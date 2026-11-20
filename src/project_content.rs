@@ -80,10 +80,10 @@ pub use closure::{
     ProjectContentClosureReceipt, ProjectContentMemberKind, ProjectContentMemberReceipt,
     ProjectSceneContentStamp, StartupContentClosureReceipt,
 };
-#[cfg(feature = "project-tooling")]
-pub(crate) use delivery::DeliverySources;
 pub use delivery::ProjectContentDeliveryReceipt;
 pub(crate) use delivery::{DeliverySnapshotPhase, DeliveryVisitError};
+#[cfg(feature = "project-tooling")]
+pub(crate) use delivery_images::{CookedImageSource, CookedImageSources};
 pub(crate) use domains::ProjectAssetDomains;
 pub(crate) use domains::validate_asset_domain_kind;
 #[cfg(feature = "tooling")]
@@ -224,6 +224,8 @@ impl ProjectPrefabContent {
 #[derive(Debug)]
 pub struct ProjectImageContent {
     image: ImageAsset,
+    #[cfg(feature = "project-tooling")]
+    metadata_digest: ContentDigest,
 }
 
 #[derive(Debug)]
@@ -280,6 +282,11 @@ impl ProjectImageContent {
     #[must_use]
     pub const fn image(&self) -> &ImageAsset {
         &self.image
+    }
+
+    #[cfg(feature = "project-tooling")]
+    pub(crate) const fn metadata_digest(&self) -> ContentDigest {
+        self.metadata_digest
     }
 }
 
@@ -1565,10 +1572,10 @@ enum ContentReadContext<'a> {
     },
 }
 
-struct LoadContext<'a> {
+struct LoadContext<'a, V = &'a SchemaValidationInput, D = &'a ProjectAssetDomains> {
     loader: &'a ProjectContentLoader,
-    validation: &'a SchemaValidationInput,
-    domains: &'a ProjectAssetDomains,
+    validation: V,
+    domains: D,
     budget: Option<BudgetTicket>,
     source_upgrade_required: bool,
     expected_startup_scene_digest: Option<ContentDigest>,
@@ -1640,11 +1647,7 @@ fn source_scope(root: &nara_project::ProjectPath) -> Result<AssetPathScope, Proj
         })
 }
 
-impl<'a> LoadContext<'a> {
-    fn asset_resolution(&self) -> AssetReferenceResolver<'_> {
-        self.asset_database.resolver(&self.asset_scope)
-    }
-
+impl<'a, V, D> LoadContext<'a, V, D> {
     fn catalogue_scope(&self, index: usize) -> &AssetPathScope {
         let root = &self
             .catalogue_roots
@@ -1664,6 +1667,63 @@ impl<'a> LoadContext<'a> {
             })
     }
 
+    fn with_inputs(loader: &'a ProjectContentLoader, validation: V, domains: D) -> Self {
+        Self {
+            loader,
+            validation,
+            domains,
+            budget: Some(loader.budget_host.reserve()),
+            source_upgrade_required: false,
+            expected_startup_scene_digest: None,
+            expected_prefabs: BTreeMap::new(),
+            runtime_agreement: None,
+            content_closure: None,
+            content_closure_work_bytes: 0,
+            native_source_work_bytes: 0,
+            asset_database: ProjectAssetDatabase::default(),
+            asset_database_work_bytes: 0,
+            asset_scope: AssetPathScope::ROOT,
+            prefab_scope: AssetPathScope::ROOT,
+            scene_scope: AssetPathScope::ROOT,
+            path_scope_work_bytes: 0,
+            catalogue: None,
+            catalogue_roots: None,
+            capture_delivery_catalogue: false,
+            completed_delivery_catalogue: None,
+            source_mode: SourceLoadMode::Current,
+            observations: None,
+        }
+    }
+
+    fn bind_source_paths(
+        &mut self,
+        assets: &nara_project::ProjectPath,
+        prefabs: &nara_project::ProjectPath,
+        scenes: &nara_project::ProjectPath,
+    ) -> Result<(), ProjectContentError> {
+        let paths = [assets, prefabs, scenes];
+        let scope_work =
+            paths
+                .iter()
+                .try_fold(3 * size_of::<nara_project::ProjectPath>(), |total, path| {
+                    let bytes = string_retained_bytes(path.as_str())?;
+                    checked_plan_sum(ProjectContentBudgetKind::WorkBytes, [total, bytes, bytes])
+                })?;
+        self.add_budget(ProjectContentBudgetKind::WorkBytes, scope_work)?;
+        self.path_scope_work_bytes = scope_work;
+        self.asset_scope = source_scope(assets)?;
+        self.prefab_scope = source_scope(prefabs)?;
+        self.scene_scope = source_scope(scenes)?;
+        self.catalogue_roots = Some(paths.into_iter().cloned().collect());
+        Ok(())
+    }
+}
+
+impl<'a> LoadContext<'a> {
+    fn asset_resolution(&self) -> AssetReferenceResolver<'_> {
+        self.asset_database.resolver(&self.asset_scope)
+    }
+
     fn new(
         loader: &'a ProjectContentLoader,
         validation: &'a SchemaValidationInput,
@@ -1681,80 +1741,43 @@ impl<'a> LoadContext<'a> {
             delivery_catalogue.map_or(0, |catalogue| catalogue.catalogue.work_bytes);
         let asset_database_work_bytes =
             delivery_catalogue.map_or(0, |catalogue| catalogue.asset_database_work_bytes);
-        let mut budget = loader.budget_host.reserve();
-        budget
-            .add(
+        let mut context = Self::with_inputs(loader, validation, domains);
+        context.add_budget(
+            ProjectContentBudgetKind::WorkBytes,
+            checked_plan_sum(
                 ProjectContentBudgetKind::WorkBytes,
-                content_closure_work_bytes
-                    .checked_add(catalogue_work_bytes)
-                    .and_then(|bytes| bytes.checked_add(asset_database_work_bytes))
-                    .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?,
-            )
-            .map_err(ProjectContentError::budget)?;
-        budget
-            .add(
-                ProjectContentBudgetKind::RetainedBytes,
-                component_bindings_witness_retained_bytes(validation.bindings())?,
-            )
-            .map_err(ProjectContentError::budget)?;
-        Ok(Self {
-            loader,
-            validation,
-            domains,
-            budget: Some(budget),
-            source_upgrade_required: false,
-            expected_startup_scene_digest,
-            expected_prefabs,
-            runtime_agreement,
-            content_closure: Some(ProjectContentClosureBuilder::new(manifest_digest)?),
-            content_closure_work_bytes,
-            native_source_work_bytes: 0,
-            asset_database: delivery_catalogue
-                .map_or_else(ProjectAssetDatabase::default, |catalogue| {
-                    catalogue.asset_database.clone()
-                }),
-            asset_database_work_bytes,
-            asset_scope: AssetPathScope::ROOT,
-            prefab_scope: AssetPathScope::ROOT,
-            scene_scope: AssetPathScope::ROOT,
-            path_scope_work_bytes: 0,
-            catalogue: delivery_catalogue.map(|catalogue| catalogue.catalogue.clone()),
-            catalogue_roots: None,
-            capture_delivery_catalogue,
-            completed_delivery_catalogue: None,
-            source_mode: SourceLoadMode::Current,
-            observations,
-        })
+                [
+                    content_closure_work_bytes,
+                    catalogue_work_bytes,
+                    asset_database_work_bytes,
+                ],
+            )?,
+        )?;
+        context.add_budget(
+            ProjectContentBudgetKind::RetainedBytes,
+            component_bindings_witness_retained_bytes(validation.bindings())?,
+        )?;
+        context.expected_startup_scene_digest = expected_startup_scene_digest;
+        context.expected_prefabs = expected_prefabs;
+        context.runtime_agreement = runtime_agreement;
+        context.content_closure = Some(ProjectContentClosureBuilder::new(manifest_digest)?);
+        context.content_closure_work_bytes = content_closure_work_bytes;
+        context.capture_delivery_catalogue = capture_delivery_catalogue;
+        context.observations = observations;
+        if let Some(delivery) = delivery_catalogue {
+            context.asset_database = delivery.asset_database.clone();
+            context.asset_database_work_bytes = asset_database_work_bytes;
+            context.catalogue = Some(delivery.catalogue.clone());
+        }
+        Ok(context)
     }
 
     fn bind_source_roots(
         &mut self,
         candidate: &ProjectSettingsCandidate,
     ) -> Result<(), ProjectContentError> {
-        let settings = candidate.settings();
-        let scope_work = checked_plan_sum(
-            ProjectContentBudgetKind::WorkBytes,
-            [
-                string_retained_bytes(settings.paths.assets.as_str())?,
-                string_retained_bytes(settings.paths.prefabs.as_str())?,
-                string_retained_bytes(settings.paths.scenes.as_str())?,
-                3 * size_of::<nara_project::ProjectPath>(),
-                string_retained_bytes(settings.paths.assets.as_str())?,
-                string_retained_bytes(settings.paths.prefabs.as_str())?,
-                string_retained_bytes(settings.paths.scenes.as_str())?,
-            ],
-        )?;
-        self.add_budget(ProjectContentBudgetKind::WorkBytes, scope_work)?;
-        self.path_scope_work_bytes = scope_work;
-        self.asset_scope = source_scope(&settings.paths.assets)?;
-        self.prefab_scope = source_scope(&settings.paths.prefabs)?;
-        self.scene_scope = source_scope(&settings.paths.scenes)?;
-        self.catalogue_roots = Some(vec![
-            settings.paths.assets.clone(),
-            settings.paths.prefabs.clone(),
-            settings.paths.scenes.clone(),
-        ]);
-        Ok(())
+        let paths = &candidate.settings().paths;
+        self.bind_source_paths(&paths.assets, &paths.prefabs, &paths.scenes)
     }
 
     fn load(
@@ -2327,7 +2350,9 @@ impl<'a> LoadContext<'a> {
             }),
         })
     }
+}
 
+impl<V, D> LoadContext<'_, V, D> {
     fn open_directory(
         &mut self,
         path: &nara_project::ProjectPath,
@@ -2523,7 +2548,9 @@ impl<'a> LoadContext<'a> {
             }
         }
     }
+}
 
+impl LoadContext<'_> {
     fn load_prefab(
         &mut self,
         prefabs: &DirectoryCapability,
@@ -3293,7 +3320,14 @@ impl<'a> LoadContext<'a> {
                 source_digest,
             )?;
         }
-        Ok((ProjectImageContent { image }, source_digest))
+        Ok((
+            ProjectImageContent {
+                image,
+                #[cfg(feature = "project-tooling")]
+                metadata_digest: meta_digest,
+            },
+            source_digest,
+        ))
     }
 
     fn reserve_image_memory(
@@ -3328,7 +3362,9 @@ impl<'a> LoadContext<'a> {
             .map_err(ProjectContentError::budget)?;
         Ok(work_before)
     }
+}
 
+impl<V, D> LoadContext<'_, V, D> {
     fn observe_path(&mut self, path: &str) -> Result<RelativePath, ProjectContentError> {
         let invalid_path = || {
             ProjectContentError::with_identifier(
@@ -3364,7 +3400,9 @@ impl<'a> LoadContext<'a> {
         self.set_budget(ProjectContentBudgetKind::WorkBytes, next)?;
         Ok(WorkReservation { reserved: amount })
     }
+}
 
+impl LoadContext<'_> {
     fn remaining_expansion_work(
         &self,
         reserved: usize,
@@ -3513,7 +3551,9 @@ impl<'a> LoadContext<'a> {
         self.subtract_budget(ProjectContentBudgetKind::WorkBytes, frame_work);
         Ok(digest)
     }
+}
 
+impl<V, D> LoadContext<'_, V, D> {
     fn add_budget(
         &mut self,
         kind: ProjectContentBudgetKind,

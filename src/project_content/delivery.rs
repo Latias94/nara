@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, convert::Infallible, fmt, mem::size_of, sync::Arc};
 
-use nara_asset::{AssetSourceKind, AssetSourcePath, StableAssetId};
+use nara_asset::{AssetSourcePath, StableAssetId};
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity};
 use nara_project::ProjectPath;
 use nara_reflect::SchemaCompositionFingerprint;
@@ -60,19 +60,6 @@ struct DeliveryInner {
     members: Box<[ProjectContentMemberReceipt]>,
     digest: ContentDigest,
     _lease: ProjectContentLease,
-}
-
-#[cfg_attr(not(feature = "project-tooling"), allow(dead_code))]
-pub(crate) struct DeliverySources {
-    pub(super) catalogue: Option<DeliveryCatalogue>,
-    pub(super) identities: BTreeMap<StableAssetId, DeliverySourceIdentity>,
-    _budget: BudgetTicket,
-}
-
-pub(super) struct DeliverySourceIdentity {
-    pub(super) path: AssetSourcePath,
-    #[cfg_attr(not(feature = "project-tooling"), allow(dead_code))]
-    pub(super) is_image: bool,
 }
 
 impl ProjectContentDeliveryReceipt {
@@ -200,7 +187,7 @@ impl ProjectContentLoader {
         plan: &RuntimePlan,
         selected_scene_product: SelectedSceneProduct,
         on_snapshot: impl FnMut(&ProjectContentSnapshot, DeliverySnapshotPhase) -> Result<(), E>,
-    ) -> Result<(ProjectContentDeliveryReceipt, Option<DeliverySources>), DeliveryVisitError<E>>
+    ) -> Result<(ProjectContentDeliveryReceipt, Option<DeliveryCatalogue>), DeliveryVisitError<E>>
     {
         let readiness = self.validate_inputs(candidate, plan)?;
         let agreement = crate::project_host::runtime_agreement::prepare_runtime_schema_agreement(
@@ -255,7 +242,7 @@ impl ProjectContentLoader {
         readiness: &SourceReadiness,
         selected_scene_product: SelectedSceneProduct,
         mut on_snapshot: impl FnMut(&ProjectContentSnapshot, DeliverySnapshotPhase) -> Result<(), E>,
-    ) -> Result<(ProjectContentDeliveryReceipt, Option<DeliverySources>), DeliveryVisitError<E>>
+    ) -> Result<(ProjectContentDeliveryReceipt, Option<DeliveryCatalogue>), DeliveryVisitError<E>>
     {
         let startup = snapshot.startup_content_closure().ok_or_else(|| {
             delivery_error(
@@ -367,12 +354,7 @@ impl ProjectContentLoader {
             // No decoded Scene/Image or generation lease escapes into the delivery receipt.
             drop(snapshot);
         }
-        let mut retained_identities = None;
-        if matches!(selected_scene_product, SelectedSceneProduct::Required) {
-            retained_identities = Some((source_identities, identity_budget));
-        } else {
-            drop((source_identities, identity_budget));
-        }
+        drop((source_identities, identity_budget));
 
         let array_work = checked_plan_product(
             ProjectContentBudgetKind::WorkBytes,
@@ -440,12 +422,7 @@ impl ProjectContentLoader {
         // Receipt, startup closure and catalogue leases still own their original reservations;
         // the bounded final read must overlap them rather than hiding publication's peak.
         readiness.revalidate(self, candidate)?;
-        let sources = retained_identities.map(|(identities, budget)| DeliverySources {
-            catalogue,
-            identities,
-            _budget: budget,
-        });
-        Ok((receipt, sources))
+        Ok((receipt, catalogue))
     }
 
     fn merge_delivery_members(
@@ -501,7 +478,7 @@ impl ProjectContentLoader {
 }
 
 fn merge_delivery_source_identities(
-    identities: &mut BTreeMap<StableAssetId, DeliverySourceIdentity>,
+    identities: &mut BTreeMap<StableAssetId, AssetSourcePath>,
     snapshot: &ProjectContentSnapshot,
     budget: &mut BudgetTicket,
 ) -> Result<(), ProjectContentError> {
@@ -511,7 +488,7 @@ fn merge_delivery_source_identities(
         let stable_id = record.stable_id();
         let path = record.path();
         if let Some(existing) = identities.get(&stable_id) {
-            if &existing.path == path {
+            if existing == path {
                 continue;
             }
             return Err(ProjectContentError::single(
@@ -523,7 +500,7 @@ fn merge_delivery_source_identities(
         let work = checked_plan_sum(
             ProjectContentBudgetKind::WorkBytes,
             [
-                size_of::<(StableAssetId, DeliverySourceIdentity)>(),
+                size_of::<(StableAssetId, AssetSourcePath)>(),
                 BTREE_ENTRY_OVERHEAD,
                 path.as_str().len(),
             ],
@@ -531,13 +508,7 @@ fn merge_delivery_source_identities(
         budget
             .add(ProjectContentBudgetKind::WorkBytes, work)
             .map_err(ProjectContentError::budget)?;
-        identities.insert(
-            stable_id,
-            DeliverySourceIdentity {
-                path: path.clone(),
-                is_image: record.source_kind() == &AssetSourceKind::Image,
-            },
-        );
+        identities.insert(stable_id, path.clone());
     }
     Ok(())
 }

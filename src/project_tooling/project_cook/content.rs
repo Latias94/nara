@@ -15,11 +15,11 @@ use crate::{
     },
     core::FormatVersion,
     fs::{DirectoryCapability, RelativePath},
-    image::ImageAsset,
     input::ActionMapAsset,
     material::{Material2dAsset, Material2dDomain},
     project_content::{
-        DeliverySnapshotPhase, DeliverySources, DeliveryVisitError, SelectedSceneProduct,
+        CookedImageSource, CookedImageSources, DeliveryCatalogue, DeliverySnapshotPhase,
+        DeliveryVisitError, ProjectImageContent, SelectedSceneProduct,
     },
     project_host::{
         ProjectContentDeliveryReceipt, ProjectContentLoader, ProjectContentMemberKind,
@@ -65,7 +65,7 @@ enum Output {
 #[derive(Clone, Copy)]
 enum StockAsset<'a> {
     Scene(&'a CompiledSceneCandidate),
-    Image(&'a ImageAsset),
+    Image(&'a ProjectImageContent),
     Input(&'a ActionMapAsset),
     Material(&'a Material2dAsset),
     TileSet(&'a ProjectTileSetContent),
@@ -87,9 +87,41 @@ impl StockAsset<'_> {
 struct Observations {
     raw: BTreeMap<AssetSourcePath, Option<ArtifactContentDigest>>,
     processed: Vec<ArtifactBuildObservation>,
+    image_sources: BTreeMap<StableAssetId, CookedImageSource>,
 }
 
 impl Observations {
+    fn image_source(
+        &mut self,
+        builder: &mut CookedContentBuilder,
+        product: AssetProductRef,
+        image: &ProjectImageContent,
+    ) -> Result<(), ProjectCookError> {
+        let path = image.path();
+        let metadata = image.metadata_digest();
+        match self.image_sources.entry(product.source()) {
+            Entry::Vacant(entry) => {
+                builder.reserve_consumer_metadata(metadata_bytes::<(
+                    StableAssetId,
+                    CookedImageSource,
+                )>(path.as_str().len())?)?;
+                entry.insert(CookedImageSource {
+                    path: path.clone(),
+                    metadata,
+                });
+                Ok(())
+            }
+            Entry::Occupied(entry)
+                if &entry.get().path == path && entry.get().metadata == metadata =>
+            {
+                Ok(())
+            }
+            Entry::Occupied(_) => Err(ProjectCookError::Invalid(format!(
+                "cooked Image Product {product} changed its selected source"
+            ))),
+        }
+    }
+
     fn raw(
         &mut self,
         builder: &mut CookedContentBuilder,
@@ -410,7 +442,7 @@ impl<'a> ProjectCookContext<'a> {
                     "a cooked Image requires persistent Product identity".into(),
                 )
             })?;
-            available.push((product, StockAsset::Image(image.image())));
+            available.push((product, StockAsset::Image(image)));
         }
         for tileset in snapshot.tilesets() {
             let product = AssetProductRef::new(tileset.stable_id(), ImportedProductId::PRIMARY)
@@ -551,7 +583,11 @@ impl<'a> ProjectCookContext<'a> {
         let resolver = self.snapshot.asset_resolution();
         match asset {
             StockAsset::Scene(scene) => self.builder.add_scene(product, scene, resolver)?,
-            StockAsset::Image(image) => self.builder.add_image(image)?,
+            StockAsset::Image(image) => {
+                self.observations
+                    .image_source(self.builder, product, image)?;
+                self.builder.add_image(image.image())?;
+            }
             StockAsset::Input(input) => self.builder.add_input(input)?,
             StockAsset::Material(material) => {
                 let material = material
@@ -606,37 +642,52 @@ fn reserve_output(builder: &mut CookedContentBuilder) -> Result<(), ProjectCookE
     Ok(())
 }
 
-fn cook_demanded_images(
+fn finish_stock_images(
     loader: &ProjectContentLoader,
     request: &ProjectCookRequest<'_>,
     plan: &RuntimePlan,
-    delivery: &(ProjectContentDeliveryReceipt, Option<DeliverySources>),
+    delivery: &(ProjectContentDeliveryReceipt, Option<DeliveryCatalogue>),
     outputs: &mut BTreeMap<AssetProductRef, Output>,
     builder: &mut CookedContentBuilder,
     observations: &mut Observations,
 ) -> Result<(), DeliveryVisitError<ProjectCookError>> {
-    let mut demands = outputs
-        .iter_mut()
-        .filter(|(product, output)| {
-            product.product() == ImportedProductId::PRIMARY
-                && matches!(
-                    **output,
-                    Output::Demanded | Output::Stock(StockKind::Image, StockState::Demanded)
-                )
-        })
-        .peekable();
-    if demands.peek().is_none() {
+    let is_demanded = |product: &AssetProductRef, output: &Output| {
+        product.product() == ImportedProductId::PRIMARY
+            && matches!(
+                output,
+                Output::Demanded | Output::Stock(StockKind::Image, StockState::Demanded)
+            )
+    };
+    if observations.image_sources.is_empty()
+        && !outputs
+            .iter()
+            .any(|(product, output)| is_demanded(product, output))
+    {
         return Ok(());
     }
 
-    let (receipt, sources) = delivery;
-    let sources = sources
-        .as_ref()
-        .expect("strict Cook retains delivery sources");
-    let mut sources = loader.delivery_images(request.candidate, plan, sources, receipt)?;
-    for (&product, output) in demands {
-        let acquired = sources.with_image(product, |image, source, metadata| {
+    let (receipt, catalogue) = delivery;
+    let mut sources = loader.delivery_images(
+        request.candidate,
+        plan,
+        receipt,
+        catalogue.as_ref(),
+        &|id| {
+            observations.image_sources.contains_key(&id)
+                || AssetProductRef::new(id, ImportedProductId::PRIMARY)
+                    .ok()
+                    .and_then(|product| outputs.get(&product).map(|output| (product, output)))
+                    .is_some_and(|(product, output)| is_demanded(&product, output))
+        },
+    )?;
+    sources.verify_sources(&observations.image_sources)?;
+    for (&product, output) in outputs
+        .iter_mut()
+        .filter(|(product, output)| is_demanded(product, output))
+    {
+        let acquired = sources.with_image(product, |image, source| {
             let path = image.path();
+            observations.image_source(builder, product, image)?;
             observations.raw(
                 builder,
                 path.as_str(),
@@ -654,7 +705,7 @@ fn cook_demanded_images(
             observations.raw(
                 builder,
                 &path.meta_path(),
-                Some(ArtifactContentDigest::from_content(metadata)),
+                Some(ArtifactContentDigest::from_content(image.metadata_digest())),
             )?;
             builder.add_image(image.image())?;
             Ok(())
@@ -800,7 +851,7 @@ fn prepare(
     } else {
         delivery
     };
-    cook_demanded_images(
+    finish_stock_images(
         &loader,
         &request,
         &plan,
@@ -810,8 +861,8 @@ fn prepare(
         &mut observations,
     )
     .map_err(delivery_error)?;
-    let (receipt, sources) = delivery;
-    drop(sources);
+    let (receipt, catalogue) = delivery;
+    drop(catalogue);
     let output_bytes = metadata_bytes::<(AssetProductRef, Output)>(0)?
         .checked_mul(outputs.len())
         .ok_or_else(overflow)?;
@@ -831,6 +882,11 @@ fn prepare(
             Some(ArtifactContentDigest::from_content(member.digest())),
         )?;
     }
+    let image_sources = CookedImageSources::new(
+        &loader,
+        request.candidate,
+        std::mem::take(&mut observations.image_sources),
+    );
     let observations = observations.finish(&mut builder)?;
     let content = builder.finish()?;
     if content
@@ -844,7 +900,8 @@ fn prepare(
             "cooked content Schema differs from its original source delivery".into(),
         ));
     }
-    let selection = ProjectCookSourceSelection::capture(request.root, receipt, observations)?;
+    let selection =
+        ProjectCookSourceSelection::capture(request.root, receipt, observations, image_sources)?;
     Ok(PreparedProjectCook { content, selection })
 }
 

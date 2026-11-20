@@ -29,6 +29,8 @@ pub(crate) struct DeliveryCatalogue {
     _budget: BudgetTicket,
 }
 
+type CatalogueDirectory = (String, usize, usize);
+
 pub(super) fn metadata_source_changed(path: &str) -> ProjectContentError {
     ProjectContentError::with_identifier(
         ProjectContentErrorKind::HostAuthorityRejected,
@@ -39,7 +41,7 @@ pub(super) fn metadata_source_changed(path: &str) -> ProjectContentError {
     )
 }
 
-impl LoadContext<'_> {
+impl<V, D> LoadContext<'_, V, D> {
     pub(super) fn has_complete_reference_catalogue(&self) -> bool {
         self.catalogue
             .as_ref()
@@ -104,6 +106,18 @@ impl LoadContext<'_> {
         if self.has_complete_reference_catalogue() {
             return Ok(());
         }
+        self.scan_reference_catalogue(None)?;
+        self.catalogue
+            .as_mut()
+            .expect("catalogue was initialized")
+            .complete = true;
+        self.capture_delivery_catalogue()
+    }
+
+    pub(super) fn scan_reference_catalogue(
+        &mut self,
+        selected: Option<&dyn Fn(StableAssetId) -> bool>,
+    ) -> Result<(), ProjectContentError> {
         let root_count = self
             .catalogue_roots
             .as_ref()
@@ -127,17 +141,12 @@ impl LoadContext<'_> {
                 .expect("catalogue roots remain bound")[root_index]
                 .clone();
             let directory = self.open_directory(&path)?;
-            let result = self.scan_metadata_directory(&directory, root_index);
+            let result = self.scan_metadata_directory(&directory, root_index, selected);
             drop((directory, path));
             self.subtract_budget(ProjectContentBudgetKind::OpenHandles, 1);
             self.subtract_budget(ProjectContentBudgetKind::WorkBytes, path_work.reserved);
             result?;
         }
-        self.catalogue
-            .as_mut()
-            .expect("catalogue was initialized")
-            .complete = true;
-        self.capture_delivery_catalogue()?;
         Ok(())
     }
 
@@ -145,10 +154,11 @@ impl LoadContext<'_> {
         &mut self,
         root: &DirectoryCapability,
         root_index: usize,
+        selected: Option<&dyn Fn(StableAssetId) -> bool>,
     ) -> Result<(), ProjectContentError> {
-        let mut pending = VecDeque::from([(String::new(), 0_usize)]);
-        self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
-        while let Some((prefix, depth)) = pending.pop_front() {
+        let mut pending = VecDeque::new();
+        self.queue_catalogue_directory(&mut pending, (String::new(), 0, 0))?;
+        while let Some((prefix, depth, prefix_work)) = pending.pop_front() {
             self.subtract_budget(ProjectContentBudgetKind::QueuedJobs, 1);
             self.observe_depth(depth)?;
             self.add_budget(
@@ -208,9 +218,9 @@ impl LoadContext<'_> {
                         .checked_add(name.len())
                         .and_then(|length| length.checked_add(usize::from(!prefix.is_empty())))
                         .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::PathBytes))?;
-                    self.reserve_catalogue_work(
+                    let path_work = self.reserve_work(
                         path_len
-                            .checked_add(size_of::<String>() + BTREE_ENTRY_OVERHEAD)
+                            .checked_add(STRING_ALLOCATION_OVERHEAD)
                             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?,
                     )?;
                     let path = if prefix.is_empty() {
@@ -221,19 +231,22 @@ impl LoadContext<'_> {
                     self.observe_path(&path)?;
                     match entry.kind() {
                         FileKind::Directory => {
-                            self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
-                            pending.push_back((
-                                path,
-                                depth.checked_add(1).ok_or_else(|| {
-                                    overflow_budget(ProjectContentBudgetKind::DirectoryDepth)
-                                })?,
-                            ));
+                            let depth = depth.checked_add(1).ok_or_else(|| {
+                                overflow_budget(ProjectContentBudgetKind::DirectoryDepth)
+                            })?;
+                            self.queue_catalogue_directory(
+                                &mut pending,
+                                (path, depth, path_work.reserved),
+                            )?;
+                            continue;
                         }
                         FileKind::Regular if path.ends_with(".meta") => {
-                            self.index_metadata(root, root_index, &path)?
+                            self.index_metadata(root, root_index, &path, selected)?
                         }
                         _ => {}
                     }
+                    drop(path);
+                    self.subtract_budget(ProjectContentBudgetKind::WorkBytes, path_work.reserved);
                 }
                 let complete = batch.is_complete();
                 drop(batch);
@@ -242,12 +255,41 @@ impl LoadContext<'_> {
                     break;
                 }
             }
-            drop((enumeration, directory));
+            drop((enumeration, directory, prefix));
+            self.subtract_budget(ProjectContentBudgetKind::WorkBytes, prefix_work);
             self.subtract_budget(
                 ProjectContentBudgetKind::OpenHandles,
                 RELATIVE_OPEN_HANDLE_PEAK,
             );
         }
+        let queue_bytes = pending.capacity() * size_of::<CatalogueDirectory>();
+        drop(pending);
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, queue_bytes);
+        Ok(())
+    }
+
+    fn queue_catalogue_directory(
+        &mut self,
+        pending: &mut VecDeque<CatalogueDirectory>,
+        directory: CatalogueDirectory,
+    ) -> Result<(), ProjectContentError> {
+        self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
+        let capacity = pending.capacity();
+        if pending.len() == capacity {
+            let work = ProjectContentBudgetKind::WorkBytes;
+            let requested = checked_plan_product(work, capacity, 2)?.max(1);
+            let size = size_of::<CatalogueDirectory>();
+            self.add_budget(work, checked_plan_product(work, requested, size)?)?;
+            pending
+                .try_reserve_exact(requested - capacity)
+                .map_err(|_| allocation_failed("project.content.catalogue-queue-allocation"))?;
+            self.add_budget(
+                work,
+                checked_plan_product(work, pending.capacity() - requested, size)?,
+            )?;
+            self.subtract_budget(work, capacity * size);
+        }
+        pending.push_back(directory);
         Ok(())
     }
 
@@ -256,11 +298,15 @@ impl LoadContext<'_> {
         root: &DirectoryCapability,
         root_index: usize,
         meta_path: &str,
+        selected: Option<&dyn Fn(StableAssetId) -> bool>,
     ) -> Result<(), ProjectContentError> {
         let source = meta_path
             .strip_suffix(".meta")
             .expect("metadata suffix was selected");
-        let path = AssetPath::new(source).map_err(|_| invalid_path(source))?;
+        let path = selected
+            .is_none()
+            .then(|| AssetPath::new(source).map_err(|_| invalid_path(source)))
+            .transpose()?;
         let ceiling = AssetMetaFileLimits::default().encoded_bytes().get();
         if let Some(observations) = self.observations.as_deref_mut() {
             let source_root = &self
@@ -273,11 +319,21 @@ impl LoadContext<'_> {
         #[cfg(all(test, feature = "project-workflow"))]
         measurement_tests::record(|counts| counts.identity_metadata_reads += 1);
         let reservation = self.reserve_work(ceiling)?;
-        let identity =
-            AssetMetaIdentityCandidate::decode_json_bytes_owned(bytes.into_boxed_slice())
-                .map_err(|_| invalid_metadata(&path))?
-                .into_identity();
+        let candidate =
+            AssetMetaIdentityCandidate::decode_json_bytes_owned(bytes.into_boxed_slice());
         self.subtract_budget(ProjectContentBudgetKind::WorkBytes, reservation.reserved);
+        let identity = match candidate {
+            Ok(candidate) => candidate.into_identity(),
+            Err(_) if selected.is_some() => return Ok(()),
+            Err(_) => return Err(invalid_metadata(source)),
+        };
+        if selected.is_some_and(|includes| !includes(identity.stable_id())) {
+            return Ok(());
+        }
+        let path = match path {
+            Some(path) => path,
+            None => AssetPath::new(source).map_err(|_| invalid_path(source))?,
+        };
         self.index_metadata_identity(path, root_index, digest, identity)
     }
 
@@ -396,7 +452,9 @@ impl LoadContext<'_> {
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
         Ok(())
     }
+}
 
+impl LoadContext<'_> {
     pub(super) fn retain_loaded_asset_identities(
         &mut self,
         selected_scene: &AssetSourcePath,
@@ -603,7 +661,7 @@ impl LoadContext<'_> {
                     self.catalogue
                         .get_or_insert_with(ReferenceCatalogue::default);
                     let meta_path = path.meta_path();
-                    self.index_metadata(assets, 0, meta_path.as_str())?;
+                    self.index_metadata(assets, 0, meta_path.as_str(), None)?;
                 }
             }
             AssetRef::StableId(_) | AssetRef::Product(_) => self.ensure_reference_catalogue()?,
@@ -760,13 +818,13 @@ pub(super) fn scoped_path_bytes(
     )
 }
 
-fn invalid_metadata(path: &AssetPath) -> ProjectContentError {
+fn invalid_metadata(path: &str) -> ProjectContentError {
     ProjectContentError::with_identifier(
         ProjectContentErrorKind::AssetMeta,
         "project.content.asset-meta-invalid",
         "Asset catalogue metadata is invalid",
         "asset",
-        path.as_str(),
+        path,
     )
 }
 

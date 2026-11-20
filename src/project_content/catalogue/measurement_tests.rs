@@ -68,6 +68,35 @@ fn measure<T>(operation: impl FnOnce() -> T) -> (T, CatalogueCounts, Duration) {
 }
 
 #[test]
+fn a_targeted_catalogue_releases_traversal_work_for_unselected_entries() {
+    let project = CatalogueProject::new(2, 4);
+    let root = project.capability();
+    let manifest = root
+        .open_file(&RelativePath::new("nara.toml").unwrap())
+        .unwrap();
+    let candidate = ingest_project_manifest(&manifest, None).unwrap();
+    let loader = ProjectContentLoader::new(root.share()).unwrap();
+    let mut context = super::super::LoadContext::with_inputs(&loader, (), ());
+    let paths = &candidate.settings().paths;
+    let assets = project.root.join(paths.assets.as_str());
+    fs::create_dir(assets.join("unused")).unwrap();
+    for file in 0..96 {
+        fs::write(assets.join(format!("unused/notes-{file}.txt")), b"unused").unwrap();
+    }
+    context
+        .bind_source_paths(&paths.assets, &paths.prefabs, &paths.scenes)
+        .unwrap();
+    let reserved = context.budget_value(ProjectContentBudgetKind::WorkBytes);
+    context.scan_reference_catalogue(Some(&|_| false)).unwrap();
+    assert_eq!(context.asset_database.records().count(), 0);
+    assert_eq!(
+        context.budget_value(ProjectContentBudgetKind::WorkBytes),
+        reserved
+    );
+    assert!(context.budget_value(ProjectContentBudgetKind::DirectoryEntries) > 96);
+}
+
+#[test]
 #[ignore = "bounded filesystem measurement; run explicitly with --nocapture"]
 fn measure_stable_id_multi_scene_delivery_and_check() {
     const SAMPLES: usize = 3;

@@ -5,8 +5,12 @@ use std::{
 
 use crate::{
     ProductRecipe,
-    asset::AssetSourcePath,
+    asset::{
+        AssetMeta, AssetMetaIdentity, AssetPath, AssetSourceKind, AssetSourcePath, StableAssetId,
+    },
     asset_build::ArtifactContentDigest,
+    image::ImageImportSettings,
+    project_content::CookedImageSource,
     project_host::{
         ProjectContentBudgetKind, ProjectContentLimits, ProjectContentLoader,
         ingest_project_manifest, resolve_product_recipe,
@@ -179,7 +183,7 @@ fn source_capture_deduplicates_equal_facts_and_checks_absent_inputs() {
     ];
     let member_count = receipt.members().len();
     let selection =
-        ProjectCookSourceSelection::capture(&root, receipt, observations.clone()).unwrap();
+        ProjectCookSourceSelection::capture(&root, receipt, observations.clone(), None).unwrap();
     assert_eq!(selection.files.len(), member_count + 2);
     assert_eq!(selection.observations(), observations);
     selection.verify(&fixture.project).unwrap();
@@ -189,6 +193,64 @@ fn source_capture_deduplicates_equal_facts_and_checks_absent_inputs() {
         selection.verify(&fixture.project),
         Err(ProjectCookError::Filesystem(FsError::TargetStateMismatch))
     ));
+}
+
+#[test]
+fn selected_image_scan_rejects_sidecar_bytes_changed_after_the_file_check() {
+    let fixture = Fixture::new();
+    let (root, loader, receipt) = fixture.delivery();
+    let manifest = root
+        .open_file_exact(&relative("nara.toml").unwrap())
+        .unwrap();
+    let candidate = ingest_project_manifest(&manifest, None).unwrap();
+    let path = "assets/selected.png.meta";
+    let id = StableAssetId::parse_str("257bb27b-5c5f-559d-8283-f498450385be").unwrap();
+    let mut bytes = AssetMeta::new(
+        AssetMetaIdentity::new(
+            id,
+            AssetPath::new("selected.png").unwrap(),
+            AssetSourceKind::Image,
+        ),
+        ImageImportSettings::default(),
+    )
+    .to_json_string()
+    .unwrap();
+    fixture.write(path, &bytes);
+    let image_sources = CookedImageSources::new(
+        &loader,
+        &candidate,
+        [(
+            id,
+            CookedImageSource {
+                path: AssetSourcePath::new("assets/selected.png").unwrap(),
+                metadata: ContentDigest::of_bytes(bytes.as_bytes()),
+            },
+        )]
+        .into_iter()
+        .collect(),
+    );
+    let selection = ProjectCookSourceSelection::capture(
+        &root,
+        receipt,
+        vec![raw(path, Some(bytes.as_bytes()))],
+        image_sources,
+    )
+    .unwrap();
+    selection.verify(&fixture.project).unwrap();
+    for file in &selection.files {
+        file.verify(&selection.root).unwrap();
+    }
+    bytes.push('\n');
+    fixture.write(path, &bytes);
+    let error = selection
+        .image_sources
+        .as_ref()
+        .unwrap()
+        .verify(&selection.root)
+        .unwrap_err();
+    assert!(error.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.content.asset-metadata-source-changed"
+    }));
 }
 
 #[test]
@@ -205,6 +267,7 @@ fn source_capture_rejects_conflicting_presence_and_digests() {
                 &root,
                 receipt.clone(),
                 vec![raw("assets/build-input.txt", Some(b"original")), conflict],
+                None,
             ),
             Err(ProjectCookError::Invalid(_))
         ));
@@ -212,7 +275,7 @@ fn source_capture_rejects_conflicting_presence_and_digests() {
     let member = &receipt.members()[0];
     let conflict = raw(member.path().as_str(), None);
     assert!(matches!(
-        ProjectCookSourceSelection::capture(&root, receipt, vec![conflict]),
+        ProjectCookSourceSelection::capture(&root, receipt, vec![conflict], None),
         Err(ProjectCookError::Invalid(_))
     ));
 }
@@ -235,7 +298,7 @@ fn source_capture_refuses_stale_receipt_bytes_with_digest_length_bound() {
     let (root, _loader, receipt) = fixture.delivery();
     fixture.write("scenes/startup.scene.json", &"x".repeat(1024 * 1024));
     assert!(matches!(
-        ProjectCookSourceSelection::capture(&root, receipt, Vec::new()),
+        ProjectCookSourceSelection::capture(&root, receipt, Vec::new(), None),
         Err(ProjectCookError::Filesystem(
             FsError::ByteLimitExceeded { .. }
         ))
@@ -251,6 +314,7 @@ fn selection_rejects_same_bytes_in_a_replaced_file_and_a_replaced_root() {
         &root,
         receipt,
         vec![raw("assets/build-input.txt", Some(b"original"))],
+        None,
     )
     .unwrap();
     fs::rename(
@@ -281,7 +345,8 @@ fn source_metadata_uses_original_retained_budget_without_claiming_a_generation()
     let before = loader.budget_snapshot();
     let observations = vec![raw("assets/optional.txt", None)];
     let selection =
-        ProjectCookSourceSelection::capture(&root, receipt.clone(), observations.clone()).unwrap();
+        ProjectCookSourceSelection::capture(&root, receipt.clone(), observations.clone(), None)
+            .unwrap();
     let retained = loader.budget_snapshot().active(kind) - before.active(kind);
     assert!(retained > 0);
     assert_eq!(
@@ -294,12 +359,13 @@ fn source_metadata_uses_original_retained_budget_without_claiming_a_generation()
     let allowance = loader.budget_host().limits().limit(kind) - before.active(kind) - retained;
     let exact = receipt.reserve_consumer_retained(allowance).unwrap();
     let selection =
-        ProjectCookSourceSelection::capture(&root, receipt.clone(), observations.clone()).unwrap();
+        ProjectCookSourceSelection::capture(&root, receipt.clone(), observations.clone(), None)
+            .unwrap();
     drop(selection);
     drop(exact);
     let one_short = receipt.reserve_consumer_retained(allowance + 1).unwrap();
     assert!(matches!(
-        ProjectCookSourceSelection::capture(&root, receipt, observations),
+        ProjectCookSourceSelection::capture(&root, receipt, observations, None),
         Err(ProjectCookError::Source(_))
     ));
     drop(one_short);
@@ -329,7 +395,7 @@ fn declared_code_keeps_extra_inputs_and_detects_default_set_changes() {
     let fixture = Fixture::new();
     fixture.write("assets/compiler.wgsl", "shader");
     let (root, _loader, receipt) = fixture.delivery();
-    let source = ProjectCookSourceSelection::capture(&root, receipt, Vec::new()).unwrap();
+    let source = ProjectCookSourceSelection::capture(&root, receipt, Vec::new(), None).unwrap();
     let mut inputs = project_rust_input_inventory(&fixture.project).unwrap();
     inputs.push(relative("assets/compiler.wgsl").unwrap());
     let request = fixture.request(inputs);
@@ -360,7 +426,7 @@ fn declared_code_keeps_extra_inputs_and_detects_default_set_changes() {
 fn undeclared_rust_file_rejects_without_inferring_dependency_inputs() {
     let fixture = Fixture::new();
     let (root, _loader, receipt) = fixture.delivery();
-    let source = ProjectCookSourceSelection::capture(&root, receipt, Vec::new()).unwrap();
+    let source = ProjectCookSourceSelection::capture(&root, receipt, Vec::new(), None).unwrap();
     let inputs = ["Cargo.toml", "Cargo.lock", "src/main.rs"]
         .map(|name| relative(name).unwrap())
         .to_vec();

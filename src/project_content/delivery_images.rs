@@ -1,35 +1,114 @@
-use nara_asset::{AssetPath, AssetProductRef, AssetSourceKind, AssetSourcePath, ImportedProductId};
+use std::{collections::BTreeMap, mem::size_of};
+
+use nara_asset::{
+    AssetPath, AssetProductRef, AssetSourceKind, AssetSourcePath, ProjectAssetDatabase,
+    StableAssetId,
+};
 use nara_fs::{ContentDigest, DirectoryCapability};
 use nara_project::ProjectPath;
 
 use super::{
-    DeliveryImageExpectation, LoadContext, ProjectContentBudgetKind as Budget,
-    ProjectContentDeliveryReceipt, ProjectContentError, ProjectContentErrorKind,
-    ProjectContentLoader, ProjectContentMemberKind, ProjectContentMemberReceipt,
-    ProjectImageContent, ProjectSettingsCandidate, RuntimePlan, STRING_ALLOCATION_OVERHEAD,
+    BTREE_ENTRY_OVERHEAD, DeliveryCatalogue, DeliveryImageExpectation, LoadContext,
+    ProjectContentBudgetHost, ProjectContentBudgetKind as Budget, ProjectContentDeliveryReceipt,
+    ProjectContentError, ProjectContentErrorKind, ProjectContentLoader,
+    ProjectContentMemberReceipt, ProjectImageContent, ProjectSettingsCandidate, RuntimePlan,
+    STRING_ALLOCATION_OVERHEAD,
+    catalogue::{ReferenceCatalogue, identity_conflict, metadata_source_changed},
     checked_plan_sum,
-    delivery::{
-        DeliverySources, DeliveryVisitError, delivery_member_changed, delivery_member_limit,
-    },
+    delivery::{DeliveryVisitError, delivery_member_changed, delivery_member_limit},
     string_retained_bytes,
 };
+
+pub(crate) struct CookedImageSources {
+    roots: [ProjectPath; 3],
+    sources: BTreeMap<StableAssetId, CookedImageSource>,
+    budget: ProjectContentBudgetHost,
+}
+
+pub(crate) struct CookedImageSource {
+    pub(crate) path: AssetSourcePath,
+    pub(crate) metadata: ContentDigest,
+}
+
+impl CookedImageSources {
+    pub(crate) fn new(
+        loader: &ProjectContentLoader,
+        candidate: &ProjectSettingsCandidate,
+        sources: BTreeMap<StableAssetId, CookedImageSource>,
+    ) -> Option<Self> {
+        if sources.is_empty() {
+            return None;
+        }
+        let configured = &candidate.settings().paths;
+        Some(Self {
+            roots: [
+                configured.assets.clone(),
+                configured.prefabs.clone(),
+                configured.scenes.clone(),
+            ],
+            sources,
+            budget: loader.budget_host(),
+        })
+    }
+
+    pub(crate) fn retained_path_bytes(&self) -> Result<usize, ProjectContentError> {
+        let roots = self.roots.iter().try_fold(0, |total, root| {
+            checked_plan_sum(
+                Budget::RetainedBytes,
+                [total, string_retained_bytes(root.as_str())?],
+            )
+        })?;
+        self.sources.values().try_fold(roots, |total, source| {
+            checked_plan_sum(
+                Budget::RetainedBytes,
+                [
+                    total,
+                    size_of::<(StableAssetId, CookedImageSource)>(),
+                    BTREE_ENTRY_OVERHEAD,
+                    string_retained_bytes(source.path.as_str())?,
+                ],
+            )
+        })
+    }
+
+    pub(crate) fn verify(&self, root: &DirectoryCapability) -> Result<(), ProjectContentError> {
+        let loader = ProjectContentLoader::with_budget_host(
+            root.share(),
+            self.budget.limits(),
+            self.budget.clone(),
+        )?;
+        let mut context = LoadContext::with_inputs(&loader, (), ());
+        context.add_budget(Budget::OpenHandles, 1)?;
+        let [assets, prefabs, scenes] = &self.roots;
+        context.bind_source_paths(assets, prefabs, scenes)?;
+        context.scan_reference_catalogue(Some(&|id| self.sources.contains_key(&id)))?;
+        verify_sources(
+            &context.asset_database,
+            context.catalogue.as_ref(),
+            &self.sources,
+        )
+    }
+}
 
 pub(crate) struct DeliveryImages<'a> {
     assets: Option<DirectoryCapability>,
     context: LoadContext<'a>,
-    sources: &'a DeliverySources,
+    catalogue: Option<&'a DeliveryCatalogue>,
     receipt: &'a ProjectContentDeliveryReceipt,
     asset_root: &'a ProjectPath,
     files: usize,
 }
 
 impl ProjectContentLoader {
+    /// Opens one bounded discovery pass when delivery has not already discovered every identity.
+    /// Supplemental reads then use the original unique delivery limit for content members.
     pub(crate) fn delivery_images<'a>(
         &'a self,
         candidate: &'a ProjectSettingsCandidate,
         plan: &'a RuntimePlan,
-        sources: &'a DeliverySources,
         receipt: &'a ProjectContentDeliveryReceipt,
+        catalogue: Option<&'a DeliveryCatalogue>,
+        selected: &dyn Fn(StableAssetId) -> bool,
     ) -> Result<DeliveryImages<'a>, ProjectContentError> {
         let mut context = LoadContext::new(
             self,
@@ -45,10 +124,14 @@ impl ProjectContentLoader {
         )?;
         context.add_budget(Budget::OpenHandles, 1)?;
         context.bind_source_roots(candidate)?;
+        if catalogue.is_none() {
+            context.scan_reference_catalogue(Some(selected))?;
+            context.set_budget(Budget::Files, 0)?;
+        }
         Ok(DeliveryImages {
             assets: None,
             context,
-            sources,
+            catalogue,
             receipt,
             asset_root: &candidate.settings().paths.assets,
             files: receipt.members().len(),
@@ -57,19 +140,20 @@ impl ProjectContentLoader {
 }
 
 impl DeliveryImages<'_> {
-    /// Supplies a demanded stock Image from observed delivery sources or the lazy catalogue.
+    pub(crate) fn verify_sources(
+        &self,
+        sources: &BTreeMap<StableAssetId, CookedImageSource>,
+    ) -> Result<(), ProjectContentError> {
+        verify_sources(self.database(), self.reference_catalogue(), sources)
+    }
+
+    /// Supplies a demanded stock Image selected by stable identity in the catalogue.
     /// The decoded data retires when the visitor returns.
     pub(crate) fn with_image<E>(
         &mut self,
         product: AssetProductRef,
-        visit: impl FnOnce(&ProjectImageContent, ContentDigest, ContentDigest) -> Result<(), E>,
+        visit: impl FnOnce(&ProjectImageContent, ContentDigest) -> Result<(), E>,
     ) -> Result<bool, DeliveryVisitError<E>> {
-        if product.product() != ImportedProductId::PRIMARY {
-            return Ok(false);
-        }
-        if self.observed_image(product).is_none() && self.sources.catalogue.is_none() {
-            self.context.ensure_reference_catalogue()?;
-        }
         let Some((canonical, relative, _)) = self.location(product) else {
             return Ok(false);
         };
@@ -100,14 +184,10 @@ impl DeliveryImages<'_> {
             return Err(delivery_member_limit().into());
         }
         let original_metadata = original_metadata.map(ProjectContentMemberReceipt::digest);
-        if let (Some(original), Some(catalogued)) = (original_metadata, catalogued_metadata)
-            && original != catalogued
-        {
+        if original_metadata.is_some_and(|original| original != catalogued_metadata) {
             return Err(delivery_member_changed().into());
         }
-        let metadata_digest = original_metadata
-            .or(catalogued_metadata)
-            .ok_or_else(delivery_member_changed)?;
+        let metadata_digest = catalogued_metadata;
         let path = AssetPath::new(relative).map_err(|_| {
             ProjectContentError::with_identifier(
                 ProjectContentErrorKind::InvalidLogicalPath,
@@ -136,7 +216,7 @@ impl DeliveryImages<'_> {
         );
         self.context.subtract_budget(Budget::InFlightJobs, 1);
         let (image, source_digest) = loaded?;
-        let result = visit(&image, source_digest, metadata_digest);
+        let result = visit(&image, source_digest);
         drop((image, path));
         self.context
             .subtract_budget(Budget::WorkBytes, work.reserved);
@@ -152,40 +232,53 @@ impl DeliveryImages<'_> {
         Ok(true)
     }
 
-    fn observed_image(&self, product: AssetProductRef) -> Option<&AssetSourcePath> {
-        let identity = self.sources.identities.get(&product.source())?;
-        if identity.is_image
-            && self
-                .receipt
-                .member_for_path(identity.path.as_str())
-                .is_some_and(|member| member.kind() == ProjectContentMemberKind::AssetSource)
-        {
-            Some(&identity.path)
-        } else {
-            None
+    fn database(&self) -> &ProjectAssetDatabase {
+        self.catalogue
+            .map_or(&self.context.asset_database, |catalogue| {
+                &catalogue.asset_database
+            })
+    }
+
+    fn reference_catalogue(&self) -> Option<&ReferenceCatalogue> {
+        match self.catalogue {
+            Some(catalogue) => Some(&catalogue.catalogue),
+            None => self.context.catalogue.as_ref(),
         }
     }
 
     fn location(
         &self,
         product: AssetProductRef,
-    ) -> Option<(&AssetSourcePath, &str, Option<ContentDigest>)> {
-        if let Some(path) = self.observed_image(product) {
-            return Some((path, self.context.asset_scope.relative_path(path)?, None));
-        }
-        let (database, catalogue) = match &self.sources.catalogue {
-            Some(catalogue) => (&catalogue.asset_database, &catalogue.catalogue),
-            None => (
-                &self.context.asset_database,
-                self.context.catalogue.as_ref()?,
-            ),
-        };
-        let record = database.record_for_stable_id(product.source())?;
+    ) -> Option<(&AssetSourcePath, &str, ContentDigest)> {
+        let catalogue = self.reference_catalogue()?;
+        let record = self.database().record_for_stable_id(product.source())?;
         if record.source_kind() != &AssetSourceKind::Image {
             return None;
         }
         let relative = self.context.asset_scope.relative_path(record.path())?;
         let metadata = catalogue.metadata.get(record.path())?;
-        Some((record.path(), relative, Some(metadata.digest)))
+        Some((record.path(), relative, metadata.digest))
     }
+}
+
+fn verify_sources(
+    database: &ProjectAssetDatabase,
+    catalogue: Option<&ReferenceCatalogue>,
+    sources: &BTreeMap<StableAssetId, CookedImageSource>,
+) -> Result<(), ProjectContentError> {
+    for (&id, source) in sources {
+        let path = &source.path;
+        if !database.record_for_stable_id(id).is_some_and(|record| {
+            record.path() == path && record.source_kind() == &AssetSourceKind::Image
+        }) {
+            return Err(identity_conflict(path));
+        }
+        if !catalogue
+            .and_then(|catalogue| catalogue.metadata.get(path))
+            .is_some_and(|metadata| metadata.digest == source.metadata)
+        {
+            return Err(metadata_source_changed(path.as_str()));
+        }
+    }
+    Ok(())
 }

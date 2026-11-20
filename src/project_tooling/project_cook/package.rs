@@ -15,7 +15,7 @@ use nara_fs::{
 use super::{PreparedProjectCook, ProjectCookError};
 use crate::{
     asset_build::ArtifactBuildObservation,
-    project_content::ProjectContentLease,
+    project_content::{CookedImageSources, ProjectContentLease},
     project_host::ProjectContentDeliveryReceipt,
     project_tooling::{
         cargo_build::{CargoBuildFailure, CargoBuildRequest},
@@ -38,17 +38,18 @@ const ENUMERATION_BATCH: usize = 32;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
 
-/// Original delivery facts and presence-aware build observations, with per-file identities.
+/// Original delivery facts, presence-aware build observations and selected Image identities.
 ///
 /// Capture reopens each observed file through the original root and checks its expected bytes.
-/// Verification preserves that per-file preparation envelope; it does not prove an atomic
-/// snapshot, prevent native identity reuse after deletion, or detect hostile ABA changes.
+/// Verification also rediscovers the selected Image identities in the original source roots.
+/// The fence consists of separately observed file and catalogue facts from that root.
 pub struct ProjectCookSourceSelection {
     root: DirectoryCapability,
     root_identity: FileIdentity,
     receipt: ProjectContentDeliveryReceipt,
     observations: Vec<ArtifactBuildObservation>,
     files: Vec<SelectedFile>,
+    image_sources: Option<CookedImageSources>,
     _lease: ProjectContentLease,
 }
 
@@ -62,6 +63,7 @@ impl ProjectCookSourceSelection {
         root: &DirectoryCapability,
         receipt: ProjectContentDeliveryReceipt,
         observations: Vec<ArtifactBuildObservation>,
+        image_sources: Option<CookedImageSources>,
     ) -> Result<Self, ProjectCookError> {
         if root.identity() != receipt.project_root_identity() {
             return Err(FsError::IdentityMismatch {
@@ -93,6 +95,14 @@ impl ProjectCookSourceSelection {
                 },
             )?;
         }
+        if let Some(images) = &image_sources {
+            retained = add(
+                retained,
+                images
+                    .retained_path_bytes()
+                    .map_err(ProjectCookError::Source)?,
+            )?;
+        }
         let lease = receipt
             .reserve_consumer_retained(retained)
             .map_err(ProjectCookError::Source)?;
@@ -120,6 +130,7 @@ impl ProjectCookSourceSelection {
             receipt,
             observations,
             files,
+            image_sources,
             _lease: lease,
         })
     }
@@ -134,11 +145,16 @@ impl ProjectCookSourceSelection {
         &self.observations
     }
 
-    /// Rechecks the current canonical project root and every original file fact.
+    /// Rechecks the canonical project root, original file facts and selected Image ownership.
     pub fn verify(&self, project: &Path) -> Result<(), ProjectCookError> {
         self.verify_project_root(project)?;
         for file in &self.files {
             file.verify(&self.root)?;
+        }
+        if let Some(images) = &self.image_sources {
+            images
+                .verify(&self.root)
+                .map_err(ProjectCookError::Source)?;
         }
         self.verify_project_root(project)
     }

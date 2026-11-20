@@ -74,6 +74,7 @@ const EXTRA_BADGE: &str = "extra.badge.json";
 const PNG: &str = "badge.png";
 const PNG_SOURCE: &str = "assets/badge.png";
 const PNG_SIDECAR: &str = "assets/badge.png.meta";
+const UNUSED_PNG: &str = "unused.png";
 const SCENE_ID: &str = "25910000-0000-4000-8000-000000000001";
 const BADGE_ID: &str = "25910000-0000-4000-8000-000000000002";
 const IMAGE_ID: &str = "25910000-0000-4000-8000-000000000003";
@@ -233,6 +234,214 @@ fn project_cook_can_acquire_known_and_new_images_in_either_product_order() {
     }
 }
 
+#[test]
+#[allow(
+    clippy::result_large_err,
+    reason = "The public Cook contribution callback returns ProjectCookError."
+)]
+fn project_cook_rejects_a_duplicate_image_product_for_either_embedded_path() {
+    let scratch = Scratch::new();
+    let project = scratch.0.join("project");
+    let recipe = recipe();
+    let (root, candidate) = write_project(
+        &project,
+        ImageDelivery::Embedded,
+        Some(ImageDelivery::LinkedAtBuild),
+        BadgeReference::Path,
+        &recipe,
+    );
+    let assets = project.join("assets");
+    fs::write(assets.join(UNUSED_PNG), PNG_AFTER).unwrap();
+    write_image_meta(&assets, UNUSED_PNG, IMAGE_ID);
+
+    let store = open_store(&scratch.0);
+    let implementation = implementation_digest();
+    let request = build_request(&root, LATER_BADGE, implementation);
+    let linked = build_source::<BadgeDomain>(&store, &request, |_| Ok(()))
+        .unwrap()
+        .into_group();
+    let image = product(IMAGE_ID);
+    let [member] = linked.members() else {
+        panic!("the later Badge build must produce one member");
+    };
+    assert_eq!(member.products, [product(LATER_BADGE_ID)]);
+    assert_eq!(
+        member.dependencies,
+        [(image, AssetReferenceDemand::Immediate)]
+    );
+
+    for (png, pixel) in [(PNG, [24, 120, 220, 255]), (UNUSED_PNG, [232, 64, 24, 255])] {
+        write_badge_body(&assets, BADGE, png, image);
+        let result = prepare_project_cooked_content(
+            badge_cook_request(&root, &candidate, &recipe, &store, implementation),
+            |context| match context.snapshot().selected_scene_path().as_str() {
+                SCENE => {
+                    let [available] = context.snapshot().images() else {
+                        panic!("the startup source snapshot must contain exactly one Image");
+                    };
+                    assert_eq!(available.path().as_str(), format!("assets/{png}"));
+                    assert_eq!(available.image().product(), Some(image));
+                    assert_eq!(available.image().pixels(), pixel);
+                    context.add_source_assets::<BadgeDomain>()
+                }
+                LATER_SCENE => {
+                    assert!(context.snapshot().images().is_empty());
+                    context.add_group::<BadgeDomain>(&linked)
+                }
+                path => panic!("unexpected Scene contribution: {path}"),
+            },
+        );
+        assert_image_identity_conflict(result, png);
+    }
+}
+
+#[test]
+#[allow(
+    clippy::result_large_err,
+    reason = "The public Cook contribution callback returns ProjectCookError."
+)]
+fn project_cook_allows_path_only_embedding_with_a_duplicate_image_id() {
+    let scratch = Scratch::new();
+    let project = scratch.0.join("project");
+    let recipe = recipe();
+    let (root, candidate) = write_project(
+        &project,
+        ImageDelivery::Embedded,
+        None,
+        BadgeReference::Path,
+        &recipe,
+    );
+    let assets = project.join("assets");
+    fs::write(assets.join(UNUSED_PNG), PNG_AFTER).unwrap();
+    write_image_meta(&assets, UNUSED_PNG, IMAGE_ID);
+    write_badge_body(&assets, BADGE, UNUSED_PNG, product(IMAGE_ID));
+
+    let store = open_store(&scratch.0);
+    let (content, selection) = prepare_project_cooked_content(
+        badge_cook_request(&root, &candidate, &recipe, &store, implementation_digest()),
+        |context| context.add_source_assets::<BadgeDomain>(),
+    )
+    .unwrap()
+    .into_parts();
+    selection.verify(&project).unwrap();
+    observe_player(
+        reopen_pack(content, &scratch.0.join("embedded.pack"), &recipe),
+        None,
+        PNG_AFTER,
+        [232, 64, 24, 255],
+    );
+}
+
+#[test]
+fn project_cook_rechecks_image_ownership_when_the_build_first_selects_the_image() {
+    exercise_image_ownership_recheck(false);
+}
+
+#[test]
+fn project_cook_rechecks_image_ownership_for_stock_encoded_from_the_scene_snapshot() {
+    exercise_image_ownership_recheck(true);
+}
+
+#[allow(
+    clippy::result_large_err,
+    reason = "The public Cook contribution callback returns ProjectCookError."
+)]
+fn exercise_image_ownership_recheck(embed_in_startup: bool) {
+    let scratch = Scratch::new();
+    let project = scratch.0.join("project");
+    let recipe = recipe();
+    let (root, candidate) = write_project(
+        &project,
+        ImageDelivery::LinkedAtBuild,
+        None,
+        BadgeReference::Path,
+        &recipe,
+    );
+    let assets = project.join("assets");
+    let image = product(IMAGE_ID);
+    if embed_in_startup {
+        write_badge_source(
+            &assets,
+            EXTRA_BADGE,
+            EXTRA_BADGE_ID,
+            image,
+            ImageDelivery::Embedded,
+        );
+        let document = SceneDocument::from_ordered_roots([
+            badge_entity(placement_id(), AssetRef::path(BADGE).unwrap()),
+            badge_entity(
+                SceneEntityId::new("embedded-badge-placement").unwrap(),
+                AssetRef::path(EXTRA_BADGE).unwrap(),
+            ),
+        ]);
+        fs::write(
+            project.join("scenes").join(SCENE),
+            document.to_json_string().unwrap(),
+        )
+        .unwrap();
+    }
+    fs::write(assets.join(UNUSED_PNG), PNG_AFTER).unwrap();
+    let unused_sidecar = assets.join("unused.png.meta");
+    fs::remove_file(&unused_sidecar).unwrap();
+
+    let store = open_store(&scratch.0);
+    let implementation = implementation_digest();
+    let cook = || {
+        prepare_project_cooked_content(
+            badge_cook_request(&root, &candidate, &recipe, &store, implementation),
+            |context| {
+                assert_eq!(
+                    context.snapshot().images().len(),
+                    usize::from(embed_in_startup)
+                );
+                context.add_source_assets::<BadgeDomain>()
+            },
+        )
+    };
+    let (_, without_sidecar) = cook().unwrap().into_parts();
+    without_sidecar.verify(&project).unwrap();
+    write_image_meta(&assets, UNUSED_PNG, UNUSED_ID);
+    let (_, with_sidecar) = cook().unwrap().into_parts();
+    with_sidecar.verify(&project).unwrap();
+
+    write_image_meta(&assets, UNUSED_PNG, IMAGE_ID);
+    assert_image_identity_conflict(without_sidecar.verify(&project), "an added sidecar");
+    assert_image_identity_conflict(with_sidecar.verify(&project), "an edited sidecar");
+    assert_image_identity_conflict(cook(), "a fresh Cook with the conflicting sidecar");
+
+    write_image_meta(&assets, UNUSED_PNG, EARLY_IMAGE_ID);
+    with_sidecar.verify(&project).unwrap();
+    cook().unwrap();
+    fs::remove_file(&unused_sidecar).unwrap();
+    let prefab_root = project.join("prefabs");
+    fs::write(prefab_root.join(UNUSED_PNG), PNG_AFTER).unwrap();
+    write_image_meta(&prefab_root, UNUSED_PNG, IMAGE_ID);
+    assert_image_identity_conflict(without_sidecar.verify(&project), "a claim in another root");
+    assert_image_identity_conflict(cook(), "a fresh Cook with a claim in another root");
+    fs::remove_file(prefab_root.join("unused.png.meta")).unwrap();
+    without_sidecar.verify(&project).unwrap();
+    let (content, selection) = cook().unwrap().into_parts();
+    selection.verify(&project).unwrap();
+    let base = reopen_pack(content, &scratch.0.join("retried.pack"), &recipe);
+    let decoded = base
+        .acquire_asset::<ImageDomain, ImageRuntimeCodec>(image)
+        .unwrap();
+    assert_eq!(decoded.product().pixels(), [24, 120, 220, 255]);
+    let complete = base.validate_deep().unwrap();
+    assert_eq!(complete.members(), 3 + usize::from(embed_in_startup));
+}
+
+fn assert_image_identity_conflict<T>(result: Result<T, ProjectCookError>, case: &str) {
+    let Err(error) = result else {
+        panic!("expected an Image identity conflict for {case}");
+    };
+    assert!(
+        matches!(&error, ProjectCookError::Source(source) if source.diagnostics().iter().any(|diagnostic|
+            diagnostic.code().as_str() == "project.content.asset-identity-conflict")),
+        "expected an Image identity conflict for {case}, got {error:?}"
+    );
+}
+
 #[allow(
     clippy::result_large_err,
     reason = "The public Cook contribution callback returns ProjectCookError."
@@ -296,45 +505,91 @@ fn exercise_cross_scene_images(extra_image_id: Option<&str>) {
     let mut contributions = Vec::new();
     let image = product(IMAGE_ID);
     let roots = [product(SCENE_ID), product(LATER_SCENE_ID)];
-    let prepared = prepare_project_cooked_content(
-        ProjectCookRequest {
-            root: &root,
-            candidate: &candidate,
-            recipe: recipe.clone(),
-            target: RuntimeContentTarget::new("consumer-headless", "badge").unwrap(),
-            store: &store,
-            implementation,
-            limits: CookedContentLimits::default(),
-        },
-        |context| {
-            let snapshot = context.snapshot();
-            contributions.push(snapshot.selected_scene_product().unwrap());
-            let group = match snapshot.selected_scene_path().as_str() {
-                SCENE => {
-                    let [available] = snapshot.images() else {
-                        panic!("the startup source snapshot must contain exactly one Image");
-                    };
-                    assert_eq!(available.image().product(), Some(image));
-                    &embedded_group
-                }
-                LATER_SCENE => {
-                    assert!(snapshot.images().is_empty());
-                    if let Some(group) = &extra_group {
-                        context.add_group::<BadgeDomain>(group)?;
+    let cook = |recipe, contributions: &mut Vec<_>| {
+        prepare_project_cooked_content(
+            ProjectCookRequest {
+                root: &root,
+                candidate: &candidate,
+                recipe,
+                target: RuntimeContentTarget::new("consumer-headless", "badge").unwrap(),
+                store: &store,
+                implementation,
+                limits: CookedContentLimits::default(),
+            },
+            |context| {
+                let snapshot = context.snapshot();
+                contributions.push(snapshot.selected_scene_product().unwrap());
+                let group = match snapshot.selected_scene_path().as_str() {
+                    SCENE => {
+                        let [available] = snapshot.images() else {
+                            panic!("the startup source snapshot must contain exactly one Image");
+                        };
+                        assert_eq!(available.image().product(), Some(image));
+                        &embedded_group
                     }
-                    &linked_group
-                }
-                path => panic!("unexpected Scene contribution: {path}"),
-            };
-            context.add_group::<BadgeDomain>(group)
-        },
-    )
-    .expect("Project Cook must recover the earlier stock Image for the later Badge");
+                    LATER_SCENE => {
+                        assert!(snapshot.images().is_empty());
+                        if let Some(group) = &extra_group {
+                            context.add_group::<BadgeDomain>(group)?;
+                        }
+                        &linked_group
+                    }
+                    path => panic!("unexpected Scene contribution: {path}"),
+                };
+                context.add_group::<BadgeDomain>(group)
+            },
+        )
+    };
+    let prepared = cook(recipe.clone(), &mut contributions)
+        .expect("Project Cook must recover the earlier stock Image for the later Badge");
     assert_eq!(contributions, roots);
     assert_eq!(badge::embedded_imports() - imports_before, 1);
 
     let (content, selection) = prepared.into_parts();
     selection.verify(&project).unwrap();
+    if extra_image.is_none() {
+        let exact_limit = selection.delivery_receipt().members().len();
+        let sidecars = ["assets", "scenes", "prefabs"]
+            .into_iter()
+            .flat_map(|directory| fs::read_dir(project.join(directory)).unwrap())
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext == "meta")
+            })
+            .count();
+        assert!(sidecars < exact_limit);
+        for index in sidecars..exact_limit {
+            let name = format!("extra-{index}.png");
+            fs::write(assets.join(&name), PNG_AFTER).unwrap();
+            write_meta(
+                &assets,
+                &name,
+                &format!("00000000-0000-4001-8000-{index:012x}"),
+                AssetSourceKind::Image,
+                ImageImportSettings::default(),
+            );
+        }
+        let exact = recipe.clone().with_source_content_limits(
+            ProjectContentLimits::default()
+                .with_limit(ProjectContentBudgetKind::Files, exact_limit)
+                .unwrap(),
+        );
+        let (_, exact) = cook(exact, &mut Vec::new()).unwrap().into_parts();
+        exact.verify(&project).unwrap();
+
+        fs::copy(
+            assets.join(format!("extra-{sidecars}.png.meta")),
+            assets.join(".meta"),
+        )
+        .unwrap();
+        selection.verify(&project).unwrap();
+        let (_, unrelated) = cook(recipe.clone(), &mut Vec::new()).unwrap().into_parts();
+        unrelated.verify(&project).unwrap();
+    }
     let base = reopen_pack(content, &scratch.0.join("later.pack"), &recipe);
     let catalog = base.catalog();
     let [startup, later] = roots;
@@ -847,15 +1102,9 @@ pending_capacity = 16
     fs::write(project.join("nara.toml"), manifest).unwrap();
 
     let assets = project.join("assets");
-    for (name, id) in [(PNG, IMAGE_ID), ("unused.png", UNUSED_ID)] {
+    for (name, id) in [(PNG, IMAGE_ID), (UNUSED_PNG, UNUSED_ID)] {
         fs::write(assets.join(name), PNG_BEFORE).unwrap();
-        write_meta(
-            &assets,
-            name,
-            id,
-            AssetSourceKind::Image,
-            ImageImportSettings::default(),
-        );
+        write_image_meta(&assets, name, id);
     }
 
     let root = readable_directory(project).unwrap();
@@ -915,11 +1164,7 @@ fn write_badge_source(
     image: AssetProductRef,
     image_delivery: ImageDelivery,
 ) {
-    let source = BadgeSource {
-        png: AssetPath::new(PNG).unwrap(),
-        image,
-    };
-    fs::write(assets.join(badge), serde_json::to_vec(&source).unwrap()).unwrap();
+    write_badge_body(assets, badge, PNG, image);
     write_meta(
         assets,
         badge,
@@ -927,6 +1172,42 @@ fn write_badge_source(
         AssetSourceKind::Other(BadgeDomain::SOURCE_KIND.into()),
         BadgeSettings { image_delivery },
     );
+}
+
+fn write_badge_body(assets: &Path, badge: &str, png: &str, image: AssetProductRef) {
+    let source = BadgeSource {
+        png: AssetPath::new(png).unwrap(),
+        image,
+    };
+    fs::write(assets.join(badge), serde_json::to_vec(&source).unwrap()).unwrap();
+}
+
+fn write_image_meta(assets: &Path, png: &str, id: &str) {
+    write_meta(
+        assets,
+        png,
+        id,
+        AssetSourceKind::Image,
+        ImageImportSettings::default(),
+    );
+}
+
+fn badge_cook_request<'a>(
+    root: &'a DirectoryCapability,
+    candidate: &'a ProjectSettingsCandidate,
+    recipe: &ProductRecipe,
+    store: &'a ArtifactBuildStore,
+    implementation: ArtifactContentDigest,
+) -> ProjectCookRequest<'a> {
+    ProjectCookRequest {
+        root,
+        candidate,
+        recipe: recipe.clone(),
+        target: RuntimeContentTarget::new("consumer-headless", "badge").unwrap(),
+        store,
+        implementation,
+        limits: CookedContentLimits::default(),
+    }
 }
 
 fn open_store(parent: &Path) -> ArtifactBuildStore {
