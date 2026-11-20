@@ -2,6 +2,7 @@
 
 #[cfg(feature = "desktop")]
 mod input;
+mod walking;
 
 use std::collections::HashSet;
 
@@ -18,7 +19,8 @@ use nara::{
     },
     prelude::{
         App, Color, Component, CoreStage, FixedTime, FixedUpdateSet, PersistentComponent, Plugin,
-        Query, Res, ResMut, Resource, Transform2d, Vec2, add_fixed_transform_projection_systems,
+        Query, Res, ResMut, Resource, Transform2d, Vec2, add_fixed_transform_input_systems,
+        add_fixed_transform_projection_systems,
     },
     reflect::{
         ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
@@ -28,6 +30,7 @@ use nara::{
     sprite::Sprite,
     transform::FixedSpatialSnapshot2d,
 };
+use walking::{WalkingState, capture_movement_parents, collect_targets, move_player};
 
 const PLUGIN_ID: PluginId = PluginId::new("collect-game.gameplay");
 const PROVIDER_ID: PluginSchemaProviderId = PluginSchemaProviderId::new("collect-game.components");
@@ -109,6 +112,7 @@ struct GameState {
     held: [bool; 4],
     collected: HashSet<Entity>,
     baseline: Vec<Baseline>,
+    walking: WalkingState,
     won: bool,
     resets: u32,
 }
@@ -125,6 +129,7 @@ impl Plugin for CollectGamePlugin {
         app.insert_resource(GameState::default())?
             .insert_resource(GameSnapshot::default())?;
         add_startup_scene_activation_systems(app, initialize)?;
+        add_fixed_transform_input_systems(app, capture_movement_parents)?;
         app.add_systems(
             CoreStage::FixedUpdate,
             consume_commands.in_set(GameplayCommandSet::Consume),
@@ -237,61 +242,6 @@ fn consume_commands(
             _ => {}
         }
     }
-}
-
-fn move_player(
-    time: Res<FixedTime>,
-    state: Res<GameState>,
-    mut players: Query<(&PlayerConfig, &mut Transform2d)>,
-) {
-    if state.won {
-        return;
-    }
-    let [left, right, up, down] = state.held.map(|held| if held { 1.0 } else { 0.0 });
-    let direction = Vec2::new(right - left, up - down).normalize_or_zero();
-    for (config, mut transform) in &mut players {
-        let next = (transform.translation + direction * config.speed * time.delta().as_secs_f32())
-            .clamp(Vec2::new(-280.0, -160.0), Vec2::new(280.0, 160.0));
-        if next != transform.translation {
-            transform.translation = next;
-        }
-    }
-}
-
-fn collect_targets(
-    mut state: ResMut<GameState>,
-    spatial: FixedSpatialSnapshot2d<'_>,
-    players: Query<Entity, With<PlayerConfig>>,
-    mut targets: Query<(Entity, &Collectible, &mut Sprite)>,
-    mut cameras: Query<&mut Camera2d>,
-) -> Result<(), BevyError> {
-    let Ok(player) = players.single() else {
-        return Ok(());
-    };
-    let player = spatial
-        .global(player)
-        .map_err(BevyError::error)?
-        .translation();
-    let total = targets.iter().count();
-    for (entity, config, mut sprite) in &mut targets {
-        let position = spatial
-            .global(entity)
-            .map_err(BevyError::error)?
-            .translation();
-        if !state.collected.contains(&entity) && player.distance(position) <= config.radius {
-            state.collected.insert(entity);
-            sprite.material.tint.a = 0.0;
-            println!("collect_game: collected={}/{total}", state.collected.len());
-        }
-    }
-    if !state.won && total > 0 && state.collected.len() == total {
-        state.won = true;
-        for mut camera in &mut cameras {
-            camera.clear_color = Some(VICTORY);
-        }
-        println!("collect_game: victory! Press R to reset.");
-    }
-    Ok(())
 }
 
 fn capture(

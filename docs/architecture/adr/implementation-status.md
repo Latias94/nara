@@ -1795,6 +1795,13 @@ native tangential retry starts from the previous accepted pose. The Headless reg
 36 rotated steps and canonical continuation after restoration at the original failing tick.
 [Rotated character repair](../../plans/2026-11-04-authored-collision-derivation-plan.md#rotated-character-pose-admission)
 
+Collect Game uses the fixed input snapshot for world-space movement under an authored Prefab
+parent and the completed fixed snapshot for pickup contact. The independent consumer checks
+world bounds, transformed and singular parents, unrepresentable local landings, and same-tick
+Reset followed by movement. Both release configurations pass 13 tests, and the Windows desktop
+first-presentation check passes.
+[Collect Game audit and evidence](../../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#collect-game-world-movement-and-pickups)
+
 The joint discontinuity unit adds semantic discontinuation to the existing CPU history lineage.
 Original clones cannot be refreshed through late admission, first preparation, target adaptation
 or retained candidate submission. Ordinary per-slot reset stays distinct. The independent two-View consumer

@@ -1787,6 +1787,12 @@ to continue engine-runtime work. Preserve their uncommitted checkpoints. Start f
 two-level game and existing managed motion/time consumers; select concrete runtime corrections
 from source and executable evidence before adding another backend or general interface.
 
+The [Collect Game movement and pickup correction](../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#collect-game-world-movement-and-pickups)
+uses the fixed input and completed spatial snapshots through the independent game's public
+composition. Movement preserves world units under authored Prefab parents when the local pose
+can represent the endpoint. Collection follows the completed walking segment with Reset handled
+by the original gameplay command order. Both sample release configurations pass 13 tests.
+
 The [managed startup pause correction](2026-11-03-joint-motion-execution-plan.md#managed-startup-pause-correction-november-13)
 preserves the final configured/Startup time policy through public Runtime promotion. The
 [two-level marker recovery](2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)

@@ -46,6 +46,12 @@ with `CARGO_TARGET_DIR` and one build job when working in the repository.
 - `prefabs/player.prefab.json` supplies the player sprite, initial position and
   authored speed. `scenes/startup.scene.json` instances it and owns the camera
   and three collectible entities.
+- Movement speed, level bounds and pickup radii use world units. A scaled,
+  rotated or reflected Prefab parent can change the authored pose. Right still
+  moves along world X at the configured speed. A singular parent keeps the
+  player at its current pose. A spawn beyond the bounds can walk back at the
+  configured speed. Each fixed tick can collect gems crossed along its walking
+  segment. Reset starts a new segment at the restored pose.
 - `assets/textures/token.png` is an original geometric image. Its committed
   metadata supplies a stable image identity. Inspector image assignment uses
   `textures/token.png` as its logical asset path.

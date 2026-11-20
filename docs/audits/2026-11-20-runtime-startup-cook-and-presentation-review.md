@@ -267,3 +267,35 @@ retains the failure result alongside any still-authorized publication, and requi
 admission after revocation.
 [Bevy failed load](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_asset/src/server/info.rs#L685) ·
 [Godot cache fallback](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/core/io/resource_loader.cpp#L620)
+
+### Collect Game world movement and pickups
+
+Windows run `4d1c302b-57c7-4e22-a6d7-709f69ccfbd4` reproduced both gameplay defects through the
+independently locked sample. At speed 200 with a 20 ms tick, a twice-scaled Prefab anchor made
+Right move 8 world units. A radius-one gem at `(-38, 0)` stayed visible after the player moved
+from `(-40, 0)` to `(-36, 0)`.
+
+The game reads the effective parent from the fixed input snapshot, computes walking and its
+limits in world units, and writes only the local translation after applying the parent's inverse.
+Pickup contact uses the completed fixed position and this tick's walking segment. A reset sets
+the origin for later movement in that tick. Pickups that inherit the player's movement use
+their final relative distance. Godot applies the parent's affine inverse when setting
+`Node2D` world position and computes contact from the nearest point on a finite segment.
+[Gameplay owner](../../samples/collect-game/gameplay-plugin/src/walking.rs) ·
+[Godot world position](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/scene/2d/node_2d.cpp#L298) ·
+[Godot segment geometry](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/core/math/geometry_2d.h#L108)
+
+A second regression, `56f9cb27-8839-4304-8a2e-f7a9a9eb06da`, reproduced an incorrect
+landing at `(-96, 3.999999)` and a false pickup under a rotated, highly nonuniform parent.
+The game checks the candidate local `f32` translation against the intended world endpoint
+before writing it. The control with the same scale and an axis-aligned parent still walks
+four world units up.
+
+The independently locked sample passes 13/13 in `14407d51-8aae-4e50-9b1f-9e57e923dd92`
+and 13/13 with `desktop` in `73f28055-3b48-49b4-a51f-698924116ce9`. The gameplay cases use
+real Scene and Prefab files. They cover transformed and nested singular parents, world bounds,
+a crossed pickup and a near miss, and Reset with and without a following command in the same
+tick. The headless commands complete all three pickups at tick 62 and verify one reset by
+tick 66. The Windows desktop command verifies the first presentation and exits. Correctness
+Clippy and sample workspace formatting checks pass on Windows with Rust 1.95.0.
+[Sample regression](../../samples/collect-game/tests/gameplay.rs)
