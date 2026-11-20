@@ -160,17 +160,20 @@ The compiled project entry selects stock payloads from the delivery roots and th
 Reference edges declared by the encoded Scenes and verified groups. A source asset consumed
 during construction, such as a PNG embedded into a typed Product, still contributes its source
 and build observations. The PNG becomes a separate Runtime member when an encoded Product or
-delivery root requires it. When a verified group first requires a stock Image, the source loader
-uses the delivery traversal's admitted identity and file facts when available. It looks up a new
-identity in its bounded catalogue, then reads the actual PNG and typed sidecar. Additional stock
-files count against the same unique delivery file limit and participate in publication revalidation.
-Each Image's decoded pixels retire after encoding. Explicit groups retain their complete mappings,
-subject to the original builder's final reachability and deep validation.
+delivery root requires it. Every stock Image chosen for delivery has one stable source in the
+admitted catalogue roots. This applies to Images encoded from a Scene snapshot and Images first
+required by a verified group. If source delivery has no complete catalogue, Cook discovers the
+selected identities in one bounded pass. It uses the admitted file facts when reading the actual
+PNG and typed sidecar. Additional stock files count against the same unique delivery file limit.
+The original publication fence rechecks the selected Image ownership and the retained file facts.
+Raw path-only inputs remain build observations until a Runtime dependency selects their Image
+Product. Each Image's decoded pixels retire after encoding. Explicit groups retain their complete
+mappings, subject to the original builder's final reachability and deep validation.
 
-A stock Sprite's selected `material.image` requires the executable's Image publication codec role.
-Deep validation checks that binding while inspecting the compiled Scene. The generic typed codec
-is sufficient for direct CPU Image consumption. Null and omitted Sprite bindings are valid
-without a published Image.
+A stock Sprite's selected `material.image` and a stock `UiVisual` image brush's `background.image`
+require the executable's Image publication codec role. Deep validation checks those bindings
+while inspecting the compiled Scene. Direct CPU Image consumption can use the generic typed
+codec. Null and omitted Sprite bindings and solid UI brushes are valid without a published Image.
 
 Cooked content is fixed before the selected Player build. A bounded generated Rust input carries
 an independently expected catalog digest/length, content target/profile and relative pack location.

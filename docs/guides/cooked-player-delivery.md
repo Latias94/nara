@@ -65,9 +65,11 @@ Stock payloads enter the pack through a delivery root or a Required or Reference
 the cooked content. An importer can embed PNG data in a custom Product and keep the PNG as a
 tracked build input. If the codec declares a link to the Image Product, the pack also contains
 the Image payload. Cook can resolve a stock Image first requested by the build result, even when
-every Scene snapshot contains zero stock Images. An Image already read through an earlier Scene is
-reacquired from its admitted source path. A newly selected PNG and sidecar count toward the project
-delivery file limit. Cook verifies both alongside the original build inputs before publication.
+every Scene snapshot contains zero stock Images. Each delivered stock Image UUID must select one
+source across the configured catalogue roots, including an Image already read through an earlier
+Scene. A newly selected PNG and sidecar count toward the project delivery file limit. Before
+publication, Cook verifies the original files and checks that no other source claims the selected
+UUID. A PNG embedded solely by path continues to participate as a build input.
 
 Decoded roots retire sequentially; the unpublished builder accumulates their processed members
 and performs the existing final complete validation. `PreparedProjectCook` retains source and
@@ -104,13 +106,13 @@ belongs to this delivery. Surplus members reject rather than silently evade vali
 implicit roots. A compound member preserves all of its Products without duplicating its bytes.
 
 Deep validation runs the selected production decoders and actual reference inventories, including
-Image/TileSet/Tilemap CPU constraints. Material texture slots and the stock Sprite's optional
-`material.image` must target members selected with the Image publication role. Choose
-`ProductRecipe::add_runtime_image_codec` for an Image used by these native bindings. The generic
-`add_runtime_asset_codec` registration remains available for direct typed CPU consumption. An Image
-transform that invalidates an atlas rejects assembly. Pack startup admits the catalog, extents and
-current demand. Later original-file corruption can reject a Deferred acquisition while preserving
-the current Scene.
+Image/TileSet/Tilemap CPU constraints. Material texture slots, the stock Sprite's optional
+`material.image` and the stock `UiVisual` image brush's `background.image` must target members
+selected with the Image publication role. Choose `ProductRecipe::add_runtime_image_codec` for an
+Image used by these native bindings. The generic `add_runtime_asset_codec` registration remains
+available for direct typed CPU consumption. An Image transform that invalidates an atlas rejects
+assembly. Pack startup admits the catalog, extents and current demand. Later original-file
+corruption can reject a Deferred acquisition while preserving the current Scene.
 
 ## Bind The Player
 

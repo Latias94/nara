@@ -170,3 +170,73 @@ readback. Round input used normalized events in headless and hidden DX12 runs wi
 controllers connected. The audio runs used actual WASAPI callbacks. Workspace-wide tests, a
 fresh standalone Player executable build, physical controller operation and audible speaker
 output were outside this review.
+
+## Repair Status
+
+The workflow fixes are `ab502b8` (Image identity), `75529e9` (UI Image publication),
+`fa71d57` (spatial inheritance), `90209e4` (Round input and travel) and `d1feb47`/`a2310b8`
+(source audio verification and its development fixture).
+
+The Cook now resolves the stable identity of each stock Image selected for delivery, including
+an Image already encoded from a Scene snapshot. The publication fence rediscovers selected
+UUIDs and checks the original metadata digests. Path-only embeddings still observe their source
+bytes through the artifact builder. The same deep Scene pass requires the selected Image codec
+to publish handles for both Sprite and `UiVisual` image bindings. See the [Cook delivery plan](../plans/2026-10-31-cooked-player-delivery-plan.md#selected-image-identity-and-ui-image-admission).
+
+Transform propagation and fixed interpolation read the stored local transforms through a shared
+structural query. The library and fixed-input target pass 45/45 in release run
+`015cb0d2-02cc-4dd7-8cf6-d303952e48d9`. The independent geometry test keeps the enabled child as the
+only extracted View. Its center remains 103 through both disabling markers, becomes 3 when the
+parent's transform is removed, and returns to 103 when restored. Vulkan replay reads all seven
+960 × 540 outputs after the original Runtime retires. Run `9e8a7b2b-4d43-44ca-94cd-cb8724fa8eaa`
+passes the pixel test on the observed NVIDIA GeForce RTX 4090 discrete adapter.
+
+The Two-Level Round admits local Save in input order before fixed consumption. Pause before Save
+preserves the previous checkpoint. While Paused, the first Continue or Return to Title action
+determines whether a pending Save can complete. Committed travel reuses the current PRIMARY
+movement contributions. Rejection keeps the incumbent's applied movement, and Resume retains its
+original captured intent. See the
+[Round input plan](../plans/2026-11-13-seat-gamepad-and-input-replay-plan.md#round-input-ordering-and-travel-handoff).
+
+The source audio verifier copies the desktop profile's admitted delivery members and captures
+the two WAVs selected by the source descriptor. It compares full WASAPI callback data and
+checks Scene scope replacement against the actual completion or cancellation in that history.
+The distributed asset control still requires an observed old-scope cancellation. The edited
+one-frame Travel cue completes before that replacement and still passes the PCM comparison.
+The private copy tests refuse independently missing input, animation and WAV dependencies
+before starting a native Runtime. See the [sample guide](../../samples/two-level-game/README.md#optional-windows-game-audio).
+
+The final Two-Level release run `5785c5b6-904d-4c12-baa9-2fc46ccfe5f6` passes 123/123, including
+zero, one and three fixed steps at the Pause/Save boundary, on-disk Restore, both paused menu
+orders, keyboard/controller handoff, replay, retained typed stop on failed travel and source/cooked
+content controls. It includes three hardware Vulkan/WASAPI test cases with eight game Runtime
+trajectories across the original, half-amplitude, rebound and one-frame source sounds, plus the
+missing-source executable control. The first 119-test pass preceded the last independent review
+corrections. Input tests use the normalized driver and the existing command queue.
+
+The independently locked release run `09f13890-544b-4e54-8917-90fe5b2b863d` passes 33/33, covering
+ten public Cook cases, nineteen registered panel cases and four geometry cases. The Cook controls
+include both earlier embedded paths, an already encoded stock Image, a Build-only Image demand,
+claims in a different source root, late duplicate insertion and edits, repair, a raw-only pack,
+an unrelated malformed or unselected sidecar, and the exact delivery file ceiling. The initial
+run exposed separate census and selected-file accounting and a test Sprite missing its required
+structural placement. The final run exercises the corrected scan and the placed Sprite.
+
+The Windows engine release run `e1bb447a-40eb-4f1a-acac-6a3a7ce7de7b` passes 245/245. The
+selected Image tests isolate source census work and verify sidecar digest changes observed
+during publication revalidation. The UI case refuses the CPU-only registration during Cook,
+reopens and runs the publication-capable pack on Headless, and keeps the solid brush and direct
+CPU Image controls valid. The original Sprite case passes in the same run.
+
+The additional game release run `30c2ec53-a5b8-4675-a43a-7ff56dab0043` passes 34/34. The ordinary
+cooker builds the Release Player and publishes the package. The test then removes the source and
+cache, relocates the package, and starts fresh Player processes for travel, persistence and refusal
+controls. The remaining cases cover collision, travel command admission and both companion regions.
+The broader sample build first exposed a test-only call to the previous PCM oracle signature.
+The original development fixture now captures its own WAV files. The three development WASAPI
+cases pass in `74449d8e-82af-45e0-b718-3e572c362578`.
+
+The executed scope is Windows x64 with Rust 1.95.0. Controller ordering and handoff use normalized
+input. Audio evidence covers original callbacks, output samples and physical device retirement.
+Correctness Clippy, root and affected consumer formatting, local document links and whitespace
+checks pass.

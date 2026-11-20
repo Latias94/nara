@@ -4687,6 +4687,12 @@ identities, pointer pixel coverage, modal pointer motion, ordinary Windows key r
 effective Prefab Revert declaration allowance. The record includes independent panel, Runtime UI
 and Windows message-pump verification.
 
+The [sixth workflow repair record](../../audits/2026-11-20-cook-identity-spatial-inheritance-and-round-input-review.md#repair-status)
+tracks unique cooked Image identities and `UiVisual` Image publication, stored spatial inheritance
+through disabled parents, ordered Round checkpoint writes, post-travel input handoff, and the
+source-dependent WASAPI verification workflow. The repair uses the existing catalogue, spatial
+queries, fixed command consumer and original audio callback.
+
 Rows retain their own last-qualified source and scope. Some older broad decisions remain partial
 or proposed while narrower Accepted ADRs implement particular workflows. Read the relevant Accepted
 refinement before treating an older gap as the current product's behavior. Links are selected

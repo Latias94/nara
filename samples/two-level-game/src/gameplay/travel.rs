@@ -91,7 +91,8 @@ pub(super) fn consume(world: &mut World) {
     for command in commands {
         let (kind, payload) = match command {
             ConsumedInput::Movement(Ok((direction, pressed))) => {
-                if !pressed || (!blocked && world.resource::<Session>().phase == GamePhase::Running) {
+                if !pressed || (!blocked && world.resource::<Session>().phase == GamePhase::Running)
+                {
                     world.resource_mut::<Session>().held[direction] = pressed;
                 }
                 continue;

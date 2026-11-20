@@ -194,9 +194,9 @@ source and source-free payloads.
 
 Real artifact builds can introduce a required Image Product that no authored Scene selected.
 After the original delivery traversal and explicit build contributions, satisfy that demand through
-the Project Content owner and stock Image importer. Use the traversal's canonical identity index
-and delivery receipt for an Image already observed. Resolve new identities from a bounded catalogue
-created only when needed. Read actual PNG and typed sidecar data through the admitted assets
+the Project Content owner and stock Image importer. Resolve the selected Product in the catalogue
+and reuse the delivery receipt's file facts for an Image already observed. Build the bounded
+catalogue only when needed. Read actual PNG and typed sidecar data through the admitted assets
 capability, checking the original digest where available. New stock paths extend the deduplicated
 delivery file count before reading. The original Cook fence retains their observations. Release each
 Image's decoded pixels after encoding. A missing identity, an unsupported auxiliary ID or a Soft
@@ -253,6 +253,36 @@ publication, source and cache removal, relocation, travel, Save/Restore, corrupt
 contained process cleanup. GPU presentation and additional platforms are outside this run.
 Scoped engine correctness Clippy, strict Clippy on the independent Cook test and a
 `project-workflow` library build without `project-tooling` pass.
+
+### Selected Image Identity And UI Image Admission
+
+The [sixth workflow review](../audits/2026-11-20-cook-identity-spatial-inheritance-and-round-input-review.md)
+found two gaps between a prepared package and its Player. An Image already seen by path could
+satisfy a later Product demand despite a second sidecar claiming the same UUID. A Scene could also
+declare a `UiVisual` image brush against an Image codec that only supports CPU acquisition.
+
+Use the original bounded catalogue to admit stock Image Products even when their pixels are
+already available. With no complete catalogue from source delivery, discover only the needed
+UUIDs in one pass through the configured roots. A prepared selection retains the Product's
+canonical path and rechecks its unique ownership at the original publication fence. Preserve
+path-only embedding, the original retained file and build observations, and the exact delivery
+file allowance. Exercise both leading path choices and a new duplicate after preparation, plus
+successful verification after repair and with an unrelated UUID.
+
+The `UiVisual` codec owns its persisted background Image field. Deep validation uses that field
+to require the executable's native Image publication role, alongside the existing Sprite check.
+Use the same compiled recipe, PNG and codec for the generic-versus-published controls. The
+publication-capable package must reopen and start a Headless Player and expose the expected
+pixels. Solid UI and direct typed CPU decoding retain their original behavior.
+
+The independent Cook target passes 10/10 within release run
+`09f13890-544b-4e54-8917-90fe5b2b863d`. Both earlier path choices refuse the same duplicate UUID.
+Late insertion, late edits and a claim from another configured root also refuse. Repair and
+unrelated or malformed unselected metadata preserve delivery, as does the raw-only Player.
+The exact file ceiling covers late Image acquisition separately from catalogue enumeration.
+The owning engine and public-content release cohort passes 245/245 in
+`e1bb447a-40eb-4f1a-acac-6a3a7ce7de7b`. It verifies the new UI and existing Sprite publication
+checks, file and scan digest agreement, finite scan work, metadata preparation and Runtime boot.
 
 ## Request-Owned Generated Rust Input Successor
 

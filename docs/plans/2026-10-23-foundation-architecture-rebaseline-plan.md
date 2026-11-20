@@ -1267,12 +1267,12 @@ both pass the relocated Windows DX12 workflow. The controller package acquires W
 its control instructions and completes the native trajectory through its keyboard fallback.
 The owning record distinguishes normalized controller input from physical device coverage.
 
-Cook fulfills Image dependencies introduced by verified builds using the source loader's previously
-admitted path or its bounded catalogue. Late PNG and sidecar reads use the same delivery file
-limit and publication fence. Deep validation checks each stock Sprite Image binding against the
-Player's selected publication codec before assembly succeeds. The generic codec still supports
-direct CPU Image acquisition.
-[Build-declared Image and Sprite qualification](2026-10-31-cooked-player-delivery-plan.md#build-declared-image-and-sprite-qualification)
+Cook fulfills Image dependencies introduced by verified builds through the source loader's bounded
+catalogue. Each stock Image selected for delivery has one stable source, with ownership and exact
+metadata rechecked at publication. Late PNG and sidecar reads use the original delivery file limit.
+Deep validation checks Sprite and `UiVisual` Image bindings against the Player's selected
+publication codec. The generic codec still supports direct CPU Image acquisition.
+[Selected Image identity and UI admission](2026-10-31-cooked-player-delivery-plan.md#selected-image-identity-and-ui-image-admission)
 
 Separate Host tool selection, target executable artifacts, content cook, release candidate and
 target-runner activation. Keep a source-carrying option but move fixed starter assumptions into
