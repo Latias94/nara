@@ -282,9 +282,16 @@ pub(super) fn assert_native_unchanged(
     expected: &[NativeState],
     changed: Option<Entity>,
 ) {
-    let actual = native_state(owner);
-    assert_eq!(actual.len(), expected.len());
     assert_eq!(owner.counts(), (expected.len(), expected.len()));
+    assert_native_states_unchanged(&native_state(owner), expected, changed);
+}
+
+pub(super) fn assert_native_states_unchanged(
+    actual: &[NativeState],
+    expected: &[NativeState],
+    changed: Option<Entity>,
+) {
+    assert_eq!(actual.len(), expected.len());
     for expected in expected
         .iter()
         .filter(|entry| Some(entry.entity) != changed)

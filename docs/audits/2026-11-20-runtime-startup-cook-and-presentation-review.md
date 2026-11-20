@@ -299,3 +299,14 @@ tick. The headless commands complete all three pickups at tick 62 and verify one
 tick 66. The Windows desktop command verifies the first presentation and exits. Correctness
 Clippy and sample workspace formatting checks pass on Windows with Rust 1.95.0.
 [Sample regression](../../samples/collect-game/tests/gameplay.rs)
+
+### Fixed floor contact continuity
+
+The independent Rapier adapter keeps the original fixed pair when the same live entity and
+collision definition yield the same native pose and local hull. The repaired Windows run
+`746bc6fb-a978-49d6-902b-8cd8aa8d3a7e` passes all 21 selected tests. An equivalent reparent and
+reflection both preserve 16 contacts and 16 sleeping bodies. Moving the floor removes the old
+contacts and lets the same bodies fall. A local hull change whose world debug points round to the
+same coordinates also replaces the pair. The independent offscreen render consumer passes 11/11
+in `2fb9f395-238a-4fe2-96b5-b56fefb3416c`, including two hardware DX12 trajectories.
+[Collision qualification](../plans/2026-11-04-authored-collision-derivation-plan.md#fixed-collision-continuity)

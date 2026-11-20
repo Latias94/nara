@@ -2129,6 +2129,11 @@ role. The owning plan retains final checks, review corrections and the explicit 
 cost. This does not freeze a local-affine schema, admit parented/scaled dynamic writeback,
 select an official Physics backend or complete R4c/R10/Foundation.
 
+The [fixed collision continuity follow-up](2026-11-04-authored-collision-derivation-plan.md#fixed-collision-continuity)
+lets the independent adapter retain Rapier handles, contacts and sleep for a live fixed entity when
+reparenting or reflection leaves its native geometry unchanged. The real geometry-change controls,
+21 collision tests and 11 offscreen render-consumer tests pass on Windows.
+
 The [visible collision continuation](2026-11-04-authored-collision-derivation-plan.md#authored-collision-and-visible-runtime-successor)
 joins the same authored domain to ordinary Scene/Sprite/stock GPU capture. The independent
 falling-box workflow uses one canonical domain Schema provider, genuine fixed-input admission,

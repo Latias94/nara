@@ -141,9 +141,11 @@ simulation test also observes a dynamic body resting on a floor and an actual so
 Source edits, Undo/Redo and disk Save/Reopen use the ordinary exact native binding. Scene source
 synchronization currently replaces that occurrence's activation; the fixture retires those old
 native pairs and derives replacements. It synchronizes only dirty sources, preserving unrelated
-occurrences and their solver state. Unchanged live entities keep native pairs, while an in-place
-changed definition rebuilds its pair and resets dynamics. Retained immutable debug captures remain
-readable across edit, removal and managed close without keeping the old solver objects alive.
+occurrences and their solver state. A live fixed entity keeps its native pair, contacts and solver
+state after an equivalent reparent or reflection. A changed definition or changed fixed geometry
+rebuilds the affected pair. Retained immutable debug captures remain readable across edit, removal
+and managed close without keeping the old solver objects alive.
+[Fixed collision continuity](../../../docs/plans/2026-11-04-authored-collision-derivation-plan.md#fixed-collision-continuity)
 
 Tests additionally cover duplicate definitions, two occurrences of one source, two structured
 Prefab projections, component/entity removal, occurrence unload, invalid source/native values,

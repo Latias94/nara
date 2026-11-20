@@ -1756,6 +1756,12 @@ numeric performance budgets and full R4c/R10/Foundation remain open.
 Local implementations are `79cd09e` (Registry constructor), `d934b24` (spatial input) and
 `c5b75ba` (concrete collision consumer); the owning plan retains their breaking API/data changes.
 
+The independent Rapier adapter preserves the same live fixed pair under equivalent reparenting
+and reflection. The fixed input regression retains all 16 original contacts and sleeping bodies,
+and an actual change to the floor's geometry still replaces its pair. The collision cohort passes
+21/21 and the independent render-policy cohort passes 11/11 on Windows.
+[Fixed collision continuity](../../plans/2026-11-04-authored-collision-derivation-plan.md#fixed-collision-continuity)
+
 The [visible authored-collision continuation](../../plans/2026-11-04-authored-collision-derivation-plan.md#visible-runtime-native-qualification)
 combines that same domain with public Scene editing and ordinary Sprite/stock capture. The domain
 now exports its original canonical Schema provider instead of each consumer claiming another

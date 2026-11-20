@@ -647,6 +647,265 @@ fn same_tick_prepare_deferred_shape_parent_edit_and_reparent_feed_original_input
     }
 }
 
+#[test]
+fn equivalent_fixed_floor_geometry_keeps_native_contacts_and_sleep() {
+    const BOX_COUNT: usize = 16;
+
+    let box_names: [String; BOX_COUNT] = std::array::from_fn(|index| format!("box-{index}"));
+    let boxes = box_names.iter().enumerate().map(|(index, name)| {
+        shape_record(
+            name,
+            definition(Vec2::ZERO, 0.4, 0.4, true),
+            transform([2.0 * index as f32 - 15.0, 1.5], 0.0, [1.0, 1.0]),
+        )
+    });
+    let mut document = SceneDocument::from_ordered_roots(
+        [
+            spatial_record("original", Transform2d::default()),
+            spatial_record("replacement", Transform2d::default()),
+            shape_record(
+                "floor",
+                definition(Vec2::ZERO, 18.0, 0.5, false),
+                transform([0.0, -0.5], 0.0, [1.0, 1.0]),
+            ),
+        ]
+        .into_iter()
+        .chain(boxes),
+    );
+    document.placements[2] = under("floor", "original");
+
+    for profile in profiles() {
+        let mut case = NativeCase::new(
+            vec![SourceScene::new(document.clone(), "resting-floor")],
+            &native_registry(),
+            profile,
+            |_| {},
+        );
+        let (floor, replacement, boxes) = {
+            let world = case.runtime.world();
+            let sources = case.sources.lock().unwrap();
+            let instance = sources[0].session.live_instance().unwrap();
+            (
+                resolve(world, instance, "floor"),
+                resolve(world, instance, "replacement"),
+                box_names
+                    .each_ref()
+                    .map(|name| resolve(world, instance, name)),
+            )
+        };
+        for _ in 0..180 {
+            case.admit(|world, owner, scenes| {
+                owner.reconcile(world, &collision_inputs(scenes)).unwrap();
+                owner.step_and_writeback(world).unwrap();
+            });
+        }
+        let (baseline, initial_resting) = {
+            let owner = case.owner.lock().unwrap();
+            (
+                native_state(&owner),
+                resting_floor_status(&owner, floor, &boxes),
+            )
+        };
+        let retained = case.owner.lock().unwrap().debug_snapshot();
+        let initial_map = fixed_input_spatial_snapshot(case.runtime.world())
+            .unwrap()
+            .global(floor)
+            .unwrap()
+            .matrix();
+        case.mutate(move |world, _, _| {
+            let from = HierarchyPlacement::current(world, floor).unwrap();
+            HierarchyWriter::new(world)
+                .apply_batch(&[HierarchyOperation::Move {
+                    entity: floor,
+                    from,
+                    to: HierarchyPlacement::last(HierarchyPlacementOwner::Parent {
+                        parent: replacement,
+                    }),
+                }])
+                .unwrap();
+        });
+
+        let equivalent = [false, true].map(|reflected| {
+            if reflected {
+                case.mutate(move |world, _, _| {
+                    world.get_mut::<Transform2d>(floor).unwrap().scale.y = -1.0;
+                });
+            }
+            case.admit(move |world, owner, scenes| {
+                let input = fixed_input_spatial_snapshot(world).unwrap();
+                let parent = input.parent(floor).unwrap();
+                let map = input.global(floor).unwrap().matrix();
+                owner.reconcile(world, &collision_inputs(scenes)).unwrap();
+                let before_solve = owner.debug_snapshot();
+                let resting_before_solve = resting_floor_status(owner, floor, &boxes);
+                owner.step_and_writeback(world).unwrap();
+                (
+                    parent,
+                    map,
+                    before_solve,
+                    resting_before_solve,
+                    resting_floor_status(owner, floor, &boxes),
+                    native_state(owner),
+                )
+            })
+        });
+
+        case.mutate(move |world, _, _| {
+            world
+                .get_mut::<Transform2d>(replacement)
+                .unwrap()
+                .translation
+                .y = -4.0;
+        });
+        let (lowered, lowered_debug, remaining_contacts, falling) =
+            case.admit(move |world, owner, scenes| {
+                let original = generated(owner, floor);
+                owner.reconcile(world, &collision_inputs(scenes)).unwrap();
+                let lowered = observe_floor_replacement(owner, floor, original);
+                let debug = owner.debug_snapshot();
+                owner.step_and_writeback(world).unwrap();
+                let (contacts, _) = resting_floor_status(owner, floor, &boxes);
+                (lowered, debug, contacts, native_state(owner))
+            });
+
+        case.mutate(move |world, _, _| {
+            world.get_mut::<Transform2d>(floor).unwrap().scale.y = -1.0_f32.next_up();
+        });
+        let (reshaped, same_pose, changed_hull, same_corners) =
+            case.admit(move |world, owner, scenes| {
+                let original = generated(owner, floor);
+                let original_debug = owner.debug_snapshot();
+                let collider = owner.collider(original.collider).unwrap();
+                let pose = *collider.position();
+                let points = collider
+                    .shape()
+                    .as_convex_polygon()
+                    .unwrap()
+                    .points()
+                    .to_vec();
+                owner.reconcile(world, &collision_inputs(scenes)).unwrap();
+                let reshaped = observe_floor_replacement(owner, floor, original);
+                let collider = owner.collider(reshaped.current.collider).unwrap();
+                let changed_hull = collider
+                    .shape()
+                    .as_convex_polygon()
+                    .unwrap()
+                    .points()
+                    .iter()
+                    .any(|point| !points.contains(point));
+                let before = original_debug
+                    .shapes
+                    .iter()
+                    .find(|shape| shape.entity == floor);
+                let debug = owner.debug_snapshot();
+                let after = debug.shapes.iter().find(|shape| shape.entity == floor);
+                (
+                    reshaped,
+                    *collider.position() == pose,
+                    changed_hull,
+                    before == after,
+                )
+            });
+        case.finish();
+
+        let initial_floor = retained
+            .shapes
+            .iter()
+            .find(|shape| shape.entity == floor)
+            .unwrap();
+        assert_eq!(initial_resting, (BOX_COUNT, BOX_COUNT));
+        for (reflected, (parent, map, debug, before, after, state)) in
+            [false, true].into_iter().zip(equivalent)
+        {
+            assert_eq!(parent, Some(replacement));
+            assert_eq!(map != initial_map, reflected);
+            assert_eq!(
+                debug.shapes.iter().find(|shape| shape.entity == floor),
+                Some(initial_floor)
+            );
+            assert_eq!(
+                before,
+                (BOX_COUNT, BOX_COUNT),
+                "contacts and sleep before solve"
+            );
+            assert_eq!(
+                after,
+                (BOX_COUNT, BOX_COUNT),
+                "contacts and sleep after solve"
+            );
+            assert_native_states_unchanged(&state, &baseline, None);
+        }
+        lowered.assert_replaced();
+        assert_eq!(
+            lowered_debug
+                .shapes
+                .iter()
+                .find(|shape| shape.entity == floor)
+                .unwrap()
+                .vertices,
+            initial_floor.vertices.map(|vertex| vertex - Vec2::Y * 4.0),
+        );
+        assert_eq!(remaining_contacts, 0);
+        for entity in boxes {
+            let resting = baseline.iter().find(|body| body.entity == entity).unwrap();
+            let falling = falling.iter().find(|body| body.entity == entity).unwrap();
+            assert_same_pair(&falling.record, &resting.record);
+            assert!(falling.velocity.y < 0.0);
+        }
+        reshaped.assert_replaced();
+        assert!(same_pose);
+        assert!(same_corners);
+        assert!(changed_hull);
+    }
+}
+
+struct FloorReplacement {
+    original: motion_physics::authored::GeneratedCollision,
+    current: motion_physics::authored::GeneratedCollision,
+    original_retired: bool,
+}
+
+impl FloorReplacement {
+    fn assert_replaced(&self) {
+        assert_ne!(self.current.body, self.original.body);
+        assert_ne!(self.current.collider, self.original.collider);
+        assert_eq!(self.current.origin, self.original.origin);
+        assert!(self.original_retired);
+    }
+}
+
+fn observe_floor_replacement(
+    owner: &CollisionWorld,
+    floor: Entity,
+    original: motion_physics::authored::GeneratedCollision,
+) -> FloorReplacement {
+    let current = generated(owner, floor);
+    let original_retired =
+        owner.body(original.body).is_none() && owner.collider(original.collider).is_none();
+    FloorReplacement {
+        original,
+        current,
+        original_retired,
+    }
+}
+
+fn resting_floor_status(owner: &CollisionWorld, floor: Entity, boxes: &[Entity]) -> (usize, usize) {
+    let contacts = boxes
+        .iter()
+        .filter(|entity| owner.contact_between(floor, **entity))
+        .count();
+    let sleeping = boxes
+        .iter()
+        .filter(|entity| {
+            owner
+                .body(generated(owner, **entity).body)
+                .unwrap()
+                .is_sleeping()
+        })
+        .count();
+    (contacts, sleeping)
+}
+
 fn transform_field(name: &str, field: &str, value: f64) -> ScenePatchOperation {
     ScenePatchOperation::SetField {
         entity: id(name),

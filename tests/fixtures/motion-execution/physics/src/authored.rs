@@ -183,22 +183,33 @@ struct CollisionAdmission {
 }
 
 impl Candidate {
-    fn preserves(&self, record: &GeneratedCollision, solved_same_input: bool) -> bool {
-        self.definition == record.definition
-            && if self.definition.dynamic {
-                self.source.local == record.last_writeback.unwrap_or(record.source.local)
-                    || (solved_same_input && self.source == record.source)
-            } else {
-                self.source == record.source
-            }
+    fn preserves(
+        &self,
+        record: &GeneratedCollision,
+        native: &PhysicsWorld,
+        solved_same_input: bool,
+    ) -> bool {
+        if self.definition != record.definition {
+            return false;
+        }
+        if self.definition.dynamic {
+            return self.source.local == record.last_writeback.unwrap_or(record.source.local)
+                || (solved_same_input && self.source == record.source);
+        }
+        self.source.global == record.source.global
+            || native
+                .colliders
+                .get(record.collider)
+                .is_some_and(|collider| self.pair.matches_fixed_geometry(collider))
     }
 }
 
 /// Owns one native world; successful inputs are its complete selected collision inventory.
 ///
-/// Unchanged geometry and domain-written poses retain their pair and solver state. External
-/// authored shape or pose edits rebuild only that pair. The first successful admission binds the
-/// owner to its World. A failed admission withholds stepping and current debug publication.
+/// Unchanged fixed geometry and domain-written dynamic poses retain their pair and solver state.
+/// Changes to the collision definition, fixed geometry, or external dynamic pose rebuild only
+/// that pair. The first successful admission binds the owner to its World. A failed admission
+/// withholds stepping and current debug publication.
 pub struct CollisionWorld {
     native: Option<PhysicsWorld>,
     world: Option<WorldId>,
@@ -263,17 +274,17 @@ impl CollisionWorld {
         let delta = fixed_delta(world)?;
         let candidates = validate_inputs(world, inputs, &spatial)?;
         let solved_same_input = self.last_solve == Some(stamp);
+        let native = self.native.as_mut().ok_or_else(diagnostics::closed)?;
         let retired: Vec<_> = self
             .records
             .iter()
             .filter(|(entity, record)| {
                 candidates
                     .get(*entity)
-                    .is_none_or(|candidate| !candidate.preserves(record, solved_same_input))
+                    .is_none_or(|candidate| !candidate.preserves(record, native, solved_same_input))
             })
             .map(|(entity, _)| *entity)
             .collect();
-        let native = self.native.as_mut().ok_or_else(diagnostics::closed)?;
 
         for entity in retired {
             if let Some(record) = self.records.remove(&entity) {

@@ -15,6 +15,23 @@ pub(super) struct PreparedPair {
     pub collider: ColliderBuilder,
 }
 
+impl PreparedPair {
+    pub(super) fn matches_fixed_geometry(&self, current: &Collider) -> bool {
+        if *current.position() != self.body.position * self.collider.position {
+            return false;
+        }
+        let (Some(proposed), Some(current)) = (
+            self.collider.shape.as_convex_polygon(),
+            current.shape().as_convex_polygon(),
+        ) else {
+            return false;
+        };
+        let proposed = proposed.points();
+        let current = current.points();
+        proposed.len() == current.len() && proposed.iter().all(|corner| current.contains(corner))
+    }
+}
+
 pub(super) struct GeometryError {
     pub code: &'static str,
     pub summary: &'static str,

@@ -748,3 +748,41 @@ The Windows hardware DX12 reconstruction run `cdd8b57e-9928-4866-b3e3-26163dd9c2
 original keyboard, wall stop and slide, restored presentation, retained image replays and native
 cleanup trajectory. The rotated trajectory is qualified through the public Headless controller.
 Two source-free Cook and Player controls also pass in `12b6f820-2898-4ea3-94c8-eaf6438f6d12`.
+
+## Fixed Collision Continuity
+
+The [November 20 review](../audits/2026-11-20-runtime-startup-cook-and-presentation-review.md#game-and-integration-findings)
+found that moving a floor between equivalent parents replaced its fixed Rapier pair and broke
+contacts for 16 sleeping boxes. The same runtime entity and unchanged collision definition
+keep their native pair when validation yields the same effective native geometry. An equal
+global matrix settles that comparison directly. When the matrix changes, the adapter compares
+the prepared native pose and the unordered local convex-hull corners against the live collider.
+This preserves an equivalent reflection and distinguishes a small shape change whose debug
+world corners round to the same coordinates. Both decisions follow the original full input
+admission. The adapter updates stored spatial facts and source attribution for retained pairs.
+
+Bevy's propagation has a path that computes the new global transform and writes it only when
+its value differs. Godot sends the global transform to the existing physics body on a transform
+notification. The sample adapter retains its own admission and replacement policy for changed
+geometry and new Scene activations.
+[Bevy transform propagation](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_transform/src/systems.rs#L719-L729) ·
+[Godot collision transform notification](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/scene/2d/physics/collision_object_2d.cpp#L81-L94)
+
+Windows nextest `18f61c75-a4ea-4be6-99fa-8b0befbddc3e` reproduces the contact-count
+change from 16 to zero before solve. The original test process aborted after the assertion
+failed in the solver callback. The final test collects observations there and asserts them after
+closing the Runtime. Run `746bc6fb-a978-49d6-902b-8cd8aa8d3a7e` passes all 21 selected
+independent collision tests. Reparent and reflection both keep the original
+native handles, 16 contacts and 16 sleeping boxes through reconciliation and solve. Lowering
+the floor by four units replaces its pair and the original dynamic bodies resume falling.
+Changing the lowered floor's local scale by one ULP also replaces its pair, with the same
+native pose and rounded world-space debug corners.
+[Independent collision regression](../../tests/fixtures/motion-execution/consumer/src/collision/transformed.rs)
+
+The independently locked render-policy consumer passes 11/11 in
+`2fb9f395-238a-4fe2-96b5-b56fefb3416c`. Both offscreen trajectories run on hardware DX12,
+with original Sprite readback, source history and managed retirement. The full capture
+trajectory retains its eleven publications across three producers. The owning workspace
+correctness Clippy passes. These results use Windows and Rust 1.95.0 with the Serial profile.
+The contact-retention result belongs to the concrete fixture's Rapier adapter.
+[Render consumer](../../tests/fixtures/render-policy-consumer/tests/authored_collision.rs)
