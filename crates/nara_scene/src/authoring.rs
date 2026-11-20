@@ -89,6 +89,8 @@ pub use schema_reclassification::{
 mod property;
 #[cfg(feature = "serde")]
 pub use property::AuthoringPropertyEdit;
+#[cfg(feature = "serde")]
+pub(crate) use property::property_rejection;
 
 pub use nara_core::{
     DocumentContentState as SceneAuthoringContentState,

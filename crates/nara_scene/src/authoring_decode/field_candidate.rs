@@ -13,11 +13,12 @@ pub(super) fn prepare<'a>(
     document: SceneDocument,
     state: &'a AuthoringDocumentState,
     edits: &[AuthoringFieldChange],
+    admit: Option<&mut reclassification::AdmissionCallback<'_>>,
 ) -> Result<PreparedFieldCandidate<'a>, ScenePatchReport> {
     // The mutation owner changes only record.value, never source identity, placement, Prefab
     // overrides, component identity, owner or version. Do not expose an arbitrary-document
     // constructor: these unchanged facts are the proof for reusing the previous classification.
-    let (mut document, inverse) = prepare_field_edits(document, state, edits)?;
+    let (mut document, inverse) = prepare_field_edits(document, state, edits, admit)?;
     validate_authoring_field_operations(inverse.operations.iter())?;
     document.canonicalize();
     Ok(PreparedFieldCandidate {

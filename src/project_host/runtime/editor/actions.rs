@@ -1087,6 +1087,7 @@ pub(super) fn prefab_patch_uses_ui_domain(patch: &nara_scene::ScenePatchDocument
             | ScenePatchOperation::ReplaceComponent { component, .. }
             | ScenePatchOperation::SetField { component, .. }
             | ScenePatchOperation::RemoveField { component, .. }
+            | ScenePatchOperation::ReplaceProperty { component, .. }
             | ScenePatchOperation::SetAssetRefField { component, .. } => {
                 if component_uses_ui_domain(component) {
                     return true;

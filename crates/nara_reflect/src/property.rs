@@ -65,6 +65,13 @@ impl ComponentPropertyKey {
         }
     }
 
+    fn logical_bytes(&self) -> usize {
+        match self {
+            Self::String(key) => key.len(),
+            Self::I64(_) | Self::U64(_) => 8,
+        }
+    }
+
     fn matches(&self, value: ComponentValueRef<'_>) -> bool {
         match self {
             Self::String(key) => value.as_str() == Some(key.as_str()),
@@ -147,10 +154,7 @@ impl ComponentPropertyPath {
                 ComponentPropertyStep::ListItem { by, key } => {
                     by.validate()
                         .map_err(|_| ComponentPropertyError::InvalidFieldId)?;
-                    by.as_str().len().saturating_add(match key {
-                        ComponentPropertyKey::String(key) => key.len(),
-                        _ => 8,
-                    })
+                    by.as_str().len().saturating_add(key.logical_bytes())
                 }
                 ComponentPropertyStep::MapEntry(key) => key.len(),
             });
@@ -159,6 +163,170 @@ impl ComponentPropertyPath {
             }
         }
         Ok(bytes)
+    }
+
+    /// Replaces an existing property in a private source candidate and returns its inverse edit.
+    ///
+    /// The returned selector addresses the same storage target after the replacement, including
+    /// an edited list identity. The supplied limits bound the previous and replacement values at
+    /// that target. The owner admits the source and validates the complete candidate and defaults
+    /// before publication. The candidate must be discarded on error.
+    #[doc(hidden)]
+    pub fn replace_in_candidate(
+        &self,
+        schema: &ComponentSchema,
+        version: ComponentSchemaVersion,
+        candidate: &mut ComponentValue,
+        replacement: ComponentValue,
+        limits: ComponentValueMaterializationLimits,
+    ) -> Result<(ComponentPropertyPath, ComponentValue), ComponentPropertyError> {
+        self.replace_candidate(schema, version, candidate, replacement, limits, &mut None)
+    }
+
+    /// Performs the same source replacement with cumulative work and allocation admission.
+    ///
+    /// The caller supplies a catalog-admitted schema and an owned replacement. Callback deltas
+    /// include selector lookup, path storage, validation scratch and the returned selector or
+    /// diagnostic. Refusal returns the exact caller error. Discard the private candidate on error.
+    #[doc(hidden)]
+    pub fn replace_in_candidate_with_admission<E>(
+        &self,
+        schema: &ComponentSchema,
+        version: ComponentSchemaVersion,
+        candidate: &mut ComponentValue,
+        replacement: ComponentValue,
+        limits: ComponentValueMaterializationLimits,
+        mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+    ) -> Result<(ComponentPropertyPath, ComponentValue), ComponentPropertyAdmissionError<E>> {
+        let mut refusal = None;
+        let result = {
+            let mut callback = |nodes, bytes, allocated| match admit(nodes, bytes, allocated) {
+                Ok(()) => true,
+                Err(error) => {
+                    refusal = Some(error);
+                    false
+                }
+            };
+            self.replace_candidate(
+                schema,
+                version,
+                candidate,
+                replacement,
+                limits,
+                &mut Some(&mut callback),
+            )
+        };
+        match refusal {
+            Some(error) => Err(ComponentPropertyAdmissionError::Admission(error)),
+            None => result.map_err(ComponentPropertyAdmissionError::Property),
+        }
+    }
+
+    fn replace_candidate(
+        &self,
+        schema: &ComponentSchema,
+        version: ComponentSchemaVersion,
+        candidate: &mut ComponentValue,
+        replacement: ComponentValue,
+        limits: ComponentValueMaterializationLimits,
+        admission: &mut Option<&mut PropertyAdmission<'_>>,
+    ) -> Result<(ComponentPropertyPath, ComponentValue), ComponentPropertyError> {
+        let mut edit = PropertyReplacement {
+            value: (&replacement).into(),
+            key_change: None,
+        };
+        let (resolved, storage) = resolve_location_with_admission(
+            schema,
+            version,
+            (&*candidate).into(),
+            self,
+            None,
+            admission.as_deref_mut(),
+            Some(&mut edit),
+        )?;
+        admit_property_value(resolved.value, Some(limits), admission)?;
+        preflight_candidate_shape(resolved.shape, self, resolved.value, admission)?;
+        resolved
+            .shape
+            .validate_value(resolved.value)
+            .map_err(|error| {
+                ComponentPropertyError::InvalidValue(ComponentCodecError::invalid_field(
+                    self.root.as_str(),
+                    error.to_string(),
+                ))
+            })?;
+        admit_property_value(edit.value, Some(limits), admission)?;
+        preflight_candidate_shape(resolved.shape, self, edit.value, admission)?;
+        validate_property_replacement_shape(resolved.shape, self, edit.value)?;
+        let inverse = self.inverse_after_key_change(edit.key_change, admission)?;
+        if admission.is_some() {
+            admit_storage_access(storage.segments(), true, admission)?;
+        }
+        let previous = candidate
+            .replace_path(&storage, replacement)
+            .map_err(ComponentPropertyError::ValueUnavailable)?;
+        Ok((inverse, previous))
+    }
+
+    fn inverse_after_key_change(
+        &self,
+        change: Option<ListKeyChange<'_, '_>>,
+        admission: &mut Option<&mut PropertyAdmission<'_>>,
+    ) -> Result<Self, ComponentPropertyError> {
+        let Some(change) = change else {
+            if admission.is_some() {
+                self.admit_inverse(self.logical_bytes()?, admission)?;
+            }
+            return Ok(self.clone());
+        };
+        let key_bytes = change.value.as_str().map_or(8, str::len);
+        let other_bytes = self.logical_bytes()? - change.previous.logical_bytes();
+        let bytes = other_bytes.saturating_add(key_bytes);
+        if bytes > MAX_SHAPE_BYTES {
+            return Err(ComponentPropertyError::PathByteLimit);
+        }
+        if change.duplicate {
+            admit_property_work(admission, 0, 0, change.value.as_str().map_or(0, str::len))?;
+        } else {
+            self.admit_inverse(bytes, admission)?;
+        }
+        let key = ComponentPropertyKey::from_value(change.value).ok_or_else(|| {
+            ComponentPropertyError::KeyTypeMismatch {
+                step: change.step,
+                expected: change.previous.value_kind(),
+                actual: change.value.kind(),
+            }
+        })?;
+        if change.duplicate {
+            return Err(ComponentPropertyError::AmbiguousListItem {
+                step: change.step,
+                key,
+            });
+        }
+        let mut steps = Vec::with_capacity(self.steps.len());
+        steps.extend_from_slice(&self.steps[..change.step]);
+        steps.push(ComponentPropertyStep::ListItem {
+            by: change.by.clone(),
+            key,
+        });
+        steps.extend_from_slice(&self.steps[change.step + 1..]);
+        Ok(Self {
+            root: self.root.clone(),
+            steps,
+        })
+    }
+
+    fn admit_inverse(
+        &self,
+        bytes: usize,
+        admission: &mut Option<&mut PropertyAdmission<'_>>,
+    ) -> Result<(), ComponentPropertyError> {
+        admit_property_work(
+            admission,
+            self.steps.len() + 1,
+            bytes,
+            self.steps.len() * size_of::<ComponentPropertyStep>() + bytes,
+        )
     }
 
     /// Replaces a property in an isolated, unpublished candidate without cloning its siblings.
@@ -457,6 +625,7 @@ pub fn resolve_component_property_storage_path_with_admission<'value, E>(
             path,
             Some(limits),
             Some(&mut callback),
+            None,
         )
         .map(|(_, storage)| storage)
     };
@@ -578,7 +747,7 @@ fn resolve_component_property_schema_claim_impl<'schema>(
         path.logical_bytes()?,
     )?;
     let field = resolve_root_field(schema, &path.root, Some(&mut *budget), &mut admission)?;
-    let selected = resolve_root_location(field, None, path, Some(budget), None, admission)?;
+    let selected = resolve_root_location(field, None, path, Some(budget), None, admission, None)?;
     Ok(ComponentPropertySchemaClaim {
         field,
         shape: selected.shape,
@@ -655,6 +824,7 @@ fn admitted_root_location<'schema, 'value>(
         Some(budget),
         capture_read_path.then(Vec::new),
         None,
+        None,
     )
 }
 
@@ -689,7 +859,7 @@ fn validate_property_replacement(
     replacement: &ComponentValue,
     limits: Option<ComponentValueMaterializationLimits>,
 ) -> Result<(), ComponentPropertyError> {
-    admit_property_value(replacement.into(), limits)?;
+    admit_property_value(replacement.into(), limits, &mut None)?;
     validate_property_replacement_shape(shape, path, replacement.into())
 }
 
@@ -718,19 +888,48 @@ fn replace_prepared_property(
     let previous = candidate
         .replace_path(storage, replacement)
         .map_err(ComponentPropertyError::ValueUnavailable)?;
-    admit_property_value(ComponentValueRef::from(&*candidate), limits)?;
+    admit_property_value(ComponentValueRef::from(&*candidate), limits, &mut None)?;
     Ok(previous)
+}
+
+fn preflight_candidate_shape(
+    shape: &ComponentValueShape,
+    path: &ComponentPropertyPath,
+    value: ComponentValueRef<'_>,
+    admission: &mut Option<&mut PropertyAdmission<'_>>,
+) -> Result<(), ComponentPropertyError> {
+    if admission.is_none() {
+        return Ok(());
+    }
+    crate::registry::preflight_property_validation(shape, &path.root, value, &mut |n, b, a| {
+        admit_property_work(admission, n, b, a)
+    })
 }
 
 fn admit_property_value(
     value: ComponentValueRef<'_>,
     limits: Option<ComponentValueMaterializationLimits>,
+    admission: &mut Option<&mut PropertyAdmission<'_>>,
 ) -> Result<(), ComponentPropertyError> {
-    match limits {
-        Some(limits) => validate_value_materialization_budget(value, limits)
+    let Some(limits) = limits else {
+        return validate_component_value_budget(value).map_err(ComponentPropertyError::ValueBudget);
+    };
+    if admission.is_some() {
+        validate_value_materialization_budget_with_admission(
+            value,
+            limits,
+            |nodes, bytes, allocated| admit_property_work(admission, nodes, bytes, allocated),
+        )
+        .map_err(|error| match error {
+            EffectiveValueAdmissionError::Value(error) => {
+                ComponentPropertyError::InvalidValue(error)
+            }
+            EffectiveValueAdmissionError::Admission(error) => error,
+        })
+    } else {
+        validate_value_materialization_budget(value, limits)
             .map(|_| ())
-            .map_err(ComponentPropertyError::InvalidValue),
-        None => validate_component_value_budget(value).map_err(ComponentPropertyError::ValueBudget),
+            .map_err(ComponentPropertyError::InvalidValue)
     }
 }
 
@@ -747,16 +946,17 @@ fn resolve_location<'schema, 'value>(
     ),
     ComponentPropertyError,
 > {
-    resolve_location_with_admission(schema, version, value, path, limits, None)
+    resolve_location_with_admission(schema, version, value, path, limits, None, None)
 }
 
-fn resolve_location_with_admission<'schema, 'value>(
+fn resolve_location_with_admission<'schema, 'value, 'path>(
     schema: &'schema ComponentSchema,
     version: ComponentSchemaVersion,
     value: ComponentValueRef<'value>,
-    path: &ComponentPropertyPath,
+    path: &'path ComponentPropertyPath,
     limits: Option<ComponentValueMaterializationLimits>,
     mut admission: Option<&mut PropertyAdmission<'_>>,
+    edit: Option<&mut PropertyReplacement<'path, '_>>,
 ) -> Result<
     (
         ResolvedComponentProperty<'schema, 'value>,
@@ -770,11 +970,26 @@ fn resolve_location_with_admission<'schema, 'value>(
             actual: version,
         });
     }
-    path.validate()?;
-    validate_component_shape_budget(schema)
-        .map_err(|(_, error)| ComponentPropertyError::InvalidSchema(error))?;
-    admit_property_value(value, limits)?;
+    let bytes = path.logical_bytes()?;
+    let meter_candidate = admission.is_some() && edit.is_some();
+    if meter_candidate {
+        admit_property_work(
+            &mut admission,
+            path.steps.len() + 1,
+            bytes,
+            bytes + ComponentFieldId::MAX_BYTES,
+        )?;
+    } else {
+        validate_component_shape_budget(schema)
+            .map_err(|(_, error)| ComponentPropertyError::InvalidSchema(error))?;
+    }
+    if edit.is_none() {
+        admit_property_value(value, limits, &mut None)?;
+    }
     let root = resolve_root_field(schema, &path.root, None, &mut admission)?;
+    if meter_candidate {
+        admit_storage_access(root.path.segments(), false, &mut admission)?;
+    }
     let current = value
         .get_path(&root.path)
         .map_err(ComponentPropertyError::ValueUnavailable)?;
@@ -793,6 +1008,7 @@ fn resolve_location_with_admission<'schema, 'value>(
         None,
         Some(root.path.segments().to_vec()),
         admission,
+        edit,
     )?;
     Ok((
         ResolvedComponentProperty {
@@ -813,16 +1029,31 @@ struct PropertyLocation<'schema, 'value> {
     storage: Option<ComponentFieldPath>,
 }
 
-fn resolve_root_location<'schema, 'value>(
+struct PropertyReplacement<'path, 'value> {
+    value: ComponentValueRef<'value>,
+    key_change: Option<ListKeyChange<'path, 'value>>,
+}
+
+struct ListKeyChange<'path, 'value> {
+    step: usize,
+    by: &'path ComponentFieldId,
+    previous: &'path ComponentPropertyKey,
+    value: ComponentValueRef<'value>,
+    duplicate: bool,
+}
+
+fn resolve_root_location<'schema, 'value, 'path>(
     root: &'schema ComponentFieldSchema,
     mut current: Option<ComponentValueRef<'value>>,
-    path: &ComponentPropertyPath,
+    path: &'path ComponentPropertyPath,
     mut budget: Option<&mut ComponentPropertyReadBudget>,
     mut storage: Option<Vec<ComponentFieldPathSegment>>,
     mut admission: Option<&mut PropertyAdmission<'_>>,
+    mut edit: Option<&mut PropertyReplacement<'path, '_>>,
 ) -> Result<PropertyLocation<'schema, 'value>, ComponentPropertyError> {
     let mut shape = &root.shape;
     let mut depth = 0;
+    let meter_candidate = admission.is_some() && edit.is_some();
     for (step, selector) in path.steps.iter().enumerate() {
         while let ComponentValueShape::Optional { value } = shape {
             observe_read(&mut budget, &mut admission, 0)?;
@@ -836,7 +1067,7 @@ fn resolve_root_location<'schema, 'value>(
         match selector {
             ComponentPropertyStep::Member(id) => {
                 for tombstone in &root.member_tombstones {
-                    if budget.is_some() {
+                    if budget.is_some() || meter_candidate {
                         for segment in tombstone.segments() {
                             let bytes = match segment {
                                 ComponentMemberPathSegment::Member(id) => id.as_str().len(),
@@ -908,10 +1139,17 @@ fn resolve_root_location<'schema, 'value>(
                     step,
                     id: id.clone(),
                 })?;
-                current = current
-                    .map(|value| value.field(&member.name))
-                    .transpose()
-                    .map_err(ComponentPropertyError::InvalidValue)?;
+                if let Some(value) = current {
+                    let Some(value) = value.get(&member.name) else {
+                        if meter_candidate {
+                            admit_property_work(&mut admission, 0, 0, member.name.len())?;
+                        }
+                        return Err(ComponentPropertyError::InvalidValue(
+                            ComponentCodecError::missing_field(&member.name),
+                        ));
+                    };
+                    current = Some(value);
+                }
                 if let Some(storage) = &mut storage {
                     reserve_storage(storage, &mut admission)?;
                     admit_property_work(&mut admission, 0, 0, member.name.len())?;
@@ -938,7 +1176,7 @@ fn resolve_root_location<'schema, 'value>(
                     });
                 }
                 // Admit the helper's finite declaration scan before it visits the members.
-                if budget.is_some()
+                if (budget.is_some() || meter_candidate)
                     && let ComponentValueShape::Record { members } = item.as_ref()
                 {
                     for member in members {
@@ -972,10 +1210,41 @@ fn resolve_root_location<'schema, 'value>(
                     continue;
                 };
                 let Some(items) = value.as_list() else {
+                    if meter_candidate {
+                        admit_property_work(
+                            &mut admission,
+                            0,
+                            0,
+                            "keyed list".len() + "list".len(),
+                        )?;
+                    }
                     return Err(ComponentPropertyError::InvalidValue(
                         ComponentCodecError::invalid_field("keyed list", "list"),
                     ));
                 };
+                let new_key = match (&edit, &path.steps[step + 1..]) {
+                    (Some(edit), []) => {
+                        admit_property_work(&mut admission, 1, member.name.len(), 0)?;
+                        edit.value.get(&member.name)
+                    }
+                    (Some(edit), [ComponentPropertyStep::Member(id)]) if id == by => {
+                        Some(edit.value)
+                    }
+                    _ => None,
+                };
+                let mut key_change = None;
+                if let Some(replacement) = new_key.filter(|value| value.kind() == expected) {
+                    admit_property_work(&mut admission, 1, key.logical_bytes(), 0)?;
+                    if !key.matches(replacement) {
+                        key_change = Some(ListKeyChange {
+                            step,
+                            by,
+                            previous: key,
+                            value: replacement,
+                            duplicate: false,
+                        });
+                    }
+                }
                 let mut found = None;
                 for (index, value) in items.iter().enumerate() {
                     observe_read(&mut budget, &mut admission, member.name.len())?;
@@ -985,6 +1254,12 @@ fn resolve_root_location<'schema, 'value>(
                         .ok_or(ComponentPropertyError::InvalidListItemKey { step, index })?;
                     let bytes = identity.as_str().map_or(8, str::len);
                     observe_read(&mut budget, &mut admission, bytes)?;
+                    if let Some(change) = &mut key_change
+                        && !change.duplicate
+                    {
+                        admit_property_work(&mut admission, 1, bytes, 0)?;
+                        change.duplicate = change.value == identity;
+                    }
                     if key.matches(identity) && found.replace((index, value)).is_some() {
                         return Err(ComponentPropertyError::AmbiguousListItem {
                             step,
@@ -997,6 +1272,9 @@ fn resolve_root_location<'schema, 'value>(
                         step,
                         key: key.clone(),
                     })?;
+                if let (Some(edit), Some(change)) = (&mut edit, key_change) {
+                    edit.key_change = Some(change);
+                }
                 current = Some(value);
                 if let Some(storage) = &mut storage {
                     let index = u32::try_from(index)
@@ -1106,6 +1384,28 @@ fn storage_path_bytes(
             })
             .ok_or(ComponentPropertyError::ReadBudgetExceeded)
     })
+}
+
+fn admit_storage_access(
+    segments: &[ComponentFieldPathSegment],
+    replacing: bool,
+    admission: &mut Option<&mut PropertyAdmission<'_>>,
+) -> Result<(), ComponentPropertyError> {
+    let stored_bytes = storage_path_bytes(segments)?;
+    let mut allocated = stored_bytes.saturating_mul(6);
+    if replacing {
+        let mut prefix_bytes = 0_usize;
+        for segment in segments {
+            prefix_bytes = prefix_bytes
+                .saturating_add(size_of::<ComponentFieldPathSegment>())
+                .saturating_add(match segment {
+                    ComponentFieldPathSegment::Field(name) => name.len(),
+                    ComponentFieldPathSegment::Index(_) => 0,
+                });
+            allocated = allocated.saturating_add(prefix_bytes);
+        }
+    }
+    admit_property_work(admission, segments.len(), stored_bytes, allocated)
 }
 
 fn reserve_storage(

@@ -7,8 +7,9 @@ use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::{
     ComponentCapability, ComponentDecodeContext, ComponentFieldId, ComponentFieldPath,
     ComponentFieldPathSegment, ComponentFieldSchema, ComponentProjectionError,
-    ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueCost, ComponentValueKind, ComponentValueMaterializationLimits,
+    ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep,
+    ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueCost, ComponentValueKind, ComponentValueMaterializationLimits,
 };
 
 use crate::{
@@ -16,8 +17,9 @@ use crate::{
     PrefabOverlay, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityPlacement,
     SceneEntityRecord, ScenePlacement,
     diagnostics::{
-        error as diagnostic_error, with_capability, with_component_field_path,
-        with_component_field_path_error, with_public_locator, with_public_u64,
+        error as diagnostic_error, usize_to_u64, with_capability, with_codec_error,
+        with_component_field_path, with_component_field_path_error, with_public_identifier,
+        with_public_locator, with_public_u64,
     },
     provenance::{CostScratchAdmission, reserve_cost_scratch},
     validation::preflight_authoring_scene_with_context_at_operation,
@@ -187,14 +189,17 @@ impl ScenePatchDocument {
         document: &PrefabDocument,
         registry: &ComponentRegistrySnapshot,
     ) -> Result<PreparedPrefabPatch, ScenePatchReport> {
-        self.prepare_to_prefab_with_validator(document, registry, |document, registry, index| {
-            match index {
+        self.prepare_to_prefab_with_validator(
+            document,
+            registry,
+            ScenePatchApplyLimits::default(),
+            |document, registry, index| match index {
                 Some(index) => document
                     .instantiate()
                     .validate_authoring_for_patch(registry, index),
                 None => document.instantiate().validate_authoring(registry),
-            }
-        })
+            },
+        )
     }
 
     pub(crate) fn prepare_to_prefab_with_asset_resolution(
@@ -203,8 +208,11 @@ impl ScenePatchDocument {
         registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<PreparedPrefabPatch, ScenePatchReport> {
-        self.prepare_to_prefab_with_validator(document, registry, |document, registry, index| {
-            match index {
+        self.prepare_to_prefab_with_validator(
+            document,
+            registry,
+            ScenePatchApplyLimits::default(),
+            |document, registry, index| match index {
                 Some(index) => document
                     .instantiate()
                     .validate_authoring_for_patch_with_asset_resolution(
@@ -215,21 +223,21 @@ impl ScenePatchDocument {
                 None => document
                     .instantiate()
                     .validate_authoring_with_asset_resolution(registry, asset_resolution),
-            }
-        })
+            },
+        )
     }
 
-    fn prepare_to_prefab_with_validator(
+    pub(crate) fn prepare_to_prefab_with_validator(
         &self,
         document: &PrefabDocument,
         registry: &ComponentRegistrySnapshot,
+        limits: ScenePatchApplyLimits,
         mut validate: impl FnMut(
             &PrefabDocument,
             &ComponentRegistrySnapshot,
             Option<usize>,
         ) -> DiagnosticReport,
     ) -> Result<PreparedPrefabPatch, ScenePatchReport> {
-        let limits = ScenePatchApplyLimits::default();
         if let Some(format_version) = self.unsupported_format_version() {
             let mut diagnostics = DiagnosticReport::default();
             diagnostics.push(with_public_u64(
@@ -264,7 +272,10 @@ impl ScenePatchDocument {
                 diagnostics,
             });
         }
-        self.admit_input_cost(limits)?;
+        self.admit_replay_cost(
+            limits,
+            "Patch input exceeds the replay data or depth budget",
+        )?;
         let source_validation = validate(document, registry, None);
         if source_validation.has_errors() {
             return Err(ScenePatchReport {
@@ -276,9 +287,15 @@ impl ScenePatchDocument {
 
         let mut scratch = document.clone();
         let mut inverse_groups = Vec::<Vec<ScenePatchOperation>>::new();
+        let materialization_limits = limits.materialization_limits();
         for (operation_index, operation) in self.operations.iter().enumerate() {
-            let inverse =
-                apply_prefab_operation(&mut scratch, registry, operation, operation_index);
+            let inverse = apply_operation(
+                &mut scratch,
+                registry,
+                operation,
+                operation_index,
+                materialization_limits,
+            );
             let inverse = match inverse {
                 Ok(inverse) => inverse,
                 Err(diagnostic) => {
@@ -322,7 +339,7 @@ impl ScenePatchDocument {
                     &scratch.entities,
                     registry,
                     operation_index,
-                    limits.materialization_limits(),
+                    materialization_limits,
                 );
                 if diagnostics.has_errors() {
                     return Err(ScenePatchReport {
@@ -336,13 +353,14 @@ impl ScenePatchDocument {
         }
 
         scratch.canonicalize();
+        let inverse = prepare_native_inverse(inverse_groups, limits, || {
+            bounded_prefab_source_cost(&scratch, limits).is_some()
+        })?;
         Ok(PreparedPrefabPatch {
             document: scratch,
             report: ScenePatchReport {
                 applied: true,
-                inverse: Some(ScenePatchDocument::new(
-                    inverse_groups.into_iter().rev().flatten(),
-                )),
+                inverse: Some(inverse),
                 diagnostics: DiagnosticReport::default(),
             },
         })
@@ -385,13 +403,18 @@ impl ScenePatchDocument {
         let mut scratch = document.clone();
         let mut inverse_groups = Vec::<Vec<ScenePatchOperation>>::new();
         let mut validation_work = source_work;
+        let materialization_limits = limits.materialization_limits();
         for (operation_index, operation) in self.operations.iter().enumerate() {
-            let inverse =
-                match apply_operation_for_patch(&mut scratch, registry, operation, operation_index)
-                {
-                    Ok(inverse) => inverse,
-                    Err(report) => return Err(*report),
-                };
+            let inverse = match apply_operation_for_patch(
+                &mut scratch,
+                registry,
+                operation,
+                operation_index,
+                materialization_limits,
+            ) {
+                Ok(inverse) => inverse,
+                Err(report) => return Err(*report),
+            };
             if let Err(report) = validate_applied_operation(
                 &mut scratch,
                 registry,
@@ -408,15 +431,14 @@ impl ScenePatchDocument {
         }
 
         scratch.canonicalize();
-
-        let inverse_operations: Vec<ScenePatchOperation> =
-            inverse_groups.into_iter().rev().flatten().collect();
-
+        let inverse = prepare_native_inverse(inverse_groups, limits, || {
+            bounded_scene_source_cost(&scratch, limits).is_some()
+        })?;
         Ok(PreparedScenePatch {
             document: scratch,
             report: ScenePatchReport {
                 applied: true,
-                inverse: Some(ScenePatchDocument::new(inverse_operations)),
+                inverse: Some(inverse),
                 diagnostics: DiagnosticReport::default(),
             },
         })
@@ -468,7 +490,11 @@ impl ScenePatchDocument {
             }));
         }
 
-        self.admit_input_cost(limits).map_err(Box::new)?;
+        self.admit_replay_cost(
+            limits,
+            "Patch input exceeds the replay data or depth budget",
+        )
+        .map_err(Box::new)?;
         let source_validation = validate(document, registry, None);
         if source_validation.has_errors() {
             return Err(Box::new(ScenePatchReport {
@@ -481,21 +507,40 @@ impl ScenePatchDocument {
         Ok(source_work)
     }
 
-    fn admit_input_cost(&self, limits: ScenePatchApplyLimits) -> Result<(), ScenePatchReport> {
+    fn admit_replay_cost(
+        &self,
+        limits: ScenePatchApplyLimits,
+        summary: &'static str,
+    ) -> Result<(), ScenePatchReport> {
         if bounded_scene_patch_cost(self, limits).is_some() {
             return Ok(());
         }
-        let mut diagnostics = DiagnosticReport::default();
-        diagnostics.push(diagnostic_error(
-            "scene.patch-validation-work-budget-exceeded",
-            "Patch input exceeds the replay data or depth budget",
-        ));
-        Err(ScenePatchReport {
-            applied: false,
-            inverse: None,
-            diagnostics,
-        })
+        Err(replay_cost_rejection(summary))
     }
+}
+
+fn prepare_native_inverse(
+    groups: Vec<Vec<ScenePatchOperation>>,
+    limits: ScenePatchApplyLimits,
+    admit_reverse_source: impl FnOnce() -> bool,
+) -> Result<ScenePatchDocument, ScenePatchReport> {
+    let inverse = ScenePatchDocument::new(groups.into_iter().rev().flatten());
+    if inverse
+        .operations
+        .iter()
+        .any(|operation| matches!(operation, ScenePatchOperation::ReplaceProperty { .. }))
+    {
+        inverse.admit_replay_cost(
+            limits,
+            "Patch inverse exceeds the replay data or depth budget",
+        )?;
+        if !admit_reverse_source() {
+            return Err(replay_cost_rejection(
+                "Patched source declarations exceed the inverse replay data or depth budget",
+            ));
+        }
+    }
+    Ok(inverse)
 }
 
 impl Default for ScenePatchDocument {
@@ -570,6 +615,14 @@ pub enum ScenePatchOperation {
         entity: SceneEntityId,
         expected: Option<PrefabInstance>,
         value: Option<PrefabInstance>,
+    },
+    /// Replaces an existing descendant of an explicitly stored component field.
+    ReplaceProperty {
+        entity: SceneEntityId,
+        component: ComponentTypeId,
+        component_version: ComponentSchemaVersion,
+        property: ComponentPropertyPath,
+        value: ComponentValue,
     },
 }
 
@@ -892,10 +945,14 @@ pub(crate) fn bounded_prefab_source_cost_with_admission<E>(
 }
 
 fn source_cost_rejection() -> ScenePatchReport {
+    replay_cost_rejection("Source declarations exceed the replay data or depth budget")
+}
+
+fn replay_cost_rejection(summary: &'static str) -> ScenePatchReport {
     let mut diagnostics = DiagnosticReport::default();
     diagnostics.push(diagnostic_error(
         "scene.patch-validation-work-budget-exceeded",
-        "Source declarations exceed the replay data or depth budget",
+        summary,
     ));
     ScenePatchReport {
         applied: false,
@@ -1162,6 +1219,28 @@ fn observed_tree_cost(
                             add_scene_entity_id_cost(&mut cost, entity);
                             add_component_type_id_cost(&mut cost, component);
                             add_component_field_id_cost(&mut cost, field);
+                            pending.push(ValueCostNode::Value(value, depth + 1));
+                        }
+                        ScenePatchOperation::ReplaceProperty {
+                            entity,
+                            component,
+                            property,
+                            value,
+                            ..
+                        } => {
+                            let steps = property.steps.len();
+                            cost.operation_count = cost.operation_count.saturating_add(steps);
+                            if limits.is_some_and(|limits| {
+                                cost.operation_count > limits.validation_work().get()
+                            }) {
+                                return None;
+                            }
+                            source_cost_progress(&mut observer, steps, 0)?;
+                            add_scene_entity_id_cost(&mut cost, entity);
+                            add_component_type_id_cost(&mut cost, component);
+                            cost.structural_logical_bytes = cost
+                                .structural_logical_bytes
+                                .saturating_add(property_selector_bytes(property));
                             pending.push(ValueCostNode::Value(value, depth + 1));
                         }
                         ScenePatchOperation::RemoveField {
@@ -1748,9 +1827,12 @@ mod bounded_cost_tests {
             }));
             let prefab =
                 PrefabDocument::new(original.placements.clone(), original.entities.clone());
-            let rejected = patch.prepare_to_prefab_with_validator(&prefab, &registry, |_, _, _| {
-                panic!("input must be admitted before source validation")
-            });
+            let rejected = patch.prepare_to_prefab_with_validator(
+                &prefab,
+                &registry,
+                ScenePatchApplyLimits::default(),
+                |_, _, _| panic!("input must be admitted before source validation"),
+            );
             let report = match rejected {
                 Ok(_) => panic!("deep declaration must be rejected before source validation"),
                 Err(report) => report,
@@ -1949,6 +2031,25 @@ fn add_component_field_id_cost(cost: &mut ScenePatchCost, field: &ComponentField
     cost.structural_logical_bytes = cost
         .structural_logical_bytes
         .saturating_add(field.as_str().len());
+}
+
+/// Counts raw selector content for storage admission before schema-aware validation.
+pub(crate) fn property_selector_bytes(property: &ComponentPropertyPath) -> usize {
+    property
+        .steps
+        .iter()
+        .fold(property.root.as_str().len(), |bytes, step| {
+            bytes.saturating_add(match step {
+                ComponentPropertyStep::Member(member) => member.as_str().len(),
+                ComponentPropertyStep::ListItem { by, key } => {
+                    by.as_str().len().saturating_add(match key {
+                        ComponentPropertyKey::String(key) => key.len(),
+                        ComponentPropertyKey::I64(_) | ComponentPropertyKey::U64(_) => 8,
+                    })
+                }
+                ComponentPropertyStep::MapEntry(key) => key.len(),
+            })
+        })
 }
 
 fn declaration_cost_allowance(
@@ -2194,8 +2295,15 @@ fn apply_operation_for_patch(
     registry: &ComponentRegistrySnapshot,
     operation: &ScenePatchOperation,
     operation_index: usize,
+    materialization_limits: ComponentValueMaterializationLimits,
 ) -> Result<Vec<ScenePatchOperation>, Box<ScenePatchReport>> {
-    match apply_operation(document, registry, operation, operation_index) {
+    match apply_operation(
+        document,
+        registry,
+        operation,
+        operation_index,
+        materialization_limits,
+    ) {
         Ok(inverse) => Ok(inverse),
         Err(diagnostic) => {
             let mut diagnostics = DiagnosticReport::default();
@@ -2346,44 +2454,6 @@ impl<'a> FieldPatchTarget<'a> {
     }
 }
 
-fn apply_prefab_operation(
-    document: &mut PrefabDocument,
-    registry: &ComponentRegistrySnapshot,
-    operation: &ScenePatchOperation,
-    operation_index: usize,
-) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
-    match operation {
-        ScenePatchOperation::AddComponent {
-            entity,
-            component,
-            value,
-        } => add_component(
-            document,
-            registry,
-            entity,
-            component,
-            value,
-            operation_index,
-        ),
-        ScenePatchOperation::RemoveComponent { entity, component } => {
-            remove_component(document, registry, entity, component, operation_index)
-        }
-        ScenePatchOperation::ReplaceComponent {
-            entity,
-            component,
-            value,
-        } => replace_component(
-            document,
-            registry,
-            entity,
-            component,
-            value,
-            operation_index,
-        ),
-        _ => apply_non_component_operation(document, registry, operation, operation_index),
-    }
-}
-
 /// Applies topology after the authoring owner has admitted the operation and component values.
 #[cfg(feature = "serde")]
 pub(crate) fn apply_authoring_structure_operation(
@@ -2431,13 +2501,21 @@ pub(crate) fn apply_authoring_structure_operation(
     }
 }
 
-fn apply_operation(
-    document: &mut SceneDocument,
+fn apply_operation<D: EntityDocument>(
+    document: &mut D,
     registry: &ComponentRegistrySnapshot,
     operation: &ScenePatchOperation,
     operation_index: usize,
+    materialization_limits: ComponentValueMaterializationLimits,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
     match operation {
+        ScenePatchOperation::AddEntity { entity }
+        | ScenePatchOperation::RestoreEntity { entity } => {
+            add_entity(document, registry, entity, operation_index)
+        }
+        ScenePatchOperation::RemoveEntity { entity } => {
+            remove_entity(document, registry, entity, operation_index)
+        }
         ScenePatchOperation::AddComponent {
             entity,
             component,
@@ -2465,34 +2543,6 @@ fn apply_operation(
             value,
             operation_index,
         ),
-        _ => apply_non_component_operation(document, registry, operation, operation_index),
-    }
-}
-
-fn apply_non_component_operation<D: EntityDocument>(
-    document: &mut D,
-    registry: &ComponentRegistrySnapshot,
-    operation: &ScenePatchOperation,
-    operation_index: usize,
-) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
-    match operation {
-        ScenePatchOperation::AddEntity { entity }
-        | ScenePatchOperation::RestoreEntity { entity } => {
-            add_entity(document, registry, entity, operation_index)
-        }
-        ScenePatchOperation::RemoveEntity { entity } => {
-            remove_entity(document, registry, entity, operation_index)
-        }
-        ScenePatchOperation::AddComponent { .. }
-        | ScenePatchOperation::RemoveComponent { .. }
-        | ScenePatchOperation::ReplaceComponent { .. } => Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-component-operation-routing-failed",
-            "Component structure operation did not pass through its document policy",
-            None,
-            None,
-            None,
-        )),
         ScenePatchOperation::SetField {
             entity,
             component,
@@ -2510,6 +2560,26 @@ fn apply_non_component_operation<D: EntityDocument>(
                 operation_index,
             ),
             value.clone(),
+        ),
+        ScenePatchOperation::ReplaceProperty {
+            entity,
+            component,
+            component_version,
+            property,
+            value,
+        } => replace_property(
+            document,
+            FieldPatchTarget::new(
+                registry,
+                entity,
+                component,
+                component_version,
+                &property.root,
+                operation_index,
+            ),
+            property,
+            value,
+            materialization_limits,
         ),
         ScenePatchOperation::RemoveField {
             entity,
@@ -2769,7 +2839,7 @@ fn set_field_value<D: EntityDocument>(
         field,
         operation_index,
     } = target;
-    let field_schema = field_schema(
+    let (_, field_schema) = field_schemas(
         registry,
         component,
         component_version,
@@ -2833,6 +2903,152 @@ fn set_field_value<D: EntityDocument>(
     Ok(previous)
 }
 
+fn replace_property<D: EntityDocument>(
+    document: &mut D,
+    target: FieldPatchTarget<'_>,
+    property: &ComponentPropertyPath,
+    value: &ComponentValue,
+    materialization_limits: ComponentValueMaterializationLimits,
+) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
+    let FieldPatchTarget {
+        registry,
+        entity,
+        component,
+        component_version,
+        field,
+        operation_index,
+    } = target;
+    if property.steps.is_empty() {
+        return Err(with_component_field_id(
+            patch_diagnostic(
+                operation_index,
+                "scene.patch-nested-property-required",
+                "Patch property replacement requires a nested selector",
+                Some(entity),
+                Some(component),
+                None,
+            ),
+            field,
+        ));
+    }
+
+    let (schema, field_schema) = field_schemas(
+        registry,
+        component,
+        component_version,
+        field,
+        operation_index,
+        entity,
+    )?;
+    let path = &field_schema.path;
+    require_field_capability(
+        field_schema,
+        ComponentCapability::Edit,
+        component,
+        field,
+        path,
+        operation_index,
+        entity,
+    )?;
+    let record = component_mut_for_field(
+        document,
+        entity,
+        component,
+        *component_version,
+        field,
+        path,
+        operation_index,
+    )?;
+    let (property, value) = property
+        .replace_in_candidate(
+            schema,
+            record.version,
+            record.value_mut(),
+            value.clone(),
+            materialization_limits,
+        )
+        .map_err(|error| {
+            with_property_error(
+                with_component_field_id(
+                    patch_diagnostic(
+                        operation_index,
+                        "scene.patch-property-replacement-rejected",
+                        "Patch property replacement could not be applied",
+                        Some(entity),
+                        Some(component),
+                        None,
+                    ),
+                    field,
+                ),
+                &error,
+                schema,
+            )
+        })?;
+    Ok(vec![ScenePatchOperation::ReplaceProperty {
+        entity: entity.clone(),
+        component: component.clone(),
+        component_version: *component_version,
+        property,
+        value,
+    }])
+}
+
+pub(crate) fn with_property_error(
+    mut diagnostic: Diagnostic,
+    error: &ComponentPropertyError,
+    schema: &ComponentSchema,
+) -> Diagnostic {
+    let (kind, step) = match error {
+        ComponentPropertyError::ReadBudgetExceeded => ("read-budget", None),
+        ComponentPropertyError::PathDepthLimit => ("path-depth-limit", None),
+        ComponentPropertyError::PathByteLimit => ("path-byte-limit", None),
+        ComponentPropertyError::InvalidFieldId => ("invalid-field-id", None),
+        ComponentPropertyError::VersionMismatch { .. } => ("version-mismatch", None),
+        ComponentPropertyError::InvalidSchema(_) => ("invalid-schema", None),
+        ComponentPropertyError::ValueBudget(_) => ("value-budget", None),
+        ComponentPropertyError::InvalidValue(_) => ("invalid-value", None),
+        ComponentPropertyError::UnknownRoot(_) => ("unknown-root", None),
+        ComponentPropertyError::RetiredField(_) => ("retired-field", None),
+        ComponentPropertyError::RetiredMember(_) => ("retired-member", None),
+        ComponentPropertyError::ValueUnavailable(_) => ("value-unavailable", None),
+        ComponentPropertyError::OptionalAbsent { step } => ("optional-absent", Some(*step)),
+        ComponentPropertyError::ExpectedRecord { step } => ("expected-record", Some(*step)),
+        ComponentPropertyError::MemberNotFound { step, .. } => ("member-not-found", Some(*step)),
+        ComponentPropertyError::ExpectedList { step } => ("expected-list", Some(*step)),
+        ComponentPropertyError::UnkeyedList { step } => ("unkeyed-list", Some(*step)),
+        ComponentPropertyError::ListIdentityMismatch { step, .. } => {
+            ("list-identity-mismatch", Some(*step))
+        }
+        ComponentPropertyError::KeyTypeMismatch { step, .. } => ("key-type-mismatch", Some(*step)),
+        ComponentPropertyError::InvalidListItemKey { step, .. } => {
+            ("invalid-list-item-key", Some(*step))
+        }
+        ComponentPropertyError::ListItemNotFound { step, .. } => {
+            ("list-item-not-found", Some(*step))
+        }
+        ComponentPropertyError::AmbiguousListItem { step, .. } => {
+            ("ambiguous-list-item", Some(*step))
+        }
+        ComponentPropertyError::ExpectedMap { step } => ("expected-map", Some(*step)),
+        ComponentPropertyError::MapEntryNotFound { step, .. } => {
+            ("map-entry-not-found", Some(*step))
+        }
+        ComponentPropertyError::InvalidReplacementShape(_) => ("invalid-replacement-shape", None),
+        ComponentPropertyError::InvalidReplacement(_) => ("invalid-replacement", None),
+        ComponentPropertyError::StorageIndexOverflow => ("storage-index-overflow", None),
+    };
+    diagnostic = with_public_identifier(diagnostic, "property-error-kind", kind);
+    if let Some(step) = step {
+        diagnostic = with_public_u64(diagnostic, "property-step-index", usize_to_u64(step));
+    }
+    if let ComponentPropertyError::InvalidValue(codec)
+    | ComponentPropertyError::InvalidReplacement(codec) = error
+    {
+        diagnostic = with_codec_error(diagnostic, codec, Some(schema));
+    }
+    diagnostic
+}
+
 fn remove_field<D: EntityDocument>(
     document: &mut D,
     registry: &ComponentRegistrySnapshot,
@@ -2874,7 +3090,7 @@ fn remove_field_value<D: EntityDocument>(
         field,
         operation_index,
     } = target;
-    let field_schema = field_schema(
+    let (_, field_schema) = field_schemas(
         registry,
         component,
         component_version,
@@ -3029,7 +3245,7 @@ fn set_asset_ref_field<D: EntityDocument>(
         field,
         operation_index,
     } = target;
-    let field_schema = field_schema(
+    let (_, field_schema) = field_schemas(
         registry,
         component,
         component_version,
@@ -3251,14 +3467,14 @@ fn require_whole_component_edit(
     }
 }
 
-fn field_schema<'a>(
+fn field_schemas<'a>(
     registry: &'a ComponentRegistrySnapshot,
     component: &ComponentTypeId,
     component_version: &ComponentSchemaVersion,
     field: &ComponentFieldId,
     operation_index: usize,
     entity: &SceneEntityId,
-) -> Result<&'a ComponentFieldSchema, Diagnostic> {
+) -> Result<(&'a ComponentSchema, &'a ComponentFieldSchema), Diagnostic> {
     let Some(component_schema) = registry.schema(component) else {
         return Err(with_component_field_id(
             patch_diagnostic(
@@ -3297,19 +3513,21 @@ fn field_schema<'a>(
         ));
     }
 
-    field_schema.ok_or_else(|| {
-        with_component_field_id(
-            patch_diagnostic(
-                operation_index,
-                "scene.patch-unknown-field",
-                "patch targets a field ID that is not registered in the component schema",
-                Some(entity),
-                Some(component),
-                None,
-            ),
-            field,
-        )
-    })
+    field_schema
+        .map(|field| (component_schema, field))
+        .ok_or_else(|| {
+            with_component_field_id(
+                patch_diagnostic(
+                    operation_index,
+                    "scene.patch-unknown-field",
+                    "patch targets a field ID that is not registered in the component schema",
+                    Some(entity),
+                    Some(component),
+                    None,
+                ),
+                field,
+            )
+        })
 }
 
 fn require_field_capability(

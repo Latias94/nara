@@ -389,6 +389,119 @@ fn admitted_keyed_list_uniqueness_rejects_colliding_identity_edits_without_mutat
 }
 
 #[test]
+fn keyed_edit_requires_a_fresh_revision_after_reordering_and_replays_after_schema_readmission() {
+    for prefab in [false, true] {
+        let mut fixture = fixture(prefab);
+        let workspace = &mut fixture.workspace;
+        let document = fixture.document;
+        let original_item = list_item("strings", ComponentPropertyKey::String("z".into()));
+        let renamed_item = list_item("strings", ComponentPropertyKey::String("renamed".into()));
+        let edits = [
+            AuthoringPropertyEdit {
+                entity: entity(),
+                component: component(),
+                component_version: ComponentSchemaVersion::ONE,
+                property: member(&original_item, "id"),
+                value: ComponentValue::String("renamed".into()),
+            },
+            AuthoringPropertyEdit {
+                entity: entity(),
+                component: component(),
+                component_version: ComponentSchemaVersion::ONE,
+                property: member(&renamed_item, "score"),
+                value: ComponentValue::U64(901),
+            },
+        ];
+        let original_basis = workspace.document_query_basis(document).unwrap();
+        let old_edit = workspace
+            .prepare_authoring_property_edit(&original_basis, &edits)
+            .unwrap();
+        let EditorPropertyValue::Present(ComponentValue::List(mut values)) =
+            read(workspace, document, path("strings"))
+        else {
+            panic!("the source list must be present");
+        };
+        values.rotate_left(1);
+        let reordered = ComponentValue::List(values.clone());
+        let reorder = workspace
+            .prepare_authoring_edit(
+                &original_basis,
+                &ScenePatchDocument::new([ScenePatchOperation::SetField {
+                    entity: entity(),
+                    component: component(),
+                    component_version: ComponentSchemaVersion::ONE,
+                    field: ComponentFieldId::new("strings"),
+                    value: reordered.clone(),
+                }]),
+            )
+            .unwrap();
+        assert!(workspace.commit_authoring_edit(reorder).applied);
+        let after_reorder = workspace.authoring_model();
+        let mut old_preview = read_request(workspace, document, member(&renamed_item, "score"));
+        old_preview.target.basis = original_basis;
+        assert_eq!(
+            old_edit.preview_property(old_preview).unwrap().value,
+            EditorPropertyValue::Present(ComponentValue::U64(901))
+        );
+        assert!(!workspace.commit_authoring_edit(old_edit).applied);
+        assert_eq!(workspace.authoring_model(), after_reorder);
+
+        let current = workspace.document_query_basis(document).unwrap();
+        let fresh = workspace
+            .prepare_authoring_property_edit(&current, &edits)
+            .unwrap();
+        assert!(matches!(fresh.inverse().operations.as_slice(), [
+            ScenePatchOperation::ReplaceProperty { property: score, value: ComponentValue::U64(101), .. },
+            ScenePatchOperation::ReplaceProperty { property: key, value: ComponentValue::String(old_key), .. },
+        ] if score == &member(&renamed_item, "score") && key == &member(&renamed_item, "id") && old_key == "z"));
+        assert!(workspace.commit_authoring_edit(fresh).applied);
+        values[2] = keyed_item(ComponentValue::String("renamed".into()), 901);
+        let edited = EditorPropertyValue::Present(ComponentValue::List(values));
+        assert_eq!(read(workspace, document, path("strings")), edited);
+
+        assert!(
+            workspace
+                .apply_authoring_command(EditorWorkspaceCommand::Undo {
+                    document,
+                    base_revision: workspace.document_revision(document).unwrap(),
+                })
+                .applied
+        );
+        assert_eq!(
+            read(workspace, document, path("strings")),
+            EditorPropertyValue::Present(reordered)
+        );
+        let at_undo = workspace.document_query_basis(document).unwrap();
+        let successor = fresh_schema_basis();
+        let admitted = workspace
+            .prepare_schema_reclassification(
+                at_undo.schema.as_ref().unwrap(),
+                &successor,
+                &SchemaReclassificationKind::DeclarationExtension,
+                &mut SchemaReclassificationWork::default(),
+            )
+            .unwrap();
+        workspace
+            .bind_schema_reclassification(admitted)
+            .unwrap()
+            .commit();
+        assert_eq!(
+            workspace.document_revision(document),
+            Some(at_undo.revision)
+        );
+        assert!(
+            workspace
+                .apply_authoring_command(EditorWorkspaceCommand::Redo {
+                    document,
+                    base_revision: at_undo.revision,
+                })
+                .applied
+        );
+        assert_eq!(read(workspace, document, path("strings")), edited);
+    }
+}
+
+#[test]
 fn missing_explicit_null_and_defaulted_null_never_fabricate_collection_items() {
     for prefab in [false, true] {
         let fixture = fixture(prefab);

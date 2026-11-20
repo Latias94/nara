@@ -1,6 +1,6 @@
 use nara_reflect::{
-    ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueCost, EntityReference, validate_component_value_with_limits,
+    ComponentFieldId, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, EntityReference, validate_component_value_with_limits,
 };
 
 use crate::{
@@ -121,11 +121,38 @@ fn canonicalize_patch(
                     entity,
                     component,
                     component_version,
-                    field.as_str(),
+                    field,
                     registry,
                     FieldVersionPolicy::RequireCurrentValueSemantics,
                 )?;
                 budget.observe(value)?;
+            }
+            ScenePatchOperation::ReplaceProperty {
+                entity,
+                component,
+                component_version,
+                property,
+                value,
+            } => {
+                canonicalize_field_target(
+                    entity,
+                    component,
+                    component_version,
+                    &property.root,
+                    registry,
+                    FieldVersionPolicy::RequireCurrentValueSemantics,
+                )?;
+                let selector_bytes = property
+                    .logical_bytes()
+                    .ok()
+                    .filter(|_| !property.steps.is_empty())
+                    .ok_or_else(|| {
+                        publication_error(diagnostic_error(
+                            "scene.file-invalid-property-selector",
+                            "Persistent property replacements require a valid nested selector",
+                        ))
+                    })?;
+                budget.observe_with_selector_cost(value, property.steps.len(), selector_bytes)?;
             }
             ScenePatchOperation::RemoveField {
                 entity,
@@ -137,7 +164,7 @@ fn canonicalize_patch(
                     entity,
                     component,
                     component_version,
-                    field.as_str(),
+                    field,
                     registry,
                     FieldVersionPolicy::StableIdentityOnly,
                 )?;
@@ -153,7 +180,7 @@ fn canonicalize_patch(
                     entity,
                     component,
                     component_version,
-                    field.as_str(),
+                    field,
                     registry,
                     FieldVersionPolicy::RequireCurrentValueSemantics,
                 )?;
@@ -382,7 +409,7 @@ fn canonicalize_field_target(
     entity: &SceneEntityId,
     component_id: &ComponentTypeId,
     component_version: &mut ComponentSchemaVersion,
-    field_id: &str,
+    field_id: &ComponentFieldId,
     registry: &ComponentRegistrySnapshot,
     version_policy: FieldVersionPolicy,
 ) -> Result<bool, SceneFilePublicationError> {
@@ -422,8 +449,7 @@ fn canonicalize_field_target(
             u64::from(schema.version.get()),
         )));
     }
-    let field = nara_reflect::ComponentFieldId::new(field_id);
-    if registry.resolve_field(component_id, &field).is_none() {
+    if registry.resolve_field(component_id, field_id).is_none() {
         return Err(publication_error(with_public_locator(
             with_public_locator(
                 with_public_locator(
@@ -438,7 +464,7 @@ fn canonicalize_field_target(
                 component_id.as_str(),
             ),
             "field-id",
-            field_id,
+            field_id.as_str(),
         )));
     }
 
@@ -467,7 +493,7 @@ fn canonicalize_field_target(
                 u64::from(schema.version.get()),
             ),
             "field-id",
-            field_id,
+            field_id.as_str(),
         )));
     }
 
@@ -514,7 +540,8 @@ fn require_exact_snapshot_version(
 }
 
 struct PublicationValueBudget {
-    cost: ComponentValueCost,
+    nodes: usize,
+    logical_bytes: usize,
     shape_nodes: usize,
     total_string_bytes: usize,
     limits: SceneFileLimits,
@@ -523,7 +550,8 @@ struct PublicationValueBudget {
 impl PublicationValueBudget {
     fn new(limits: SceneFileLimits) -> Self {
         Self {
-            cost: ComponentValueCost::ZERO,
+            nodes: 0,
+            logical_bytes: 0,
             shape_nodes: 0,
             total_string_bytes: 0,
             limits,
@@ -531,18 +559,30 @@ impl PublicationValueBudget {
     }
 
     fn observe(&mut self, value: &ComponentValue) -> Result<(), SceneFilePublicationError> {
+        self.observe_with_selector_cost(value, 0, 0)
+    }
+
+    fn observe_with_selector_cost(
+        &mut self,
+        value: &ComponentValue,
+        selector_nodes: usize,
+        selector_bytes: usize,
+    ) -> Result<(), SceneFilePublicationError> {
         let (shape_nodes, total_string_bytes) = self.validate_shape(value)?;
         let cost = value.cost();
-        let observed = self.cost.saturating_add(cost);
+        let nodes = self
+            .nodes
+            .saturating_add(cost.nodes())
+            .saturating_add(selector_nodes);
+        let logical_bytes = self
+            .logical_bytes
+            .saturating_add(cost.logical_bytes())
+            .saturating_add(selector_bytes);
         for (kind, observed, maximum) in [
-            (
-                "nodes",
-                observed.nodes(),
-                self.limits.component_value_nodes().get(),
-            ),
+            ("nodes", nodes, self.limits.component_value_nodes().get()),
             (
                 "logical-bytes",
-                observed.logical_bytes(),
+                logical_bytes,
                 self.limits.component_value_bytes().get(),
             ),
         ] {
@@ -565,7 +605,8 @@ impl PublicationValueBudget {
                 )));
             }
         }
-        self.cost = observed;
+        self.nodes = nodes;
+        self.logical_bytes = logical_bytes;
         self.shape_nodes = shape_nodes;
         self.total_string_bytes = total_string_bytes;
         Ok(())

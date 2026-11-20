@@ -949,13 +949,16 @@ failure does not establish a conflicting source intent.
 
 For editing, pass ordered `AuthoringPropertyEdit` replacements to
 `prepare_authoring_property_edit` on a Scene/Prefab session, Workspace, project session or Editor
-Application, then use the existing `commit_authoring_edit`. The owner coalesces writes to each root
-and creates the ordinary inverse/history entry. Original operation count, selector bytes and
-replacement payload are admitted before coalescing; final root patches and inverses retain their
-existing limits. Exact source revision/Schema checks, unavailable-record preservation and one Undo
-remain unchanged. This path replaces existing stored targets; root omission/default reset still
-uses the existing root-field operations. It is not a complete document/Prefab-occurrence address
-and remains separate from the declarative Prefab overlay namespace and actual composition.
+Application, then use `commit_authoring_edit`. An edit inside an explicitly stored root produces
+`ScenePatchOperation::ReplaceProperty`. Its inverse carries the previous selected value. If a write
+changes a keyed item's identity, use the new key in later operations in that batch. The owner
+creates the reverse selector for Undo. The replay allowance covers actual changed payloads and
+both selector directions. Complete validation still checks the resulting source and its history.
+
+An explicit whole-root write or first nested write into a defaulted root uses a root-field patch
+and its complete replay allowance. Undo of the latter restores the omitted root. The entire batch
+publishes as one history entry. This interface addresses direct source records. Use the Prefab
+overlay interface for instance overrides and effective values.
 
 Workspace, Project Session and Application preparation takes the complete retained
 `EditorDocumentQueryBasis`, including exact Schema admission. Source-local Scene/Prefab
@@ -968,8 +971,7 @@ optional containers, retired targets and changed list identity policy without re
 These diagnostics do not publish actual map/list keys or replacement payloads.
 
 The first-party inline Inspector collection controls still support scalar items only. A keyed
-Record list is available through the public property-edit API, not those inline controls; this
-Schema capability does not imply a new collection UI.
+Record list can be edited through the public property-edit API and registered panels.
 
 ## Runtime-Only Components
 

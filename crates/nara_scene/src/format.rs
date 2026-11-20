@@ -6,6 +6,8 @@ mod decoding_tests;
 mod diagnostic_tests;
 #[cfg(test)]
 mod encoding_tests;
+#[cfg(test)]
+mod property_patch_tests;
 mod publication_shape;
 #[cfg(test)]
 mod publication_shape_tests;
@@ -23,7 +25,7 @@ use nara_asset::AssetReferenceResolver;
 use nara_core::{
     ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, ItemLimit,
     PersistentFileContract, PersistentFileContractError, PersistentFileDecodeError,
-    PersistentFileEnvelope, PersistentFileHeader, SerdeShapeLimits,
+    PersistentFileEnvelope, PersistentFileHeader, SerdeShapeLimits, SerdeShapePreflightError,
     decode_persistent_file_with_preflight, preflight_serde_shape,
 };
 use nara_diagnostic::DiagnosticReport;
@@ -37,7 +39,7 @@ use crate::{
     PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId,
     SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
     ScenePatchReport, ScenePlacementParent,
-    patch::ScenePatchDocumentWire,
+    patch::{ScenePatchDocumentWire, property_selector_bytes},
     prefab::{
         PrefabOverlayCost, PrefabOverlayCostError, PrefabOverlayCostKind, PrefabOverlayCostLimits,
         prefab_instance_cost, scene_placements_cost,
@@ -886,7 +888,7 @@ impl SceneFilePayload for PrefabDocument {
             limits.overlay_declarations(),
             SceneFileBudgetKind::OverlayDeclarations,
         )?;
-        counts.overlay_nodes = self.inputs.len();
+        counts.structural_nodes = self.inputs.len();
         counts.validate_raw_cost(ComponentValueCost::ZERO, 0, limits)?;
         for input in &self.inputs {
             counts.observe_structural_bytes(input.as_str().len(), limits)?;
@@ -1438,6 +1440,13 @@ fn encode_with_admission<T: SceneFilePayload, E>(
         }));
     }
     result.map_err(Format)?;
+    if T::KIND == SCENE_PATCH_KIND {
+        match encoding {
+            SceneFileEncoding::Json => validate_json_shape(&bytes, limits.shape()),
+            SceneFileEncoding::Ron => validate_ron_shape(&bytes, limits.shape()),
+        }
+        .map_err(Format)?;
+    }
     // Reuse the admitted byte allocation; UTF-8 validation requires no output copy.
     String::from_utf8(bytes).map_err(|source| {
         Format(SceneFormatError::Encode {
@@ -1532,13 +1541,7 @@ fn validate_json_publication_shape<T: Serialize>(
     if certified {
         return Ok(());
     }
-    let mut deserializer = serde_json::Deserializer::from_slice(encoded.as_slice());
-    preflight_serde_shape(&mut deserializer, limits.shape()).map_err(|source| {
-        SceneFormatError::Shape {
-            encoding: SceneFileEncoding::Json,
-            source: Box::new(source),
-        }
-    })
+    validate_json_shape(encoded.as_slice(), limits.shape())
 }
 
 fn validate_ron_publication_shape<T: Serialize>(
@@ -1566,18 +1569,20 @@ fn validate_ron_publication_shape<T: Serialize>(
     if certified {
         return Ok(());
     }
-    let mut deserializer =
-        ron::de::Deserializer::from_bytes(encoded.as_slice()).map_err(|source| {
-            SceneFormatError::Shape {
-                encoding: SceneFileEncoding::Ron,
-                source: Box::new(source),
-            }
-        })?;
-    preflight_serde_shape(&mut deserializer, limits.shape()).map_err(|source| {
-        SceneFormatError::Shape {
-            encoding: SceneFileEncoding::Ron,
-            source: Box::new(source),
-        }
+    validate_ron_shape(encoded.as_slice(), limits.shape())
+}
+
+fn validate_json_shape(encoded: &[u8], limits: SerdeShapeLimits) -> Result<(), SceneFormatError> {
+    preflight_json_shape(encoded, limits).map_err(|source| SceneFormatError::Shape {
+        encoding: SceneFileEncoding::Json,
+        source: Box::new(source),
+    })
+}
+
+fn validate_ron_shape(encoded: &[u8], limits: SerdeShapeLimits) -> Result<(), SceneFormatError> {
+    preflight_ron_shape(encoded, limits).map_err(|source| SceneFormatError::Shape {
+        encoding: SceneFileEncoding::Ron,
+        source: Box::new(source),
     })
 }
 
@@ -1711,8 +1716,7 @@ fn decode_json_payload<T: SceneFilePayload>(
             #[cfg(feature = "work-observation")]
             let _work_span =
                 tracing::info_span!(target: "nara::scene::work", "scene_wire_preflight").entered();
-            let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-            preflight_serde_shape(&mut deserializer, limits.shape()).map_err(JsonDecodeError::Shape)
+            preflight_json_shape(bytes, limits.shape()).map_err(JsonDecodeError::Shape)
         },
         |bytes| {
             #[cfg(feature = "work-observation")]
@@ -1752,14 +1756,7 @@ fn decode_ron_payload<T: SceneFilePayload>(
             #[cfg(feature = "work-observation")]
             let _work_span =
                 tracing::info_span!(target: "nara::scene::work", "scene_wire_preflight").entered();
-            let mut deserializer =
-                ron::de::Deserializer::from_bytes(bytes).map_err(RonDecodeError::Syntax)?;
-            preflight_serde_shape(&mut deserializer, limits.shape()).map_err(|error| match error {
-                nara_core::SerdeShapePreflightError::Shape(error) => RonDecodeError::Shape(error),
-                nara_core::SerdeShapePreflightError::Parse(error) => {
-                    RonDecodeError::Syntax(deserializer.span_error(error))
-                }
-            })
+            preflight_ron_shape(bytes, limits.shape())
         },
         |bytes| {
             #[cfg(feature = "work-observation")]
@@ -1779,9 +1776,28 @@ fn decode_ron_payload<T: SceneFilePayload>(
     T::from_wire(envelope.into_payload())
 }
 
+fn preflight_json_shape(
+    bytes: &[u8],
+    limits: SerdeShapeLimits,
+) -> Result<(), SerdeShapePreflightError<serde_json::Error>> {
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    preflight_serde_shape(&mut deserializer, limits)
+}
+
+fn preflight_ron_shape(bytes: &[u8], limits: SerdeShapeLimits) -> Result<(), RonDecodeError> {
+    let mut deserializer =
+        ron::de::Deserializer::from_bytes(bytes).map_err(RonDecodeError::Syntax)?;
+    preflight_serde_shape(&mut deserializer, limits).map_err(|error| match error {
+        SerdeShapePreflightError::Shape(error) => RonDecodeError::Shape(error),
+        SerdeShapePreflightError::Parse(error) => {
+            RonDecodeError::Syntax(deserializer.span_error(error))
+        }
+    })
+}
+
 #[derive(Debug)]
 enum JsonDecodeError {
-    Shape(nara_core::SerdeShapePreflightError<serde_json::Error>),
+    Shape(SerdeShapePreflightError<serde_json::Error>),
     Syntax(serde_json::Error),
 }
 
@@ -1918,7 +1934,7 @@ struct SceneFileCounts {
     diagnostic_sources: usize,
     component_value_cost: ComponentValueCost,
     structural_logical_bytes: usize,
-    overlay_nodes: usize,
+    structural_nodes: usize,
 }
 
 impl SceneFileCounts {
@@ -1998,7 +2014,7 @@ impl SceneFileCounts {
         let used_nodes = self
             .component_value_cost
             .nodes()
-            .saturating_add(self.overlay_nodes);
+            .saturating_add(self.structural_nodes);
         let used_bytes = self
             .component_value_cost
             .logical_bytes()
@@ -2049,8 +2065,8 @@ impl SceneFileCounts {
         self.components = self.components.saturating_add(cost.components);
         self.prefab_instances = self.prefab_instances.saturating_add(cost.prefab_instances);
         self.overlay_declarations = self.overlay_declarations.saturating_add(cost.declarations);
-        self.overlay_nodes = self
-            .overlay_nodes
+        self.structural_nodes = self
+            .structural_nodes
             .saturating_add(cost.nodes.saturating_sub(cost.value_cost.nodes()));
         self.structural_logical_bytes = self
             .structural_logical_bytes
@@ -2076,7 +2092,7 @@ impl SceneFileCounts {
                 SceneFileBudgetKind::ComponentValueNodes,
                 self.component_value_cost
                     .nodes()
-                    .saturating_add(self.overlay_nodes),
+                    .saturating_add(self.structural_nodes),
                 limits.component_value_nodes().get(),
             ),
             PrefabOverlayCostKind::Depth => (SceneFileBudgetKind::PlacementDepth, 0, error.maximum),
@@ -2158,6 +2174,19 @@ impl SceneFileCounts {
                 ScenePatchOperation::SetField { value, .. } => {
                     self.observe_component_value(value.cost(), limits)?;
                 }
+                ScenePatchOperation::ReplaceProperty {
+                    property, value, ..
+                } => {
+                    self.structural_nodes =
+                        self.structural_nodes.saturating_add(property.steps.len());
+                    self.validate_raw_cost(
+                        self.component_value_cost,
+                        self.structural_logical_bytes,
+                        limits,
+                    )?;
+                    self.observe_structural_bytes(property_selector_bytes(property), limits)?;
+                    self.observe_component_value(value.cost(), limits)?;
+                }
                 ScenePatchOperation::SetPrefabInstance {
                     expected, value, ..
                 } => {
@@ -2224,8 +2253,8 @@ impl SceneFileCounts {
             limits.overlay_declarations(),
             SceneFileBudgetKind::OverlayDeclarations,
         )?;
-        self.overlay_nodes = self
-            .overlay_nodes
+        self.structural_nodes = self
+            .structural_nodes
             .saturating_add(record.contextual_defaults.len());
         self.observe_component_value(record.value().cost(), limits)?;
         for (field, value) in &record.contextual_defaults {
@@ -2255,7 +2284,7 @@ impl SceneFileCounts {
         for (kind, observed, maximum) in [
             (
                 SceneFileBudgetKind::ComponentValueNodes,
-                values.nodes().saturating_add(self.overlay_nodes),
+                values.nodes().saturating_add(self.structural_nodes),
                 limits.component_value_nodes().get(),
             ),
             (

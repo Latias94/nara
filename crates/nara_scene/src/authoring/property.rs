@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPathError, ComponentPropertyError, ComponentPropertyPath,
     ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    replace_component_property,
 };
 
 use super::{
@@ -39,7 +38,7 @@ pub(super) struct StagedPropertyRecord<'a> {
 }
 
 impl SceneAuthoringSession {
-    /// Prepares ordered property replacements, coalescing roots into one existing history entry.
+    /// Prepares ordered property replacements in one source candidate and history entry.
     pub fn prepare_authoring_property_edit(
         &self,
         base_revision: SceneAuthoringRevision,
@@ -144,7 +143,13 @@ fn lower_with_write_limit<'a>(
             Option<&BTreeMap<ComponentFieldId, ComponentValue>>,
         ),
     >::new();
-    let mut touched = BTreeSet::<(SceneEntityId, ComponentTypeId, ComponentFieldId)>::new();
+    let mut root_updates = edits
+        .iter()
+        .filter(|edit| edit.property.steps.is_empty())
+        .map(|edit| (&edit.entity, &edit.component, &edit.property.root))
+        .collect::<BTreeSet<_>>();
+    let mut nested_updates = Vec::new();
+    let limits = state.property_staging_limits();
     for (operation_index, edit) in edits.iter().enumerate() {
         let key = (edit.entity.clone(), edit.component.clone());
         let (schema, candidate, contextual_defaults) = match candidates.entry(key) {
@@ -174,7 +179,7 @@ fn lower_with_write_limit<'a>(
                             actual: edit.component_version,
                         },
                         schema,
-                        operation_index,
+                        Some(operation_index),
                     ));
                 }
                 entry.insert((
@@ -184,45 +189,54 @@ fn lower_with_write_limit<'a>(
                 ))
             }
         };
-        initialize_missing_root(schema, candidate, *contextual_defaults, edit)
-            .map_err(|error| property_rejection(&error, schema, operation_index))?;
-        replace_component_property(
-            schema,
-            edit.component_version,
-            candidate,
-            &edit.property,
-            edit.value.clone(),
-        )
-        .map_err(|error| property_rejection(&error, schema, operation_index))?;
-        touched.insert((
-            edit.entity.clone(),
-            edit.component.clone(),
-            edit.property.root.clone(),
-        ));
+        let target = (&edit.entity, &edit.component, &edit.property.root);
+        let reject = |error| property_rejection(&error, schema, Some(operation_index));
+        if initialize_missing_root(schema, candidate, *contextual_defaults, edit).map_err(reject)? {
+            root_updates.insert(target);
+        }
+        edit.property
+            .replace_in_candidate(
+                schema,
+                edit.component_version,
+                candidate,
+                edit.value.clone(),
+                limits,
+            )
+            .map_err(reject)?;
+        if !root_updates.contains(&target) {
+            nested_updates.push(ScenePatchOperation::ReplaceProperty {
+                entity: edit.entity.clone(),
+                component: edit.component.clone(),
+                component_version: edit.component_version,
+                property: edit.property.clone(),
+                value: edit.value.clone(),
+            });
+        }
     }
 
-    let mut operations = Vec::with_capacity(touched.len());
-    for (entity, component, root) in touched {
+    let mut operations = Vec::with_capacity(root_updates.len() + nested_updates.len());
+    for (entity, component, root) in root_updates {
         let (schema, candidate, _) = candidates
             .get(&(entity.clone(), component.clone()))
             .ok_or_else(rejected)?;
         let field = schema
             .fields()
             .iter()
-            .find(|field| field.id() == &root)
+            .find(|field| field.id() == root)
             .ok_or_else(rejected)?;
         let value = candidate
             .get_path(field.path())
             .map_err(|_| rejected())?
             .clone();
         operations.push(ScenePatchOperation::SetField {
-            entity,
-            component,
+            entity: entity.clone(),
+            component: component.clone(),
             component_version: schema.version(),
-            field: root,
+            field: root.clone(),
             value,
         });
     }
+    operations.extend(nested_updates);
     Ok(ScenePatchDocument::new(operations))
 }
 
@@ -231,13 +245,13 @@ fn initialize_missing_root(
     candidate: &mut ComponentValue,
     contextual_defaults: Option<&BTreeMap<ComponentFieldId, ComponentValue>>,
     edit: &AuthoringPropertyEdit,
-) -> Result<(), ComponentPropertyError> {
+) -> Result<bool, ComponentPropertyError> {
     let Some(field) = schema
         .fields()
         .iter()
         .find(|field| field.id() == &edit.property.root)
     else {
-        return Ok(());
+        return Ok(false);
     };
     if matches!(
         candidate.get_path(field.path()),
@@ -252,15 +266,16 @@ fn initialize_missing_root(
         {
             default
         } else {
-            return Ok(());
+            return Ok(false);
         };
         // The ordinary root patch will retain original absence as RemoveField. Never create
         // ancestors or merge an explicit root; set_path keeps that existing storage contract.
         candidate
             .set_path(field.path(), value.clone())
             .map_err(ComponentPropertyError::ValueUnavailable)?;
+        return Ok(true);
     }
-    Ok(())
+    Ok(false)
 }
 
 fn rejected() -> ScenePatchReport {
@@ -272,7 +287,7 @@ fn rejected() -> ScenePatchReport {
 
 fn rejected_at(operation_index: usize) -> ScenePatchReport {
     let mut diagnostics = nara_diagnostic::DiagnosticReport::default();
-    diagnostics.push(rejection_diagnostic(operation_index));
+    diagnostics.push(rejection_diagnostic(Some(operation_index)));
     ScenePatchReport {
         applied: false,
         inverse: None,
@@ -280,80 +295,33 @@ fn rejected_at(operation_index: usize) -> ScenePatchReport {
     }
 }
 
-fn rejection_diagnostic(operation_index: usize) -> nara_diagnostic::Diagnostic {
-    crate::diagnostics::with_public_u64(
-        crate::diagnostics::error(
-            "scene.authoring-property-edit-rejected",
-            "Property edit was rejected before document publication",
-        ),
-        "operation-index",
-        u64::try_from(operation_index).unwrap_or(u64::MAX),
-    )
+fn rejection_diagnostic(operation_index: Option<usize>) -> nara_diagnostic::Diagnostic {
+    let diagnostic = crate::diagnostics::error(
+        "scene.authoring-property-edit-rejected",
+        "Property edit was rejected before document publication",
+    );
+    if let Some(index) = operation_index {
+        crate::diagnostics::with_public_u64(
+            diagnostic,
+            "operation-index",
+            u64::try_from(index).unwrap_or(u64::MAX),
+        )
+    } else {
+        diagnostic
+    }
 }
 
-fn property_rejection(
+pub(crate) fn property_rejection(
     error: &ComponentPropertyError,
     schema: &ComponentSchema,
-    operation_index: usize,
+    operation_index: Option<usize>,
 ) -> ScenePatchReport {
-    let (kind, step) = match error {
-        ComponentPropertyError::ReadBudgetExceeded => ("read-budget", None),
-        ComponentPropertyError::PathDepthLimit => ("path-depth-limit", None),
-        ComponentPropertyError::PathByteLimit => ("path-byte-limit", None),
-        ComponentPropertyError::InvalidFieldId => ("invalid-field-id", None),
-        ComponentPropertyError::VersionMismatch { .. } => ("version-mismatch", None),
-        ComponentPropertyError::InvalidSchema(_) => ("invalid-schema", None),
-        ComponentPropertyError::ValueBudget(_) => ("value-budget", None),
-        ComponentPropertyError::InvalidValue(_) => ("invalid-value", None),
-        ComponentPropertyError::UnknownRoot(_) => ("unknown-root", None),
-        ComponentPropertyError::RetiredField(_) => ("retired-field", None),
-        ComponentPropertyError::RetiredMember(_) => ("retired-member", None),
-        ComponentPropertyError::ValueUnavailable(_) => ("value-unavailable", None),
-        ComponentPropertyError::OptionalAbsent { step } => ("optional-absent", Some(*step)),
-        ComponentPropertyError::ExpectedRecord { step } => ("expected-record", Some(*step)),
-        ComponentPropertyError::MemberNotFound { step, .. } => ("member-not-found", Some(*step)),
-        ComponentPropertyError::ExpectedList { step } => ("expected-list", Some(*step)),
-        ComponentPropertyError::UnkeyedList { step } => ("unkeyed-list", Some(*step)),
-        ComponentPropertyError::ListIdentityMismatch { step, .. } => {
-            ("list-identity-mismatch", Some(*step))
-        }
-        ComponentPropertyError::KeyTypeMismatch { step, .. } => ("key-type-mismatch", Some(*step)),
-        ComponentPropertyError::InvalidListItemKey { step, .. } => {
-            ("invalid-list-item-key", Some(*step))
-        }
-        ComponentPropertyError::ListItemNotFound { step, .. } => {
-            ("list-item-not-found", Some(*step))
-        }
-        ComponentPropertyError::AmbiguousListItem { step, .. } => {
-            ("ambiguous-list-item", Some(*step))
-        }
-        ComponentPropertyError::ExpectedMap { step } => ("expected-map", Some(*step)),
-        ComponentPropertyError::MapEntryNotFound { step, .. } => {
-            ("map-entry-not-found", Some(*step))
-        }
-        ComponentPropertyError::InvalidReplacementShape(_) => ("invalid-replacement-shape", None),
-        ComponentPropertyError::InvalidReplacement(_) => ("invalid-replacement", None),
-        ComponentPropertyError::StorageIndexOverflow => ("storage-index-overflow", None),
-    };
-    let mut diagnostic = crate::diagnostics::with_public_identifier(
-        rejection_diagnostic(operation_index),
-        "property-error-kind",
-        kind,
-    );
-    if let Some(step) = step {
-        diagnostic = crate::diagnostics::with_public_u64(
-            diagnostic,
-            "property-step-index",
-            u64::try_from(step).unwrap_or(u64::MAX),
-        );
-    }
-    if let ComponentPropertyError::InvalidValue(codec)
-    | ComponentPropertyError::InvalidReplacement(codec) = error
-    {
-        diagnostic = crate::diagnostics::with_codec_error(diagnostic, codec, Some(schema));
-    }
     let mut diagnostics = nara_diagnostic::DiagnosticReport::default();
-    diagnostics.push(diagnostic);
+    diagnostics.push(crate::patch::with_property_error(
+        rejection_diagnostic(operation_index),
+        error,
+        schema,
+    ));
     ScenePatchReport {
         applied: false,
         inverse: None,

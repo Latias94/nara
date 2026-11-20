@@ -83,6 +83,9 @@ Rules:
   resolution. A wire-layout migration may retain member IDs; changing keyed-item identity policy
   refuses the old selector's `by` member until an explicit address remap is supplied. A component
   migration does not implicitly migrate persistent selectors or manufacture a new overlay format.
+- Canonical standalone patch v1 includes `replace_property` for a nonempty durable nested selector.
+  Its component version must match the receiving Schema. The existing value and selector
+  admission apply to the selected replacement. Scene and Prefab declarations keep their formats.
 - Unsupported future document versions fail with typed format errors.
 - Prototype, unknown, and missing migration steps fail with typed format errors. nara must not
   best-effort guess unknown document shapes.

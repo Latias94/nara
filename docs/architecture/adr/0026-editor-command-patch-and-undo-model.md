@@ -83,10 +83,17 @@ Rules:
 - Repeating an existing authored placement through Scene or Prefab composition preserves the
   current revision, content state and Redo branch. A new explicit placement can still pin an
   inherited target that has no matching declaration of its own.
-- Ordered stable-property replacements resolve through the admitted Schema against one evolving
-  private candidate, then coalesce into the existing root-field patch and owner-created inverse.
-  Original property operation count, selector/key bytes and replacement payload are bounded before
-  coalescing; forward/inverse/history admission remains separate. A late failure publishes nothing.
+- Ordered stable-property replacements resolve through the admitted Schema against evolving
+  private source values. A replacement inside an explicitly stored root uses `ReplaceProperty`
+  with the durable selector and selected value. Its inverse retains the previous selected value
+  and addresses the same item under its resulting key. Repeated nested writes retain their order.
+  Explicit root replacements and first writes into a defaulted root coalesce as root-field
+  patches. Source Schemas prohibit overlapping root paths, so each of those root changes can be
+  published independently of sibling nested operations in the same transaction.
+  Original operation count, selector/key bytes and replacement payload are bounded; complete
+  forward, inverse and history admission uses the resulting operations. Private staging allows
+  the admitted source plus one bounded patch. Both directions check the final source against its
+  original file limits. A late failure publishes nothing.
   Rejection retains the original operation index, static property error kind and known step index,
   not private selector keys or replacement values.
   Scoped member IDs, declaration-path tombstones and keyed-item policy follow ADRs 0011/0081.
@@ -96,7 +103,7 @@ Rules:
   unrelated defaults, merge an explicit/partial value, create optional or keyed descendants, or
   manufacture missing storage parents/list slots. A root-only write may explicitly create its
   field through the same existing storage contract. The ordinary root patch/inverse/history owns
-  publication; Undo restores original field absence rather than persisting a default-equal value.
+  publication. Undo restores the field's original absence.
   Missing parents, complete replay limits, capabilities and stale/history refusals remain real
   admission conditions. Complete Reflect resolution does not implicitly synthesize source values.
 - Invalid selector IDs are unadmitted caller data and are never retained in property-error objects.

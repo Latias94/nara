@@ -232,7 +232,7 @@ fn placement_metadata_uses_inclusive_aggregate_file_budgets() {
             SceneFileLimits::default(),
         )
         .unwrap();
-    let nodes = counts.overlay_nodes + counts.component_value_cost.nodes();
+    let nodes = counts.structural_nodes + counts.component_value_cost.nodes();
     let bytes = counts.structural_logical_bytes + counts.component_value_cost.logical_bytes();
     let exact = SceneFileLimits::default()
         .with_placements(ItemLimit::new(counts.placements).unwrap())

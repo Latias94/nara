@@ -361,6 +361,7 @@ impl EditorProjectSession {
                     operation,
                     ScenePatchOperation::SetField { .. }
                         | ScenePatchOperation::SetAssetRefField { .. }
+                        | ScenePatchOperation::ReplaceProperty { .. }
                 )
             })
             && (self.prefab_uses_ui_authoring_domain(document)

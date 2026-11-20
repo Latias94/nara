@@ -1,6 +1,7 @@
 #![cfg(feature = "serde")]
 
 use nara_asset::AssetRef;
+use nara_core::{ByteLimit, DepthLimit, SerdeShapeLimits};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentNumericBound, ComponentNumericInterval,
@@ -10,9 +11,10 @@ use nara_reflect::{
 };
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringPropertyEdit,
-    MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
-    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityRecord, ScenePatchOperation,
+    AuthoringSchemaBasis, MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringSession, PrefabDocument,
+    PrefabDocumentCandidate, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneFileBudgetKind, SceneFileLimits,
+    SceneFormatError, ScenePatchOperation, SchemaReclassificationKind, SchemaReclassificationWork,
 };
 
 fn id() -> SceneEntityId {
@@ -189,19 +191,21 @@ fn construction_rejects_oversized_component_ids_before_retaining_intent() {
         assert_eq!(
             prepared.patch().operations,
             vec![
-                ScenePatchOperation::SetField {
+                ScenePatchOperation::ReplaceProperty {
                     entity: id(),
                     component: ComponentTypeId::new("test.PropertyLimits"),
                     component_version: ComponentSchemaVersion::ONE,
-                    field: ComponentFieldId::new("data"),
-                    value: ComponentValue::map([("text", ComponentValue::String("after".into()),)]),
+                    property: ComponentPropertyPath::new(ComponentFieldId::new("weights"))
+                        .with_steps([ComponentPropertyStep::MapEntry("private-key".into())]),
+                    value: ComponentValue::U64(6),
                 },
-                ScenePatchOperation::SetField {
+                ScenePatchOperation::ReplaceProperty {
                     entity: id(),
                     component: ComponentTypeId::new("test.PropertyLimits"),
                     component_version: ComponentSchemaVersion::ONE,
-                    field: ComponentFieldId::new("weights"),
-                    value: ComponentValue::map([("private-key", ComponentValue::U64(6))]),
+                    property: ComponentPropertyPath::new(ComponentFieldId::new("data"))
+                        .with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("text"))]),
+                    value: ComponentValue::String("after".into()),
                 },
             ]
         );
@@ -296,12 +300,29 @@ fn prefab_property_edits_reuse_the_nominal_owner_and_existing_inverse() {
             .unwrap()
             .publish(),
     );
+    let edits = [edit("middle"), edit("after")];
     let prepared = session
-        .prepare_authoring_property_edit(session.revision(), &[edit("middle"), edit("after")])
+        .prepare_authoring_property_edit(session.revision(), &edits)
         .unwrap();
     assert_eq!(session.document(), &prefab);
-    assert_eq!(prepared.patch().operations.len(), 1);
-    assert_eq!(prepared.inverse().operations.len(), 1);
+    for (patch, expected) in [
+        (prepared.patch(), ["middle", "after"]),
+        (prepared.inverse(), ["middle", "before"]),
+    ] {
+        assert_eq!(patch.operations.len(), expected.len());
+        for (operation, text) in patch.operations.iter().zip(expected) {
+            assert_eq!(
+                operation,
+                &ScenePatchOperation::ReplaceProperty {
+                    entity: id(),
+                    component: edits[0].component.clone(),
+                    component_version: ComponentSchemaVersion::ONE,
+                    property: edits[0].property.clone(),
+                    value: ComponentValue::String(text.into()),
+                }
+            );
+        }
+    }
     assert!(session.commit_authoring_edit(prepared).applied);
     let accepted = session.document().clone();
     assert_eq!(session.history_status().undo_depth, 1);
@@ -309,6 +330,326 @@ fn prefab_property_edits_reuse_the_nominal_owner_and_existing_inverse() {
     assert_eq!(session.document(), &prefab);
     assert!(session.redo_authoring().applied);
     assert_eq!(session.document(), &accepted);
+}
+
+#[test]
+fn scene_and_prefab_mixed_edits_enforce_file_limits_on_the_final_candidate() {
+    let bundle = bundle();
+    let adapter =
+        AuthoringAdapterReceipt::from_schema_owner(&bundle.owners()[0], &Default::default())
+            .unwrap();
+    let old_text = "a".repeat(512);
+    let component = ComponentTypeId::new("test.PropertyLimits");
+    let weights_path = ComponentFieldPath::from_fields(["weights"]);
+    let text_path = ComponentFieldPath::from_fields(["data", "text"]);
+    let mut original = SceneDocument::from_ordered_roots(
+        document()
+            .entities
+            .into_iter()
+            .chain([SceneEntityRecord::new(SceneEntityId::new("spare").unwrap())]),
+    );
+    let value = original.entities[0]
+        .components
+        .get_mut(&component)
+        .unwrap()
+        .value_mut();
+    value
+        .set_path(&text_path, ComponentValue::String(old_text.clone()))
+        .unwrap();
+    let original_size = value.cost().logical_bytes();
+    let extra_key = "b".repeat(256);
+    let expanded_weights = ComponentValue::map([
+        ("private-key", ComponentValue::U64(5)),
+        (extra_key.as_str(), ComponentValue::U64(6)),
+    ]);
+    let growth = expanded_weights.cost().logical_bytes()
+        - value
+            .get_path(&weights_path)
+            .unwrap()
+            .cost()
+            .logical_bytes();
+    let new_text = &old_text[..old_text.len() - growth];
+    let edits = [
+        edit(new_text),
+        AuthoringPropertyEdit {
+            property: ComponentPropertyPath::new(ComponentFieldId::new("weights")),
+            value: expanded_weights.clone(),
+            ..edit("unused")
+        },
+    ];
+    let overflow = [edit(format!("{new_text}x")), edits[1].clone()];
+    let mut expected = original.clone();
+    let value = expected.entities[0]
+        .components
+        .get_mut(&component)
+        .unwrap()
+        .value_mut();
+    value
+        .set_path(&text_path, ComponentValue::String(new_text.into()))
+        .unwrap();
+    value.set_path(&weights_path, expanded_weights).unwrap();
+    assert_eq!(value.cost().logical_bytes(), original_size);
+    let reordered = original
+        .placements
+        .iter()
+        .rev()
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut expected_reordered = expected.clone();
+    expected_reordered.placements = reordered.clone();
+
+    let exact_limits = |encode: &dyn Fn(SceneFileLimits) -> Result<String, SceneFormatError>| {
+        let mut bytes = original_size;
+        while bytes < original_size + growth {
+            let limits = SceneFileLimits::default()
+                .with_component_value_bytes(ByteLimit::new(bytes).unwrap());
+            match encode(limits) {
+                Ok(_) => return limits,
+                Err(SceneFormatError::Budget(budget))
+                    if budget.kind == SceneFileBudgetKind::ComponentValueBytes =>
+                {
+                    assert!(budget.observed > bytes);
+                    bytes = budget.observed;
+                }
+                Err(error) => panic!("unexpected source budget error: {error}"),
+            }
+        }
+        panic!("the fixture must fit only after balancing the property edits");
+    };
+    let scene_limits = exact_limits(&|limits| original.to_json_string_with_limits(limits));
+    let mut scene = SceneAuthoringSession::from_published_authoring_document(
+        SceneDocumentCandidate::decode_json_bytes_with_limits(
+            original.to_json_string().unwrap().as_bytes(),
+            scene_limits,
+        )
+        .unwrap()
+        .admit_authoring(
+            AuthoringDocumentSource::new(AssetRef::path("scenes/mixed-properties.json").unwrap()),
+            &bundle,
+            std::slice::from_ref(&adapter),
+        )
+        .unwrap()
+        .publish(),
+    );
+    let prefab_original =
+        PrefabDocument::new(original.placements.clone(), original.entities.clone());
+    let prefab_expected =
+        PrefabDocument::new(expected.placements.clone(), expected.entities.clone());
+    let prefab_reordered = PrefabDocument::new(reordered.clone(), expected.entities.clone());
+    let prefab_limits = exact_limits(&|limits| prefab_original.to_json_string_with_limits(limits));
+    let mut prefab = PrefabAuthoringSession::from_published_authoring_document(
+        PrefabDocumentCandidate::decode_json_bytes_with_limits(
+            prefab_original.to_json_string().unwrap().as_bytes(),
+            prefab_limits,
+        )
+        .unwrap()
+        .admit_authoring(
+            AuthoringDocumentSource::new(AssetRef::path("prefabs/mixed-properties.json").unwrap()),
+            &bundle,
+            std::slice::from_ref(&adapter),
+        )
+        .unwrap()
+        .publish(),
+    );
+    macro_rules! readmit {
+        ($session:ident, $expected:ident) => {{
+            let before = ($session.revision(), $session.history_status());
+            let next =
+                AuthoringSchemaBasis::admit(&bundle, std::slice::from_ref(&adapter)).unwrap();
+            assert_ne!($session.authoring_schema_basis(), Some(next.clone()));
+            let prepared = $session
+                .prepare_schema_reclassification(
+                    &next,
+                    &SchemaReclassificationKind::DeclarationExtension,
+                    &mut SchemaReclassificationWork::default(),
+                )
+                .unwrap();
+            $session
+                .bind_schema_reclassification(prepared)
+                .unwrap()
+                .commit();
+            assert_eq!($session.authoring_schema_basis(), Some(next));
+            assert_eq!(($session.revision(), $session.history_status()), before);
+            assert_eq!($session.document(), &$expected);
+        }};
+    }
+    macro_rules! assert_history {
+        ($session:ident, $original:ident, $expected:ident, $reordered:ident) => {{
+            let revision = $session.revision();
+            let report = $session
+                .prepare_authoring_property_edit(revision, &overflow)
+                .unwrap_err();
+            assert_eq!(
+                report.diagnostics.iter().next().unwrap().code().as_str(),
+                "scene.authoring-field-edit-format-invalid",
+            );
+            assert_eq!($session.document(), &$original);
+            assert_eq!($session.revision(), revision);
+            assert_eq!($session.history_status().undo_depth, 0);
+
+            let prepared = $session
+                .prepare_authoring_property_edit(revision, &edits)
+                .unwrap();
+            assert!(matches!(
+                prepared.patch().operations.as_slice(),
+                [
+                    ScenePatchOperation::SetField { .. },
+                    ScenePatchOperation::ReplaceProperty { .. }
+                ]
+            ));
+            assert!(matches!(
+                prepared.inverse().operations.as_slice(),
+                [
+                    ScenePatchOperation::ReplaceProperty { .. },
+                    ScenePatchOperation::SetField { .. }
+                ]
+            ));
+            let mut mixed = prepared.patch().clone();
+            mixed.operations.insert(
+                1,
+                ScenePatchOperation::SetPlacements {
+                    expected: $original.placements.clone(),
+                    value: reordered.clone(),
+                },
+            );
+            assert!($session.commit_authoring_edit(prepared).applied);
+            assert_eq!($session.document(), &$expected);
+            assert_eq!($session.history_status().undo_depth, 1);
+            assert!($session.undo_authoring().applied);
+            assert_eq!($session.document(), &$original);
+            assert!($session.redo_authoring().applied);
+            assert_eq!($session.document(), &$expected);
+            assert!($session.undo_authoring().applied);
+            assert_eq!($session.document(), &$original);
+
+            let prepared = $session
+                .prepare_authoring_edit($session.revision(), &mixed)
+                .unwrap();
+            assert!($session.commit_authoring_edit(prepared).applied);
+            assert_eq!($session.document(), &$reordered);
+            readmit!($session, $reordered);
+            assert!($session.undo_authoring().applied);
+            assert_eq!($session.document(), &$original);
+            readmit!($session, $original);
+            assert!($session.redo_authoring().applied);
+            assert_eq!($session.document(), &$reordered);
+        }};
+    }
+    assert_history!(scene, original, expected, expected_reordered);
+    assert_history!(prefab, prefab_original, prefab_expected, prefab_reordered);
+}
+
+#[test]
+fn a_coalesced_root_can_discard_a_deep_intermediate_value_before_publication() {
+    let component = ComponentTypeId::new("test.DeepProperty");
+    let root = ComponentFieldId::new("settings");
+    let shape = (0..34).fold(ComponentValueKind::U64.into(), |item, _| {
+        ComponentValueShape::list(item)
+    });
+    let schema = ComponentSchema::new(
+        component.clone(),
+        "Deep property",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields([ComponentFieldSchema::required(
+        root.clone(),
+        "Settings",
+        ComponentFieldPath::from_fields(["settings"]),
+        ComponentValueShape::record_members([
+            ComponentShapeMember::new("tree", shape).with_id(ComponentFieldId::new("tree")),
+            ComponentShapeMember::new("label", ComponentValueKind::String)
+                .with_id(ComponentFieldId::new("label")),
+        ]),
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
+    let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+        PersistentComponentSchemaOwnerId::try_new("test.deep-property").unwrap(),
+        ComponentSchemaCatalog {
+            components: vec![schema],
+            ..Default::default()
+        },
+        None,
+    )])
+    .unwrap();
+    let adapter =
+        AuthoringAdapterReceipt::from_schema_owner(&bundle.owners()[0], &Default::default())
+            .unwrap();
+    let settings = |label: &str| {
+        ComponentValue::map([
+            ("tree", ComponentValue::List(Vec::new())),
+            ("label", ComponentValue::String(label.into())),
+        ])
+    };
+    let document = |label| {
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(id()).with_component(
+            component.clone(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([("settings", settings(label))]),
+            ),
+        )])
+    };
+    let original = document("before");
+    let limits = SceneFileLimits::default();
+    let shape = limits.shape();
+    let limits = limits.with_shape(SerdeShapeLimits::new(
+        DepthLimit::new(32).unwrap(),
+        shape.nodes(),
+        shape.container_items(),
+        shape.string_bytes(),
+        shape.total_string_bytes(),
+    ));
+    let mut session = SceneAuthoringSession::from_published_authoring_document(
+        SceneDocumentCandidate::decode_json_bytes_with_limits(
+            original.to_json_string().unwrap().as_bytes(),
+            limits,
+        )
+        .unwrap()
+        .admit_authoring(
+            AuthoringDocumentSource::new(AssetRef::path("scenes/deep-property.json").unwrap()),
+            &bundle,
+            &[adapter],
+        )
+        .unwrap()
+        .publish(),
+    );
+    let insert_deep = AuthoringPropertyEdit {
+        entity: id(),
+        component: component.clone(),
+        component_version: ComponentSchemaVersion::ONE,
+        property: ComponentPropertyPath::new(root.clone())
+            .with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("tree"))]),
+        value: (0..34).fold(ComponentValue::U64(1), |item, _| {
+            ComponentValue::List(vec![item])
+        }),
+    };
+    let revision = session.revision();
+    let overflow = session
+        .prepare_authoring_property_edit(revision, std::slice::from_ref(&insert_deep))
+        .unwrap_err();
+    assert_eq!(
+        overflow.diagnostics.iter().next().unwrap().code().as_str(),
+        "scene.authoring-field-edit-format-invalid"
+    );
+    assert_eq!(session.revision(), revision);
+    assert_eq!(session.document(), &original);
+    let reset = AuthoringPropertyEdit {
+        property: ComponentPropertyPath::new(root),
+        value: settings("after"),
+        ..insert_deep.clone()
+    };
+    let prepared = session
+        .prepare_authoring_property_edit(revision, &[insert_deep, reset])
+        .unwrap();
+    assert!(matches!(
+        prepared.patch().operations.as_slice(),
+        [ScenePatchOperation::SetField { .. }]
+    ));
+    assert!(session.commit_authoring_edit(prepared).applied);
+    assert_eq!(session.document(), &document("after"));
+    assert!(session.undo_authoring().applied);
+    assert_eq!(session.document(), &original);
 }
 
 #[test]

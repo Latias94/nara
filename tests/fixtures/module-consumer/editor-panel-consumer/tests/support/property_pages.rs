@@ -1,16 +1,24 @@
-//! A registered panel computes a durable edit from bounded pages in a non-active source.
+//! Registered panels review and commit edits from bounded reads of non-active sources.
 
 use super::*;
 
 use nara::{
-    reflect::{ComponentFieldPathSegment, ComponentShapeMember, ComponentValueShape},
-    scene::AuthoringRecordReadiness,
+    diagnostic::DiagnosticValueRef,
+    project_host::EditorEditPreparationError,
+    reflect::{
+        ComponentFieldPathSegment, ComponentPropertyError, ComponentPropertyKey,
+        ComponentPropertyStep, ComponentShapeMember, ComponentValueShape,
+    },
+    scene::{AuthoringReadError, AuthoringRecordReadiness},
 };
-use nara_editor::{EditorPanel, EditorPanelContext, EditorPanelHost, workspace::EditorPanelTarget};
+use nara_editor::{
+    EditorPanel, EditorPanelContext, EditorPanelHost,
+    workspace::{EditorPanelInstanceId, EditorPanelTarget},
+};
 use nara_tooling::{
-    EditorPersistenceView, EditorPropertyPage, EditorPropertyPageData, EditorPropertyPageItem,
-    EditorPropertyPagePosition, EditorPropertyPageRead, EditorPropertyPageValue,
-    EditorWorkspaceCommandReport, MAX_EDITOR_PROPERTY_READ_LOGICAL_BYTES,
+    EditorDocumentDigest, EditorPersistenceView, EditorPropertyPage, EditorPropertyPageData,
+    EditorPropertyPageItem, EditorPropertyPagePosition, EditorPropertyPageRead,
+    EditorPropertyPageValue, EditorWorkspaceCommandReport, MAX_EDITOR_PROPERTY_READ_LOGICAL_BYTES,
     MAX_EDITOR_PROPERTY_READ_VALUE_NODES,
 };
 
@@ -20,8 +28,44 @@ const STARTUP: &str = "scenes/startup.scene.json";
 const SAMPLE_COUNT: usize = 4_097;
 const ORIGINAL_SCORE: u64 = 7;
 const UPDATED_SCORE: u64 = 42;
+const OLD_ROW_KEY: &str = "chosen/original";
+const NEW_ROW_KEY: &str = "chosen/renamed";
+const INTERMEDIATE_ROW_SCORE: u64 = 19;
 
 fn schemas() -> AuthoringSchemaBundle {
+    schema_bundle([
+        ComponentFieldSchema::required(
+            ComponentFieldId::new("samples"),
+            "Samples",
+            ComponentFieldPath::from_fields(["wire_samples"]),
+            ComponentValueShape::list(ComponentValueKind::U64.into()),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+        ComponentFieldSchema::required(
+            ComponentFieldId::new("score"),
+            "Score",
+            ComponentFieldPath::from_fields(["wire_score"]),
+            ComponentValueKind::U64,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("bonuses"),
+            "Bonuses",
+            ComponentFieldPath::from_fields(["wire_bonuses"]),
+            ComponentValueShape::list(ComponentValueShape::record_members([
+                ComponentShapeMember::new("wire_bonus", ComponentValueKind::U64)
+                    .with_id(ComponentFieldId::new("bonus")),
+            ])),
+            ComponentValue::List(vec![ComponentValue::map([(
+                "wire_bonus",
+                ComponentValue::U64(3),
+            )])]),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+    ])
+}
+
+fn schema_bundle(fields: impl IntoIterator<Item = ComponentFieldSchema>) -> AuthoringSchemaBundle {
     AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
         PersistentComponentSchemaOwnerId::try_new(OWNER).unwrap(),
         ComponentSchemaCatalog {
@@ -32,36 +76,7 @@ fn schemas() -> AuthoringSchemaBundle {
                     ComponentSchemaVersion::ONE,
                 )
                 .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-                .with_fields([
-                    ComponentFieldSchema::required(
-                        ComponentFieldId::new("samples"),
-                        "Samples",
-                        ComponentFieldPath::from_fields(["wire_samples"]),
-                        ComponentValueShape::list(ComponentValueKind::U64.into()),
-                    )
-                    .with_capabilities(ComponentCapability::SCENE_AUTHORING),
-                    ComponentFieldSchema::required(
-                        ComponentFieldId::new("score"),
-                        "Score",
-                        ComponentFieldPath::from_fields(["wire_score"]),
-                        ComponentValueKind::U64,
-                    )
-                    .with_capabilities(ComponentCapability::SCENE_AUTHORING),
-                    ComponentFieldSchema::optional_with_default(
-                        ComponentFieldId::new("bonuses"),
-                        "Bonuses",
-                        ComponentFieldPath::from_fields(["wire_bonuses"]),
-                        ComponentValueShape::list(ComponentValueShape::record_members([
-                            ComponentShapeMember::new("wire_bonus", ComponentValueKind::U64)
-                                .with_id(ComponentFieldId::new("bonus")),
-                        ])),
-                        ComponentValue::List(vec![ComponentValue::map([(
-                            "wire_bonus",
-                            ComponentValue::U64(3),
-                        )])]),
-                    )
-                    .with_capabilities(ComponentCapability::SCENE_AUTHORING),
-                ]),
+                .with_fields(fields),
             ],
             ..Default::default()
         },
@@ -440,31 +455,29 @@ fn a_registered_panel_pages_values_and_round_trips_a_nonactive_prefab_edit() {
     );
 }
 
-fn round_trip(kind: EditorDocumentKind, source: &str) {
-    let project = text_project::TextProject::new();
+fn open_nonactive_source(
+    project: &text_project::TextProject,
+    kind: EditorDocumentKind,
+    source: &str,
+    schemas: AuthoringSchemaBundle,
+    entities: impl IntoIterator<Item = SceneEntityRecord>,
+) -> (Application, EditorDocumentId, String, String) {
     fs::write(
         project.root.join("schema/authoring.bundle.json"),
-        schemas().to_json_string().unwrap(),
+        schemas.to_json_string().unwrap(),
     )
     .unwrap();
     let startup = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("active"))])
         .to_json_string()
         .unwrap();
-    let startup_path = project.root.join(STARTUP);
-    fs::write(&startup_path, &startup).unwrap();
-    let entities = [SceneEntityRecord::new(id("anchor")).with_component(
-        ComponentTypeId::new(COMPONENT),
-        SceneComponentRecord::new(ComponentSchemaVersion::ONE, component_value(ORIGINAL_SCORE))
-            .with_owner(PersistentComponentSchemaOwnerId::try_new(OWNER).unwrap()),
-    )];
+    fs::write(project.root.join(STARTUP), &startup).unwrap();
     let original = match kind {
         EditorDocumentKind::Scene => SceneDocument::from_ordered_roots(entities).to_json_string(),
         EditorDocumentKind::Prefab => PrefabDocument::from_ordered_roots(entities).to_json_string(),
         EditorDocumentKind::Extension(_) => unreachable!(),
     }
     .unwrap();
-    let source_path = project.root.join(source);
-    fs::write(&source_path, &original).unwrap();
+    fs::write(project.root.join(source), &original).unwrap();
 
     let mut app = Application(EditorApplication::new(EditorLaunchOptions::new(
         &project.root,
@@ -532,31 +545,45 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
     assert_eq!(initial_tab.kind, kind);
     assert!(initial_tab.source_binding.is_some());
     assert!(!initial_tab.dirty);
-    let assert_navigation = |app: &EditorApplication| {
-        let current = frame(app);
-        let workspace = current.workspace();
-        assert_eq!(workspace.active_document, Some(active));
-        assert_eq!(workspace.active_scene.as_ref(), Some(initial_scene));
-        assert_eq!(current.scene_preview_document(), Some(active));
-        assert_eq!(
-            workspace.documents.len(),
-            initial.workspace().documents.len()
-        );
-        assert_eq!(
-            workspace.document(active),
-            initial.workspace().document(active)
-        );
-        let tab = workspace.document(document).unwrap();
-        assert_eq!(tab.source_binding, initial_tab.source_binding);
-        assert_eq!(
-            tab.authoring_schema_basis,
-            initial_tab.authoring_schema_basis
-        );
-    };
+    assert_eq!(
+        (
+            initial_tab.history.undo_depth,
+            initial_tab.history.redo_depth
+        ),
+        (0, 0)
+    );
+    (app, document, original, startup)
+}
 
+fn assert_navigation(
+    app: &EditorApplication,
+    initial: &EditorFrameModel,
+    document: EditorDocumentId,
+) {
+    let current = frame(app);
+    let workspace = current.workspace();
+    let original = initial.workspace();
+    let active = original.active_document.unwrap();
+    assert_eq!(workspace.active_document, Some(active));
+    assert_eq!(workspace.active_scene, original.active_scene);
+    assert_eq!(current.scene_preview_document(), Some(active));
+    assert_eq!(workspace.documents.len(), original.documents.len());
+    assert_eq!(workspace.document(active), original.document(active));
+    let tab = workspace.document(document).unwrap();
+    let initial_tab = original.document(document).unwrap();
+    assert_eq!(tab.source_binding, initial_tab.source_binding);
+    assert_eq!(
+        tab.authoring_schema_basis,
+        initial_tab.authoring_schema_basis
+    );
+}
+
+fn register_panel(
+    app: &mut EditorApplication,
+) -> (EditorPanelHost<PropertyPagesPanel>, EditorPanelInstanceId) {
     let mut host = EditorPanelHost::new();
     host.register_panel(
-        &mut app,
+        app,
         EditorPanelDescriptor::new(
             PANEL,
             "Property value pages",
@@ -571,6 +598,26 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
         .panel_workspace_mut()
         .open(PANEL, EditorPanelTarget::Workspace)
         .unwrap();
+    (host, instance)
+}
+
+fn round_trip(kind: EditorDocumentKind, source: &str) {
+    let project = text_project::TextProject::new();
+    let entities = [SceneEntityRecord::new(id("anchor")).with_component(
+        ComponentTypeId::new(COMPONENT),
+        SceneComponentRecord::new(ComponentSchemaVersion::ONE, component_value(ORIGINAL_SCORE))
+            .with_owner(PersistentComponentSchemaOwnerId::try_new(OWNER).unwrap()),
+    )];
+    let (mut app, document, original, startup) =
+        open_nonactive_source(&project, kind, source, schemas(), entities);
+    let source_path = project.root.join(source);
+    let startup_path = project.root.join(STARTUP);
+    let initial = frame(&app);
+    let active = initial.workspace().active_document.unwrap();
+    let initial_tab = initial.workspace().document(document).unwrap();
+    let assert_navigation = |app: &EditorApplication| assert_navigation(app, &initial, document);
+
+    let (mut host, instance) = register_panel(&mut app);
     let mut observation = None;
     let submission = host
         .prepare(&app, |panel, context| {
@@ -896,4 +943,477 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
         app.close(),
         "the property pages project did not physically retire"
     );
+}
+
+fn keyed_rows_schema() -> AuthoringSchemaBundle {
+    schema_bundle([
+        ComponentFieldSchema::required(
+            ComponentFieldId::new("rows"),
+            "Rows",
+            ComponentFieldPath::from_fields(["wire_rows"]),
+            ComponentValueShape::keyed_list(
+                ComponentValueShape::record_members([
+                    ComponentShapeMember::new("wire_key", ComponentValueKind::String)
+                        .with_id(ComponentFieldId::new("id")),
+                    ComponentShapeMember::new("wire_score", ComponentValueKind::U64)
+                        .with_id(ComponentFieldId::new("score")),
+                ]),
+                ComponentFieldId::new("id"),
+            ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+        ComponentFieldSchema::required(
+            ComponentFieldId::new("note"),
+            "Note",
+            ComponentFieldPath::from_fields(["wire_note"]),
+            ComponentValueKind::String,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+    ])
+}
+
+fn keyed_rows_entity() -> SceneEntityRecord {
+    let row = |key, score| {
+        ComponentValue::map([
+            ("wire_key", ComponentValue::String(key)),
+            ("wire_score", ComponentValue::U64(score)),
+        ])
+    };
+    let rows = (0..SAMPLE_COUNT - 1)
+        .map(|index| row(format!("row-{index}"), index as u64))
+        .chain([row(OLD_ROW_KEY.into(), ORIGINAL_SCORE)])
+        .collect();
+    SceneEntityRecord::new(id("anchor"))
+        .with_component(
+            ComponentTypeId::new(COMPONENT),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([
+                    ("wire_rows", ComponentValue::List(rows)),
+                    ("wire_note", ComponentValue::String("keep this note".into())),
+                ]),
+            )
+            .with_owner(PersistentComponentSchemaOwnerId::try_new(OWNER).unwrap()),
+        )
+        .with_component(
+            ComponentTypeId::new("consumer.Unknown"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(7),
+                ComponentValue::String("preserve exactly".into()),
+            ),
+        )
+}
+
+fn keyed_read(basis: &EditorDocumentQueryBasis, key: &str, member: &str) -> EditorPropertyRead {
+    EditorPropertyRead {
+        target: EditorPropertyTarget {
+            basis: basis.clone(),
+            entity: id("anchor"),
+            component: ComponentTypeId::new(COMPONENT),
+            property: ComponentPropertyPath::new(ComponentFieldId::new("rows")).with_steps([
+                ComponentPropertyStep::ListItem {
+                    by: ComponentFieldId::new("id"),
+                    key: ComponentPropertyKey::String(key.into()),
+                },
+                ComponentPropertyStep::Member(ComponentFieldId::new(member)),
+            ]),
+        },
+        limits: EditorPropertyReadLimits::new(128, 1, 32)
+            .unwrap()
+            .with_scan_limits(2 * SAMPLE_COUNT + 32, 128 * 1024)
+            .unwrap(),
+    }
+}
+
+fn missing_row(key: &str) -> EditorDocumentQueryRejection {
+    EditorDocumentQueryRejection::Source(AuthoringReadError::Property(
+        ComponentPropertyError::ListItemNotFound {
+            step: 0,
+            key: ComponentPropertyKey::String(key.into()),
+        },
+    ))
+}
+
+fn prepare_keyed_edit(
+    context: &EditorPanelContext<'_, '_>,
+    captured: &EditorDocumentQueryBasis,
+) -> PreparedEditorDocumentEdit {
+    let old_score = keyed_read(captured, OLD_ROW_KEY, "score");
+    let old_key = keyed_read(captured, OLD_ROW_KEY, "id");
+    let new_score = keyed_read(captured, NEW_ROW_KEY, "score");
+    let new_key = keyed_read(captured, NEW_ROW_KEY, "id");
+    let mut rows = old_score.target.clone();
+    rows.property.steps.clear();
+    let limits = EditorPropertyReadLimits::new(128, 2, 32)
+        .unwrap()
+        .with_scan_limits(32, 1024)
+        .unwrap();
+    let first = context
+        .read_document_property_page(root_page_request(rows.clone(), limits))
+        .unwrap();
+    assert_page_limits(&first, limits);
+    assert_eq!(first.target(), &rows);
+    assert_eq!(
+        first.value,
+        EditorPropertyPageValue::Present(EditorPropertyPageData::List {
+            total_items: SAMPLE_COUNT,
+            start: 0,
+            items: vec![EditorPropertyPageItem::Map { len: 2 }],
+        })
+    );
+    assert!(first.next.is_some());
+
+    let before = context.read_document_property(old_score.clone()).unwrap();
+    assert_eq!(before.target, old_score.target);
+    assert_eq!(before.value_nodes, 1);
+    assert_eq!(before.value_logical_bytes, 8);
+    assert!(before.scanned_entries <= old_score.limits.max_scan_entries());
+    assert!(before.scanned_logical_bytes <= old_score.limits.max_scan_logical_bytes());
+    assert_eq!(
+        before.value,
+        EditorPropertyValue::Present(ComponentValue::U64(ORIGINAL_SCORE))
+    );
+
+    let write = |request: &EditorPropertyRead, value| AuthoringPropertyEdit {
+        entity: request.target.entity.clone(),
+        component: request.target.component.clone(),
+        component_version: ComponentSchemaVersion::ONE,
+        property: request.target.property.clone(),
+        value,
+    };
+    let edits = [
+        write(&old_score, ComponentValue::U64(INTERMEDIATE_ROW_SCORE)),
+        write(&old_key, ComponentValue::String(NEW_ROW_KEY.into())),
+        write(&new_score, ComponentValue::U64(UPDATED_SCORE)),
+    ];
+    let mut wrong_final = edits.clone();
+    wrong_final[2].property = old_score.target.property.clone();
+    let error = context
+        .prepare_authoring_property_edit(captured, &wrong_final)
+        .unwrap_err();
+    let EditorEditPreparationError::Document(rejected) = error else {
+        panic!("the old key must be rejected at the final write: {error:?}");
+    };
+    assert!(!rejected.applied);
+    assert!(rejected.patch_report.as_ref().unwrap().inverse.is_none());
+    assert!(rejected.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.authoring-property-edit-rejected"
+            && diagnostic.fields().iter().any(|field| {
+                field.key().as_str() == "operation-index"
+                    && field.value() == DiagnosticValueRef::Unsigned(2)
+            })
+            && diagnostic.fields().iter().any(|field| {
+                field.key().as_str() == "property-error-kind"
+                    && field.value() == DiagnosticValueRef::Identifier("list-item-not-found")
+            })
+    }));
+    assert_eq!(
+        context.read_document_property(old_score.clone()),
+        Ok(before)
+    );
+    assert_eq!(
+        context.read_document_property(new_score.clone()),
+        Err(missing_row(NEW_ROW_KEY))
+    );
+
+    let prepared = context
+        .prepare_authoring_property_edit(captured, &edits)
+        .expect("the three leaf writes must fit without replaying the authored list");
+    let replace = |edit: AuthoringPropertyEdit| ScenePatchOperation::ReplaceProperty {
+        entity: edit.entity,
+        component: edit.component,
+        component_version: edit.component_version,
+        property: edit.property,
+        value: edit.value,
+    };
+    assert_eq!(prepared.patch().operations.as_slice(), &edits.map(replace));
+    let inverse = [
+        write(&new_score, ComponentValue::U64(INTERMEDIATE_ROW_SCORE)),
+        write(&new_key, ComponentValue::String(OLD_ROW_KEY.into())),
+        write(&old_score, ComponentValue::U64(ORIGINAL_SCORE)),
+    ];
+    assert_eq!(
+        prepared.inverse().operations.as_slice(),
+        &inverse.map(replace)
+    );
+    assert_eq!(
+        prepared.preview_property(old_score),
+        Err(missing_row(OLD_ROW_KEY))
+    );
+    assert_eq!(
+        prepared.preview_property(new_key).unwrap().value,
+        EditorPropertyValue::Present(ComponentValue::String(NEW_ROW_KEY.into()))
+    );
+    let proposed = prepared.preview_property(new_score.clone()).unwrap();
+    assert_eq!(proposed.target, new_score.target);
+    assert_eq!(
+        proposed.value,
+        EditorPropertyValue::Present(ComponentValue::U64(UPDATED_SCORE))
+    );
+    let page = prepared
+        .preview_property_page(root_page_request(
+            new_score.target.clone(),
+            new_score.limits,
+        ))
+        .unwrap();
+    assert_eq!(page.target(), &new_score.target);
+    assert!(page.next.is_none());
+    assert_page_limits(&page, new_score.limits);
+    assert_eq!(
+        page.value,
+        EditorPropertyPageValue::Present(EditorPropertyPageData::Scalar(ComponentValue::U64(
+            UPDATED_SCORE,
+        )))
+    );
+    prepared
+}
+
+fn assert_keyed_score(
+    app: &EditorApplication,
+    document: EditorDocumentId,
+    key: &str,
+    absent_key: &str,
+    score: u64,
+) {
+    let captured = basis(app, document);
+    assert_eq!(
+        app.read_document_property(keyed_read(&captured, key, "score"))
+            .unwrap()
+            .value,
+        EditorPropertyValue::Present(ComponentValue::U64(score))
+    );
+    assert_eq!(
+        app.read_document_property(keyed_read(&captured, absent_key, "score")),
+        Err(missing_row(absent_key))
+    );
+}
+
+#[test]
+fn a_registered_panel_round_trips_large_keyed_list_edits_on_a_nonactive_scene() {
+    round_trip_keyed_edit(EditorDocumentKind::Scene, "scenes/keyed-rows.scene.json");
+}
+
+#[test]
+fn a_registered_panel_round_trips_large_keyed_list_edits_on_a_nonactive_prefab() {
+    round_trip_keyed_edit(EditorDocumentKind::Prefab, "prefabs/keyed-rows.prefab.json");
+}
+
+fn round_trip_keyed_edit(kind: EditorDocumentKind, source: &str) {
+    let project = text_project::TextProject::new();
+    let (mut app, document, original, startup) = open_nonactive_source(
+        &project,
+        kind,
+        source,
+        keyed_rows_schema(),
+        [keyed_rows_entity()],
+    );
+    let source_path = project.root.join(source);
+    let initial = frame(&app);
+    let active = initial.workspace().active_document.unwrap();
+    let mut token = None;
+    let (mut host, instance) = register_panel(&mut app);
+    let review = host
+        .prepare(&app, |panel, context| {
+            assert!(context.model().document().is_none());
+            assert_eq!(
+                context.model().frame().workspace().active_document,
+                Some(active)
+            );
+            let captured = context.document_query_basis(document).unwrap();
+            let prepared = prepare_keyed_edit(context, &captured);
+            assert_eq!(prepared.document(), document);
+            assert_eq!(prepared.document_kind(), kind);
+            assert_eq!(prepared.base_revision(), captured.revision);
+            assert!(panel.retained.replace(prepared).is_none());
+            assert!(token.replace(context.instance_token()).is_none());
+        })
+        .unwrap();
+    assert_eq!(review.submissions().len(), 0);
+    host.submit_and_drive(&mut app, review, Duration::ZERO);
+    let token = token.unwrap();
+    assert_eq!(token.instance(), instance);
+    assert_eq!(
+        frame(&app).workspace().documents,
+        initial.workspace().documents
+    );
+    assert_keyed_score(&app, document, OLD_ROW_KEY, NEW_ROW_KEY, ORIGINAL_SCORE);
+    assert_navigation(&app, &initial, document);
+    assert_eq!(fs::read_to_string(&source_path).unwrap(), original);
+
+    let commit = host
+        .prepare(&app, |panel, context| {
+            assert!(context.matches_instance(&token));
+            assert!(panel.completion.is_none());
+            context
+                .commit_authoring_edit(panel.retained.take().unwrap())
+                .unwrap();
+        })
+        .unwrap();
+    assert_eq!(commit.submissions().len(), 1);
+    let (origin, submitted) = commit.submissions().next().unwrap();
+    assert_eq!(origin, instance);
+    assert_eq!(
+        frame(&app).workspace().documents,
+        initial.workspace().documents
+    );
+    host.submit_and_drive(&mut app, commit, Duration::ZERO);
+    let edited = frame(&app);
+    let tab = edited.workspace().document(document).unwrap();
+    host.inspect(&app, &token, |panel, _| {
+        let report = panel.completed(submitted);
+        assert!(report.applied, "{:?}", report.diagnostics);
+        assert_eq!(report.document, Some(document));
+        assert_eq!(report.active_document, Some(active));
+        assert_eq!(report.revision, Some(tab.revision));
+    })
+    .unwrap();
+    let initial_tab = initial.workspace().document(document).unwrap();
+    assert_ne!(tab.revision, initial_tab.revision);
+    assert_eq!(tab.revision.source_id(), initial_tab.revision.source_id());
+    assert!(tab.dirty);
+    assert_eq!(tab.saved_revision, initial_tab.saved_revision);
+    assert_eq!((tab.history.undo_depth, tab.history.redo_depth), (1, 0));
+    assert_keyed_score(&app, document, NEW_ROW_KEY, OLD_ROW_KEY, UPDATED_SCORE);
+    assert_navigation(&app, &initial, document);
+    assert_eq!(fs::read_to_string(&source_path).unwrap(), original);
+
+    let original: serde_json::Value = serde_json::from_str(&original).unwrap();
+    let mut expected_edit = original.clone();
+    let component = &mut expected_edit["payload"]["entities"][0]["components"][COMPONENT]["value"];
+    let rows = component["value"]["wire_rows"]["value"]
+        .as_array_mut()
+        .unwrap();
+    assert_eq!(rows.len(), SAMPLE_COUNT);
+    let last = &mut rows.last_mut().unwrap()["value"];
+    assert_eq!(last["wire_key"]["value"], OLD_ROW_KEY);
+    assert_eq!(last["wire_score"]["value"], ORIGINAL_SCORE);
+    last["wire_key"]["value"] = NEW_ROW_KEY.into();
+    last["wire_score"]["value"] = UPDATED_SCORE.into();
+
+    let mut saved = save_exact_source(&mut app, document, &source_path, &expected_edit);
+    assert_navigation(&app, &initial, document);
+    for (redo, key, absent_key, score, expected) in [
+        (false, OLD_ROW_KEY, NEW_ROW_KEY, ORIGINAL_SCORE, &original),
+        (
+            true,
+            NEW_ROW_KEY,
+            OLD_ROW_KEY,
+            UPDATED_SCORE,
+            &expected_edit,
+        ),
+    ] {
+        let (checkpoint, _, disk_bytes) = &saved;
+        let base_revision = checkpoint.revision;
+        let action = if redo {
+            EditorDocumentMutation::Redo {
+                document,
+                base_revision,
+            }
+        } else {
+            EditorDocumentMutation::Undo {
+                document,
+                base_revision,
+            }
+        };
+        let result = submit(&mut app, EditorAction::Mutate(action));
+        assert!(
+            matches!(
+                result.actions(),
+                [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(
+                    report,
+                ))] if report.applied && report.document == Some(document)
+                    && report.active_document == Some(active)
+            ),
+            "{result:?}"
+        );
+        assert_keyed_score(&app, document, key, absent_key, score);
+        let current = frame(&app);
+        let tab = current.workspace().document(document).unwrap();
+        assert!(tab.dirty);
+        assert_eq!(
+            (tab.history.undo_depth, tab.history.redo_depth),
+            (usize::from(redo), usize::from(!redo))
+        );
+        assert_navigation(&app, &initial, document);
+        assert_eq!(&fs::read(&source_path).unwrap(), disk_bytes);
+        saved = save_exact_source(&mut app, document, &source_path, expected);
+        assert_navigation(&app, &initial, document);
+    }
+
+    let (saving, digest, saved_bytes) = saved;
+    let opened = persist(
+        &mut app,
+        EditorPersistenceAction::Reopen {
+            target: EditorReopenTarget::OpenDocument {
+                document,
+                base_revision: saving.revision,
+            },
+        },
+    );
+    let reopened = frame(&app);
+    let tab = reopened.workspace().document(document).unwrap();
+    assert_eq!(
+        opened,
+        EditorPersistenceResult::Opened {
+            document,
+            revision: tab.revision,
+            digest,
+        }
+    );
+    assert_ne!(tab.revision.source_id(), saving.revision.source_id());
+    assert_eq!(tab.saved_revision, tab.revision);
+    assert!(!tab.dirty);
+    assert_eq!((tab.history.undo_depth, tab.history.redo_depth), (0, 0));
+    assert_eq!(
+        app.read_document_property(keyed_read(&saving, NEW_ROW_KEY, "score")),
+        Err(EditorDocumentQueryRejection::StaleIncarnation)
+    );
+    assert_keyed_score(&app, document, NEW_ROW_KEY, OLD_ROW_KEY, UPDATED_SCORE);
+    assert_navigation(&app, &initial, document);
+    assert_eq!(fs::read(source_path).unwrap(), saved_bytes);
+    assert_eq!(
+        fs::read_to_string(project.root.join(STARTUP)).unwrap(),
+        startup
+    );
+    assert!(
+        app.close(),
+        "the keyed-list project did not physically retire"
+    );
+}
+
+fn save_exact_source(
+    app: &mut EditorApplication,
+    document: EditorDocumentId,
+    path: &std::path::Path,
+    expected: &serde_json::Value,
+) -> (EditorDocumentQueryBasis, EditorDocumentDigest, Vec<u8>) {
+    let saving = basis(app, document);
+    let saved = persist(
+        app,
+        EditorPersistenceAction::Save {
+            document,
+            base_revision: saving.revision,
+        },
+    );
+    let EditorPersistenceResult::Saved {
+        document: saved_document,
+        revision,
+        digest,
+    } = saved
+    else {
+        panic!("the keyed-list source must save: {saved:?}");
+    };
+    assert_eq!(saved_document, document);
+    assert_eq!(revision, saving.revision);
+    let current = frame(app);
+    let tab = current.workspace().document(document).unwrap();
+    assert_eq!(tab.saved_revision, saving.revision);
+    assert!(!tab.dirty);
+    let bytes = fs::read(path).unwrap();
+    assert_eq!(
+        &serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+        expected,
+        "the complete normalized source must match after saving revision {revision:?}"
+    );
+    (saving, digest, bytes)
 }

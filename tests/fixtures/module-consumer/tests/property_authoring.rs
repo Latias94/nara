@@ -25,7 +25,7 @@ use nara_reflect::{
 };
 use nara_scene::{
     AuthoringDocumentReadiness, AuthoringOverlayPathSegment, AuthoringOverlayRecordSlot,
-    AuthoringPropertyEdit, AuthoringRecordLocation, AuthoringRecordReadiness,
+    AuthoringPropertyEdit, AuthoringReadError, AuthoringRecordLocation, AuthoringRecordReadiness,
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
     PrefabDeclarationLimits, PrefabDocument, PrefabDocumentCandidate, PrefabEntityOrigin,
     PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabInstancePath, PrefabOverlay,
@@ -38,11 +38,12 @@ use nara_scene::{
 };
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId, EditorDocumentKind,
-    EditorDocumentMutation, EditorDocumentOpenResult, EditorDocumentQueryRejection,
-    EditorNavigationAction, EditorPersistenceAction, EditorPersistenceRequestResult,
-    EditorPersistenceResult, EditorProjectBrowserAction, EditorProjectBrowserActionOutcome,
-    EditorPropertyRead, EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue,
-    PrefabCompositionCommand, PrefabCompositionEntityDraft, PrefabCompositionOutcome,
+    EditorDocumentMutation, EditorDocumentOpenResult, EditorDocumentQueryBasis,
+    EditorDocumentQueryRejection, EditorNavigationAction, EditorPersistenceAction,
+    EditorPersistenceRequestResult, EditorPersistenceResult, EditorProjectBrowserAction,
+    EditorProjectBrowserActionOutcome, EditorPropertyRead, EditorPropertyReadLimits,
+    EditorPropertyTarget, EditorPropertyValue, PrefabCompositionCommand,
+    PrefabCompositionEntityDraft, PrefabCompositionOutcome, PreparedEditorDocumentEdit,
     SceneCompositionCommand, SceneCompositionEntityKind,
 };
 
@@ -237,6 +238,16 @@ fn edit(
         component_version: ComponentSchemaVersion::ONE,
         property: ComponentPropertyPath::new(ComponentFieldId::new("settings")).with_steps(steps),
         value,
+    }
+}
+
+fn replace_property(edit: AuthoringPropertyEdit) -> ScenePatchOperation {
+    ScenePatchOperation::ReplaceProperty {
+        entity: edit.entity,
+        component: edit.component,
+        component_version: edit.component_version,
+        property: edit.property,
+        value: edit.value,
     }
 }
 
@@ -815,7 +826,7 @@ fn session_preparation_requires_the_exact_schema_admission_for_scene_and_prefab(
 }
 
 #[test]
-fn nested_writes_coalesce_and_keep_exact_basis_history_and_saved_records() {
+fn ordered_nested_writes_keep_exact_basis_history_and_saved_records() {
     for source in [SCENE, PREFAB] {
         let project = Project::new();
         let mut editor = open_project(&project);
@@ -828,13 +839,21 @@ fn nested_writes_coalesce_and_keep_exact_basis_history_and_saved_records() {
             edit([step("stats"), step("hp")], ComponentValue::U64(30)),
             edit([step("stats"), step("mp")], ComponentValue::U64(40)),
         ];
+        let forward = ScenePatchDocument::new(edits.clone().map(replace_property));
+        let inverse = ScenePatchDocument::new(
+            [
+                edit([step("stats"), step("mp")], ComponentValue::U64(20)),
+                edit([step("stats"), step("hp")], ComponentValue::U64(10)),
+            ]
+            .map(replace_property),
+        );
         let expected = settings(30, 40, "a", 1, "before");
 
         let cancelled = editor
             .prepare_authoring_property_edit(&basis, &edits)
             .unwrap();
-        assert_eq!(cancelled.patch(), &patch(expected.clone()));
-        assert_eq!(cancelled.inverse(), &patch(initial()));
+        assert_eq!(cancelled.patch(), &forward);
+        assert_eq!(cancelled.inverse(), &inverse);
         drop(cancelled);
         editor.drive_editor_frame(Duration::ZERO);
         assert_eq!(editor.current_frame().workspace(), before.workspace());
@@ -855,7 +874,8 @@ fn nested_writes_coalesce_and_keep_exact_basis_history_and_saved_records() {
             }
         );
         assert_eq!(prepared.base_revision(), basis.revision);
-        assert_eq!(prepared.patch(), &patch(expected.clone()));
+        assert_eq!(prepared.patch(), &forward);
+        assert_eq!(prepared.inverse(), &inverse);
         editor.drive_editor_frame(Duration::ZERO);
         assert_eq!(editor.current_frame().workspace(), before.workspace());
         assert_applied(editor.commit_authoring_edit(prepared));
@@ -939,6 +959,12 @@ fn nested_writes_coalesce_and_keep_exact_basis_history_and_saved_records() {
 
 #[test]
 fn key_changes_resolve_in_order_and_a_final_failure_publishes_nothing() {
+    let label_steps = || {
+        [
+            step("labels"),
+            ComponentPropertyStep::MapEntry(MAP_KEY.to_owned()),
+        ]
+    };
     for source in [SCENE, PREFAB] {
         let project = Project::new();
         let mut editor = open_project(&project);
@@ -954,20 +980,31 @@ fn key_changes_resolve_in_order_and_a_final_failure_publishes_nothing() {
                 [step("rows"), item("b"), step("score")],
                 ComponentValue::U64(8),
             ),
-            edit(
-                [
-                    step("labels"),
-                    ComponentPropertyStep::MapEntry(MAP_KEY.to_owned()),
-                ],
-                ComponentValue::String("after".to_owned()),
-            ),
+            edit(label_steps(), ComponentValue::String("after".to_owned())),
         ];
         let expected = settings(10, 20, "b", 8, "after");
         let basis = editor.document_query_basis(document).unwrap();
         let prepared = editor
             .prepare_authoring_property_edit(&basis, &edits)
             .unwrap();
-        assert_eq!(prepared.patch(), &patch(expected.clone()));
+        let forward = ScenePatchDocument::new(edits.map(replace_property));
+        let inverse = ScenePatchDocument::new(
+            [
+                edit(label_steps(), ComponentValue::String("before".to_owned())),
+                edit(
+                    [step("rows"), item("b"), step("score")],
+                    ComponentValue::U64(1),
+                ),
+                edit(
+                    [step("rows"), item("b"), step("id")],
+                    ComponentValue::String("a".to_owned()),
+                ),
+            ]
+            .map(replace_property),
+        );
+        assert_eq!(prepared.patch(), &forward);
+        assert_eq!(prepared.inverse(), &inverse);
+        assert_renamed_row(&prepared, &basis, "a", "b", 8);
         assert_applied(editor.commit_authoring_edit(prepared));
         editor.drive_editor_frame(Duration::ZERO);
         assert_eq!(root(&editor), expected);
@@ -984,10 +1021,7 @@ fn key_changes_resolve_in_order_and_a_final_failure_publishes_nothing() {
                 ComponentValue::U64(500),
             ),
             edit(
-                [
-                    step("labels"),
-                    ComponentPropertyStep::MapEntry(MAP_KEY.to_owned()),
-                ],
+                label_steps(),
                 ComponentValue::String("must not leak".to_owned()),
             ),
             // The old key no longer exists in this private candidate; preceding writes must roll back.
@@ -999,10 +1033,24 @@ fn key_changes_resolve_in_order_and_a_final_failure_publishes_nothing() {
         let prefix = editor
             .prepare_authoring_property_edit(&basis, &failing[..3])
             .unwrap();
-        assert_eq!(
-            prefix.patch(),
-            &patch(settings(10, 20, "c", 500, "must not leak"))
+        let forward = ScenePatchDocument::new(failing[..3].iter().cloned().map(replace_property));
+        let inverse = ScenePatchDocument::new(
+            [
+                edit(label_steps(), ComponentValue::String("after".to_owned())),
+                edit(
+                    [step("rows"), item("c"), step("score")],
+                    ComponentValue::U64(8),
+                ),
+                edit(
+                    [step("rows"), item("c"), step("id")],
+                    ComponentValue::String("b".to_owned()),
+                ),
+            ]
+            .map(replace_property),
         );
+        assert_eq!(prefix.patch(), &forward);
+        assert_eq!(prefix.inverse(), &inverse);
+        assert_renamed_row(&prefix, &basis, "b", "c", 500);
         drop(prefix);
         assert!(
             editor
@@ -1057,6 +1105,42 @@ fn key_changes_resolve_in_order_and_a_final_failure_publishes_nothing() {
     }
 }
 
+fn assert_renamed_row(
+    prepared: &PreparedEditorDocumentEdit,
+    basis: &EditorDocumentQueryBasis,
+    old_key: &str,
+    new_key: &str,
+    score: u64,
+) {
+    let read_score =
+        |key: &str| EditorPropertyRead {
+            target: EditorPropertyTarget {
+                basis: basis.clone(),
+                entity: id("actor"),
+                component: ComponentTypeId::new(COMPONENT),
+                property: ComponentPropertyPath::new(ComponentFieldId::new("settings"))
+                    .with_steps([step("rows"), item(key), step("score")]),
+            },
+            limits: EditorPropertyReadLimits::new(4096, 64, 4096).unwrap(),
+        };
+    assert_eq!(
+        prepared
+            .preview_property(read_score(new_key))
+            .unwrap()
+            .value,
+        EditorPropertyValue::Present(ComponentValue::U64(score))
+    );
+    assert_eq!(
+        prepared.preview_property(read_score(old_key)).unwrap_err(),
+        EditorDocumentQueryRejection::Source(AuthoringReadError::Property(
+            ComponentPropertyError::ListItemNotFound {
+                step: 1,
+                key: ComponentPropertyKey::String(old_key.to_owned()),
+            },
+        ))
+    );
+}
+
 #[test]
 fn explicitly_targeted_inactive_scene_and_prefab_keep_tabs_and_selections() {
     let project = Project::new();
@@ -1077,7 +1161,13 @@ fn explicitly_targeted_inactive_scene_and_prefab_keep_tabs_and_selections() {
         let prepared = editor
             .prepare_authoring_property_edit(&basis, &edits)
             .unwrap();
-        assert_eq!(prepared.patch(), &patch(settings(42, 20, "a", 1, "before")));
+        let forward = ScenePatchDocument::new(edits.map(replace_property));
+        let inverse = ScenePatchDocument::new([replace_property(edit(
+            [step("stats"), step("hp")],
+            ComponentValue::U64(10),
+        ))]);
+        assert_eq!(prepared.patch(), &forward);
+        assert_eq!(prepared.inverse(), &inverse);
         editor.drive_editor_frame(Duration::ZERO);
         assert_eq!(editor.current_frame().workspace(), before.workspace());
         assert_applied(editor.commit_authoring_edit(prepared));

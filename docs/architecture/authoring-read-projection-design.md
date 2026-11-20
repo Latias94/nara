@@ -622,6 +622,44 @@ and the original DX12 Drawn Inspector workflow after the shared property reader 
 native path reads presented, committed values. Candidate reads are exercised by the independent
 panel and Tooling targets. Expanded Prefab values use the separate effective-field workflow.
 
+### Selective Edits In Authored Collections
+
+A tool can page an authored collection and edit an existing member using its durable Schema
+selector. For an explicit root, the source patch records the selected replacement and the
+inverse records the previous selected value. Changing the key of a keyed-list item updates the
+inverse selector to the resulting key. Later writes in the same transaction can use that key.
+An explicit whole-root write or the first nested write into an omitted defaulted root still
+uses root-field history, preserving the original presence or absence when replayed.
+
+Qualification uses non-active Scene and Prefab documents with 4,097 stored keyed records.
+It prepares and previews selected edits through the registered panel, verifies the record after
+an ordered key change, and commits the retained candidate. Undo and Redo check the complete
+source together with Save and Reopen. A failed final selector preserves source, selection and
+history. The existing bounds apply to actual replacement payloads, selectors, and both
+directions of history. Complete source classification and publication admission still apply.
+Private staging allows the admitted source and one bounded field patch. This lets an exact-limit
+document shrink one field and grow another in the same transaction. Publication and history replay
+check the final source against its original file limits.
+
+The seventh workflow review reproduced the original fixed threshold at 86 two-field records.
+Godot pairs a property write with the previous property value for Undo, and Bevy Reflect offers
+mutable access to an individual list element. Nara's durable keyed selector applies the
+individual replacement to the admitted source and gives inverse replay the appropriate key.
+[Reproduction](../audits/2026-11-20-camera-recovery-and-authoring-review.md#p2-architecture--a-keyed-list-can-be-displayed-after-its-row-selector-stops-working)
+· [Godot Inspector](https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/editor/inspector/editor_inspector.cpp#L5773-L5788)
+· [Bevy Reflect List](https://github.com/bevyengine/bevy/blob/85503941e488152711a4695bbe248e9ed9f453fc/crates/bevy_reflect/src/list.rs#L59-L66)
+
+The independently locked Windows run `3e770e3e-5922-4d54-a289-a11bf36a5af1` passes 29 tests
+across the Scene and registered-panel consumers. The exact file-limit cohort passes 9/9 in
+`008af713-218e-4685-8741-df91765d4c43`. A balanced mixed structural/property candidate reaches
+the original source allowance, while one more byte refuses without history or source changes.
+Both history sides survive nominal Schema readmission. The Host's same-batch pending Close
+guard passes in `facba9af-c907-4383-b5c4-fc6b5f9c5907`. The original Windows/DX12 Drawn Shell
+structure, history and persistence trajectory passes in `f8ad5d60-dea0-46bc-a7d0-b25a603b9a16`.
+Initial keyed-item resolution still
+charges its bounded scan, including the identity check across the list. The review's 32,767-row
+first-lookup refusal remains outside this edit qualification.
+
 ## Acceptance And Experiment Stops
 
 - Source Scene/Prefab tests distinguish actual versus catalog-only components, all retained

@@ -157,6 +157,67 @@ fn set(entity: &str, name: &str, value: ComponentValue) -> ScenePatchOperation {
         value,
     }
 }
+
+#[test]
+fn bounded_field_replay_charges_the_storage_path_before_a_root_write() {
+    let wire_name = "storage".repeat(1024);
+    let mut field = field("short-id", ComponentValueKind::U64);
+    field.path = ComponentFieldPath::from_fields([wire_name.as_str()]);
+    let schema = ComponentSchema::new(component(), "Value", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([field]);
+    let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+        owner(),
+        ComponentSchemaCatalog {
+            components: vec![schema],
+            ..Default::default()
+        },
+        None,
+    )])
+    .unwrap();
+    let adapter =
+        AuthoringAdapterReceipt::from_schema_owner(&bundle.owners()[0], &BTreeSet::new()).unwrap();
+    let basis = Arc::new(AuthoringClassificationBasis::new(&bundle, &[adapter]).unwrap());
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("root"))
+        .with_component(
+            component(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([(wire_name.as_str(), ComponentValue::U64(1))]),
+            ),
+        )]);
+    let state = classify_scene_document(
+        &document,
+        AuthoringDocumentSource::new(asset("scenes/long-field.scene.json")),
+        AuthoringDocumentKind::Scene,
+        basis,
+        SceneFileLimits::default(),
+    )
+    .unwrap();
+    let patch = ScenePatchDocument::new([set("root", "short-id", ComponentValue::U64(2))]);
+    let edits = field_edits_from_patch(&patch).unwrap();
+    let refusal = authoring_field_patch_rejection();
+    let mut admit = |stage: &str, bytes: Option<usize>| {
+        if stage == "field-storage-path" {
+            assert!(bytes.unwrap() >= wire_name.len());
+            Err(refusal.clone())
+        } else {
+            Ok(())
+        }
+    };
+    let Err(report) = prepare(document.clone(), &state, &edits, Some(&mut admit)) else {
+        panic!("the field edit must honor storage admission before setting the value");
+    };
+    assert_eq!(report.diagnostics, refusal.diagnostics);
+    let accepted = prepare(document, &state, &edits, None).unwrap();
+    assert_eq!(
+        accepted.document().entities[0].components[&component()]
+            .value()
+            .get(&wire_name),
+        Some(&ComponentValue::U64(2)),
+    );
+}
+
 fn full(
     document: &SceneDocument,
     state: &AuthoringDocumentState,
@@ -204,7 +265,7 @@ fn field_candidate_matches_full_classification_for_both_kinds_and_preservation_s
                 ),
             ]);
             let edits = field_edits_from_patch(&patch).unwrap();
-            let candidate = prepare(document.clone(), &state, &edits).unwrap();
+            let candidate = prepare(document.clone(), &state, &edits, None).unwrap();
             assert_eq!(
                 candidate.touched.len(),
                 2,
@@ -236,7 +297,7 @@ fn field_candidate_matches_full_classification_for_both_kinds_and_preservation_s
             );
             let (changed, inverse) = candidate.into_parts();
             let inverse = field_edits_from_patch(&inverse).unwrap();
-            let restored = prepare(changed, &actual, &inverse).unwrap();
+            let restored = prepare(changed, &actual, &inverse, None).unwrap();
             assert_eq!(restored.document(), &document);
             assert_same(&restored.classify().unwrap(), &state);
         }
@@ -281,7 +342,7 @@ fn scalar_only_candidate_retains_local_classification_without_reference_facts() 
         .unwrap();
         let patch = ScenePatchDocument::new([set("z", "number", ComponentValue::U64(9))]);
         let edits = field_edits_from_patch(&patch).unwrap();
-        let candidate = prepare(document.clone(), &state, &edits).unwrap();
+        let candidate = prepare(document.clone(), &state, &edits, None).unwrap();
         let local = candidate
             .try_classify()
             .unwrap()
@@ -449,6 +510,7 @@ fn field_candidate_keeps_full_classifier_error_order() {
             document.clone(),
             &state,
             &field_edits_from_patch(&patch).unwrap(),
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -469,6 +531,7 @@ fn field_candidate_uses_full_fallback_when_record_authority_cannot_be_proven() {
             document.clone(),
             &state,
             &field_edits_from_patch(&patch).unwrap(),
+            None,
         )
         .unwrap();
         let record = candidate
@@ -731,6 +794,7 @@ fn ordinary_field_edits_reject_selected_wire_limits_without_publishing_either_ki
                 document.clone(),
                 &state,
                 &field_edits_from_patch(&patch).unwrap(),
+                None,
             )
             .unwrap();
             assert!(

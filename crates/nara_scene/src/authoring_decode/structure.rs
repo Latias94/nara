@@ -9,6 +9,8 @@ use crate::authoring::prefab_conversion::{
     retention,
     work::{self, ConversionWork},
 };
+use nara_core::{ByteLimit, ItemLimit, SerdeShapeLimits};
+use nara_reflect::ComponentFieldPathSegment;
 use std::{collections::BTreeSet, sync::Arc};
 
 enum StructureAdmission<'a> {
@@ -188,7 +190,10 @@ fn prepare_structure_from_parts(
     } else {
         Vec::new()
     };
-    admit_replay_cost(patch, admit.as_deref_mut())?;
+    let patch_cost = admit_replay_cost(patch, admit.as_deref_mut())?;
+    let inverse_limits = admit
+        .is_some()
+        .then(|| inverse_staging_limits(state, &fields, patch_cost));
     let mut fields = fields.iter();
     if let Some(work) = work.as_deref_mut() {
         work.reserve(
@@ -209,30 +214,31 @@ fn prepare_structure_from_parts(
     let mut created = BTreeSet::new();
     let mut inverses = Vec::with_capacity(patch.operations.len());
     for (operation_index, operation) in patch.operations.iter().enumerate() {
-        if let Some(admit) = admit.as_deref_mut() {
+        if is_authoring_field_operation(operation) {
+            let edit = fields
+                .next()
+                .expect("each field operation has one parsed edit");
+            let (next, inverse) = if created
+                .contains(&(edit.entity.clone(), edit.component.clone()))
+            {
+                super::prepare_admitted_field_edit(candidate, state, edit, admit.as_deref_mut())?
+            } else {
+                super::prepare_field_edit(candidate, state, edit, admit.as_deref_mut())?
+            };
+            candidate = next;
+            inverses.push(inverse.operations);
+            continue;
+        }
+        if let (Some(admit), Some(limits)) = (admit.as_deref_mut(), inverse_limits) {
             // Each operation can retain at most the current source in its exact inverse.
             // This actual-state bound also covers complete restored records and layout vectors.
             let inverse_bound = retention::document_dynamic_bytes_with_admission(
                 &candidate.placements,
                 &candidate.entities,
-                state.limits,
+                limits,
                 |bytes| admit("operation-inverse-scan", bytes),
             )?;
             admit("operation-inverse", inverse_bound)?;
-        }
-        if is_authoring_field_operation(operation) {
-            let edit = fields
-                .next()
-                .expect("each field operation has one parsed edit");
-            let (next, inverse) =
-                if created.contains(&(edit.entity.clone(), edit.component.clone())) {
-                    super::prepare_admitted_field_edit(candidate, state, edit)?
-                } else {
-                    super::prepare_field_edit(candidate, state, edit)?
-                };
-            candidate = next;
-            inverses.push(inverse.operations);
-            continue;
         }
         match &admission {
             StructureAdmission::PrefabConversion(footprint) => {
@@ -497,10 +503,63 @@ fn validate_conversion_component(
     Ok(())
 }
 
+/// Bounds inverse measurement of an unpublished source using the admitted file and patch. Root
+/// writes can insert a storage key supplied by the Schema rather than carried by the patch.
+fn inverse_staging_limits(
+    state: &AuthoringDocumentState,
+    fields: &[super::AuthoringFieldChange],
+    patch: crate::patch::ScenePatchCost,
+) -> crate::SceneFileLimits {
+    let storage_bytes = fields
+        .iter()
+        .filter(|edit| edit.property.steps.is_empty() && edit.value.is_some())
+        .filter_map(|edit| {
+            let schema = &state.basis.schemas.get(&edit.component)?.schema;
+            let field = schema
+                .fields()
+                .iter()
+                .find(|field| field.id() == &edit.property.root)?;
+            match field.path().segments().last() {
+                Some(ComponentFieldPathSegment::Field(name)) => Some(name.len()),
+                _ => None,
+            }
+        })
+        .fold(0usize, usize::saturating_add);
+    let limits = state.limits;
+    let shape = limits.shape();
+    let add_items = |limit: ItemLimit, growth| {
+        ItemLimit::new(limit.get().saturating_add(growth)).expect("source limits are nonzero")
+    };
+    let structural_growth = patch.operation_count();
+    limits
+        .with_placements(add_items(limits.placements(), structural_growth))
+        .with_shape(SerdeShapeLimits::new(
+            shape.depth(),
+            add_items(shape.nodes(), structural_growth),
+            shape.container_items(),
+            shape.string_bytes(),
+            shape.total_string_bytes(),
+        ))
+        .with_component_value_nodes(add_items(
+            limits.component_value_nodes(),
+            patch.value_cost().nodes(),
+        ))
+        .with_component_value_bytes(
+            ByteLimit::new(
+                limits
+                    .component_value_bytes()
+                    .get()
+                    .saturating_add(patch.logical_bytes())
+                    .saturating_add(storage_bytes),
+            )
+            .expect("source limits are nonzero"),
+        )
+}
+
 fn admit_replay_cost(
     patch: &ScenePatchDocument,
     admission: Option<&mut super::reclassification::AdmissionCallback<'_>>,
-) -> Result<(), ScenePatchReport> {
+) -> Result<crate::patch::ScenePatchCost, ScenePatchReport> {
     let cost = match admission {
         Some(admit) => crate::patch::bounded_scene_patch_cost_with_admission(
             patch,
@@ -511,7 +570,7 @@ fn admit_replay_cost(
             crate::patch::bounded_scene_patch_cost(patch, crate::ScenePatchApplyLimits::default())
         }
     };
-    cost.map(|_| ()).ok_or_else(|| {
+    cost.ok_or_else(|| {
         authoring_structure_rejection(
             "Authoring construction or its inverse exceeds the replay work budget",
         )

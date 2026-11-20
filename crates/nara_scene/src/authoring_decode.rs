@@ -43,14 +43,14 @@ use std::{
 };
 
 use nara_asset::AssetRef;
-#[cfg(test)]
-use nara_core::{ByteLimit, ItemLimit};
+use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
     AuthoringSchemaBundle, CatalogFingerprint, ComponentCapability, ComponentFieldId,
-    ComponentFieldPathSegment, ComponentSchema, ComponentSchemaContributionReceipt,
-    ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueShape, DeclaredAssetReference, EntityReference, PersistentComponentSchemaOwnerId,
+    ComponentFieldPathSegment, ComponentPropertyPath, ComponentSchema,
+    ComponentSchemaContributionReceipt, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueShape, DeclaredAssetReference, EntityReference,
+    PersistentComponentSchemaOwnerId,
 };
 
 use crate::{
@@ -1622,6 +1622,30 @@ impl AuthoringDocumentState {
         self.limits
     }
 
+    /// Bounds selected values in the private replay of an admitted source and one field patch.
+    /// The final candidate uses the file's exact limits, including its configured wire depth.
+    pub(crate) fn property_staging_limits(
+        &self,
+    ) -> nara_reflect::ComponentValueMaterializationLimits {
+        let limits = self.limits.component_materialization_limits();
+        nara_reflect::ComponentValueMaterializationLimits::new(
+            ItemLimit::new(
+                limits
+                    .nodes()
+                    .saturating_add(MAX_AUTHORING_FIELD_VALUE_NODES),
+            )
+            .expect("field staging must allow at least one node"),
+            ByteLimit::new(
+                limits
+                    .bytes()
+                    .saturating_add(MAX_AUTHORING_FIELD_LOGICAL_BYTES),
+            )
+            .expect("field staging must allow at least one byte"),
+            DepthLimit::new(limits.depth().get().max(ComponentPropertyPath::MAX_STEPS))
+                .expect("field staging must allow at least one level"),
+        )
+    }
+
     pub(crate) fn source(&self) -> &AuthoringDocumentSource {
         &self.source
     }
@@ -2731,7 +2755,8 @@ fn prepare_scene_authoring_patch_impl(
     }
     let edits = field_edits_from_patch(patch)?;
     let edit = &edits[0];
-    let candidate = field_candidate::prepare(document.clone(), state, &edits)?;
+    let candidate =
+        field_candidate::prepare(document.clone(), state, &edits, admit.as_deref_mut())?;
     let shape = if let Some(admit) = admit.as_deref_mut() {
         crate::format::validate_scene_publication_shape_with_admission(
             candidate.document(),
@@ -3011,7 +3036,8 @@ fn prepare_prefab_authoring_patch_impl(
     }
     let edits = field_edits_from_patch(patch)?;
     let edit = &edits[0];
-    let candidate = field_candidate::prepare(document.instantiate(), state, &edits)?;
+    let candidate =
+        field_candidate::prepare(document.instantiate(), state, &edits, admit.as_deref_mut())?;
     let candidate = if let Some(admit) = admit.as_deref_mut() {
         candidate.validate_prefab_shape_with_admission(&document.inputs, admit)?
     } else {
@@ -3075,7 +3101,7 @@ struct AuthoringFieldChange {
     entity: SceneEntityId,
     component: ComponentTypeId,
     component_version: ComponentSchemaVersion,
-    field: ComponentFieldId,
+    property: ComponentPropertyPath,
     value: Option<ComponentValue>,
 }
 
@@ -3085,6 +3111,7 @@ pub(crate) fn is_authoring_field_operation(operation: &ScenePatchOperation) -> b
         ScenePatchOperation::SetField { .. }
             | ScenePatchOperation::SetAssetRefField { .. }
             | ScenePatchOperation::RemoveField { .. }
+            | ScenePatchOperation::ReplaceProperty { .. }
     )
 }
 
@@ -3104,11 +3131,13 @@ fn field_edits_from_operations<'a>(
     parse_authoring_field_operations(
         operations,
         maximum_writes,
-        |entity, component, version, field, value| AuthoringFieldChange {
+        |entity, component, version, field, property, value| AuthoringFieldChange {
             entity: entity.clone(),
             component: component.clone(),
             component_version: version,
-            field: field.clone(),
+            property: property
+                .cloned()
+                .unwrap_or_else(|| ComponentPropertyPath::new(field.clone())),
             value: value.cloned(),
         },
     )
@@ -3124,7 +3153,7 @@ fn validate_authoring_field_operations_with_limit<'a>(
     operations: impl Iterator<Item = &'a ScenePatchOperation> + Clone,
     maximum_writes: usize,
 ) -> Result<(), ScenePatchReport> {
-    parse_authoring_field_operations(operations, maximum_writes, |_, _, _, _, _| ()).map(|_| ())
+    parse_authoring_field_operations(operations, maximum_writes, |_, _, _, _, _, _| ()).map(|_| ())
 }
 
 fn parse_authoring_field_operations<'a, T>(
@@ -3135,6 +3164,7 @@ fn parse_authoring_field_operations<'a, T>(
         &ComponentTypeId,
         ComponentSchemaVersion,
         &ComponentFieldId,
+        Option<&ComponentPropertyPath>,
         Option<&ComponentValue>,
     ) -> T,
 ) -> Result<Vec<T>, ScenePatchReport> {
@@ -3148,14 +3178,21 @@ fn parse_authoring_field_operations<'a, T>(
     operations
         .map(|operation| {
             let asset_value;
-            let (entity, component, component_version, field, value) = match operation {
+            let (entity, component, component_version, field, property, value) = match operation {
                 ScenePatchOperation::SetField {
                     entity,
                     component,
                     component_version,
                     field,
                     value,
-                } => (entity, component, component_version, field, Some(value)),
+                } => (
+                    entity,
+                    component,
+                    component_version,
+                    field,
+                    None,
+                    Some(value),
+                ),
                 ScenePatchOperation::SetAssetRefField {
                     entity,
                     component,
@@ -3169,6 +3206,7 @@ fn parse_authoring_field_operations<'a, T>(
                         component,
                         component_version,
                         field,
+                        None,
                         Some(&asset_value),
                     )
                 }
@@ -3177,7 +3215,31 @@ fn parse_authoring_field_operations<'a, T>(
                     component,
                     component_version,
                     field,
-                } => (entity, component, component_version, field, None),
+                } => (entity, component, component_version, field, None, None),
+                ScenePatchOperation::ReplaceProperty {
+                    entity,
+                    component,
+                    component_version,
+                    property,
+                    value,
+                } => {
+                    if property.steps.is_empty() {
+                        return Err(authoring_field_patch_rejection());
+                    }
+                    logical_bytes = logical_bytes.saturating_add(
+                        property
+                            .logical_bytes()
+                            .map_err(|_| authoring_field_patch_rejection())?,
+                    );
+                    (
+                        entity,
+                        component,
+                        component_version,
+                        &property.root,
+                        Some(property),
+                        Some(value),
+                    )
+                }
                 _ => return Err(authoring_field_patch_rejection()),
             };
             if let Some(value) = &value {
@@ -3190,7 +3252,7 @@ fn parse_authoring_field_operations<'a, T>(
                 value_nodes = value_nodes.saturating_add(cost.nodes());
                 logical_bytes = logical_bytes.saturating_add(cost.logical_bytes());
             }
-            if !fields.insert((entity, component, field))
+            if (property.is_none() && !fields.insert((entity, component, field)))
                 || value_nodes > MAX_AUTHORING_FIELD_VALUE_NODES
                 || logical_bytes > MAX_AUTHORING_FIELD_LOGICAL_BYTES
             {
@@ -3201,6 +3263,7 @@ fn parse_authoring_field_operations<'a, T>(
                 component,
                 *component_version,
                 field,
+                property,
                 value,
             ))
         })
@@ -3211,7 +3274,7 @@ fn authoring_field_patch_rejection() -> ScenePatchReport {
     let mut diagnostics = DiagnosticReport::default();
     diagnostics.push(diagnostic_error(
         "scene.authoring-field-patch-unavailable",
-        "Authoring transactions require bounded distinct preservation-safe field changes",
+            "Authoring transactions require bounded preservation-safe field changes and distinct root writes",
     ));
     ScenePatchReport {
         applied: false,
@@ -3224,10 +3287,11 @@ fn prepare_field_edits(
     mut candidate: SceneDocument,
     state: &AuthoringDocumentState,
     edits: &[AuthoringFieldChange],
+    mut admit: Option<&mut reclassification::AdmissionCallback<'_>>,
 ) -> Result<(SceneDocument, ScenePatchDocument), ScenePatchReport> {
     let mut inverse = Vec::with_capacity(edits.len());
     for edit in edits {
-        let (next, undo) = prepare_field_edit(candidate, state, edit)?;
+        let (next, undo) = prepare_field_edit(candidate, state, edit, admit.as_deref_mut())?;
         candidate = next;
         inverse.extend(undo.operations);
     }
@@ -3239,29 +3303,26 @@ fn prepare_field_edit(
     candidate: SceneDocument,
     state: &AuthoringDocumentState,
     edit: &AuthoringFieldChange,
+    admit: Option<&mut reclassification::AdmissionCallback<'_>>,
 ) -> Result<(SceneDocument, ScenePatchDocument), ScenePatchReport> {
-    let available = state.record_facts.iter().any(|fact| {
-        fact.readiness == AuthoringRecordReadiness::Available
-            && fact.component == edit.component
-            && matches!(
-                &fact.location,
-                AuthoringRecordLocation::EntityComponent { entity } if entity == &edit.entity
-            )
-    });
-    if !available {
+    if state
+        .available_component_schema(&edit.entity, &edit.component)
+        .is_none()
+    {
         return Err(field_edit_rejection(
             edit,
             "scene.authoring-field-edit-unavailable",
             "Authoring field edit requires an Available direct component record",
         ));
     }
-    prepare_admitted_field_edit(candidate, state, edit)
+    prepare_admitted_field_edit(candidate, state, edit, admit)
 }
 
 fn prepare_admitted_field_edit(
     mut candidate: SceneDocument,
     state: &AuthoringDocumentState,
     edit: &AuthoringFieldChange,
+    mut admit: Option<&mut reclassification::AdmissionCallback<'_>>,
 ) -> Result<(SceneDocument, ScenePatchDocument), ScenePatchReport> {
     let Some(schema_entry) = state.basis.schemas.get(&edit.component) else {
         return Err(field_edit_rejection(
@@ -3300,7 +3361,7 @@ fn prepare_admitted_field_edit(
         .schema
         .fields()
         .iter()
-        .find(|field| field.id() == &edit.field)
+        .find(|field| field.id() == &edit.property.root)
     else {
         return Err(field_edit_rejection(
             edit,
@@ -3326,6 +3387,89 @@ fn prepare_admitted_field_edit(
                 "Authoring field edit is outside the preservation-safe value whitelist"
             },
         ));
+    }
+    if let Some(admit) = admit.as_deref_mut() {
+        let field_bytes = if edit.property.steps.is_empty() {
+            field.id().as_str().len()
+        } else {
+            0
+        };
+        admit(
+            "field-inverse-target",
+            std::mem::size_of::<ScenePatchOperation>()
+                .checked_add(edit.entity.as_str().len())
+                .and_then(|bytes| bytes.checked_add(edit.component.as_str().len()))
+                .and_then(|bytes| bytes.checked_add(field_bytes)),
+        )?;
+    }
+    if !edit.property.steps.is_empty() {
+        let replacement = edit
+            .value
+            .as_ref()
+            .expect("a nested edit always replaces a selected value");
+        let schema = &schema_entry.schema;
+        let limits = state.property_staging_limits();
+        let reject = |error| crate::authoring::property_rejection(&error, schema, None);
+        let (property, previous) = match admit {
+            Some(admit) => edit
+                .property
+                .replace_in_candidate_with_admission(
+                    schema,
+                    edit.component_version,
+                    record.value_mut(),
+                    replacement.clone(),
+                    limits,
+                    |nodes, bytes, allocated| {
+                        admit(
+                            "property-replay",
+                            nodes
+                                .checked_add(bytes)
+                                .and_then(|count| count.checked_add(allocated)),
+                        )
+                    },
+                )
+                .map_err(|error| match error {
+                    nara_reflect::__private::ComponentPropertyAdmissionError::Admission(report) => {
+                        report
+                    }
+                    nara_reflect::__private::ComponentPropertyAdmissionError::Property(error) => {
+                        reject(error)
+                    }
+                })?,
+            None => edit
+                .property
+                .replace_in_candidate(
+                    schema,
+                    edit.component_version,
+                    record.value_mut(),
+                    replacement.clone(),
+                    limits,
+                )
+                .map_err(reject)?,
+        };
+        if !authoring_field_change_is_preservation_safe(field, Some(&previous), None) {
+            return Err(field_edit_rejection(
+                edit,
+                "scene.authoring-entity-reference-edit-unavailable",
+                "Entity reference edits require an inverse without Persistent runtime references",
+            ));
+        }
+        let inverse = ScenePatchDocument::new([ScenePatchOperation::ReplaceProperty {
+            entity: edit.entity.clone(),
+            component: edit.component.clone(),
+            component_version: record.version,
+            property,
+            value: previous,
+        }]);
+        return Ok((candidate, inverse));
+    }
+
+    if let Some(admit) = admit {
+        admit(
+            "field-storage-path",
+            retention::field_path_dynamic_bytes(field.path())
+                .and_then(|bytes| bytes.checked_mul(field.path().segments().len() + 6)),
+        )?;
     }
     let previous = match &edit.value {
         Some(value) => record.value_mut().set_path(field.path(), value.clone()),
@@ -3356,14 +3500,14 @@ fn prepare_admitted_field_edit(
             entity: edit.entity.clone(),
             component: edit.component.clone(),
             component_version: record.version,
-            field: edit.field.clone(),
+            field: edit.property.root.clone(),
             value,
         },
         None => ScenePatchOperation::RemoveField {
             entity: edit.entity.clone(),
             component: edit.component.clone(),
             component_version: record.version,
-            field: edit.field.clone(),
+            field: edit.property.root.clone(),
         },
     };
     Ok((candidate, ScenePatchDocument::new([inverse])))
@@ -3431,7 +3575,7 @@ fn field_edit_rejection(
     diagnostics.push(with_public_locator(
         diagnostic,
         "field-id",
-        edit.field.as_str(),
+        edit.property.root.as_str(),
     ));
     ScenePatchReport {
         applied: false,
