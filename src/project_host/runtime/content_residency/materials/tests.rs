@@ -343,8 +343,8 @@ fn processed_binding_outlives_residency_and_releases_original_acquisition_and_me
     let mut world = world();
     publish_processed_startup(&mut world, &content).unwrap();
     let residency = world.resource::<ProjectSceneResidency>();
-    let metadata = Arc::downgrade(&residency.materials.owned[0].identity._metadata);
-    let handle = residency.materials.owned[0].handle;
+    let metadata = Arc::downgrade(&residency.stock.materials.owned[0].identity._metadata);
+    let handle = residency.stock.materials.owned[0].handle;
     let published = world
         .resource::<Assets<Material2dAsset>>()
         .get(handle)
@@ -371,10 +371,11 @@ fn unpublished_material_slots_refuse_replaced_value_or_state_stores_without_publ
     let prepared =
         PreparedResidency::prepare(&world, ResidencyInput::Processed(&content), None).unwrap();
     let handle = prepared
-        .staged_server
+        .bindings
+        .staged_server()
         .get_product_handle::<Material2dAsset>(product(MATERIAL))
         .unwrap();
-    assert!(prepared.materials.validate(&world).is_ok());
+    assert!(prepared.stock.materials.validate(&world).is_ok());
     assert!(
         world
             .resource::<Assets<Material2dAsset>>()
@@ -384,11 +385,11 @@ fn unpublished_material_slots_refuse_replaced_value_or_state_stores_without_publ
     assert!(world.resource::<AssetStates>().state(handle.id()).is_none());
     assert_eq!(world.resource::<AssetEvents>().iter().count(), 0);
     let values = std::mem::take(&mut *world.resource_mut::<Assets<Material2dAsset>>());
-    assert!(prepared.materials.validate(&world).is_err());
+    assert!(prepared.stock.materials.validate(&world).is_err());
     *world.resource_mut::<Assets<Material2dAsset>>() = values;
-    assert!(prepared.materials.validate(&world).is_ok());
+    assert!(prepared.stock.materials.validate(&world).is_ok());
     world.insert_resource(AssetStates::default());
-    assert!(prepared.materials.validate(&world).is_err());
+    assert!(prepared.stock.materials.validate(&world).is_err());
     assert!(
         world
             .resource::<Assets<Material2dAsset>>()
@@ -406,16 +407,16 @@ fn raw_material_mutation_revokes_retirement_receipt() {
     let mut world = world();
     publish_processed_startup(&mut world, &content).unwrap();
     let current = world.resource::<ProjectSceneResidency>();
-    let handle = current.materials.owned[0].handle;
+    let handle = current.stock.materials.owned[0].handle;
     let prepared =
         PreparedResidency::prepare(&world, ResidencyInput::Processed(&empty), Some(current))
             .unwrap();
-    assert!(prepared.materials.validate(&world).is_ok());
+    assert!(prepared.stock.materials.validate(&world).is_ok());
     world
         .resource_mut::<Assets<Material2dAsset>>()
         .get_mut(handle)
         .unwrap();
-    assert!(prepared.materials.validate(&world).is_err());
+    assert!(prepared.stock.materials.validate(&world).is_err());
     assert!(
         world
             .resource::<Assets<Material2dAsset>>()

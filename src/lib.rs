@@ -127,7 +127,10 @@ mod project_diagnostic_ids;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 mod project_content;
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(all(feature = "runtime-core", feature = "serde"))]
+mod project_assets;
+
+#[cfg(all(feature = "runtime-core", feature = "serde"))]
 pub mod runtime_content;
 
 #[cfg(feature = "runtime-core")]
@@ -188,9 +191,11 @@ pub mod prelude {
     #[cfg(feature = "runtime-ui")]
     pub use crate::RuntimeUiPlugins;
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub use crate::project_host::ProjectSceneSourceUpdateStatus;
+    #[cfg(feature = "serde")]
     pub use crate::project_host::{
         PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
-        ProjectSceneRequestState, ProjectSceneSourceUpdateStatus, ProjectScenes,
+        ProjectSceneRequestState, ProjectScenes,
     };
     #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "asset-watch"))]
     pub use crate::project_host::{
@@ -304,7 +309,7 @@ pub mod prelude {
 #[cfg(feature = "runtime-core")]
 pub mod advanced_prelude {
     pub use crate::prelude::*;
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "serde")]
     pub use crate::project_host::advanced::{
         ManagedSceneDomain, ManagedSceneDomainAttempt, ManagedSceneDomainError,
         ManagedSceneDomainId, ManagedSceneDomainPhase, ManagedSceneDomainPreparation,
@@ -590,8 +595,8 @@ mod tests {
                 .contains_resource::<nara_input::ActionOutcomes>()
         );
         #[cfg(any(
-            feature = "presentation-2d",
-            feature = "runtime-ui",
+            feature = "runtime-2d",
+            feature = "presentation-ui",
             feature = "render-wgpu"
         ))]
         assert!(!app.world().contains_resource::<nara_render::RenderFrame>());

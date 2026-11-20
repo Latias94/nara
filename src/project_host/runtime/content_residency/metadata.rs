@@ -1,19 +1,37 @@
 //! Closed content authority and admission for residency-owned metadata.
 
-use nara_asset::{AssetId, AssetProductRef, ImportedProductId};
-use nara_tilemap::TileSetDescriptor;
-use std::sync::Arc;
+use std::{mem::size_of, sync::Arc};
+
+use nara_asset::AssetProductRef;
+#[cfg(feature = "runtime-2d")]
+use nara_asset::{AssetId, AssetMutationBaseline, AssetSourceKind, ImportedProductId};
+#[cfg(feature = "runtime-2d")]
+use nara_image::ImageAsset;
+#[cfg(feature = "runtime-2d")]
+use nara_material::{Material2dAsset, Material2dDomain};
+#[cfg(feature = "runtime-2d")]
+use nara_tilemap::{TileSet, TileSetContentReceipt, TileSetDescriptor, TileSetPublicationInput};
 
 use super::*;
+#[cfg(feature = "runtime-2d")]
+use super::{catalog::CatalogChange, images::OwnedImage};
+#[cfg(feature = "runtime-2d")]
 use crate::{
-    runtime_content::{RuntimeContentAsset, RuntimeContentScene},
-    scene_retention::{ARC_CONTROL_BLOCK_BYTES, BTREE_ENTRY_OVERHEAD},
+    project_content::{ProjectContentLease, asset_record_retained_bytes},
+    project_host::ProjectSettingsLineage,
+    runtime_content::RuntimeContentAsset,
+    scene_retention::BTREE_ENTRY_OVERHEAD,
+};
+use crate::{
+    runtime_content::{RuntimeContentBase, RuntimeContentLease, RuntimeContentScene},
+    scene_retention::ARC_CONTROL_BLOCK_BYTES,
 };
 
 #[cfg(test)]
 mod tests;
 
 pub(super) enum ResidencyAuthority {
+    #[cfg(feature = "runtime-2d")]
     Source {
         lineage: ProjectSettingsLineage,
         catalog: Vec<AssetRecord>,
@@ -21,6 +39,7 @@ pub(super) enum ResidencyAuthority {
         _lease: ProjectContentLease,
     },
     Processed {
+        #[cfg(feature = "runtime-2d")]
         _tilesets: Vec<RuntimeContentAsset<TileSetDescriptor>>,
         scenes: Vec<RuntimeContentScene>,
         deferred_scene_products: Vec<AssetProductRef>,
@@ -32,6 +51,7 @@ pub(super) enum ResidencyAuthority {
 impl ResidencyAuthority {
     pub(super) fn validate(&self, content: ResidencyInput<'_>) -> Result<(), HostFault> {
         match (self, content) {
+            #[cfg(feature = "runtime-2d")]
             (Self::Source { lineage, scope, .. }, ResidencyInput::Source(snapshot))
                 if *lineage == snapshot.lineage()
                     && scope == snapshot.asset_resolution().scope() =>
@@ -43,6 +63,7 @@ impl ResidencyAuthority {
             {
                 Ok(())
             }
+            #[cfg(feature = "runtime-2d")]
             (Self::Source { .. }, ResidencyInput::Source(_)) => Err(failure(
                 "project.scene.lineage-mismatch",
                 "Prepared Scene belongs to another project",
@@ -56,6 +77,7 @@ impl ResidencyAuthority {
 }
 
 pub(super) enum PreparedCatalog {
+    #[cfg(feature = "runtime-2d")]
     Source {
         original: Option<ProjectAssetDatabase>,
         change: CatalogChange,
@@ -64,6 +86,7 @@ pub(super) enum PreparedCatalog {
         lease: ProjectContentLease,
     },
     Processed {
+        #[cfg(feature = "runtime-2d")]
         tilesets: Vec<RuntimeContentAsset<TileSetDescriptor>>,
         scenes: Vec<RuntimeContentScene>,
         deferred_scene_products: Vec<AssetProductRef>,
@@ -76,11 +99,18 @@ impl PreparedCatalog {
     pub(super) fn prepare(
         world: &World,
         content: ResidencyInput<'_>,
-        current: Option<&ProjectSceneResidency>,
+        #[cfg(feature = "runtime-2d")] current: Option<&ProjectSceneResidency>,
         addition_to: Option<&ProjectSceneResidency>,
     ) -> Result<Self, HostFault> {
-        let bytes = metadata_bytes(world, content, current, addition_to)?;
+        let bytes = metadata_bytes(
+            world,
+            content,
+            #[cfg(feature = "runtime-2d")]
+            current,
+            addition_to,
+        )?;
         match content {
+            #[cfg(feature = "runtime-2d")]
             ResidencyInput::Source(snapshot) => {
                 let lease = snapshot
                     .reserve_consumer_retained(bytes)
@@ -110,6 +140,7 @@ impl PreparedCatalog {
                     )
                 })?;
                 Ok(Self::Processed {
+                    #[cfg(feature = "runtime-2d")]
                     tilesets: content.tilesets.clone(),
                     scenes: content.dependencies.clone(),
                     deferred_scene_products: content.deferred_scene_products.clone(),
@@ -120,6 +151,7 @@ impl PreparedCatalog {
         }
     }
 
+    #[cfg(feature = "runtime-2d")]
     pub(super) fn asset_resolution(&self) -> Option<nara_asset::AssetReferenceResolver<'_>> {
         match self {
             Self::Source { change, scope, .. } => Some(change.database.resolver(scope)),
@@ -127,6 +159,7 @@ impl PreparedCatalog {
         }
     }
 
+    #[cfg(feature = "runtime-2d")]
     pub(super) fn stage_source_relocations(
         &self,
         snapshot: &ProjectContentSnapshot,
@@ -190,6 +223,7 @@ impl PreparedCatalog {
         Ok(())
     }
 
+    #[cfg(feature = "runtime-2d")]
     pub(super) fn runtime_lease(&self) -> Option<&Arc<RuntimeContentLease>> {
         match self {
             Self::Source { .. } => None,
@@ -197,9 +231,10 @@ impl PreparedCatalog {
         }
     }
 
-    pub(super) fn validate(&self, world: &World) -> Result<(), HostFault> {
+    pub(super) fn validate(&self, _world: &World) -> Result<(), HostFault> {
+        #[cfg(feature = "runtime-2d")]
         if let Self::Source { original, .. } = self {
-            if world.get_resource::<ProjectAssetDatabase>() != original.as_ref() {
+            if _world.get_resource::<ProjectAssetDatabase>() != original.as_ref() {
                 return Err(failure(
                     "project.scene.asset-catalog-changed",
                     "Scene asset catalogue changed after preparation",
@@ -209,8 +244,9 @@ impl PreparedCatalog {
         Ok(())
     }
 
-    pub(super) fn commit(self, world: &mut World) -> ResidencyAuthority {
+    pub(super) fn commit(self, _world: &mut World) -> ResidencyAuthority {
         match self {
+            #[cfg(feature = "runtime-2d")]
             Self::Source {
                 original: _,
                 change,
@@ -218,7 +254,7 @@ impl PreparedCatalog {
                 scope,
                 lease,
             } => {
-                world.insert_resource(change.database);
+                _world.insert_resource(change.database);
                 ResidencyAuthority::Source {
                     lineage,
                     catalog: change.owned,
@@ -227,12 +263,14 @@ impl PreparedCatalog {
                 }
             }
             Self::Processed {
+                #[cfg(feature = "runtime-2d")]
                 tilesets,
                 scenes,
                 deferred_scene_products,
                 lease,
                 base,
             } => ResidencyAuthority::Processed {
+                #[cfg(feature = "runtime-2d")]
                 _tilesets: tilesets,
                 scenes,
                 deferred_scene_products,
@@ -246,7 +284,7 @@ impl PreparedCatalog {
 fn metadata_bytes(
     world: &World,
     content: ResidencyInput<'_>,
-    current: Option<&ProjectSceneResidency>,
+    #[cfg(feature = "runtime-2d")] current: Option<&ProjectSceneResidency>,
     addition_to: Option<&ProjectSceneResidency>,
 ) -> Result<usize, HostFault> {
     // One conservative logical reservation covers both preparation and its committed receipts.
@@ -266,6 +304,46 @@ fn metadata_bytes(
     };
     let staged_copies = 2;
     add_entries(&mut bytes, 1 + staged_copies, catalogue_bytes)?;
+    if addition_to.is_some() {
+        add_entries(&mut bytes, 1, size_of::<additive::ActiveAddition>())?;
+        add_entries(&mut bytes, 1, size_of::<additive::PreparedAddition>())?;
+    }
+    #[cfg(feature = "runtime-2d")]
+    stock_metadata_bytes(&mut bytes, content, current, addition_to, staged_copies)?;
+    let content = match content {
+        #[cfg(feature = "runtime-2d")]
+        ResidencyInput::Source(snapshot) => {
+            source_metadata_bytes(&mut bytes, world, snapshot)?;
+            return Ok(bytes);
+        }
+        ResidencyInput::Processed(content) => content,
+    };
+    add_entries(
+        &mut bytes,
+        content.dependencies.len(),
+        size_of::<RuntimeContentScene>(),
+    )?;
+    add_entries(
+        &mut bytes,
+        content.deferred_scene_products.len(),
+        size_of::<AssetProductRef>(),
+    )?;
+    add_entries(
+        &mut bytes,
+        1,
+        size_of::<RuntimeContentLease>() + ARC_CONTROL_BLOCK_BYTES,
+    )?;
+    Ok(bytes)
+}
+
+#[cfg(feature = "runtime-2d")]
+fn stock_metadata_bytes(
+    bytes: &mut usize,
+    content: ResidencyInput<'_>,
+    current: Option<&ProjectSceneResidency>,
+    addition_to: Option<&ProjectSceneResidency>,
+    staged_copies: usize,
+) -> Result<(), HostFault> {
     // Only the staged copies grow. A complete new binding is a conservative upper bound
     // even when the target reuses an existing identity; current-only bindings are already above.
     match content {
@@ -274,7 +352,7 @@ fn metadata_bytes(
                 let growth =
                     AssetServer::checked_product_binding_retained_bytes(Some(record.path()))
                         .ok_or_else(metadata_overflow)?;
-                add_entries(&mut bytes, staged_copies, growth)?;
+                add_entries(bytes, staged_copies, growth)?;
             }
         }
         ResidencyInput::Processed(content) => {
@@ -286,7 +364,7 @@ fn metadata_bytes(
                 .checked_add(content.tilesets.len())
                 .ok_or_else(metadata_overflow)?;
             add_entries(
-                &mut bytes,
+                bytes,
                 products,
                 growth
                     .checked_mul(staged_copies)
@@ -295,10 +373,8 @@ fn metadata_bytes(
         }
     }
     if addition_to.is_some() {
-        add_entries(&mut bytes, 1, size_of::<additive::ActiveAddition>())?;
-        add_entries(&mut bytes, 1, size_of::<additive::PreparedAddition>())?;
         add_entries(
-            &mut bytes,
+            bytes,
             content
                 .image_count()
                 .checked_add(content.material_count())
@@ -306,7 +382,7 @@ fn metadata_bytes(
             size_of::<AssetProductRef>(),
         )?;
         add_entries(
-            &mut bytes,
+            bytes,
             content.tileset_count(),
             size_of::<nara_asset::Handle<TileSet>>(),
         )?;
@@ -317,17 +393,17 @@ fn metadata_bytes(
         + 3 * BTREE_ENTRY_OVERHEAD
         + 5 * ARC_CONTROL_BLOCK_BYTES
         + size_of::<RuntimeContentAsset<ImageAsset>>();
-    add_entries(&mut bytes, content.image_count(), image_metadata)?;
+    add_entries(bytes, content.image_count(), image_metadata)?;
     let tileset_metadata = 3 * size_of::<TileSetPublicationInput>()
         + 3 * size_of::<TileSetContentReceipt>()
         + size_of::<RuntimeContentAsset<TileSetDescriptor>>()
         + size_of::<AssetMutationBaseline<TileSet>>()
         + size_of::<AssetId>()
         + 3 * BTREE_ENTRY_OVERHEAD;
-    add_entries(&mut bytes, content.tileset_count(), tileset_metadata)?;
+    add_entries(bytes, content.tileset_count(), tileset_metadata)?;
     if let Some(current) = current.or(addition_to) {
         add_entries(
-            &mut bytes,
+            bytes,
             current.image_count(),
             2 * size_of::<OwnedImage>()
                 + size_of::<AssetId>()
@@ -335,7 +411,7 @@ fn metadata_bytes(
                 + BTREE_ENTRY_OVERHEAD,
         )?;
         add_entries(
-            &mut bytes,
+            bytes,
             current.tileset_count(),
             2 * size_of::<TileSetContentReceipt>()
                 + size_of::<AssetId>()
@@ -344,86 +420,74 @@ fn metadata_bytes(
                 + BTREE_ENTRY_OVERHEAD,
         )?;
     }
-    if let ResidencyInput::Source(snapshot) = content {
-        if let Some(prefix) = snapshot.asset_resolution().scope().prefix() {
-            add_entries(
-                &mut bytes,
-                1,
-                prefix
-                    .as_str()
-                    .len()
-                    .checked_add(crate::scene_retention::STRING_ALLOCATION_OVERHEAD)
-                    .ok_or_else(metadata_overflow)?,
-            )?;
-        }
-        // Existing database estimates include owned paths, case-folded keys and tree indices.
-        // Four copies conservatively cover original/merged catalogs, target indexing, receipts
-        // and real source aliases while those representations overlap during preparation.
-        let existing = world.get_resource::<ProjectAssetDatabase>();
-        for record in existing
-            .into_iter()
-            .flat_map(ProjectAssetDatabase::records)
-            .chain(snapshot.asset_database().records())
-        {
-            let record_bytes = asset_record_retained_bytes(record)
-                .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
-            add_entries(&mut bytes, 4, record_bytes)?;
-        }
-        for tileset in snapshot.tilesets() {
-            if let nara_asset::AssetRef::Path(path) = &tileset.source().image {
-                // Inputs and their prepared copies retain authored aliases. Their bound
-                // canonical dependency is one shared allocation, independent of the Host scope.
-                let alias = path
-                    .as_str()
-                    .len()
-                    .checked_add(crate::scene_retention::STRING_ALLOCATION_OVERHEAD)
-                    .ok_or_else(metadata_overflow)?;
-                add_entries(&mut bytes, 3, alias)?;
-                let canonical = snapshot
-                    .asset_resolution()
-                    .resolution_work_bytes(&tileset.source().image)
-                    .ok_or_else(metadata_overflow)?;
-                let canonical_len = if canonical == 0 {
-                    path.as_str().len()
-                } else {
-                    canonical
-                };
-                add_entries(
-                    &mut bytes,
-                    1,
-                    canonical_len
-                        .checked_add(size_of::<nara_asset::AssetSourcePath>())
-                        .and_then(|value| value.checked_add(ARC_CONTROL_BLOCK_BYTES))
-                        .and_then(|value| {
-                            value.checked_add(crate::scene_retention::STRING_ALLOCATION_OVERHEAD)
-                        })
-                        .ok_or_else(metadata_overflow)?,
-                )?;
-                // The temporary catalogue lookup overlaps those retained inputs.
-                add_entries(&mut bytes, 1, canonical)?;
-            }
-        }
-    } else {
-        let ResidencyInput::Processed(content) = content else {
-            unreachable!()
-        };
+    Ok(())
+}
+
+#[cfg(feature = "runtime-2d")]
+fn source_metadata_bytes(
+    bytes: &mut usize,
+    world: &World,
+    snapshot: &ProjectContentSnapshot,
+) -> Result<(), HostFault> {
+    if let Some(prefix) = snapshot.asset_resolution().scope().prefix() {
         add_entries(
-            &mut bytes,
-            content.dependencies.len(),
-            size_of::<RuntimeContentScene>(),
-        )?;
-        add_entries(
-            &mut bytes,
-            content.deferred_scene_products.len(),
-            size_of::<AssetProductRef>(),
-        )?;
-        add_entries(
-            &mut bytes,
+            bytes,
             1,
-            size_of::<RuntimeContentLease>() + ARC_CONTROL_BLOCK_BYTES,
+            prefix
+                .as_str()
+                .len()
+                .checked_add(crate::scene_retention::STRING_ALLOCATION_OVERHEAD)
+                .ok_or_else(metadata_overflow)?,
         )?;
     }
-    Ok(bytes)
+    // Existing database estimates include owned paths, case-folded keys and tree indices.
+    // Four copies conservatively cover original/merged catalogs, target indexing, receipts
+    // and real source aliases while those representations overlap during preparation.
+    let existing = world.get_resource::<ProjectAssetDatabase>();
+    for record in existing
+        .into_iter()
+        .flat_map(ProjectAssetDatabase::records)
+        .chain(snapshot.asset_database().records())
+    {
+        let record_bytes = asset_record_retained_bytes(record)
+            .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
+        add_entries(bytes, 4, record_bytes)?;
+    }
+    for tileset in snapshot.tilesets() {
+        if let nara_asset::AssetRef::Path(path) = &tileset.source().image {
+            // Inputs and their prepared copies retain authored aliases. Their bound
+            // canonical dependency is one shared allocation, independent of the Host scope.
+            let alias = path
+                .as_str()
+                .len()
+                .checked_add(crate::scene_retention::STRING_ALLOCATION_OVERHEAD)
+                .ok_or_else(metadata_overflow)?;
+            add_entries(bytes, 3, alias)?;
+            let canonical = snapshot
+                .asset_resolution()
+                .resolution_work_bytes(&tileset.source().image)
+                .ok_or_else(metadata_overflow)?;
+            let canonical_len = if canonical == 0 {
+                path.as_str().len()
+            } else {
+                canonical
+            };
+            add_entries(
+                bytes,
+                1,
+                canonical_len
+                    .checked_add(size_of::<nara_asset::AssetSourcePath>())
+                    .and_then(|value| value.checked_add(ARC_CONTROL_BLOCK_BYTES))
+                    .and_then(|value| {
+                        value.checked_add(crate::scene_retention::STRING_ALLOCATION_OVERHEAD)
+                    })
+                    .ok_or_else(metadata_overflow)?,
+            )?;
+            // The temporary catalogue lookup overlaps those retained inputs.
+            add_entries(bytes, 1, canonical)?;
+        }
+    }
+    Ok(())
 }
 
 fn add_entries(bytes: &mut usize, count: usize, per_entry: usize) -> Result<(), HostFault> {

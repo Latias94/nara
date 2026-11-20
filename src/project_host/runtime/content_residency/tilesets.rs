@@ -1,6 +1,20 @@
-use nara_asset::{AssetId, Handle};
+use std::collections::{BTreeMap, BTreeSet};
 
-use super::*;
+use nara_asset::{
+    AssetId, AssetMutationBaseline, AssetRecord, AssetRef, AssetSourceKind, AssetStates, Assets,
+    Handle, SourceHash,
+};
+use nara_ecs::World;
+use nara_image::ImageAsset;
+use nara_scene::advanced::SceneAssetReservations;
+use nara_tilemap::{
+    TileSet, TileSetAssetError, TileSetAssets, TileSetContentReceipt, TileSetPublicationInput,
+};
+
+use super::{
+    HostFault, ProjectSceneResidency, ResidencyInput, binding_changed, failure,
+    images::ImagePublications, resources_missing,
+};
 
 #[derive(Clone, Copy)]
 pub(super) enum TileSetChange<'a> {
@@ -24,6 +38,19 @@ pub(super) struct TileSetChanges {
     pub(super) slots: Vec<AssetMutationBaseline<TileSet>>,
     pub(super) uses: Vec<Handle<TileSet>>,
     pub(super) new_handles: BTreeSet<AssetId>,
+}
+
+impl TileSetChanges {
+    pub(super) fn has_publications(&self) -> bool {
+        !self.inputs.is_empty() || !self.retirements.is_empty()
+    }
+
+    pub(super) fn share_inputs(&self) -> Result<Vec<TileSetPublicationInput>, HostFault> {
+        self.inputs
+            .iter()
+            .map(|input| input.share_retained().ok_or_else(resources_missing))
+            .collect()
+    }
 }
 
 pub(super) fn prepare(
@@ -161,4 +188,42 @@ pub(super) fn prepare(
         }
     }
     Ok(changes)
+}
+
+fn tileset_kind() -> AssetSourceKind {
+    AssetSourceKind::Other(String::from("tileset"))
+}
+
+pub(super) fn tileset_failure(error: TileSetAssetError) -> HostFault {
+    let summary = match error {
+        TileSetAssetError::InvalidSourceKind => "Prepared Scene TileSet source kind is invalid",
+        TileSetAssetError::InvalidSource => "Prepared Scene TileSet source is invalid",
+        TileSetAssetError::InvalidDescriptor => "Prepared Scene TileSet descriptor is invalid",
+        TileSetAssetError::Capacity => "Prepared Scene exceeds TileSet source capacity",
+        TileSetAssetError::RetentionCapacity => {
+            "Prepared Scene exceeds retained TileSet Image capacity"
+        }
+        TileSetAssetError::SourceReferenceCapacity => {
+            "Prepared Scene exceeds TileSet source reference capacity"
+        }
+        TileSetAssetError::DependencyUnavailable => {
+            "Prepared Scene TileSet Image dependency is unavailable"
+        }
+        TileSetAssetError::ImageExtentMismatch => {
+            "Prepared Scene TileSet atlas does not match its Image extent"
+        }
+        TileSetAssetError::AtlasLayoutChangeRequiresRebuild => {
+            "Prepared Scene changes a resident TileSet atlas layout; rebuild its consumers first"
+        }
+        TileSetAssetError::IdentityMismatch => {
+            "Prepared Scene TileSet identity conflicts with the runtime"
+        }
+        TileSetAssetError::Superseded => "Another writer changed the current TileSet publication",
+        TileSetAssetError::InvalidPublicationBatch => {
+            "Prepared Scene repeats or overlaps TileSet publication identities"
+        }
+        TileSetAssetError::Asset(_) => "Prepared Scene TileSet asset publication is invalid",
+        TileSetAssetError::State(_) => "Prepared Scene TileSet asset state cannot advance",
+    };
+    failure("project.scene.tileset-preparation-failed", summary)
 }

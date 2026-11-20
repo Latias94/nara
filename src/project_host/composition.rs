@@ -906,7 +906,7 @@ fn resolve_runtime_composition(
     let data_contributors = request.recipe.data_contributors();
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     let asset_domains = request.recipe.asset_domains.clone();
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "serde")]
     let runtime_codecs = request.recipe.runtime_codecs.clone();
     let snapshot_cell = Arc::new(OnceLock::new());
     request.plugins = request
@@ -923,7 +923,7 @@ fn resolve_runtime_composition(
         {
             return Err(CompositionError::InputOwnerRequired.into());
         }
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "serde")]
         let input_codec_selected = runtime_codecs.has_family_format::<nara_input::ActionMapDomain>(
             <nara_input::ActionMapRuntimeCodec as nara_asset::RuntimeAssetCodec<
                 nara_input::ActionMapAsset,
@@ -932,7 +932,7 @@ fn resolve_runtime_composition(
                 nara_input::ActionMapAsset,
             >>::RUNTIME_VERSION,
         );
-        #[cfg(not(all(feature = "runtime-2d", feature = "serde")))]
+        #[cfg(not(feature = "serde"))]
         let input_codec_selected = false;
         if !input_codec_selected {
             return Err(CompositionError::InputCodecRequired.into());
@@ -973,7 +973,7 @@ fn resolve_runtime_composition(
             required,
             plugin_plan,
             schema_validation,
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "serde")]
             runtime_codecs,
         },
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]

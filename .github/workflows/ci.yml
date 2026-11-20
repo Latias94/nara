@@ -365,6 +365,8 @@ jobs:
         run: cargo check --manifest-path samples/two-level-game/Cargo.toml --locked --all-features --all-targets
       - name: Check Two-Level Game shipping desktop without development tools
         run: cargo check --manifest-path samples/two-level-game/Cargo.toml --locked --no-default-features --features cooked-player,desktop --all-targets
+      - name: Check Two-Level Game dedicated server without client 2D
+        run: cargo check --manifest-path samples/two-level-game/Cargo.toml --locked --no-default-features --features cooked-server --all-targets
       - name: Test Two-Level Game shipping headless without development tools
         run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --no-default-features --features cooked-player --all-targets --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test Two-Level Game cook-only source controls

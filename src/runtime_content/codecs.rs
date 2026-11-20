@@ -16,7 +16,7 @@ use super::{
     DecodeLease, RuntimeContentAsset, RuntimeContentBase, RuntimeContentBudgetKind,
     RuntimeContentError, RuntimeContentMember, RuntimeContentMemberKind, checked_add,
 };
-use crate::project_content::{
+use crate::project_assets::{
     ErasedCollection, ProjectAssetCollection, ProjectDomainAssets, runtime_collection,
 };
 
@@ -90,7 +90,9 @@ pub enum RuntimeCodecSelectionError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuntimeCodecRole {
     Cpu,
+    #[cfg(feature = "runtime-2d")]
     Image,
+    #[cfg(feature = "runtime-2d")]
     TileSet,
 }
 
@@ -129,6 +131,7 @@ pub(super) struct DecodedAsset {
     _work: DecodeLease,
 }
 
+#[cfg(feature = "runtime-2d")]
 impl DecodedAsset {
     pub(super) fn typed<D: AssetDomain>(&self) -> Option<&RuntimeContentAsset<D::Product>> {
         if self.family != TypeId::of::<D>() {
@@ -296,7 +299,9 @@ impl RuntimeCodecs {
             hash.update(&definition.version.to_le_bytes());
             hash.update(&[match definition.role {
                 RuntimeCodecRole::Cpu => 0,
+                #[cfg(feature = "runtime-2d")]
                 RuntimeCodecRole::Image => 1,
+                #[cfg(feature = "runtime-2d")]
                 RuntimeCodecRole::TileSet => 2,
             }]);
             for bytes in [
@@ -346,6 +351,7 @@ impl RuntimeCodecs {
         Ok(definition.limits)
     }
 
+    #[cfg(feature = "runtime-2d")]
     pub(crate) fn role(&self, member: &RuntimeContentMember) -> Option<RuntimeCodecRole> {
         self.definitions
             .iter()

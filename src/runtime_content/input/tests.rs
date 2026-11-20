@@ -94,7 +94,7 @@ fn recipe() -> ProductRecipe {
 fn configuration() -> RuntimeConfiguration {
     let mut configuration = RuntimeConfiguration::default();
     configuration.runtime.preset = RuntimePreset::LocalHeadless;
-    configuration.capabilities.requested = vec![ProductCapability::Runtime2d];
+    configuration.capabilities.requested = vec![ProductCapability::RuntimeCore];
     configuration.input.action_map = Some(input_product());
     configuration.tasks.io.workers = 1;
     configuration.tasks.compute.workers = 1;

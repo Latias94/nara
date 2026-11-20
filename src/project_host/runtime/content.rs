@@ -2,17 +2,21 @@
 
 use std::sync::Arc;
 
-use nara_asset::{AssetProductRef, AssetRef, ImportedProductId};
+#[cfg(feature = "runtime-2d")]
+use nara_asset::AssetRef;
+use nara_asset::{AssetProductRef, ImportedProductId};
 use nara_scene::{CompiledSceneDocument, SceneComponentBindings};
 
+#[cfg(feature = "runtime-2d")]
+use crate::project_content::ProjectContentSnapshot;
 use crate::{
-    project_content::{ProjectContentSnapshot, ProjectDomainAssets},
-    runtime_content::ProcessedSceneContent,
+    project_assets::ProjectDomainAssets, runtime_content::ProcessedSceneContent,
     startup_scene::SceneSource,
 };
 
 #[derive(Clone)]
 pub(super) enum PreparedSceneContent {
+    #[cfg(feature = "runtime-2d")]
     Source(ProjectContentSnapshot),
     Processed(Arc<ProcessedSceneContent>),
 }
@@ -20,6 +24,7 @@ pub(super) enum PreparedSceneContent {
 impl PreparedSceneContent {
     pub(super) fn scene_source(&self) -> SceneSource {
         match self {
+            #[cfg(feature = "runtime-2d")]
             Self::Source(snapshot) => snapshot.scene_source(),
             Self::Processed(content) => {
                 SceneSource::from_hosted_runtime_content(content.scene.clone())
@@ -29,6 +34,7 @@ impl PreparedSceneContent {
 
     pub(super) fn document(&self) -> &CompiledSceneDocument {
         match self {
+            #[cfg(feature = "runtime-2d")]
             Self::Source(snapshot) => snapshot.compiled_scene(),
             Self::Processed(content) => content.scene.candidate().document(),
         }
@@ -36,6 +42,7 @@ impl PreparedSceneContent {
 
     pub(super) fn domain_assets(&self) -> &ProjectDomainAssets {
         match self {
+            #[cfg(feature = "runtime-2d")]
             Self::Source(snapshot) => snapshot.domain_assets(),
             Self::Processed(content) => &content.domains,
         }
@@ -49,6 +56,7 @@ impl PreparedSceneContent {
             return None;
         }
         match self {
+            #[cfg(feature = "runtime-2d")]
             Self::Source(snapshot) => {
                 let record = snapshot
                     .asset_resolution()
@@ -78,6 +86,7 @@ impl PreparedSceneContent {
 
     pub(super) fn shares_component_bindings(&self, bindings: &SceneComponentBindings) -> bool {
         match self {
+            #[cfg(feature = "runtime-2d")]
             Self::Source(snapshot) => snapshot.shares_component_bindings(bindings),
             Self::Processed(content) => content.scene.candidate().definitions().matches(bindings),
         }

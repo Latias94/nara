@@ -14,7 +14,9 @@ mod codecs;
 mod deep;
 mod dependencies;
 mod input;
+#[cfg(feature = "runtime-2d")]
 mod materials;
+#[cfg(feature = "runtime-2d")]
 mod native;
 mod prepared;
 mod traversal;
@@ -50,6 +52,8 @@ use nara_reflect::{
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneDocumentCandidate, RuntimeSceneError, RuntimeSceneLimits,
 };
+#[cfg(all(feature = "runtime-ui", not(feature = "runtime-2d")))]
+use nara_ui::__private::UI_VISUAL_IMAGE_FIELD_ID;
 
 use crate::{
     ProductRecipe,
@@ -231,7 +235,9 @@ pub enum RuntimeContentError {
     CodecPanicked,
     ProductIdentityMismatch,
     NativeResourceUnavailable,
+    #[cfg(feature = "runtime-2d")]
     TileSet(nara_tilemap::TileSetDescriptorError),
+    #[cfg(feature = "runtime-2d")]
     Tilemap(nara_tilemap::TilemapMembershipError),
     Scene(RuntimeSceneError),
     SceneReference(DeclaredAssetReferenceError),
@@ -300,7 +306,9 @@ impl RuntimeContentError {
             Self::NativeResourceUnavailable => {
                 "Runtime resource requires an unavailable native product family"
             }
+            #[cfg(feature = "runtime-2d")]
             Self::TileSet(_) => "Runtime TileSet descriptor does not match its actual Image",
+            #[cfg(feature = "runtime-2d")]
             Self::Tilemap(_) => "Runtime Tilemap cells do not match their admitted TileSet",
             Self::Scene(_) => "Runtime Scene admission failed",
             Self::SceneReference(_) => "Runtime Scene asset-reference inventory failed",
@@ -321,7 +329,9 @@ impl Error for RuntimeContentError {
             Self::Scene(error) => Some(error),
             Self::SceneReference(error) => Some(error),
             Self::Asset(error) => Some(error),
+            #[cfg(feature = "runtime-2d")]
             Self::TileSet(error) => Some(error),
+            #[cfg(feature = "runtime-2d")]
             Self::Tilemap(error) => Some(error),
             _ => None,
         }
@@ -626,8 +636,7 @@ impl RuntimeContentBase {
                 .reserve(promised, limits.work_bytes().get())?;
             let mut dependencies = DependencyInventory::new(self, member)?;
             let encoded = self.encoded_member(index)?;
-            let mut value =
-                C::decode_runtime(encoded.as_ref()).map_err(RuntimeContentError::Asset)?;
+            let value = C::decode_runtime(encoded.as_ref()).map_err(RuntimeContentError::Asset)?;
             drop(encoded);
             for reference in member.products() {
                 if !D::contains_product(&value, reference.product())
@@ -658,8 +667,13 @@ impl RuntimeContentBase {
                 metadata,
             )?;
             lease.finish_decode(retained)?;
+            #[cfg(feature = "runtime-2d")]
+            let mut value = value;
+            #[cfg(feature = "runtime-2d")]
             let (lease, retained) =
                 materials::retain_acquisition(self, &mut value, lease, retained)?;
+            #[cfg(not(feature = "runtime-2d"))]
+            let lease = Some(lease);
             Ok(RuntimeContentAsset {
                 inner: Arc::new(RuntimeContentAssetInner {
                     product: value,
@@ -680,6 +694,7 @@ impl RuntimeContentBase {
             .ok_or(RuntimeContentError::UndeclaredProduct)
     }
 
+    #[cfg(feature = "runtime-2d")]
     fn validate_immediate_dependency(
         &self,
         member: &RuntimeContentMember,
@@ -715,6 +730,10 @@ impl RuntimeContentBase {
         let bindings = self.inner.plan.schema_validation().bindings();
         let mut work = self.inner.budget.reserve(0, 0)?;
         let mut dependencies = DependencyInventory::new(self, member)?;
+        #[cfg(all(feature = "runtime-ui", not(feature = "runtime-2d")))]
+        let ui_visual = deep::ui_visual_component(self);
+        #[cfg(all(feature = "runtime-ui", not(feature = "runtime-2d")))]
+        let mut unavailable_ui_image = None;
         for entity in candidate.document().entities() {
             for (component, record) in entity.components() {
                 // Runtime Scene admission has already proved this exact immutable selection.
@@ -739,10 +758,26 @@ impl RuntimeContentBase {
                         return Err(RuntimeContentError::ProductIdentityMismatch);
                     };
                     dependencies.observe(*product, reference.demand())?;
+                    #[cfg(all(feature = "runtime-ui", not(feature = "runtime-2d")))]
+                    if ui_visual == Some(component)
+                        && reference.field_id().as_str() == UI_VISUAL_IMAGE_FIELD_ID
+                    {
+                        unavailable_ui_image.get_or_insert((entity.id(), *product));
+                    }
                 }
             }
         }
-        dependencies.finish()
+        dependencies.finish()?;
+        #[cfg(all(feature = "runtime-ui", not(feature = "runtime-2d")))]
+        if let Some((entity, target)) = unavailable_ui_image {
+            return Err(deep::scene_image_publication_error(
+                member.products()[0],
+                entity,
+                target,
+                deep::SceneImageBinding::UiVisual,
+            ));
+        }
+        Ok(())
     }
 }
 

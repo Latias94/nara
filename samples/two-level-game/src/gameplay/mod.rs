@@ -16,18 +16,14 @@ mod verification;
 
 use std::{path::PathBuf, sync::Arc};
 
-#[cfg(feature = "local-player")]
-use nara::sprite::Sprite;
 use nara::{
     ProductConfiguration, ProductRecipe, SchemaContribution,
     advanced_prelude::{CurrentScene, add_startup_scene_activation_systems},
     app::{PluginCategory, PluginDeclaration, PluginId, PluginSchemaProviderId},
-    core::ItemLimit,
     ecs::{Entity, World, schedule::IntoScheduleConfigs},
     gameplay::{GameplayCommandSet, add_local_gameplay_command_systems},
     identity::{EntityLookup, SceneEntityId},
     prelude::{App, CoreStage, FixedUpdateSet, Plugin, PluginError, Resource, Transform2d, Vec2},
-    project_host::ProjectContentLimits,
     reflect::{
         ComponentRegistryBuilder, ComponentRegistryError, ComponentSchemaCatalog,
         ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
@@ -37,6 +33,8 @@ use nara::{
     scene::advanced::SceneProductResource,
     transform::fixed_spatial_snapshot,
 };
+#[cfg(feature = "local-player")]
+use nara::{core::ItemLimit, project_host::ProjectContentLimits, sprite::Sprite};
 
 use crate::{
     levels::{LevelId, LevelKey},
@@ -460,10 +458,12 @@ fn exploration_recipe(configuration: ExplorationConfiguration) -> ProductRecipe 
         [PROVIDER],
     )
     .expect("static game schema and composition");
-    ProductRecipe::new()
-        .with_source_content_limits(
-            ProjectContentLimits::default().with_retained_generations(ItemLimit::new(4).unwrap()),
-        )
+    let recipe = ProductRecipe::new();
+    #[cfg(feature = "local-player")]
+    let recipe = recipe.with_source_content_limits(
+        ProjectContentLimits::default().with_retained_generations(ItemLimit::new(4).unwrap()),
+    );
+    recipe
         .add_contribution(contribution)
         .expect("static game recipe")
 }
@@ -510,6 +510,7 @@ fn initialize(world: &mut World) {
         return;
     };
     world.resource_mut::<Session>().clock.timestep_nanos = timestep;
+    #[cfg(feature = "local-player")]
     resume::remember_current(world);
     let content = Content::read_current(world);
     match content {

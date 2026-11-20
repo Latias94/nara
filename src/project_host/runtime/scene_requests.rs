@@ -3,11 +3,14 @@
 mod api;
 pub(crate) mod domains;
 mod preparation;
+#[cfg(feature = "runtime-2d")]
 mod source_updates;
 
+#[cfg(feature = "runtime-2d")]
+pub use api::ProjectSceneSourceUpdateStatus;
 pub use api::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
-    ProjectSceneRequestState, ProjectSceneSelection, ProjectSceneSourceUpdateStatus, ProjectScenes,
+    ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
     activate_prepared_project_scene, begin_prepared_project_scene_travel,
     commit_prepared_project_scene,
 };
@@ -24,7 +27,9 @@ use nara_app::{
     RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
     RuntimeGeneration,
 };
-use nara_asset::{AssetProductRef, AssetSourcePath};
+use nara_asset::AssetProductRef;
+#[cfg(feature = "runtime-2d")]
+use nara_asset::AssetSourcePath;
 use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, SafeSummary};
 use nara_ecs::{Res, ResMut, Resource, World, system::SystemParam};
 use nara_identity::SpawnedSceneInstance;
@@ -36,10 +41,11 @@ use nara_scene::{
 use nara_tasks::TaskPools;
 
 use super::{content::PreparedSceneContent, content_residency::ProjectSceneResidency};
+#[cfg(feature = "runtime-2d")]
+use crate::project_host::{
+    ProjectContentErrorKind, ProjectContentLoader, ProjectSettingsCandidate, RuntimePlan,
+};
 use crate::{
-    project_host::{
-        ProjectContentErrorKind, ProjectContentLoader, ProjectSettingsCandidate, RuntimePlan,
-    },
     runtime_content::{RuntimeContentBase, RuntimeContentMemberKind},
     startup_scene::CurrentSceneOwner,
 };
@@ -49,6 +55,7 @@ use preparation::Preparation;
 static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 
 enum Context {
+    #[cfg(feature = "runtime-2d")]
     Source {
         candidate: ProjectSettingsCandidate,
         plan: RuntimePlan,
@@ -63,6 +70,7 @@ enum Context {
 impl Context {
     fn matches_current(&self, current: &CurrentSceneOwner) -> bool {
         match self {
+            #[cfg(feature = "runtime-2d")]
             Self::Source { .. } => current.is_project_backed(),
             Self::Processed { base } => current
                 .hosted_runtime_base()
@@ -70,6 +78,7 @@ impl Context {
         }
     }
 
+    #[cfg(feature = "runtime-2d")]
     fn declares_source_path(&self, path: &ProjectPath) -> bool {
         let Self::Source { candidate, .. } = self else {
             return false;
@@ -81,11 +90,13 @@ impl Context {
 
     fn admits_request(&self, selection: &ProjectSceneSelection) -> bool {
         match (self, selection) {
+            #[cfg(feature = "runtime-2d")]
             (Self::Source { .. }, ProjectSceneSelection::Source(path)) => {
                 self.declares_source_path(path)
             }
             // Product identity and declared-root membership need actual source discovery. The
             // worker admits that association or returns a rejection without owner-thread I/O.
+            #[cfg(feature = "runtime-2d")]
             (Self::Source { .. }, ProjectSceneSelection::Product(_)) => true,
             (Self::Processed { base }, ProjectSceneSelection::Product(product)) => {
                 base.catalog().scenes().contains(product)
@@ -93,7 +104,7 @@ impl Context {
                         matches!(member.kind(), RuntimeContentMemberKind::Scene { .. })
                     })
             }
-            _ => false,
+            (Self::Processed { .. }, ProjectSceneSelection::Source(_)) => false,
         }
     }
 }
@@ -109,6 +120,7 @@ struct Admission {
 #[derive(Clone)]
 enum RequestPurpose {
     Travel,
+    #[cfg(feature = "runtime-2d")]
     AdditiveSource(AssetSourcePath),
     AdditiveProcessed,
 }
@@ -124,6 +136,7 @@ struct RequestOwner {
     context: Arc<Context>,
     closing: Arc<AtomicBool>,
     slot: Option<Slot>,
+    #[cfg(feature = "runtime-2d")]
     source_updates: Option<source_updates::SourceUpdates>,
     #[cfg(test)]
     gate: Option<preparation::TestGate>,
@@ -162,6 +175,7 @@ struct ManagedTravelState {
     state: ProjectSceneRequestState,
     publication_diagnostics: DiagnosticReport,
     diagnostics: DiagnosticReport,
+    #[cfg(feature = "runtime-2d")]
     source_closure: Option<crate::project_content::ProjectContentClosureReceipt>,
 }
 
@@ -347,6 +361,7 @@ impl RequestOwner {
 }
 
 /// Installs only the original Host authority. Call during unpublished runtime admission.
+#[cfg(feature = "runtime-2d")]
 pub(super) fn install_context(
     world: &mut World,
     candidate: ProjectSettingsCandidate,
@@ -375,13 +390,20 @@ pub(super) fn install_runtime_context(
     world: &mut World,
     base: RuntimeContentBase,
 ) -> Result<(), ProjectSceneRequestError> {
-    install_request_owner(world, Context::Processed { base }, None)
+    install_request_owner(
+        world,
+        Context::Processed { base },
+        #[cfg(feature = "runtime-2d")]
+        None,
+    )
 }
 
 fn install_request_owner(
     world: &mut World,
     context: Context,
-    source_closure: Option<crate::project_content::ProjectContentClosureReceipt>,
+    #[cfg(feature = "runtime-2d")] source_closure: Option<
+        crate::project_content::ProjectContentClosureReceipt,
+    >,
 ) -> Result<(), ProjectSceneRequestError> {
     if world.contains_resource::<RequestOwner>() {
         return Err(ProjectSceneRequestError::Stale);
@@ -394,6 +416,7 @@ fn install_request_owner(
     if closing.load(Ordering::Acquire) {
         return Err(ProjectSceneRequestError::Unavailable);
     }
+    #[cfg(feature = "runtime-2d")]
     let source_updates = if let Some(source_closure) = source_closure {
         let generation = world
             .get_resource::<RuntimeGeneration>()
@@ -413,6 +436,7 @@ fn install_request_owner(
         context: Arc::new(context),
         closing,
         slot: None,
+        #[cfg(feature = "runtime-2d")]
         source_updates,
         #[cfg(test)]
         gate: None,
@@ -420,7 +444,7 @@ fn install_request_owner(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime-2d"))]
 pub(super) fn hold_next_preparation(
     world: &mut World,
 ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
@@ -433,6 +457,7 @@ pub(super) fn hold_next_preparation(
 
 /// The exclusive TaskUpdate poll is inert in runtimes without a project request owner.
 pub(crate) fn poll_project_scene_requests(world: &mut World) {
+    #[cfg(feature = "runtime-2d")]
     if world.get_resource::<RequestOwner>().is_some_and(|owner| {
         owner.slot.is_none()
             && !owner.closing.load(Ordering::Acquire)
@@ -504,6 +529,7 @@ pub(crate) fn poll_project_scene_requests(world: &mut World) {
                     Slot::Ready { admission, content }
                 }
                 (None, Err(failure)) => {
+                    #[cfg(feature = "runtime-2d")]
                     if let Some(updates) = &mut owner.source_updates {
                         updates.failed(id, failure.error, failure.observations);
                     }
@@ -681,6 +707,7 @@ fn drive_managed_travel(world: &mut World) {
                     }
                 };
                 travel.published = report.instance;
+                #[cfg(feature = "runtime-2d")]
                 if let (Some(updates), Some(source_closure), Some(instance)) =
                     (&mut owner.source_updates, travel.source_closure.take(), travel.published.as_ref())
                 {
@@ -804,10 +831,15 @@ impl RuntimeCloseParticipant for CloseParticipant {
         context: &mut RuntimeCloseContext<'_>,
     ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
         self.0.store(true, Ordering::Release);
-        if let Some(mut owner) = context.get_resource_mut::<RequestOwner>().map_err(|_| {
+        if let Some(owner) = context.get_resource_mut::<RequestOwner>().map_err(|_| {
             RuntimeCloseParticipantError::new("project.scene.close-owner-unavailable")
         })? {
-            owner.source_updates = None;
+            #[cfg(feature = "runtime-2d")]
+            let owner = {
+                let owner = owner.into_inner();
+                owner.source_updates = None;
+                owner
+            };
             if let Some(Slot::Preparing { preparation, .. }) = &owner.slot {
                 preparation.cancel();
             }

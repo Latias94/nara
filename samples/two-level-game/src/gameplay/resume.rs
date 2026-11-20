@@ -9,8 +9,9 @@ use std::time::Duration;
 
 #[cfg(feature = "desktop")]
 use nara::project_host::DesktopControlError;
+#[cfg(feature = "local-player")]
+use nara::{advanced_prelude::CurrentScene, project_host::ProjectSceneContentStamp};
 use nara::{
-    advanced_prelude::CurrentScene,
     app::{FixedTime, RuntimeState, RuntimeTimeContinuation, RuntimeTimeSettings},
     ecs::World,
     gameplay::{
@@ -20,7 +21,7 @@ use nara::{
         GameplayCommandValue,
     },
     prelude::{App, PluginError, Resource, Transform2d, Vec2},
-    project_host::{HeadlessSession, HeadlessSessionError, ProjectSceneContentStamp},
+    project_host::{HeadlessSession, HeadlessSessionError},
 };
 
 use super::{GamePhase, Progress, Session, fail, player, travel};
@@ -129,7 +130,8 @@ fn supported_service(id: &str) -> bool {
     )
 }
 
-fn stamp(level: LevelId, source: ProjectSceneContentStamp) -> LevelContentStamp {
+#[cfg(feature = "local-player")]
+pub(super) fn stamp(level: LevelId, source: ProjectSceneContentStamp) -> LevelContentStamp {
     LevelContentStamp {
         level,
         manifest: *source.manifest_digest().as_bytes(),
@@ -137,6 +139,7 @@ fn stamp(level: LevelId, source: ProjectSceneContentStamp) -> LevelContentStamp 
     }
 }
 
+#[cfg(feature = "local-player")]
 pub(super) fn remember_current(world: &mut World) {
     if let Some(source) = CurrentScene::get(world).and_then(|view| view.source_content_stamp()) {
         world
@@ -186,26 +189,27 @@ pub(super) fn required_levels(world: &World) -> Vec<LevelId> {
 
 pub(super) fn validate_content(
     world: &World,
-    level: LevelId,
-    source: Option<ProjectSceneContentStamp>,
+    source: Option<(LevelContentStamp, [u8; 32])>,
 ) -> Result<Option<LevelContentStamp>, String> {
-    let Some(source) = source else {
+    let Some((record, schema)) = source else {
         if is_pending(world) {
             return Err("exact reconstruction requires admitted source content facts".into());
         }
         return Ok(None);
     };
-    let record = stamp(level, source);
     let control = world.resource::<ResumeControl>();
     if let Some(state) = &control.pending {
-        if source.schema_fingerprint().as_bytes() != state.compatibility.schema
+        if schema != state.compatibility.schema
             || !state
                 .compatibility
                 .levels
                 .iter()
                 .any(|expected| expected == &record)
         {
-            return Err(format!("resume content compatibility rejected {level:?}"));
+            return Err(format!(
+                "resume content compatibility rejected {:?}",
+                record.level
+            ));
         }
     }
     Ok(Some(record))
@@ -350,7 +354,7 @@ pub(super) fn begin_from_command(
     world: &mut World,
     payload: &GameplayCommandPayload,
 ) -> Result<(), String> {
-    if !world.resource::<Session>().local_player {
+    if !cfg!(feature = "local-player") || !world.resource::<Session>().local_player {
         return Err("exact reconstruction requires the local source player".into());
     }
     if world.resource::<FixedTime>().tick() != 1
@@ -404,12 +408,15 @@ pub(super) fn begin_from_command(
     {
         return Err("resume Schema or game timestep is incompatible".into());
     }
-    let current = CurrentScene::get(world)
-        .and_then(|current| current.source_content_stamp())
-        .ok_or("resume startup source facts are unavailable")?;
-    let startup = stamp(LevelId::STARTUP, current);
-    if !state.compatibility.levels.contains(&startup) {
-        return Err("resume startup content is incompatible".into());
+    #[cfg(feature = "local-player")]
+    {
+        let current = CurrentScene::get(world)
+            .and_then(|current| current.source_content_stamp())
+            .ok_or("resume startup source facts are unavailable")?;
+        let startup = stamp(LevelId::STARTUP, current);
+        if !state.compatibility.levels.contains(&startup) {
+            return Err("resume startup content is incompatible".into());
+        }
     }
     let progress = state.progress.clone();
     world.resource_mut::<ResumeControl>().pending = Some(state);

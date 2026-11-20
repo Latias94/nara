@@ -94,7 +94,7 @@ where
         Ok(bindings) => bindings,
         Err(report) => return report,
     };
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "serde")]
     if crate::project_host::has_active_project_scene_addition(world) {
         return rejected(
             "project.scene.addition-active",

@@ -3,7 +3,7 @@ use super::*;
 use nara_ecs::{ResMut, bevy_ecs::system::SystemState};
 use nara_material::MaterialTextureDeclaration;
 
-use crate::project_host::runtime::content_residency::replacement::commit_materials;
+use crate::project_host::runtime::content_residency::stock::commit_materials;
 
 fn prepare_materials(
     world: &World,
@@ -76,7 +76,7 @@ fn signed_zero_defaults_refuse_sharing_while_identical_bits_keep_the_original_pu
     let mut world = world();
     publish_processed_startup(&mut world, &content).unwrap();
     let current = world.resource::<ProjectSceneResidency>();
-    let handle = current.materials.owned[0].handle;
+    let handle = current.stock.materials.owned[0].handle;
     let slot = world
         .resource::<Assets<Material2dAsset>>()
         .slot_revision(handle);
@@ -207,7 +207,7 @@ fn additive_material_shares_primary_handle_slot_version_and_original_custody() {
     let mut world = world();
     publish_processed_startup(&mut world, &content).unwrap();
     let current = world.resource::<ProjectSceneResidency>();
-    let original = &current.materials.owned[0];
+    let original = &current.stock.materials.owned[0];
     let handle = original.handle;
     let slot = world
         .resource::<Assets<Material2dAsset>>()
@@ -242,6 +242,7 @@ fn additive_material_shares_primary_handle_slot_version_and_original_custody() {
     assert_eq!(
         world
             .resource::<ProjectSceneResidency>()
+            .stock
             .materials
             .iter()
             .count(),
@@ -259,7 +260,7 @@ fn additive_pool_publishes_once_and_replace_retires_primary_and_pooled_union() {
     let mut world = world();
     publish_processed_startup(&mut world, &content).unwrap();
     let current = world.resource::<ProjectSceneResidency>();
-    let primary = current.materials.owned[0].handle;
+    let primary = current.stock.materials.owned[0].handle;
     let prepared = prepare_materials(&world, &addition, MaterialChange::Add(current)).unwrap();
     assert_eq!(prepared.0.products(), vec![product(OTHER_MATERIAL)]);
     assert_eq!(prepared.0.publish.len(), 1);
@@ -274,6 +275,7 @@ fn additive_pool_publishes_once_and_replace_retires_primary_and_pooled_union() {
     world
         .resource_mut::<ProjectSceneResidency>()
         .additions
+        .stock
         .materials
         .append(pool);
     let current = world.resource::<ProjectSceneResidency>();
@@ -331,7 +333,7 @@ fn borrowed_pool_retirement_removes_only_selected_material_and_keeps_escaped_bin
     let mut world = world();
     publish_processed_startup(&mut world, &content).unwrap();
     let current = world.resource::<ProjectSceneResidency>();
-    let primary = current.materials.owned[0].handle;
+    let primary = current.stock.materials.owned[0].handle;
     let prepared = prepare_materials(&world, &addition, MaterialChange::Add(current)).unwrap();
     let pool = commit_prepared(&mut world, prepared);
     let handle = pool.owned[0].handle;
@@ -345,23 +347,26 @@ fn borrowed_pool_retirement_removes_only_selected_material_and_keeps_escaped_bin
     world
         .resource_mut::<ProjectSceneResidency>()
         .additions
+        .stock
         .materials
         .append(pool);
     let current = world.resource::<ProjectSceneResidency>();
     let retirement =
-        MaterialPublications::retire(current.additions.materials.iter(), &world).unwrap();
+        MaterialPublications::retire(current.additions.stock.materials.iter(), &world).unwrap();
     let retired = retirement.retiring_products().collect::<BTreeSet<_>>();
     assert_eq!(retired, BTreeSet::from([product(OTHER_MATERIAL)]));
     assert!(commit_materials(&mut world, retirement).is_empty());
     world
         .resource_mut::<ProjectSceneResidency>()
         .additions
+        .stock
         .materials
         .retain_products(|product| !retired.contains(&product));
     assert!(
         world
             .resource::<ProjectSceneResidency>()
             .additions
+            .stock
             .materials
             .is_empty()
     );
@@ -406,7 +411,7 @@ fn conflicting_live_material_refuses_before_any_publication_or_scene_mutation() 
     let mut world = world();
     publish_processed_startup(&mut world, &content).unwrap();
     let current = world.resource::<ProjectSceneResidency>();
-    let handle = current.materials.owned[0].handle;
+    let handle = current.stock.materials.owned[0].handle;
     let slot = world
         .resource::<Assets<Material2dAsset>>()
         .slot_revision(handle);
@@ -438,7 +443,7 @@ fn failed_reload_keeps_exact_last_good_retirement_but_revokes_ordinary_sharing()
         let mut world = world();
         publish_processed_startup(&mut world, &content).unwrap();
         let current = world.resource::<ProjectSceneResidency>();
-        let handle = current.materials.owned[0].handle;
+        let handle = current.stock.materials.owned[0].handle;
         let shared = prepare_materials(&world, &content, MaterialChange::Add(current)).unwrap();
         let slot = world
             .resource::<Assets<Material2dAsset>>()
@@ -497,7 +502,12 @@ fn failed_last_good_material_cannot_retire_after_publication_revocation() {
     let content = base.prepare_scene_content(product(STARTUP)).unwrap();
     let mut world = world();
     publish_processed_startup(&mut world, &content).unwrap();
-    let handle = world.resource::<ProjectSceneResidency>().materials.owned[0].handle;
+    let handle = world
+        .resource::<ProjectSceneResidency>()
+        .stock
+        .materials
+        .owned[0]
+        .handle;
     fail_reload(&mut world, handle);
     let retirement = MaterialPublications::retire(
         world.resource::<ProjectSceneResidency>().owned_materials(),

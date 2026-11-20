@@ -23,8 +23,9 @@ impl ProjectSceneRequestId {
 ///
 /// Source Hosts resolve a Product through its actual primary Scene sidecar in the preparation
 /// worker, then require its resolved path to be startup or an explicitly declared Scene root.
-/// Processed Hosts require an exact Product in their original immutable base. Neither mode falls
-/// back to the other, and an auxiliary selection never selects its enclosing primary Product.
+/// Processed Hosts require a Product in their original immutable base and reject source paths
+/// with [`ProjectSceneRequestError::UndeclaredScene`]. Product selection uses the full identity,
+/// including the subproduct ID.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectSceneSelection {
     Source(ProjectPath),
@@ -59,6 +60,7 @@ pub enum ProjectSceneRequestError {
     IdExhausted,
     #[error("project Scene request inputs no longer match the runtime")]
     Stale,
+    #[cfg(feature = "runtime-2d")]
     #[error("project Scene content was rejected: {0:?}")]
     Content(ProjectContentErrorKind),
     /// Processed acquisition failed. The request diagnostics retain its safe Runtime category.
@@ -79,6 +81,7 @@ impl ProjectSceneRequestError {
             Self::TaskUnavailable => "project.scene.preparation-unavailable",
             Self::IdExhausted => "project.scene.request-id-exhausted",
             Self::Stale => "project.scene.request-stale",
+            #[cfg(feature = "runtime-2d")]
             Self::Content(_) => "project.scene.content-rejected",
             Self::RuntimeContent => "project.scene.runtime-content-rejected",
             Self::CommitRejected => "project.scene.commit-rejected",
@@ -111,6 +114,7 @@ impl ProjectSceneRequestState {
 
 /// Observations of the original Scene owner's coalesced source-update intent.
 /// This value contains no preparation, publication or acknowledgement authority.
+#[cfg(feature = "runtime-2d")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProjectSceneSourceUpdateStatus {
     /// The automatic request, retained through its exact terminal acknowledgement.
@@ -135,6 +139,7 @@ impl PreparedProjectSceneView<'_> {
     /// Returns the original admitted source-content stamp for this prepared Project Scene.
     ///
     /// Processed content returns `None`. Committing source content preserves this frozen stamp.
+    #[cfg(feature = "runtime-2d")]
     #[must_use]
     pub fn source_content_stamp(&self) -> Option<crate::project_content::ProjectSceneContentStamp> {
         match self.content {
@@ -176,6 +181,7 @@ impl PreparedProjectSceneView<'_> {
     #[must_use]
     pub fn selected_scene_path(&self) -> Option<&ProjectPath> {
         match self.content {
+            #[cfg(feature = "runtime-2d")]
             PreparedSceneContent::Source(snapshot) => Some(snapshot.selected_scene_path()),
             PreparedSceneContent::Processed(_) => None,
         }
@@ -212,20 +218,20 @@ pub struct ProjectScenes<'w> {
     residency: Option<Res<'w, ProjectSceneResidency>>,
     generation: Option<Res<'w, RuntimeGeneration>>,
     pools: Option<Res<'w, TaskPools>>,
-    #[cfg(feature = "asset-watch")]
+    #[cfg(all(feature = "runtime-2d", feature = "asset-watch"))]
     source_watch: Option<ResMut<'w, super::super::source_watch::SourceWatchDriver>>,
 }
 
 impl ProjectScenes<'_> {
     /// Observes optional native source coverage without polling or admitting a request.
-    #[cfg(feature = "asset-watch")]
+    #[cfg(all(feature = "runtime-2d", feature = "asset-watch"))]
     #[must_use]
     pub fn source_watch_status(&self) -> Option<super::super::ProjectSceneWatchStatus> {
         self.source_watch.as_deref().map(|driver| driver.status())
     }
 
     /// Retains read-only original-worker join counts through Runtime close and World retention.
-    #[cfg(feature = "asset-watch")]
+    #[cfg(all(feature = "runtime-2d", feature = "asset-watch"))]
     #[must_use]
     pub fn source_watch_retirement(&self) -> Option<nara_asset_watch::AssetWatchRuntimeObserver> {
         self.source_watch
@@ -234,7 +240,7 @@ impl ProjectScenes<'_> {
     }
 
     /// Requests one retry after native coverage failed. Native I/O occurs in TaskUpdate.
-    #[cfg(feature = "asset-watch")]
+    #[cfg(all(feature = "runtime-2d", feature = "asset-watch"))]
     pub fn retry_source_watch(&mut self) -> bool {
         self.source_watch
             .as_deref_mut()
@@ -247,6 +253,7 @@ impl ProjectScenes<'_> {
     /// request, unknown paths conservatively queue a successor before its new dependency cut is
     /// known. No I/O, asset-state mutation, commit or acknowledgement occurs here. The returned
     /// flag reports queued interest, not exclusive consumption of a shared source event.
+    #[cfg(feature = "runtime-2d")]
     pub fn notify_source_change(
         &mut self,
         change: &nara_asset::AssetSourceChange,
@@ -277,6 +284,7 @@ impl ProjectScenes<'_> {
 
     /// Queues a complete source revalidation after observation overflow or uncertain scope.
     /// The original worker builds its own candidate; the current Scene stays usable until commit.
+    #[cfg(feature = "runtime-2d")]
     pub fn request_source_rescan(&mut self) -> Result<(), ProjectSceneRequestError> {
         self.validate_source_update_authority()?;
         self.owner
@@ -291,6 +299,7 @@ impl ProjectScenes<'_> {
 
     /// Observes source intent without advancing work or consuming its terminal request.
     /// A stale current instance or generation does not hide a retained automatic request ID.
+    #[cfg(feature = "runtime-2d")]
     #[must_use]
     pub fn source_update_status(&self) -> Option<ProjectSceneSourceUpdateStatus> {
         self.owner
@@ -300,6 +309,7 @@ impl ProjectScenes<'_> {
             .map(|updates| updates.status())
     }
 
+    #[cfg(feature = "runtime-2d")]
     fn validate_source_update_authority(&self) -> Result<(), ProjectSceneRequestError> {
         let owner = self
             .owner
@@ -327,6 +337,7 @@ impl ProjectScenes<'_> {
         Ok(())
     }
 
+    #[cfg(feature = "runtime-2d")]
     pub(super) fn start_source_update(&mut self) {
         let Some(owner) = self.owner.as_deref() else {
             return;
@@ -509,17 +520,21 @@ impl ProjectScenes<'_> {
             .residency
             .as_deref()
             .ok_or(ProjectSceneRequestError::Unavailable)?;
-        let purpose = if current.is_project_backed() {
+        #[cfg(feature = "runtime-2d")]
+        if current.is_project_backed() {
             let path = current
                 .deferred_source_scene(product)
                 .ok_or(ProjectSceneRequestError::NotDeferredScene)?;
-            RequestPurpose::AdditiveSource(path.clone())
-        } else if residency.admits_processed_addition(current, product) {
-            RequestPurpose::AdditiveProcessed
-        } else {
+            let purpose = RequestPurpose::AdditiveSource(path.clone());
+            return self.request_with_purpose(ProjectSceneSelection::Product(product), purpose);
+        }
+        if !residency.admits_processed_addition(current, product) {
             return Err(ProjectSceneRequestError::NotDeferredScene);
-        };
-        self.request_with_purpose(ProjectSceneSelection::Product(product), purpose)
+        }
+        self.request_with_purpose(
+            ProjectSceneSelection::Product(product),
+            RequestPurpose::AdditiveProcessed,
+        )
     }
 
     fn request_with_purpose(
@@ -631,6 +646,7 @@ impl ProjectScenes<'_> {
             .is_some_and(|slot| slot.id() == request && slot.state().is_terminal())
         {
             owner.slot = None;
+            #[cfg(feature = "runtime-2d")]
             if let Some(updates) = &mut owner.source_updates {
                 updates.acknowledge(request);
             }
@@ -764,6 +780,7 @@ fn commit_ready_project_scene(
             publish(world, &admission, &content)
         };
         let state = if !report.diagnostics.has_errors() && report.instance.is_some() {
+            #[cfg(feature = "runtime-2d")]
             if !additive
                 && let (Some(updates), PreparedSceneContent::Source(snapshot), Some(instance)) = (
                     &mut owner.source_updates,
@@ -907,6 +924,7 @@ where
                     state: ProjectSceneRequestState::Retiring,
                     publication_diagnostics: DiagnosticReport::default(),
                     diagnostics: DiagnosticReport::default(),
+                    #[cfg(feature = "runtime-2d")]
                     source_closure: match &content {
                         PreparedSceneContent::Source(snapshot) => Some(snapshot.content_closure()),
                         PreparedSceneContent::Processed(_) => None,
@@ -933,6 +951,7 @@ pub(super) fn content_matches_admission(
     admission: &Admission,
 ) -> bool {
     match (content, admission.context.as_ref(), &admission.selection) {
+        #[cfg(feature = "runtime-2d")]
         (
             PreparedSceneContent::Source(snapshot),
             Context::Source {
@@ -989,6 +1008,7 @@ pub(super) fn content_matches_admission(
                         admission.context.admits_request(&admission.selection)
                     }
                     RequestPurpose::AdditiveProcessed => true,
+                    #[cfg(feature = "runtime-2d")]
                     RequestPurpose::AdditiveSource(_) => false,
                 }
                 && content

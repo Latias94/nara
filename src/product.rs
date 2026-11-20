@@ -357,7 +357,7 @@ pub struct ProductRecipe {
     wgpu_policy: Option<RecipeWgpuPolicy>,
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) asset_domains: crate::project_content::ProjectAssetDomains,
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "serde")]
     pub(crate) runtime_codecs: crate::runtime_content::RuntimeCodecs,
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     source_content_limits: Option<ProjectContentLimits>,
@@ -388,7 +388,7 @@ impl fmt::Debug for ProductRecipe {
         debug.field("wgpu_policy", &self.selected_wgpu_policy());
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
         debug.field("asset_domains", &self.asset_domains);
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "serde")]
         debug.field("runtime_codecs", &self.runtime_codecs);
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
         debug.field("source_content_limits", &self.source_content_limits);
@@ -406,7 +406,7 @@ impl ProductRecipe {
             wgpu_policy: None,
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             asset_domains: crate::project_content::ProjectAssetDomains::new(),
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "serde")]
             runtime_codecs: crate::runtime_content::RuntimeCodecs::new(),
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             source_content_limits: None,
@@ -422,11 +422,10 @@ impl ProductRecipe {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         let empty = self.entries.is_empty() && self.defaults.is_empty();
+        #[cfg(feature = "serde")]
+        let empty = empty && self.runtime_codecs.is_empty();
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-        let empty = empty
-            && self.asset_domains.is_empty()
-            && self.runtime_codecs.is_empty()
-            && self.source_content_limits.is_none();
+        let empty = empty && self.asset_domains.is_empty() && self.source_content_limits.is_none();
         empty
     }
 
@@ -458,7 +457,7 @@ impl ProductRecipe {
     ///
     /// The versioned definition names this compiled family/codec binding. It is distinct from
     /// the encoded format version and participates in the executable/content agreement.
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "serde")]
     pub fn add_runtime_asset_codec<D, C>(
         mut self,
         definition: crate::runtime_content::RuntimeCodecDefinitionId,
@@ -918,7 +917,7 @@ pub enum ProductRecipeError {
         "selected WGPU policy plugin {plugin} must keep its paired capture adapter configuration"
     )]
     SelectedWgpuPolicyConfiguration { plugin: PluginId },
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "serde")]
     #[error(transparent)]
     RuntimeCodec(#[from] crate::runtime_content::RuntimeCodecSelectionError),
     #[error("asset domain identity {kind} is empty or reserved by the product")]

@@ -1,21 +1,37 @@
 use std::{fmt, num::NonZeroU32, time::Duration};
 
-use nara_app::{RuntimeCloseEvidence, RuntimeClosePolicy};
+#[cfg(feature = "runtime-2d")]
+use nara_app::RuntimeCloseEvidence;
+use nara_app::RuntimeClosePolicy;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::Resource;
+#[cfg(feature = "runtime-2d")]
 use nara_fs::DirectoryCapability;
 use nara_gameplay::GameplayCommandSubmission;
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 use nara_winit::WinitControlFlow;
 
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 use super::super::desktop_run::{
     DesktopRun, DesktopRunOptions, DesktopRunState, DesktopStartupObservation, DesktopStartupPhase,
     PendingDesktopTerminal, StartupTimer,
     verification::{DesktopFirstPresentRequest, DesktopFirstPresentVerification},
 };
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 use super::super::{ProductSupervisedDesktopSession, SupervisedDesktopProductIdentity};
+#[cfg(feature = "runtime-2d")]
 use super::super::{
     StartupContentClosureReceipt,
     check::{
@@ -24,10 +40,12 @@ use super::super::{
     },
 };
 use super::{
-    CleanupDriveOutcome, HostFault, ProjectHost, RuntimeHostPolicyContribution,
-    RuntimePluginOverlay, RuntimeStartAttempt, runtime_plan_failure_report,
-    runtime_plan_selected_report, single_error,
+    CleanupDriveOutcome, HostFault, ProjectHost, RuntimeStartAttempt, runtime_plan_selected_report,
+    single_error,
 };
+#[cfg(feature = "runtime-2d")]
+use super::{RuntimeHostPolicyContribution, RuntimePluginOverlay, runtime_plan_failure_report};
+#[cfg(feature = "runtime-2d")]
 use crate::ProductRecipe;
 
 type TerminalPredicate<O> = Box<dyn Fn(&O) -> bool + Send + 'static>;
@@ -125,12 +143,14 @@ impl<O> HeadlessRunOptions<O> {
 ///
 /// The recipe is the complete Rust product-composition input. Candidate, publication, and cleanup
 /// choreography remain private to the root Host.
+#[cfg(feature = "runtime-2d")]
 pub struct HeadlessRunIntent<O> {
     profile: Option<String>,
     recipe: ProductRecipe,
     execution: HeadlessRunOptions<O>,
 }
 
+#[cfg(feature = "runtime-2d")]
 impl<O> fmt::Debug for HeadlessRunIntent<O> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -142,6 +162,7 @@ impl<O> fmt::Debug for HeadlessRunIntent<O> {
     }
 }
 
+#[cfg(feature = "runtime-2d")]
 impl<O> HeadlessRunIntent<O> {
     /// Runs exactly this many fixed transactions, without normal gameplay frame stages.
     ///
@@ -221,6 +242,7 @@ pub enum HeadlessRunOutcome<O> {
 pub struct HeadlessRunReport<O> {
     outcome: HeadlessRunOutcome<O>,
     diagnostics: DiagnosticReport,
+    #[cfg(feature = "runtime-2d")]
     startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
@@ -240,6 +262,7 @@ impl<O> HeadlessRunReport<O> {
     /// Runtime startup, execution, shutdown, or cleanup may still have failed. `None` means the
     /// manifest, product composition, or startup content check itself did not publish a closure,
     /// or that this run selected an already admitted processed Runtime base.
+    #[cfg(feature = "runtime-2d")]
     #[must_use]
     pub const fn startup_content_closure(&self) -> Option<&StartupContentClosureReceipt> {
         self.startup_content_closure.as_ref()
@@ -251,7 +274,11 @@ impl<O> HeadlessRunReport<O> {
     }
 }
 
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 /// File-backed desktop run intent for the concrete first-party Winit product path.
 pub struct DesktopRunIntent {
     profile: Option<String>,
@@ -260,7 +287,11 @@ pub struct DesktopRunIntent {
     first_present: Option<DesktopFirstPresentRequest>,
 }
 
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 impl fmt::Debug for DesktopRunIntent {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -279,14 +310,22 @@ impl fmt::Debug for DesktopRunIntent {
     }
 }
 
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 impl Default for DesktopRunIntent {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 impl DesktopRunIntent {
     #[must_use]
     pub fn new() -> Self {
@@ -357,7 +396,11 @@ impl DesktopRunIntent {
     }
 }
 
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 impl DesktopRun {
     /// Creates the ordinary desktop product action from one recipe.
     #[must_use]
@@ -602,7 +645,11 @@ impl DesktopRun {
     }
 }
 
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 pub(in crate::project_host) enum DesktopRunInputs {
     Source {
         project_root: DirectoryCapability,
@@ -615,7 +662,11 @@ pub(in crate::project_host) enum DesktopRunInputs {
     },
 }
 
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 fn desktop_state_after_failure(host: ProjectHost) -> DesktopRunState {
     if host.has_cleanup_owner() {
         DesktopRunState::Cleaning {
@@ -638,6 +689,7 @@ where
 {
     state: HeadlessRunState<O>,
     diagnostics: DiagnosticReport,
+    #[cfg(feature = "runtime-2d")]
     startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
@@ -646,15 +698,16 @@ where
     O: Resource + Clone,
 {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("HeadlessRun")
+        let mut debug = formatter.debug_struct("HeadlessRun");
+        debug
             .field("state", &self.state.label())
-            .field("diagnostics", &self.diagnostics)
-            .field(
-                "startup_content_closure_present",
-                &self.startup_content_closure.is_some(),
-            )
-            .finish_non_exhaustive()
+            .field("diagnostics", &self.diagnostics);
+        #[cfg(feature = "runtime-2d")]
+        debug.field(
+            "startup_content_closure_present",
+            &self.startup_content_closure.is_some(),
+        );
+        debug.finish_non_exhaustive()
     }
 }
 
@@ -663,6 +716,7 @@ where
     O: Resource + Clone,
 {
     /// Creates the ordinary bounded headless product action from one recipe.
+    #[cfg(feature = "runtime-2d")]
     #[must_use]
     pub fn from_recipe(
         project_root: DirectoryCapability,
@@ -681,6 +735,7 @@ where
     ///
     /// Ownership does not bypass admission: every submission is still validated by the runtime
     /// command queue before the product action can complete.
+    #[cfg(feature = "runtime-2d")]
     #[must_use]
     pub fn new(
         project_root: DirectoryCapability,
@@ -707,10 +762,12 @@ where
                 commands,
             }),
             diagnostics: DiagnosticReport::default(),
+            #[cfg(feature = "runtime-2d")]
             startup_content_closure: None,
         }
     }
 
+    #[cfg(feature = "runtime-2d")]
     fn new_inner(
         project_root: DirectoryCapability,
         intent: HeadlessRunIntent<O>,
@@ -729,6 +786,7 @@ where
         }
     }
 
+    #[cfg(feature = "runtime-2d")]
     pub(crate) fn new_with_overlay(
         project_root: DirectoryCapability,
         intent: HeadlessRunIntent<O>,
@@ -779,16 +837,23 @@ where
             drive,
             terminal_predicate,
             plan_diagnostics,
+            #[cfg(feature = "runtime-2d")]
             startup_content_closure,
         } = match prepare_start(inputs) {
             Ok(prepared) => prepared,
             Err(error) => {
-                self.startup_content_closure = error.startup_content_closure;
+                #[cfg(feature = "runtime-2d")]
+                {
+                    self.startup_content_closure = error.startup_content_closure;
+                }
                 self.diagnostics.extend(error.fault.diagnostics);
                 return HeadlessRunState::Failed;
             }
         };
-        self.startup_content_closure = startup_content_closure;
+        #[cfg(feature = "runtime-2d")]
+        {
+            self.startup_content_closure = startup_content_closure;
+        }
         self.diagnostics.extend(plan_diagnostics);
 
         match host.complete_start(&mut attempt) {
@@ -901,10 +966,12 @@ where
         HeadlessRunReport {
             outcome,
             diagnostics: self.diagnostics.clone(),
+            #[cfg(feature = "runtime-2d")]
             startup_content_closure: self.startup_content_closure.clone(),
         }
     }
 
+    #[cfg(feature = "runtime-2d")]
     pub(crate) fn incomplete_cleanup_diagnostics(&self) -> DiagnosticReport {
         let mut diagnostics = DiagnosticReport::default();
         if let HeadlessRunState::Cleaning { host, .. } = &self.state
@@ -921,6 +988,7 @@ where
 }
 
 enum HeadlessRunInputs<O> {
+    #[cfg(feature = "runtime-2d")]
     Source {
         project_root: DirectoryCapability,
         intent: HeadlessRunIntent<O>,
@@ -940,6 +1008,7 @@ struct PreparedStart<O> {
     drive: HeadlessDrive,
     terminal_predicate: Option<TerminalPredicate<O>>,
     plan_diagnostics: DiagnosticReport,
+    #[cfg(feature = "runtime-2d")]
     startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
@@ -947,11 +1016,13 @@ struct PreparedProjectStart {
     host: ProjectHost,
     attempt: RuntimeStartAttempt,
     plan_diagnostics: DiagnosticReport,
+    #[cfg(feature = "runtime-2d")]
     startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
 struct PreparedProjectStartError {
     fault: HostFault,
+    #[cfg(feature = "runtime-2d")]
     startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
@@ -1007,6 +1078,7 @@ fn prepare_start<O>(
     inputs: HeadlessRunInputs<O>,
 ) -> Result<PreparedStart<O>, PreparedProjectStartError> {
     match inputs {
+        #[cfg(feature = "runtime-2d")]
         HeadlessRunInputs::Source {
             project_root,
             intent,
@@ -1058,12 +1130,14 @@ fn prepare_start<O>(
                 drive,
                 terminal_predicate,
                 plan_diagnostics: prepared.plan_diagnostics,
+                #[cfg(feature = "runtime-2d")]
                 startup_content_closure: None,
             })
         }
     }
 }
 
+#[cfg(feature = "runtime-2d")]
 fn prepare_project_start(
     project_root: DirectoryCapability,
     profile: Option<String>,
@@ -1127,16 +1201,19 @@ fn prepare_runtime_content_start(
         .begin_processed_start(base, commands)
         .map_err(|fault| PreparedProjectStartError {
             fault,
+            #[cfg(feature = "runtime-2d")]
             startup_content_closure: None,
         })?;
     Ok(PreparedProjectStart {
         host,
         attempt,
         plan_diagnostics,
+        #[cfg(feature = "runtime-2d")]
         startup_content_closure: None,
     })
 }
 
+#[cfg(feature = "runtime-2d")]
 fn project_source_check_fault(error: ProjectSourceCheckError) -> HostFault {
     let diagnostics = match error {
         ProjectSourceCheckError::Manifest(error) => error.diagnostics().clone(),

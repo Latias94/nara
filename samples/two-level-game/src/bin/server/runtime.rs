@@ -9,27 +9,30 @@ use std::{
 use nara::{
     advanced_prelude::CurrentScene,
     app::{FixedCatchUpPolicy, FixedTime},
-    asset::Assets,
     fs::{ContentDigest, RelativePath},
     identity::EntityLookup,
-    image::ImageAsset,
     input::{
         ActionMaps, ActionOutcomes, ButtonInput, InputTimeline, KeyCode, MouseButton, PointerState,
         SemanticActions,
     },
-    material::Material2dAsset,
     project::{ProductCapability, ProductCapabilitySet, RuntimePreset},
     project_host::{
         HeadlessSession, HeadlessSessionClose, HeadlessSessionError,
         open_executable_relative_runtime_pack,
     },
-    render::{RenderBackendStatus, RenderFrame},
     runtime_content::{
         RuntimeContentBase, RuntimeContentExpectation, RuntimeContentLimits,
         RuntimeContentMemberKind, RuntimeContentTarget,
     },
-    tilemap::TileSetAssets,
     window::{PrimaryWindowId, WindowEvents, backend::BackendWindowHandles},
+};
+#[cfg(feature = "local-player")]
+use nara::{
+    asset::Assets,
+    image::ImageAsset,
+    material::Material2dAsset,
+    render::{RenderBackendStatus, RenderFrame},
+    tilemap::TileSetAssets,
 };
 use serde_json::{Value, json};
 use two_level_game::{
@@ -216,7 +219,7 @@ fn open_pack() -> Result<RuntimeContentBase, String> {
 
 fn verify_runtime(session: &HeadlessSession, snapshot: &GameSnapshot) -> Result<(), Failure> {
     session.observe(|world| -> Result<(), Failure> {
-        if world.contains_resource::<InputTimeline>()
+        let has_client_services = world.contains_resource::<InputTimeline>()
             || world.contains_resource::<ActionMaps>()
             || world.contains_resource::<ActionOutcomes>()
             || world.contains_resource::<SemanticActions>()
@@ -225,13 +228,15 @@ fn verify_runtime(session: &HeadlessSession, snapshot: &GameSnapshot) -> Result<
             || world.contains_resource::<ButtonInput<MouseButton>>()
             || world.contains_resource::<WindowEvents>()
             || world.contains_resource::<PrimaryWindowId>()
-            || world.contains_resource::<BackendWindowHandles>()
+            || world.contains_resource::<BackendWindowHandles>();
+        #[cfg(feature = "local-player")]
+        let has_client_services = has_client_services
             || world.contains_resource::<RenderFrame>()
             || world.contains_resource::<RenderBackendStatus>()
             || world.contains_resource::<Assets<ImageAsset>>()
             || world.contains_resource::<Assets<Material2dAsset>>()
-            || world.contains_resource::<TileSetAssets>()
-        {
+            || world.contains_resource::<TileSetAssets>();
+        if has_client_services {
             return Err("Server World contains Input, Window or presentation services".into());
         }
         if world.resource::<FixedTime>().catch_up_policy() != FixedCatchUpPolicy::PreserveDebt {
@@ -239,8 +244,10 @@ fn verify_runtime(session: &HeadlessSession, snapshot: &GameSnapshot) -> Result<
         }
         let current = CurrentScene::get(world).ok_or("Server has no live Scene receipt")?;
         let receipt = current.receipt();
-        if current.source_content_stamp().is_some()
-            || current.source_view().with_runtime_scene(|_| ()).is_none()
+        let processed = current.source_view().with_runtime_scene(|_| ()).is_some();
+        #[cfg(feature = "local-player")]
+        let processed = processed && current.source_content_stamp().is_none();
+        if !processed
             || Some(receipt.instance_id()) != snapshot.current_instance
             || receipt.len() != AUTHORED_LEVEL_MEMBERS
             || receipt

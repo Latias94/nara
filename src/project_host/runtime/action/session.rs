@@ -8,6 +8,7 @@ use nara_app::{
 };
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::World;
+#[cfg(feature = "runtime-2d")]
 use nara_fs::DirectoryCapability;
 use nara_gameplay::{
     GameplayCommandKey, GameplayCommandRejection, GameplayCommandSubmission,
@@ -16,8 +17,11 @@ use nara_gameplay::{
 
 use super::{
     CleanupDriveOutcome, HostFault, PreparedProjectStart, ProjectHost,
-    StartupContentClosureReceipt, prepare_project_start, prepare_runtime_content_start,
+    prepare_runtime_content_start,
 };
+#[cfg(feature = "runtime-2d")]
+use super::{StartupContentClosureReceipt, prepare_project_start};
+#[cfg(feature = "runtime-2d")]
 use crate::ProductRecipe;
 
 /// Failure of an explicit operation on a retained Headless product.
@@ -60,6 +64,7 @@ pub enum HeadlessSessionClose {
 }
 
 enum Inputs {
+    #[cfg(feature = "runtime-2d")]
     Source {
         root: DirectoryCapability,
         recipe: ProductRecipe,
@@ -81,6 +86,7 @@ pub struct HeadlessSession {
     inputs: Option<Inputs>,
     host: Option<ProjectHost>,
     diagnostics: DiagnosticReport,
+    #[cfg(feature = "runtime-2d")]
     startup_content_closure: Option<StartupContentClosureReceipt>,
     paused_boundary: bool,
     exit: Option<AppExit>,
@@ -103,6 +109,7 @@ impl std::fmt::Debug for HeadlessSession {
 
 impl HeadlessSession {
     /// Selects a source product without starting it or installing a toolchain.
+    #[cfg(feature = "runtime-2d")]
     #[must_use]
     pub fn new(root: DirectoryCapability, recipe: ProductRecipe) -> Self {
         Self::with_inputs(Inputs::Source { root, recipe })
@@ -119,6 +126,7 @@ impl HeadlessSession {
             inputs: Some(inputs),
             host: None,
             diagnostics: DiagnosticReport::default(),
+            #[cfg(feature = "runtime-2d")]
             startup_content_closure: None,
             paused_boundary: false,
             exit: None,
@@ -140,6 +148,7 @@ impl HeadlessSession {
             .take()
             .ok_or(HeadlessSessionError::Unavailable)?;
         let prepared = match inputs {
+            #[cfg(feature = "runtime-2d")]
             Inputs::Source { root, recipe } => prepare_project_start(
                 root,
                 None,
@@ -157,16 +166,23 @@ impl HeadlessSession {
             mut host,
             mut attempt,
             plan_diagnostics,
+            #[cfg(feature = "runtime-2d")]
             startup_content_closure,
         } = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
-                self.startup_content_closure = error.startup_content_closure;
+                #[cfg(feature = "runtime-2d")]
+                {
+                    self.startup_content_closure = error.startup_content_closure;
+                }
                 return Err(self.record_fault(error.fault));
             }
         };
         self.diagnostics.extend(plan_diagnostics);
-        self.startup_content_closure = startup_content_closure;
+        #[cfg(feature = "runtime-2d")]
+        {
+            self.startup_content_closure = startup_content_closure;
+        }
         let result = host.complete_start(&mut attempt);
         self.host = Some(host);
         match result {
@@ -195,6 +211,7 @@ impl HeadlessSession {
     }
 
     #[must_use]
+    #[cfg(feature = "runtime-2d")]
     pub fn startup_content_closure(&self) -> Option<&StartupContentClosureReceipt> {
         self.startup_content_closure.as_ref()
     }

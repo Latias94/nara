@@ -1,7 +1,7 @@
 use std::mem::{size_of, size_of_val};
 
 use nara_asset::AssetRef;
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 use nara_scene::PrefabDocument;
 use nara_scene::{
     CompiledSceneCandidate, CompiledSceneDocument, CompiledSceneEntity, PrefabInstance,
@@ -399,7 +399,7 @@ pub(crate) fn scene_provenance_dynamic_bytes(
     ])
 }
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub(crate) fn prefab_retained_bytes(
     document: &PrefabDocument,
 ) -> Result<usize, SceneRetentionOverflow> {
@@ -1567,7 +1567,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(source.retained_bytes(), required);
+        #[cfg(feature = "runtime-2d")]
         assert!(!source.is_project_backed());
+        assert!(!source.is_content_managed());
         assert!(source.asset_resolution().is_none());
         assert_eq!(
             crate::startup_scene::SceneSource::runtime(

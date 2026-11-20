@@ -2,6 +2,8 @@
 
 use std::borrow::Cow;
 
+use nara_ecs::Mut;
+
 use super::*;
 
 pub(crate) struct StagedProjectSceneReplacement {
@@ -9,12 +11,10 @@ pub(crate) struct StagedProjectSceneReplacement {
     expected: SpawnedSceneInstance,
     additions_revision: u64,
     content: PreparedSceneContent,
+    #[cfg(feature = "runtime-2d")]
     staged_server: AssetServer,
-    images: ImagePublications,
-    materials: MaterialPublications,
-    inputs: Vec<TileSetPublicationInput>,
-    retirements: Vec<TileSetContentReceipt>,
-    tileset_slots: Vec<AssetMutationBaseline<TileSet>>,
+    #[cfg(feature = "runtime-2d")]
+    stock: PreparedStock,
     catalog: PreparedCatalog,
 }
 
@@ -33,7 +33,12 @@ impl StagedProjectSceneReplacement {
     {
         nara_hierarchy::__private::prepare_mutation_baseline(world);
         let component_bindings = current_scene_bindings(world, expected)?;
-        validate_resources(world, content).map_err(rejected)?;
+        validate_resources(
+            world,
+            #[cfg(feature = "runtime-2d")]
+            content.into(),
+        )
+        .map_err(rejected)?;
         if !content.shares_component_bindings(&component_bindings) {
             return Err(rejected(failure(
                 "project.scene.schema-mismatch",
@@ -45,31 +50,24 @@ impl StagedProjectSceneReplacement {
             let scene_retirements =
                 scene_retirements(world, &current, limits, additional_retirements)
                     .map_err(rejected)?;
-            let prepared = PreparedResidency::prepare(world, content.into(), Some(&current))
-                .map_err(rejected)?;
             let PreparedResidency {
                 // Bind the reservation first so every fallible local drops its catalogue copies
                 // and publication scratch before this metadata owner is released.
                 catalog,
                 bindings,
-                staged_server,
-                images,
-                materials,
-                inputs,
-                retirements,
-                tileset_slots,
-            } = prepared;
-            probe_tilesets(
-                world,
-                &inputs,
-                &retirements,
-                &staged_server,
-                catalog
-                    .asset_resolution()
-                    .map(|resolver| resolver.database()),
-            )
-            .map_err(rejected)?;
+                #[cfg(feature = "runtime-2d")]
+                stock,
+            } = PreparedResidency::prepare(world, content.into(), Some(&current))
+                .map_err(rejected)?;
+            #[cfg(feature = "runtime-2d")]
+            let staged_server = {
+                let server = bindings.staged_server();
+                stock::probe_tilesets(world, &stock.tilesets, server, &catalog)
+                    .map_err(rejected)?;
+                server.clone()
+            };
             let scene = match content {
+                #[cfg(feature = "runtime-2d")]
                 PreparedSceneContent::Source(snapshot) => component_bindings
                     .stage_scene_replacement_with_claims(
                         world,
@@ -99,12 +97,10 @@ impl StagedProjectSceneReplacement {
                 expected: expected.clone(),
                 additions_revision,
                 content: content.clone(),
+                #[cfg(feature = "runtime-2d")]
                 staged_server,
-                images,
-                materials,
-                inputs,
-                retirements,
-                tileset_slots,
+                #[cfg(feature = "runtime-2d")]
+                stock,
                 catalog,
             })
         })
@@ -120,14 +116,12 @@ impl StagedProjectSceneReplacement {
             .as_ref()
             .expect("unpublished replacement retains its Scene candidate")
             .validate_baseline(world)?;
-        probe_tilesets(
+        #[cfg(feature = "runtime-2d")]
+        stock::probe_tilesets(
             world,
-            &self.inputs,
-            &self.retirements,
+            &self.stock.tilesets,
             &self.staged_server,
-            self.catalog
-                .asset_resolution()
-                .map(|resolver| resolver.database()),
+            &self.catalog,
         )
         .map_err(rejected)?;
         if world.resource::<ProjectSceneResidency>().has_addition() {
@@ -147,7 +141,12 @@ impl StagedProjectSceneReplacement {
                 "Prepared Scene uses another schema authority",
             )));
         }
-        validate_resources(world, &self.content).map_err(rejected)?;
+        validate_resources(
+            world,
+            #[cfg(feature = "runtime-2d")]
+            (&self.content).into(),
+        )
+        .map_err(rejected)?;
         let residency = world.resource::<ProjectSceneResidency>();
         if residency.additions.revision != self.additions_revision {
             return Err(rejected(failure(
@@ -160,26 +159,8 @@ impl StagedProjectSceneReplacement {
             .validate((&self.content).into())
             .map_err(rejected)?;
         self.catalog.validate(world).map_err(rejected)?;
-        if !self.tileset_slots.is_empty() {
-            for baseline in &self.tileset_slots {
-                baseline
-                    .validate(
-                        world.resource::<Assets<TileSet>>(),
-                        world.resource::<AssetStates>(),
-                    )
-                    .map_err(|_| rejected(tileset_failure(TileSetAssetError::Superseded)))?;
-            }
-        }
-        if !self.images.is_empty() {
-            self.images
-                .validate(
-                    world.resource::<AssetServer>(),
-                    world.resource::<Assets<ImageAsset>>(),
-                    world.resource::<AssetStates>(),
-                )
-                .map_err(rejected)?;
-        }
-        self.materials.validate(world).map_err(rejected)?;
+        #[cfg(feature = "runtime-2d")]
+        self.stock.validate_replacement(world).map_err(rejected)?;
         Ok(())
     }
 
@@ -194,35 +175,40 @@ impl StagedProjectSceneReplacement {
         if let Err(report) = self.validate_content(world) {
             return Err((self, report));
         }
-        if self.inputs.is_empty() && self.retirements.is_empty() {
-            return self.commit_with_tilesets(world, None);
-        }
-        let inputs = match share_inputs(&self.inputs) {
-            Ok(inputs) => inputs,
-            Err(fault) => return Err((self, rejected(fault))),
-        };
-        world.resource_scope(|world, mut owner: Mut<TileSetAssets>| {
-            let tilesets = match owner.prepare_publications(
-                inputs,
-                &self.retirements,
-                &self.staged_server,
-                self.catalog
-                    .asset_resolution()
-                    .map(|resolver| resolver.database()),
-                world.resource::<Assets<TileSet>>(),
-                world.resource::<AssetStates>(),
-            ) {
-                Ok(prepared) => prepared,
-                Err(error) => return Err((self, rejected(tileset_failure(error)))),
+        #[cfg(feature = "runtime-2d")]
+        if self.stock.tilesets.has_publications() {
+            let inputs = match self.stock.tilesets.share_inputs() {
+                Ok(inputs) => inputs,
+                Err(fault) => return Err((self, rejected(fault))),
             };
-            self.commit_with_tilesets(world, Some(tilesets))
-        })
+            return world.resource_scope(|world, mut owner: Mut<TileSetAssets>| {
+                let tilesets = match stock::prepare_tilesets(
+                    world,
+                    &mut owner,
+                    inputs,
+                    &self.stock.tilesets.retirements,
+                    &self.staged_server,
+                    self.catalog
+                        .asset_resolution()
+                        .map(|resolver| resolver.database()),
+                ) {
+                    Ok(prepared) => prepared,
+                    Err(fault) => return Err((self, rejected(fault))),
+                };
+                self.commit_scene(world, Some(tilesets))
+            });
+        }
+        self.commit_scene(
+            world,
+            #[cfg(feature = "runtime-2d")]
+            None,
+        )
     }
 
-    fn commit_with_tilesets(
+    fn commit_scene(
         mut self,
         world: &mut World,
-        tilesets: Option<PreparedTileSetPublications<'_>>,
+        #[cfg(feature = "runtime-2d")] tilesets: Option<PreparedTileSetPublications<'_>>,
     ) -> Result<SceneSpawnReport, (Self, SceneSpawnReport)> {
         let scene = self
             .scene
@@ -235,8 +221,9 @@ impl StagedProjectSceneReplacement {
                 return Err((self, report));
             }
         };
-        let (images, tilesets, materials) =
-            commit_publications(world, self.images, tilesets, self.materials);
+        #[cfg(feature = "runtime-2d")]
+        let stock =
+            stock::commit_publications(world, self.stock.images, tilesets, self.stock.materials);
         let authority = self.catalog.commit(world);
         world.insert_resource(self.content.domain_assets().clone());
         world.resource_mut::<CurrentSceneOwner>().commit_source(
@@ -249,9 +236,8 @@ impl StagedProjectSceneReplacement {
         );
         *world.resource_mut::<ProjectSceneResidency>() = ProjectSceneResidency {
             additions: additive::Additions::default(),
-            images,
-            tilesets,
-            materials,
+            #[cfg(feature = "runtime-2d")]
+            stock,
             authority,
         };
         Ok(report)
@@ -301,180 +287,41 @@ fn scene_retirements<'a>(
     ))
 }
 
-pub(super) fn commit_publications(
-    world: &mut World,
-    images: ImagePublications,
-    tilesets: Option<PreparedTileSetPublications<'_>>,
-    materials: MaterialPublications,
-) -> (
-    Vec<OwnedImage>,
-    Vec<TileSetContentReceipt>,
-    MaterialResidency,
-) {
-    let images = commit_images(world, images);
-    let tilesets = tilesets.map_or_else(Vec::new, |prepared| {
-        let mut access = SystemState::<(
-            Res<AssetServer>,
-            Res<Assets<ImageAsset>>,
-            ResMut<Assets<TileSet>>,
-            ResMut<AssetStates>,
-            ResMut<AssetEvents>,
-        )>::new(world);
-        let (server, images, mut values, mut states, mut events) = access
-            .get_mut(world)
-            .expect("TileSet residency resources passed preflight");
-        prepared.commit(&server, &images, &mut values, &mut states, &mut events)
-    });
-    let materials = commit_materials(world, materials);
-    (images, tilesets, materials)
-}
-
-pub(super) fn commit_materials(
-    world: &mut World,
-    materials: MaterialPublications,
-) -> MaterialResidency {
-    if materials.is_empty() {
-        MaterialResidency::default()
-    } else {
-        let mut access = SystemState::<(
-            Res<AssetServer>,
-            ResMut<Assets<Material2dAsset>>,
-            ResMut<AssetStates>,
-            ResMut<AssetEvents>,
-        )>::new(world);
-        let (server, mut values, mut states, mut events) = access
-            .get_mut(world)
-            .expect("Material residency resources passed preflight");
-        materials.commit(&server, &mut values, &mut states, &mut events)
-    }
-}
-
-pub(super) fn commit_images(world: &mut World, images: ImagePublications) -> Vec<OwnedImage> {
-    if images.is_empty() {
-        return Vec::new();
-    }
-    let mut access = SystemState::<(
-        Res<AssetServer>,
-        ResMut<Assets<ImageAsset>>,
-        ResMut<AssetStates>,
-        ResMut<AssetEvents>,
-    )>::new(world);
-    let (server, mut values, mut states, mut events) = access
-        .get_mut(world)
-        .expect("Scene residency resources passed preflight");
-    images.commit(&server, &mut values, &mut states, &mut events)
-}
-
-fn share_inputs(
-    inputs: &[TileSetPublicationInput],
-) -> Result<Vec<TileSetPublicationInput>, HostFault> {
-    inputs
-        .iter()
-        .map(|input| input.share_retained().ok_or_else(resources_missing))
-        .collect()
-}
-
-fn probe_tilesets(
-    world: &mut World,
-    inputs: &[TileSetPublicationInput],
-    retirements: &[TileSetContentReceipt],
-    server: &AssetServer,
-    database: Option<&ProjectAssetDatabase>,
+fn validate_resources(
+    world: &World,
+    #[cfg(feature = "runtime-2d")] content: ResidencyInput<'_>,
 ) -> Result<(), HostFault> {
-    if inputs.is_empty() && retirements.is_empty() {
-        return Ok(());
-    }
-    let inputs = share_inputs(inputs)?;
-    world.resource_scope(|world, mut owner: Mut<TileSetAssets>| {
-        owner
-            .prepare_publications(
-                inputs,
-                retirements,
-                server,
-                database,
-                world.resource::<Assets<TileSet>>(),
-                world.resource::<AssetStates>(),
-            )
-            .map(|_| ())
-            .map_err(tileset_failure)
-    })
-}
-
-fn validate_resources(world: &World, content: &PreparedSceneContent) -> Result<(), HostFault> {
     if !world.contains_resource::<CurrentSceneOwner>()
         || !world.contains_resource::<ProjectSceneResidency>()
-        || !world.contains_resource::<crate::project_content::ProjectDomainAssets>()
+        || !world.contains_resource::<ProjectDomainAssets>()
     {
         return Err(resources_missing());
     }
-    let source = matches!(content, PreparedSceneContent::Source(_));
-    if source
-        && (!world.contains_resource::<ProjectAssetDatabase>()
-            || !world.resource::<CurrentSceneOwner>().is_project_backed())
-    {
-        return Err(resources_missing());
-    }
-    validate_native_resources(
-        world,
-        content.into(),
-        Some(world.resource::<ProjectSceneResidency>()),
-    )?;
-    let uses_tilesets = ResidencyInput::from(content).tileset_count() != 0
-        || world.resource::<ProjectSceneResidency>().tileset_count() != 0;
-    if nara_ecs::__private::validate_resource_scope::<ProjectSceneResidency>(world).is_err()
-        || source && nara_ecs::__private::validate_resource_scope::<ProjectAssetDatabase>(world).is_err()
-        || nara_ecs::__private::validate_resource_scope::<crate::project_content::ProjectDomainAssets>(world).is_err()
-        || nara_ecs::__private::validate_resource_scope::<CurrentSceneOwner>(world).is_err()
-        || uses_tilesets && nara_ecs::__private::validate_resource_scope::<TileSetAssets>(world).is_err()
-    {
-        return Err(failure("project.scene.residency-lifecycle-unsupported", "Scene residency owners cannot run lifecycle effects during commit"));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_native_resources(
-    world: &World,
-    content: ResidencyInput<'_>,
-    current: Option<&ProjectSceneResidency>,
-) -> Result<(), HostFault> {
-    let uses_tilesets =
-        content.tileset_count() != 0 || current.is_some_and(|current| current.tileset_count() != 0);
-    let uses_images =
-        content.image_count() != 0 || current.is_some_and(|current| current.image_count() != 0);
-    let uses_materials = content.material_count() != 0
-        || current.is_some_and(|current| current.material_count() != 0);
-    if uses_tilesets {
-        validate_tileset_resources(world)?;
-    } else if uses_images {
-        validate_image_resources(world)?;
-    }
-    if uses_materials
-        && (!world.contains_resource::<AssetServer>()
-            || !world.contains_resource::<Assets<Material2dAsset>>()
-            || !world.contains_resource::<AssetStates>()
-            || !world.contains_resource::<AssetEvents>())
-    {
-        return Err(resources_missing());
-    }
-    Ok(())
-}
-
-pub(super) fn validate_tileset_resources(world: &World) -> Result<(), HostFault> {
-    validate_image_resources(world)?;
-    if !world.contains_resource::<TileSetAssets>() || !world.contains_resource::<Assets<TileSet>>()
-    {
-        return Err(resources_missing());
-    }
-    Ok(())
-}
-
-fn validate_image_resources(world: &World) -> Result<(), HostFault> {
-    if !world.contains_resource::<AssetServer>()
-        || !world.contains_resource::<Assets<ImageAsset>>()
-        || !world.contains_resource::<AssetStates>()
-        || !world.contains_resource::<AssetEvents>()
-    {
-        return Err(resources_missing());
+    let unsupported = nara_ecs::__private::validate_resource_scope::<ProjectSceneResidency>(world)
+        .is_err()
+        || nara_ecs::__private::validate_resource_scope::<ProjectDomainAssets>(world).is_err()
+        || nara_ecs::__private::validate_resource_scope::<CurrentSceneOwner>(world).is_err();
+    #[cfg(feature = "runtime-2d")]
+    let unsupported = {
+        let source = matches!(content, ResidencyInput::Source(_));
+        if source
+            && (!world.contains_resource::<ProjectAssetDatabase>()
+                || !world.resource::<CurrentSceneOwner>().is_project_backed())
+        {
+            return Err(resources_missing());
+        }
+        let current = world.resource::<ProjectSceneResidency>();
+        stock::validate_resources(world, content, Some(current))?;
+        let uses_tilesets = content.tileset_count() != 0 || current.tileset_count() != 0;
+        unsupported
+            || source
+                && nara_ecs::__private::validate_resource_scope::<ProjectAssetDatabase>(world)
+                    .is_err()
+            || uses_tilesets
+                && nara_ecs::__private::validate_resource_scope::<TileSetAssets>(world).is_err()
+    };
+    if unsupported {
+        return Err(lifecycle_unsupported());
     }
     Ok(())
 }

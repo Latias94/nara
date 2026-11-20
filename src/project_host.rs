@@ -2,7 +2,7 @@ mod composition;
 mod ingest;
 mod product_launch;
 #[cfg(any(
-    all(feature = "runtime-2d", feature = "serde"),
+    feature = "serde",
     all(feature = "desktop-winit", feature = "render-wgpu")
 ))]
 mod runtime_diagnostics;
@@ -69,10 +69,10 @@ pub(crate) mod runtime_agreement;
 
 pub mod advanced;
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 mod runtime;
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub(crate) use runtime::has_active_project_scene_addition;
 
 #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
@@ -86,14 +86,15 @@ pub use runtime::{
     EditorSourceAssetImporters,
 };
 
+#[cfg(feature = "serde")]
+pub use crate::project_assets::{ProjectAssetCollection, ProjectDomainAssets};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use crate::project_content::{
-    ProjectAssetCollection, ProjectContentBudgetError, ProjectContentBudgetHost,
-    ProjectContentBudgetKind, ProjectContentBudgetSnapshot, ProjectContentClosureReceipt,
-    ProjectContentDeliveryReceipt, ProjectContentError, ProjectContentErrorKind,
-    ProjectContentLimits, ProjectContentLoader, ProjectContentMemberKind,
-    ProjectContentMemberReceipt, ProjectContentRevision, ProjectContentSnapshot,
-    ProjectDomainAssets, ProjectImageContent, ProjectInputContent, ProjectPrefabContent,
+    ProjectContentBudgetError, ProjectContentBudgetHost, ProjectContentBudgetKind,
+    ProjectContentBudgetSnapshot, ProjectContentClosureReceipt, ProjectContentDeliveryReceipt,
+    ProjectContentError, ProjectContentErrorKind, ProjectContentLimits, ProjectContentLoader,
+    ProjectContentMemberKind, ProjectContentMemberReceipt, ProjectContentRevision,
+    ProjectContentSnapshot, ProjectImageContent, ProjectInputContent, ProjectPrefabContent,
     ProjectSceneContent, ProjectSceneContentStamp, ProjectTileSetContent,
     StartupContentClosureReceipt,
 };
@@ -132,9 +133,9 @@ pub use product_launch::{
     ProductProjectRootError, ProductProjectRootSource, resolve_product_project_root,
 };
 pub use product_launch::{open_explicit_product_project_root, open_product_project_root};
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 mod runtime_pack;
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub use runtime_pack::open_executable_relative_runtime_pack;
 #[cfg(feature = "runtime-ui")]
 #[doc(hidden)]
@@ -242,12 +243,14 @@ pub use runtime::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPrevi
 ))]
 #[doc(hidden)]
 pub use runtime::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub use runtime::{
-    HeadlessRun, HeadlessRunIntent, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport,
-    HeadlessSession, HeadlessSessionClose, HeadlessSessionError,
+    HeadlessRun, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport, HeadlessSession,
+    HeadlessSessionClose, HeadlessSessionError,
 };
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub use runtime::{HeadlessRunIntent, ProjectSceneSourceUpdateStatus};
+#[cfg(feature = "serde")]
 pub(crate) use runtime::{
     PROJECT_SCENE_REQUEST_CLOSE_OBLIGATION, poll_project_scene_requests,
     register_project_scene_close_participant,
@@ -257,10 +260,10 @@ pub use runtime::{
     PROJECT_SCENE_WATCH_PLUGIN_ID, ProjectSceneWatchConfigurationError, ProjectSceneWatchPlugin,
     ProjectSceneWatchState, ProjectSceneWatchStatus,
 };
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub use runtime::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
-    ProjectSceneRequestState, ProjectSceneSelection, ProjectSceneSourceUpdateStatus, ProjectScenes,
+    ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
     activate_prepared_project_scene, inspect_current_scene_dependency,
     instantiate_current_scene_dependency, unload_project_scene_addition,
 };

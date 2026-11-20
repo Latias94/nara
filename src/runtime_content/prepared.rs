@@ -2,21 +2,30 @@
 
 use std::{mem::size_of, sync::Arc};
 
-use nara_asset::{AssetProductRef, AssetRef};
+use nara_asset::AssetProductRef;
+#[cfg(feature = "runtime-2d")]
+use nara_asset::AssetRef;
+#[cfg(feature = "runtime-2d")]
 use nara_image::{ImageAsset, ImageDomain};
+#[cfg(feature = "runtime-2d")]
 use nara_material::Material2dDomain;
+#[cfg(feature = "runtime-2d")]
 use nara_tilemap::{
     TileSetDescriptor, TileSetDomain, tilemap_membership_work_bytes,
     validate_persisted_tilemap_membership,
 };
 
 use super::{
-    DecodeLease, RuntimeCodecRole, RuntimeContentAsset, RuntimeContentBase,
-    RuntimeContentBudgetKind, RuntimeContentDependencyRole, RuntimeContentError,
-    RuntimeContentLease, RuntimeContentMemberKind, RuntimeContentScene, codecs::DecodedAsset,
-    materials::SceneMaterialBinding, native::validate_tileset_image, traversal::MemberTraversal,
+    DecodeLease, RuntimeContentBase, RuntimeContentBudgetKind, RuntimeContentDependencyRole,
+    RuntimeContentError, RuntimeContentLease, RuntimeContentMemberKind, RuntimeContentScene,
+    codecs::DecodedAsset, traversal::MemberTraversal,
 };
-use crate::project_content::ProjectDomainAssets;
+#[cfg(feature = "runtime-2d")]
+use super::{
+    RuntimeCodecRole, RuntimeContentAsset, materials::SceneMaterialBinding,
+    native::validate_tileset_image,
+};
+use crate::project_assets::ProjectDomainAssets;
 
 #[cfg(test)]
 mod tests;
@@ -26,7 +35,9 @@ pub(crate) struct ProcessedSceneContent {
     pub(crate) dependencies: Vec<RuntimeContentScene>,
     pub(crate) deferred_scene_products: Vec<AssetProductRef>,
     pub(crate) domains: ProjectDomainAssets,
+    #[cfg(feature = "runtime-2d")]
     pub(crate) images: Vec<RuntimeContentAsset<ImageAsset>>,
+    #[cfg(feature = "runtime-2d")]
     pub(crate) tilesets: Vec<RuntimeContentAsset<TileSetDescriptor>>,
     // Drop the actual closure and its indices before releasing their metadata reservation.
     pub(crate) _lease: RuntimeContentLease,
@@ -161,40 +172,43 @@ impl RuntimeContentBase {
         };
         let deferred_count = deferred_scene_products().count();
         let codecs = self.plan().runtime_codecs();
-        let image_count = decoded
-            .assets
-            .iter()
-            .filter(|asset| {
-                codecs.role(&self.catalog().members()[asset.member])
-                    == Some(RuntimeCodecRole::Image)
-            })
-            .count();
-        let tileset_count = decoded
-            .assets
-            .iter()
-            .filter(|asset| {
-                codecs.role(&self.catalog().members()[asset.member])
-                    == Some(RuntimeCodecRole::TileSet)
-            })
-            .count();
         let kind = RuntimeContentBudgetKind::RetainedBytes;
-        let bytes = image_count
-            .checked_mul(size_of::<RuntimeContentAsset<ImageAsset>>())
-            .and_then(|bytes| {
-                bytes.checked_add(
-                    tileset_count
-                        .checked_mul(size_of::<RuntimeContentAsset<TileSetDescriptor>>())?,
-                )
-            })
-            .and_then(|bytes| {
-                bytes.checked_add(scene_count.checked_mul(size_of::<RuntimeContentScene>())?)
-            })
+        let bytes = scene_count
+            .checked_mul(size_of::<RuntimeContentScene>())
             .and_then(|bytes| {
                 bytes.checked_add(deferred_count.checked_mul(size_of::<AssetProductRef>())?)
             })
             .and_then(|bytes| bytes.checked_add(size_of::<ProcessedSceneContent>()))
             .and_then(|bytes| bytes.checked_add(crate::scene_retention::ARC_CONTROL_BLOCK_BYTES))
             .ok_or(RuntimeContentError::BudgetOverflow { kind })?;
+        #[cfg(feature = "runtime-2d")]
+        let (image_count, tileset_count, bytes) = {
+            let image_count = decoded
+                .assets
+                .iter()
+                .filter(|asset| {
+                    codecs.role(&members[asset.member]) == Some(RuntimeCodecRole::Image)
+                })
+                .count();
+            let tileset_count = decoded
+                .assets
+                .iter()
+                .filter(|asset| {
+                    codecs.role(&members[asset.member]) == Some(RuntimeCodecRole::TileSet)
+                })
+                .count();
+            let bytes = image_count
+                .checked_mul(size_of::<RuntimeContentAsset<ImageAsset>>())
+                .and_then(|image_bytes| bytes.checked_add(image_bytes))
+                .and_then(|bytes| {
+                    bytes.checked_add(
+                        tileset_count
+                            .checked_mul(size_of::<RuntimeContentAsset<TileSetDescriptor>>())?,
+                    )
+                })
+                .ok_or(RuntimeContentError::BudgetOverflow { kind })?;
+            (image_count, tileset_count, bytes)
+        };
         let lease = self.reserve_retained(bytes)?;
         let mut deferred_products = Vec::with_capacity(deferred_count);
         deferred_products.extend(deferred_scene_products());
@@ -207,98 +221,107 @@ impl RuntimeContentBase {
             }
         }
         let domains = codecs.prepare_collections(self, &decoded.assets)?;
-        let mut images = Vec::with_capacity(image_count);
-        if let Some(collection) = domains.collection::<ImageDomain>() {
-            images.extend(
-                collection
-                    .runtime_acquisitions()
-                    .iter()
-                    .filter(|asset| {
-                        self.member(asset.reference()).is_some_and(|member| {
-                            codecs.role(member) == Some(RuntimeCodecRole::Image)
+        #[cfg(feature = "runtime-2d")]
+        let (images, tilesets) = {
+            let mut images = Vec::with_capacity(image_count);
+            if let Some(collection) = domains.collection::<ImageDomain>() {
+                images.extend(
+                    collection
+                        .runtime_acquisitions()
+                        .iter()
+                        .filter(|asset| {
+                            self.member(asset.reference()).is_some_and(|member| {
+                                codecs.role(member) == Some(RuntimeCodecRole::Image)
+                            })
                         })
-                    })
-                    .cloned(),
-            );
-        }
-        let mut tilesets = Vec::with_capacity(tileset_count);
-        if let Some(collection) = domains.collection::<TileSetDomain>() {
-            tilesets.extend(
-                collection
-                    .runtime_acquisitions()
-                    .iter()
-                    .filter(|asset| {
-                        self.member(asset.reference()).is_some_and(|member| {
-                            codecs.role(member) == Some(RuntimeCodecRole::TileSet)
+                        .cloned(),
+                );
+            }
+            let mut tilesets = Vec::with_capacity(tileset_count);
+            if let Some(collection) = domains.collection::<TileSetDomain>() {
+                tilesets.extend(
+                    collection
+                        .runtime_acquisitions()
+                        .iter()
+                        .filter(|asset| {
+                            self.member(asset.reference()).is_some_and(|member| {
+                                codecs.role(member) == Some(RuntimeCodecRole::TileSet)
+                            })
                         })
-                    })
-                    .cloned(),
-            );
-        }
+                        .cloned(),
+                );
+            }
+            (images, tilesets)
+        };
         // Typed collections and native preparations share these acquisitions. Only the discovery
         // wrappers are temporary; no codec runs again when the final collections are assembled.
         drop(decoded);
-        for image in &images {
-            self.image_fact(image.reference(), image.product())?;
-        }
-        for tileset in &tilesets {
-            let descriptor = tileset.product();
-            self.validate_tileset_member(tileset.reference(), descriptor)?;
-            let image = images
-                .iter()
-                .find(|image| image.product().product() == Some(descriptor.image_product()))
-                .map(|image| image.product().extent());
-            validate_tileset_image(descriptor, image)?;
-        }
-        let tilemap = nara_reflect::ComponentTypeId::new("nara.tilemap.Tilemap");
-        for entity in std::iter::once(&scene)
-            .chain(dependencies.iter())
-            .flat_map(|scene| scene.candidate().document().entities())
+        #[cfg(feature = "runtime-2d")]
         {
-            let Some(record) = entity.components().get(&tilemap) else {
-                continue;
-            };
-            let scratch = tilemap_membership_work_bytes(record.value()).ok_or(
-                RuntimeContentError::BudgetOverflow {
-                    kind: RuntimeContentBudgetKind::WorkBytes,
-                },
-            )?;
-            let _work = self.inner.budget.reserve(0, scratch)?;
-            validate_persisted_tilemap_membership(record.value(), |reference| {
-                let AssetRef::Product(product) = reference else {
-                    return None;
-                };
-                tilesets
+            for image in &images {
+                self.image_fact(image.reference(), image.product())?;
+            }
+            for tileset in &tilesets {
+                let descriptor = tileset.product();
+                self.validate_tileset_member(tileset.reference(), descriptor)?;
+                let image = images
                     .iter()
-                    .find(|asset| asset.product().product() == *product)
-                    .map(|asset| asset.product().atlas())
-            })
-            .map_err(RuntimeContentError::Tilemap)?;
-        }
-        let material = nara_reflect::ComponentTypeId::new("nara.material2d");
-        let materials = domains.collection::<Material2dDomain>();
-        for entity in std::iter::once(&scene)
-            .chain(dependencies.iter())
-            .flat_map(|scene| scene.candidate().document().entities())
-        {
-            let Some(record) = entity.components().get(&material) else {
-                continue;
-            };
-            let binding = SceneMaterialBinding::read(self, record)?;
-            binding.validate(
-                |product| {
-                    let asset = materials?.get(&AssetRef::Product(product))?;
-                    Some((asset.product(), asset.generation().declaration()))
-                },
-                |product| images.iter().any(|image| image.reference() == product),
-            )?;
+                    .find(|image| image.product().product() == Some(descriptor.image_product()))
+                    .map(|image| image.product().extent());
+                validate_tileset_image(descriptor, image)?;
+            }
+            let tilemap = nara_reflect::ComponentTypeId::new("nara.tilemap.Tilemap");
+            for entity in std::iter::once(&scene)
+                .chain(dependencies.iter())
+                .flat_map(|scene| scene.candidate().document().entities())
+            {
+                let Some(record) = entity.components().get(&tilemap) else {
+                    continue;
+                };
+                let scratch = tilemap_membership_work_bytes(record.value()).ok_or(
+                    RuntimeContentError::BudgetOverflow {
+                        kind: RuntimeContentBudgetKind::WorkBytes,
+                    },
+                )?;
+                let _work = self.inner.budget.reserve(0, scratch)?;
+                validate_persisted_tilemap_membership(record.value(), |reference| {
+                    let AssetRef::Product(product) = reference else {
+                        return None;
+                    };
+                    tilesets
+                        .iter()
+                        .find(|asset| asset.product().product() == *product)
+                        .map(|asset| asset.product().atlas())
+                })
+                .map_err(RuntimeContentError::Tilemap)?;
+            }
+            let material = nara_reflect::ComponentTypeId::new("nara.material2d");
+            let materials = domains.collection::<Material2dDomain>();
+            for entity in std::iter::once(&scene)
+                .chain(dependencies.iter())
+                .flat_map(|scene| scene.candidate().document().entities())
+            {
+                let Some(record) = entity.components().get(&material) else {
+                    continue;
+                };
+                let binding = SceneMaterialBinding::read(self, record)?;
+                binding.validate(
+                    |product| {
+                        let asset = materials?.get(&AssetRef::Product(product))?;
+                        Some((asset.product(), asset.generation().declaration()))
+                    },
+                    |product| images.iter().any(|image| image.reference() == product),
+                )?;
+            }
         }
         Ok(Arc::new(ProcessedSceneContent {
             scene,
             dependencies,
             deferred_scene_products: deferred_products,
             domains,
+            #[cfg(feature = "runtime-2d")]
             images,
+            #[cfg(feature = "runtime-2d")]
             tilesets,
             _lease: lease,
         }))

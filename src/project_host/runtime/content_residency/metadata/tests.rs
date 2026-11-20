@@ -4,10 +4,10 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use nara_asset::{ImportedProductId, StableAssetId};
+use nara_asset::{Assets, ImportedProductId, ProjectAssetDatabase, StableAssetId};
 use nara_fs::ContentDigest;
 use nara_identity::SceneEntityId;
-use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
+use nara_project::{RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneLimits, SceneDocument, SceneEntityRecord, SourceDocumentKey,
     SourceDocumentKind,
@@ -44,7 +44,10 @@ impl Fixture {
         .unwrap();
         let mut configuration = RuntimeConfiguration::default();
         configuration.runtime.preset = RuntimePreset::LocalHeadless;
-        configuration.capabilities.requested = vec![ProductCapability::Runtime2d];
+        #[cfg(feature = "runtime-2d")]
+        {
+            configuration.capabilities.requested = vec![nara_project::ProductCapability::Runtime2d];
+        }
         let plan =
             resolve_runtime_configuration(&configuration.resolve().unwrap(), ProductRecipe::new())
                 .unwrap();
@@ -141,13 +144,25 @@ fn active_retained_bytes(base: &RuntimeContentBase) -> usize {
 
 #[test]
 fn unrelated_catalogue_snapshots_refuse_before_residency_clones_and_release_their_charge() {
+    struct UnrelatedAsset;
+
     let (_fixture, base, content) = Fixture::open();
-    assert!(content.images.is_empty());
-    assert!(content.tilesets.is_empty());
+    #[cfg(feature = "runtime-2d")]
+    {
+        assert!(content.images.is_empty());
+        assert!(content.tilesets.is_empty());
+    }
     let input = ResidencyInput::Processed(&content);
     let mut world = World::new();
     world.insert_resource(AssetServer::new());
-    let small_bytes = metadata_bytes(&world, input, None, None).unwrap();
+    let small_bytes = metadata_bytes(
+        &world,
+        input,
+        #[cfg(feature = "runtime-2d")]
+        None,
+        None,
+    )
+    .unwrap();
     let before = active_retained_bytes(&base);
     let prepared = PreparedResidency::prepare(&world, input, None).unwrap();
     assert_eq!(active_retained_bytes(&base) - before, small_bytes);
@@ -161,17 +176,24 @@ fn unrelated_catalogue_snapshots_refuse_before_residency_clones_and_release_thei
     {
         let mut server = world.resource_mut::<AssetServer>();
         for _ in 0..4096 {
-            server.reserve_anonymous::<ImageAsset>().unwrap();
+            server.reserve_anonymous::<UnrelatedAsset>().unwrap();
         }
         server
-            .reserve::<ImageAsset>("unrelated/a-long-path-to-an-unloaded-image.png")
+            .reserve::<UnrelatedAsset>("unrelated/a-long-path-to-an-unloaded-asset.bin")
             .unwrap();
     }
     let large_catalogue = world
         .resource::<AssetServer>()
         .checked_retained_bytes()
         .unwrap();
-    let large_bytes = metadata_bytes(&world, input, None, None).unwrap();
+    let large_bytes = metadata_bytes(
+        &world,
+        input,
+        #[cfg(feature = "runtime-2d")]
+        None,
+        None,
+    )
+    .unwrap();
     assert_eq!(
         large_bytes - small_bytes,
         3 * (large_catalogue - empty_catalogue),
@@ -197,5 +219,5 @@ fn unrelated_catalogue_snapshots_refuse_before_residency_clones_and_release_thei
     assert_eq!(active_retained_bytes(&base), before);
     assert!(!world.contains_resource::<ProjectSceneResidency>());
     assert!(!world.contains_resource::<ProjectAssetDatabase>());
-    assert!(!world.contains_resource::<Assets<ImageAsset>>());
+    assert!(!world.contains_resource::<Assets<UnrelatedAsset>>());
 }

@@ -6,15 +6,22 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "runtime-2d")]
 pub(crate) use super::composition::{RuntimeHostPolicyContribution, RuntimePluginOverlay};
 use super::runtime_diagnostics::*;
+#[cfg(feature = "runtime-2d")]
 use super::{
     CompositionError, ProjectContentRevision, ProjectContentSnapshot, ProjectSettingsLineage,
     RuntimePlan, RuntimePlanError,
 };
-#[cfg(all(test, feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    test,
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 use super::{DesktopRun, DesktopRunOutcome};
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime-2d"))]
 use nara_app::RuntimeCloseCause;
 use nara_app::{
     AppExit, PluginFailureReport, PluginPlanError, RuntimeAdmissionReservation,
@@ -25,26 +32,32 @@ use nara_app::{
     RuntimeObligationLedger, RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement,
     RuntimeState,
 };
+#[cfg(feature = "runtime-2d")]
 use nara_asset::{
     AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets, SourceHash,
 };
 use nara_diagnostic::{Diagnostic, DiagnosticField, DiagnosticReport, PublicDiagnosticIdentifier};
-use nara_ecs::{Mut, Resource, World};
+#[cfg(feature = "runtime-2d")]
+use nara_ecs::Mut;
+use nara_ecs::{Resource, World};
 use nara_gameplay::{GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandQueue, GameplayCommandSubmission};
+#[cfg(feature = "runtime-2d")]
 use nara_image::ImageAsset;
-use nara_reflect::{
-    SchemaCompositionFingerprint, component_registry, validate_component_registry_authority,
-};
+#[cfg(feature = "runtime-2d")]
+use nara_reflect::SchemaCompositionFingerprint;
+use nara_reflect::{component_registry, validate_component_registry_authority};
 use nara_scene::{
     SceneComponentBindings, scene_component_bindings, validate_scene_component_bindings_authority,
 };
 use nara_tasks::TaskShutdownReport;
+#[cfg(feature = "runtime-2d")]
 use nara_tilemap::TileSet;
 
 use super::composition::RuntimeConfigurationPlan;
 use crate::runtime_content::{ProcessedSceneContent, RuntimeContentBase, RuntimeContentError};
 use crate::startup_scene::{SceneSource, materialize_startup_scene};
 
+#[cfg(feature = "runtime-2d")]
 const PROJECT_MANIFEST: &str = "nara.toml";
 
 mod action;
@@ -55,11 +68,18 @@ pub use content_residency::{
     inspect_current_scene_dependency, instantiate_current_scene_dependency,
     unload_project_scene_addition,
 };
-#[cfg(all(test, feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    test,
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 mod desktop_poll_tests;
 mod scene_requests;
-#[cfg(feature = "asset-watch")]
+#[cfg(all(feature = "runtime-2d", feature = "asset-watch"))]
 mod source_watch;
+#[cfg(feature = "runtime-2d")]
+pub use scene_requests::ProjectSceneSourceUpdateStatus;
 pub use scene_requests::domains::{
     ManagedSceneDomain, ManagedSceneDomainAttempt, ManagedSceneDomainError, ManagedSceneDomainId,
     ManagedSceneDomainPhase, ManagedSceneDomainPreparation, ManagedSceneDomains,
@@ -70,19 +90,19 @@ pub(crate) use scene_requests::{
 };
 pub use scene_requests::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
-    ProjectSceneRequestState, ProjectSceneSelection, ProjectSceneSourceUpdateStatus, ProjectScenes,
+    ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
     activate_prepared_project_scene, begin_prepared_project_scene_travel,
     commit_prepared_project_scene,
 };
-#[cfg(feature = "asset-watch")]
+#[cfg(all(feature = "runtime-2d", feature = "asset-watch"))]
 pub use source_watch::{
     PROJECT_SCENE_WATCH_PLUGIN_ID, ProjectSceneWatchConfigurationError, ProjectSceneWatchPlugin,
     ProjectSceneWatchState, ProjectSceneWatchStatus,
 };
 
-#[cfg(feature = "tooling")]
+#[cfg(all(feature = "runtime-2d", feature = "tooling"))]
 mod editor;
-#[cfg(feature = "tooling")]
+#[cfg(all(feature = "runtime-2d", feature = "tooling"))]
 pub use editor::{
     AuthoredSchemaUpgradeProposal, AuthoredSchemaUpgradeReview,
     AuthoredSchemaUpgradeReviewedSource, AuthoredSchemaUpgradeSourceProposal,
@@ -116,22 +136,36 @@ pub use editor::{
     PreparedEditorSourceToolWithdrawal,
 };
 
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 pub(super) use action::DesktopRunInputs;
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 pub use action::DesktopRunIntent;
+#[cfg(feature = "runtime-2d")]
+pub use action::HeadlessRunIntent;
 pub use action::{
-    HeadlessRun, HeadlessRunIntent, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport,
-    HeadlessSession, HeadlessSessionClose, HeadlessSessionError,
+    HeadlessRun, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport, HeadlessSession,
+    HeadlessSessionClose, HeadlessSessionError,
 };
-#[cfg(all(feature = "tooling", feature = "presentation-ui"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "tooling",
+    feature = "presentation-ui"
+))]
 pub use editor::EditorUiPreviewCandidate;
 #[cfg(all(feature = "tooling", feature = "presentation-2d"))]
 pub use editor::{
     EditorAcceptedPreview, EditorPresentationError, EditorPresentationImage, EditorPresentedToken,
     EditorPreviewPresentation,
 };
-#[cfg(feature = "tooling")]
+#[cfg(all(feature = "runtime-2d", feature = "tooling"))]
 #[doc(hidden)]
 pub use editor::{
     EditorEditPreparationError, EditorProjectCloseProgress, EditorProjectCloseReceipt,
@@ -144,6 +178,7 @@ pub use editor::{
     TrustedCompiledEditorProjectIntent, admit_supervised_desktop_source_receipt,
 };
 #[cfg(all(
+    feature = "runtime-2d",
     feature = "tooling",
     any(feature = "presentation-2d", feature = "presentation-ui")
 ))]
@@ -155,7 +190,7 @@ pub use editor::{
 };
 #[cfg(all(feature = "tooling", feature = "presentation-2d"))]
 pub use editor::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
-#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+#[cfg(all(feature = "runtime-2d", feature = "tooling", feature = "runtime-ui"))]
 pub use editor::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
 
 struct RuntimeStartAttempt {
@@ -174,6 +209,7 @@ struct PreparedRuntimeStart {
 }
 
 impl PreparedRuntimeStart {
+    #[cfg(feature = "runtime-2d")]
     fn source(&self) -> Option<(&ProjectContentSnapshot, &RuntimePlan)> {
         match &self.content {
             RuntimeStartContent::Source { snapshot, plan } => Some((snapshot, plan)),
@@ -194,6 +230,7 @@ struct RuntimeStartInputs {
     startup_scene: SceneSource,
     commands: Vec<GameplayCommandSubmission>,
     obligations: RuntimeObligationLedger,
+    #[cfg(feature = "runtime-2d")]
     scene_preparation: Option<(
         super::ProjectSettingsCandidate,
         Arc<crate::project_content::ProjectContentLoader>,
@@ -202,6 +239,7 @@ struct RuntimeStartInputs {
 
 #[derive(Clone)]
 enum RuntimeStartContent {
+    #[cfg(feature = "runtime-2d")]
     Source {
         snapshot: ProjectContentSnapshot,
         plan: RuntimePlan,
@@ -216,6 +254,7 @@ enum RuntimeStartContent {
 impl RuntimeStartContent {
     fn plan(&self) -> &RuntimeConfigurationPlan {
         match self {
+            #[cfg(feature = "runtime-2d")]
             Self::Source { plan, .. } => plan.configuration_plan(),
             Self::Processed { base, .. } => base.plan(),
         }
@@ -223,6 +262,7 @@ impl RuntimeStartContent {
 }
 
 enum RuntimeStartStamp {
+    #[cfg(feature = "runtime-2d")]
     Source {
         lineage: ProjectSettingsLineage,
         content_revision: ProjectContentRevision,
@@ -240,6 +280,7 @@ enum RuntimeStartStamp {
 impl RuntimeStartStamp {
     fn capture(content: &RuntimeStartContent) -> Self {
         match content {
+            #[cfg(feature = "runtime-2d")]
             RuntimeStartContent::Source { snapshot, plan } => Self::Source {
                 lineage: snapshot.lineage(),
                 content_revision: snapshot.revision(),
@@ -261,6 +302,7 @@ impl RuntimeStartStamp {
 
     fn matches(&self, content: &RuntimeStartContent, startup_scene: &SceneSource) -> bool {
         match (self, content) {
+            #[cfg(feature = "runtime-2d")]
             (
                 Self::Source {
                     lineage,
@@ -314,6 +356,7 @@ impl RuntimeStartStamp {
                     )
                     && startup_scene.is_content_managed()
             }
+            #[cfg(feature = "runtime-2d")]
             _ => false,
         }
     }
@@ -444,11 +487,12 @@ enum ProjectHostSlot {
 struct PublishedProjectRuntime {
     epoch: u64,
     runtime: RuntimePublicationSlot,
-    content: PublishedRuntimeContent,
+    _content: PublishedRuntimeContent,
     _plan: RuntimeConfigurationPlan,
 }
 
 enum PublishedRuntimeContent {
+    #[cfg(feature = "runtime-2d")]
     Source {
         startup_admission_revision: ProjectContentRevision,
         _plan: RuntimePlan,
@@ -459,14 +503,22 @@ enum PublishedRuntimeContent {
 }
 
 /// Retains the original source/processed and configuration owners after one-time publication take.
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 pub(super) struct DesktopRuntimeContext {
     _epoch: u64,
     _content: PublishedRuntimeContent,
     _configuration: RuntimeConfigurationPlan,
 }
 
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 impl DesktopRuntimeContext {
     pub(super) fn observe<R>(
         &self,
@@ -677,7 +729,11 @@ impl ProjectHost {
         }
     }
 
-    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+    #[cfg(all(
+        feature = "runtime-2d",
+        feature = "desktop-winit",
+        feature = "render-wgpu"
+    ))]
     fn take_desktop_runtime(
         &mut self,
     ) -> Result<(RuntimeInstance, DesktopRuntimeContext), HostFault> {
@@ -692,7 +748,7 @@ impl ProjectHost {
         let PublishedProjectRuntime {
             epoch,
             mut runtime,
-            content,
+            _content: content,
             _plan,
         } = *published;
         let runtime = runtime
@@ -757,9 +813,10 @@ impl ProjectHost {
         }
     }
 
+    #[cfg(feature = "runtime-2d")]
     fn running_content_revision(&self) -> Option<ProjectContentRevision> {
         match &self.slot {
-            ProjectHostSlot::Running(published) => match &published.content {
+            ProjectHostSlot::Running(published) => match &published._content {
                 PublishedRuntimeContent::Source {
                     startup_admission_revision,
                     ..
@@ -880,6 +937,7 @@ impl ProjectHost {
         !matches!(self.slot, ProjectHostSlot::Empty) || self.start_claim.any_active()
     }
 
+    #[cfg(feature = "runtime-2d")]
     fn begin_start(
         &mut self,
         snapshot: ProjectContentSnapshot,
@@ -890,6 +948,7 @@ impl ProjectHost {
         self.begin_start_with_scene(snapshot, plan, startup_scene, commands)
     }
 
+    #[cfg(feature = "runtime-2d")]
     fn begin_project_start(
         &mut self,
         snapshot: ProjectContentSnapshot,
@@ -950,6 +1009,7 @@ impl ProjectHost {
         )
     }
 
+    #[cfg(feature = "runtime-2d")]
     fn begin_editor_start(
         &mut self,
         snapshot: ProjectContentSnapshot,
@@ -960,6 +1020,7 @@ impl ProjectHost {
         self.begin_start_with_scene(snapshot, plan, startup_scene, commands)
     }
 
+    #[cfg(feature = "runtime-2d")]
     fn begin_start_with_scene(
         &mut self,
         snapshot: ProjectContentSnapshot,
@@ -1040,6 +1101,7 @@ impl ProjectHost {
                 startup_scene,
                 commands,
                 obligations: RuntimeObligationLedger::new(),
+                #[cfg(feature = "runtime-2d")]
                 scene_preparation: None,
             }),
         })
@@ -1063,6 +1125,7 @@ impl ProjectHost {
             startup_scene,
             commands,
             obligations,
+            #[cfg(feature = "runtime-2d")]
             scene_preparation,
         } = inputs;
         let plan = content.plan().clone();
@@ -1093,6 +1156,7 @@ impl ProjectHost {
         let command_result = Arc::clone(&materialization);
         let admission = candidate.with_admission_scope(move |scope| {
             let input_selection = match &admission_content {
+                #[cfg(feature = "runtime-2d")]
                 RuntimeStartContent::Source { snapshot, .. } => snapshot
                     .input_action_map()
                     .map(|input| input.prepare_state())
@@ -1140,6 +1204,7 @@ impl ProjectHost {
                 )
                 .and_then(|diagnostics| {
                     let context = match &admission_content {
+                        #[cfg(feature = "runtime-2d")]
                         RuntimeStartContent::Source { plan, snapshot } => match scene_preparation {
                             Some((candidate, loader)) => {
                                 #[cfg(feature = "asset-watch")]
@@ -1307,6 +1372,7 @@ impl ProjectHost {
         debug_assert!(matches!(self.slot, ProjectHostSlot::Empty));
         debug_assert!(claim.owner.is_active(epoch));
         let content = match content {
+            #[cfg(feature = "runtime-2d")]
             RuntimeStartContent::Source { snapshot, plan } => PublishedRuntimeContent::Source {
                 // Freshness compares the admitted startup, even after a legal current-Scene change.
                 // Live sources and published Images retain their own decoded generation instead.
@@ -1320,13 +1386,14 @@ impl ProjectHost {
         self.slot = ProjectHostSlot::Running(Box::new(PublishedProjectRuntime {
             epoch,
             runtime,
-            content,
+            _content: content,
             _plan: plan,
         }));
         claim.finish();
         diagnostics
     }
 
+    #[cfg(feature = "runtime-2d")]
     fn abort_prepared_start(&mut self, mut prepared: PreparedRuntimeStart) {
         let epoch = prepared.claim.epoch();
         let task_report_required = project_requires_task_report(&prepared.plan);
@@ -1769,12 +1836,14 @@ fn project_requires_task_report(plan: &RuntimeConfigurationPlan) -> bool {
 fn verify_processed_runtime_plan(plan: &RuntimeConfigurationPlan) -> Result<(), HostFault> {
     for entry in plan.plugin_plan().entries() {
         let plugin = entry.plugin_id();
-        let source_execution = plugin == nara_asset::ASSET_SOURCE_PLUGIN_ID
-            || plugin == nara_image::IMAGE_SOURCE_PLUGIN_ID;
+        let source_execution = plugin == nara_asset::ASSET_SOURCE_PLUGIN_ID;
+        #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
+        let source_execution = source_execution || plugin == nara_image::IMAGE_SOURCE_PLUGIN_ID;
         #[cfg(feature = "asset-watch")]
-        let source_execution = source_execution
-            || plugin == nara_asset_watch::ASSET_WATCH_PLUGIN_ID
-            || plugin == PROJECT_SCENE_WATCH_PLUGIN_ID;
+        let source_execution =
+            source_execution || plugin == nara_asset_watch::ASSET_WATCH_PLUGIN_ID;
+        #[cfg(all(feature = "runtime-2d", feature = "asset-watch"))]
+        let source_execution = source_execution || plugin == PROJECT_SCENE_WATCH_PLUGIN_ID;
         if source_execution {
             return Err(HostFault::new(single_diagnostic(attach_identifier(
                 Diagnostic::error(
@@ -1814,11 +1883,16 @@ fn materialize_runtime(
     }
     // Processed Scene decoding resolves complete Products through installed native resources.
     // Publish those resources while the candidate is still unpublished, before Scene admission.
-    if let RuntimeStartContent::Processed { content, .. } = content {
-        content_residency::publish_processed_startup(world, content)?;
+    match content {
+        RuntimeStartContent::Processed { content, .. } => {
+            content_residency::publish_processed_startup(world, content)?;
+        }
+        #[cfg(feature = "runtime-2d")]
+        RuntimeStartContent::Source { .. } => {}
     }
     let diagnostics = materialize_startup_scene(world, startup_scene)
         .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
+    #[cfg(feature = "runtime-2d")]
     if let RuntimeStartContent::Source { snapshot, .. } = content {
         content_residency::publish_startup(world, snapshot)?;
     }
@@ -1852,6 +1926,7 @@ fn materialize_runtime(
     Ok(diagnostics)
 }
 
+#[cfg(feature = "runtime-2d")]
 fn publish_snapshot_assets(
     world: &mut World,
     snapshot: &ProjectContentSnapshot,
@@ -1939,6 +2014,7 @@ fn publish_snapshot_assets(
     Ok(())
 }
 
+#[cfg(feature = "runtime-2d")]
 fn publish_snapshot_tilesets(
     world: &mut World,
     snapshot: &ProjectContentSnapshot,
@@ -2109,7 +2185,9 @@ fn processed_content_fault(error: &RuntimeContentError) -> HostFault {
         RuntimeContentError::CodecPanicked => "codec-panicked",
         RuntimeContentError::ProductIdentityMismatch => "product-identity-mismatch",
         RuntimeContentError::NativeResourceUnavailable => "native-resource-unavailable",
+        #[cfg(feature = "runtime-2d")]
         RuntimeContentError::TileSet(_) => "tileset-rejected",
+        #[cfg(feature = "runtime-2d")]
         RuntimeContentError::Tilemap(_) => "tilemap-rejected",
         RuntimeContentError::Scene(_) => "scene-rejected",
         RuntimeContentError::SceneReference(_) => "scene-reference-rejected",
@@ -2147,6 +2225,7 @@ fn processed_content_fault(error: &RuntimeContentError) -> HostFault {
     HostFault::new(diagnostics)
 }
 
+#[cfg(feature = "runtime-2d")]
 fn runtime_plan_failure_report(error: &RuntimePlanError) -> DiagnosticReport {
     match error {
         RuntimePlanError::Composition(error) => composition_failure_report(error),
@@ -2154,6 +2233,7 @@ fn runtime_plan_failure_report(error: &RuntimePlanError) -> DiagnosticReport {
     }
 }
 
+#[cfg(feature = "runtime-2d")]
 fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
     let reason = match error {
         CompositionError::ProjectLineageMismatch => "project-lineage-mismatch",

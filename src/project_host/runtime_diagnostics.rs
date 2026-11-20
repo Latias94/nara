@@ -1,6 +1,6 @@
 //! Shared CPU lowering for managed Runtime and plugin diagnostics.
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 use nara_app::RuntimeAdmissionError;
 use nara_app::{
     PluginFailureReport, PluginHook, PluginHookMutation, RuntimeCloseCause,
@@ -14,10 +14,10 @@ use nara_diagnostic::{
 
 mod plugin;
 pub(super) use plugin::append_plugin_shutdown_diagnostics;
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub(super) use plugin::runtime_construction_failure_report;
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub(super) fn admission_failure_report(error: &RuntimeAdmissionError) -> DiagnosticReport {
     let reason = match error {
         RuntimeAdmissionError::AppNotReady { .. } => "app-not-ready",
@@ -31,7 +31,7 @@ pub(super) fn admission_failure_report(error: &RuntimeAdmissionError) -> Diagnos
     ))
 }
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub(super) fn runtime_scope_failure_report(fault: &RuntimeFault) -> DiagnosticReport {
     let (code, summary) = if fault.kind() == RuntimeFaultKind::RuntimeAuthority {
         (
@@ -78,7 +78,7 @@ pub(super) const fn runtime_fault_kind_id(kind: RuntimeFaultKind) -> &'static st
     }
 }
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub(super) fn runtime_startup_failure_report(fault: &RuntimeFault) -> DiagnosticReport {
     if fault.kind() == RuntimeFaultKind::RuntimeAuthority {
         return runtime_authority_invalid_report();
@@ -134,7 +134,7 @@ pub(super) fn runtime_fault_diagnostic(
         .expect("one classified runtime fault has one bounded origin")
 }
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub(super) fn runtime_authority_invalid_report() -> DiagnosticReport {
     single_error(
         "project.run.runtime-authority-invalid",
@@ -142,7 +142,7 @@ pub(super) fn runtime_authority_invalid_report() -> DiagnosticReport {
     )
 }
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub(super) fn cleanup_incomplete_report(
     evidence: &RuntimeCloseEvidence,
     plugins: Option<&PluginFailureReport>,
@@ -252,7 +252,7 @@ pub(super) fn attach_identifier(
         .expect("project Host diagnostics use unique bounded fields")
 }
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub(super) fn attach_u64(diagnostic: Diagnostic, key: &'static str, value: usize) -> Diagnostic {
     diagnostic
         .try_with_field(DiagnosticField::public_u64(
@@ -300,7 +300,7 @@ pub(super) fn single_error(code: &'static str, summary: &'static str) -> Diagnos
     ))
 }
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub(super) fn single_warning(code: &'static str, summary: &'static str) -> DiagnosticReport {
     single_diagnostic(Diagnostic::warning(
         diagnostic_code(code),
@@ -326,7 +326,7 @@ pub(super) fn single_warning_with_project_relative(
     single_diagnostic(diagnostic)
 }
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "serde")]
 pub(super) fn single_error_with_u64(
     code: &'static str,
     summary: &'static str,

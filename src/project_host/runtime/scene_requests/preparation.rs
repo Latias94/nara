@@ -5,16 +5,19 @@ use nara_tasks::{
     TaskTerminal,
 };
 
+#[cfg(feature = "runtime-2d")]
+use super::ProjectContentErrorKind;
 use super::{
     Context, Diagnostic, DiagnosticCode, DiagnosticReport, PreparedSceneContent,
-    ProjectContentErrorKind, ProjectSceneRequestError, ProjectSceneSelection, RequestPurpose,
-    SafeSummary, error_diagnostics,
+    ProjectSceneRequestError, ProjectSceneSelection, RequestPurpose, SafeSummary,
+    error_diagnostics,
 };
 
 #[derive(Debug)]
 pub(super) struct PreparationFailure {
     pub(super) error: ProjectSceneRequestError,
     pub(super) diagnostics: DiagnosticReport,
+    #[cfg(feature = "runtime-2d")]
     pub(super) observations: Option<crate::project_content::ProjectSourceObservations>,
 }
 
@@ -24,10 +27,12 @@ impl PreparationFailure {
         Self {
             error,
             diagnostics: error_diagnostics(error),
+            #[cfg(feature = "runtime-2d")]
             observations: None,
         }
     }
 
+    #[cfg(feature = "runtime-2d")]
     fn source_content(
         error: crate::project_host::ProjectContentError,
         observations: crate::project_content::ProjectSourceObservations,
@@ -57,6 +62,7 @@ impl PreparationFailure {
         Self {
             error: kind,
             diagnostics,
+            #[cfg(feature = "runtime-2d")]
             observations: None,
         }
     }
@@ -105,6 +111,7 @@ impl Preparation {
                     // Startup already established executable schema agreement. Ordinary targets use the
                     // same frozen native plan; they are not new startup attestations or schema owners.
                     work.result = Some(match (work.context.as_ref(), &work.selection) {
+                        #[cfg(feature = "runtime-2d")]
                         (
                             Context::Source {
                                 candidate,
@@ -177,13 +184,15 @@ impl Preparation {
                                 .map(PreparedSceneContent::Processed)
                                 .map_err(PreparationFailure::runtime_content)
                         }
-                        _ => Err(PreparationFailure {
-                            error: ProjectSceneRequestError::UndeclaredScene,
-                            diagnostics: error_diagnostics(
-                                ProjectSceneRequestError::UndeclaredScene,
-                            ),
-                            observations: None,
-                        }),
+                        (Context::Processed { .. }, ProjectSceneSelection::Source(_)) => {
+                            let error = ProjectSceneRequestError::UndeclaredScene;
+                            Err(PreparationFailure {
+                                error,
+                                diagnostics: error_diagnostics(error),
+                                #[cfg(feature = "runtime-2d")]
+                                observations: None,
+                            })
+                        }
                     });
                     #[cfg(test)]
                     wait_at(&mut work.gate, TestPhase::AfterPreparation);
@@ -288,6 +297,7 @@ impl TestGate {
         )
     }
 
+    #[cfg(feature = "runtime-2d")]
     pub(super) fn panicking(phase: TestPhase) -> (Self, TestControl) {
         let (mut gate, control) = Self::new(phase);
         gate.panic_after_release = true;
@@ -305,6 +315,7 @@ impl TestControl {
     pub(super) fn release(mut self) {
         self.release.take();
     }
+    #[cfg(feature = "runtime-2d")]
     pub(super) fn into_channels(
         mut self,
     ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {

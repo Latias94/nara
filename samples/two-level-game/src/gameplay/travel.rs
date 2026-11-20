@@ -307,14 +307,16 @@ pub(super) fn advance(world: &mut World) {
         .copied()
         .unwrap_or(pending.target.level());
     if pending.request.is_none() {
-        let Some(current) = CurrentScene::get(world) else {
-            reject(world, "current Scene is unavailable".into());
-            return;
-        };
-        let selection = if current.source_view().with_runtime_scene(|_| ()).is_some() {
-            ProjectSceneSelection::Product(level.scene_product())
-        } else {
-            ProjectSceneSelection::Source(level.scene_path())
+        let selection = match CurrentScene::get(world) {
+            #[cfg(feature = "local-player")]
+            Some(current) if current.source_view().with_runtime_scene(|_| ()).is_none() => {
+                ProjectSceneSelection::Source(level.scene_path())
+            }
+            Some(_) => ProjectSceneSelection::Product(level.scene_product()),
+            None => {
+                reject(world, "current Scene is unavailable".into());
+                return;
+            }
         };
         let result = ProjectScenes::scope(world, |scenes| scenes.request(selection));
         match result {
@@ -350,7 +352,16 @@ pub(super) fn advance(world: &mut World) {
                     .ok_or("prepared level lacks its Sound Bank")?;
                 bank.validate(view.domain_assets(), &presentation.bank)?;
             }
-            Ok((content, view.source_content_stamp()))
+            #[cfg(feature = "local-player")]
+            let source = view.source_content_stamp().map(|source| {
+                (
+                    super::resume::stamp(level, source),
+                    source.schema_fingerprint().as_bytes(),
+                )
+            });
+            #[cfg(not(feature = "local-player"))]
+            let source = None;
+            Ok((content, source))
         }),
         Some(ProjectSceneRequestState::Preparing | ProjectSceneRequestState::Cancelling) => None,
         state => Some(Err(format!(
@@ -362,7 +373,7 @@ pub(super) fn advance(world: &mut World) {
         world.resource_mut::<Travel>().pending = Some(pending);
         return;
     };
-    let (content, stamp) = match prepared {
+    let (content, source) = match prepared {
         Ok(content) => content,
         Err(error) => {
             cancel_ack(world, request);
@@ -370,7 +381,7 @@ pub(super) fn advance(world: &mut World) {
             return;
         }
     };
-    let stamp = match super::resume::validate_content(world, level, stamp) {
+    let stamp = match super::resume::validate_content(world, source) {
         Ok(stamp) => stamp,
         Err(error) => {
             cancel_ack(world, request);

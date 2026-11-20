@@ -12,7 +12,7 @@ project-tool-protocol = 1
 resolver = "3"
 
 [dependencies]
-nara = { path = "../..", default-features = false, features = ["runtime-2d", "serde"] }
+nara = { path = "../..", default-features = false, features = ["runtime-core", "serde"] }
 nara_gilrs = { path = "../../crates/nara_gilrs", optional = true }
 nara_rapier2d = { path = "../../crates/nara_rapier2d" }
 nara_sprite_animation = { path = "../../crates/nara_sprite_animation", optional = true }
@@ -45,7 +45,7 @@ windows-sys = { version = "0.61.2", optional = true, features = [
 
 [features]
 default = ["development"]
-local-player = ["dep:nara_sprite_animation", "dep:hound"]
+local-player = ["nara/runtime-2d", "dep:nara_sprite_animation", "dep:hound"]
 development = ["local-player", "nara/project-tooling", "dep:notify"]
 audio-cpal = ["local-player", "dep:cpal", "dep:rtrb"]
 desktop = ["local-player", "nara/presentation-2d", "nara/desktop-winit", "nara/render-wgpu", "dep:wgpu"]

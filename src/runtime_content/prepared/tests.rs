@@ -7,7 +7,7 @@ use std::{
 
 use nara_app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
 use nara_asset::{
-    AssetDomain, AssetPathScope, AssetRecord, AssetReferenceDemand, AssetRuntimeError,
+    AssetDomain, AssetPathScope, AssetRecord, AssetRef, AssetReferenceDemand, AssetRuntimeError,
     AssetRuntimeLimits, AssetSourceKind, AssetSourcePath, ImportedProductId, ProjectAssetDatabase,
     RuntimeAssetCodec, StableAssetId,
 };
@@ -15,6 +15,7 @@ use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 use nara_fs::{ContentDigest, RelativePath};
 use nara_identity::SceneEntityId;
+#[cfg(feature = "runtime-2d")]
 use nara_image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec};
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{
@@ -29,21 +30,25 @@ use nara_scene::{
 };
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "runtime-2d")]
+use super::super::native::ImageFact;
 use super::*;
 use crate::{
     ProductRecipe, SchemaContribution,
+    project_assets::{CollectionStorage, ProjectAssetCollection},
     project_host::{open_explicit_product_project_root, resolve_runtime_configuration},
     runtime_content::{
-        RUNTIME_CONTENT_CATALOG_FILE, RuntimeCodecDefinitionId, RuntimeContentCatalog,
-        RuntimeContentCatalogDefinition, RuntimeContentCatalogLimits, RuntimeContentDependency,
-        RuntimeContentDependencyRole, RuntimeContentExpectation, RuntimeContentLimits,
-        RuntimeContentMember, RuntimeContentTarget, native::ImageFact,
+        RUNTIME_CONTENT_CATALOG_FILE, RuntimeCodecDefinitionId, RuntimeContentAsset,
+        RuntimeContentCatalog, RuntimeContentCatalogDefinition, RuntimeContentCatalogLimits,
+        RuntimeContentDependency, RuntimeContentDependencyRole, RuntimeContentExpectation,
+        RuntimeContentLimits, RuntimeContentMember, RuntimeContentTarget,
     },
 };
 
 const X: u8 = 1;
 const Y: u8 = 2;
 const Z: u8 = 3;
+#[cfg(feature = "runtime-2d")]
 const IMAGE: u8 = 4;
 const ROOM: u8 = 5;
 const SCENE_WORK: usize = 1024 * 1024;
@@ -57,6 +62,7 @@ static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 struct Observations {
     decoded: Vec<(u8, usize)>,
     dropped: Vec<(u8, usize)>,
+    #[cfg(feature = "runtime-2d")]
     image_decodes: usize,
 }
 
@@ -273,7 +279,9 @@ codec!(XCodec, X, "prepared_x", 256 * 1024, 256 * 1024);
 codec!(YCodec, Y, "prepared_y", Y_WORK, Y_OUTPUT);
 codec!(ZCodec, Z, "prepared_z", 512 * 1024, 256 * 1024);
 
+#[cfg(feature = "runtime-2d")]
 struct SmallImageCodec;
+#[cfg(feature = "runtime-2d")]
 impl RuntimeAssetCodec<ImageAsset> for SmallImageCodec {
     const RUNTIME_KIND: &'static str = ImageRuntimeCodec::RUNTIME_KIND;
     const RUNTIME_VERSION: u32 = ImageRuntimeCodec::RUNTIME_VERSION;
@@ -377,9 +385,9 @@ fn contribution() -> SchemaContribution<FixturePlugin> {
 }
 
 fn recipe(reversed: bool, contribution: SchemaContribution<FixturePlugin>) -> ProductRecipe {
-    let recipe = ProductRecipe::new()
-        .add_contribution(contribution)
-        .unwrap()
+    let recipe = ProductRecipe::new().add_contribution(contribution).unwrap();
+    #[cfg(feature = "runtime-2d")]
+    let recipe = recipe
         .add_runtime_image_codec::<SmallImageCodec>(RuntimeCodecDefinitionId::new(
             "nara.test.prepared.b",
             1,
@@ -427,6 +435,17 @@ impl Fixture {
     }
 
     fn with_asset_scene_reference(room: bool) -> Self {
+        Self::with_startup_entity(room, &[], |_, entity| entity)
+    }
+
+    fn with_startup_entity(
+        room: bool,
+        extra_capabilities: &[ProductCapability],
+        extend: impl FnOnce(
+            &crate::project_host::RuntimeConfigurationPlan,
+            SceneEntityRecord,
+        ) -> SceneEntityRecord,
+    ) -> Self {
         let root = std::env::temp_dir().join(format!(
             "{FIXTURE_PREFIX}{}-{}",
             std::process::id(),
@@ -440,7 +459,15 @@ impl Fixture {
         ];
         let mut configuration = RuntimeConfiguration::default();
         configuration.runtime.preset = RuntimePreset::LocalHeadless;
-        configuration.capabilities.requested = vec![ProductCapability::Runtime2d];
+        configuration.capabilities.requested = vec![if cfg!(feature = "runtime-2d") {
+            ProductCapability::Runtime2d
+        } else {
+            ProductCapability::RuntimeCore
+        }];
+        configuration
+            .capabilities
+            .requested
+            .extend_from_slice(extra_capabilities);
         configuration.tasks.io.workers = 1;
         configuration.tasks.compute.workers = 1;
         configuration.tasks.async_compute.workers = 1;
@@ -449,40 +476,56 @@ impl Fixture {
                 .unwrap();
         let source =
             SourceDocumentKey::stable_asset(product(0).source(), SourceDocumentKind::Scene);
-        let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-            SceneEntityId::new("root").unwrap(),
-        )
-        .with_component(
+        let scene_assets = [
+            X,
+            Z,
+            #[cfg(feature = "runtime-2d")]
+            IMAGE,
+        ];
+        let entity = SceneEntityRecord::new(SceneEntityId::new("root").unwrap()).with_component(
             ComponentTypeId::new(COMPONENT),
             SceneComponentRecord::new(
                 ComponentSchemaVersion::ONE,
                 ComponentValue::map([(
                     "now",
-                    ComponentValue::List(vec![
-                        encode_asset_reference_value(&AssetRef::Product(product(X))),
-                        encode_asset_reference_value(&AssetRef::Product(product(Z))),
-                        encode_asset_reference_value(&AssetRef::Product(product(IMAGE))),
-                    ]),
+                    ComponentValue::List(
+                        scene_assets
+                            .iter()
+                            .map(|&tag| {
+                                encode_asset_reference_value(&AssetRef::Product(product(tag)))
+                            })
+                            .collect(),
+                    ),
                 )]),
             )
             .with_owner(owner()),
-        )]);
+        );
+        let document = SceneDocument::from_ordered_roots([extend(&plan, entity)]);
         let scene = crate::startup_scene::compile_test_scene(
             &document,
             plan.schema_validation().bindings(),
             source.clone(),
         );
         let mut database = ProjectAssetDatabase::default();
-        for tag in [X, Y, Z, IMAGE] {
+        for tag in [
+            X,
+            Y,
+            Z,
+            #[cfg(feature = "runtime-2d")]
+            IMAGE,
+        ] {
+            let source_kind = AssetSourceKind::Unknown;
+            #[cfg(feature = "runtime-2d")]
+            let source_kind = if tag == IMAGE {
+                AssetSourceKind::Image
+            } else {
+                source_kind
+            };
             database
                 .insert(AssetRecord::new(
                     product(tag).source(),
                     AssetSourcePath::new(format!("assets/{tag}.bin")).unwrap(),
-                    if tag == IMAGE {
-                        AssetSourceKind::Image
-                    } else {
-                        AssetSourceKind::Unknown
-                    },
+                    source_kind,
                 ))
                 .unwrap();
         }
@@ -505,7 +548,7 @@ impl Fixture {
                 ContentDigest::of_bytes(&encoded),
                 RuntimeContentMemberKind::Scene { source },
                 vec![product(0)],
-                vec![required(X), required(Z), required(IMAGE)],
+                scene_assets.into_iter().map(required).collect(),
             )
             .unwrap(),
         ];
@@ -593,32 +636,35 @@ impl Fixture {
                 .unwrap(),
             );
         }
-        let image = ImageAsset::from_product(
-            product(IMAGE),
-            ImageExtent {
-                width: 1,
-                height: 1,
-            },
-            ImageFormat::Rgba8,
-            ImageColorSpace::Srgb,
-            vec![11, 22, 33, 255],
-        )
-        .unwrap();
-        let encoded = SmallImageCodec::encode_runtime(&image).unwrap();
-        fs::write(root.join("05-image.bin"), &encoded).unwrap();
-        members.push(
-            RuntimeContentMember::new(
-                "05-image.bin",
-                ContentDigest::of_bytes(&encoded),
-                RuntimeContentMemberKind::Asset {
-                    format: FormatKind::new(SmallImageCodec::RUNTIME_KIND).unwrap(),
-                    version: FormatVersion::new(SmallImageCodec::RUNTIME_VERSION).unwrap(),
+        #[cfg(feature = "runtime-2d")]
+        {
+            let image = ImageAsset::from_product(
+                product(IMAGE),
+                ImageExtent {
+                    width: 1,
+                    height: 1,
                 },
-                vec![product(IMAGE)],
-                vec![],
+                ImageFormat::Rgba8,
+                ImageColorSpace::Srgb,
+                vec![11, 22, 33, 255],
             )
-            .unwrap(),
-        );
+            .unwrap();
+            let encoded = SmallImageCodec::encode_runtime(&image).unwrap();
+            fs::write(root.join("05-image.bin"), &encoded).unwrap();
+            members.push(
+                RuntimeContentMember::new(
+                    "05-image.bin",
+                    ContentDigest::of_bytes(&encoded),
+                    RuntimeContentMemberKind::Asset {
+                        format: FormatKind::new(SmallImageCodec::RUNTIME_KIND).unwrap(),
+                        version: FormatVersion::new(SmallImageCodec::RUNTIME_VERSION).unwrap(),
+                    },
+                    vec![product(IMAGE)],
+                    vec![],
+                )
+                .unwrap(),
+            );
+        }
         let target = RuntimeContentTarget::new("test-host", "prepared-discovery").unwrap();
         let catalog = RuntimeContentCatalog::new(
             RuntimeContentCatalogDefinition {
@@ -954,9 +1000,19 @@ fn discovery_peak(fixture: &Fixture) -> Peak {
     let graph_bytes = charge(&base, RuntimeContentBudgetKind::WorkBytes);
     drop(graph);
     let scene = base.acquire_startup_scene().unwrap();
-    let image = base
-        .acquire_asset::<ImageDomain, SmallImageCodec>(product(IMAGE))
-        .unwrap();
+    #[cfg(feature = "runtime-2d")]
+    let (image_work, image_retained, image_fact_work) = {
+        let image = base
+            .acquire_asset::<ImageDomain, SmallImageCodec>(product(IMAGE))
+            .unwrap();
+        (
+            size_of::<RuntimeContentAsset<ImageAsset>>(),
+            image.retained_bytes(),
+            size_of::<(usize, ImageFact)>(),
+        )
+    };
+    #[cfg(not(feature = "runtime-2d"))]
+    let (image_work, image_retained, image_fact_work) = (0, 0, 0);
     let x = base
         .acquire_asset::<ProbeDomain, XCodec>(product(X))
         .unwrap();
@@ -964,32 +1020,29 @@ fn discovery_peak(fixture: &Fixture) -> Peak {
         .acquire_asset::<ProbeDomain, YCodec>(product(Y))
         .unwrap();
     let metadata = y.retained_bytes() - YCodec::runtime_retained_bytes(y.product()).unwrap();
+    let asset_count = base.catalog().members().len() - 1;
     let peak = Peak {
-        // At Y: graph + output slots + the live Image/X/Y erased wrappers + Y's original
-        // work promise + Y's one dependency slot. Z is pending and has not decoded yet.
         work: graph_bytes
             + size_of::<(usize, RuntimeContentScene)>()
-            + 4 * size_of::<DecodedAsset>()
-            + size_of::<RuntimeContentAsset<ImageAsset>>()
+            + asset_count * size_of::<DecodedAsset>()
+            + image_work
             + 2 * size_of::<RuntimeContentAsset<ProbeProduct>>()
             + Y_WORK
             + size_of::<Option<AssetReferenceDemand>>(),
         retained: baseline
             + scene.retained_bytes()
-            + image.retained_bytes()
+            + image_retained
             + x.retained_bytes()
             + Y_OUTPUT
             + metadata,
-        // Strict validation keeps the compact Image fact, but has already disposed the Image,
-        // Scene and X decoded outputs. Only Y's current erased wrapper remains as decode work.
         deep_work: graph_bytes
-            + size_of::<(usize, ImageFact)>()
+            + image_fact_work
             + size_of::<RuntimeContentAsset<ProbeProduct>>()
             + Y_WORK
             + size_of::<Option<AssetReferenceDemand>>(),
         deep_retained: baseline + Y_OUTPUT + metadata,
     };
-    drop((scene, image, x, y));
+    drop((scene, x, y));
     assert_refunded(&base, baseline);
     reset_observations();
     peak
@@ -1048,20 +1101,19 @@ fn assert_prepared_once(content: &ProcessedSceneContent) {
     assert_eq!(decoded(), [X, Y, Z]);
     assert!(dropped().is_empty());
     assert!(content.dependencies.is_empty());
-    assert_eq!(content.images.len(), 1);
-    OBSERVED.with(|observed| assert_eq!(observed.borrow().image_decodes, 1));
-    assert!(content.tilesets.is_empty());
+    #[cfg(feature = "runtime-2d")]
+    {
+        assert_eq!(content.images.len(), 1);
+        OBSERVED.with(|observed| assert_eq!(observed.borrow().image_decodes, 1));
+        assert!(content.tilesets.is_empty());
+    }
     let collection = content.domains.collection::<ProbeDomain>().unwrap();
     assert_eq!(collection.iter().len(), 3);
     for (tag, instance) in [(X, 1), (Y, 2), (Z, 3)] {
         let value = collection.get(&AssetRef::Product(product(tag))).unwrap();
         assert_eq!(value.instance, instance);
         assert_eq!(value.payload[0], tag);
-        let acquisition = collection
-            .runtime_acquisitions()
-            .iter()
-            .find(|asset| asset.reference() == product(tag))
-            .unwrap();
+        let acquisition = probe_acquisition(collection, tag);
         assert!(std::ptr::eq(value, acquisition.product()));
     }
     let record = content.scene.candidate().document().entities()[0]
@@ -1072,6 +1124,179 @@ fn assert_prepared_once(content: &ProcessedSceneContent) {
         record.value().field("future").unwrap(),
         &encode_asset_reference_value(&AssetRef::Product(product(X)))
     );
+}
+
+fn probe_acquisition(
+    collection: &ProjectAssetCollection<ProbeProduct>,
+    tag: u8,
+) -> &RuntimeContentAsset<ProbeProduct> {
+    let products = match &collection.storage {
+        CollectionStorage::Processed { products, .. } => products,
+        #[cfg(feature = "runtime-2d")]
+        CollectionStorage::Source { .. } => panic!("the fixture requires a processed collection"),
+    };
+    products
+        .iter()
+        .find(|asset| asset.reference() == product(tag))
+        .unwrap()
+}
+
+#[test]
+fn headless_session_publishes_the_original_cpu_closure_and_retires_it() {
+    use nara_identity::EntityLookup;
+
+    use crate::{
+        project_host::{HeadlessSession, ProjectDomainAssets},
+        startup_scene::{CurrentScene, CurrentSceneOwner},
+    };
+
+    let fixture = Fixture::new();
+    let base = fixture.open(false, content_limits());
+    drop(fixture);
+    let baseline = charge(&base, RuntimeContentBudgetKind::RetainedBytes);
+    reset_observations();
+
+    let mut session = HeadlessSession::from_runtime_content(base.clone());
+    session.start().unwrap();
+    assert_eq!(decoded(), [X, Y, Z]);
+    let source = session
+        .observe(|world| {
+            let domains = world.resource::<ProjectDomainAssets>();
+            let collection = domains.collection::<ProbeDomain>().unwrap();
+            assert_eq!(collection.iter().len(), 3);
+            let y = collection.get(&AssetRef::Product(product(Y))).unwrap();
+            assert_eq!(y.wire.reference, product(Y));
+            assert_eq!(y.payload[0], Y);
+
+            let current = CurrentScene::get(world).unwrap();
+            let owner = world.resource::<CurrentSceneOwner>();
+            let admitted = owner.hosted_runtime_scene().unwrap();
+            assert!(admitted.base().same_base(&base));
+            assert_eq!(admitted.product(), base.catalog().startup_scene());
+            let root = SceneEntityId::new("root").unwrap();
+            assert_eq!(current.source().roots(), std::slice::from_ref(&root));
+            assert_eq!(current.receipt().entity_ids(), current.source().roots());
+            assert!(matches!(
+                current.receipt().resolve(world, &root),
+                EntityLookup::Resolved(_)
+            ));
+            current.source_view()
+        })
+        .unwrap();
+
+    close_headless_session(&mut session);
+    assert!(source.with_runtime_scene(|_| ()).is_none());
+    assert_eq!(dropped(), [X, Y, Z]);
+    assert_refunded(&base, baseline);
+}
+
+fn close_headless_session(session: &mut crate::project_host::HeadlessSession) {
+    use std::time::{Duration, Instant};
+
+    use crate::project_host::HeadlessSessionClose;
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match session.close() {
+            HeadlessSessionClose::Complete => break,
+            HeadlessSessionClose::Failed => panic!("{:?}", session.diagnostics()),
+            HeadlessSessionClose::Pending => {
+                assert!(Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+        }
+    }
+    assert!(session.is_closed());
+}
+
+#[cfg(all(feature = "runtime-ui", not(feature = "runtime-2d")))]
+#[test]
+fn processed_ui_solid_brush_runs_and_image_brush_requires_publication() {
+    use nara_asset::AssetServer;
+    use nara_ecs::World;
+    use nara_reflect::ComponentEncodeContext;
+    use nara_ui::{UiColor, UiLayer, UiNode, UiRoot, UiStyle, UiVisual};
+
+    use crate::project_host::{HeadlessSession, HeadlessSessionClose, HeadlessSessionError};
+
+    const CODE: &str = "runtime.content.ui-visual-image-publication-unavailable";
+    for textured in [false, true] {
+        let fixture = Fixture::with_startup_entity(
+            false,
+            &[ProductCapability::RuntimeUi],
+            |plan, mut record| {
+                let mut world = World::new();
+                let color = UiColor::rgba(0.2, 0.4, 0.6, 1.0);
+                let visual = if textured {
+                    let mut server = AssetServer::new();
+                    let handle = server.reserve_product(product(X)).unwrap();
+                    world.insert_resource(server);
+                    UiVisual::image_asset(handle, color)
+                } else {
+                    UiVisual::solid(color)
+                };
+                let entity = world
+                    .spawn((
+                        UiRoot::new(UiLayer::Base),
+                        UiNode::new(UiStyle::fill()),
+                        visual,
+                    ))
+                    .id();
+                for component in ["nara.ui.UiRoot", "nara.ui.UiNode", "nara.ui.UiVisual"] {
+                    let id = ComponentTypeId::new(component);
+                    let value = plan
+                        .schema_validation()
+                        .snapshot()
+                        .encode_component_with_context(
+                            &id,
+                            &world,
+                            entity,
+                            &ComponentEncodeContext::new(),
+                        )
+                        .unwrap()
+                        .unwrap();
+                    record = record.with_component(
+                        id,
+                        SceneComponentRecord::new(ComponentSchemaVersion::ONE, value),
+                    );
+                }
+                record
+            },
+        );
+        let base = fixture.open(false, content_limits());
+        let asset = base
+            .acquire_asset::<ProbeDomain, XCodec>(product(X))
+            .unwrap();
+        assert_eq!(asset.product().wire.reference, product(X));
+        drop(asset);
+        let deep = base.validate_deep();
+        let mut session = HeadlessSession::from_runtime_content(base);
+        if textured {
+            assert!(matches!(deep, Err(RuntimeContentError::Asset(error))
+                if error.diagnostic().code().as_str() == CODE));
+            assert!(
+                matches!(session.start(), Err(HeadlessSessionError::Runtime(report))
+                if report.iter().any(|diagnostic| diagnostic.code().as_str() == CODE))
+            );
+            assert!(session.state().is_none());
+            assert_eq!(session.close(), HeadlessSessionClose::Failed);
+        } else {
+            deep.unwrap();
+            session.start().unwrap();
+            session
+                .observe(|world| {
+                    assert_eq!(
+                        world
+                            .iter_entities()
+                            .filter(|entity| entity.contains::<UiVisual>())
+                            .count(),
+                        1
+                    )
+                })
+                .unwrap();
+            close_headless_session(&mut session);
+        }
+    }
 }
 
 #[test]
@@ -1113,15 +1338,8 @@ fn newly_revealed_earlier_definition_precedes_pending_z_for_both_recipe_orders()
         let content = base.prepare_scene_content(product(0)).unwrap();
         assert_prepared_once(&content);
         assert_eq!(charge(&base, RuntimeContentBudgetKind::WorkBytes), 0);
-        let escaped = content
-            .domains
-            .collection::<ProbeDomain>()
-            .unwrap()
-            .runtime_acquisitions()
-            .iter()
-            .find(|asset| asset.reference() == product(Y))
-            .unwrap()
-            .clone();
+        let collection = content.domains.collection::<ProbeDomain>().unwrap();
+        let escaped = probe_acquisition(collection, Y).clone();
         drop(content);
         assert_eq!(dropped(), [X, Z]);
         assert_eq!(
@@ -1236,10 +1454,12 @@ fn decoder_refusal_after_x_and_y_allocation_refunds_and_allows_a_fresh_preparati
 fn assert_deep_once(base: &RuntimeContentBase) {
     let report = base.validate_deep().unwrap();
     assert_eq!(report.catalog_digest(), base.catalog_digest());
-    assert_eq!(report.members(), 5);
-    assert_eq!(report.products(), 5);
+    let member_count = 4 + usize::from(cfg!(feature = "runtime-2d"));
+    assert_eq!(report.members(), member_count);
+    assert_eq!(report.products(), member_count);
     assert_eq!(decoded(), [X, Y, Z]);
     assert_eq!(dropped(), [X, Y, Z]);
+    #[cfg(feature = "runtime-2d")]
     OBSERVED.with(|observed| assert_eq!(observed.borrow().image_decodes, 1));
 }
 
@@ -1301,6 +1521,7 @@ fn deep_compact_summary_overlaps_decoder_promises_at_exact_and_one_short_budgets
                     );
                     assert_eq!(decoded(), [X]);
                     assert_eq!(dropped(), [X]);
+                    #[cfg(feature = "runtime-2d")]
                     OBSERVED.with(|observed| assert_eq!(observed.borrow().image_decodes, 1));
                 } else {
                     assert_deep_once(&base);

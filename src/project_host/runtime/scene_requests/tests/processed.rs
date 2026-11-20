@@ -1,7 +1,6 @@
 use nara_asset::{AssetPathScope, ImportedProductId, ProjectAssetDatabase, StableAssetId};
 use nara_core::ByteLimit;
 use nara_fs::ContentDigest;
-use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneLimits, SourceDocumentKey, SourceDocumentKind,
 };
@@ -17,6 +16,7 @@ use crate::{
     startup_scene::{SceneSource, replace_current_scene_with_product},
 };
 
+#[cfg(feature = "runtime-2d")]
 #[test]
 fn processed_scene_refuses_source_notifications_and_rescans_without_admitting_io() {
     let fixture = ProcessedFixture::new();
@@ -118,8 +118,12 @@ fn processed_worker_uses_captured_bytes_and_original_definitions_without_source_
         None,
     )
     .unwrap();
-    let PreparedSceneContent::Processed(content) = finish(&mut preparation).unwrap() else {
-        panic!("processed requests retain processed acquisitions")
+    let content = match finish(&mut preparation).unwrap() {
+        PreparedSceneContent::Processed(content) => content,
+        #[cfg(feature = "runtime-2d")]
+        PreparedSceneContent::Source(_) => {
+            panic!("processed requests retain processed acquisitions")
+        }
     };
     assert!(base.same_base(content.base()));
     assert_eq!(content.product(), later_product());
@@ -156,18 +160,25 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
         Arc::new(Context::Processed { base: base.clone() }),
         source,
         move |world| {
+            assert_eq!(
+                ProjectScenes::scope(world, |scenes| scenes.request(later_product())),
+                Err(ProjectSceneRequestError::TaskUnavailable),
+            );
             world.insert_resource(pools());
             let expected = CurrentScene::get(world).unwrap().receipt().clone();
             let source_view = CurrentScene::get(world).unwrap().source_view();
-            assert_eq!(
-                CurrentScene::get(world).unwrap().source_content_stamp(),
-                None
-            );
-            let mut current_access = SystemState::<CurrentScene>::new(world);
-            assert_eq!(
-                current_access.get(world).unwrap().source_content_stamp(),
-                None
-            );
+            #[cfg(feature = "runtime-2d")]
+            {
+                assert_eq!(
+                    CurrentScene::get(world).unwrap().source_content_stamp(),
+                    None
+                );
+                let mut current_access = SystemState::<CurrentScene>::new(world);
+                assert_eq!(
+                    current_access.get(world).unwrap().source_content_stamp(),
+                    None
+                );
+            }
             ProjectScenes::scope(world, |scenes| {
                 assert_eq!(
                     scenes.request(selected()),
@@ -178,6 +189,14 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
                     Err(ProjectSceneRequestError::UndeclaredScene),
                 );
             });
+            assert_eq!(
+                world
+                    .resource::<TaskPools>()
+                    .stats()
+                    .for_kind(nara_tasks::TaskPoolKind::Io)
+                    .admitted,
+                0,
+            );
             let request =
                 ProjectScenes::scope(world, |scenes| scenes.request(later_product())).unwrap();
             wait_for_request(world, request, ProjectSceneRequestState::Ready);
@@ -188,6 +207,7 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
                     &ProjectSceneSelection::Product(later_product())
                 );
                 assert_eq!(view.selected_scene_path(), None);
+                #[cfg(feature = "runtime-2d")]
                 assert_eq!(view.source_content_stamp(), None);
                 assert_eq!(view.selected_scene_product(), Some(later_product()));
                 assert_eq!(view.expected_instance(), &expected);
@@ -358,6 +378,7 @@ fn processed_managed_travel_publishes_content_and_retains_request_authority() {
             assert_ne!(current.receipt().instance_id(), expected.instance_id());
             assert_eq!(current.source().roots(), [entity("later")]);
             assert!(current.is_content_managed());
+            #[cfg(feature = "runtime-2d")]
             assert!(!current.is_project_backed());
             assert!(current.hosted_runtime_base().unwrap().same_base(&base));
             assert!(!world.contains_resource::<ProjectAssetDatabase>());
@@ -380,9 +401,11 @@ fn processed_hosted_custody_requires_residency_and_preserves_independent_replace
     let startup = base.acquire_startup_scene().unwrap();
     let later = base.acquire_scene(later_product()).unwrap();
     let independent = later.scene_source();
+    #[cfg(feature = "runtime-2d")]
     assert!(!independent.is_project_backed());
     assert!(!independent.is_content_managed());
     let hosted = SceneSource::from_hosted_runtime_content(startup.clone());
+    #[cfg(feature = "runtime-2d")]
     assert!(!hosted.is_project_backed());
     assert!(hosted.is_content_managed());
     let hosted_base = base.clone();
@@ -393,6 +416,7 @@ fn processed_hosted_custody_requires_residency_and_preserves_independent_replace
         move |world| {
             let current = world.resource::<CurrentSceneOwner>();
             assert!(current.is_content_managed());
+            #[cfg(feature = "runtime-2d")]
             assert!(!current.is_project_backed());
             assert!(
                 current
@@ -494,9 +518,7 @@ impl ProcessedFixture {
             SEQUENCE.fetch_add(1, Ordering::Relaxed),
         ));
         fs::create_dir(&root).unwrap();
-        let mut configuration = RuntimeConfiguration::default();
-        configuration.runtime.preset = RuntimePreset::LocalHeadless;
-        configuration.capabilities.requested = vec![ProductCapability::Runtime2d];
+        let configuration = processed_configuration();
         let plan = resolve_runtime_configuration(
             &configuration.resolve().unwrap(),
             crate::ProductRecipe::new(),

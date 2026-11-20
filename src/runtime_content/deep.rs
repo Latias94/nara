@@ -1,51 +1,69 @@
 //! Strict payload validation without retaining the decoded resource closure or publishing stores.
 
+#[cfg(feature = "runtime-2d")]
 use std::{
     mem::{size_of, size_of_val},
     sync::Arc,
 };
 
-use nara_asset::{AssetProductRef, AssetRef, AssetRuntimeError};
+#[cfg(feature = "runtime-2d")]
+use nara_asset::AssetRef;
+#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+use nara_asset::{AssetProductRef, AssetRuntimeError};
+#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
     SafeSummary,
 };
 use nara_fs::ContentDigest;
+#[cfg(feature = "runtime-2d")]
 use nara_image::ImageDomain;
+#[cfg(feature = "runtime-2d")]
 use nara_material::{Material2dAsset, Material2dDeclaration, Material2dDomain};
+#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+use nara_reflect::ComponentTypeId;
+#[cfg(feature = "runtime-2d")]
 use nara_reflect::{
-    ComponentTypeId, ComponentValueRef, asset_reference_decode_work_bytes,
-    decode_asset_reference_value,
+    ComponentValueRef, asset_reference_decode_work_bytes, decode_asset_reference_value,
 };
+#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
 use nara_scene::SceneEntityId;
+#[cfg(feature = "runtime-2d")]
 use nara_sprite::{
     SPRITE_COMPONENT_ID, SPRITE_IMAGE_FIELD_ID, SPRITE_SCHEMA_OWNER_ID,
     persisted_sprite_image_value,
 };
+#[cfg(feature = "runtime-2d")]
 use nara_tilemap::{
     TileSetDescriptor, TileSetDomain, TilemapMembershipRequirement,
     prepare_persisted_tilemap_membership, tilemap_membership_work_bytes,
 };
+#[cfg(all(feature = "runtime-2d", feature = "runtime-ui"))]
+use nara_ui::__private::persisted_ui_visual_image_value;
 #[cfg(feature = "runtime-ui")]
 use nara_ui::{
-    __private::{UI_VISUAL_ID, UI_VISUAL_IMAGE_FIELD_ID, persisted_ui_visual_image_value},
+    __private::{UI_VISUAL_ID, UI_VISUAL_IMAGE_FIELD_ID},
     UI_SCHEMA_OWNER_ID, UiVisual,
 };
 
+#[cfg(feature = "runtime-2d")]
 use super::{
-    DecodeBudget, DecodeLease, RuntimeCodecRole, RuntimeContentBase, RuntimeContentBudgetKind,
-    RuntimeContentError, RuntimeContentMemberKind, RuntimeContentScene, checked_add,
+    DecodeBudget, DecodeLease, RuntimeCodecRole, RuntimeContentBudgetKind, RuntimeContentScene,
+    checked_add,
     materials::SceneMaterialBinding,
     native::{ImageFact, validate_tileset_image},
-    traversal::MemberTraversal,
+};
+use super::{
+    RuntimeContentBase, RuntimeContentError, RuntimeContentMemberKind, traversal::MemberTraversal,
 };
 
 /// The result of checking the actual mandatory payload closure of one immutable base.
 ///
 /// Root Scenes, addressable roots and global Input participate. Every reachable Required or
 /// Reference target uses its selected production decoder and complete dependency admission.
-/// First-party Scene Sprite, UI Image and material bindings, Material texture kinds and
-/// Image/TileSet/Tilemap CPU constraints are checked against decoded facts and selected codec roles.
+/// The compiled first-party validators check Scene Sprite, UI Image and material bindings,
+/// Material texture kinds and Image/TileSet/Tilemap CPU constraints against decoded facts and
+/// selected codec roles.
 /// Soft metadata alone triggers no work. Opening a base does not perform this operation.
 ///
 /// This report retains no decoded products or publication authority. It proves neither native
@@ -75,6 +93,7 @@ impl RuntimeContentValidationReport {
     }
 }
 
+#[cfg(feature = "runtime-2d")]
 struct NativeFacts {
     images: Vec<(usize, ImageFact)>,
     tilesets: Vec<(usize, TileSetDescriptor)>,
@@ -84,6 +103,7 @@ struct NativeFacts {
     _work: DecodeLease,
 }
 
+#[cfg(feature = "runtime-2d")]
 struct MaterialFact {
     member: usize,
     product: AssetProductRef,
@@ -91,11 +111,13 @@ struct MaterialFact {
     _work: DecodeLease,
 }
 
+#[cfg(feature = "runtime-2d")]
 struct WorkFacts<T> {
     values: Vec<T>,
     _work: Option<DecodeLease>,
 }
 
+#[cfg(feature = "runtime-2d")]
 impl<T> WorkFacts<T> {
     const fn new() -> Self {
         Self {
@@ -125,6 +147,7 @@ impl<T> WorkFacts<T> {
     }
 }
 
+#[cfg(feature = "runtime-2d")]
 impl NativeFacts {
     fn new(base: &RuntimeContentBase) -> Result<Self, RuntimeContentError> {
         let codecs = base.plan().runtime_codecs();
@@ -168,16 +191,7 @@ impl NativeFacts {
         let material = ComponentTypeId::new("nara.material2d");
         let sprite = ComponentTypeId::new(SPRITE_COMPONENT_ID);
         #[cfg(feature = "runtime-ui")]
-        let ui_visual = {
-            let registry = base.plan().schema_validation().snapshot();
-            registry
-                .schema_for_type::<UiVisual>()
-                .map(|schema| schema.id())
-                .filter(|id| {
-                    id.as_str() == UI_VISUAL_ID
-                        && registry.component_schema_owner(id) == Some(UI_SCHEMA_OWNER_ID)
-                })
-        };
+        let ui_visual = ui_visual_component(base);
         for entity in scene.candidate().document().entities() {
             if let Some(record) = entity.components().get(&tilemap) {
                 let scratch = tilemap_membership_work_bytes(record.value()).ok_or(
@@ -339,12 +353,27 @@ impl NativeFacts {
     }
 }
 
-enum SceneImageBinding {
+#[cfg(feature = "runtime-ui")]
+pub(super) fn ui_visual_component(base: &RuntimeContentBase) -> Option<&ComponentTypeId> {
+    let registry = base.plan().schema_validation().snapshot();
+    registry
+        .schema_for_type::<UiVisual>()
+        .map(|schema| schema.id())
+        .filter(|id| {
+            id.as_str() == UI_VISUAL_ID
+                && registry.component_schema_owner(id) == Some(UI_SCHEMA_OWNER_ID)
+        })
+}
+
+#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+pub(super) enum SceneImageBinding {
+    #[cfg(feature = "runtime-2d")]
     Sprite,
     #[cfg(feature = "runtime-ui")]
     UiVisual,
 }
 
+#[cfg(feature = "runtime-2d")]
 fn validate_scene_image(
     base: &RuntimeContentBase,
     scene: AssetProductRef,
@@ -373,13 +402,15 @@ fn validate_scene_image(
     Ok(())
 }
 
-fn scene_image_publication_error(
+#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+pub(super) fn scene_image_publication_error(
     scene: AssetProductRef,
     entity: &SceneEntityId,
     target: AssetProductRef,
     binding: SceneImageBinding,
 ) -> RuntimeContentError {
     let (code, summary, component, field) = match binding {
+        #[cfg(feature = "runtime-2d")]
         SceneImageBinding::Sprite => (
             "runtime.content.sprite-image-publication-unavailable",
             "Scene Sprite image requires an Image codec selected for native publication",
@@ -439,6 +470,7 @@ impl RuntimeContentBase {
         if let Some(product) = self.plan().settings().input().action_map {
             pending.enqueue(self, self.member_index(product)?)?;
         }
+        #[cfg(feature = "runtime-2d")]
         let mut facts = NativeFacts::new(self)?;
         let mut members = 0;
         let mut products = 0;
@@ -451,10 +483,13 @@ impl RuntimeContentBase {
             match member.kind() {
                 RuntimeContentMemberKind::Scene { .. } => {
                     let scene = self.acquire_scene_member(product)?;
+                    #[cfg(feature = "runtime-2d")]
                     facts.capture_scene(self, &scene)?;
+                    drop(scene);
                 }
                 RuntimeContentMemberKind::Asset { .. } => {
                     let asset = self.plan().runtime_codecs().acquire_member(self, index)?;
+                    #[cfg(feature = "runtime-2d")]
                     match self.plan().runtime_codecs().role(member) {
                         Some(RuntimeCodecRole::Image) => {
                             let image = asset
@@ -477,6 +512,7 @@ impl RuntimeContentBase {
                         }
                         None => return Err(RuntimeContentError::CodecNotSelected),
                     }
+                    drop(asset);
                 }
             }
             // The local acquisition and heavy output have now dropped. Only verified demand
@@ -485,6 +521,7 @@ impl RuntimeContentBase {
             members += 1;
             products += member.products().len();
         }
+        #[cfg(feature = "runtime-2d")]
         facts.finish(self)?;
         Ok(RuntimeContentValidationReport {
             catalog_digest: self.catalog_digest(),
@@ -494,7 +531,7 @@ impl RuntimeContentBase {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime-2d"))]
 mod tests {
     use std::{mem::size_of, sync::Arc};
 

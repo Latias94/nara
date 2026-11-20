@@ -142,6 +142,7 @@ fn stable_revision_and_concrete_role_are_independent_of_format_version() {
         selected(1, RuntimeCodecRole::Cpu),
         selected(2, RuntimeCodecRole::Cpu)
     );
+    #[cfg(feature = "runtime-2d")]
     assert_ne!(
         selected(1, RuntimeCodecRole::Cpu),
         selected(1, RuntimeCodecRole::Image)

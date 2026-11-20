@@ -7,20 +7,25 @@ use std::{
 
 use nara_core::ItemLimit;
 use nara_ecs::bevy_ecs::system::SystemState;
+#[cfg(feature = "runtime-2d")]
 use nara_fs::{
     CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
 };
 use nara_identity::SceneEntityId;
+#[cfg(feature = "runtime-2d")]
+use nara_project::ProductCapability;
+use nara_project::{RuntimeConfiguration, RuntimePreset};
 use nara_scene::{CompiledSceneDocument, SceneDocument, SceneEntityRecord};
 use nara_tasks::TaskPoolConfig;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(feature = "runtime-2d", target_os = "linux"))]
 use std::fs::File;
 
 use super::{
     preparation::{TestGate, TestPhase},
     *,
 };
+#[cfg(feature = "runtime-2d")]
 use crate::project_host::{
     ProjectContentBudgetKind, ProjectContentBudgetSnapshot, ingest_project_manifest,
     resolve_product_recipe,
@@ -29,7 +34,9 @@ use crate::startup_scene::{CurrentScene, StartupSceneActivationPlugin, materiali
 
 mod instances;
 mod processed;
+#[cfg(feature = "runtime-2d")]
 mod source_products;
+#[cfg(feature = "runtime-2d")]
 mod source_updates;
 
 #[test]
@@ -49,6 +56,7 @@ fn direct_world_without_project_owner_needs_no_tasks_or_current_scene() {
     assert!(!world.contains_resource::<TaskPools>());
 }
 
+#[cfg(feature = "runtime-2d")]
 #[test]
 fn source_requests_reject_undeclared_paths_without_queuing_work() {
     Fixture::new().with_world(|world| {
@@ -72,6 +80,7 @@ fn source_requests_reject_undeclared_paths_without_queuing_work() {
     });
 }
 
+#[cfg(feature = "runtime-2d")]
 #[test]
 fn scoped_requests_keep_cancelling_slot_until_physical_return_and_explicit_acknowledgement() {
     Fixture::new().with_world(|world| {
@@ -137,6 +146,7 @@ fn scoped_requests_keep_cancelling_slot_until_physical_return_and_explicit_ackno
     });
 }
 
+#[cfg(feature = "runtime-2d")]
 #[test]
 fn scoped_prepared_inspection_preserves_source_receipt_pair_and_scheduled_stale_predicates() {
     Fixture::new().with_world(|world| {
@@ -199,6 +209,7 @@ fn scoped_prepared_inspection_preserves_source_receipt_pair_and_scheduled_stale_
     });
 }
 
+#[cfg(feature = "runtime-2d")]
 #[test]
 fn worker_prepares_selected_scene_and_refunds_rejected_content() {
     let fixture = Fixture::new();
@@ -290,6 +301,7 @@ fn worker_prepares_selected_scene_and_refunds_rejected_content() {
     pools.shutdown_blocking().unwrap();
 }
 
+#[cfg(feature = "runtime-2d")]
 #[test]
 fn cancellation_keeps_worker_and_prepared_generation_until_physical_return() {
     let fixture = Fixture::new();
@@ -339,6 +351,7 @@ fn cancellation_keeps_worker_and_prepared_generation_until_physical_return() {
     pools.shutdown_blocking().unwrap();
 }
 
+#[cfg(feature = "runtime-2d")]
 #[test]
 fn failed_worker_discards_its_prepared_snapshot_and_closed_pool_never_reads_inline() {
     let fixture = Fixture::new();
@@ -385,6 +398,7 @@ fn failed_worker_discards_its_prepared_snapshot_and_closed_pool_never_reads_inli
     assert_active_budget(&context, baseline);
 }
 
+#[cfg(feature = "runtime-2d")]
 #[test]
 fn inline_pool_rejects_scene_io_without_queuing_or_loading() {
     let fixture = Fixture::new();
@@ -465,6 +479,7 @@ fn wait_for_request(
     }
 }
 
+#[cfg(feature = "runtime-2d")]
 fn assert_active_budget(context: &Context, expected: ProjectContentBudgetSnapshot) {
     let Context::Source { loader, .. } = context else {
         unreachable!()
@@ -481,6 +496,20 @@ struct Fixture {
     root: PathBuf,
 }
 
+impl Fixture {
+    fn empty() -> Self {
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "nara_scene_request_{}_{}",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).unwrap();
+        Self { root }
+    }
+}
+
+#[cfg(feature = "runtime-2d")]
 impl Fixture {
     fn with_world(&self, inspect: impl FnOnce(&mut World) + Send + Sync + 'static) {
         let context = self.context();
@@ -499,13 +528,8 @@ impl Fixture {
     }
 
     fn new() -> Self {
-        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-        let root = std::env::temp_dir().join(format!(
-            "nara_scene_request_{}_{}",
-            std::process::id(),
-            SEQUENCE.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir(&root).unwrap();
+        let fixture = Self::empty();
+        let root = &fixture.root;
         for child in ["assets", "scenes", "prefabs"] {
             fs::create_dir(root.join(child)).unwrap();
         }
@@ -545,7 +569,7 @@ requested = ["runtime-2d"]
             )
             .unwrap();
         }
-        Self { root }
+        fixture
     }
 
     fn context(&self) -> Arc<Context> {
@@ -587,21 +611,44 @@ requested = ["runtime-2d"]
     }
 }
 
+fn processed_configuration() -> RuntimeConfiguration {
+    let mut configuration = RuntimeConfiguration::default();
+    #[cfg(feature = "runtime-2d")]
+    {
+        configuration.runtime.preset = RuntimePreset::LocalHeadless;
+        configuration.capabilities.requested = vec![ProductCapability::Runtime2d];
+    }
+    #[cfg(not(feature = "runtime-2d"))]
+    {
+        configuration.runtime.preset = RuntimePreset::Server;
+    }
+    configuration
+}
+
 fn with_context_world(
     context: Arc<Context>,
     source: crate::startup_scene::SceneSource,
     inspect: impl FnOnce(&mut World) + Send + Sync + 'static,
 ) {
-    with_context_world_and_startup(context, source, None, inspect);
+    with_context_world_and_startup(
+        context,
+        source,
+        #[cfg(feature = "runtime-2d")]
+        None,
+        inspect,
+    );
 }
 
 fn with_context_world_and_startup(
     context: Arc<Context>,
     source: crate::startup_scene::SceneSource,
-    source_startup: Option<crate::project_host::ProjectContentSnapshot>,
+    #[cfg(feature = "runtime-2d")] source_startup: Option<
+        crate::project_host::ProjectContentSnapshot,
+    >,
     inspect: impl FnOnce(&mut World) + Send + Sync + 'static,
 ) {
     let schema = match context.as_ref() {
+        #[cfg(feature = "runtime-2d")]
         Context::Source { plan, .. } => plan.schema_validation(),
         Context::Processed { base } => base.plan().schema_validation(),
     };
@@ -616,8 +663,11 @@ fn with_context_world_and_startup(
             nara_scene::SceneComponentsPlugin,
             nara_hierarchy::HierarchyPlugin,
             nara_transform::TransformPlugin,
+            #[cfg(feature = "runtime-2d")]
             nara_render::RenderComponentsPlugin,
+            #[cfg(feature = "runtime-2d")]
             (nara_sprite::SpritePlugin, nara_material::Material2dPlugin),
+            #[cfg(feature = "runtime-2d")]
             nara_tilemap::TilemapPlugin,
             nara_scene::SceneComponentBindingsPlugin::new(
                 schema.bindings().data_owners().iter().cloned(),
@@ -645,23 +695,27 @@ fn with_context_world_and_startup(
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut World| {
+                #[cfg(feature = "runtime-2d")]
                 let source_closure = source_startup
                     .as_ref()
                     .map(|snapshot| snapshot.content_closure());
+                #[cfg(feature = "runtime-2d")]
                 if let Some(snapshot) = source_startup {
                     super::super::content_residency::publish_startup(world, &snapshot).unwrap();
                 }
-                if let Context::Processed { base } = context.as_ref()
-                    && source.is_content_managed()
-                {
-                    let content = base
-                        .prepare_scene_content(base.catalog().startup_scene())
-                        .unwrap();
-                    super::super::content_residency::publish_processed_startup(world, &content)
-                        .unwrap();
+                match context.as_ref() {
+                    Context::Processed { base } if source.is_content_managed() => {
+                        let content = base
+                            .prepare_scene_content(base.catalog().startup_scene())
+                            .unwrap();
+                        super::super::content_residency::publish_processed_startup(world, &content)
+                            .unwrap();
+                    }
+                    _ => {}
                 }
                 materialize_startup_scene(world, source).unwrap();
                 match context.as_ref() {
+                    #[cfg(feature = "runtime-2d")]
                     Context::Source {
                         candidate,
                         plan,

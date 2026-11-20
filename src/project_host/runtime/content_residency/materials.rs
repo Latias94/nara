@@ -19,7 +19,8 @@ use super::{
     resources_missing,
 };
 use crate::{
-    project_content::{ProjectContentLease, ProjectDomainAssets, asset_record_retained_bytes},
+    project_assets::ProjectDomainAssets,
+    project_content::{ProjectContentLease, asset_record_retained_bytes},
     runtime_content::{RuntimeContentAsset, RuntimeContentLease},
     scene_retention::{ARC_CONTROL_BLOCK_BYTES, BTREE_ENTRY_OVERHEAD},
 };

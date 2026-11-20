@@ -1,14 +1,16 @@
+use std::{fs, sync::Arc};
+#[cfg(feature = "runtime-2d")]
 use std::{
-    fs,
-    sync::{Arc, Mutex},
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
 use nara_app::{App, PluginError};
+#[cfg(feature = "runtime-2d")]
+use nara_asset::{AssetMeta, AssetMetaIdentity, AssetPath, Assets};
 use nara_asset::{
-    AssetMeta, AssetMetaIdentity, AssetPath, AssetPathScope, AssetProductRef, AssetRecord,
-    AssetRef, AssetReferenceDemand, AssetServer, AssetSourceKind, AssetStates, Assets,
-    ImportedProductId, ProjectAssetDatabase, StableAssetId,
+    AssetPathScope, AssetProductRef, AssetRecord, AssetRef, AssetReferenceDemand, AssetServer,
+    AssetSourceKind, AssetStates, ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::ItemLimit;
 use nara_ecs::{Entity, World};
@@ -18,7 +20,6 @@ use nara_identity::{
     EntityLookup, EntityReference, PrefabEntityTarget, SceneEntityId, SpawnedSceneInstance,
     WorldIdentityDomain,
 };
-use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
@@ -33,20 +34,29 @@ use nara_scene::{
     scene_component_bindings,
 };
 
+#[cfg(feature = "runtime-2d")]
 use super::super::super::{CleanupDriveOutcome, ProjectHost};
 use super::{
-    Context, Fixture, PreparedSceneContent, ProjectSceneRequestError, ProjectSceneRequestState,
-    ProjectScenes, RequestOwner, Slot, activate_prepared_project_scene, assert_active_budget,
-    begin_prepared_project_scene_travel, commit_prepared_project_scene,
-    poll_project_scene_requests, pools,
+    Context, Fixture, ProjectSceneRequestError, ProjectSceneRequestState, ProjectScenes,
+    activate_prepared_project_scene, begin_prepared_project_scene_travel,
+    commit_prepared_project_scene, poll_project_scene_requests, pools, processed_configuration,
+    wait_for_request, with_context_world,
+};
+#[cfg(feature = "runtime-2d")]
+use super::{
+    PreparedSceneContent, RequestOwner, Slot, assert_active_budget,
     preparation::{TestGate, TestPhase},
-    wait_for_request, with_context_world, with_context_world_and_startup,
+    with_context_world_and_startup,
+};
+#[cfg(feature = "runtime-2d")]
+use crate::{
+    project_host::ProjectContentSnapshot, startup_scene::restart_current_scene_with_product,
 };
 use crate::{
     project_host::{
-        ProjectContentSnapshot, inspect_current_scene_dependency,
-        instantiate_current_scene_dependency, open_explicit_product_project_root,
-        resolve_runtime_configuration, unload_project_scene_addition,
+        inspect_current_scene_dependency, instantiate_current_scene_dependency,
+        open_explicit_product_project_root, resolve_runtime_configuration,
+        unload_project_scene_addition,
     },
     runtime_content::{
         RUNTIME_CONTENT_CATALOG_FILE, RuntimeContentBase, RuntimeContentBudgetKind,
@@ -55,13 +65,14 @@ use crate::{
         RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentMember,
         RuntimeContentMemberKind, RuntimeContentTarget,
     },
-    startup_scene::{CurrentScene, CurrentSceneOwner, restart_current_scene_with_product},
+    startup_scene::{CurrentScene, CurrentSceneOwner},
 };
 
 const IMMEDIATE: &str = "test.scene-dependency.Immediate";
 const DEFERRED: &str = "test.scene-dependency.Deferred";
 const LINK: &str = "test.scene-dependency.Link";
 
+#[cfg(feature = "runtime-2d")]
 #[test]
 fn additive_cancellation_retains_the_original_slot_until_its_worker_returns() {
     let (_fixture, context, snapshot) = source_fixture();
@@ -154,7 +165,7 @@ fn additive_cancellation_retains_the_original_slot_until_its_worker_returns() {
 
 #[test]
 fn coordinated_travel_revalidates_and_retires_two_occurrences_of_the_same_deferred_scene() {
-    let fixture = Fixture::new();
+    let fixture = Fixture::empty();
     let base = processed_base(&fixture);
     let source = crate::startup_scene::SceneSource::from_hosted_runtime_content(
         base.acquire_startup_scene().unwrap(),
@@ -162,6 +173,18 @@ fn coordinated_travel_revalidates_and_retires_two_occurrences_of_the_same_deferr
     with_context_world(Arc::new(Context::Processed { base }), source, |world| {
         world.insert_resource(pools());
         let primary = CurrentScene::get(world).unwrap().receipt().clone();
+        ProjectScenes::scope(world, |scenes| {
+            for product in [product(2), product(3)] {
+                assert_eq!(
+                    scenes.request_additive(product),
+                    Err(ProjectSceneRequestError::NotDeferredScene)
+                );
+            }
+            assert_eq!(
+                scenes.request(product(4)),
+                Err(ProjectSceneRequestError::UndeclaredScene)
+            );
+        });
         let activate = |world: &mut World, slot| {
             let request =
                 ProjectScenes::scope(world, |scenes| scenes.request_additive(product(4))).unwrap();
@@ -326,6 +349,7 @@ impl super::super::domains::ManagedSceneDomainAttempt for FailFirstRetirement {
     }
 }
 
+#[cfg(feature = "runtime-2d")]
 #[test]
 fn source_dependency_instances_share_capture_and_isolate_hierarchy_references_and_occurrences() {
     let (fixture, context, snapshot) = source_fixture();
@@ -375,7 +399,7 @@ fn source_dependency_instances_share_capture_and_isolate_hierarchy_references_an
 
 #[test]
 fn processed_dependency_instances_use_original_hosted_immediate_members_without_acquisition() {
-    let fixture = Fixture::new();
+    let fixture = Fixture::empty();
     let base = processed_base(&fixture);
     assert!(base.acquire_scene(product(3)).is_err());
     fs::write(fixture.root.join("cooked/3.runtime.json"), b"{ malformed").unwrap();
@@ -416,6 +440,7 @@ fn processed_dependency_instances_use_original_hosted_immediate_members_without_
     );
 }
 
+#[cfg(feature = "runtime-2d")]
 #[test]
 fn dependency_inspection_accepts_installed_startup_and_rejects_foreign_and_root_only_receipts() {
     let foreign = Arc::new(Mutex::new(None));
@@ -677,22 +702,35 @@ fn assert_error(report: &SceneSpawnReport, code: &str) {
     );
 }
 
-fn resource_counts(world: &World) -> (usize, Option<usize>, Option<usize>, Option<usize>) {
-    (
-        world
+#[derive(Debug, PartialEq, Eq)]
+struct ResourceCounts {
+    retained_bytes: usize,
+    asset_states: Option<usize>,
+    #[cfg(feature = "runtime-2d")]
+    images: Option<usize>,
+    #[cfg(feature = "runtime-2d")]
+    tilesets: Option<usize>,
+}
+
+fn resource_counts(world: &World) -> ResourceCounts {
+    ResourceCounts {
+        retained_bytes: world
             .resource::<AssetServer>()
             .checked_retained_bytes()
             .unwrap(),
-        world.get_resource::<AssetStates>().map(AssetStates::len),
-        world
+        asset_states: world.get_resource::<AssetStates>().map(AssetStates::len),
+        #[cfg(feature = "runtime-2d")]
+        images: world
             .get_resource::<Assets<nara_image::ImageAsset>>()
             .map(Assets::len),
-        world
+        #[cfg(feature = "runtime-2d")]
+        tilesets: world
             .get_resource::<Assets<nara_tilemap::TileSet>>()
             .map(Assets::len),
-    )
+    }
 }
 
+#[cfg(feature = "runtime-2d")]
 fn source_fixture() -> (Fixture, Arc<Context>, ProjectContentSnapshot) {
     let fixture = Fixture::new();
     let manifest = fixture.root.join("nara.toml");
@@ -757,9 +795,7 @@ fn source_fixture() -> (Fixture, Arc<Context>, ProjectContentSnapshot) {
 fn processed_base(fixture: &Fixture) -> RuntimeContentBase {
     let directory = fixture.root.join("cooked");
     fs::create_dir(&directory).unwrap();
-    let mut configuration = RuntimeConfiguration::default();
-    configuration.runtime.preset = RuntimePreset::LocalHeadless;
-    configuration.capabilities.requested = vec![ProductCapability::Runtime2d];
+    let configuration = processed_configuration();
     let plan = resolve_runtime_configuration(&configuration.resolve().unwrap(), recipe()).unwrap();
     let mut database = ProjectAssetDatabase::default();
     for (id, path, _) in documents() {

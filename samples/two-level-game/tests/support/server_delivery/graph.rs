@@ -7,20 +7,24 @@ use nara::{
 
 use crate::cooked_delivery::native::Custody;
 
-const KNOWN_RUNTIME_PACKAGES: &[&str] = &[
+const REQUIRED_RUNTIME_PACKAGES: &[&str] = &[
+    "nara_asset",
+    "nara_gameplay",
     "nara_input",
-    "nara_window",
-    "nara_image",
-    "nara_material",
-    "nara_render",
-    "nara_sprite",
-    "nara_tilemap",
     "nara_rapier2d",
+    "nara_scene",
+    "nara_transform",
+    "nara_window",
     "rapier2d",
 ];
 
 const FORBIDDEN_PACKAGES: &[&str] = &[
     "nara_asset_watch",
+    "nara_image",
+    "nara_material",
+    "nara_render",
+    "nara_sprite",
+    "nara_tilemap",
     "nara_tooling",
     "nara_sprite_render",
     "nara_sprite_animation",
@@ -143,14 +147,14 @@ pub(super) fn audit(
         if package == "nara" {
             assert_eq!(
                 features,
-                BTreeSet::from(["runtime-2d", "runtime-core", "serde"]),
+                BTreeSet::from(["runtime-core", "serde"]),
                 "{line}"
             );
         }
     }
     for required in [invocation.package_name(), "nara"]
         .into_iter()
-        .chain(KNOWN_RUNTIME_PACKAGES.iter().copied())
+        .chain(REQUIRED_RUNTIME_PACKAGES.iter().copied())
     {
         assert!(
             packages.contains(required),
@@ -161,14 +165,14 @@ pub(super) fn audit(
         concat!(
             "TWO_LEVEL_SERVER_CARGO_GRAPH package={} bin={} profile={} target={} ",
             "locked=true default_features=false features={} edges=normal,build packages={} ",
-            "backend_neutral=nara_input,nara_window ",
-            "cpu_2d=nara_image,nara_material,nara_render,nara_sprite,nara_tilemap,nara_rapier2d,rapier2d"
+            "required_runtime_packages={}"
         ),
         invocation.package_name(),
         invocation.target_name(),
         invocation.profile(),
         invocation.target_triple(),
         features,
-        packages.len()
+        packages.len(),
+        REQUIRED_RUNTIME_PACKAGES.join(",")
     );
 }

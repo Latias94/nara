@@ -55,6 +55,9 @@ use nara_tilemap::{
     validate_persisted_tilemap_membership,
 };
 
+pub(crate) use crate::project_assets::ErasedCollection;
+use crate::project_assets::RequiredAssetProducts;
+pub use crate::project_assets::{ProjectAssetCollection, ProjectDomainAssets};
 use crate::project_diagnostic_ids::{fs_operation_id, io_error_kind_id};
 use crate::project_host::{
     ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan, SchemaValidationInput,
@@ -86,12 +89,9 @@ pub use delivery::ProjectContentDeliveryReceipt;
 pub(crate) use delivery::{DeliverySnapshotPhase, DeliveryVisitError};
 #[cfg(feature = "project-tooling")]
 pub(crate) use delivery_assets::DeliveryAssetDefinition;
-pub(crate) use domains::ProjectAssetDomains;
-pub(crate) use domains::validate_asset_domain_kind;
 #[cfg(feature = "tooling")]
 pub(crate) use domains::{EditorSourceValidation, validate_editor_source};
-pub(crate) use domains::{ErasedCollection, runtime_collection};
-pub use domains::{ProjectAssetCollection, ProjectDomainAssets};
+pub(crate) use domains::{ProjectAssetDomains, validate_asset_domain_kind};
 pub use input::ProjectInputContent;
 use scenes::pending_scene_source_work_bytes;
 pub(crate) use source_observations::{ProjectSceneLoadAttempt, ProjectSourceObservations};
@@ -746,7 +746,7 @@ impl ProjectContentSnapshot {
         }
         self.inner
             .domain_assets
-            .validate_product_selections(&mut required)
+            .validate_source_product_selections(&mut required)
     }
 
     #[cfg(feature = "presentation-2d")]
@@ -1555,8 +1555,6 @@ impl SourceLoadMode {
         )
     }
 }
-
-type RequiredAssetProducts = BTreeMap<StableAssetId, BTreeSet<AssetProductRef>>;
 
 struct PendingSceneSource {
     reader: usize,

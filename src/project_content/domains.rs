@@ -1,23 +1,20 @@
-//! Typed source and processed CPU content selected by the compiled product recipe.
+//! Typed source content selected by the compiled product recipe.
 
 use std::{
-    any::Any,
     marker::PhantomData,
     panic::{AssertUnwindSafe, catch_unwind},
 };
 
 use nara_asset::{
-    AssetDomain, AssetImportError, AssetImportLimits, AssetImportSource,
-    AssetMetaIdentityCandidate, SourceAssetImporter,
+    AssetImportError, AssetImportLimits, AssetImportSource, AssetMetaIdentityCandidate,
+    SourceAssetImporter,
 };
 use nara_core::ByteLimit;
-use nara_ecs::Resource;
 #[cfg(feature = "project-tooling")]
 use nara_material::{Material2dAsset, Material2dDomain};
 
-use crate::runtime_content::{
-    RuntimeContentAsset, RuntimeContentBase, RuntimeContentError, RuntimeContentLease,
-};
+pub(super) use crate::project_assets::{CollectionStorage, ErasedCollection};
+use crate::project_assets::{DomainCollection, validate_product_membership};
 
 use super::*;
 
@@ -35,269 +32,14 @@ fn import_error(error: AssetImportError<ProjectContentError>) -> ProjectContentE
     }
 }
 
-/// Typed products and their admitted identities for one selected Scene.
-pub struct ProjectAssetCollection<T> {
-    pub(super) storage: CollectionStorage<T>,
-}
-
-pub(super) enum CollectionStorage<T> {
-    Source {
-        scope: AssetPathScope,
-        records: Vec<AssetRecord>,
-        products: Vec<T>,
-        // Bound to the selected domain. This trusted query only inspects immutable values;
-        // it must not allocate, load, perform I/O, mutate products or publish state.
-        contains_product: fn(&T, ImportedProductId) -> bool,
-    },
-    Processed {
-        products: Vec<RuntimeContentAsset<T>>,
-        mappings: Vec<(AssetProductRef, usize)>,
-    },
-}
-
-impl<T> ProjectAssetCollection<T> {
-    /// Looks up the stored value containing the exact selected product.
-    ///
-    /// Source values are checked through their domain's pure membership query after locating
-    /// the actual enclosing record. Paths alias only real source primary products, and stable
-    /// IDs select only primary products. Path aliases are relative to the collection's admitted
-    /// source scope; source record paths remain canonical. Processed values require an exact
-    /// admitted Product mapping; an auxiliary selection never falls back to its primary product.
-    /// This query performs no loading, importing, I/O or World mutation.
-    #[must_use]
-    pub fn get(&self, reference: &AssetRef) -> Option<&T> {
-        match &self.storage {
-            CollectionStorage::Source {
-                scope,
-                records,
-                products,
-                contains_product,
-            } => {
-                let index = records.iter().position(|record| match reference {
-                    AssetRef::Path(path) => {
-                        scope.relative_path(record.path()) == Some(path.as_str())
-                    }
-                    AssetRef::StableId(id) => record.stable_id() == *id,
-                    AssetRef::Product(product) => record.stable_id() == product.source(),
-                })?;
-                let id = match reference {
-                    AssetRef::Product(product) => product.product(),
-                    AssetRef::Path(_) | AssetRef::StableId(_) => ImportedProductId::PRIMARY,
-                };
-                let product = &products[index];
-                contains_product(product, id).then_some(product)
-            }
-            CollectionStorage::Processed { products, mappings } => {
-                let reference = match reference {
-                    AssetRef::Product(product) => *product,
-                    AssetRef::StableId(id) => {
-                        AssetProductRef::new(*id, ImportedProductId::PRIMARY).ok()?
-                    }
-                    AssetRef::Path(_) => return None,
-                };
-                let index = mappings
-                    .binary_search_by_key(&reference, |(product, _)| *product)
-                    .ok()?;
-                Some(products[mappings[index].1].product())
-            }
-        }
-    }
-
-    /// Visits each stored decoded value once, independently of its aliases or Product mappings.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &T> {
-        match &self.storage {
-            CollectionStorage::Source { products, .. } => CollectionIter::Source(products.iter()),
-            CollectionStorage::Processed { products, .. } => {
-                CollectionIter::Processed(products.iter())
-            }
-        }
-    }
-
-    /// Visits real source records with canonical locations, independently of local Path aliases.
-    /// Processed collections have no source metadata or aliases.
-    pub fn source_records(&self) -> impl ExactSizeIterator<Item = &AssetRecord> {
-        self.source_records_slice().iter()
-    }
-
-    pub(crate) fn runtime_acquisitions(&self) -> &[RuntimeContentAsset<T>] {
-        match &self.storage {
-            CollectionStorage::Processed { products, .. } => products,
-            CollectionStorage::Source { .. } => &[],
-        }
-    }
-
-    fn source_records_slice(&self) -> &[AssetRecord] {
-        match &self.storage {
-            CollectionStorage::Source { records, .. } => records,
-            CollectionStorage::Processed { .. } => &[],
-        }
-    }
-}
-
-enum CollectionIter<'a, T> {
-    Source(std::slice::Iter<'a, T>),
-    Processed(std::slice::Iter<'a, RuntimeContentAsset<T>>),
-}
-
-impl<'a, T> Iterator for CollectionIter<'a, T> {
-    type Item = &'a T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Source(products) => products.next(),
-            Self::Processed(products) => products.next().map(RuntimeContentAsset::product),
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            Self::Source(products) => products.size_hint(),
-            Self::Processed(products) => products.size_hint(),
-        }
-    }
-}
-
-impl<T> ExactSizeIterator for CollectionIter<'_, T> {}
-
-pub(crate) trait ErasedCollection: Any + Send + Sync {
-    fn domain_type(&self) -> std::any::TypeId;
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-    fn records(&self) -> &[AssetRecord];
-    fn validate_product_selections(
-        &self,
-        required: &mut RequiredAssetProducts,
-    ) -> Result<(), AssetProductRef>;
-}
-
-struct DomainCollection<D: AssetDomain>(ProjectAssetCollection<D::Product>);
-
-/// Retains pre-budgeted acquisitions and their complete verified member mappings.
-///
-/// The caller supplies one acquisition per decoded member from the selected original base.
-/// Sorting is in place and does not allocate. Each mapping must belong to its acquisition's
-/// already verified member, and all acquisitions must retain the same exact base. This
-/// constructor does not execute a codec or source importer.
-pub(crate) fn runtime_collection<D: AssetDomain>(
-    products: Vec<RuntimeContentAsset<D::Product>>,
-    mut mappings: Vec<(AssetProductRef, usize)>,
-) -> Result<Box<dyn ErasedCollection>, RuntimeContentError> {
-    if let Some(first) = products.first() {
-        for asset in &products[1..] {
-            if !first.base().same_base(asset.base()) {
-                return Err(RuntimeContentError::ProductIdentityMismatch);
-            }
-        }
-    }
-    mappings.sort_unstable_by_key(|(reference, _)| *reference);
-    if mappings.windows(2).any(|pair| pair[0].0 == pair[1].0) {
-        return Err(RuntimeContentError::ProductIdentityMismatch);
-    }
-    for (reference, index) in &mappings {
-        let asset = products
-            .get(*index)
-            .ok_or(RuntimeContentError::ProductIdentityMismatch)?;
-        let member = asset
-            .base()
-            .member(asset.reference())
-            .ok_or(RuntimeContentError::ProductIdentityMismatch)?;
-        if !asset
-            .base()
-            .member(*reference)
-            .is_some_and(|mapped| std::ptr::eq(mapped, member))
-        {
-            return Err(RuntimeContentError::ProductIdentityMismatch);
-        }
-    }
-    Ok(Box::new(DomainCollection::<D>(ProjectAssetCollection {
-        storage: CollectionStorage::Processed { products, mappings },
-    })))
-}
-
-impl<D: AssetDomain> ErasedCollection for DomainCollection<D> {
-    fn domain_type(&self) -> std::any::TypeId {
-        std::any::TypeId::of::<D>()
-    }
-    fn as_any(&self) -> &dyn Any {
-        &self.0
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        &mut self.0
-    }
-    fn records(&self) -> &[AssetRecord] {
-        self.0.source_records_slice()
-    }
-    fn validate_product_selections(
-        &self,
-        required: &mut RequiredAssetProducts,
-    ) -> Result<(), AssetProductRef> {
-        for (record, product) in self.0.source_records().zip(self.0.iter()) {
-            if let Some(selections) = required.remove(&record.stable_id()) {
-                validate_product_membership::<D>(product, selections)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Immutable typed resource collections retaining the committed Scene's original content owner.
-///
-/// File-backed Hosts install this resource before gameplay startup and replace it only after a
-/// successful Scene transaction. Clones keep the exact products and their budget reservation alive.
-/// Plain CPU collections retain no Scene source and do not reserve a decoded Scene generation.
-/// Products containing retained image/material views preserve those views' own custody.
-/// Heterogeneous storage is private; no public erased store or mutable World callback is exposed.
-#[derive(Clone, Resource)]
-pub struct ProjectDomainAssets {
-    inner: Arc<DomainAssetsInner>,
-}
-
-struct DomainAssetsInner {
-    collections: Box<[Box<dyn ErasedCollection>]>,
-    // Drop values and indices before releasing their metadata reservation or content owner.
-    _custody: DomainAssetsCustody,
-}
-
-enum DomainAssetsCustody {
-    Source {
-        _lease: ProjectContentLease,
-    },
-    Processed {
-        _lease: RuntimeContentLease,
-        _base: RuntimeContentBase,
-    },
-}
-
 impl ProjectDomainAssets {
-    pub(crate) fn contains_additive_unsupported_collections(&self) -> bool {
-        self.inner.collections.iter().any(|collection| {
-            collection.domain_type() != std::any::TypeId::of::<nara_image::ImageDomain>()
-                && collection.domain_type()
-                    != std::any::TypeId::of::<nara_material::Material2dDomain>()
-                && collection.domain_type() != std::any::TypeId::of::<nara_tilemap::TileSetDomain>()
-        })
-    }
-
-    pub(crate) fn runtime_metadata_bytes(collections: usize) -> Option<usize> {
-        std::mem::size_of::<DomainAssetsInner>()
-            .checked_add(crate::scene_retention::ARC_CONTROL_BLOCK_BYTES)?
-            .checked_add(collections.checked_mul(std::mem::size_of::<Box<dyn ErasedCollection>>())?)
-    }
-
-    pub(super) fn validate_product_selections(
+    pub(super) fn validate_source_product_selections(
         &self,
         required: &mut RequiredAssetProducts,
     ) -> Result<(), ProjectContentError> {
         catch_unwind(AssertUnwindSafe(|| {
-            for collection in &self.inner.collections {
-                collection
-                    .validate_product_selections(required)
-                    .map_err(missing_product)?;
-            }
-            if let Some(reference) = required.values().find_map(|products| products.first()) {
-                return Err(missing_product(*reference));
-            }
-            Ok(())
+            self.validate_product_selections(required)
+                .map_err(missing_product)
         }))
         .map_err(|_| {
             ProjectContentError::single(
@@ -306,56 +48,6 @@ impl ProjectDomainAssets {
                 "Prepared asset product membership query panicked",
             )
         })?
-    }
-
-    pub(super) fn new(
-        collections: Vec<Box<dyn ErasedCollection>>,
-        lease: ProjectContentLease,
-    ) -> Self {
-        Self {
-            inner: Arc::new(DomainAssetsInner {
-                collections: collections.into_boxed_slice(),
-                _custody: DomainAssetsCustody::Source { _lease: lease },
-            }),
-        }
-    }
-
-    pub(crate) fn from_runtime(
-        collections: Vec<Box<dyn ErasedCollection>>,
-        base: RuntimeContentBase,
-        lease: RuntimeContentLease,
-    ) -> Self {
-        Self {
-            inner: Arc::new(DomainAssetsInner {
-                collections: collections.into_boxed_slice(),
-                _custody: DomainAssetsCustody::Processed {
-                    _lease: lease,
-                    _base: base,
-                },
-            }),
-        }
-    }
-
-    #[must_use]
-    pub fn collection<D: AssetDomain>(&self) -> Option<&ProjectAssetCollection<D::Product>> {
-        self.inner
-            .collections
-            .iter()
-            .filter(|collection| collection.domain_type() == std::any::TypeId::of::<D>())
-            .find_map(|collection| {
-                collection
-                    .as_any()
-                    .downcast_ref::<ProjectAssetCollection<D::Product>>()
-            })
-    }
-}
-
-impl fmt::Debug for ProjectDomainAssets {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ProjectDomainAssets")
-            .field("collection_count", &self.inner.collections.len())
-            .finish_non_exhaustive()
     }
 }
 
@@ -795,26 +487,19 @@ impl LoadContext<'_> {
     pub(super) fn prepare_domain_collections(
         &mut self,
     ) -> Result<Vec<Box<dyn ErasedCollection>>, ProjectContentError> {
-        let providers = self.domains;
+        let kind = ProjectContentBudgetKind::RetainedBytes;
+        let provider_count = self.domains.providers.len();
+        let collection_bytes = ProjectDomainAssets::runtime_metadata_bytes(provider_count)
+            .ok_or_else(|| overflow_budget(kind))?;
+        let provider_bytes =
+            checked_plan_product(kind, provider_count, size_of::<Arc<dyn DomainProvider>>())?;
         let mut collections = Vec::new();
         self.add_budget(
-            ProjectContentBudgetKind::RetainedBytes,
-            checked_plan_sum(
-                ProjectContentBudgetKind::RetainedBytes,
-                [
-                    size_of::<DomainAssetsInner>(),
-                    ARC_CONTROL_BLOCK_BYTES,
-                    checked_plan_product(
-                        ProjectContentBudgetKind::RetainedBytes,
-                        providers.providers.len(),
-                        size_of::<Box<dyn ErasedCollection>>()
-                            + size_of::<Arc<dyn DomainProvider>>(),
-                    )?,
-                ],
-            )?,
+            kind,
+            checked_plan_sum(kind, [collection_bytes, provider_bytes])?,
         )?;
         collections
-            .try_reserve_exact(providers.providers.len())
+            .try_reserve_exact(provider_count)
             .map_err(|_| allocation_failed("project.content.domain-allocation"))?;
         Ok(collections)
     }
@@ -947,18 +632,6 @@ impl LoadContext<'_> {
         self.subtract_budget(ProjectContentBudgetKind::WorkBytes, queued_path_work);
         Ok(())
     }
-}
-
-fn validate_product_membership<D: AssetDomain>(
-    product: &D::Product,
-    required: BTreeSet<AssetProductRef>,
-) -> Result<(), AssetProductRef> {
-    for reference in required {
-        if !D::contains_product(product, reference.product()) {
-            return Err(reference);
-        }
-    }
-    Ok(())
 }
 
 fn missing_product(reference: AssetProductRef) -> ProjectContentError {

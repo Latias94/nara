@@ -1,7 +1,12 @@
 #[cfg(feature = "desktop")]
 use nara::project_host::DesktopRun;
+#[cfg(feature = "local-player")]
 use nara::{
     advanced_prelude::CurrentScene,
+    asset::Assets,
+    material::{Material2d, Material2dAsset},
+};
+use nara::{
     app::{FixedTime, RuntimeTimeSettings},
     ecs::World,
     gameplay::{GameplayCommandBatch, GameplayCommandQueue, LocalGameplayCommands},
@@ -9,24 +14,19 @@ use nara::{
     project_host::HeadlessSession,
     tasks::{TaskPools, TaskReturnState},
 };
-#[cfg(feature = "local-player")]
-use nara::{
-    asset::Assets,
-    material::{Material2d, Material2dAsset},
-};
 
 use super::{GameResumeError, ResumeControl};
+#[cfg(feature = "local-player")]
+use crate::gameplay::ActiveLevel;
 use crate::{
-    gameplay::{
-        ActiveLevel, GamePhase, Progress, Session, player, travel, verification::Verification,
-    },
+    gameplay::{GamePhase, Progress, Session, player, travel, verification::Verification},
     resume::{PlayerState, ResumeCompatibility, ResumeState, RuntimeTimeState, SessionCounters},
 };
 
 pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
     let reject = |reason: &str| GameResumeError::Ineligible(reason.into());
     let session = world.resource::<Session>();
-    if !session.local_player {
+    if !cfg!(feature = "local-player") || !session.local_player {
         return Err(reject(
             "exact reconstruction requires the local source player",
         ));
@@ -158,16 +158,20 @@ pub(crate) fn capture_world(
 ) -> Result<ResumeState, GameResumeError> {
     eligible(world)?;
     let reject = |reason: &str| GameResumeError::Ineligible(reason.into());
-    let current = CurrentScene::get(world).ok_or_else(|| reject("current Scene is unavailable"))?;
-    let source = current
-        .source_content_stamp()
-        .ok_or_else(|| reject("admitted source facts are unavailable"))?;
-    let key = world.resource::<ActiveLevel>().key();
     let control = world.resource::<ResumeControl>();
-    if control.levels.get(&key.level()) != Some(&super::stamp(key.level(), source)) {
-        return Err(reject(
-            "current source no longer matches game-owned admission facts",
-        ));
+    #[cfg(feature = "local-player")]
+    {
+        let current =
+            CurrentScene::get(world).ok_or_else(|| reject("current Scene is unavailable"))?;
+        let source = current
+            .source_content_stamp()
+            .ok_or_else(|| reject("admitted source facts are unavailable"))?;
+        let level = world.resource::<ActiveLevel>().key().level();
+        if control.levels.get(&level) != Some(&super::stamp(level, source)) {
+            return Err(reject(
+                "current source no longer matches game-owned admission facts",
+            ));
+        }
     }
     travel::observe_markers(world).map_err(GameResumeError::Ineligible)?;
     let mut progress = world.resource::<Progress>().checkpoint().clone();
