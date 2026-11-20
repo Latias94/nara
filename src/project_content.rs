@@ -5,7 +5,7 @@ mod catalogue;
 mod closure;
 mod delivery;
 #[cfg(feature = "project-tooling")]
-mod delivery_images;
+mod delivery_assets;
 mod domains;
 mod input;
 pub(crate) mod materials;
@@ -84,6 +84,8 @@ pub use closure::{
 };
 pub use delivery::ProjectContentDeliveryReceipt;
 pub(crate) use delivery::{DeliverySnapshotPhase, DeliveryVisitError};
+#[cfg(feature = "project-tooling")]
+pub(crate) use delivery_assets::DeliveryAssetDefinition;
 pub(crate) use domains::ProjectAssetDomains;
 pub(crate) use domains::validate_asset_domain_kind;
 #[cfg(feature = "tooling")]
@@ -1610,6 +1612,8 @@ struct LoadContext<'a, V = &'a SchemaValidationInput, D = &'a ProjectAssetDomain
     completed_delivery_catalogue: Option<DeliveryCatalogue>,
     source_mode: SourceLoadMode,
     observations: Option<&'a mut ProjectSourceObservations>,
+    #[cfg(feature = "project-tooling")]
+    supplemental_delivery: Option<&'a ProjectContentDeliveryReceipt>,
 }
 
 struct LoadedPrefabContent {
@@ -1644,7 +1648,6 @@ struct WorkReservation {
 
 struct DeliveryImageExpectation {
     metadata: ContentDigest,
-    source: Option<ContentDigest>,
 }
 
 fn source_scope(root: &nara_project::ProjectPath) -> Result<AssetPathScope, ProjectContentError> {
@@ -1706,6 +1709,8 @@ impl<'a, V, D> LoadContext<'a, V, D> {
             completed_delivery_catalogue: None,
             source_mode: SourceLoadMode::Current,
             observations: None,
+            #[cfg(feature = "project-tooling")]
+            supplemental_delivery: None,
         }
     }
 
@@ -2477,6 +2482,17 @@ impl<V, D> LoadContext<'_, V, D> {
             (RELATIVE_OPEN_HANDLE_PEAK, 0)
         };
         let relative = self.observe_path(logical_path)?;
+        #[cfg(feature = "project-tooling")]
+        let expected = match (self.supplemental_delivery, project_path) {
+            (Some(receipt), Some((root, path))) => {
+                self.admit_supplemental_read(receipt, root, path)?
+            }
+            _ => {
+                self.add_budget(ProjectContentBudgetKind::Files, 1)?;
+                None
+            }
+        };
+        #[cfg(not(feature = "project-tooling"))]
         self.add_budget(ProjectContentBudgetKind::Files, 1)?;
         let open_handles = checked_plan_sum(
             ProjectContentBudgetKind::OpenHandles,
@@ -2553,6 +2569,10 @@ impl<V, D> LoadContext<'_, V, D> {
                         .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::EncodedBytes))?,
                 )?;
                 let digest = ContentDigest::of_bytes(&bytes);
+                #[cfg(feature = "project-tooling")]
+                if expected.is_some_and(|expected| expected != digest) {
+                    return Err(delivery::delivery_member_changed());
+                }
                 Ok((bytes, digest))
             }
             Err(error) => {
@@ -2951,8 +2971,7 @@ impl LoadContext<'_> {
             self.add_budget(ProjectContentBudgetKind::InFlightJobs, 1)?;
             let result = self.load_image(assets, asset_root, &path, None);
             self.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);
-            let (image, _) = result?;
-            images.push(image);
+            images.push(result?);
             let queued_work = queued_source_path_work_bytes(&path)?;
             drop(path);
             self.subtract_budget(ProjectContentBudgetKind::WorkBytes, queued_work);
@@ -3103,14 +3122,65 @@ impl LoadContext<'_> {
         asset_root: &nara_project::ProjectPath,
         path: &AssetPath,
     ) -> Result<(ProjectTileSetContent, WorkReservation), ProjectContentError> {
+        let (record, source, meta_digest, source_digest, record_path_work) =
+            self.read_tileset_definition(assets, asset_root, path, ContentReadContext::Asset)?;
+        let (image_path, image_path_work) =
+            self.resolve_reference_path(&source.image, &AssetSourceKind::Image, asset_root)?;
+        self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
+        // Resolving a stable Image reference may populate the catalogue.
+        self.verify_catalogued_metadata(record.path(), asset_root, meta_digest)?;
+        let stable_id = record.stable_id();
+        let path_work = self.reserve_work(string_retained_bytes(record.path().as_str())?)?;
+        let path = record.path().clone();
+        drop(record);
+        self.subtract_budget(
+            ProjectContentBudgetKind::WorkBytes,
+            record_path_work.reserved,
+        );
+        let paths_work = WorkReservation {
+            reserved: image_path_work
+                .reserved
+                .checked_add(path_work.reserved)
+                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?,
+        };
+        Ok((
+            ProjectTileSetContent {
+                stable_id,
+                path,
+                image_path,
+                metadata_digest: meta_digest,
+                source_hash: source_digest,
+                source,
+            },
+            paths_work,
+        ))
+    }
+
+    fn read_tileset_definition(
+        &mut self,
+        assets: &DirectoryCapability,
+        asset_root: &nara_project::ProjectPath,
+        path: &AssetPath,
+        read: ContentReadContext<'_>,
+    ) -> Result<
+        (
+            AssetRecord,
+            TileSetSource,
+            ContentDigest,
+            ContentDigest,
+            WorkReservation,
+        ),
+        ProjectContentError,
+    > {
         let meta_path = path.meta_path();
         self.observe_source_read(Some(asset_root), &meta_path)?;
-        let (meta_bytes, meta_digest) = self.read_file(
+        let (meta_bytes, meta_digest) = self.read_file_inner(
             assets,
             &meta_path,
             nara_asset::AssetMetaFileLimits::default()
                 .encoded_bytes()
                 .get(),
+            read,
         )?;
         self.record_member(
             ProjectContentMemberKind::AssetMetadata,
@@ -3154,11 +3224,10 @@ impl LoadContext<'_> {
         let record_path_work = self.reserve_work(record_path_bytes)?;
         let record = identity.into_record(&self.asset_scope);
         self.verify_catalogued_metadata(record.path(), asset_root, meta_digest)?;
-        let stable_id = record.stable_id();
         let source_ceiling = TileSetSourceFileLimits::default().encoded_bytes().get();
         self.observe_source_read(Some(asset_root), path.as_str())?;
         let (source_bytes, source_digest) =
-            self.read_file(assets, path.as_str(), source_ceiling)?;
+            self.read_file_inner(assets, path.as_str(), source_ceiling, read)?;
         let source =
             TileSetSource::decode_ron_bytes(&source_bytes, TileSetSourceFileLimits::default())
                 .map_err(|_| {
@@ -3170,40 +3239,13 @@ impl LoadContext<'_> {
                         path.as_str(),
                     )
                 })?;
-        let (image_path, image_path_work) =
-            self.resolve_reference_path(&source.image, &AssetSourceKind::Image, asset_root)?;
-        self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
-        self.verify_catalogued_metadata(record.path(), asset_root, meta_digest)?;
         self.record_member(
             ProjectContentMemberKind::AssetSource,
             asset_root,
             path.as_str(),
             source_digest,
         )?;
-        let path_work = self.reserve_work(string_retained_bytes(record.path().as_str())?)?;
-        let path = record.path().clone();
-        drop(record);
-        self.subtract_budget(
-            ProjectContentBudgetKind::WorkBytes,
-            record_path_work.reserved,
-        );
-        let paths_work = WorkReservation {
-            reserved: image_path_work
-                .reserved
-                .checked_add(path_work.reserved)
-                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?,
-        };
-        Ok((
-            ProjectTileSetContent {
-                stable_id,
-                path,
-                image_path,
-                metadata_digest: meta_digest,
-                source_hash: source_digest,
-                source,
-            },
-            paths_work,
-        ))
+        Ok((record, source, meta_digest, source_digest, record_path_work))
     }
 
     fn load_image(
@@ -3212,7 +3254,7 @@ impl LoadContext<'_> {
         asset_root: &nara_project::ProjectPath,
         path: &AssetPath,
         expected: Option<DeliveryImageExpectation>,
-    ) -> Result<(ProjectImageContent, ContentDigest), ProjectContentError> {
+    ) -> Result<ProjectImageContent, ProjectContentError> {
         let read = if expected.is_some() {
             ContentReadContext::ExactProjectMember {
                 source_root: asset_root,
@@ -3234,14 +3276,13 @@ impl LoadContext<'_> {
             if meta_digest != expected.metadata {
                 return Err(catalogue::metadata_source_changed(path.as_str()));
             }
-        } else {
-            self.record_member(
-                ProjectContentMemberKind::AssetMetadata,
-                asset_root,
-                &meta_path,
-                meta_digest,
-            )?;
         }
+        self.record_member(
+            ProjectContentMemberKind::AssetMetadata,
+            asset_root,
+            &meta_path,
+            meta_digest,
+        )?;
         let meta = AssetMetaCandidate::<ImageImportSettings>::decode_json_bytes(&meta_bytes)
             .map_err(|_| {
                 ProjectContentError::with_identifier(
@@ -3305,13 +3346,6 @@ impl LoadContext<'_> {
         self.observe_source_read(Some(asset_root), path.as_str())?;
         let (source_bytes, source_digest) =
             self.read_file_inner(assets, path.as_str(), ceiling, read)?;
-        if expected
-            .as_ref()
-            .and_then(|expected| expected.source)
-            .is_some_and(|digest| digest != source_digest)
-        {
-            return Err(delivery::delivery_member_changed());
-        }
         let source_path_bytes = record.path().as_str().len();
         let import = self
             .loader
@@ -3326,22 +3360,17 @@ impl LoadContext<'_> {
         let work_before = self.reserve_image_memory(source_path_bytes, memory, record_path_work)?;
         let image = import.import().map_err(map_image_import_error)?;
         self.set_budget(ProjectContentBudgetKind::WorkBytes, work_before)?;
-        if expected.is_none() {
-            self.record_member(
-                ProjectContentMemberKind::AssetSource,
-                asset_root,
-                path.as_str(),
-                source_digest,
-            )?;
-        }
-        Ok((
-            ProjectImageContent {
-                image,
-                #[cfg(feature = "project-tooling")]
-                metadata_digest: meta_digest,
-            },
+        self.record_member(
+            ProjectContentMemberKind::AssetSource,
+            asset_root,
+            path.as_str(),
             source_digest,
-        ))
+        )?;
+        Ok(ProjectImageContent {
+            image,
+            #[cfg(feature = "project-tooling")]
+            metadata_digest: meta_digest,
+        })
     }
 
     fn reserve_image_memory(
@@ -3513,15 +3542,12 @@ impl LoadContext<'_> {
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::PathBytes))?;
         let work = content_closure_entry_work_bytes(logical_path_bytes)?;
         self.add_budget(ProjectContentBudgetKind::WorkBytes, work)?;
-        self.content_closure
+        let inserted = self
+            .content_closure
             .as_mut()
             .expect("load context owns one Scene closure builder until publication")
             .insert(kind, directory, path, digest)?;
-        self.content_closure_work_bytes = self
-            .content_closure_work_bytes
-            .checked_add(work)
-            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
-        Ok(())
+        self.retain_member_work(inserted, work)
     }
 
     fn record_project_member(
@@ -3539,14 +3565,27 @@ impl LoadContext<'_> {
                 "Content member has an invalid project-relative path",
             )
         })?;
-        self.content_closure
+        let inserted = self
+            .content_closure
             .as_mut()
             .expect("load context owns one Scene closure builder until publication")
             .insert_project_path(kind, path, digest)?;
-        self.content_closure_work_bytes = self
-            .content_closure_work_bytes
-            .checked_add(work)
-            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+        self.retain_member_work(inserted, work)
+    }
+
+    fn retain_member_work(
+        &mut self,
+        inserted: bool,
+        work: usize,
+    ) -> Result<(), ProjectContentError> {
+        if inserted {
+            self.content_closure_work_bytes = self
+                .content_closure_work_bytes
+                .checked_add(work)
+                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+        } else {
+            self.subtract_budget(ProjectContentBudgetKind::WorkBytes, work);
+        }
         Ok(())
     }
 
@@ -5587,6 +5626,50 @@ mod tests {
         assert_eq!(digest, project.digest("scenes/startup.scene.json"));
         assert_eq!(context.budget_value(handles), 1);
         assert_eq!(context.budget_value(work), base_work);
+        drop(context);
+        assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+    }
+
+    #[test]
+    fn repeated_shared_input_keeps_one_closure_index_charge() {
+        let project = LazyContentProject::new();
+        let (candidate, plan, loader) = project.inputs();
+        let mut context = LoadContext::new(
+            &loader,
+            plan.schema_validation(),
+            &plan.asset_domains,
+            None,
+            BTreeMap::new(),
+            candidate.manifest_digest(),
+            None,
+            None,
+            false,
+            None,
+        )
+        .unwrap();
+        let kind = ProjectContentMemberKind::AssetSource;
+        let work = ProjectContentBudgetKind::WorkBytes;
+        let assets = &candidate.settings().paths.assets;
+        let digest = ContentDigest::of_bytes(b"shared input");
+        context
+            .record_member(kind, assets, "palette.wgsl", digest)
+            .unwrap();
+        let owned = context.budget_value(work);
+        for _ in 0..2 {
+            context
+                .record_member(kind, assets, "palette.wgsl", digest)
+                .unwrap();
+            assert_eq!(context.budget_value(work), owned);
+        }
+        let error = context
+            .record_member(
+                kind,
+                assets,
+                "palette.wgsl",
+                ContentDigest::of_bytes(b"changed input"),
+            )
+            .unwrap_err();
+        assert_eq!(error.kind(), ProjectContentErrorKind::ClosurePathCollision);
         drop(context);
         assert_eq!(loader.budget_snapshot().active_reservations(), 0);
     }

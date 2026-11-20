@@ -590,8 +590,10 @@ workflow. Undo uses the resulting key when the edit changes an item's identity. 
 [indexed keyed reads](../architecture/authoring-read-projection-design.md#indexed-reads-in-admitted-keyed-collections)
 retain validated positions in the exact source or Schema owner and remove the list-length scan
 from the first selected read. Compact canonical RON keeps the reviewed large document inside
-the original publication limits. Complete field query coverage, preparation locality and
-larger-workload comparisons stay open.
+the original publication limits. The [bound encoding and omitted-default regressions](../audits/2026-11-20-recovery-format-and-runtime-input-review.md#repair-status)
+also verify prepared non-active edits, exact history and persistence through the independent
+registered panel. Complete field query coverage, preparation locality and larger-workload
+comparisons stay open.
 
 ## R3: Behavior Representation And Immutable Module Publications
 
@@ -1304,6 +1306,14 @@ metadata rechecked at publication. Late PNG and sidecar reads use the original d
 Deep validation checks Sprite and `UiVisual` Image bindings against the Player's selected
 publication codec. The generic codec still supports direct CPU Image acquisition.
 [Selected Image identity and UI admission](2026-10-31-cooked-player-delivery-plan.md#selected-image-identity-and-ui-image-admission)
+
+The [build-declared TileSet and Material successor](2026-10-31-cooked-player-delivery-plan.md#stock-dependency-qualification)
+resolves a stock definition requested by a verified build even when no authored Scene selected
+it. The existing source owner resolves unique definitions, tracks Shader inputs and uses the
+encoded dependency edges to find their actual Images. The independent single-Scene consumer
+reopens a relocated pack and verifies both dependency roles through the processed Runtime.
+This completes the selected stock closure without promoting the general Cook scheduler or
+dedicated-server delivery proposals.
 
 Separate Host tool selection, target executable artifacts, content cook, release candidate and
 target-runner activation. Keep a source-carrying option but move fixed starter assumptions into

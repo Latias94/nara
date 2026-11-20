@@ -17,8 +17,9 @@ use crate::{
     fs::{ContentDigest, DirectoryCapability, RelativePath},
     material::{Material2dAsset, Material2dDomain},
     project_content::{
-        CookedProductSource, CookedProductSources, DeliveryCatalogue, DeliverySnapshotPhase,
-        DeliveryVisitError, ProjectImageContent, ProjectInputContent, SelectedSceneProduct,
+        CookedProductSource, CookedProductSources, DeliveryAssetDefinition, DeliveryCatalogue,
+        DeliverySnapshotPhase, DeliveryVisitError, ProjectImageContent, ProjectInputContent,
+        SelectedSceneProduct,
     },
     project_host::{
         ProjectContentDeliveryReceipt, ProjectContentLoader, ProjectContentMemberKind,
@@ -27,7 +28,7 @@ use crate::{
     project_workflow::cooked_content::{CookedContentBuilder, CookedContentRequest},
     runtime_content::RuntimeContentDependencyRole,
     scene::CompiledSceneCandidate,
-    tilemap::TileSetDescriptor,
+    tilemap::{TileSetDescriptor, TileSetSource},
 };
 
 use super::{
@@ -528,17 +529,7 @@ impl<'a> ProjectCookContext<'a> {
                 {
                     self.cook_stock(product, available[slot].1)?;
                 } else {
-                    match self.outputs.entry(product) {
-                        Entry::Vacant(entry) => {
-                            reserve_output(self.builder)?;
-                            entry.insert(Output::Demanded);
-                        }
-                        Entry::Occupied(mut entry) => {
-                            if let Output::Stock(_, state) = entry.get_mut() {
-                                *state = StockState::Demanded;
-                            }
-                        }
-                    }
+                    mark_stock_demand(self.builder, self.outputs, product)?;
                 }
             }
             *inspected_members += 1;
@@ -629,12 +620,8 @@ impl<'a> ProjectCookContext<'a> {
             StockAsset::TileSet(tileset) => {
                 let source = tileset.source();
                 let image = resolve_image(resolver, &source.image)?;
-                let descriptor = TileSetDescriptor::new(product, image, source.atlas)
-                    .map(|value| value.with_sampler(source.sampler))
-                    .map(|value| value.with_alpha_mode(source.alpha_mode))
-                    .and_then(|value| value.with_tint(source.tint))
-                    .map_err(|error| ProjectCookError::Invalid(error.to_string()))?;
-                self.builder.add_tileset(&descriptor)?;
+                self.builder
+                    .add_tileset(&tileset_descriptor(product, image, source)?)?;
             }
         }
         self.outputs
@@ -688,7 +675,41 @@ fn reserve_output(builder: &mut CookedContentBuilder) -> Result<(), ProjectCookE
     Ok(())
 }
 
-fn finish_stock_images(
+fn mark_stock_demand(
+    builder: &mut CookedContentBuilder,
+    outputs: &mut BTreeMap<AssetProductRef, Output>,
+    product: AssetProductRef,
+) -> Result<(), ProjectCookError> {
+    match outputs.entry(product) {
+        Entry::Vacant(entry) => {
+            reserve_output(builder)?;
+            entry.insert(Output::Demanded);
+        }
+        Entry::Occupied(mut entry) => {
+            if let Output::Stock(_, state @ StockState::Available) = entry.get_mut() {
+                *state = StockState::Demanded;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn tileset_descriptor(
+    product: AssetProductRef,
+    image: AssetProductRef,
+    source: &TileSetSource,
+) -> Result<TileSetDescriptor, ProjectCookError> {
+    TileSetDescriptor::new(product, image, source.atlas)
+        .map(|value| {
+            value
+                .with_sampler(source.sampler)
+                .with_alpha_mode(source.alpha_mode)
+        })
+        .and_then(|value| value.with_tint(source.tint))
+        .map_err(|error| ProjectCookError::Invalid(error.to_string()))
+}
+
+fn finish_stock_assets(
     loader: &ProjectContentLoader,
     request: &ProjectCookRequest<'_>,
     plan: &RuntimePlan,
@@ -696,25 +717,37 @@ fn finish_stock_images(
     outputs: &mut BTreeMap<AssetProductRef, Output>,
     builder: &mut CookedContentBuilder,
     observations: &mut Observations,
+    inspected_members: &mut usize,
 ) -> Result<(), DeliveryVisitError<ProjectCookError>> {
-    let is_demanded = |product: &AssetProductRef, output: &Output| {
+    let is_demanded_asset = |product: &AssetProductRef, output: &Output| {
         product.product() == ImportedProductId::PRIMARY
             && matches!(
                 output,
-                Output::Demanded | Output::Stock(StockKind::Image, StockState::Demanded)
+                Output::Demanded
+                    | Output::Stock(
+                        StockKind::Image | StockKind::Material | StockKind::TileSet,
+                        StockState::Demanded
+                    )
             )
     };
-    let is_cooked_image =
-        |output: &Output| matches!(output, Output::Stock(StockKind::Image, StockState::Cooked));
+    let is_cooked_asset = |output: &Output| {
+        matches!(
+            output,
+            Output::Stock(
+                StockKind::Image | StockKind::Material | StockKind::TileSet,
+                StockState::Cooked
+            )
+        )
+    };
     if !outputs
         .iter()
-        .any(|(product, output)| is_cooked_image(output) || is_demanded(product, output))
+        .any(|(product, output)| is_cooked_asset(output) || is_demanded_asset(product, output))
     {
         return Ok(());
     }
 
     let (receipt, catalogue) = delivery;
-    let mut sources = loader.delivery_images(
+    let mut sources = loader.delivery_assets(
         request.candidate,
         plan,
         receipt,
@@ -724,46 +757,77 @@ fn finish_stock_images(
                 .ok()
                 .and_then(|product| outputs.get(&product).map(|output| (product, output)))
                 .is_some_and(|(product, output)| {
-                    is_cooked_image(output) || is_demanded(&product, output)
+                    is_cooked_asset(output) || is_demanded_asset(&product, output)
                 })
         },
     )?;
     for (product, output) in &*outputs {
-        if is_cooked_image(output) {
+        if is_cooked_asset(output) {
             let id = product.source();
             sources.verify_source(id, &observations.product_sources[&id])?;
         }
     }
+    for (&product, output) in outputs.iter_mut().filter(|(product, output)| {
+        is_demanded_asset(product, output) && !matches!(output, Output::Stock(StockKind::Image, _))
+    }) {
+        let kind = sources.with_definition(product, |definition, path, metadata| {
+            let selected_kind = match definition {
+                DeliveryAssetDefinition::TileSet(..) => StockKind::TileSet,
+                DeliveryAssetDefinition::Material(_) => StockKind::Material,
+            };
+            if matches!(output, Output::Stock(previous, _) if *previous != selected_kind) {
+                return Err(ProjectCookError::Invalid(format!(
+                    "cooked Product {product} changed its selected resource kind"
+                )));
+            }
+            observations.product_source(builder, product.source(), path, Some(metadata))?;
+            match definition {
+                DeliveryAssetDefinition::TileSet(source, image) => {
+                    builder.add_tileset(&tileset_descriptor(product, image, source)?)?
+                }
+                DeliveryAssetDefinition::Material(material) => builder.add_material(material)?,
+            }
+            Ok(selected_kind)
+        })?;
+        if let Some(kind) = kind {
+            *output = Output::Stock(kind, StockState::Cooked);
+        }
+    }
+    sources.verify_textures(|id, path, metadata| {
+        observations.product_source(builder, id, path, Some(metadata))
+    })?;
+    while let Some(count) = builder
+        .pending_dependencies(*inspected_members)
+        .map(|edges| edges.len())
+    {
+        for index in 0..count {
+            let edge = builder
+                .pending_dependencies(*inspected_members)
+                .expect("assembled stock retains its dependencies")[index];
+            if edge.role() != RuntimeContentDependencyRole::Soft {
+                mark_stock_demand(builder, outputs, edge.product())
+                    .map_err(DeliveryVisitError::Visit)?;
+            }
+        }
+        *inspected_members += 1;
+    }
+    let is_demanded_image = |product: &AssetProductRef, output: &Output| {
+        product.product() == ImportedProductId::PRIMARY
+            && matches!(
+                output,
+                Output::Demanded | Output::Stock(StockKind::Image, StockState::Demanded)
+            )
+    };
     for (&product, output) in outputs
         .iter_mut()
-        .filter(|(product, output)| is_demanded(product, output))
+        .filter(|(product, output)| is_demanded_image(product, output))
     {
-        let acquired = sources.with_image(product, |image, source| {
-            let path = image.path();
+        let acquired = sources.with_image(product, |image| {
             observations.product_source(
                 builder,
                 product.source(),
-                path,
+                image.path(),
                 Some(image.metadata_digest()),
-            )?;
-            observations.raw(
-                builder,
-                path.as_str(),
-                Some(ArtifactContentDigest::from_content(source)),
-            )?;
-            let metadata_path_bytes = path.as_str().len().checked_add(5).ok_or_else(overflow)?;
-            builder.admit_consumer_work(
-                metadata_path_bytes
-                    .checked_add(metadata_bytes::<(
-                        AssetSourcePath,
-                        Option<ArtifactContentDigest>,
-                    )>(metadata_path_bytes)?)
-                    .ok_or_else(overflow)?,
-            )?;
-            observations.raw(
-                builder,
-                &path.meta_path(),
-                Some(ArtifactContentDigest::from_content(image.metadata_digest())),
             )?;
             builder.add_image(image.image())?;
             Ok(())
@@ -771,6 +835,15 @@ fn finish_stock_images(
         if acquired {
             *output = Output::Stock(StockKind::Image, StockState::Cooked);
         }
+    }
+    for (path, digest) in sources.observed_files() {
+        observations
+            .raw(
+                builder,
+                path,
+                Some(ArtifactContentDigest::from_content(digest)),
+            )
+            .map_err(DeliveryVisitError::Visit)?;
     }
     Ok(())
 }
@@ -780,8 +853,8 @@ fn finish_stock_images(
 /// Stock payloads are selected through delivery roots and the assembled Runtime dependencies.
 /// Stock Images preserve their admitted pixels, color space and extent through the stock Runtime
 /// codec. Device-specific image transforms remain explicit separate artifact contributions.
-/// Complete source snapshots are borrowed sequentially. Images first demanded by built Products
-/// use the same loader and contribute their own source and metadata observations.
+/// Complete source snapshots are borrowed sequentially. Late stock asset demand uses the same
+/// loader and contributes its own source, metadata and importer input observations.
 pub fn prepare_project_cooked_content(
     request: ProjectCookRequest<'_>,
     mut contribute: impl FnMut(&mut ProjectCookContext<'_>) -> Result<(), ProjectCookError>,
@@ -866,9 +939,12 @@ fn prepare(
         ProjectCookError::Invalid("source delivery produced no startup Scene".into())
     })?;
     let needs_replay = |outputs: &BTreeMap<AssetProductRef, Output>| {
-        outputs
-            .values()
-            .any(|output| matches!(output, Output::Stock(kind, StockState::Demanded) if *kind != StockKind::Image))
+        outputs.values().any(|output| {
+            matches!(
+                output,
+                Output::Stock(StockKind::Scene, StockState::Demanded)
+            )
+        })
     };
     let delivery = if needs_replay(&outputs) {
         let (receipt, _) = &delivery;
@@ -909,7 +985,7 @@ fn prepare(
     } else {
         delivery
     };
-    finish_stock_images(
+    finish_stock_assets(
         &loader,
         &request,
         &plan,
@@ -917,6 +993,7 @@ fn prepare(
         &mut outputs,
         &mut builder,
         &mut observations,
+        &mut inspected_members,
     )
     .map_err(delivery_error)?;
     let (receipt, catalogue) = delivery;

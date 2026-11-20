@@ -1,4 +1,4 @@
-//! A source badge with an authored Image dependency and two concrete delivery forms.
+//! A source badge with authored Image and build-only stock dependencies.
 
 use std::cell::Cell;
 
@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 const PNG_BYTES: usize = 256;
 const RUNTIME_BYTES: usize = 2048;
+pub(super) const MAX_STOCK_DEPENDENCIES: usize = 12;
 
 thread_local! {
     static EMBEDDED_IMPORTS: Cell<usize> = const { Cell::new(0) };
@@ -24,12 +25,13 @@ pub(super) fn embedded_imports() -> usize {
     EMBEDDED_IMPORTS.get()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum ImageDelivery {
     Embedded,
     Linked,
     LinkedAtBuild,
+    StockAtBuild(Box<[(AssetProductRef, AssetReferenceDemand)]>),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -53,7 +55,7 @@ pub(super) struct Badge {
     #[serde(skip)]
     source_image: Option<AssetRef>,
     #[serde(skip)]
-    build_image: Option<AssetProductRef>,
+    build_art: Option<BadgeArt>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -61,6 +63,7 @@ pub(super) struct Badge {
 pub(super) enum BadgeArt {
     Embedded(Box<[u8]>),
     Linked(AssetProductRef),
+    Stock(Box<[(AssetProductRef, AssetReferenceDemand)]>),
 }
 
 pub(super) struct BadgeDomain;
@@ -91,27 +94,30 @@ impl SourceAssetImporter for BadgeDomain {
         if !png.starts_with(PNG_SIGNATURE) || body.image.product() != ImportedProductId::PRIMARY {
             return Err(AssetImportError::domain(invalid_badge()));
         }
-        let source_image = match settings.image_delivery {
-            ImageDelivery::Embedded => Some(AssetRef::Path(body.png)),
-            ImageDelivery::Linked => Some(AssetRef::Product(body.image)),
-            ImageDelivery::LinkedAtBuild => None,
-        };
-        let build_image =
-            (settings.image_delivery == ImageDelivery::LinkedAtBuild).then_some(body.image);
-        if settings.image_delivery == ImageDelivery::Embedded {
-            EMBEDDED_IMPORTS.set(EMBEDDED_IMPORTS.get() + 1);
-        }
-        let art = match settings.image_delivery {
-            ImageDelivery::Embedded | ImageDelivery::LinkedAtBuild => {
-                BadgeArt::Embedded(Box::from(png.as_ref()))
+        let embedded = || BadgeArt::Embedded(Box::from(png.as_ref()));
+        let (art, source_image, build_art) = match settings.image_delivery {
+            ImageDelivery::Embedded => {
+                EMBEDDED_IMPORTS.set(EMBEDDED_IMPORTS.get() + 1);
+                (embedded(), Some(AssetRef::Path(body.png)), None)
             }
-            ImageDelivery::Linked => BadgeArt::Linked(body.image),
+            ImageDelivery::Linked => (
+                BadgeArt::Linked(body.image),
+                Some(AssetRef::Product(body.image)),
+                None,
+            ),
+            ImageDelivery::LinkedAtBuild => (embedded(), None, Some(BadgeArt::Linked(body.image))),
+            ImageDelivery::StockAtBuild(dependencies) => {
+                if !valid_stock_dependencies(&dependencies) {
+                    return Err(AssetImportError::domain(invalid_badge()));
+                }
+                (embedded(), None, Some(BadgeArt::Stock(dependencies)))
+            }
         };
         Ok(Badge {
             product,
             art,
             source_image,
-            build_image,
+            build_art,
         })
     }
 
@@ -141,8 +147,8 @@ impl SourceAssetBuild for BadgeDomain {
 
     fn build<E>(source: &mut AssetBuildSource<'_, E>) -> Result<Badge, AssetImportError<E>> {
         let mut badge = source.prepare_import::<Self>()?;
-        if let Some(image) = badge.build_image.take() {
-            badge.art = BadgeArt::Linked(image);
+        if let Some(art) = badge.build_art.take() {
+            badge.art = art;
         }
         Ok(badge)
     }
@@ -177,7 +183,8 @@ impl RuntimeAssetCodec<Badge> for BadgeDomain {
             serde_json::from_slice(encoded).map_err(|_| AssetRuntimeError::new(invalid_badge()))?;
         let valid_art = match &badge.art {
             BadgeArt::Embedded(png) => png.len() <= PNG_BYTES && png.starts_with(PNG_SIGNATURE),
-            BadgeArt::Linked(image) => image.product() == ImportedProductId::PRIMARY,
+            BadgeArt::Linked(product) => product.product() == ImportedProductId::PRIMARY,
+            BadgeArt::Stock(dependencies) => valid_stock_dependencies(dependencies),
         };
         if badge.product.product() != ImportedProductId::PRIMARY || !valid_art {
             return Err(AssetRuntimeError::new(invalid_badge()));
@@ -189,6 +196,7 @@ impl RuntimeAssetCodec<Badge> for BadgeDomain {
         let payload = match &badge.art {
             BadgeArt::Embedded(png) => png.len(),
             BadgeArt::Linked(_) => 0,
+            BadgeArt::Stock(dependencies) => std::mem::size_of_val(dependencies.as_ref()),
         };
         Ok(size_of::<Badge>() + payload)
     }
@@ -197,15 +205,28 @@ impl RuntimeAssetCodec<Badge> for BadgeDomain {
         badge: &Badge,
         mut visit: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
-        if let BadgeArt::Linked(image) = &badge.art {
-            visit(*image, AssetReferenceDemand::Immediate)?;
+        match &badge.art {
+            BadgeArt::Embedded(_) => Ok(()),
+            BadgeArt::Linked(image) => visit(*image, AssetReferenceDemand::Immediate),
+            BadgeArt::Stock(dependencies) => {
+                for &(product, demand) in dependencies.iter() {
+                    visit(product, demand)?;
+                }
+                Ok(())
+            }
         }
-        Ok(())
     }
 
     fn contains_runtime_product(badge: &Badge, product: AssetProductRef) -> bool {
         badge.product == product
     }
+}
+
+fn valid_stock_dependencies(dependencies: &[(AssetProductRef, AssetReferenceDemand)]) -> bool {
+    (1..=MAX_STOCK_DEPENDENCIES).contains(&dependencies.len())
+        && dependencies
+            .iter()
+            .all(|(product, _)| product.product() == ImportedProductId::PRIMARY)
 }
 
 fn bytes(limit: usize) -> ByteLimit {

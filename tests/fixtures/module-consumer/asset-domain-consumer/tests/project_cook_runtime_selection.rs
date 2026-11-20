@@ -30,7 +30,7 @@ use nara::{
         ArtifactSourceRequest, build_source,
     },
     core::FormatVersion,
-    ecs::Component,
+    ecs::{Component, World},
     fs::{ContentDigest, DirectoryCapability, FsError, RelativePath},
     identity::EntityLookup,
     image::{ImageAsset, ImageDomain, ImageExtent, ImageImportSettings, ImageRuntimeCodec},
@@ -63,6 +63,8 @@ use serde::Serialize;
 
 #[path = "support/project_cook_badge.rs"]
 mod badge;
+#[path = "support/project_cook_stock.rs"]
+mod stock;
 
 use badge::{BadgeArt, BadgeDomain, BadgeSettings, BadgeSource, ImageDelivery};
 
@@ -106,6 +108,17 @@ fn project_cook_retains_linked_image_and_rebuilds_after_source_drift() {
 #[test]
 fn project_cook_resolves_an_image_first_required_by_the_only_scene_build() {
     exercise_project_cook(ImageDelivery::LinkedAtBuild);
+}
+
+#[test]
+fn project_cook_delivers_a_tileset_first_selected_by_the_only_scene_build() {
+    stock::exercise(stock::Stock::TileSet);
+}
+
+#[test]
+fn project_cook_delivers_a_material_first_selected_by_the_only_scene_build() {
+    stock::exercise(stock::Stock::Material);
+    stock::exercise_shared_material_file_limit();
 }
 
 #[test]
@@ -656,7 +669,7 @@ fn exercise_project_cook(image_delivery: ImageDelivery) {
     let recipe = recipe();
     let (root, candidate) = write_project(
         &project,
-        image_delivery,
+        image_delivery.clone(),
         None,
         BadgeReference::Product,
         &recipe,
@@ -820,16 +833,7 @@ fn exercise_project_cook(image_delivery: ImageDelivery) {
     let base = if image_delivery == ImageDelivery::LinkedAtBuild {
         let expectation = write_pack(content, &pack);
         drop((selection, request, root));
-        let original = project.canonicalize().unwrap();
-        assert_eq!(original.parent(), Some(scratch.0.as_path()));
-        let retired = scratch.0.join("retired-project");
-        assert!(!retired.exists());
-        fs::rename(original, retired).unwrap();
-        assert!(!project.exists());
-        let relocated = scratch.0.join("relocated");
-        fs::create_dir(&relocated).unwrap();
-        let published = relocated.join("content.pack");
-        fs::rename(&pack, &published).unwrap();
+        let published = scratch.relocate_pack(&project, &pack);
         open_pack(&published, &expectation, &recipe)
     } else {
         reopen_pack(content, &pack, &recipe)
@@ -921,6 +925,29 @@ fn observe_player(
     assert_eq!(complete.products(), members);
     assert_eq!(complete.catalog_digest(), catalog_digest);
 
+    observe_cooked_badge(base, |world, decoded| {
+        let images = world.resource::<Assets<ImageAsset>>();
+        match (&decoded.art, image) {
+            (BadgeArt::Embedded(png), None) => {
+                assert_eq!(png.as_ref(), expected_png);
+                assert!(images.is_empty());
+            }
+            (BadgeArt::Linked(target), Some(expected)) => {
+                assert_eq!(*target, expected);
+                assert_eq!(images.len(), 1);
+                let (_, published) = images.iter().next().unwrap();
+                assert_eq!(published.product(), Some(*target));
+                assert!(published.source().is_none());
+                assert_eq!(published.extent(), ImageExtent::new(1, 1));
+                assert_eq!(published.pixels(), expected_pixel);
+            }
+            (art, expected) => panic!("unexpected decoded badge {art:?} for {expected:?}"),
+        }
+    });
+}
+
+fn observe_cooked_badge(base: RuntimeContentBase, observe: impl FnOnce(&World, &badge::Badge)) {
+    let badge = product(BADGE_ID);
     let mut player = HeadlessSession::from_runtime_content(base);
     player.start().expect("the cooked Player must start");
     assert!(player.frame(Duration::ZERO).unwrap().is_none());
@@ -941,23 +968,7 @@ fn observe_player(
             assert_eq!(badges.source_records().len(), 0);
             let decoded = badges.get(&placed.badge).unwrap();
             assert_eq!(decoded.product, badge);
-            let images = world.resource::<Assets<ImageAsset>>();
-            match (&decoded.art, image) {
-                (BadgeArt::Embedded(png), None) => {
-                    assert_eq!(png.as_ref(), expected_png);
-                    assert!(images.is_empty());
-                }
-                (BadgeArt::Linked(target), Some(expected)) => {
-                    assert_eq!(*target, expected);
-                    assert_eq!(images.len(), 1);
-                    let (_, published) = images.iter().next().unwrap();
-                    assert_eq!(published.product(), Some(*target));
-                    assert!(published.source().is_none());
-                    assert_eq!(published.extent(), ImageExtent::new(1, 1));
-                    assert_eq!(published.pixels(), expected_pixel);
-                }
-                (art, expected) => panic!("unexpected decoded badge {art:?} for {expected:?}"),
-            }
+            observe(world, decoded);
         })
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -1272,7 +1283,7 @@ fn implementation_digest() -> ArtifactContentDigest {
     })
 }
 
-struct Scratch(PathBuf);
+struct Scratch(PathBuf, DirectoryCapability);
 
 impl Scratch {
     fn new() -> Self {
@@ -1283,7 +1294,32 @@ impl Scratch {
             NEXT.fetch_add(1, Ordering::Relaxed),
         ));
         fs::create_dir(&path).unwrap();
-        Self(path)
+        let root = readable_directory(&path).unwrap();
+        Self(path, root)
+    }
+
+    fn relocate_pack(&self, project: &Path, pack: &Path) -> PathBuf {
+        let current = readable_directory(&self.0).unwrap();
+        assert!(self.1.same_object(&current).unwrap());
+        let original = project.canonicalize().unwrap();
+        assert_eq!(original.as_path(), project);
+        assert_eq!(original.parent(), Some(self.0.as_path()));
+        assert_eq!(pack.canonicalize().unwrap().as_path(), pack);
+        assert_eq!(pack.parent(), Some(self.0.as_path()));
+
+        let retired = self.0.join("retired-project");
+        assert_eq!(
+            fs::symlink_metadata(&retired).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        let relocated = self.0.join("relocated");
+        fs::create_dir(&relocated).unwrap();
+        assert_eq!(relocated.canonicalize().unwrap(), relocated);
+        fs::rename(original, retired).unwrap();
+        assert!(!project.exists());
+        let published = relocated.join("content.pack");
+        fs::rename(pack, &published).unwrap();
+        published
     }
 }
 
@@ -1291,6 +1327,8 @@ impl Drop for Scratch {
     fn drop(&mut self) {
         if let Ok(path) = self.0.canonicalize()
             && path == self.0
+            && readable_directory(&path)
+                .is_ok_and(|root| matches!(self.1.same_object(&root), Ok(true)))
         {
             let _ = fs::remove_dir_all(path);
         }

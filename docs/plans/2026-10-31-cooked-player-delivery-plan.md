@@ -284,6 +284,74 @@ The owning engine and public-content release cohort passes 245/245 in
 `e1bb447a-40eb-4f1a-acac-6a3a7ce7de7b`. It verifies the new UI and existing Sprite publication
 checks, file and scan digest agreement, finite scan work, metadata preparation and Runtime boot.
 
+## Build-Declared TileSet And Material Dependencies
+
+A verified Product can declare a required TileSet or Material before any Scene loads that
+resource. Acquire the selected primary Product through the Project Content owner using its unique
+scoped sidecar and the existing source importer. Encode the TileSet or Material through
+`CookedContentBuilder` and use its encoded dependency declarations to admit the actual Image
+products. Shader files read by the Material importer contribute exact source observations. The
+finished package retains the existing `Required` and `Reference` roles, independent of whether
+the dependency appears in an authored Scene. The Scene root and travel catalogue stay selected
+by the original delivery traversal.
+
+Reuse the captured complete catalogue when available. Without one, a filtered pass resolves the
+initial selected stock identities and a second filtered pass can resolve newly exposed Image
+identities. Each additional exact read counts against the distinct source-file limit before
+opening unless its path is already admitted. Repeated reads compare the original digest and reuse
+the retained closure entry. Already-supplied texture Products still have their source association
+verified. Retain source, sidecar and Shader commitments through the original publication fence.
+The source owner borrows the decoded definition for encoding and releases it
+before another acquisition. This replaces the stock-resource replay of earlier Scene snapshots.
+Earlier dependency-only Scene payloads keep their existing bounded replay. Explicit game-owned
+groups continue to supply other kinds and auxiliary products.
+
+Godot's export walks the dependency index from selected resources and autoloads. Its imported
+resource path asks the destination format reader for dependencies of the imported data. Bevy's
+`ProcessContext` retains inputs used for processing, and `LoadContext::finish` walks dependencies
+of the loaded value. Nara applies the same ownership distinction at its existing source, build
+and Runtime catalog interfaces. [Godot export](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/export/editor_export_platform.cpp#L1305-L1350) · [Godot imported resources](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/core/io/resource_importer.cpp#L461-L469) · [Bevy process observations](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_asset/src/processor/process.rs#L429-L453) · [Bevy loaded dependencies](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_asset/src/loader.rs#L578-L601)
+
+Qualify both resource types through an independently locked, single-Scene consumer. Before
+Cook, strict source delivery should omit the asset. Assert the verified artifact's exact edge,
+successful source selection, the complete roles and member set, and rejection after a selected
+source change. Relocate the pack away from the authoring project and verify the actual TileSet,
+Material shader and pixels through the processed Runtime owner. Keep missing and conflicting
+source selection failures distinct from an admitted pack. The workflow requires no new build
+scheduler, asset loader or package format.
+
+### Stock Dependency Qualification
+
+The independent Windows release run `00dd6965-09ff-4341-a5f6-09c70eadb888` passes 23/23. The
+new single-Scene tests cover TileSet and Material through both `Required` and `Reference`
+dependencies, filtered and complete catalogue acquisition, source drift, and pack relocation
+with the original project path absent. The startup observer checks actual publication for the
+required resource. Explicit acquisition checks both roles against the original atlas, decoded
+RGBA pixels and full compiled Shader source. Missing referenced TileSet, a texture path claiming
+its Badge group's ID, and a file ceiling one below the combined distinct paths are rejected.
+Twelve Material definitions sharing one WGSL and Image produce the same catalog under the exact
+combined file ceiling.
+
+The owning Project Content, Cook and processed-content cohort passes 160/160 in
+`e939230c-a4ff-4587-9a97-22707b12388f`. Repeating a shared file observation retains one entry
+charge and a changed digest still refuses. Original content-budget, Image acquisition and
+file-backed TileSet controls also pass. Independent review identified the pre-existing-output
+identity bypass, duplicate file and closure-index charges, and redundant catalogue scans within
+the first implementation. The final source ownership check, exact read admission and filtered
+discovery close those findings. The comparison and tests cover the finite stock dependencies
+supported here. General build scheduling, server stripping and foreign execution remain open.
+
+Two-Level Cook/source regression passes 43/43 in `2992ba4a-83c1-445b-b703-ff23f3a58ea3`.
+Its production relocated desktop acceptance passes 1/1 in
+`d277010d-eda0-4292-a33c-633f964b2bdd`. The Windows x64 Rust 1.95.0 run builds the actual
+Player, removes access to source and cache, presents through DX12, exercises native keyboard
+play, Save and fresh Restore, and retains original process/window retirement. This is adjacent
+native coverage of the shared Cook entry. The independent build-declared resource cases use
+typed CPU acquisition and Headless Runtime publication.
+
+The `project-workflow` library build without tooling, scoped correctness Clippy, and root and
+independent consumer formatting checks pass.
+
 ## Request-Owned Generated Rust Input Successor
 
 Remove the shared-source bootstrap write used by Two-Level and the independent delivery fixtures.

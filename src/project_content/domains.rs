@@ -7,11 +7,13 @@ use std::{
 };
 
 use nara_asset::{
-    AssetDomain, AssetImportError, AssetImportSource, AssetMetaIdentityCandidate,
-    SourceAssetImporter,
+    AssetDomain, AssetImportError, AssetImportLimits, AssetImportSource,
+    AssetMetaIdentityCandidate, SourceAssetImporter,
 };
 use nara_core::ByteLimit;
 use nara_ecs::Resource;
+#[cfg(feature = "project-tooling")]
+use nara_material::{Material2dAsset, Material2dDomain};
 
 use crate::runtime_content::{
     RuntimeContentAsset, RuntimeContentBase, RuntimeContentError, RuntimeContentLease,
@@ -505,94 +507,24 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
         for record in &records {
             context.subtract_budget(ProjectContentBudgetKind::QueuedJobs, 1);
             context.add_budget(ProjectContentBudgetKind::InFlightJobs, 1)?;
-            let local_path = context
-                .asset_scope
-                .relative_path(record.path())
-                .ok_or_else(|| source_scope_mismatch(record.path()))?;
-            // Cover the local source alias, sidecar spelling and temporary bound identity
-            // before allocating any of them. Concrete reads stay under the Assets capability.
-            let path_work = context.reserve_work(checked_plan_sum(
-                ProjectContentBudgetKind::WorkBytes,
-                [
-                    string_retained_bytes(local_path)?,
-                    string_retained_bytes(local_path)?,
-                    ".meta".len(),
-                    asset_record_retained_bytes(record)?,
-                ],
-            )?)?;
-            let path = context
-                .asset_scope
-                .relativize(record.path())
-                .ok_or_else(|| source_scope_mismatch(record.path()))?;
-            let metadata_path = path.meta_path();
-            context.observe_source_read(Some(root), &metadata_path)?;
-            let (bytes, digest) = context.read_file(
+            let (product, source_work) = prepare_domain_source::<D>(
+                context,
                 assets,
-                &metadata_path,
-                nara_asset::AssetMetaFileLimits::default()
-                    .encoded_bytes()
-                    .get(),
-            )?;
-            context.verify_catalogued_metadata(record.path(), root, digest)?;
-            context.record_member(
-                ProjectContentMemberKind::AssetMetadata,
                 root,
-                &metadata_path,
-                digest,
+                record,
+                cache,
+                limits,
+                ContentReadContext::Asset,
             )?;
-            let metadata_work = context.reserve_work(
-                nara_asset::AssetMetaFileLimits::default()
-                    .encoded_bytes()
-                    .get(),
-            )?;
-            let metadata =
-                AssetMetaIdentityCandidate::decode_json_bytes_owned(bytes.into_boxed_slice())
-                    .map_err(|_| catalogue::identity_conflict(record.path()))?;
-            if metadata.identity().path() != &path {
-                return Err(catalogue::identity_conflict(record.path()));
-            }
-            if metadata
-                .identity()
-                .clone()
-                .into_record(&context.asset_scope)
-                != *record
-            {
-                return Err(catalogue::identity_conflict(record.path()));
-            }
-            context.add_budget(
-                ProjectContentBudgetKind::RetainedBytes,
-                limits.retained_bytes().get(),
-            )?;
-            let work = context.reserve_work(limits.work_bytes().get())?;
-            let product = {
-                let mut reader = DomainSourceReader {
-                    context,
-                    assets,
-                    root,
-                    cache,
-                };
-                let bytes = reader.read_source(&path, limits.source_bytes())?;
-                let mut read_dependency =
-                    |path: &AssetPath, limit| reader.read_dependency(path, limit);
-                D::prepare(&mut AssetImportSource::new(
-                    &metadata,
-                    bytes,
-                    &mut read_dependency,
-                ))
-                .map_err(import_error)?
-            };
             if let Some(required) = sources.products.remove(&record.stable_id()) {
                 validate_product_membership::<D>(&product, required).map_err(missing_product)?;
             }
             D::visit_source_dependencies(&product, |reference, kind, demand| {
                 context.collect_source_reference(assets, reference, Some(kind), demand, sources)
             })?;
-            drop(metadata);
-            drop(metadata_path);
-            drop(path);
-            context.subtract_budget(ProjectContentBudgetKind::WorkBytes, path_work.reserved);
-            context.subtract_budget(ProjectContentBudgetKind::WorkBytes, metadata_work.reserved);
-            context.subtract_budget(ProjectContentBudgetKind::WorkBytes, work.reserved);
+            for reservation in source_work {
+                context.subtract_budget(ProjectContentBudgetKind::WorkBytes, reservation.reserved);
+            }
             context.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);
             products.push(product);
         }
@@ -649,6 +581,81 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
             },
         })))
     }
+}
+
+fn prepare_domain_source<D: SourceAssetImporter>(
+    context: &mut LoadContext<'_>,
+    assets: &DirectoryCapability,
+    root: &nara_project::ProjectPath,
+    record: &AssetRecord,
+    cache: &mut SourceCache,
+    limits: AssetImportLimits,
+    read: ContentReadContext<'_>,
+) -> Result<(D::Product, [WorkReservation; 3]), ProjectContentError> {
+    let local_path = context
+        .asset_scope
+        .relative_path(record.path())
+        .ok_or_else(|| source_scope_mismatch(record.path()))?;
+    // Cover the local source alias, sidecar spelling and temporary bound identity
+    // before allocating any of them. Concrete reads stay under the Assets capability.
+    let path_work = context.reserve_work(checked_plan_sum(
+        ProjectContentBudgetKind::WorkBytes,
+        [
+            string_retained_bytes(local_path)?,
+            string_retained_bytes(local_path)?,
+            ".meta".len(),
+            asset_record_retained_bytes(record)?,
+        ],
+    )?)?;
+    let path = context
+        .asset_scope
+        .relativize(record.path())
+        .ok_or_else(|| source_scope_mismatch(record.path()))?;
+    let metadata_path = path.meta_path();
+    let metadata_limit = AssetMetaFileLimits::default().encoded_bytes().get();
+    context.observe_source_read(Some(root), &metadata_path)?;
+    let (bytes, digest) = context.read_file_inner(assets, &metadata_path, metadata_limit, read)?;
+    context.verify_catalogued_metadata(record.path(), root, digest)?;
+    context.record_member(
+        ProjectContentMemberKind::AssetMetadata,
+        root,
+        &metadata_path,
+        digest,
+    )?;
+    let metadata_work = context.reserve_work(metadata_limit)?;
+    let metadata = AssetMetaIdentityCandidate::decode_json_bytes_owned(bytes.into_boxed_slice())
+        .map_err(|_| catalogue::identity_conflict(record.path()))?;
+    if metadata.identity().path() != &path {
+        return Err(catalogue::identity_conflict(record.path()));
+    }
+    if metadata
+        .identity()
+        .clone()
+        .into_record(&context.asset_scope)
+        != *record
+    {
+        return Err(catalogue::identity_conflict(record.path()));
+    }
+    context.add_budget(
+        ProjectContentBudgetKind::RetainedBytes,
+        limits.retained_bytes().get(),
+    )?;
+    let work = context.reserve_work(limits.work_bytes().get())?;
+    let mut reader = DomainSourceReader {
+        context,
+        assets,
+        root,
+        cache,
+    };
+    let bytes = reader.read_source(&path, limits.source_bytes())?;
+    let mut read_dependency = |path: &AssetPath, limit| reader.read_dependency(path, limit);
+    let product = D::prepare(&mut AssetImportSource::new(
+        &metadata,
+        bytes,
+        &mut read_dependency,
+    ))
+    .map_err(import_error)?;
+    Ok((product, [path_work, metadata_work, work]))
 }
 
 fn source_scope_mismatch(path: &AssetSourcePath) -> ProjectContentError {
@@ -746,6 +753,45 @@ impl DomainSourceReader<'_, '_> {
 }
 
 impl LoadContext<'_> {
+    /// Reads a stock material and its raw source inputs for Cook. The caller holds the
+    /// retained reservation until the material is dropped.
+    #[cfg(feature = "project-tooling")]
+    pub(super) fn read_delivery_material(
+        &mut self,
+        assets: &DirectoryCapability,
+        root: &nara_project::ProjectPath,
+        record: &AssetRecord,
+    ) -> Result<Option<Material2dAsset>, ProjectContentError> {
+        let AssetSourceKind::Other(kind) = record.source_kind() else {
+            return Ok(None);
+        };
+        if !self.domains.providers.iter().any(|provider| {
+            provider.source_kind() == kind
+                && provider.domain_type() == std::any::TypeId::of::<Material2dDomain>()
+        }) {
+            return Ok(None);
+        }
+
+        let mut cache = SourceCache::default();
+        let prepared = prepare_domain_source::<Material2dDomain>(
+            self,
+            assets,
+            root,
+            record,
+            &mut cache,
+            Material2dDomain::limits(),
+            ContentReadContext::ExactProjectMember { source_root: root },
+        );
+        let cache_work = cache.work_bytes;
+        drop(cache);
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, cache_work);
+        let (material, source_work) = prepared?;
+        for reservation in source_work {
+            self.subtract_budget(ProjectContentBudgetKind::WorkBytes, reservation.reserved);
+        }
+        Ok(Some(material))
+    }
+
     pub(super) fn prepare_domain_collections(
         &mut self,
     ) -> Result<Vec<Box<dyn ErasedCollection>>, ProjectContentError> {

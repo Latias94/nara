@@ -174,6 +174,13 @@ until a Runtime dependency selects their Product. Each Image's decoded pixels re
 encoding. Explicit groups retain their complete mappings, subject to the original builder's
 final reachability and deep validation.
 
+A required or referenced primary stock TileSet or Material can enter the Cook closure through a
+verified group. The original source owner resolves its unique metadata, reads the typed
+definition and keeps every source and Shader input it used. The original encoder emits the
+resulting Image dependency edges. The same delivery file allowance and publication fence cover
+those supplemental reads. Scene roots and enabled Material provider selection still come from
+the original project settings and recipe. Cook obtains other built products from explicit groups.
+
 A stock Sprite's selected `material.image` and a stock `UiVisual` image brush's `background.image`
 require the executable's Image publication codec role. Deep validation checks those bindings
 while inspecting the compiled Scene. Direct CPU Image consumption can use the generic typed

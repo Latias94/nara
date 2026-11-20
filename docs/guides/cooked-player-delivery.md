@@ -64,12 +64,15 @@ verified group. A source-only importer does not automatically opt into that buil
 Stock payloads enter the pack through a delivery root or a Required or Reference edge declared by
 the cooked content. An importer can embed PNG data in a custom Product and keep the PNG as a
 tracked build input. If the codec declares a link to the Image Product, the pack also contains
-the Image payload. Cook can resolve a stock Image first requested by the build result, even when
-every Scene snapshot contains zero stock Images. Each delivered stock Image UUID must select one
-source across the configured catalogue roots, including an Image already read through an earlier
-Scene. A newly selected PNG and sidecar count toward the project delivery file limit. Before
-publication, Cook verifies the original files and checks that no other source claims the selected
-UUID. A PNG embedded solely by path continues to participate as a build input.
+the Image payload. A build result can also request a stock Image, TileSet or Material by its
+primary Product, even when no Scene snapshot loaded it. TileSet and Material definitions add
+the Image Products named by their actual encoded dependencies. For Material, enable the stock
+source domain and the Runtime codec in the recipe. The Material importer reads its Shader files
+as source inputs and stores the admitted shader in the cooked Material. Each selected UUID has
+one source across the configured catalogue roots. Newly selected definitions, PNGs, sidecars
+and Shader files count once per path against the delivery file limit. Before publication, Cook
+verifies the original files and checks the selected UUIDs again. A PNG embedded solely by path
+continues to participate as a build input.
 
 Decoded roots retire sequentially; the unpublished builder accumulates their processed members
 and performs the existing final complete validation. `PreparedProjectCook` retains source and

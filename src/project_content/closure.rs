@@ -473,13 +473,29 @@ impl ProjectContentClosureBuilder {
             .extend(paths.into_iter().map(|path| path.as_str().to_owned()));
     }
 
+    #[cfg(feature = "project-tooling")]
+    pub(super) fn supplemental_files(&self) -> impl Iterator<Item = (&str, ContentDigest)> {
+        self.members.iter().filter_map(|(path, facts)| {
+            matches!(
+                facts.kind,
+                ProjectContentMemberKind::AssetMetadata | ProjectContentMemberKind::AssetSource
+            )
+            .then_some((path.as_str(), facts.digest))
+        })
+    }
+
+    #[cfg(feature = "project-tooling")]
+    pub(super) fn member_digest(&self, path: &str) -> Option<ContentDigest> {
+        self.members.get(path).map(|facts| facts.digest)
+    }
+
     pub(super) fn insert(
         &mut self,
         kind: ProjectContentMemberKind,
         directory: &ProjectPath,
         path: &str,
         digest: ContentDigest,
-    ) -> Result<(), ProjectContentError> {
+    ) -> Result<bool, ProjectContentError> {
         let path = ProjectPath::new(format!("{}/{path}", directory.as_str())).map_err(|_| {
             ProjectContentError::single(
                 ProjectContentErrorKind::HostAuthorityRejected,
@@ -540,7 +556,7 @@ impl ProjectContentClosureBuilder {
         kind: ProjectContentMemberKind,
         path: ProjectPath,
         digest: ContentDigest,
-    ) -> Result<(), ProjectContentError> {
+    ) -> Result<bool, ProjectContentError> {
         self.insert_path(kind, path, digest)
     }
 
@@ -549,17 +565,17 @@ impl ProjectContentClosureBuilder {
         kind: ProjectContentMemberKind,
         path: ProjectPath,
         digest: ContentDigest,
-    ) -> Result<(), ProjectContentError> {
+    ) -> Result<bool, ProjectContentError> {
         let key = path.as_str().to_owned();
         let facts = ProjectContentMemberFacts::new(kind, digest);
         match self.members.entry(key) {
             Entry::Vacant(entry) => {
                 entry.insert(facts);
-                Ok(())
+                Ok(true)
             }
             Entry::Occupied(mut entry) => {
                 if entry.get_mut().merge(facts) {
-                    return Ok(());
+                    return Ok(false);
                 }
                 Err(ProjectContentError::single(
                     ProjectContentErrorKind::ClosurePathCollision,

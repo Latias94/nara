@@ -2373,6 +2373,12 @@ with an exact binding diagnostic. The independent source-free pack, file-limit a
 acquisition controls pass.
 [Build-declared Image and Sprite qualification](../../plans/2026-10-31-cooked-player-delivery-plan.md#build-declared-image-and-sprite-qualification)
 
+The [build-declared TileSet and Material qualification](../../plans/2026-10-31-cooked-player-delivery-plan.md#stock-dependency-qualification)
+extends the same Cook entry. Source definitions and Shader inputs keep the original publication
+fence. The encoded resources contribute their own Image dependency edges. The independent
+source-free pack proves exact texture and Shader data, Required startup residency and deferred
+Reference access. The owning content and budget controls pass.
+
 Commit `ddabcab` uses the existing exact capability read before admitting typed bytes to the
 source cache. In the Windows Sound Bank controls, Check rejects the wrong spelling. Once corrected,
 Cook and the Runtime codec preserve both original PCM clips. Engine 143/143, Two-Level 68/68 and
