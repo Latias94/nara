@@ -25,15 +25,21 @@ pub enum EditorPropertyPagePosition {
     Continue(EditorPropertyPageCursor),
 }
 
-/// Replayable next page for the original workspace, document basis, property and value location.
+/// Replayable next page for the original live document or prepared edit and value location.
 /// Retaining the cursor holds metadata and Schema admission, not the document or its payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorPropertyPageCursor {
-    pub(crate) owner: EditorDocumentQueryOwner,
+    pub(crate) owner: PropertyValuePageOwner,
     pub(crate) kind: EditorDocumentKind,
     pub(crate) target: Arc<PropertyValuePageTarget>,
     pub(crate) read_path: Arc<ComponentFieldPath>,
     pub(crate) next: PropertyValuePagePosition,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) enum PropertyValuePageOwner {
+    Workspace(EditorDocumentQueryOwner),
+    Prepared(EditorDocumentQueryOwner),
 }
 
 #[derive(Debug, PartialEq, Eq)]

@@ -8,9 +8,10 @@ use nara::{
 };
 use nara_editor::{EditorPanel, EditorPanelContext, EditorPanelHost, workspace::EditorPanelTarget};
 use nara_tooling::{
-    EditorPersistenceView, EditorPropertyPageData, EditorPropertyPageItem,
+    EditorPersistenceView, EditorPropertyPage, EditorPropertyPageData, EditorPropertyPageItem,
     EditorPropertyPagePosition, EditorPropertyPageRead, EditorPropertyPageValue,
-    MAX_EDITOR_PROPERTY_READ_LOGICAL_BYTES, MAX_EDITOR_PROPERTY_READ_VALUE_NODES,
+    EditorWorkspaceCommandReport, MAX_EDITOR_PROPERTY_READ_LOGICAL_BYTES,
+    MAX_EDITOR_PROPERTY_READ_VALUE_NODES,
 };
 
 const PANEL: &str = "consumer.property-pages";
@@ -82,6 +83,24 @@ fn component_value(score: u64) -> ComponentValue {
 #[derive(Default)]
 struct PropertyPagesPanel {
     completion: Option<(PanelSubmissionId, PanelActionDispatch)>,
+    retained: Option<PreparedEditorDocumentEdit>,
+}
+
+impl PropertyPagesPanel {
+    fn completed(&self, submitted: PanelSubmissionId) -> &EditorWorkspaceCommandReport {
+        let Some((
+            finished,
+            PanelActionDispatch::Dispatched(EditorActionOutcome::Workspace(report)),
+        )) = &self.completion
+        else {
+            panic!(
+                "the panel must receive its exact Commit result: {:?}",
+                self.completion
+            );
+        };
+        assert_eq!(*finished, submitted);
+        report
+    }
 }
 
 impl EditorPanel for PropertyPagesPanel {
@@ -90,14 +109,80 @@ impl EditorPanel for PropertyPagesPanel {
     }
 }
 
+fn root_page_request(
+    target: EditorPropertyTarget,
+    limits: EditorPropertyReadLimits,
+) -> EditorPropertyPageRead {
+    EditorPropertyPageRead {
+        position: EditorPropertyPagePosition::Start {
+            target,
+            path: ComponentFieldPath::empty(),
+        },
+        limits,
+    }
+}
+
+fn assert_page_limits(page: &EditorPropertyPage, limits: EditorPropertyReadLimits) {
+    assert!(page.metadata_bytes <= limits.max_metadata_bytes());
+    assert!(page.value_nodes <= limits.max_value_nodes());
+    assert!(page.value_logical_bytes <= limits.max_logical_bytes());
+    assert!(page.scanned_entries <= limits.max_scan_entries());
+    assert!(page.scanned_logical_bytes <= limits.max_scan_logical_bytes());
+}
+
+fn sample_on_page(page: &EditorPropertyPage, samples: &EditorPropertyTarget, offset: usize) -> u64 {
+    assert_eq!(page.target(), samples);
+    assert!(page.path().is_empty());
+    let EditorPropertyPageValue::Present(EditorPropertyPageData::List {
+        total_items,
+        start,
+        items,
+    }) = &page.value
+    else {
+        panic!("the source must return a page of its stored samples");
+    };
+    assert_eq!(*total_items, SAMPLE_COUNT);
+    assert_eq!(*start, offset);
+    let [EditorPropertyPageItem::Scalar(ComponentValue::U64(sample))] = items.as_slice() else {
+        panic!("the output ceiling allows exactly one sample: {items:?}");
+    };
+    *sample
+}
+
+fn assert_preview_score(prepared: &PreparedEditorDocumentEdit, request: &EditorPropertyRead) {
+    let observed = prepared.preview_property(request.clone()).unwrap();
+    assert_eq!(observed.target, request.target);
+    assert_eq!(observed.value_nodes, 1);
+    assert_eq!(observed.value_logical_bytes, 8);
+    let EditorPropertyValue::Present(ComponentValue::U64(score)) = &observed.value else {
+        panic!("the prepared candidate must expose its proposed score: {observed:?}");
+    };
+    assert_eq!(*score, UPDATED_SCORE);
+
+    let paged = root_page_request(observed.target.clone(), request.limits);
+    let page = prepared.preview_property_page(paged.clone()).unwrap();
+    assert_eq!(page.target(), &observed.target);
+    assert!(page.path().is_empty());
+    assert!(page.next.is_none());
+    assert_page_limits(&page, request.limits);
+    assert_eq!(
+        page.value,
+        EditorPropertyPageValue::Present(EditorPropertyPageData::Scalar(ComponentValue::U64(
+            *score,
+        )))
+    );
+    assert_eq!(prepared.preview_property(request.clone()), Ok(observed));
+    assert_eq!(prepared.preview_property_page(paged), Ok(page));
+}
+
 fn prepare_from_pages(
     context: &EditorPanelContext<'_, '_>,
     document: EditorDocumentId,
 ) -> (
-    EditorPropertyTarget,
+    EditorPropertyRead,
     EditorPropertyTarget,
     EditorPropertyPageRead,
-    PreparedEditorDocumentEdit,
+    [PreparedEditorDocumentEdit; 2],
 ) {
     assert!(context.model().document().is_none());
     assert_ne!(
@@ -169,58 +254,38 @@ fn prepare_from_pages(
         }
     };
     let samples = target("samples", ComponentValueKind::List);
-    let whole = EditorPropertyReadLimits::new(
-        1024,
-        MAX_EDITOR_PROPERTY_READ_VALUE_NODES,
-        MAX_EDITOR_PROPERTY_READ_LOGICAL_BYTES,
-    )
-    .unwrap();
+    let whole_samples = EditorPropertyRead {
+        target: samples.clone(),
+        limits: EditorPropertyReadLimits::new(
+            1024,
+            MAX_EDITOR_PROPERTY_READ_VALUE_NODES,
+            MAX_EDITOR_PROPERTY_READ_LOGICAL_BYTES,
+        )
+        .unwrap(),
+    };
     let limits = EditorPropertyReadLimits::new(1024, 2, 8)
         .unwrap()
         .with_scan_limits(32, 1024)
         .unwrap();
     assert_eq!(
-        context.read_document_property(EditorPropertyRead {
-            target: samples.clone(),
-            limits: whole,
-        }),
+        context.read_document_property(whole_samples.clone()),
         Err(EditorDocumentQueryRejection::ValueBudgetExceeded)
     );
     let read_page = |position| {
         let page = context
             .read_document_property_page(EditorPropertyPageRead { position, limits })
             .unwrap();
-        assert!(page.metadata_bytes <= limits.max_metadata_bytes());
-        assert!(page.value_nodes <= limits.max_value_nodes());
-        assert!(page.value_logical_bytes <= limits.max_logical_bytes());
-        assert!(page.scanned_entries <= limits.max_scan_entries());
-        assert!(page.scanned_logical_bytes <= limits.max_scan_logical_bytes());
+        assert_page_limits(&page, limits);
         page
     };
-    let mut position = EditorPropertyPagePosition::Start {
-        target: samples.clone(),
-        path: ComponentFieldPath::empty(),
-    };
+    let samples_start = root_page_request(samples.clone(), limits);
+    let mut position = samples_start.position.clone();
     let mut sum = 0;
     for (offset, expected) in [19, 20].into_iter().enumerate() {
         let page = read_page(position);
-        assert_eq!(page.target(), &samples);
-        assert!(page.path().is_empty());
-        let EditorPropertyPageValue::Present(EditorPropertyPageData::List {
-            total_items,
-            start,
-            items,
-        }) = page.value
-        else {
-            panic!("the source must return a page of its stored samples");
-        };
-        assert_eq!(total_items, SAMPLE_COUNT);
-        assert_eq!(start, offset);
-        let [EditorPropertyPageItem::Scalar(ComponentValue::U64(sample))] = items.as_slice() else {
-            panic!("the output ceiling allows exactly one sample: {items:?}");
-        };
-        assert_eq!(*sample, expected);
-        sum += *sample;
+        let sample = sample_on_page(&page, &samples, offset);
+        assert_eq!(sample, expected);
+        sum += sample;
         position = EditorPropertyPagePosition::Continue(page.next.unwrap());
     }
 
@@ -245,18 +310,20 @@ fn prepare_from_pages(
     assert_eq!(bonus, 3);
 
     let score = target("score", ComponentValueKind::U64);
-    let prepared = context
-        .prepare_authoring_property_edit(
-            &score.basis,
-            &[AuthoringPropertyEdit {
-                entity: score.entity.clone(),
-                component: score.component.clone(),
-                component_version: *version,
-                property: score.property.clone(),
-                value: ComponentValue::U64(sum + bonus),
-            }],
-        )
-        .unwrap();
+    let edits = [AuthoringPropertyEdit {
+        entity: score.entity.clone(),
+        component: score.component.clone(),
+        component_version: *version,
+        property: score.property.clone(),
+        value: ComponentValue::U64(sum + bonus),
+    }];
+    let prepare = || {
+        context
+            .prepare_authoring_property_edit(&score.basis, &edits)
+            .unwrap()
+    };
+    let prepared = prepare();
+    let retained = prepare();
     let set_score = |value| ScenePatchOperation::SetField {
         entity: score.entity.clone(),
         component: score.component.clone(),
@@ -274,12 +341,58 @@ fn prepare_from_pages(
         prepared.inverse().operations.as_slice(),
         &[set_score(ORIGINAL_SCORE)]
     );
-    (
-        score,
-        samples,
-        EditorPropertyPageRead { position, limits },
-        prepared,
-    )
+    assert_eq!(retained.base_revision(), prepared.base_revision());
+
+    let score_read = EditorPropertyRead {
+        target: score,
+        limits: EditorPropertyReadLimits::new(1024, 1, 8).unwrap(),
+    };
+    assert_eq!(
+        prepared.preview_property(whole_samples),
+        Err(EditorDocumentQueryRejection::ValueBudgetExceeded)
+    );
+    let live_continuation = EditorPropertyPageRead { position, limits };
+    for (candidate, sibling) in [(&prepared, &retained), (&retained, &prepared)] {
+        assert_preview_score(candidate, &score_read);
+        let first = candidate
+            .preview_property_page(samples_start.clone())
+            .unwrap();
+        assert_page_limits(&first, limits);
+        assert_eq!(sample_on_page(&first, &samples, 0), 19);
+        let continuation = EditorPropertyPageRead {
+            position: EditorPropertyPagePosition::Continue(first.next.unwrap()),
+            limits,
+        };
+        let next = candidate
+            .preview_property_page(continuation.clone())
+            .unwrap();
+        assert_page_limits(&next, limits);
+        assert_eq!(sample_on_page(&next, &samples, 1), 20);
+        assert_eq!(
+            candidate.preview_property_page(continuation.clone()),
+            Ok(next)
+        );
+        assert_eq!(
+            context.read_document_property_page(continuation.clone()),
+            Err(EditorDocumentQueryRejection::WrongPreparedEdit)
+        );
+        assert_eq!(
+            sibling.preview_property_page(continuation),
+            Err(EditorDocumentQueryRejection::WrongPreparedEdit)
+        );
+        assert_eq!(
+            candidate.preview_property_page(live_continuation.clone()),
+            Err(EditorDocumentQueryRejection::WrongPreparedEdit)
+        );
+    }
+    assert_eq!(
+        context
+            .read_document_property(score_read.clone())
+            .unwrap()
+            .value,
+        EditorPropertyValue::Present(ComponentValue::U64(ORIGINAL_SCORE))
+    );
+    (score_read, samples, live_continuation, [prepared, retained])
 }
 
 fn persist(
@@ -464,17 +577,20 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
             assert!(panel.completion.is_none());
             let token = context.instance_token();
             assert_eq!(token.instance(), instance);
-            let (score, samples, continuation, prepared) = prepare_from_pages(context, document);
+            let (score_read, samples, continuation, [prepared, retained]) =
+                prepare_from_pages(context, document);
             assert_eq!(prepared.document_kind(), kind);
+            assert!(panel.retained.replace(retained).is_none());
             let submitted = context.commit_authoring_edit(prepared).unwrap();
             assert!(
                 observation
-                    .replace((token, submitted, score, samples, continuation))
+                    .replace((token, submitted, score_read, samples, continuation))
                     .is_none()
             );
         })
         .unwrap();
-    let (token, submitted, score, mut samples, continuation) = observation.unwrap();
+    let (token, submitted, score_read, mut samples, continuation) = observation.unwrap();
+    let score = &score_read.target;
     assert_eq!(score.basis, basis(&app, document));
     assert_eq!(submission.submissions().len(), 1);
     assert_eq!(submission.submissions().next(), Some((instance, submitted)));
@@ -490,17 +606,7 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
     let edited = frame(&app);
     let tab = edited.workspace().document(document).unwrap();
     host.inspect(&app, &token, |panel, _| {
-        let Some((
-            finished,
-            PanelActionDispatch::Dispatched(EditorActionOutcome::Workspace(report)),
-        )) = &panel.completion
-        else {
-            panic!(
-                "the panel must receive its exact Commit result: {:?}",
-                panel.completion
-            );
-        };
-        assert_eq!(*finished, submitted);
+        let report = panel.completed(submitted);
         assert!(report.applied, "{:?}", report.diagnostics);
         assert_eq!(report.document, Some(document));
         assert_eq!(report.active_document, Some(active));
@@ -533,13 +639,7 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
         edited.workspace().documents
     );
 
-    let score_request = |target| EditorPropertyPageRead {
-        position: EditorPropertyPagePosition::Start {
-            target,
-            path: ComponentFieldPath::empty(),
-        },
-        limits: EditorPropertyReadLimits::new(1024, 1, 8).unwrap(),
-    };
+    let score_request = |target| root_page_request(target, score_read.limits);
     let assert_score = |app: &mut EditorApplication, expected| {
         let target = EditorPropertyTarget {
             basis: basis(app, document),
@@ -659,6 +759,52 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
             (tab.history.undo_depth, tab.history.redo_depth),
             (usize::from(redo), usize::from(!redo))
         );
+        if !redo {
+            let live_score = EditorPropertyTarget {
+                basis: basis(&app, document),
+                ..score.clone()
+            };
+            let stale_submission = host
+                .prepare(&app, |panel, context| {
+                    assert_eq!(panel.completion.take().map(|(id, _)| id), Some(submitted));
+                    let retained = panel.retained.take().unwrap();
+                    assert_preview_score(&retained, &score_read);
+                    assert_eq!(
+                        retained.preview_property(EditorPropertyRead {
+                            target: live_score.clone(),
+                            limits: score_read.limits,
+                        }),
+                        Err(EditorDocumentQueryRejection::StaleRevision)
+                    );
+                    assert_eq!(
+                        retained.preview_property_page(score_request(live_score.clone())),
+                        Err(EditorDocumentQueryRejection::StaleRevision)
+                    );
+                    context.commit_authoring_edit(retained).unwrap();
+                })
+                .unwrap();
+            assert_eq!(stale_submission.submissions().len(), 1);
+            let (origin, stale_id) = stale_submission.submissions().next().unwrap();
+            assert_eq!(origin, instance);
+            assert_ne!(stale_id, submitted);
+            host.submit_and_drive(&mut app, stale_submission, Duration::ZERO);
+            host.inspect(&app, &token, |panel, _| {
+                let report = panel.completed(stale_id);
+                assert!(!report.applied);
+                assert_eq!(report.document, Some(document));
+                assert_eq!(report.active_document, Some(active));
+                assert_eq!(report.revision, Some(tab.revision));
+                assert!(report.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code().as_str() == "tooling.workspace-stale-document-revision"
+                }));
+            })
+            .unwrap();
+            assert_score(&mut app, ORIGINAL_SCORE);
+            assert_eq!(
+                frame(&app).workspace().documents,
+                current.workspace().documents
+            );
+        }
         assert_navigation(&app);
         assert_eq!(fs::read_to_string(&source_path).unwrap(), original);
     }

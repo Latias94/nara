@@ -35,6 +35,77 @@ fn scan_exhausted() -> EditorDocumentQueryRejection {
 }
 
 #[test]
+fn prepared_property_reads_keep_the_original_basis_and_presence() {
+    for prefab in [false, true] {
+        let (mut workspace, document) = fixture(prefab);
+        let original = read(&workspace, document, "amount", 8);
+        let patch = |value| {
+            ScenePatchDocument::new([ScenePatchOperation::SetField {
+                entity: original.target.entity.clone(),
+                component: original.target.component.clone(),
+                component_version: ComponentSchemaVersion::ONE,
+                field: ComponentFieldId::new("amount"),
+                value: ComponentValue::U64(value),
+            }])
+        };
+        let prepared = workspace
+            .prepare_authoring_edit(&original.target.basis, &patch(70))
+            .unwrap();
+        let model = workspace.authoring_model();
+        for (field, expected) in [
+            (
+                "defaulted",
+                EditorPropertyValue::Defaulted(ComponentValue::U64(11)),
+            ),
+            ("missing", EditorPropertyValue::Missing),
+            (
+                "nullable",
+                EditorPropertyValue::Present(ComponentValue::Null),
+            ),
+        ] {
+            let request = read(&workspace, document, field, 8);
+            let preview = prepared.preview_property(request.clone()).unwrap();
+            assert_eq!(preview.value, expected);
+            assert_eq!(preview, workspace.read_document_property(request).unwrap());
+        }
+        assert_eq!(workspace.authoring_model(), model);
+
+        let mut invalid = original.clone();
+        invalid.target.basis.schema = None;
+        invalid.limits = EditorPropertyReadLimits::new(1, 1, 1).unwrap();
+        assert_eq!(
+            prepared.preview_property(invalid),
+            Err(EditorDocumentQueryRejection::StaleSchema)
+        );
+        let mut invalid = original.clone();
+        invalid.limits = EditorPropertyReadLimits::new(1024, 1, 7).unwrap();
+        assert_eq!(
+            prepared.preview_property(invalid),
+            Err(EditorDocumentQueryRejection::ValueBudgetExceeded)
+        );
+
+        let successor = workspace
+            .prepare_authoring_edit(&original.target.basis, &patch(80))
+            .unwrap();
+        assert!(workspace.commit_authoring_edit(successor).applied);
+        let current = read(&workspace, document, "amount", 8);
+        assert_eq!(
+            prepared.preview_property(current.clone()),
+            Err(EditorDocumentQueryRejection::StaleRevision)
+        );
+        assert_eq!(
+            prepared.preview_property(original).unwrap().value,
+            EditorPropertyValue::Present(ComponentValue::U64(70))
+        );
+        assert!(!workspace.commit_authoring_edit(prepared).applied);
+        assert_eq!(
+            workspace.read_document_property(current).unwrap().value,
+            EditorPropertyValue::Present(ComponentValue::U64(80))
+        );
+    }
+}
+
+#[test]
 fn large_unkeyed_list_pages_visit_only_the_current_slice() {
     const COUNT: usize = 5_001;
     for prefab in [false, true] {

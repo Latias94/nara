@@ -8,7 +8,8 @@ use super::{
     SceneAuthoringSession, authoring_field_edit_session_rejection, history_error_report,
 };
 use crate::{
-    PrefabDocument, SceneDocument, ScenePatchDocument, ScenePatchReport,
+    AuthoringEntityView, AuthoringReadError, PrefabDocument, SceneDocument, SceneEntityId,
+    ScenePatchDocument, ScenePatchReport,
     authoring_decode::{
         AuthoringDocumentState, PreparedPrefabAuthoringPatch, PreparedSceneAuthoringPatch,
         prepare_prefab_authoring_patch, prepare_scene_authoring_patch,
@@ -117,6 +118,16 @@ impl PreparedSceneAuthoringEdit {
     #[must_use]
     pub fn document(&self) -> &SceneDocument {
         &self.candidate.document
+    }
+
+    /// Borrows an actual entity from this candidate and its admitted Schema projection.
+    pub fn authoring_entity_view(
+        &self,
+        entity: &SceneEntityId,
+    ) -> Result<AuthoringEntityView<'_>, AuthoringReadError> {
+        self.candidate
+            .state
+            .entity_view(&self.candidate.document.entities, entity)
     }
 
     /// Exact forward changes admitted against the previewed candidate.
@@ -301,6 +312,16 @@ impl PreparedPrefabAuthoringEdit {
     #[must_use]
     pub fn document(&self) -> &PrefabDocument {
         &self.candidate.document
+    }
+
+    /// Borrows an actual entity from this candidate and its admitted Schema projection.
+    pub fn authoring_entity_view(
+        &self,
+        entity: &SceneEntityId,
+    ) -> Result<AuthoringEntityView<'_>, AuthoringReadError> {
+        self.candidate
+            .state
+            .entity_view(&self.candidate.document.entities, entity)
     }
 
     #[must_use]

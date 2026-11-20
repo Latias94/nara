@@ -3,14 +3,14 @@ use std::{sync::Arc, thread};
 use nara_asset::AssetRef;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    PersistentComponentSchemaOwnerId,
+    ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentSchema,
+    ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringSchemaBasis,
-    PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance,
-    PrefabInstanceBinding, ResolvedPrefabSource, SceneAuthoringContentState,
+    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringReadError,
+    AuthoringSchemaBasis, PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget,
+    PrefabInstance, PrefabInstanceBinding, ResolvedPrefabSource, SceneAuthoringContentState,
     SceneAuthoringHistoryStatus, SceneAuthoringHistoryUsage, SceneComponentRecord, SceneDocument,
     SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
     ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
@@ -18,9 +18,11 @@ use nara_scene::{
 };
 use nara_tooling::{
     EditorDocumentDigest, EditorDocumentId, EditorDocumentKind, EditorDocumentQueryBasis,
-    EditorDocumentSourceBinding, EditorPersistenceAuthority, EditorPrefabConversionCommitError,
-    EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
-    EditorWorkspaceModel, PreparedEditorPrefabConversion,
+    EditorDocumentQueryRejection, EditorDocumentSourceBinding, EditorPersistenceAuthority,
+    EditorPrefabConversionCommitError, EditorPropertyRead, EditorPropertyReadLimits,
+    EditorPropertyTarget, EditorPropertyValue, EditorSelectionSet, EditorWorkspace,
+    EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceModel,
+    PreparedEditorPrefabConversion,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -122,6 +124,63 @@ fn open_document(
         EditorDocumentKind::Extension(_) => unreachable!("nominal source fixture"),
     };
     report.opened_document.unwrap()
+}
+
+#[test]
+fn prepared_property_reads_observe_candidate_removals() {
+    let schema = schema_basis();
+    for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
+        let mut workspace = EditorWorkspace::new();
+        let entity = id("editable");
+        let source = SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(entity.clone()).with_component(component(), record(7))
+        ]);
+        let placements = source.placements.clone();
+        let document = open_document(&mut workspace, kind, "editable", source, &schema);
+        let request = EditorPropertyRead {
+            target: EditorPropertyTarget {
+                basis: workspace.document_query_basis(document).unwrap(),
+                entity: entity.clone(),
+                component: component(),
+                property: ComponentPropertyPath::new(ComponentFieldId::new("amount")),
+            },
+            limits: EditorPropertyReadLimits::new(1024, 1, 8).unwrap(),
+        };
+        for (patch, error) in [
+            (
+                ScenePatchDocument::new([ScenePatchOperation::RemoveComponent {
+                    entity: entity.clone(),
+                    component: component(),
+                }]),
+                AuthoringReadError::ComponentNotFound,
+            ),
+            (
+                ScenePatchDocument::new([
+                    ScenePatchOperation::RemoveEntity { entity },
+                    ScenePatchOperation::SetPlacements {
+                        expected: placements,
+                        value: Vec::new(),
+                    },
+                ]),
+                AuthoringReadError::EntityNotFound,
+            ),
+        ] {
+            let prepared = workspace
+                .prepare_authoring_edit(&request.target.basis, &patch)
+                .unwrap_or_else(|report| panic!("{kind:?} {patch:?} was refused: {report:?}"));
+            assert_eq!(
+                prepared.preview_property(request.clone()),
+                Err(EditorDocumentQueryRejection::Source(error))
+            );
+            assert_eq!(
+                workspace
+                    .read_document_property(request.clone())
+                    .unwrap()
+                    .value,
+                EditorPropertyValue::Present(ComponentValue::U64(7))
+            );
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]

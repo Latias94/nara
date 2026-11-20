@@ -5,17 +5,17 @@ use std::{
 };
 
 use nara_reflect::{
-    ComponentFieldPath, ComponentFieldPathSegment, ComponentPropertyError,
-    ComponentPropertyReadBudget, ComponentValue,
+    ComponentFieldPath, ComponentFieldPathSegment, ComponentPropertyReadBudget, ComponentValue,
 };
 use nara_scene::{AuthoringPropertyValue, AuthoringReadError};
 
-use super::{EditorWorkspace, property_component};
+use super::{EditorWorkspace, PropertySource};
 use crate::{
-    EditorDocumentQueryRejection, EditorPropertyPage, EditorPropertyPageCursor,
-    EditorPropertyPageData, EditorPropertyPageItem, EditorPropertyPagePosition,
-    EditorPropertyPageRead, EditorPropertyPageValue, EditorPropertyReadLimits,
-    authoring_query::{PropertyValuePagePosition, PropertyValuePageTarget},
+    EditorDocumentKind, EditorDocumentQueryBasis, EditorDocumentQueryRejection, EditorPropertyPage,
+    EditorPropertyPageCursor, EditorPropertyPageData, EditorPropertyPageItem,
+    EditorPropertyPagePosition, EditorPropertyPageRead, EditorPropertyPageValue,
+    EditorPropertyReadLimits,
+    authoring_query::{PropertyValuePageOwner, PropertyValuePagePosition, PropertyValuePageTarget},
 };
 
 impl EditorWorkspace {
@@ -25,96 +25,120 @@ impl EditorWorkspace {
         &self,
         request: EditorPropertyPageRead,
     ) -> Result<EditorPropertyPage, EditorDocumentQueryRejection> {
-        let (target, expected_kind, position, read_path) = match request.position {
-            EditorPropertyPagePosition::Start { target, path } => (
-                Arc::new(PropertyValuePageTarget {
-                    property: target,
-                    path,
-                }),
-                None,
-                PropertyValuePagePosition::Start,
-                None,
-            ),
-            EditorPropertyPagePosition::Continue(cursor) => {
-                if cursor.owner != self.document_query_owner {
+        read_property_page(
+            request,
+            PropertyValuePageOwner::Workspace(self.document_query_owner.clone()),
+            |basis, kind| {
+                self.resolve_document_query_slot(basis, kind)
+                    .map(PropertySource::Live)
+            },
+        )
+    }
+}
+
+pub(in crate::workspace) fn read_property_page<'a>(
+    request: EditorPropertyPageRead,
+    owner: PropertyValuePageOwner,
+    resolve: impl FnOnce(
+        &EditorDocumentQueryBasis,
+        Option<EditorDocumentKind>,
+    ) -> Result<PropertySource<'a>, EditorDocumentQueryRejection>,
+) -> Result<EditorPropertyPage, EditorDocumentQueryRejection> {
+    let (target, expected_kind, position, read_path) = match request.position {
+        EditorPropertyPagePosition::Start { target, path } => (
+            Arc::new(PropertyValuePageTarget {
+                property: target,
+                path,
+            }),
+            None,
+            PropertyValuePagePosition::Start,
+            None,
+        ),
+        EditorPropertyPagePosition::Continue(cursor) => {
+            match (&owner, &cursor.owner) {
+                (PropertyValuePageOwner::Workspace(a), PropertyValuePageOwner::Workspace(b))
+                    if a != b =>
+                {
                     return Err(EditorDocumentQueryRejection::WrongWorkspace);
                 }
-                (
-                    cursor.target,
-                    Some(cursor.kind),
-                    cursor.next,
-                    Some(cursor.read_path),
-                )
-            }
-        };
-        let slot = self.resolve_document_query_slot(&target.property.basis, expected_kind)?;
-        let metadata_bytes = target
-            .property
-            .admitted_metadata_bytes(request.limits.max_metadata_bytes())?;
-        let mut reader = ValuePageReader {
-            limits: request.limits,
-            scan: request.limits.scan_budget(),
-            nodes: 0,
-            logical_bytes: 0,
-        };
-        let component = property_component(slot, &target.property)?;
-        let resuming = read_path.is_some();
-        let (value, read_path) = match read_path {
-            Some(read_path) => (
-                component.property_root_value(&target.property.property.root)?,
-                read_path,
-            ),
-            None => {
-                let (value, read_path) = component
-                    .property_value_with_read_path(&target.property.property, &mut reader.scan)?;
-                (value, Arc::new(read_path))
-            }
-        };
-        let (value, next) = match value {
-            AuthoringPropertyValue::Present(root) | AuthoringPropertyValue::Defaulted(root) => {
-                let selected = if resuming {
-                    reader.select(root, &read_path)?
-                } else {
-                    root
-                };
-                let selected = reader.select(selected, &target.path)?;
-                let (data, next) = reader.page(selected, position)?;
-                let value = match value {
-                    AuthoringPropertyValue::Defaulted(_) => {
-                        EditorPropertyPageValue::Defaulted(data)
-                    }
-                    _ => EditorPropertyPageValue::Present(data),
-                };
-                (value, next)
-            }
-            AuthoringPropertyValue::Missing => {
-                if resuming {
-                    return Err(EditorDocumentQueryRejection::InvalidContinuation);
+                _ if owner != cursor.owner => {
+                    return Err(EditorDocumentQueryRejection::WrongPreparedEdit);
                 }
-                if !target.path.is_empty() {
-                    return Err(EditorDocumentQueryRejection::InvalidValuePath { step: 0 });
-                }
-                (EditorPropertyPageValue::Missing, None)
+                _ => {}
             }
-        };
-        let next = next.map(|next| EditorPropertyPageCursor {
-            owner: self.document_query_owner.clone(),
-            kind: slot.kind(),
-            target: Arc::clone(&target),
+            (
+                cursor.target,
+                Some(cursor.kind),
+                cursor.next,
+                Some(cursor.read_path),
+            )
+        }
+    };
+    let source = resolve(&target.property.basis, expected_kind)?;
+    let metadata_bytes = target
+        .property
+        .admitted_metadata_bytes(request.limits.max_metadata_bytes())?;
+    let mut reader = ValuePageReader {
+        limits: request.limits,
+        scan: request.limits.scan_budget(),
+        nodes: 0,
+        logical_bytes: 0,
+    };
+    let component = source.component(&target.property)?;
+    let resuming = read_path.is_some();
+    let (value, read_path) = match read_path {
+        Some(read_path) => (
+            component.property_root_value(&target.property.property.root)?,
             read_path,
-            next,
-        });
-        Ok(EditorPropertyPage {
-            target,
-            value,
-            metadata_bytes,
-            value_nodes: reader.nodes,
-            value_logical_bytes: reader.logical_bytes,
-            scanned_entries: reader.scan.scanned_entries(),
-            scanned_logical_bytes: reader.scan.scanned_logical_bytes(),
-            next,
-        })
-    }
+        ),
+        None => {
+            let (value, read_path) = component
+                .property_value_with_read_path(&target.property.property, &mut reader.scan)?;
+            (value, Arc::new(read_path))
+        }
+    };
+    let (value, next) = match value {
+        AuthoringPropertyValue::Present(root) | AuthoringPropertyValue::Defaulted(root) => {
+            let selected = if resuming {
+                reader.select(root, &read_path)?
+            } else {
+                root
+            };
+            let selected = reader.select(selected, &target.path)?;
+            let (data, next) = reader.page(selected, position)?;
+            let value = match value {
+                AuthoringPropertyValue::Defaulted(_) => EditorPropertyPageValue::Defaulted(data),
+                _ => EditorPropertyPageValue::Present(data),
+            };
+            (value, next)
+        }
+        AuthoringPropertyValue::Missing => {
+            if resuming {
+                return Err(EditorDocumentQueryRejection::InvalidContinuation);
+            }
+            if !target.path.is_empty() {
+                return Err(EditorDocumentQueryRejection::InvalidValuePath { step: 0 });
+            }
+            (EditorPropertyPageValue::Missing, None)
+        }
+    };
+    let next = next.map(|next| EditorPropertyPageCursor {
+        owner,
+        kind: source.kind(),
+        target: Arc::clone(&target),
+        read_path,
+        next,
+    });
+    Ok(EditorPropertyPage {
+        target,
+        value,
+        metadata_bytes,
+        value_nodes: reader.nodes,
+        value_logical_bytes: reader.logical_bytes,
+        scanned_entries: reader.scan.scanned_entries(),
+        scanned_logical_bytes: reader.scan.scanned_logical_bytes(),
+        next,
+    })
 }
 
 fn path_segment_bytes(segment: &ComponentFieldPathSegment) -> usize {

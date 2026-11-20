@@ -12,7 +12,8 @@ use nara_scene::{
 
 use super::{
     EditorDocumentSlot, EditorWorkspace, EditorWorkspaceCommandReport, WorkspaceDocumentContext,
-    authoring_command_error_report, workspace_document_error_report, workspace_error_report,
+    authoring_command_error_report, prepared_edit::PreparedEditorDocumentEdit,
+    workspace_document_error_report, workspace_error_report,
 };
 use crate::{
     EditorAuthoringCursor, EditorAuthoringMemberStatus, EditorAuthoringPage,
@@ -27,6 +28,7 @@ use crate::{
 };
 
 mod value_page;
+pub(super) use value_page::read_property_page;
 
 pub(super) fn rejected_basis_report(
     workspace: &EditorWorkspace,
@@ -94,16 +96,7 @@ impl EditorWorkspace {
                 actual: kind,
             });
         }
-        let revision = slot.revision();
-        if basis.revision.source_id() != revision.source_id() {
-            return Err(EditorDocumentQueryRejection::StaleIncarnation);
-        }
-        if basis.revision != revision {
-            return Err(EditorDocumentQueryRejection::StaleRevision);
-        }
-        if basis.schema != slot.authoring_schema_basis() {
-            return Err(EditorDocumentQueryRejection::StaleSchema);
-        }
+        basis.require_exact_source(slot.revision(), || slot.authoring_schema_basis())?;
         Ok(slot)
     }
 
@@ -370,11 +363,44 @@ impl EditorWorkspace {
         request: EditorPropertyRead,
     ) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
         let slot = self.resolve_document_query_slot(&request.target.basis, None)?;
+        PropertySource::Live(slot).read_property(request)
+    }
+}
+
+pub(super) enum PropertySource<'a> {
+    Live(&'a EditorDocumentSlot),
+    Prepared(&'a PreparedEditorDocumentEdit),
+}
+
+impl<'a> PropertySource<'a> {
+    fn kind(&self) -> EditorDocumentKind {
+        match self {
+            Self::Live(slot) => slot.kind(),
+            Self::Prepared(edit) => edit.document_kind(),
+        }
+    }
+
+    fn component(
+        &self,
+        target: &EditorPropertyTarget,
+    ) -> Result<AuthoringComponentView<'a>, EditorDocumentQueryRejection> {
+        let entity = match self {
+            Self::Live(slot) => entity_view(slot, &target.entity)?,
+            Self::Prepared(edit) => edit.authoring_entity_view(&target.entity)?,
+        };
+        Ok(entity.component(&target.component)?)
+    }
+
+    pub(super) fn read_property(
+        self,
+        request: EditorPropertyRead,
+    ) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
         let metadata_bytes = request
             .target
             .admitted_metadata_bytes(request.limits.max_metadata_bytes())?;
         let mut budget = request.limits.scan_budget();
-        let root = property_component(slot, &request.target)?
+        let root = self
+            .component(&request.target)?
             .property_value(&request.target.property, &mut budget)?;
         let (value_nodes, value_logical_bytes) = match root {
             AuthoringPropertyValue::Present(value) | AuthoringPropertyValue::Defaulted(value) => {
@@ -405,13 +431,6 @@ impl EditorWorkspace {
             scanned_logical_bytes: budget.scanned_logical_bytes(),
         })
     }
-}
-
-fn property_component<'a>(
-    slot: &'a EditorDocumentSlot,
-    target: &EditorPropertyTarget,
-) -> Result<AuthoringComponentView<'a>, EditorDocumentQueryRejection> {
-    Ok(entity_view(slot, &target.entity)?.component(&target.component)?)
 }
 
 fn entity_view<'a>(

@@ -1,7 +1,7 @@
 use nara_reflect::{
-    ComponentFieldId, ComponentMemberPath, ComponentMemberPathSegment, ComponentPropertyError,
-    ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep, ComponentSchemaVersion,
-    ComponentValue, ComponentValueKind,
+    ComponentFieldId, ComponentFieldPath, ComponentMemberPath, ComponentMemberPathSegment,
+    ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep,
+    ComponentSchemaVersion, ComponentValue, ComponentValueKind,
 };
 use nara_scene::{
     AuthoringPropertyEdit, AuthoringReadError, PrefabDocumentCandidate, SceneAuthoringSession,
@@ -12,7 +12,8 @@ use nara_tooling::{
     EditorAuthoringPage, EditorAuthoringProjection, EditorAuthoringPropertyStatus,
     EditorAuthoringQuery, EditorAuthoringQueryLimits, EditorAuthoringQueryPosition,
     EditorAuthoringRow, EditorDocumentDigest, EditorDocumentQueryRejection,
-    EditorDocumentSourceBinding, EditorPropertyValue, EditorWorkspaceCommand,
+    EditorDocumentSourceBinding, EditorPropertyPagePosition, EditorPropertyPageRead,
+    EditorPropertyReadLimits, EditorPropertyValue, EditorWorkspaceCommand,
 };
 
 #[path = "property_children/support.rs"]
@@ -1077,6 +1078,35 @@ fn equal_catalog_readmission_invalidates_property_cursors_without_changing_the_r
                 limits(1),
             ))
             .unwrap();
+        let amount = read_request(&fixture.workspace, fixture.document, path("amount"));
+        let edit = fixture
+            .workspace
+            .prepare_authoring_edit(
+                &amount.target.basis,
+                &ScenePatchDocument::new([ScenePatchOperation::SetField {
+                    entity: entity(),
+                    component: component(),
+                    component_version: ComponentSchemaVersion::ONE,
+                    field: ComponentFieldId::new("amount"),
+                    value: ComponentValue::U64(70),
+                }]),
+            )
+            .unwrap();
+        let page_limits = EditorPropertyReadLimits::new(1024, 2, 32).unwrap();
+        let first_preview = edit
+            .preview_property_page(EditorPropertyPageRead {
+                position: EditorPropertyPagePosition::Start {
+                    target: read_request(&fixture.workspace, fixture.document, path("map")).target,
+                    path: ComponentFieldPath::empty(),
+                },
+                limits: page_limits,
+            })
+            .unwrap();
+        let resume = EditorPropertyPageRead {
+            position: EditorPropertyPagePosition::Continue(first_preview.next.unwrap()),
+            limits: page_limits,
+        };
+        let second_preview = edit.preview_property_page(resume.clone()).unwrap();
         let previous = first.target.basis.schema.clone().unwrap();
         let successor = fresh_schema_basis();
         assert_ne!(previous, successor);
@@ -1101,6 +1131,26 @@ fn equal_catalog_readmission_invalidates_property_cursors_without_changing_the_r
         assert_eq!(current.revision, first.target.basis.revision);
         assert_eq!(current.schema, Some(successor));
         let before = fixture.workspace.authoring_model();
+        let mut current_amount = amount.clone();
+        current_amount.target.basis = current;
+        assert_eq!(
+            edit.preview_property(current_amount.clone()),
+            Err(EditorDocumentQueryRejection::StaleSchema)
+        );
+        assert_eq!(
+            edit.preview_property(amount).unwrap().value,
+            EditorPropertyValue::Present(ComponentValue::U64(70))
+        );
+        assert_eq!(edit.preview_property_page(resume).unwrap(), second_preview);
+        assert!(!fixture.workspace.commit_authoring_edit(edit).applied);
+        assert_eq!(
+            fixture
+                .workspace
+                .read_document_property(current_amount)
+                .unwrap()
+                .value,
+            EditorPropertyValue::Present(ComponentValue::U64(7))
+        );
         assert_eq!(
             fixture
                 .workspace

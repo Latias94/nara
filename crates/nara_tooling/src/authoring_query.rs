@@ -18,7 +18,9 @@ pub use value_page::{
     EditorPropertyPage, EditorPropertyPageCursor, EditorPropertyPageData, EditorPropertyPageItem,
     EditorPropertyPagePosition, EditorPropertyPageRead, EditorPropertyPageValue,
 };
-pub(crate) use value_page::{PropertyValuePagePosition, PropertyValuePageTarget};
+pub(crate) use value_page::{
+    PropertyValuePageOwner, PropertyValuePagePosition, PropertyValuePageTarget,
+};
 
 pub const MAX_EDITOR_AUTHORING_QUERY_ENTRIES: usize = 256;
 pub const MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES: usize = 64 * 1024;

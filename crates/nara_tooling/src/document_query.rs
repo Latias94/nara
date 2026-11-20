@@ -17,6 +17,25 @@ pub struct EditorDocumentQueryBasis {
     pub schema: Option<AuthoringSchemaBasis>,
 }
 
+impl EditorDocumentQueryBasis {
+    pub(crate) fn require_exact_source(
+        &self,
+        revision: SceneAuthoringRevision,
+        schema: impl FnOnce() -> Option<AuthoringSchemaBasis>,
+    ) -> Result<(), EditorDocumentQueryRejection> {
+        if self.revision.source_id() != revision.source_id() {
+            return Err(EditorDocumentQueryRejection::StaleIncarnation);
+        }
+        if self.revision != revision {
+            return Err(EditorDocumentQueryRejection::StaleRevision);
+        }
+        if self.schema != schema() {
+            return Err(EditorDocumentQueryRejection::StaleSchema);
+        }
+        Ok(())
+    }
+}
+
 /// Exact rejection of a query without changing document or presentation state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditorDocumentQueryRejection {
@@ -27,6 +46,8 @@ pub enum EditorDocumentQueryRejection {
     Closing,
     /// The continuation belongs to another workspace, including a replaced project workspace.
     WrongWorkspace,
+    /// A prepared property query names a different read source or document.
+    WrongPreparedEdit,
     /// The explicitly named document is no longer open, or was never open here.
     DocumentNotOpen { document: EditorDocumentId },
     /// Only direct Scene and Prefab source records are supported.
@@ -74,6 +95,9 @@ impl fmt::Display for EditorDocumentQueryRejection {
             Self::Closing => formatter.write_str("document workspace is closing"),
             Self::WrongWorkspace => {
                 formatter.write_str("document query belongs to another workspace")
+            }
+            Self::WrongPreparedEdit => {
+                formatter.write_str("property query belongs to a different read source")
             }
             Self::DocumentNotOpen { .. } => {
                 formatter.write_str("document query document is not open")
