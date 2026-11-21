@@ -1,4 +1,4 @@
-//! Bounded source declaration observations and exact source-owned Revert preparation.
+//! Bounded source declaration observations and exact source-owned edit preparation.
 
 use std::{error::Error, fmt};
 
@@ -16,7 +16,9 @@ use crate::{
     prefab::{PrefabOverlayCostLimits, prefab_instance_cost},
 };
 
-/// Inclusive logical limits for source declaration observation and Revert lowering.
+mod property_set;
+
+/// Inclusive logical limits for source declaration observation and edit lowering.
 ///
 /// Nodes include raw declaration/target/value nodes and copied location headers/steps.
 /// Bytes include the raw-storage cost plus each copied anchor's UTF-8 bytes and nine bytes
@@ -89,6 +91,9 @@ pub enum PrefabDeclarationError {
     InstanceAbsent,
     OverlayAbsent,
     SlotNotFound,
+    ConflictingClaim,
+    StaleObservedIntent,
+    AlreadySet,
     BudgetExceeded,
 }
 
@@ -109,6 +114,11 @@ impl PrefabDeclarationError {
             Self::InstanceAbsent => "the selected optional instance declaration is absent",
             Self::OverlayAbsent => "the selected instance has no overlay",
             Self::SlotNotFound => "the selected overlay intent was not found",
+            Self::ConflictingClaim => "a same-layer property claim is an ancestor or descendant",
+            Self::StaleObservedIntent => {
+                "the observed property Set disagrees with current source intent"
+            }
+            Self::AlreadySet => "the selected property already has this exact Set claim",
             Self::BudgetExceeded => "source declaration work exceeds its logical limits",
         }
     }
@@ -123,6 +133,9 @@ impl PrefabDeclarationError {
             Self::InstanceAbsent => "scene.authoring-prefab-instance-absent",
             Self::OverlayAbsent => "scene.authoring-prefab-overlay-absent",
             Self::SlotNotFound => "scene.authoring-prefab-slot-not-found",
+            Self::ConflictingClaim => "scene.authoring-prefab-conflicting-claim",
+            Self::StaleObservedIntent => "scene.authoring-prefab-stale-observed-intent",
+            Self::AlreadySet => "scene.authoring-prefab-already-set",
             Self::BudgetExceeded => "scene.authoring-prefab-budget-exceeded",
         }
     }
@@ -612,12 +625,10 @@ impl DeclarationBudget {
         if steps.len() > self.limits.max_depth {
             return Err(PrefabDeclarationError::BudgetExceeded);
         }
-        self.nodes = self.nodes.saturating_add(1).saturating_add(steps.len());
-        self.bytes = self
-            .bytes
-            .saturating_add(anchor.len())
-            .saturating_add(steps.len().saturating_mul(9));
-        self.check()
+        self.charge(
+            1_usize.saturating_add(steps.len()),
+            anchor.len().saturating_add(steps.len().saturating_mul(9)),
+        )
     }
 
     fn instance(
@@ -625,32 +636,34 @@ impl DeclarationBudget {
         instance: &PrefabInstance,
         copies: usize,
     ) -> Result<(), PrefabDeclarationError> {
-        let nodes = self.limits.max_nodes.saturating_sub(self.nodes) / copies;
-        let bytes = self.limits.max_logical_bytes.saturating_sub(self.bytes) / copies;
-        let cost = prefab_instance_cost(
-            instance,
-            PrefabOverlayCostLimits {
-                nodes,
-                depth: self.limits.max_depth,
-                declarations: nodes,
-                entities: nodes,
-                placements: nodes,
-                components: nodes,
-                prefab_instances: nodes,
-                value_nodes: nodes,
-                value_bytes: bytes,
-                logical_bytes: bytes,
-            },
+        let cost = prefab_instance_cost(instance, self.remaining_cost_limits(copies))
+            .map_err(|_| PrefabDeclarationError::BudgetExceeded)?;
+        self.charge(
+            cost.nodes.saturating_mul(copies),
+            cost.logical_bytes().saturating_mul(copies),
         )
-        .map_err(|_| PrefabDeclarationError::BudgetExceeded)?;
-        self.nodes = self.nodes.saturating_add(cost.nodes.saturating_mul(copies));
-        self.bytes = self
-            .bytes
-            .saturating_add(cost.logical_bytes().saturating_mul(copies));
-        self.check()
     }
 
-    fn check(&self) -> Result<(), PrefabDeclarationError> {
+    fn remaining_cost_limits(&self, copies: usize) -> PrefabOverlayCostLimits {
+        let nodes = self.limits.max_nodes.saturating_sub(self.nodes) / copies;
+        let bytes = self.limits.max_logical_bytes.saturating_sub(self.bytes) / copies;
+        PrefabOverlayCostLimits {
+            nodes,
+            depth: self.limits.max_depth,
+            declarations: nodes,
+            entities: nodes,
+            placements: nodes,
+            components: nodes,
+            prefab_instances: nodes,
+            value_nodes: nodes,
+            value_bytes: bytes,
+            logical_bytes: bytes,
+        }
+    }
+
+    fn charge(&mut self, nodes: usize, bytes: usize) -> Result<(), PrefabDeclarationError> {
+        self.nodes = self.nodes.saturating_add(nodes);
+        self.bytes = self.bytes.saturating_add(bytes);
         if self.nodes > self.limits.max_nodes || self.bytes > self.limits.max_logical_bytes {
             Err(PrefabDeclarationError::BudgetExceeded)
         } else {

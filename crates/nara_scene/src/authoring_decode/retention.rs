@@ -224,7 +224,7 @@ pub(super) fn overlay_path_dynamic_bytes(
     Some(bytes)
 }
 
-pub(super) fn target_dynamic_bytes(target: &PrefabEntityTarget) -> Option<usize> {
+pub(crate) fn target_dynamic_bytes(target: &PrefabEntityTarget) -> Option<usize> {
     let bytes = provenance_string_bytes(target.entity.entity().as_str())?.checked_add(
         target
             .through

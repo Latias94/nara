@@ -21,6 +21,11 @@ use nara_tooling::{
     EditorPrefabPropertyAddress,
 };
 
+#[path = "prefab_effective_inspection/recursive.rs"]
+mod recursive;
+#[path = "prefab_effective_inspection/set.rs"]
+mod set;
+
 const PANEL: &str = "consumer.prefab-effective-inspection";
 const COMPONENT: &str = "consumer.prefab.EffectiveSettings";
 const ANCHOR_COMPONENT: &str = "consumer.prefab.AnchorLabel";
@@ -572,7 +577,7 @@ fn prepare_revert(
         }),
         Outcome::Accepted {
             inspection,
-            phase: Phase::PreparingRevert,
+            phase: Phase::PreparingEdit,
         }
     );
 }
@@ -586,7 +591,10 @@ fn assert_review(
     expect_phase(app, inspection, Phase::Review);
     panel.observe(app, |context| {
         assert_eq!(
-            context.prefab_inspection_revert_patch(inspection).unwrap(),
+            context
+                .prefab_inspection_review(inspection)
+                .unwrap()
+                .patch(),
             expected_patch
         );
     });
@@ -865,7 +873,7 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
     );
     acknowledge(&mut panel, &mut app, reviewed);
     assert_eq!(
-        app.prefab_inspection_revert_patch(reviewed).unwrap_err(),
+        app.prefab_inspection_review(reviewed).unwrap_err(),
         Rejection::WrongInspection
     );
     assert_eq!(basis(&app, document), captured);
@@ -911,7 +919,7 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
     prepare_revert(&mut panel, &mut app, inspection, selected, large_limits);
     assert_review(&mut panel, &mut app, inspection, &expected_patch);
     assert_eq!(
-        app.prefab_inspection_revert_patch(inspection).unwrap(),
+        app.prefab_inspection_review(inspection).unwrap().patch(),
         &expected_patch
     );
     assert_eq!(basis(&app, document), captured);
@@ -924,7 +932,10 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
                 Phase::Review
             );
             assert_eq!(
-                context.prefab_inspection_revert_patch(inspection).unwrap(),
+                context
+                    .prefab_inspection_review(inspection)
+                    .unwrap()
+                    .patch(),
                 &expected_patch
             );
             Action::Commit { inspection }

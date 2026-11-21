@@ -135,12 +135,12 @@ impl EditorPanelContext<'_, '_> {
         self.application.prefab_effective_observation(inspection)
     }
 
-    /// Borrows the source-owned Revert before submitting Commit.
-    pub fn prefab_inspection_revert_patch(
+    /// Borrows the source-owned edit and its exact candidate before submitting Commit.
+    pub fn prefab_inspection_review(
         &self,
         inspection: EditorPrefabInspectionId,
-    ) -> Result<&ScenePatchDocument, EditorPrefabInspectionRejection> {
-        self.application.prefab_inspection_revert_patch(inspection)
+    ) -> Result<&PreparedEditorDocumentEdit, EditorPrefabInspectionRejection> {
+        self.application.prefab_inspection_review(inspection)
     }
 
     /// Prepares Revert of a discovered claim without rebinding its source slot.

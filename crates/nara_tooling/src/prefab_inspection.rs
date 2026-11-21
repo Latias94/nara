@@ -1,7 +1,7 @@
 //! UI-neutral actions and observations for one Host-owned effective Prefab inspection.
 
 use nara_diagnostic::DiagnosticReport;
-use nara_reflect::{ComponentPropertyPath, ComponentTypeId};
+use nara_reflect::{ComponentPropertyPath, ComponentTypeId, ComponentValue};
 use nara_scene::{
     PrefabDeclarationLimits, PrefabEntityTarget, SceneAuthoringRevision, SceneEntityId,
 };
@@ -23,7 +23,7 @@ impl EditorPrefabInspectionId {
     }
 }
 
-/// A read-only property address relative to the containing Scene or Prefab source.
+/// A property address relative to the containing Scene or Prefab source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorPrefabPropertyAddress {
     /// The first hop enters the instance anchor selected by [`EditorPrefabInspectionAction::Inspect`].
@@ -38,7 +38,7 @@ pub enum EditorPrefabInspectionPhase {
     Idle,
     Inspecting,
     Ready,
-    PreparingRevert,
+    PreparingEdit,
     Review,
     Validating,
     Cancelling,
@@ -50,7 +50,7 @@ impl EditorPrefabInspectionPhase {
     pub const fn work_pending(self) -> bool {
         matches!(
             self,
-            Self::Inspecting | Self::PreparingRevert | Self::Validating | Self::Cancelling
+            Self::Inspecting | Self::PreparingEdit | Self::Validating | Self::Cancelling
         )
     }
 }
@@ -73,6 +73,8 @@ pub enum EditorPrefabInspectionRejection {
     TaskCleanupFailed,
     IdExhausted,
     InvalidProperty,
+    ConflictingClaim,
+    AlreadySet,
     NoCurrentClaim,
 }
 
@@ -83,6 +85,11 @@ pub enum EditorPrefabInspectionResult {
         inspection: EditorPrefabInspectionId,
     },
     Reverted {
+        inspection: EditorPrefabInspectionId,
+        document: EditorDocumentId,
+        revision: SceneAuthoringRevision,
+    },
+    Set {
         inspection: EditorPrefabInspectionId,
         document: EditorDocumentId,
         revision: SceneAuthoringRevision,
@@ -101,7 +108,7 @@ pub struct EditorPrefabInspectionView {
     pub result: Option<EditorPrefabInspectionResult>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EditorPrefabInspectionAction {
     Inspect {
         basis: EditorDocumentQueryBasis,
@@ -111,6 +118,14 @@ pub enum EditorPrefabInspectionAction {
         inspection: EditorPrefabInspectionId,
         address: EditorPrefabPropertyAddress,
         /// Logical limits for preparing the source declaration patch.
+        limits: PrefabDeclarationLimits,
+    },
+    /// Pins a visible editable scalar in the selected instance layer of the containing source.
+    /// An inherited value explicitly set to itself becomes a stored claim.
+    PrepareSet {
+        inspection: EditorPrefabInspectionId,
+        address: EditorPrefabPropertyAddress,
+        value: ComponentValue,
         limits: PrefabDeclarationLimits,
     },
     Commit {

@@ -605,6 +605,12 @@ uses the same bounded query operations for working documents and the exact prepa
 construction. It includes candidate-only resolved entity references and stored Prefab claims.
 Commit retains the original document authority and refuses obsolete bases.
 
+The [explicit scalar override successor](../architecture/authoring-read-projection-design.md#explicit-scalar-overrides)
+completes Set and Revert of an effective scalar on a selected instance in a non-active Scene or
+Prefab. The original source owner lowers the claim, and the same Host validates its effective
+meaning and participating sources before exposing the ordinary prepared edit for review. Complete
+component editing, reference rebinding and cross-source Apply retain their own contracts.
+
 ## R3: Behavior Representation And Immutable Module Publications
 
 **Design:** D02, D03, D06. **State:** the closed native/data Scene family is adopted under ADR 0006

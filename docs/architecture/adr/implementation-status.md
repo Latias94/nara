@@ -4381,6 +4381,16 @@ locked release cohort passes 24/24. The Windows/DX12 Drawn workflow verifies the
 alongside actual presented Inspector editing and passes 1/1. This qualifies direct source queries.
 Preparation locality and effective Prefab dependency work keep their separate gates.
 
+The [effective scalar Set successor](../authoring-read-projection-design.md#explicit-scalar-overrides)
+allows a registered semantic panel to author an inherited scalar in a selected instance and
+review the resulting source candidate without activating the containing Scene or Prefab. The
+source owner retains the claim and exact inverse. The inspection reuses one candidate for
+recursive composition, review and commit. The operation preserves the original file and
+working-copy dependency contract. The [qualification](../authoring-read-projection-design.md#november-22-scalar-set-qualification)
+records 63/63 selected owner and Windows/DX12 tests and 30/30 independent release and
+embedded Host tests. Authored absence, reference rebinding, cross-source Apply and
+large-workload preparation cost remain separate.
+
 The [selective collection edit](../authoring-read-projection-design.md#selective-edits-in-authored-collections)
 keeps the selected replacement and previous value in the original Scene and Prefab history.
 The inverse follows a changed key. Exact final file validation and nominal Schema readmission

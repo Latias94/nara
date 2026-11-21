@@ -1026,7 +1026,7 @@ impl EditorProjectSession {
     }
 }
 
-fn component_uses_ui_domain(component: &nara_reflect::ComponentTypeId) -> bool {
+pub(super) fn component_uses_ui_domain(component: &nara_reflect::ComponentTypeId) -> bool {
     // Persistent domain identity remains meaningful when its executable module is absent.
     matches!(
         component.as_str(),

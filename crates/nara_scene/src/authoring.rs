@@ -402,7 +402,7 @@ impl AuthoringHistory {
     fn publish_forward_with_scope<D>(
         &mut self,
         document: &mut Arc<D>,
-        candidate: D,
+        candidate: impl Into<Arc<D>>,
         report: ScenePatchReport,
         cost: SceneAuthoringHistoryCost,
         scope: AuthoringHistoryScope,
@@ -420,7 +420,7 @@ impl AuthoringHistory {
             .expect("admitted history owns its inverse");
 
         let before_state = self.content_state;
-        *document = Arc::new(candidate);
+        *document = candidate.into();
         self.advance_revision();
         let after_state = self.content_state_for_current_revision();
         self.content_state = after_state;

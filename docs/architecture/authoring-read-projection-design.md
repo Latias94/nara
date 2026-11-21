@@ -336,6 +336,47 @@ diagnostic. The existing prepared edit supplies the review and original transact
 Close retain pending inspection work until physical return. Revert changes the containing source
 and creates one normal history entry. Read a new observation to see the value revealed by Revert.
 
+##### Explicit scalar overrides
+
+`PrepareSet` writes a scalar selected from the effective inspection into the direct instance
+overlay of the containing Scene or Prefab. The compiler supplies the canonical base and the
+selected layer's existing component group even when the read used another root-binding alias.
+The source owner writes one `Set` claim and preserves the existing target spelling of that group.
+An explicit Set equal to an inherited value pins it. The remaining fields keep their existing
+inheritance. The selected component and field must admit editing. A complete component owned
+by the containing anchor or selected overlay has its own authoring location. Strict ancestor or
+descendant overlap within one property group refuses the write. Repeating an identical stored Set
+returns `AlreadySet` and creates no history entry. Specialized UI Prefab fields retain their own
+domain admission, and unrelated UI records can coexist with a scalar Set in the same source.
+
+The original declaration and its proposed replacement enter the same prepared edit and history
+owners as Revert. Before review, the Host uses the selected compiler on the exact unpublished
+candidate with its original files and working-copy selections. It checks that the original
+address now observes the requested scalar under an exact Set from the selected containing layer.
+This also refuses writes that remove the selector's meaning, such as changing the key used by a
+selected keyed item. The recompilation runs on the existing inspection task lane. A read-only
+inspection releases decoded dependency inputs once Ready. The Set path reacquires the demanded
+inputs only for the unpublished candidate and compares their file, lookup and working-copy facts
+with the original observation. The verification uses the candidate at every actual demand for
+the containing Prefab itself. Files read as content keep their canonical source and exact digest.
+Open working copies also keep their original file object and live revision. Commit revalidates
+those original facts and consumes the exact reviewed edit. `prefab_inspection_review` borrows the
+same prepared candidate view, patch and inverse for Set and Revert. Cancel and Close retain
+pending work until physical task return.
+
+This operation covers scalar leaves available through their current selector. Separate workflows
+own reference rebinding, authored absence, collection identity changes, writes to an owning
+complete record and applying an override back into a different source.
+
+Godot retains a pinned property even when the current value equals the inherited default and
+stores pinning in its normal Inspector Undo. Bevy copies a cached component template on the
+first local write, preserving the cached template for other consumers. Nara keeps the same
+authored distinction between local and inherited values using its existing stable selectors
+and exact source transaction.
+[Godot packed scene](https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/scene/resources/packed_scene.cpp#L1061-L1085) ·
+[Godot Inspector pinning](https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/editor/inspector/editor_inspector.cpp#L6022-L6023) ·
+[Bevy resolved templates](https://github.com/bevyengine/bevy/blob/85503941e488152711a4695bbe248e9ed9f453fc/crates/bevy_scene/src/resolved_scene.rs#L463-L503)
+
 The acceptance workflow uses two mounts of one base, a root-bound alias, an equal-value pin,
 and a later base change. It checks stale and missing demanded sources, unrelated invalid sources,
 the newly inherited value, exact Undo/Redo, and Save/Reopen of both containing source kinds.
@@ -383,6 +424,33 @@ target was selected for this unit.
 Affected library correctness Clippy passes for Scene, Tooling, Nara and Editor. Scene also
 builds with default features disabled. Root and independent panel formatting checks and local
 documentation links pass.
+
+##### November 22 scalar Set qualification
+
+Windows x64 / Rust 1.95.0 nextest run `f1025ab1-93d8-4b25-895b-414f42d381f3` passes
+63/63 selected tests. That includes the original Scene, Tooling, selected source acquisition
+and operation lifetime controls and the actual Windows/DX12 Prefab conversion trajectory.
+The Host tests confirm physical task return on cancellation and rejection of changed content.
+They also replace an unopened dependency with identical bytes separately before Prepare and
+before Commit and verify that both admit the same content.
+
+The independently locked release run `20429830-ebd6-48fd-8192-dcd23ef52451` passes 30/30
+selected tests, including 29 panel tests and the hidden-window Windows/DX12 embedded Host.
+The registered panel discovers a scalar in a non-active Scene or Prefab, derives the new
+value, queries the exact prepared candidate, then commits it. The fixture checks Cancel,
+one history entry per Set, Undo/Redo, Save/Reopen and Revert. It observes an equal-value pin
+after a change to the shared base and confirms that the other instance inherits the new base.
+Other controls exercise the nested storage route behind a direct addition alias, an exact
+already-stored Set, read-only and overlapping claims, budget refusal, a change to a
+participating open Prefab and a candidate that would break a finite recursive Prefab.
+The recursive test requires a composition diagnostic before any review or source edit.
+[Registered panel cases](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/set.rs) ·
+[Recursive regression](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/recursive.rs)
+
+The independent panel cases exercise the semantic API. Native qualification covers the shared
+source transaction and selected acquisition used by existing authoring controls.
+Correctness Clippy passes for the affected libraries, Scene checks without default features,
+and the affected packages pass formatting and local documentation link checks.
 
 ## Workspace Contract
 

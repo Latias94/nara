@@ -298,6 +298,21 @@ impl EditorProjectSession {
         &mut self,
         prepared: PreparedEditorDocumentEdit,
     ) -> EditorActionOutcome {
+        self.commit_authoring_edit_inner(prepared, false)
+    }
+
+    pub(super) fn commit_verified_prefab_set(
+        &mut self,
+        prepared: PreparedEditorDocumentEdit,
+    ) -> EditorActionOutcome {
+        self.commit_authoring_edit_inner(prepared, true)
+    }
+
+    fn commit_authoring_edit_inner(
+        &mut self,
+        prepared: PreparedEditorDocumentEdit,
+        verified_prefab_set: bool,
+    ) -> EditorActionOutcome {
         #[cfg(feature = "editor-work-observation")]
         let base_revision = prepared.base_revision();
         #[cfg(feature = "editor-work-observation")]
@@ -328,6 +343,7 @@ impl EditorProjectSession {
             ));
         }
         if !prepared.is_prefab_revert()
+            && !verified_prefab_set
             && let Err(rejection) =
                 self.verify_prepared_patch_contract(prepared.document(), prepared.patch())
         {

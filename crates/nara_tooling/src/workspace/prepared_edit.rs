@@ -10,10 +10,12 @@ use super::{
 };
 use crate::{EditorDocumentQueryBasis, document_query::EditorDocumentQueryOwner};
 use nara_scene::{
-    AuthoringPropertyEdit, PrefabDeclarationLimits, PrefabInstancePath, PrefabRevert,
-    PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit, SceneAuthoringRevision,
+    __private::{ObservedPrefabPropertySet, SourceDocumentInput},
+    AuthoringPropertyEdit, PrefabDeclarationLimits, PrefabDocument, PrefabInstancePath,
+    PrefabRevert, PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit, SceneAuthoringRevision,
     ScenePatchDocument,
 };
+use std::sync::Arc;
 
 /// A move-only edit of one explicitly named open document; it owns no workspace or selection.
 #[derive(Debug)]
@@ -42,6 +44,10 @@ enum EditRequest<'a> {
     PrefabRevert {
         path: &'a PrefabInstancePath,
         action: PrefabRevert,
+        limits: PrefabDeclarationLimits,
+    },
+    PrefabPropertySet {
+        edit: &'a ObservedPrefabPropertySet,
         limits: PrefabDeclarationLimits,
     },
 }
@@ -98,6 +104,32 @@ impl PreparedEditorDocumentEdit {
         };
         EditorPreparedDocumentPreview::new(&self.basis, &self.query_owner, source)
     }
+
+    #[doc(hidden)]
+    pub fn source_input(&self) -> SourceDocumentInput<'_> {
+        match &self.edit {
+            PreparedDocumentEdit::Scene(edit) => SourceDocumentInput::Scene(edit.document()),
+            PreparedDocumentEdit::Prefab(edit) => SourceDocumentInput::Prefab(edit.document()),
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn shared_prefab_document(&self) -> Option<Arc<PrefabDocument>> {
+        match &self.edit {
+            PreparedDocumentEdit::Scene(_) => None,
+            PreparedDocumentEdit::Prefab(edit) => Some(edit.shared_document()),
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn checked_retained_bytes(&self) -> Option<usize> {
+        let edit_bytes = match &self.edit {
+            PreparedDocumentEdit::Scene(edit) => edit.checked_retained_bytes(),
+            PreparedDocumentEdit::Prefab(edit) => edit.checked_retained_bytes(),
+        }?;
+        edit_bytes
+            .checked_add(std::mem::size_of::<Self>() - std::mem::size_of::<PreparedDocumentEdit>())
+    }
 }
 
 impl EditorWorkspace {
@@ -141,6 +173,16 @@ impl EditorWorkspace {
         )
     }
 
+    #[doc(hidden)]
+    pub fn prepare_prefab_property_set(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+        edit: &ObservedPrefabPropertySet,
+        limits: PrefabDeclarationLimits,
+    ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
+        self.prepare_edit(basis, EditRequest::PrefabPropertySet { edit, limits })
+    }
+
     fn prepare_edit(
         &self,
         basis: &EditorDocumentQueryBasis,
@@ -153,7 +195,9 @@ impl EditorWorkspace {
         let slot = self.resolve_authoring_preparation_slot(document, base_revision)?;
         let origin = match &request {
             EditRequest::PrefabRevert { .. } => PreparedEditOrigin::PrefabRevert,
-            EditRequest::Patch(_) | EditRequest::Properties(_) => PreparedEditOrigin::Authoring,
+            EditRequest::Patch(_)
+            | EditRequest::Properties(_)
+            | EditRequest::PrefabPropertySet { .. } => PreparedEditOrigin::Authoring,
         };
         let prepared = match slot {
             EditorDocumentSlot::Scene(slot) => match request {
@@ -170,6 +214,9 @@ impl EditorWorkspace {
                 } => slot
                     .session
                     .prepare_prefab_revert(base_revision, path, action, limits),
+                EditRequest::PrefabPropertySet { edit, limits } => slot
+                    .session
+                    .prepare_prefab_property_set(base_revision, edit, limits),
             }
             .map(PreparedDocumentEdit::Scene),
             EditorDocumentSlot::Prefab(slot) => match request {
@@ -186,6 +233,9 @@ impl EditorWorkspace {
                 } => slot
                     .session
                     .prepare_prefab_revert(base_revision, path, action, limits),
+                EditRequest::PrefabPropertySet { edit, limits } => slot
+                    .session
+                    .prepare_prefab_property_set(base_revision, edit, limits),
             }
             .map(PreparedDocumentEdit::Prefab),
             EditorDocumentSlot::Extension(_) => {

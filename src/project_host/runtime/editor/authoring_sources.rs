@@ -48,11 +48,13 @@ pub(super) struct SelectedPrefabSources {
     prefabs: Vec<AuthoringSourceSelection>,
 }
 
+#[derive(PartialEq, Eq)]
 pub(super) struct SelectedPrefabBasis {
     root: AuthoringSourceSelection,
     participants: Vec<PrefabParticipant>,
 }
 
+#[derive(PartialEq, Eq)]
 struct PrefabParticipant {
     key: SourceDocumentKey,
     project_path: Arc<str>,

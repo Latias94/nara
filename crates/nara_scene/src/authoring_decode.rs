@@ -32,6 +32,7 @@ pub use read::{
 pub(crate) use read::{property_children_in_schema, property_root};
 pub(crate) use retention::asset_references_bytes as retained_asset_references_bytes;
 pub(crate) use retention::prefab_inputs_bytes as retained_prefab_inputs_bytes;
+pub(crate) use retention::target_dynamic_bytes as retained_prefab_target_bytes;
 use structure::authoring_structure_rejection;
 
 use std::{

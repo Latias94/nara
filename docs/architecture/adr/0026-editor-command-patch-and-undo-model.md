@@ -145,6 +145,12 @@ Rules:
   controlling claim in the containing source. The Host retains the prepared edit and verifies
   the original composition sources before consuming it. Undo and Redo use the resulting ordinary
   history entry.
+- Setting a selected effective scalar writes one stable property claim at the directly owned
+  instance layer. The selected compiler supplies its base, target route and any existing
+  component group. Source-owned lowering preserves existing claims and prepares the exact
+  transaction and inverse. A same-value inherited write is still an explicit claim. The Host
+  checks the resulting selected composition under the original source observation before review
+  and revalidates that observation before commit. Raw Revert continues to serve unresolved intent.
 - Complete instance conversion is a dedicated source-owned preparation, not an arbitrary populated
   record patch. It compiles the actual selected instance, allocates persistent local IDs and lowers
   one exact declaration/record transaction. Its closed replay footprint remains with the same

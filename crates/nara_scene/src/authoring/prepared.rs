@@ -55,7 +55,8 @@ impl PreparedSceneAuthoringEdit {
         })
     }
 
-    pub(super) fn checked_retained_bytes(&self) -> Option<usize> {
+    #[doc(hidden)]
+    pub fn checked_retained_bytes(&self) -> Option<usize> {
         let candidate = &self.candidate;
         std::mem::size_of::<Self>()
             .checked_add(super::prefab_conversion::retention::document_dynamic_bytes(
@@ -217,7 +218,10 @@ impl SceneAuthoringSession {
 pub struct PreparedPrefabAuthoringEdit {
     revision: SceneAuthoringRevision,
     history_cost: SceneAuthoringHistoryCost,
-    candidate: PreparedPrefabAuthoringPatch,
+    document: Arc<PrefabDocument>,
+    state: AuthoringDocumentState,
+    patch: ScenePatchDocument,
+    report: ScenePatchReport,
     scope: AuthoringHistoryScope,
 }
 
@@ -236,41 +240,36 @@ impl PreparedPrefabAuthoringEdit {
         let AuthoringHistoryScope::PrefabConversion(footprint) = &scope else {
             unreachable!()
         };
-        let mut candidate = crate::authoring_decode::prepare_prefab_conversion_patch_with_work(
+        let candidate = crate::authoring_decode::prepare_prefab_conversion_patch_with_work(
             document, state, patch, footprint, work,
         )?;
-        let (report, history_cost) =
-            AuthoringHistory::admit_report(limits, &candidate.patch, candidate.report, &scope)?;
-        candidate.report = report;
-        Ok(Self {
-            revision,
-            history_cost,
-            candidate,
-            scope,
-        })
+        Self::retain(revision, limits, candidate, scope)
     }
 
-    pub(super) fn checked_retained_bytes(&self) -> Option<usize> {
-        let candidate = &self.candidate;
+    #[doc(hidden)]
+    pub fn checked_retained_bytes(&self) -> Option<usize> {
         std::mem::size_of::<Self>()
+            .checked_add(std::mem::size_of::<PrefabDocument>() + 2 * std::mem::size_of::<usize>())?
+            .checked_add(crate::authoring_decode::retained_prefab_inputs_bytes(
+                &self.document.inputs,
+            )?)?
             .checked_add(super::prefab_conversion::retention::document_dynamic_bytes(
-                &candidate.document.placements,
-                &candidate.document.entities,
-                candidate.state.file_limits(),
+                &self.document.placements,
+                &self.document.entities,
+                self.state.file_limits(),
             )?)?
             .checked_add(
-                candidate
-                    .state
+                self.state
                     .checked_retained_bytes()?
                     .checked_sub(std::mem::size_of::<AuthoringDocumentState>())?,
             )?
             .checked_add(super::prefab_conversion::retention::patch_dynamic_bytes(
-                &candidate.patch,
+                &self.patch,
             )?)?
             .checked_add(super::prefab_conversion::retention::patch_dynamic_bytes(
-                candidate.report.inverse.as_ref()?,
+                self.report.inverse.as_ref()?,
             )?)?
-            .checked_add(candidate.report.diagnostics.retained_bytes())?
+            .checked_add(self.report.diagnostics.retained_bytes())?
             .checked_add(self.scope.retained_bytes())
     }
 
@@ -284,7 +283,7 @@ impl PreparedPrefabAuthoringEdit {
         scope: AuthoringHistoryScope,
     ) -> Result<Self, ScenePatchReport> {
         AuthoringHistory::admit_input(limits, patch, &scope)?;
-        let mut candidate = match &scope {
+        let candidate = match &scope {
             AuthoringHistoryScope::Ordinary => {
                 prepare_prefab_authoring_patch(document, state, patch, false)
             }
@@ -294,13 +293,30 @@ impl PreparedPrefabAuthoringEdit {
                 )
             }
         }?;
+        Self::retain(revision, limits, candidate, scope)
+    }
+
+    fn retain(
+        revision: SceneAuthoringRevision,
+        limits: SceneAuthoringHistoryLimits,
+        candidate: PreparedPrefabAuthoringPatch,
+        scope: AuthoringHistoryScope,
+    ) -> Result<Self, ScenePatchReport> {
+        let PreparedPrefabAuthoringPatch {
+            document,
+            state,
+            patch,
+            report,
+        } = candidate;
         let (report, history_cost) =
-            AuthoringHistory::admit_report(limits, &candidate.patch, candidate.report, &scope)?;
-        candidate.report = report;
+            AuthoringHistory::admit_report(limits, &patch, report, &scope)?;
         Ok(Self {
             revision,
             history_cost,
-            candidate,
+            document: Arc::new(document),
+            state,
+            patch,
+            report,
             scope,
         })
     }
@@ -312,7 +328,13 @@ impl PreparedPrefabAuthoringEdit {
 
     #[must_use]
     pub fn document(&self) -> &PrefabDocument {
-        &self.candidate.document
+        &self.document
+    }
+
+    /// Shares the unpublished document with an exact-source compiler.
+    #[doc(hidden)]
+    pub fn shared_document(&self) -> Arc<PrefabDocument> {
+        Arc::clone(&self.document)
     }
 
     /// Borrows an actual entity from this candidate and its admitted Schema projection.
@@ -320,20 +342,17 @@ impl PreparedPrefabAuthoringEdit {
         &self,
         entity: &SceneEntityId,
     ) -> Result<AuthoringEntityView<'_>, AuthoringReadError> {
-        self.candidate
-            .state
-            .entity_view(&self.candidate.document.entities, entity)
+        self.state.entity_view(&self.document.entities, entity)
     }
 
     #[must_use]
     pub fn patch(&self) -> &ScenePatchDocument {
-        &self.candidate.patch
+        &self.patch
     }
 
     #[must_use]
     pub fn inverse(&self) -> &ScenePatchDocument {
-        self.candidate
-            .report
+        self.report
             .inverse
             .as_ref()
             .expect("prepared history owns its inverse")
@@ -380,22 +399,24 @@ impl PrefabAuthoringSession {
         prepared: PreparedPrefabAuthoringEdit,
     ) -> ScenePatchReport {
         if self.revision() != prepared.revision
-            || self.authoring_schema_basis() != Some(prepared.candidate.state.schema_basis())
+            || self.authoring_schema_basis() != Some(prepared.state.schema_basis())
         {
             return stale_basis();
         }
-        let PreparedPrefabAuthoringPatch {
+        let PreparedPrefabAuthoringEdit {
             document,
             state,
             report,
+            history_cost,
+            scope,
             ..
-        } = prepared.candidate;
+        } = prepared;
         let report = self.history.publish_forward_with_scope(
             &mut self.document,
             document,
             report,
-            prepared.history_cost,
-            prepared.scope,
+            history_cost,
+            scope,
         );
         if report.applied {
             self.authority = AuthoringSessionAuthority::Published(Arc::new(state));

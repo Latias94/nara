@@ -271,6 +271,27 @@ pub(crate) struct AuthoringSourceCaptureInputs {
 }
 
 impl AuthoringSourceCaptureInputs {
+    pub(crate) fn retain_prior_inspection(
+        &mut self,
+        prior: &AuthoringSourceValidation,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        let bytes = prior
+            .retained_capture_bytes
+            .checked_sub(prior.schema.budget.retained_candidate_bytes)
+            .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+        let handles = checked_product(
+            prior.physical_count()?,
+            FileSourceObservation::retained_handle_capacity(),
+        )?;
+        let retained = checked_sum([self.worker_retained_bytes, bytes])?;
+        let mut budget = self.budget;
+        budget.charge_source_bytes(0, 0, 0, bytes)?;
+        budget.retain_open_handles(handles)?;
+        self.budget = budget;
+        self.worker_retained_bytes = retained;
+        Ok(())
+    }
+
     pub(crate) fn capture_source_observation(
         &mut self,
         cost: FileSourceObservationCost,
@@ -696,6 +717,15 @@ struct OpenedSourceObservation {
 }
 
 impl AuthoringSourceValidation {
+    /// A candidate composed from the same physical file facts and reference lookups.
+    pub(crate) fn has_same_source_inputs(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.schema, &other.schema)
+            && self
+                .source_observations
+                .has_same_inputs(&other.source_observations)
+            && self.stable_lookups == other.stable_lookups
+    }
+
     /// Checks retained schema handles; historical sources are collected separately.
     pub(crate) fn source_object_in_use(&self, candidate: &FileCapability) -> Result<bool, FsError> {
         if self.schema.source_object_in_use(candidate)? {

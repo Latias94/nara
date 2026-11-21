@@ -3,7 +3,8 @@
 #[cfg(test)]
 use nara_asset::AssetRef;
 use nara_reflect::{
-    ComponentPropertyKey, ComponentPropertyStep, ComponentValue, ComponentValueCost,
+    ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep, ComponentTypeId,
+    ComponentValue, ComponentValueCost,
 };
 
 use super::{
@@ -15,6 +16,8 @@ use crate::{
     PrefabInstance, PrefabInstanceBinding, SceneComponentRecord, SceneEntityPlacement,
     ScenePlacementParent, ScenePlacementSlot, SourceDocumentKey, SourceDocumentOrigin,
 };
+
+const ROOT_DEPTH: usize = 1;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct PrefabOverlayCost {
@@ -78,7 +81,7 @@ impl PrefabOverlayCostLimits {
         observer: &mut dyn SourceCostObserver,
     ) -> Option<PrefabOverlayCost> {
         CostWalker::new(self, Some(observer))
-            .walk(Frame::Instance(instance, 1))
+            .walk(Frame::Instance(instance, ROOT_DEPTH))
             .ok()
     }
 
@@ -90,6 +93,35 @@ impl PrefabOverlayCostLimits {
         let mut walker = CostWalker::new(self, Some(observer));
         walker.placements(placements, 1).ok()?;
         Some(walker.cost)
+    }
+
+    #[cfg(feature = "serde")]
+    pub(crate) fn property_set_delta_cost(
+        self,
+        new_overlay_base: Option<&SourceDocumentKey>,
+        new_group: Option<(&PrefabEntityTarget, &ComponentTypeId)>,
+        new_claim: Option<&ComponentPropertyPath>,
+        value: &ComponentValue,
+    ) -> Result<PrefabOverlayCost, PrefabOverlayCostError> {
+        let mut walker = CostWalker::new(self, None);
+        let overlay_depth = ROOT_DEPTH + 1;
+        let component_depth = overlay_depth + 1;
+        let claim_depth = component_depth + 1;
+        if let Some(base) = new_overlay_base {
+            walker.node(overlay_depth)?;
+            walker.overlay_base(base, overlay_depth)?;
+        }
+        if let Some((target, component)) = new_group {
+            walker.declarations(1)?;
+            walker.component_header(component_depth)?;
+            walker.property_group_header(target, component, component_depth)?;
+        }
+        if let Some(property) = new_claim {
+            walker.declarations(1)?;
+            walker.property_claim_header(property, claim_depth)?;
+        }
+        walker.value(value, claim_depth + 1)?;
+        Ok(walker.cost)
     }
 }
 
@@ -118,7 +150,7 @@ pub(crate) fn prefab_instance_cost(
     instance: &PrefabInstance,
     limits: PrefabOverlayCostLimits,
 ) -> Result<PrefabOverlayCost, PrefabOverlayCostError> {
-    CostWalker::new(limits, None).walk(Frame::Instance(instance, 1))
+    CostWalker::new(limits, None).walk(Frame::Instance(instance, ROOT_DEPTH))
 }
 
 /// `Ok(None)` is scratch refusal; the outer cost owner retains the callback's typed error.
@@ -134,7 +166,7 @@ pub(crate) fn prefab_instance_cost_with_admission(
             refused |= !accepted;
             accepted
         };
-        CostWalker::new(limits, Some(&mut callback)).walk(Frame::Instance(instance, 1))
+        CostWalker::new(limits, Some(&mut callback)).walk(Frame::Instance(instance, ROOT_DEPTH))
     };
     if refused { Ok(None) } else { result.map(Some) }
 }
@@ -240,8 +272,7 @@ impl<'a> CostWalker<'a> {
                     {
                         return Err(self.scratch_refusal());
                     }
-                    self.declarations(1)?;
-                    self.source(&overlay.base, depth.saturating_add(1))?;
+                    self.overlay_base(&overlay.base, depth)?;
                     self.declarations(overlay.additions.len())?;
                     add(
                         &mut self.cost.entities,
@@ -328,9 +359,7 @@ impl<'a> CostWalker<'a> {
         intent: &PrefabComponentIntent,
         depth: usize,
     ) -> Result<(), PrefabOverlayCostError> {
-        self.node(depth)?;
-        self.components(1)?;
-        self.bytes(1)?;
+        self.component_header(depth)?;
         match intent {
             PrefabComponentIntent::Set {
                 target,
@@ -357,31 +386,13 @@ impl<'a> CostWalker<'a> {
                 claims,
                 ..
             } => {
-                self.target(target, depth)?;
-                self.bytes(component.as_str().len().saturating_add(4))?;
+                self.property_group_header(target, component, depth)?;
                 self.declarations(claims.len())?;
+                let claim_depth = depth.saturating_add(1);
                 for claim in claims {
-                    self.node(depth.saturating_add(1))?;
-                    self.bytes(claim.path.root.as_str().len())?;
-                    for step in &claim.path.steps {
-                        self.node(depth.saturating_add(2))?;
-                        self.bytes(1)?;
-                        self.bytes(match step {
-                            ComponentPropertyStep::Member(member) => member.as_str().len(),
-                            ComponentPropertyStep::MapEntry(key) => key.len(),
-                            ComponentPropertyStep::ListItem { by, key } => {
-                                by.as_str().len().saturating_add(match key {
-                                    ComponentPropertyKey::String(key) => key.len(),
-                                    ComponentPropertyKey::I64(_) | ComponentPropertyKey::U64(_) => {
-                                        8
-                                    }
-                                })
-                            }
-                        })?;
-                    }
-                    self.bytes(1)?;
+                    self.property_claim_header(&claim.path, claim_depth)?;
                     if let PrefabPropertyIntent::Set(value) = &claim.intent {
-                        self.value(value, depth.saturating_add(2))?;
+                        self.value(value, claim_depth.saturating_add(1))?;
                     }
                 }
             }
@@ -392,6 +403,55 @@ impl<'a> CostWalker<'a> {
             return Err(self.scratch_refusal());
         }
         Ok(())
+    }
+
+    fn overlay_base(
+        &mut self,
+        base: &SourceDocumentKey,
+        depth: usize,
+    ) -> Result<(), PrefabOverlayCostError> {
+        self.declarations(1)?;
+        self.source(base, depth.saturating_add(1))
+    }
+
+    fn component_header(&mut self, depth: usize) -> Result<(), PrefabOverlayCostError> {
+        self.node(depth)?;
+        self.components(1)?;
+        self.bytes(1)
+    }
+
+    fn property_group_header(
+        &mut self,
+        target: &PrefabEntityTarget,
+        component: &ComponentTypeId,
+        depth: usize,
+    ) -> Result<(), PrefabOverlayCostError> {
+        self.target(target, depth)?;
+        self.bytes(component.as_str().len().saturating_add(4))
+    }
+
+    fn property_claim_header(
+        &mut self,
+        path: &ComponentPropertyPath,
+        depth: usize,
+    ) -> Result<(), PrefabOverlayCostError> {
+        self.node(depth)?;
+        self.bytes(path.root.as_str().len())?;
+        for step in &path.steps {
+            self.node(depth.saturating_add(1))?;
+            self.bytes(1)?;
+            self.bytes(match step {
+                ComponentPropertyStep::Member(member) => member.as_str().len(),
+                ComponentPropertyStep::MapEntry(key) => key.len(),
+                ComponentPropertyStep::ListItem { by, key } => {
+                    by.as_str().len().saturating_add(match key {
+                        ComponentPropertyKey::String(key) => key.len(),
+                        ComponentPropertyKey::I64(_) | ComponentPropertyKey::U64(_) => 8,
+                    })
+                }
+            })?;
+        }
+        self.bytes(1)
     }
 
     fn target(

@@ -1077,7 +1077,7 @@ impl EditorApplication {
     }
 
     /// Borrows the completed observation of one selected Prefab occurrence.
-    /// The file evidence is rechecked when preparing and committing a Revert.
+    /// Source edits recheck the original file and working-copy evidence.
     pub fn prefab_effective_observation(
         &self,
         inspection: nara::tooling::EditorPrefabInspectionId,
@@ -1090,15 +1090,17 @@ impl EditorApplication {
             .prefab_effective_observation(inspection)
     }
 
-    /// Borrows the existing source owner's unpublished Revert for review.
-    pub fn prefab_inspection_revert_patch(
+    /// Borrows the source owner's unpublished inspection edit and its candidate queries.
+    pub fn prefab_inspection_review(
         &self,
         inspection: nara::tooling::EditorPrefabInspectionId,
-    ) -> Result<&nara::scene::ScenePatchDocument, nara::tooling::EditorPrefabInspectionRejection>
-    {
+    ) -> Result<
+        &nara::tooling::PreparedEditorDocumentEdit,
+        nara::tooling::EditorPrefabInspectionRejection,
+    > {
         self.authoring_query_session()
             .map_err(prefab_inspection_query_rejection)?
-            .prefab_inspection_revert_patch(inspection)
+            .prefab_inspection_review(inspection)
     }
 
     /// Prepares Revert of the selected claim at its original document basis and instance path.

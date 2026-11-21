@@ -42,6 +42,35 @@ impl SourceObservation {
 impl SourceObservations {
     const STORAGE_BYTES: usize = size_of::<Self>() + 2 * size_of::<usize>();
 
+    pub(super) fn has_same_inputs(&self, other: &Self) -> bool {
+        self.entries.len() == other.entries.len()
+            && self.entries.iter().zip(&other.entries).all(
+                |((path, expected), (actual_path, actual))| {
+                    if path != actual_path
+                        || expected.native().map(AdmittedNativeDocumentSource::key)
+                            != actual.native().map(AdmittedNativeDocumentSource::key)
+                    {
+                        return false;
+                    }
+                    match (expected, actual) {
+                        (
+                            SourceObservation::Original { source, .. },
+                            SourceObservation::Original { source: actual, .. },
+                        ) => source.same_file_observation(actual),
+                        (
+                            SourceObservation::ReadContent { source, .. },
+                            SourceObservation::ReadContent { source: actual, .. },
+                        ) => {
+                            source.kind() == actual.kind()
+                                && source.digest() == actual.digest()
+                                && source.encoded_bytes() == actual.encoded_bytes()
+                        }
+                        _ => false,
+                    }
+                },
+            )
+    }
+
     pub(super) fn new(
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<Self, AuthoringProjectSourceAdmissionError> {

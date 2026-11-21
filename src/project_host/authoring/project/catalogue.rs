@@ -16,12 +16,14 @@ mod frozen;
 mod tests;
 
 /// Source binding observations do not certify decoded payload or compound Product membership.
+#[derive(PartialEq, Eq)]
 pub(super) enum ReferenceObservation {
     StableLookup(StableLookupObservation),
     ResolvedTarget(ResolvedTargetObservation),
 }
 
 /// One demanded global identity observation, separate from its reader and working-copy evidence.
+#[derive(PartialEq, Eq)]
 pub(super) struct StableLookupObservation {
     stable_id: StableAssetId,
     // An unresolved result remains provisional; capture still requires recapture.
@@ -34,6 +36,7 @@ pub(super) struct StableLookupObservation {
 
 /// A Deferred target keeps its canonical reader binding without observing its document body.
 /// Its key and sidecar content are validated by the capture's separate metadata source facts.
+#[derive(PartialEq, Eq)]
 pub(super) struct ResolvedTargetObservation {
     kind: AuthoringSourceKind,
     project_path: ProjectPath,

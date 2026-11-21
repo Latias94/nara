@@ -27,6 +27,10 @@ use crate::{
     draft::SceneDraft,
 };
 
+mod property_set;
+
+pub use property_set::{AuthoringPrefabPropertySetError, ObservedPrefabPropertySet};
+
 /// Compiles an actual source's selected directly owned Prefab instance for authoring reads.
 /// The loader receives only requests made by structural and surviving effective-value demand.
 pub fn try_inspect_authoring_prefab_instance_with_loader<F, E>(
@@ -571,6 +575,8 @@ pub(crate) struct InspectedComponent {
     pub(crate) claims: Vec<AuthoringPrefabPropertyClaim>,
     pub(crate) defaulted_roots: Vec<ComponentFieldId>,
     pub(crate) payload: Option<ExpandedSceneComponent>,
+    pub(crate) selected_overlay_intent: Option<usize>,
+    pub(crate) accepts_selected_overlay_properties: bool,
 }
 
 impl CapturedPrefabInspection {

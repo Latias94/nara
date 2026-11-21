@@ -1309,15 +1309,21 @@ only that value under a separate allowance and gives local references their orig
 routes. The property exposes its contributing record and the claim controlling the selector.
 An explicit Set equal to its inherited value still appears as a claim.
 
-For a property with `revert_claim()`, submit `PrepareRevert` with the same inspection ID,
-the exact target, component and property path, and `PrefabDeclarationLimits`. Use the default
-for ordinary declarations. A tool handling large declarations can select a bounded allowance
-with `PrefabDeclarationLimits::new`. Revert charges both complete expected and replacement
-declarations and reports `BudgetExceeded` if they exceed the selected allowance. Once the frame
-reports `Review`, borrow `prefab_inspection_revert_patch` and submit `Commit` or `Cancel`.
-Preparation and Commit verify the files and open Prefab working copies used by the original
-inspection. A terminal `Reverted` result carries the new revision. Acknowledge it and inspect again
-to read the newly inherited value. Undo, Redo and Save remain ordinary Workspace operations.
+To set an editable scalar at that address, submit `PrepareSet` with the same inspection ID,
+the target, component and property path, the new `ComponentValue`, and `PrefabDeclarationLimits`.
+An equal-value Set deliberately pins the inherited value. For a property with `revert_claim()`,
+use `PrepareRevert` with the same address and limits to remove exactly that claim. Use the default
+limits for ordinary declarations. A tool handling large declarations can select a bounded
+allowance with `PrefabDeclarationLimits::new`. An identical Set already stored at the address
+returns `AlreadySet` with the current revision and history untouched. Specialized UI Prefab
+field edits use their own authoring route.
+
+When the frame reports `Review`, borrow `prefab_inspection_review`. Use `preview()` to discover
+candidate claims or `patch()` and `inverse()` to review the source changes, then submit `Commit`
+or `Cancel` for the same inspection. Preparation and Commit verify the files and open Prefab working
+copies used by the inspection. The terminal `Set` or `Reverted` carries the new revision.
+Acknowledge it and inspect again to read the resulting effective value. Undo, Redo and Save
+remain ordinary Workspace operations.
 When inspection alone is enough, submit `Cancel` and acknowledge its result before starting
 another inspection.
 

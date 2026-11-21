@@ -56,6 +56,25 @@ impl AuthoringProjectSessionSnapshot {
 }
 
 impl AuthoringPrefabCaptureRequest {
+    /// Binds a Prefab candidate to every acquisition of its original containing source.
+    /// The original file observation and working-copy revision still fence publication.
+    pub(crate) fn use_containing_candidate(
+        &mut self,
+        document: Arc<nara_scene::PrefabDocument>,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        let mismatch = || AuthoringProjectSourceAdmissionError::DocumentSourceMismatch;
+        let mut matching = self.open_prefabs.iter_mut().filter(|candidate| {
+            &candidate.source_key == self.source.source_key()
+                && candidate.project_path.as_ref() == self.source.relative_path()
+        });
+        let root = matching.next().ok_or_else(mismatch)?;
+        if matching.next().is_some() {
+            return Err(mismatch());
+        }
+        root.document = document;
+        Ok(())
+    }
+
     /// Registers additional root/request retention not already admitted in `inputs`.
     /// The prepared result has its own compiler-reservation transfer at completion.
     pub(crate) fn retain_root_input(&mut self, bytes: usize) {

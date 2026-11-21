@@ -79,7 +79,8 @@ where
             )?;
             let mut components = BTreeMap::new();
             for (component, references) in programs {
-                let observation = self.capture_inspected_component(&mut result, node, component)?;
+                let observation =
+                    self.capture_inspected_component(&mut result, selected_scope, node, component)?;
                 components.insert(component.clone(), observation);
                 for origin in references.value.origins.values() {
                     if let Some(ResolvedReference::Local(target)) = &origin.resolved {
@@ -132,6 +133,7 @@ where
     fn capture_inspected_component(
         &mut self,
         result: &mut CapturedPrefabInspection,
+        selected_scope: ScopeId,
         node: NodeId,
         component: &ComponentTypeId,
     ) -> Result<InspectedComponent, SceneCompilationFailure> {
@@ -242,6 +244,16 @@ where
             claims,
             defaulted_roots,
             payload: None,
+            selected_overlay_intent: program
+                .properties
+                .iter()
+                .find_map(|&(scope, index)| (scope == selected_scope).then_some(index)),
+            accepts_selected_overlay_properties: match program.record {
+                Record::Source { scope, .. } => scope != 0,
+                Record::Addition { scope, .. } | Record::Set { scope, .. } => {
+                    scope != selected_scope
+                }
+            },
         })
     }
 

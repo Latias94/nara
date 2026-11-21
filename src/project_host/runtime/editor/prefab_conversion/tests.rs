@@ -725,13 +725,24 @@ impl Gate {
 
 #[test]
 fn shared_selected_source_capture_keeps_inspection_worker_custody_during_close() {
+    for prepare_set in [false, true] {
+        close_while_inspection_worker_holds_source(prepare_set);
+    }
+}
+
+fn close_while_inspection_worker_holds_source(prepare_set: bool) {
+    use nara_reflect::ComponentPropertyPath;
+
     let project = Project::new(2, false);
     let mut editor = project.editor();
     let document = open_source(&mut editor, CONTAINER);
     let before = source_state(&editor, document);
     let basis = editor.document_query_basis(document).unwrap();
     let (mut gate, worker_gate) = Gate::worker_gate();
-    editor.prefab_inspection.next_inspect_gate = Some(worker_gate);
+    let mut worker_gate = Some(worker_gate);
+    if !prepare_set {
+        editor.prefab_inspection.next_inspect_gate = worker_gate.take();
+    }
     let admitted = inspection(
         &mut editor,
         InspectAction::Inspect {
@@ -746,6 +757,39 @@ fn shared_selected_source_capture_keeps_inspection_worker_custody_during_close()
     else {
         panic!("effective inspection was not admitted: {admitted:?}");
     };
+    if prepare_set {
+        wait(&mut editor, |editor| {
+            editor.prefab_inspection.view().phase == InspectPhase::Ready
+        });
+        let target = editor
+            .prefab_effective_observation(id)
+            .unwrap()
+            .targets()
+            .find(|target| target.entity.entity().as_str() == "leaf-0")
+            .unwrap()
+            .clone();
+        editor.prefab_inspection.next_inspect_gate = worker_gate.take();
+        assert_eq!(
+            inspection(
+                &mut editor,
+                InspectAction::PrepareSet {
+                    inspection: id,
+                    address: EditorPrefabPropertyAddress {
+                        entity: target,
+                        component: payload_type(),
+                        property: ComponentPropertyPath::new(ComponentFieldId::new("amount")),
+                    },
+                    value: ComponentValue::U64(42),
+                    limits: Default::default(),
+                },
+            ),
+            InspectOutcome::Accepted {
+                inspection: id,
+                phase: InspectPhase::PreparingEdit
+            }
+        );
+        editor.drive_editor_frame(Duration::ZERO);
+    }
     gate.wait_entered();
     assert!(
         editor
@@ -850,12 +894,12 @@ fn effective_revert_revalidates_disk_after_dispatch_before_the_owner_consumes_it
             ),
             InspectOutcome::Accepted {
                 inspection: operation,
-                phase: InspectPhase::PreparingRevert
+                phase: InspectPhase::PreparingEdit
             }
         );
         if commit {
             editor.drive_editor_frame(Duration::ZERO);
-            assert!(editor.prefab_inspection_revert_patch(operation).is_ok());
+            assert!(editor.prefab_inspection_review(operation).is_ok());
             assert_eq!(
                 inspection(
                     &mut editor,
@@ -888,6 +932,100 @@ fn effective_revert_revalidates_disk_after_dispatch_before_the_owner_consumes_it
         assert_eq!(source_state(&editor, document), before);
         close(&mut editor);
     }
+}
+
+#[test]
+fn effective_set_accepts_identical_replacements_for_content_only_dependencies_at_both_fences() {
+    use nara_reflect::ComponentPropertyPath;
+
+    let project = Project::new(1, false);
+    let mut editor = project.editor();
+    let document = open_source(&mut editor, CONTAINER);
+    let basis = editor.document_query_basis(document).unwrap();
+    let InspectOutcome::Accepted {
+        inspection: operation,
+        ..
+    } = inspection(
+        &mut editor,
+        InspectAction::Inspect {
+            basis: basis.clone(),
+            anchor: id("anchor"),
+        },
+    )
+    else {
+        panic!("the original effective inspection must start");
+    };
+    wait(&mut editor, |editor| {
+        !editor.prefab_inspection.work_pending()
+    });
+    let target = editor
+        .prefab_effective_observation(operation)
+        .unwrap()
+        .targets()
+        .find(|target| target.entity.entity().as_str() == "leaf-0")
+        .unwrap()
+        .clone();
+    let file = project.root.join(BASE);
+    let bytes = fs::read(&file).unwrap();
+    let replace = |name| {
+        let replacement = file.with_file_name(name);
+        fs::write(&replacement, &bytes).unwrap();
+        fs::rename(replacement, &file).unwrap();
+    };
+    replace("first-replacement.tmp");
+    assert_eq!(
+        inspection(
+            &mut editor,
+            InspectAction::PrepareSet {
+                inspection: operation,
+                address: EditorPrefabPropertyAddress {
+                    entity: target,
+                    component: payload_type(),
+                    property: ComponentPropertyPath::new(ComponentFieldId::new("amount")),
+                },
+                value: ComponentValue::U64(42),
+                limits: Default::default(),
+            },
+        ),
+        InspectOutcome::Accepted {
+            inspection: operation,
+            phase: InspectPhase::PreparingEdit
+        }
+    );
+    wait(&mut editor, |editor| {
+        !editor.prefab_inspection.work_pending()
+    });
+    assert!(
+        editor.prefab_inspection_review(operation).is_ok(),
+        "{:?}",
+        editor.prefab_inspection.view()
+    );
+    replace("second-replacement.tmp");
+    assert_eq!(
+        inspection(
+            &mut editor,
+            InspectAction::Commit {
+                inspection: operation
+            }
+        ),
+        InspectOutcome::Accepted {
+            inspection: operation,
+            phase: InspectPhase::Validating
+        }
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    let committed = editor.document_query_basis(document).unwrap().revision;
+    assert_ne!(committed, basis.revision);
+    assert_eq!(
+        editor.prefab_inspection.view().result,
+        Some(InspectResult::Set {
+            inspection: operation,
+            document,
+            revision: committed
+        })
+    );
+    assert_eq!(fs::read(file).unwrap(), bytes);
+    close(&mut editor);
 }
 
 impl Drop for Gate {
