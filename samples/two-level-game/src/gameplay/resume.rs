@@ -3,6 +3,7 @@
 mod capture;
 #[cfg(feature = "desktop")]
 mod desktop;
+mod processed;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -27,7 +28,11 @@ use nara::{
 use super::{GamePhase, Progress, Session, fail, player, travel};
 use crate::{
     levels::LevelId,
-    resume::{LevelContentStamp, ResumeError, ResumeState, decode_resume, encode_resume},
+    resume::{
+        LevelContentStamp, ResumeCompatibility, ResumeError, ResumeState, RuntimeTimeState,
+        decode_resume, encode_resume,
+        processed::{ProcessedResumeError, decode_processed_resume},
+    },
 };
 
 #[cfg(feature = "desktop")]
@@ -37,7 +42,9 @@ pub use capture::capture_resume;
 pub(crate) use capture::capture_world;
 #[cfg(feature = "desktop")]
 pub use desktop::restore_desktop_resume;
+pub use processed::{capture_processed_resume, restore_processed_resume};
 pub(super) const RESTORE_STATE: &str = "two-level-game.resume-state";
+const RESUME_SOURCE: &str = "two-level-game.resume";
 
 /// Exact reconstruction refusal. A separate candidate never modifies the retained incumbent.
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +56,8 @@ pub enum GameResumeError {
     Desktop(#[from] DesktopControlError),
     #[error(transparent)]
     Format(#[from] ResumeError),
+    #[error(transparent)]
+    ProcessedFormat(#[from] ProcessedResumeError),
     #[error("game state is not eligible for reconstruction: {0}")]
     Ineligible(String),
 }
@@ -58,9 +67,14 @@ struct ResumeControl {
     configuration: [u8; 32],
     unsupported: Vec<String>,
     levels: BTreeMap<LevelId, LevelContentStamp>,
-    pending: Option<ResumeState>,
+    pending: Option<ResumeActivation>,
     restored: bool,
     rejected: bool,
+}
+
+struct ResumeActivation {
+    game: ResumeState<()>,
+    source: Option<ResumeCompatibility>,
 }
 
 pub(super) fn install(app: &mut App) -> Result<(), PluginError> {
@@ -69,17 +83,16 @@ pub(super) fn install(app: &mut App) -> Result<(), PluginError> {
 }
 
 pub(super) fn record_configuration(app: &mut App) -> Result<(), PluginError> {
-    if !app.world().resource::<Session>().local_player {
-        return Ok(());
-    }
+    let local_player = app.world().resource::<Session>().local_player;
     let configuration = app.configuration_fingerprint().as_bytes();
     let unsupported = app
         .installed_plugins()
         .filter(|declaration| {
-            let supported = supported_service(declaration.id.as_str());
+            let supported = supported_service(declaration.id.as_str(), local_player);
             #[cfg(all(windows, feature = "audio-cpal", feature = "local-player"))]
             let supported = supported
-                || (declaration.id == crate::audio::AUDIO_PLUGIN_ID
+                || (local_player
+                    && declaration.id == crate::audio::AUDIO_PLUGIN_ID
                     && crate::audio::development_reset_installed(app.world()));
             !supported
         })
@@ -91,7 +104,7 @@ pub(super) fn record_configuration(app: &mut App) -> Result<(), PluginError> {
     Ok(())
 }
 
-fn supported_service(id: &str) -> bool {
+fn supported_service(id: &str, local_player: bool) -> bool {
     matches!(
         id,
         "two-level-game.exploration"
@@ -105,29 +118,35 @@ fn supported_service(id: &str) -> bool {
             | "nara.tasks"
             | "nara.asset"
             | "nara.transform"
-            | "nara.input"
             | "nara.gameplay.commands"
-            | "nara.material2d"
-            | "nara.render-components"
-            | "nara.window"
-            | "nara.render"
-            | "nara.render-wgpu.capture"
-            | "nara.render-wgpu.window-presentation"
-            | "nara.render-wgpu.stock-capture"
-            | "nara.render-wgpu.stock-policy"
-            | "nara.render-wgpu.stock-sprite"
-            | "nara.sprite-render"
-            | "nara.image.prepare"
-            | "nara.sprite"
-            | "nara.tilemap"
-            | "nara.tilemap.assets"
-            | "nara.image"
             | "nara.startup-scene-activation"
-            | "two-level-game.input"
-            | "two-level-game.replay"
-            | "two-level-game.test.desktop-capture"
-            | "two-level-game.development.presentation"
-    )
+    ) || if local_player {
+        matches!(
+            id,
+            "nara.input"
+                | "nara.material2d"
+                | "nara.render-components"
+                | "nara.window"
+                | "nara.render"
+                | "nara.render-wgpu.capture"
+                | "nara.render-wgpu.window-presentation"
+                | "nara.render-wgpu.stock-capture"
+                | "nara.render-wgpu.stock-policy"
+                | "nara.render-wgpu.stock-sprite"
+                | "nara.sprite-render"
+                | "nara.image.prepare"
+                | "nara.sprite"
+                | "nara.tilemap"
+                | "nara.tilemap.assets"
+                | "nara.image"
+                | "two-level-game.input"
+                | "two-level-game.replay"
+                | "two-level-game.test.desktop-capture"
+                | "two-level-game.development.presentation"
+        )
+    } else {
+        id == "nara.server-time-policy"
+    }
 }
 
 #[cfg(feature = "local-player")]
@@ -141,7 +160,9 @@ pub(super) fn stamp(level: LevelId, source: ProjectSceneContentStamp) -> LevelCo
 
 #[cfg(feature = "local-player")]
 pub(super) fn remember_current(world: &mut World) {
-    if let Some(source) = CurrentScene::get(world).and_then(|view| view.source_content_stamp()) {
+    if world.resource::<Session>().local_player
+        && let Some(source) = CurrentScene::get(world).and_then(|view| view.source_content_stamp())
+    {
         world
             .resource_mut::<ResumeControl>()
             .levels
@@ -176,14 +197,8 @@ pub(super) fn required_levels(world: &World) -> Vec<LevelId> {
         .resource::<ResumeControl>()
         .pending
         .as_ref()
-        .map(|state| {
-            state
-                .compatibility
-                .levels
-                .iter()
-                .map(|record| record.level)
-                .collect()
-        })
+        .and_then(|state| state.source.as_ref())
+        .map(|source| source.levels.iter().map(|record| record.level).collect())
         .unwrap_or_default()
 }
 
@@ -191,28 +206,27 @@ pub(super) fn validate_content(
     world: &World,
     source: Option<(LevelContentStamp, [u8; 32])>,
 ) -> Result<Option<LevelContentStamp>, String> {
-    let Some((record, schema)) = source else {
-        if is_pending(world) {
-            return Err("exact reconstruction requires admitted source content facts".into());
-        }
-        return Ok(None);
-    };
     let control = world.resource::<ResumeControl>();
     if let Some(state) = &control.pending {
-        if schema != state.compatibility.schema
-            || !state
-                .compatibility
-                .levels
-                .iter()
-                .any(|expected| expected == &record)
-        {
-            return Err(format!(
-                "resume content compatibility rejected {:?}",
-                record.level
-            ));
+        match (&state.source, source) {
+            (Some(expected), Some((record, schema))) => {
+                if schema != expected.schema || !expected.levels.contains(&record) {
+                    return Err(format!(
+                        "resume content compatibility rejected {:?}",
+                        record.level
+                    ));
+                }
+            }
+            (Some(_), None) => {
+                return Err("exact reconstruction requires admitted source content facts".into());
+            }
+            (None, Some(_)) => {
+                return Err("processed reconstruction received source content".into());
+            }
+            (None, None) => {}
         }
     }
-    Ok(Some(record))
+    Ok(source.map(|(record, _)| record))
 }
 
 pub(super) fn commit_content(world: &mut World, stamps: Vec<LevelContentStamp>) {
@@ -233,14 +247,16 @@ pub(super) fn validate_prepared_placement(
 ) -> Result<(), String> {
     let control = world.resource::<ResumeControl>();
     if let Some(state) = control.pending.as_ref()
-        && state.progress.location.level.level() == level
+        && state.game.progress.location.level.level() == level
     {
-        content.collision.validate_placement(player_pose(state))?;
+        content
+            .collision
+            .validate_placement(player_pose(&state.game))?;
     }
     Ok(())
 }
 
-fn player_pose(state: &ResumeState) -> Transform2d {
+fn player_pose<C>(state: &ResumeState<C>) -> Transform2d {
     Transform2d {
         translation: Vec2::from_array(state.player.translation),
         rotation: state.player.rotation,
@@ -248,7 +264,10 @@ fn player_pose(state: &ResumeState) -> Transform2d {
     }
 }
 
-fn validate_current_placement(world: &World, state: &ResumeState) -> Result<(), GameResumeError> {
+fn validate_current_placement<C>(
+    world: &World,
+    state: &ResumeState<C>,
+) -> Result<(), GameResumeError> {
     let level = world.resource::<super::ActiveLevel>();
     if level.key().level() == state.progress.location.level.level() {
         level
@@ -304,13 +323,21 @@ pub fn request_resume(
     let bytes = encode_resume(state)?;
     session.capture(fresh_candidate)??;
     session.capture(|world| validate_current_placement(world, state))??;
-    session.restore_time_continuation(state.runtime_time.to_continuation()?)?;
+    enter_headless_resume(session, state.runtime_time, restore_command(bytes)?)
+}
+
+fn enter_headless_resume(
+    session: &mut HeadlessSession,
+    time: RuntimeTimeState,
+    command: GameplayCommandSubmission,
+) -> Result<(), GameResumeError> {
+    session.restore_time_continuation(time.to_continuation()?)?;
     if session.frame(Duration::ZERO)?.is_some() {
         return Err(GameResumeError::Ineligible(
             "candidate exited during time continuation maintenance".into(),
         ));
     }
-    session.submit(restore_command(bytes)?)?;
+    session.submit(command)?;
     if session.step()?.is_some() || session.state() != Some(RuntimeState::Paused) {
         return Err(GameResumeError::Ineligible(
             "candidate exited during reconstruction entry".into(),
@@ -324,6 +351,11 @@ pub fn request_resume(
 }
 
 fn fresh_candidate(world: &World) -> Result<(), GameResumeError> {
+    fresh_runtime(world)?;
+    capture::eligible(world)
+}
+
+fn fresh_runtime(world: &World) -> Result<(), GameResumeError> {
     if world.resource::<FixedTime>().tick() != 0
         || world.resource::<Session>().clock.ticks != 0
         || world.resource::<ResumeControl>().restored
@@ -332,7 +364,7 @@ fn fresh_candidate(world: &World) -> Result<(), GameResumeError> {
             "candidate is not a fresh game".into(),
         ));
     }
-    capture::eligible(world)
+    Ok(())
 }
 
 fn restore_command(bytes: Vec<u8>) -> Result<GameplayCommandSubmission, GameResumeError> {
@@ -343,7 +375,7 @@ fn restore_command(bytes: Vec<u8>) -> Result<GameplayCommandSubmission, GameResu
         .map_err(|error| GameResumeError::Ineligible(error.to_string()))?;
     Ok(GameplayCommandSubmission::new(
         GameplayCommandTick::new(1).unwrap(),
-        GameplayCommandIngressSource::external("two-level-game.resume").unwrap(),
+        GameplayCommandIngressSource::external(RESUME_SOURCE).unwrap(),
         GameplayCommandSourceSequence::new(1).unwrap(),
         GameplayCommandDraft::new(GameplayCommandTypeId::new(RESTORE_STATE).unwrap())
             .with_payload(payload),
@@ -354,16 +386,14 @@ pub(super) fn begin_from_command(
     world: &mut World,
     payload: &GameplayCommandPayload,
 ) -> Result<(), String> {
-    if !cfg!(feature = "local-player") || !world.resource::<Session>().local_player {
-        return Err("exact reconstruction requires the local source player".into());
-    }
+    let batch = world.resource::<GameplayCommandBatch>();
     if world.resource::<FixedTime>().tick() != 1
         || !world.resource::<RuntimeTimeSettings>().paused()
         || world.resource::<Session>().clock.ticks != 0
         || world.resource::<ResumeControl>().restored
         || world.resource::<ResumeControl>().rejected
         || is_pending(world)
-        || world.resource::<GameplayCommandBatch>().len() != 1
+        || batch.len() != 1
         || world
             .resource::<GameplayCommandQueue>()
             .stats()
@@ -372,11 +402,76 @@ pub(super) fn begin_from_command(
     {
         return Err("resume command requires one isolated fresh-runtime transaction".into());
     }
+    let command = &batch.commands()[0];
+    if command
+        .source()
+        .id()
+        .is_none_or(|id| id.as_str() != RESUME_SOURCE)
+        || !matches!(
+            command.source(),
+            nara::gameplay::GameplayCommandSource::External { .. }
+        )
+        || command.source_sequence().get() != 1
+        || command.target().is_some()
+        || payload.len() != 1
+        || !world.resource::<super::storage::Storage>().permits_resume()
+    {
+        return Err(
+            "resume command requires its original isolated ingress and no open SaveSlot".into(),
+        );
+    }
     let Some(GameplayCommandValue::String(encoded)) = payload.get("state") else {
         return Err("resume command lacks its bounded state".into());
     };
-    let state = decode_resume(encoded.as_bytes()).map_err(|error| error.to_string())?;
-    validate_current_placement(world, &state).map_err(|error| error.to_string())?;
+    let (activation, facts) = if world.resource::<Session>().local_player {
+        let state = decode_resume(encoded.as_bytes()).map_err(|error| error.to_string())?;
+        #[cfg(feature = "local-player")]
+        {
+            let current = CurrentScene::get(world)
+                .and_then(|current| current.source_content_stamp())
+                .ok_or("resume startup source facts are unavailable")?;
+            if !state
+                .compatibility
+                .levels
+                .contains(&stamp(LevelId::STARTUP, current))
+            {
+                return Err("resume startup content is incompatible".into());
+            }
+        }
+        let source = state.compatibility.clone();
+        let facts = (source.schema, source.configuration);
+        (
+            ResumeActivation {
+                game: state.with_compatibility(()),
+                source: Some(source),
+            },
+            facts,
+        )
+    } else {
+        let state =
+            decode_processed_resume(encoded.as_bytes()).map_err(|error| error.to_string())?;
+        if !state.pending.is_empty()
+            || capture::hosted_catalog(world).map_err(|error| error.to_string())?
+                != state.catalog.into()
+        {
+            return Err(
+                "processed resume requires its original Runtime catalog and isolated initializer"
+                    .into(),
+            );
+        }
+        let facts = (
+            state.game.compatibility.schema,
+            state.game.compatibility.configuration,
+        );
+        (
+            ResumeActivation {
+                game: state.game.with_compatibility(()),
+                source: None,
+            },
+            facts,
+        )
+    };
+    validate_current_placement(world, &activation.game).map_err(|error| error.to_string())?;
     let fixed = world.resource::<FixedTime>();
     let pending = fixed
         .debt()
@@ -385,7 +480,8 @@ pub(super) fn begin_from_command(
     let actual_time =
         RuntimeTimeContinuation::new(world.resource::<RuntimeTimeSettings>(), fixed, pending)
             .map_err(|error| error.to_string())?;
-    if state
+    if activation
+        .game
         .runtime_time
         .to_continuation()
         .map_err(|error| error.to_string())?
@@ -394,8 +490,7 @@ pub(super) fn begin_from_command(
         return Err("resume scheduling phase or policy is incompatible".into());
     }
     let control = world.resource::<ResumeControl>();
-    if !control.unsupported.is_empty() || control.configuration != state.compatibility.configuration
-    {
+    if !control.unsupported.is_empty() || control.configuration != facts.1 {
         return Err("resume configuration or service inventory is incompatible".into());
     }
     let registry =
@@ -403,23 +498,13 @@ pub(super) fn begin_from_command(
     let schema = registry
         .schema_composition_fingerprint()
         .map_err(|error| error.to_string())?;
-    if schema.as_bytes() != state.compatibility.schema
-        || state.clock.timestep_nanos != world.resource::<Session>().clock.timestep_nanos
+    if schema.as_bytes() != facts.0
+        || activation.game.clock.timestep_nanos != world.resource::<Session>().clock.timestep_nanos
     {
         return Err("resume Schema or game timestep is incompatible".into());
     }
-    #[cfg(feature = "local-player")]
-    {
-        let current = CurrentScene::get(world)
-            .and_then(|current| current.source_content_stamp())
-            .ok_or("resume startup source facts are unavailable")?;
-        let startup = stamp(LevelId::STARTUP, current);
-        if !state.compatibility.levels.contains(&startup) {
-            return Err("resume startup content is incompatible".into());
-        }
-    }
-    let progress = state.progress.clone();
-    world.resource_mut::<ResumeControl>().pending = Some(state);
+    let progress = activation.game.progress.clone();
+    world.resource_mut::<ResumeControl>().pending = Some(activation);
     if let Err(error) = travel::begin(world, progress, travel::TravelKind::Resume) {
         world.resource_mut::<ResumeControl>().pending = None;
         return Err(error);
@@ -436,16 +521,16 @@ pub(super) fn finish(world: &mut World) {
     {
         return;
     }
-    let Some(state) = world.resource_mut::<ResumeControl>().pending.take() else {
+    let Some(activation) = world.resource_mut::<ResumeControl>().pending.take() else {
         return;
     };
-    let observed = world
-        .resource::<ResumeControl>()
-        .levels
-        .values()
-        .copied()
-        .collect::<Vec<_>>();
-    if observed != state.compatibility.levels {
+    if let Some(source) = activation.source
+        && world
+            .resource::<ResumeControl>()
+            .levels
+            .values()
+            .ne(&source.levels)
+    {
         reject(world);
         fail(
             world,
@@ -453,6 +538,7 @@ pub(super) fn finish(world: &mut World) {
         );
         return;
     }
+    let state = activation.game;
     let Some(player) = player(world) else {
         reject(world);
         fail(world, "reconstructed player identity is unavailable".into());

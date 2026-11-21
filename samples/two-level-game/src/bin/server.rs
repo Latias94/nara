@@ -28,39 +28,35 @@ mod service;
 use std::{
     ffi::OsString,
     io::{self, Write},
+    path::PathBuf,
     process::ExitCode,
 };
 
 use serde_json::{Value, json};
 use two_level_game::{RunOptions, Scenario};
 
-const USAGE: &str = "usage: server [--serve [--save ABSOLUTE_PATH] | --verify-travel | --verify-save ABSOLUTE_PATH | --verify-restore ABSOLUTE_PATH | --verify-regions]";
+const USAGE: &str = "usage: server [--serve [--paused] [--save ABSOLUTE_PATH] | --serve --paused --resume-state ABSOLUTE_PATH | --verify-travel | --verify-save ABSOLUTE_PATH | --verify-restore ABSOLUTE_PATH | --verify-regions]";
 const RESULT: &str = "TWO_LEVEL_SERVER_RESULT";
 
 enum Invocation {
     Player(RunOptions),
-    Serve(#[cfg_attr(not(nara_cooked_player), allow(dead_code))] RunOptions),
+    Serve(#[cfg_attr(not(nara_cooked_player), allow(dead_code))] ServeOptions),
     Regions,
+}
+
+#[derive(Default)]
+#[cfg_attr(not(nara_cooked_player), allow(dead_code))]
+struct ServeOptions {
+    save_path: Option<PathBuf>,
+    paused: bool,
+    resume_state: Option<PathBuf>,
 }
 
 impl Invocation {
     fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Self, &'static str> {
         let mut arguments = arguments.into_iter().peekable();
         if arguments.next_if(|flag| flag == "--serve").is_some() {
-            let save_path = match arguments.next() {
-                None => None,
-                Some(flag) if flag == "--save" => {
-                    Some(arguments::parse_save_path(arguments.next().ok_or(USAGE)?)?)
-                }
-                Some(_) => return Err(USAGE),
-            };
-            if arguments.next().is_some() {
-                return Err(USAGE);
-            }
-            return Ok(Self::Serve(RunOptions {
-                scenario: Scenario::Interactive,
-                save_path,
-            }));
+            return ServeOptions::parse(arguments).map(Self::Serve);
         }
         if arguments
             .next_if(|flag| flag == "--verify-regions")
@@ -94,6 +90,32 @@ impl Invocation {
             Self::Serve(_) => "serve",
             Self::Regions => "regions",
         }
+    }
+}
+
+impl ServeOptions {
+    fn parse(mut arguments: impl Iterator<Item = OsString>) -> Result<Self, &'static str> {
+        let mut options = Self::default();
+        while let Some(flag) = arguments.next() {
+            if flag == "--paused" && !options.paused {
+                options.paused = true;
+            } else if flag == "--save" && options.save_path.is_none() {
+                options.save_path =
+                    Some(arguments::parse_save_path(arguments.next().ok_or(USAGE)?)?);
+            } else if flag == "--resume-state" && options.resume_state.is_none() {
+                let path = PathBuf::from(arguments.next().ok_or(USAGE)?);
+                if !path.is_absolute() {
+                    return Err("Server resume state path must be absolute");
+                }
+                options.resume_state = Some(path);
+            } else {
+                return Err(USAGE);
+            }
+        }
+        if options.resume_state.is_some() && (!options.paused || options.save_path.is_some()) {
+            return Err("Server --resume-state requires --paused and conflicts with --save");
+        }
+        Ok(options)
     }
 }
 
@@ -195,13 +217,15 @@ mod tests {
         else {
             panic!("expected sustained operation with a checkpoint");
         };
-        assert_eq!(options.scenario, Scenario::Interactive);
         assert_eq!(options.save_path, Some(path));
+        assert!(!options.paused);
+        assert!(options.resume_state.is_none());
         assert!(matches!(
             Invocation::parse(["--serve".into()]),
-            Ok(Invocation::Serve(RunOptions {
+            Ok(Invocation::Serve(ServeOptions {
                 save_path: None,
-                ..
+                paused: false,
+                resume_state: None,
             }))
         ));
         for arguments in [
@@ -211,6 +235,48 @@ mod tests {
             vec!["--verify-regions", "--serve"],
         ] {
             assert!(Invocation::parse(arguments.into_iter().map(OsString::from)).is_err());
+        }
+    }
+
+    #[test]
+    fn exact_continuation_requires_an_explicit_paused_service_without_a_save_slot() {
+        let path = std::env::temp_dir().join("server-continuation.json");
+        let Ok(Invocation::Serve(options)) = Invocation::parse([
+            "--serve".into(),
+            "--paused".into(),
+            "--resume-state".into(),
+            path.clone().into(),
+        ]) else {
+            panic!("expected a paused continuation candidate");
+        };
+        assert!(options.paused);
+        assert_eq!(options.resume_state.as_deref(), Some(path.as_path()));
+        assert!(options.save_path.is_none());
+
+        for arguments in [
+            vec![
+                "--serve".into(),
+                "--resume-state".into(),
+                path.clone().into(),
+            ],
+            vec!["--serve".into(), "--paused".into(), "--resume-state".into()],
+            vec![
+                "--serve".into(),
+                "--paused".into(),
+                "--resume-state".into(),
+                "relative.json".into(),
+            ],
+            vec![
+                "--serve".into(),
+                "--paused".into(),
+                "--resume-state".into(),
+                path.clone().into(),
+                "--save".into(),
+                path.clone().into(),
+            ],
+            vec!["--serve".into(), "--paused".into(), "--paused".into()],
+        ] {
+            assert!(Invocation::parse(arguments).is_err());
         }
     }
 }

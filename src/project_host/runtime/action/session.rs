@@ -254,12 +254,22 @@ impl HeadlessSession {
 
     /// Applies Resume at the original control boundary and completes that managed App frame.
     pub fn resume(&mut self) -> Result<Option<AppExit>, HeadlessSessionError> {
+        self.resume_with_frame(Duration::ZERO)
+    }
+
+    /// Applies Resume and uses the supplied elapsed time for the first running App frame.
+    ///
+    /// This uses one ordinary fixed-step allowance, including any debt already retained.
+    pub fn resume_with_frame(
+        &mut self,
+        real_delta: Duration,
+    ) -> Result<Option<AppExit>, HeadlessSessionError> {
         let host = self.available_host()?;
         let ticket = match host.request_runtime_control(RuntimeControl::Resume) {
             Ok(ticket) => ticket,
             Err(fault) => return Err(self.operation_error(fault)),
         };
-        let result = host.drive_one_frame(Duration::ZERO);
+        let result = host.drive_one_frame(real_delta);
         let applied = host.runtime_control_status(ticket) == Some(RuntimeControlStatus::Applied);
         let exit = self.finish_drive(result)?;
         if !applied {

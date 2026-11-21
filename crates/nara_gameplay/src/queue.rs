@@ -658,6 +658,24 @@ impl GameplayCommandQueue {
         self.last_lifecycle_error.as_ref()
     }
 
+    /// Borrows drafts awaiting admission in tick, source, and source-sequence order.
+    pub fn pending_commands(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            GameplayCommandTick,
+            &GameplayCommandSource,
+            GameplayCommandSourceSequence,
+            &GameplayCommandDraft,
+        ),
+    > {
+        self.pending.iter().flat_map(|(&tick, commands)| {
+            commands
+                .iter()
+                .map(move |((source, sequence), queued)| (tick, source, *sequence, &queued.command))
+        })
+    }
+
     #[must_use]
     pub fn quarantined_commands(&self) -> &[GameplayCommandEnvelope] {
         &self.quarantined

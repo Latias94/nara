@@ -28,6 +28,11 @@ impl FrameClock {
             .saturating_sub(now.duration_since(self.last_frame))
     }
 
+    #[cfg(nara_cooked_player)]
+    pub(super) fn reset(&mut self, now: Instant) {
+        self.last_frame = now;
+    }
+
     pub(super) fn elapsed(&self, now: Instant) -> Result<Duration, FrameOverrun> {
         let elapsed = now.duration_since(self.last_frame);
         if elapsed > self.max_delta {

@@ -6,6 +6,7 @@
 //! native handle is represented here. Use [`decode_resume`] to admit external bytes; derived Serde
 //! alone does not enforce the byte, shape, or semantic limits.
 
+pub mod processed;
 mod runtime_time;
 
 pub use runtime_time::{RuntimeCatchUpPolicy, RuntimeTimeState};
@@ -30,7 +31,7 @@ pub const MAX_RESUME_BYTES: usize = 128 * 1024;
 /// Complete semantic state selected by the game for reconstruction in a fresh Runtime.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ResumeState {
+pub struct ResumeState<C = ResumeCompatibility> {
     pub progress: Checkpoint,
     pub player: PlayerState,
     pub held: [bool; 4],
@@ -38,7 +39,7 @@ pub struct ResumeState {
     #[serde(deserialize_with = "runtime_time::deserialize_object")]
     pub runtime_time: RuntimeTimeState,
     pub counters: SessionCounters,
-    pub compatibility: ResumeCompatibility,
+    pub compatibility: C,
 }
 
 /// The active player's local transform, independent of its fresh Scene/World identity.
@@ -92,6 +93,56 @@ pub struct LevelContentStamp {
 impl ResumeState {
     /// Checks bounded, internally consistent game data without reading or activating content.
     pub fn validate(&self) -> Result<(), ResumeError> {
+        self.validate_game_state()?;
+        self.validate_source_levels()
+    }
+
+    fn validate_source_levels(&self) -> Result<(), ResumeError> {
+        let levels = &self.compatibility.levels;
+        if levels.is_empty() || levels.len() > LevelId::ALL.len() {
+            return Err(ResumeError::InvalidContentRecordCount(levels.len()));
+        }
+        for (index, stamp) in levels.iter().enumerate() {
+            if levels[..index]
+                .iter()
+                .any(|other| other.level == stamp.level)
+            {
+                return Err(ResumeError::DuplicateLevel(stamp.level));
+            }
+            if stamp.manifest != levels[0].manifest {
+                return Err(ResumeError::ConflictingManifest(stamp.level));
+            }
+        }
+        let required = [LevelId::STARTUP, self.progress.location.level.level()]
+            .into_iter()
+            .chain(
+                self.progress
+                    .collected
+                    .iter()
+                    .map(|pickup| pickup.level.level()),
+            )
+            .chain(
+                self.progress
+                    .markers
+                    .iter()
+                    .map(|marker| marker.level.level()),
+            );
+        for level in required {
+            if !levels.iter().any(|stamp| stamp.level == level) {
+                return Err(ResumeError::MissingLevel(level));
+            }
+        }
+        Ok(())
+    }
+
+    fn canonicalize(&mut self) {
+        self.canonicalize_game();
+        self.compatibility.levels.sort_by_key(|stamp| stamp.level);
+    }
+}
+
+impl<C> ResumeState<C> {
+    pub(super) fn validate_game_state(&self) -> Result<(), ResumeError> {
         self.progress.validate()?;
         let expected_score = self.progress.collected.len() as u32 * 10;
         if self.progress.score != expected_score {
@@ -147,48 +198,24 @@ impl ResumeState {
                 runtime: self.runtime_time.timestep_nanos,
             });
         }
-
-        let levels = &self.compatibility.levels;
-        if levels.is_empty() || levels.len() > LevelId::ALL.len() {
-            return Err(ResumeError::InvalidContentRecordCount(levels.len()));
-        }
-        for (index, stamp) in levels.iter().enumerate() {
-            if levels[..index]
-                .iter()
-                .any(|other| other.level == stamp.level)
-            {
-                return Err(ResumeError::DuplicateLevel(stamp.level));
-            }
-            if stamp.manifest != levels[0].manifest {
-                return Err(ResumeError::ConflictingManifest(stamp.level));
-            }
-        }
-        let required = [LevelId::STARTUP, self.progress.location.level.level()]
-            .into_iter()
-            .chain(
-                self.progress
-                    .collected
-                    .iter()
-                    .map(|pickup| pickup.level.level()),
-            )
-            .chain(
-                self.progress
-                    .markers
-                    .iter()
-                    .map(|marker| marker.level.level()),
-            );
-        for level in required {
-            if !levels.iter().any(|stamp| stamp.level == level) {
-                return Err(ResumeError::MissingLevel(level));
-            }
-        }
         Ok(())
     }
 
-    fn canonicalize(&mut self) {
+    pub(super) fn canonicalize_game(&mut self) {
         self.progress.collected.sort();
         self.progress.markers.sort_by_key(|marker| marker.id);
-        self.compatibility.levels.sort_by_key(|stamp| stamp.level);
+    }
+
+    pub(crate) fn with_compatibility<D>(self, compatibility: D) -> ResumeState<D> {
+        ResumeState {
+            progress: self.progress,
+            player: self.player,
+            held: self.held,
+            clock: self.clock,
+            runtime_time: self.runtime_time,
+            counters: self.counters,
+            compatibility,
+        }
     }
 }
 

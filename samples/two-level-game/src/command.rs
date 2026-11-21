@@ -67,6 +67,7 @@ impl SemanticCommand {
     }
 
     /// Decodes only exact game commands, with no target or unrepresented payload fields.
+    #[cfg(feature = "development")]
     pub(crate) fn from_envelope(envelope: &GameplayCommandEnvelope) -> Result<Self, String> {
         if envelope.command_type().as_str() == commands::MOVE {
             let (direction, pressed) = decode_movement(envelope)?;
@@ -79,18 +80,23 @@ impl SemanticCommand {
         if !payload.is_empty() {
             return Err("semantic game actions require an empty payload".into());
         }
-        match envelope.command_type().as_str() {
-            commands::MARKER => Ok(Self::Marker),
-            commands::TRAVEL => Ok(Self::Travel),
-            commands::INSTANCE => Ok(Self::Instance),
-            commands::RETRY => Ok(Self::Retry),
-            kind => Err(format!("unsupported semantic game command {kind}")),
-        }
+        semantic_action(envelope.command_type().as_str())
+    }
+}
+
+fn semantic_action(kind: &str) -> Result<SemanticCommand, String> {
+    match kind {
+        commands::MARKER => Ok(SemanticCommand::Marker),
+        commands::TRAVEL => Ok(SemanticCommand::Travel),
+        commands::INSTANCE => Ok(SemanticCommand::Instance),
+        commands::RETRY => Ok(SemanticCommand::Retry),
+        kind => Err(format!("unsupported semantic game command {kind}")),
     }
 }
 
 /// Commands available to an operator of the cooked dedicated server.
-#[cfg(feature = "cooked-server")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ServerCommand {
     Gameplay(SemanticCommand),
     SideRoom,
@@ -99,15 +105,19 @@ pub enum ServerCommand {
     Restore,
 }
 
-#[cfg(feature = "cooked-server")]
 impl ServerCommand {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        match self {
+            Self::Gameplay(command) => command.validate(),
+            _ => Ok(()),
+        }
+    }
+
     /// Lowers an operator command through the game's existing fixed-step command vocabulary.
     pub fn into_draft(self) -> Result<GameplayCommandDraft, String> {
+        self.validate()?;
         let action = match self {
-            Self::Gameplay(command) => {
-                command.validate()?;
-                return Ok(command.draft());
-            }
+            Self::Gameplay(command) => return Ok(command.draft()),
             Self::SideRoom => commands::SIDE_ROOM,
             Self::Lookout => commands::LOOKOUT,
             Self::Save => commands::SAVE,
@@ -115,13 +125,34 @@ impl ServerCommand {
         };
         Ok(commands::action(action))
     }
+
+    pub(crate) fn from_draft(draft: &GameplayCommandDraft) -> Result<Self, String> {
+        if draft.command_type().as_str() == commands::MOVE {
+            let (direction, pressed) = decode_movement_draft(draft)?;
+            return Ok(Self::Gameplay(SemanticCommand::Move { direction, pressed }));
+        }
+        if draft.target().is_some() || !draft.payload().is_empty() {
+            return Err("semantic server actions require an empty payload and no target".into());
+        }
+        Ok(match draft.command_type().as_str() {
+            commands::SIDE_ROOM => Self::SideRoom,
+            commands::LOOKOUT => Self::Lookout,
+            commands::SAVE => Self::Save,
+            commands::RESTORE => Self::Restore,
+            kind => Self::Gameplay(semantic_action(kind)?),
+        })
+    }
 }
 
 pub(crate) fn decode_movement(envelope: &GameplayCommandEnvelope) -> Result<(usize, bool), String> {
-    if envelope.target().is_some() {
+    decode_movement_draft(envelope.command())
+}
+
+fn decode_movement_draft(draft: &GameplayCommandDraft) -> Result<(usize, bool), String> {
+    if draft.target().is_some() {
         return Err("semantic game commands cannot have a target".into());
     }
-    let payload = envelope.payload();
+    let payload = draft.payload();
     let (Some(GameplayCommandValue::I64(direction)), Some(GameplayCommandValue::Bool(pressed))) =
         (payload.get("direction"), payload.get("pressed"))
     else {

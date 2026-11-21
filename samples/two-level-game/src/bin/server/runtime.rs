@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeSet,
     io::{self, Write},
+    num::NonZeroU64,
     panic::{AssertUnwindSafe, catch_unwind},
     process::ExitCode,
     time::{Duration, Instant},
@@ -12,7 +13,8 @@ use nara::{
     fs::{ContentDigest, RelativePath},
     gameplay::{
         GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandKey,
-        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTick,
+        GameplayCommandQueue, GameplayCommandSourceSequence, GameplayCommandSubmission,
+        GameplayCommandTick,
     },
     identity::EntityLookup,
     input::{
@@ -398,9 +400,31 @@ pub(super) fn submit_external(
     last_sequence: &mut u64,
     draft: GameplayCommandDraft,
 ) -> Result<GameplayCommandKey, Failure> {
-    let current_tick = session.observe(|world| world.resource::<FixedTime>().tick())?;
+    submit_external_after(session, last_sequence, draft, NonZeroU64::MIN)
+}
+
+pub(super) fn submit_external_after(
+    session: &mut HeadlessSession,
+    last_sequence: &mut u64,
+    draft: GameplayCommandDraft,
+    after_ticks: NonZeroU64,
+) -> Result<GameplayCommandKey, Failure> {
+    let (current_tick, horizon) = session.observe(|world| {
+        (
+            world.resource::<FixedTime>().tick(),
+            world
+                .resource::<GameplayCommandQueue>()
+                .settings()
+                .future_ticks(),
+        )
+    })?;
+    if after_ticks > horizon {
+        return Err(Failure::Rejected(format!(
+            "Server command after_ticks exceeds the configured queue horizon of {horizon}"
+        )));
+    }
     let tick = current_tick
-        .checked_add(1)
+        .checked_add(after_ticks.get())
         .and_then(GameplayCommandTick::new)
         .ok_or("Server tick cannot accept another command")?;
     let sequence = last_sequence

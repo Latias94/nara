@@ -409,6 +409,24 @@ impl SceneSourceView {
         }
     }
 
+    /// Returns the retained Host-managed Runtime Scene's Product and original catalog digest.
+    ///
+    /// Returns `None` for other Scene sources or after the owner retires.
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn hosted_runtime_scene_identity(
+        &self,
+    ) -> Option<(nara_asset::AssetProductRef, nara_fs::ContentDigest)> {
+        let source = self.source.upgrade()?;
+        match &source.retention {
+            SceneRetention::RuntimeContent {
+                content,
+                custody: RuntimeContentCustody::HostManaged,
+            } => Some((content.product(), content.base().catalog_digest())),
+            _ => None,
+        }
+    }
+
     /// Returns the logical retained-byte charge owned by the root activation authority.
     #[must_use]
     pub(crate) const fn retained_bytes(&self) -> usize {

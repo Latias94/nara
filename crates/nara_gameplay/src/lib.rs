@@ -1438,6 +1438,34 @@ mod tests {
     }
 
     #[test]
+    fn pending_commands_borrow_only_future_drafts_in_tick_order() {
+        let mut queue = GameplayCommandQueue::default();
+        let source = GameplayCommandIngressSource::external("server").unwrap();
+        let later = queue
+            .submit(submission(3, source.clone(), 1, "later"))
+            .unwrap();
+        let earlier = queue
+            .submit(submission(2, source.clone(), 2, "earlier"))
+            .unwrap();
+        queue.submit(submission(1, source, 3, "active")).unwrap();
+
+        let mut batch = GameplayCommandBatch::new();
+        queue.admit_tick(tick(1), &mut batch).unwrap();
+        assert_eq!(batch.len(), 1);
+
+        let mut pending = queue.pending_commands();
+        assert_eq!(
+            pending.next(),
+            Some((tick(2), earlier.source(), sequence(2), &command("earlier")))
+        );
+        assert_eq!(
+            pending.next(),
+            Some((tick(3), later.source(), sequence(1), &command("later")))
+        );
+        assert_eq!(pending.next(), None);
+    }
+
+    #[test]
     fn duplicate_key_is_rejected_without_replacing_the_first_command() {
         let mut queue = GameplayCommandQueue::default();
         let source = GameplayCommandIngressSource::external("server").unwrap();

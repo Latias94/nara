@@ -1,18 +1,19 @@
 #[cfg(feature = "desktop")]
 use nara::project_host::DesktopRun;
-#[cfg(feature = "local-player")]
 use nara::{
     advanced_prelude::CurrentScene,
-    asset::Assets,
-    material::{Material2d, Material2dAsset},
-};
-use nara::{
     app::{FixedTime, RuntimeTimeSettings},
     ecs::World,
+    fs::ContentDigest,
     gameplay::{GameplayCommandBatch, GameplayCommandQueue, LocalGameplayCommands},
     prelude::Transform2d,
     project_host::HeadlessSession,
     tasks::{TaskPools, TaskReturnState},
+};
+#[cfg(feature = "local-player")]
+use nara::{
+    asset::Assets,
+    material::{Material2d, Material2dAsset},
 };
 
 use super::{GameResumeError, ResumeControl};
@@ -20,7 +21,10 @@ use super::{GameResumeError, ResumeControl};
 use crate::gameplay::ActiveLevel;
 use crate::{
     gameplay::{GamePhase, Progress, Session, player, travel, verification::Verification},
-    resume::{PlayerState, ResumeCompatibility, ResumeState, RuntimeTimeState, SessionCounters},
+    resume::{
+        PlayerState, ResumeCompatibility, ResumeState, RuntimeTimeState, SessionCounters,
+        processed::ProcessedResumeCompatibility,
+    },
 };
 
 pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
@@ -31,6 +35,54 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
             "exact reconstruction requires the local source player",
         ));
     }
+    quiescent(world, false)?;
+    #[cfg(feature = "local-player")]
+    {
+        super::input_capture_eligible(world)?;
+        if world
+            .get_resource::<Assets<Material2dAsset>>()
+            .is_some_and(|assets| !assets.is_empty())
+        {
+            return Err(reject("material assets are not represented by ResumeState"));
+        }
+        if world
+            .iter_entities()
+            .any(|entity| entity.contains::<Material2d>())
+        {
+            return Err(reject(
+                "material components are not represented by ResumeState",
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn hosted_catalog(world: &World) -> Result<ContentDigest, GameResumeError> {
+    if world
+        .get_resource::<Session>()
+        .is_none_or(|session| session.local_player)
+    {
+        return Err(GameResumeError::Ineligible(
+            "processed reconstruction requires the dedicated Server recipe".into(),
+        ));
+    }
+    let (product, catalog) = CurrentScene::get(world)
+        .and_then(|current| current.source_view().hosted_runtime_scene_identity())
+        .ok_or_else(|| {
+            GameResumeError::Ineligible("the active Scene has no hosted Runtime catalog".into())
+        })?;
+    let level = world.resource::<Progress>().checkpoint().location.level;
+    if product != level.level().scene_product() {
+        return Err(GameResumeError::Ineligible(
+            "the active Scene Product differs from the Server level".into(),
+        ));
+    }
+    Ok(catalog)
+}
+
+pub(super) fn quiescent(world: &World, allow_pending: bool) -> Result<(), GameResumeError> {
+    let reject = |reason: &str| GameResumeError::Ineligible(reason.into());
+    let session = world.resource::<Session>();
     if !session.initialized
         || session.phase != GamePhase::Running
         || session.error.is_some()
@@ -61,32 +113,18 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
             control.unsupported
         )));
     }
-    #[cfg(feature = "local-player")]
-    super::input_capture_eligible(world)?;
     if control.rejected {
         return Err(reject("this candidate rejected its reconstruction"));
-    }
-    #[cfg(feature = "local-player")]
-    if world
-        .get_resource::<Assets<Material2dAsset>>()
-        .is_some_and(|assets| !assets.is_empty())
-    {
-        return Err(reject("material assets are not represented by ResumeState"));
-    }
-    #[cfg(feature = "local-player")]
-    if world
-        .iter_entities()
-        .any(|entity| entity.contains::<Material2d>())
-    {
-        return Err(reject(
-            "material components are not represented by ResumeState",
-        ));
     }
     let queue = world.resource::<GameplayCommandQueue>();
     let stats = queue.stats();
     let time = world.resource::<FixedTime>();
-    if !queue.is_idle()
+    if queue.last_lifecycle_error().is_some()
+        || stats.closed_through_tick != time.tick()
         || stats.acknowledged_through_tick != time.tick()
+        || stats.active_commands != 0
+        || stats.quarantined_commands != 0
+        || (!allow_pending && stats.retained_commands != 0)
         || !world.resource::<GameplayCommandBatch>().is_empty()
         || !world.resource::<LocalGameplayCommands>().is_empty()
     {
@@ -173,13 +211,9 @@ pub(crate) fn capture_world(
             ));
         }
     }
-    travel::observe_markers(world).map_err(GameResumeError::Ineligible)?;
-    let mut progress = world.resource::<Progress>().checkpoint().clone();
-    progress.collected.sort();
-    progress.markers.sort_by_key(|record| record.id);
-    let entity = player(world).ok_or_else(|| reject("the current player is unavailable"))?;
     #[cfg(feature = "local-player")]
     {
+        let entity = player(world).ok_or_else(|| reject("the current player is unavailable"))?;
         let presentation = world
             .resource::<ActiveLevel>()
             .content()
@@ -194,19 +228,54 @@ pub(crate) fn capture_world(
             ));
         }
     }
-    crate::gameplay::collision::capture_eligible(world, entity)
-        .map_err(GameResumeError::Ineligible)?;
-    let player = Some(entity)
-        .and_then(|entity| world.get::<Transform2d>(entity))
-        .ok_or_else(|| reject("the current player transform is unavailable"))?;
-    let session = world.resource::<Session>();
+    let facts = compatibility(world)?;
+    let state = game(
+        world,
+        runtime_time,
+        ResumeCompatibility {
+            schema: facts.schema,
+            configuration: facts.configuration,
+            levels: control.levels.values().copied().collect(),
+        },
+    )?;
+    state.validate()?;
+    Ok(state)
+}
+
+pub(super) fn compatibility(
+    world: &World,
+) -> Result<ProcessedResumeCompatibility, GameResumeError> {
+    let reject = |reason: &str| GameResumeError::Ineligible(reason.into());
     let registry = nara::reflect::component_registry(world)
         .ok_or_else(|| reject("game Schema is unavailable"))?;
     let schema = registry
         .schema_composition_fingerprint()
         .map_err(|error| reject(&error.to_string()))?
         .as_bytes();
-    let state = ResumeState {
+    Ok(ProcessedResumeCompatibility {
+        schema,
+        configuration: world.resource::<ResumeControl>().configuration,
+    })
+}
+
+pub(super) fn game<C>(
+    world: &World,
+    runtime_time: RuntimeTimeState,
+    compatibility: C,
+) -> Result<ResumeState<C>, GameResumeError> {
+    let reject = |reason: &str| GameResumeError::Ineligible(reason.into());
+    travel::observe_markers(world).map_err(GameResumeError::Ineligible)?;
+    let mut progress = world.resource::<Progress>().checkpoint().clone();
+    progress.collected.sort();
+    progress.markers.sort_by_key(|record| record.id);
+    let entity = player(world).ok_or_else(|| reject("the current player is unavailable"))?;
+    crate::gameplay::collision::capture_eligible(world, entity)
+        .map_err(GameResumeError::Ineligible)?;
+    let player = world
+        .get::<Transform2d>(entity)
+        .ok_or_else(|| reject("the current player transform is unavailable"))?;
+    let session = world.resource::<Session>();
+    Ok(ResumeState {
         progress,
         player: PlayerState {
             translation: player.translation.to_array(),
@@ -222,12 +291,6 @@ pub(crate) fn capture_world(
             saves: session.saves,
             restores: session.restores,
         },
-        compatibility: ResumeCompatibility {
-            schema,
-            configuration: control.configuration,
-            levels: control.levels.values().cloned().collect(),
-        },
-    };
-    state.validate()?;
-    Ok(state)
+        compatibility,
+    })
 }

@@ -4,7 +4,7 @@ use std::{
     thread,
 };
 
-use super::{Event, Request, SemanticCommand, read_events};
+use super::{CloseRequest, Event, Request, SemanticCommand, read_events};
 
 fn collect_events(reader: impl BufRead + Send) -> Vec<Event> {
     thread::scope(|scope| {
@@ -38,6 +38,7 @@ fn rejected_complete_lines_preserve_order_and_leave_semantics_to_session() {
                     direction: 4,
                     pressed: true,
                 },
+            after_ticks,
         }),
         Event::Eof,
     ] = events.as_slice()
@@ -48,6 +49,7 @@ fn rejected_complete_lines_preserve_order_and_leave_semantics_to_session() {
     assert!(duplicate.contains("duplicate map key"), "{duplicate}");
     assert!(unknown.contains("unknown field `path`"), "{unknown}");
     assert!(trailing.starts_with("trailing control request data:"));
+    assert_eq!(after_ticks.get(), 1);
 }
 
 #[test]
@@ -71,6 +73,40 @@ fn requests_and_commands_require_objects_with_known_fields() {
     assert!(request.contains("expected a JSON object"), "{request}");
     assert!(command.contains("expected a JSON object"), "{command}");
     assert!(unknown.contains("unknown field `tick`"), "{unknown}");
+}
+
+#[test]
+fn paused_controls_and_delayed_commands_keep_exact_elapsed_and_offsets() {
+    let events = collect_events(
+        br#"{"request":"pause"}
+{"request":"resume"}
+{"request":"advance","elapsed_nanos":23000000}
+{"request":"capture"}
+{"request":"command","after_ticks":5,"command":{"operation":"marker"}}
+{"request":"command","after_ticks":0,"command":{"operation":"marker"}}
+{"request":"advance","elapsed_nanos":-1}
+"#
+        .as_slice(),
+    );
+    let [
+        Event::Request(Request::Pause {}),
+        Event::Request(Request::Resume {}),
+        Event::Request(Request::Advance {
+            elapsed_nanos: 23_000_000,
+        }),
+        Event::Request(Request::Capture {}),
+        Event::Request(Request::Command {
+            command: SemanticCommand::Marker,
+            after_ticks,
+        }),
+        Event::Rejected(_),
+        Event::Rejected(_),
+        Event::Eof,
+    ] = events.as_slice()
+    else {
+        panic!("unexpected control events: {events:?}");
+    };
+    assert_eq!(after_ticks.get(), 5);
 }
 
 #[test]
@@ -124,20 +160,38 @@ fn read_failure_follows_complete_requests_and_stops_the_stream() {
 }
 
 #[test]
-fn shutdown_is_enqueued_last_and_leaves_the_following_request_unread() {
-    let mut reader =
-        b"{\"request\":\"save\"}\n{\"request\":\"shutdown\"}\n{\"request\":\"restore\"}\n"
-            .as_slice();
-    let events = collect_events(&mut reader);
-    assert!(
-        matches!(
-            events.as_slice(),
-            [
-                Event::Request(Request::Save {}),
-                Event::Request(Request::Shutdown {})
-            ]
-        ),
-        "unexpected control events: {events:?}"
-    );
+fn rejected_close_resumes_reading_and_accepted_close_leaves_later_requests_unread() {
+    let mut reader = br#"{"request":"save"}
+{"request":"retire"}
+{"request":"shutdown"}
+{"request":"restore"}
+"#
+    .as_slice();
+    thread::scope(|scope| {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let reader = &mut reader;
+        scope.spawn(move || read_events(reader, sender));
+        assert!(matches!(
+            receiver.recv().unwrap(),
+            Event::Request(Request::Save {})
+        ));
+        let Event::Close {
+            request: CloseRequest::Retire,
+            keep_reading,
+        } = receiver.recv().unwrap()
+        else {
+            panic!("expected a Retire decision");
+        };
+        keep_reading.send(()).unwrap();
+        let Event::Close {
+            request: CloseRequest::Shutdown,
+            keep_reading,
+        } = receiver.recv().unwrap()
+        else {
+            panic!("expected a Shutdown decision");
+        };
+        drop(keep_reading);
+        assert!(receiver.recv().is_err());
+    });
     assert_eq!(reader, b"{\"request\":\"restore\"}\n");
 }

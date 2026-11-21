@@ -2,12 +2,13 @@ use std::{
     fmt,
     io::{BufRead, Read},
     marker::PhantomData,
-    sync::mpsc::SyncSender,
+    num::NonZeroU64,
+    sync::mpsc::{self, Sender, SyncSender},
 };
 #[cfg(nara_cooked_player)]
 use std::{
     io,
-    sync::mpsc::{self, Receiver},
+    sync::mpsc::Receiver,
     thread::{self, JoinHandle},
 };
 
@@ -30,24 +31,47 @@ const REQUEST_SHAPE_LIMITS: SerdeShapeLimits = SerdeShapeLimits::new(
 #[derive(Debug)]
 pub(super) enum Event {
     Request(Request),
+    Close {
+        request: CloseRequest,
+        keep_reading: Sender<()>,
+    },
     Rejected(String),
     Eof,
     Failed(String),
+}
+
+#[derive(Debug)]
+pub(super) enum CloseRequest {
+    Shutdown,
+    Retire,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "request", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Request {
     Observe {},
+    Pause {},
+    Resume {},
+    Advance {
+        elapsed_nanos: u64,
+    },
+    Capture {},
     Shutdown {},
+    Retire {},
     Command {
         #[serde(deserialize_with = "deserialize_object")]
         command: SemanticCommand,
+        #[serde(default = "next_tick")]
+        after_ticks: NonZeroU64,
     },
     SideRoom {},
     Lookout {},
     Save {},
     Restore {},
+}
+
+fn next_tick() -> NonZeroU64 {
+    NonZeroU64::MIN
 }
 
 #[cfg(nara_cooked_player)]
@@ -79,10 +103,26 @@ fn read_events(mut reader: impl BufRead, sender: SyncSender<Event>) {
             Ok(_) => Event::Failed("control input ended before the request newline".into()),
             Err(error) => Event::Failed(format!("read control input: {error}")),
         };
-        let terminal = matches!(
-            event,
-            Event::Eof | Event::Failed(_) | Event::Request(Request::Shutdown {})
-        );
+        let close = match event {
+            Event::Request(Request::Shutdown {}) => Some(CloseRequest::Shutdown),
+            Event::Request(Request::Retire {}) => Some(CloseRequest::Retire),
+            _ => None,
+        };
+        if let Some(request) = close {
+            let (keep_reading, decision) = mpsc::channel();
+            if sender
+                .send(Event::Close {
+                    request,
+                    keep_reading,
+                })
+                .is_err()
+                || decision.recv().is_err()
+            {
+                return;
+            }
+            continue;
+        }
+        let terminal = matches!(event, Event::Eof | Event::Failed(_));
         if sender.send(event).is_err() || terminal {
             return;
         }
