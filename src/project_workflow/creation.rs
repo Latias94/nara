@@ -8,23 +8,27 @@ use super::{
         DependencyPreparationError, NaraDependencySource, PreparedDependency,
         PreparedDependencyRevalidation, prepare_dependency,
     },
-    starter::{ProjectCreationPlan, ProjectSlug, build_desktop_2d_v1_plan},
+    starter::{ProjectCreationPlan, ProjectSlug, ProjectStarter, build_creation_plan},
 };
 
 pub struct ProjectCreationRequest {
+    starter: ProjectStarter,
     publication_parent: DirectoryCapability,
     slug: ProjectSlug,
     dependency: NaraDependencySource,
 }
 
 impl ProjectCreationRequest {
+    /// Selects the exact starter version, destination authority and Nara dependency.
     #[must_use]
     pub fn new(
+        starter: ProjectStarter,
         publication_parent: DirectoryCapability,
         slug: ProjectSlug,
         dependency: NaraDependencySource,
     ) -> Self {
         Self {
+            starter,
             publication_parent,
             slug,
             dependency,
@@ -84,7 +88,7 @@ pub enum ProjectCreationPlanError {
     NonUtf8LocalCoordinate,
     #[error("project source identity could not be generated")]
     SourceIdentityEntropy(#[source] getrandom::Error),
-    #[error("desktop-2d/v1 starter contract is invalid: {0}")]
+    #[error("generated starter contract is invalid: {0}")]
     StarterContract(&'static str),
 }
 
@@ -108,6 +112,7 @@ pub fn prepare_desktop_2d_project(
     request: ProjectCreationRequest,
 ) -> Result<PreparedProjectCreation, ProjectCreationPlanError> {
     let ProjectCreationRequest {
+        starter,
         publication_parent,
         slug,
         dependency,
@@ -134,11 +139,11 @@ pub fn prepare_desktop_2d_project(
         receipt,
         revalidation: dependency_revalidation,
     } = dependency;
-    let (source_universe, startup_scene_identity) = prepare_source_identities(getrandom::fill)?;
-    let plan = build_desktop_2d_v1_plan(
+    let identities = prepare_source_identities(starter, getrandom::fill)?;
+    let plan = build_creation_plan(
+        starter,
         slug,
-        source_universe,
-        startup_scene_identity,
+        identities,
         &manifest_fragment,
         &creation_command_arguments,
         receipt,
@@ -152,18 +157,29 @@ pub fn prepare_desktop_2d_project(
     })
 }
 
+pub(super) struct StarterSourceIdentities {
+    pub(super) universe: SourceUniverseId,
+    pub(super) scene: StableAssetId,
+    pub(super) action_map: Option<StableAssetId>,
+}
+
 fn prepare_source_identities(
+    starter: ProjectStarter,
     fill: impl FnOnce(&mut [u8]) -> Result<(), getrandom::Error>,
-) -> Result<(SourceUniverseId, StableAssetId), ProjectCreationPlanError> {
-    let mut entropy = [[0_u8; 16]; 2];
-    fill(entropy.as_flattened_mut()).map_err(ProjectCreationPlanError::SourceIdentityEntropy)?;
-    let [project, scene] = entropy;
+) -> Result<StarterSourceIdentities, ProjectCreationPlanError> {
+    let mut entropy = [[0_u8; 16]; 3];
+    let identity_count = 2 + usize::from(starter.has_action_map());
+    fill(entropy[..identity_count].as_flattened_mut())
+        .map_err(ProjectCreationPlanError::SourceIdentityEntropy)?;
+    let [project, scene, action_map] = entropy;
     let project = uuid::Builder::from_random_bytes(project).into_uuid();
-    let scene = uuid::Builder::from_random_bytes(scene).into_uuid();
-    Ok((
-        SourceUniverseId::try_from_uuid(project).expect("a version-4 UUID is not nil"),
-        StableAssetId::from_uuid(scene),
-    ))
+    let asset_id =
+        |bytes| StableAssetId::from_uuid(uuid::Builder::from_random_bytes(bytes).into_uuid());
+    Ok(StarterSourceIdentities {
+        universe: SourceUniverseId::try_from_uuid(project).expect("a version-4 UUID is not nil"),
+        scene: asset_id(scene),
+        action_map: starter.has_action_map().then(|| asset_id(action_map)),
+    })
 }
 
 #[cfg(test)]
@@ -172,16 +188,28 @@ mod tests {
 
     #[test]
     fn source_identity_entropy_is_consumed_once_and_failure_is_explicit() {
-        let (universe, scene) = prepare_source_identities(|bytes| {
+        let identities = prepare_source_identities(ProjectStarter::Desktop2dV1, |bytes| {
             assert_eq!(bytes.len(), 32);
             bytes[..16].fill(1);
             bytes[16..].fill(2);
             Ok(())
         })
         .unwrap();
-        assert_eq!(universe.to_string(), "01010101-0101-4101-8101-010101010101");
-        assert_eq!(scene.to_string(), "02020202-0202-4202-8202-020202020202");
-        let error = prepare_source_identities(|_| Err(getrandom::Error::UNSUPPORTED)).unwrap_err();
+        assert_eq!(
+            identities.universe.to_string(),
+            "01010101-0101-4101-8101-010101010101"
+        );
+        assert_eq!(
+            identities.scene.to_string(),
+            "02020202-0202-4202-8202-020202020202"
+        );
+        assert!(identities.action_map.is_none());
+        let error = prepare_source_identities(ProjectStarter::Desktop2dV2, |bytes| {
+            assert_eq!(bytes.len(), 48);
+            Err(getrandom::Error::UNSUPPORTED)
+        })
+        .err()
+        .unwrap();
         assert_eq!(
             error.kind(),
             ProjectCreationPlanErrorKind::SourceIdentityEntropy

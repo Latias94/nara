@@ -1,5 +1,6 @@
 use std::{ffi::OsString, iter::Peekable, path::PathBuf};
 
+use nara::project_workflow::ProjectStarter;
 use thiserror::Error;
 
 pub(crate) enum Command {
@@ -34,6 +35,7 @@ pub(crate) struct SchemaArguments {
 }
 
 pub(crate) struct NewArguments {
+    pub(crate) starter: ProjectStarter,
     pub(crate) slug: String,
     pub(crate) parent: PathBuf,
     pub(crate) dependency: DependencyArguments,
@@ -223,10 +225,8 @@ fn parse_new(arguments: impl Iterator<Item = OsString>) -> Result<Command, Parse
     if take_help(&mut arguments) {
         return scoped_help(arguments, HelpTopic::New);
     }
-    let starter = required_unicode(arguments.next(), "missing starter id")?;
-    if starter != "desktop-2d/v1" {
-        return Err(error("unsupported starter id"));
-    }
+    let id = required_unicode(arguments.next(), "missing starter id")?;
+    let starter = ProjectStarter::from_id(&id).ok_or_else(|| error("unsupported starter id"))?;
     if take_help(&mut arguments) {
         return scoped_help(arguments, HelpTopic::New);
     }
@@ -282,6 +282,7 @@ fn parse_new(arguments: impl Iterator<Item = OsString>) -> Result<Command, Parse
         _ => return Err(error("choose exactly one Nara dependency source")),
     };
     Ok(Command::New(NewArguments {
+        starter,
         slug,
         parent,
         dependency,

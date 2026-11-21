@@ -125,7 +125,11 @@ jobs:
           CARGO_TARGET_DIR: "${{ github.workspace }}/target"
           CARGO_NET_OFFLINE: "true"
           RUSTUP_TOOLCHAIN: "1.95.0"
-        run: cargo nextest run --locked --offline -p nara --no-default-features --features project-workflow-cli --test project_cook --test project_author_workflow --run-ignored only -E 'test(=generated_project_cooks_custom_game_and_runs_after_relocation) | test(=live_cook_consumer_timeout_preserves_and_retires_the_original_child) | test(=same_named_new_games_keep_their_identities_and_complete_source_and_cooked_workflows)' --test-threads=1 --no-fail-fast --no-tests fail
+        run: >-
+          cargo nextest run --locked --offline -p nara --no-default-features --features project-workflow-cli,tooling
+          --test project_cook --test project_author_workflow --run-ignored only
+          -E 'test(=generated_project_cooks_custom_game_and_runs_after_relocation) | test(=live_cook_consumer_timeout_preserves_and_retires_the_original_child) | test(=same_named_new_games_keep_their_identities_and_complete_source_and_cooked_workflows) | test(=generated_v2_puzzle_observes_the_edited_scene_and_input_after_source_removal)'
+          --test-threads=1 --no-fail-fast --no-tests fail
       - name: Test production Dear renderer adapter
         shell: bash
         env:

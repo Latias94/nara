@@ -1,4 +1,6 @@
-use nara_fs::{ContentDigest, DirectoryCapability, DirectoryPublicationReceipt, FileCapability};
+use nara_fs::{
+    ContentDigest, DirectoryCapability, DirectoryPublicationReceipt, FileCapability, FsError,
+};
 
 use super::{
     ProjectCreationAdmissionError, ProjectCreationAdmissionErrorInner, ProjectCreationOutcome,
@@ -7,12 +9,15 @@ use super::{
 };
 use crate::{
     project_host::{
-        StartupContentClosureReceipt,
+        ProjectContentMemberKind, StartupContentClosureReceipt,
         check::{ProjectSourceCheckError, check_project_source_with_expected_digests},
     },
     project_workflow::{
         dependency::PreparedDependencyRevalidation,
-        starter::{ProjectCreationPlanReceipt, ProjectMember, desktop_2d_v1_product_recipe},
+        starter::{
+            ProjectCreationPlanReceipt, ProjectMember, STARTER_ACTION_MAP_PATH,
+            desktop_2d_product_recipe,
+        },
     },
 };
 
@@ -94,7 +99,9 @@ fn admit_project(
         let member = receipt.member();
         if !matches!(
             member,
-            ProjectMember::ProjectManifest | ProjectMember::StartupScene
+            ProjectMember::ProjectManifest
+                | ProjectMember::StartupScene
+                | ProjectMember::InputActionMap
         ) {
             verified_member(project_root, member, receipt.digest())?;
         }
@@ -107,8 +114,10 @@ fn admit_project(
         .member(ProjectMember::StartupScene)
         .expect("the closed starter receipt contains the startup Scene")
         .digest();
-    let recipe = desktop_2d_v1_product_recipe().map_err(|error| ProjectCreationAdmissionError {
-        inner: ProjectCreationAdmissionErrorInner::RecipeConstruction(Box::new(error)),
+    let recipe = desktop_2d_product_recipe(plan.starter()).map_err(|error| {
+        ProjectCreationAdmissionError {
+            inner: ProjectCreationAdmissionErrorInner::RecipeConstruction(Box::new(error)),
+        }
     })?;
     let checked = check_project_source_with_expected_digests(
         project_root.share(),
@@ -119,9 +128,32 @@ fn admit_project(
     )
     .map_err(project_admission_error)?;
     let (_, content) = checked.into_parts();
-    Ok(content
+    let closure = content
         .startup_content_closure()
-        .expect("project admission loads the manifest's startup Scene"))
+        .expect("project admission loads the manifest's startup Scene");
+    if let Some(expected) = plan.member(ProjectMember::InputActionMap) {
+        let selected = closure.members().iter().find(|member| {
+            member.kind() == ProjectContentMemberKind::InputActionMap
+                && member.path().as_str() == STARTER_ACTION_MAP_PATH
+        });
+        let error = match selected {
+            Some(member) if member.digest() == expected.digest() => None,
+            Some(member) => Some(FsError::DigestMismatch {
+                expected: expected.digest(),
+                actual: member.digest(),
+            }),
+            None => Some(FsError::TargetStateMismatch),
+        };
+        if let Some(source) = error {
+            return Err(ProjectCreationAdmissionError {
+                inner: ProjectCreationAdmissionErrorInner::PublishedMember {
+                    member: ProjectMember::InputActionMap,
+                    source,
+                },
+            });
+        }
+    }
+    Ok(closure)
 }
 
 fn project_admission_error(error: ProjectSourceCheckError) -> ProjectCreationAdmissionError {

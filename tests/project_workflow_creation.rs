@@ -13,9 +13,10 @@ use nara::{
         TrustMode,
     },
     project_workflow::{
-        LocalDependencyRelation, NaraDependencySource, ProjectCreationOutcome,
-        ProjectCreationPlanErrorKind, ProjectCreationRejectionKind, ProjectCreationRequest,
-        ProjectDirectory, ProjectMember, ProjectSlug, prepare_desktop_2d_project,
+        LocalDependencyRelation, NaraDependencySource, ProjectContentMemberKind,
+        ProjectCreationOutcome, ProjectCreationPlanErrorKind, ProjectCreationRejectionKind,
+        ProjectCreationRequest, ProjectDirectory, ProjectMember, ProjectSlug, ProjectStarter,
+        prepare_desktop_2d_project,
     },
 };
 
@@ -27,6 +28,7 @@ fn independent_project_preparations_do_not_share_source_identities() {
     let root = TestRoot::new("independent-identities");
     let prepare = || {
         prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             root.writable_capability(),
             ProjectSlug::new("same-slug").unwrap(),
             NaraDependencySource::immutable_git(
@@ -71,6 +73,104 @@ fn independent_project_preparations_do_not_share_source_identities() {
 }
 
 #[test]
+fn desktop_2d_v2_owns_its_action_map_and_uses_the_same_pinned_dependency() {
+    use nara::input::{ActionMapFileCandidate, GamepadButton, InputBinding, KeyCode};
+
+    let root = TestRoot::new("action-starter");
+    let prepare = || {
+        prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV2,
+            root.writable_capability(),
+            ProjectSlug::new("action-game").unwrap(),
+            NaraDependencySource::immutable_git(
+                "https://github.com/nara-engine/nara.git",
+                GIT_REVISION,
+            )
+            .unwrap(),
+        ))
+        .unwrap()
+    };
+    let prepared = prepare();
+    let plan = prepared.plan();
+    let decode_actions = |plan: &nara::project_workflow::ProjectCreationPlan| {
+        ActionMapFileCandidate::decode_json_bytes(
+            plan.member(ProjectMember::InputActionMap).unwrap().bytes(),
+        )
+        .unwrap()
+    };
+    let actions = decode_actions(plan);
+    assert_ne!(
+        actions.product(),
+        decode_actions(prepare().plan()).product()
+    );
+    assert_eq!(plan.starter(), ProjectStarter::Desktop2dV2);
+    assert_eq!(plan.members().len(), 14);
+    assert!(plan.directories().contains(&ProjectDirectory::Input));
+    assert!(plan.member(ProjectMember::GameplaySource).is_some());
+    let bindings = actions.definition().bindings();
+    for (name, expected_key, expected_button) in [
+        (
+            "move.left",
+            KeyCode::Character('a'),
+            GamepadButton::DPadLeft,
+        ),
+        (
+            "move.right",
+            KeyCode::Character('d'),
+            GamepadButton::DPadRight,
+        ),
+        ("move.up", KeyCode::Character('w'), GamepadButton::DPadUp),
+        (
+            "move.down",
+            KeyCode::Character('s'),
+            GamepadButton::DPadDown,
+        ),
+        ("confirm", KeyCode::Enter, GamepadButton::South),
+    ] {
+        let inputs = bindings
+            .iter()
+            .filter(|binding| binding.action.as_str() == name)
+            .map(|binding| binding.input)
+            .collect::<Vec<_>>();
+        assert_eq!(inputs.len(), 2);
+        assert!(inputs.contains(&InputBinding::Key(expected_key)));
+        assert!(inputs.contains(&InputBinding::GamepadButton(expected_button.code())));
+    }
+    let cargo =
+        std::str::from_utf8(plan.member(ProjectMember::CargoManifest).unwrap().bytes()).unwrap();
+    let cargo: toml::Value = toml::from_str(cargo).unwrap();
+    let nara = &cargo["dependencies"]["nara"];
+    let gilrs = &cargo["target"]["cfg(windows)"]["dependencies"]["nara_gilrs"];
+    assert_eq!(gilrs["git"], nara["git"]);
+    assert_eq!(gilrs["rev"], nara["rev"]);
+    assert_eq!(gilrs["optional"].as_bool(), Some(true));
+
+    #[cfg(any(
+        all(target_os = "windows", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64")
+    ))]
+    {
+        let digest = plan.member(ProjectMember::InputActionMap).unwrap().digest();
+        let outcome = prepared.publish();
+        if publication_is_unavailable_and_clean(&outcome, root.path(), "action-game") {
+            return;
+        }
+        let ProjectCreationOutcome::Created(receipt) = outcome else {
+            panic!("expected an admitted creation receipt: {outcome:?}");
+        };
+        assert_eq!(receipt.plan().starter(), ProjectStarter::Desktop2dV2);
+        let admitted = receipt
+            .startup_content_closure()
+            .members()
+            .iter()
+            .find(|receipt| receipt.kind() == ProjectContentMemberKind::InputActionMap)
+            .unwrap();
+        assert_eq!(admitted.path().as_str(), "input/starter.actions.json");
+        assert_eq!(admitted.digest(), digest);
+    }
+}
+
+#[test]
 fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
     let root = TestRoot::new("closed-plan");
     let parent = root.writable_capability();
@@ -79,8 +179,12 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
         GIT_REVISION,
     )
     .unwrap();
-    let request =
-        ProjectCreationRequest::new(parent, ProjectSlug::new("sample-game").unwrap(), source);
+    let request = ProjectCreationRequest::new(
+        ProjectStarter::Desktop2dV1,
+        parent,
+        ProjectSlug::new("sample-game").unwrap(),
+        source,
+    );
 
     let prepared = prepare_desktop_2d_project(request).unwrap();
     let plan = prepared.plan();
@@ -347,8 +451,12 @@ fn local_source_derives_the_cargo_path_from_the_authorized_parent_relation() {
         None,
         Some(RelativePath::new("projects").unwrap()),
     ));
-    let request =
-        ProjectCreationRequest::new(parent, ProjectSlug::new("local-game").unwrap(), source);
+    let request = ProjectCreationRequest::new(
+        ProjectStarter::Desktop2dV1,
+        parent,
+        ProjectSlug::new("local-game").unwrap(),
+        source,
+    );
 
     let prepared = prepare_desktop_2d_project(request).unwrap();
     let cargo = prepared
@@ -398,6 +506,7 @@ fn local_source_supports_sibling_paths_with_spaces_and_literal_quotes() {
     let publication_parent = ancestor.open_directory(&parent).unwrap();
     let parent_identity = publication_parent.identity();
     let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+        ProjectStarter::Desktop2dV1,
         publication_parent,
         ProjectSlug::new("sibling-game").unwrap(),
         NaraDependencySource::local(LocalDependencyRelation::new(
@@ -442,6 +551,7 @@ fn local_source_rejects_a_parent_outside_the_claimed_common_ancestor_relation() 
         None,
     ));
     let request = ProjectCreationRequest::new(
+        ProjectStarter::Desktop2dV1,
         destination.writable_capability(),
         ProjectSlug::new("outside-game").unwrap(),
         source,
@@ -468,6 +578,7 @@ fn local_source_revalidates_the_checkout_relation_before_staging() {
         .open_directory(&RelativePath::new("projects").unwrap())
         .unwrap();
     let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+        ProjectStarter::Desktop2dV1,
         publication_parent,
         ProjectSlug::new("drifted-game").unwrap(),
         NaraDependencySource::local(LocalDependencyRelation::new(
@@ -514,6 +625,7 @@ fn local_source_revalidates_the_selected_checkout_before_staging() {
         .open_directory(&RelativePath::new("games").unwrap())
         .unwrap();
     let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+        ProjectStarter::Desktop2dV1,
         parent,
         ProjectSlug::new("drifted-game").unwrap(),
         NaraDependencySource::local(LocalDependencyRelation::new(
@@ -555,6 +667,7 @@ fn published_project_is_reopened_and_admitted_through_ordinary_authority() {
     )
     .unwrap();
     let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+        ProjectStarter::Desktop2dV1,
         root.writable_capability(),
         ProjectSlug::new("published-game").unwrap(),
         source,
@@ -701,6 +814,7 @@ fn destination_collision_rejects_without_overwrite_or_staging_residue() {
     )
     .unwrap();
     let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+        ProjectStarter::Desktop2dV1,
         root.writable_capability(),
         ProjectSlug::new("existing-game").unwrap(),
         source,

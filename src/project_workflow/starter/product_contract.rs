@@ -8,7 +8,7 @@ use nara_reflect::AuthoringSchemaBundle;
 use nara_scene::SceneDocumentCandidate;
 use toml::Value;
 
-use super::ProjectSlug;
+use super::{ProjectSlug, ProjectStarter, STARTER_ACTION_MAP_PATH};
 use crate::{
     ProductRecipe,
     project_workflow::dependency::{
@@ -17,17 +17,12 @@ use crate::{
 };
 
 const HEADLESS_NARA_FEATURES: [&str; 3] = ["runtime-2d", "serde", "project-tooling"];
-const DESKTOP_NARA_FEATURES: [&str; 3] = [
+const DESKTOP_NARA_FEATURES: [&str; 4] = [
     "nara/presentation-2d",
     "nara/desktop-winit",
     "nara/render-wgpu",
+    "dep:nara_gilrs",
 ];
-const LIBRARY_MARKERS: [&[u8]; 3] = [
-    b"pub fn product_recipe() -> Result<nara::ProductRecipe, nara::ProductRecipeError>",
-    b"nara::ProductRecipe::new()",
-    b".add_runtime_image_codec::<nara::image::ImageRuntimeCodec>(",
-];
-const BINARY_MARKER: &[u8] = b"nara_game::product_recipe()";
 
 pub(super) struct ProductContractSources<'a> {
     pub(super) source_universe: SourceUniverseId,
@@ -37,18 +32,31 @@ pub(super) struct ProductContractSources<'a> {
     pub(super) project_manifest: &'a [u8],
     pub(super) authoring_schema_bundle: &'a [u8],
     pub(super) expected_authoring_schema_bundle: &'a AuthoringSchemaBundle,
-    pub(super) dependency_manifest_fragment: &'a str,
-    pub(super) creation_command_arguments: &'a str,
-    pub(super) author_guide: &'a str,
-    pub(super) library: &'a [u8],
-    pub(super) headless: &'a [u8],
-    pub(super) desktop: &'a [u8],
-    pub(super) cook: &'a [u8],
-    pub(super) player: &'a [u8],
     pub(super) startup_scene: &'a [u8],
 }
 
-pub(super) fn render_cargo_manifest(slug: &ProjectSlug, dependency: &str) -> String {
+pub(super) fn render_cargo_manifest(
+    starter: ProjectStarter,
+    slug: &ProjectSlug,
+    dependency: &str,
+    receipt: &NaraDependencyReceipt,
+) -> String {
+    let desktop = desktop_features(starter)
+        .iter()
+        .map(|feature| format!("\"{feature}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let gamepad_dependency = if starter.has_action_map() {
+        let coordinate = gilrs_local_path(receipt).map_or_else(
+            || dependency.to_owned(),
+            |path| format!("path = {}", Value::String(path)),
+        );
+        format!(
+            "\n[target.'cfg(windows)'.dependencies]\nnara_gilrs = {{ {coordinate}, optional = true }}\n"
+        )
+    } else {
+        String::new()
+    };
     format!(
         r#"[package]
 name = "{}"
@@ -69,7 +77,7 @@ nara = {{ {}, default-features = false, features = ["{}", "{}", "{}"] }}
 
 [features]
 default = []
-desktop = ["{}", "{}", "{}"]
+desktop = [{desktop}]
 
 [lib]
 name = "nara_game"
@@ -91,22 +99,25 @@ path = "src/bin/cook.rs"
 [[bin]]
 name = "player"
 path = "src/bin/player.rs"
-"#,
+{gamepad_dependency}"#,
         slug.as_str(),
         dependency,
         HEADLESS_NARA_FEATURES[0],
         HEADLESS_NARA_FEATURES[1],
-        HEADLESS_NARA_FEATURES[2],
-        DESKTOP_NARA_FEATURES[0],
-        DESKTOP_NARA_FEATURES[1],
-        DESKTOP_NARA_FEATURES[2]
+        HEADLESS_NARA_FEATURES[2]
     )
 }
 
 pub(super) fn render_project_manifest(
+    starter: ProjectStarter,
     slug: &ProjectSlug,
     source_universe: SourceUniverseId,
 ) -> String {
+    let input = if starter.has_action_map() {
+        format!("\n[input]\naction_map = \"{STARTER_ACTION_MAP_PATH}\"\n")
+    } else {
+        String::new()
+    };
     format!(
         r#"schema_version = 1
 
@@ -156,31 +167,37 @@ width = 1280
 height = 720
 present_mode = "fifo"
 resizable = true
-"#,
+{input}"#,
         slug.as_str(),
         slug.as_str(),
         slug.as_str()
     )
 }
 
-pub(crate) fn product_recipe() -> Result<ProductRecipe, crate::ProductRecipeError> {
-    ProductRecipe::new().add_runtime_image_codec::<nara_image::ImageRuntimeCodec>(
-        crate::runtime_content::RuntimeCodecDefinitionId::new("nara.starter.desktop-2d.image", 1),
-    )
+pub(crate) fn product_recipe(
+    starter: ProjectStarter,
+) -> Result<ProductRecipe, crate::ProductRecipeError> {
+    use crate::runtime_content::RuntimeCodecDefinitionId;
+
+    let recipe = ProductRecipe::new().add_runtime_image_codec::<nara_image::ImageRuntimeCodec>(
+        RuntimeCodecDefinitionId::new("nara.starter.desktop-2d.image", 1),
+    )?;
+    if starter.has_action_map() {
+        recipe.add_runtime_asset_codec::<nara_input::ActionMapDomain, nara_input::ActionMapRuntimeCodec>(
+            RuntimeCodecDefinitionId::new("nara.starter.desktop-2d.actions", 1),
+        )
+    } else {
+        Ok(recipe)
+    }
 }
 
 pub(super) fn validate(
+    starter: ProjectStarter,
     slug: &ProjectSlug,
     dependency: &NaraDependencyReceipt,
     sources: ProductContractSources<'_>,
 ) -> Result<(), &'static str> {
-    validate_cargo_manifest(slug, dependency, sources.cargo_manifest)?;
-    validate_author_guide(
-        slug,
-        sources.dependency_manifest_fragment,
-        sources.creation_command_arguments,
-        sources.author_guide,
-    )?;
+    validate_cargo_manifest(starter, slug, dependency, sources.cargo_manifest)?;
     let load = ProjectManifest::parse_toml_bytes(sources.project_manifest);
     if load.has_errors() {
         return Err("generated project manifest is invalid");
@@ -201,6 +218,7 @@ pub(super) fn validate(
         ProductCapability::DesktopWinit,
         ProductCapability::RenderWgpu,
     ]);
+    let expected_action_map = starter.has_action_map().then_some(STARTER_ACTION_MAP_PATH);
     if manifest.project.name != slug.as_str()
         || manifest.project.source_universe != sources.source_universe
         || manifest.project.native_document_identity != NativeDocumentIdentity::StableMetadata
@@ -218,6 +236,7 @@ pub(super) fn validate(
         || headless.runtime_preset != RuntimePreset::LocalHeadless
         || headless.startup.default_scene.is_none()
         || headless.window.enabled
+        || headless.input.action_map.as_ref().map(|path| path.as_str()) != expected_action_map
     {
         return Err("generated headless product contract disagrees with the starter");
     }
@@ -231,18 +250,9 @@ pub(super) fn validate(
         || desktop.window.title != slug.as_str()
         || !desktop.window.resizable
         || desktop.window.present_mode != ProjectPresentMode::Fifo
+        || desktop.input.action_map.as_ref().map(|path| path.as_str()) != expected_action_map
     {
         return Err("generated desktop product contract disagrees with the starter");
-    }
-    if !LIBRARY_MARKERS
-        .iter()
-        .all(|marker| source_contains(sources.library, marker))
-        || !source_contains(sources.headless, BINARY_MARKER)
-        || !source_contains(sources.desktop, BINARY_MARKER)
-        || !source_contains(sources.cook, BINARY_MARKER)
-        || !source_contains(sources.player, BINARY_MARKER)
-    {
-        return Err("generated Rust entry points disagree with the starter product contract");
     }
     validate_authoring_schema_bundle(
         sources.authoring_schema_bundle,
@@ -270,34 +280,8 @@ fn validate_authoring_schema_bundle(
     Ok(())
 }
 
-fn validate_author_guide(
-    slug: &ProjectSlug,
-    dependency_manifest_fragment: &str,
-    creation_command_arguments: &str,
-    guide: &str,
-) -> Result<(), &'static str> {
-    let dependency_marker = format!("Nara dependency: `{dependency_manifest_fragment}`");
-    let creation_command = format!(
-        "nara new desktop-2d/v1 {} --parent . {creation_command_arguments}",
-        slug.as_str()
-    );
-    if !guide.starts_with(&format!("# {} author guide\n", slug.as_str()))
-        || !guide.contains("Starter: `desktop-2d/v1`")
-        || !guide.contains(&dependency_marker)
-        || !guide.contains(&creation_command)
-        || !guide.contains("nara check .")
-        || !guide.contains("nara export .")
-        || !guide.contains("nara repair startup-scene .")
-        || !guide.contains("source-carrying declared-content candidate")
-        || !guide.contains("[content]")
-        || !guide.contains("scenes = [\"level-b.scene.json\"]")
-    {
-        return Err("generated author guide disagrees with the starter workflow");
-    }
-    Ok(())
-}
-
 fn validate_cargo_manifest(
+    starter: ProjectStarter,
     slug: &ProjectSlug,
     dependency: &NaraDependencyReceipt,
     cargo_manifest: &[u8],
@@ -309,7 +293,7 @@ fn validate_cargo_manifest(
     let root = value
         .as_table()
         .ok_or("generated Cargo manifest root is not a table")?;
-    if root.len() != 6 {
+    if root.len() != 6 + usize::from(starter.has_action_map()) {
         return Err("generated Cargo manifest contains an unexpected top-level section");
     }
     let package = root
@@ -388,6 +372,9 @@ fn validate_cargo_manifest(
             }
         }
     }
+    if starter.has_action_map() {
+        validate_gamepad_dependency(root.get("target"), dependency_table, dependency)?;
+    }
 
     let features = root
         .get("features")
@@ -395,7 +382,7 @@ fn validate_cargo_manifest(
         .ok_or("generated Cargo features table is absent")?;
     if features.len() != 2
         || !string_array_matches(features.get("default"), &[])
-        || !string_array_matches(features.get("desktop"), &DESKTOP_NARA_FEATURES)
+        || !string_array_matches(features.get("desktop"), desktop_features(starter))
     {
         return Err("generated Cargo product features disagree with the starter");
     }
@@ -460,6 +447,57 @@ fn binary_target_matches(
         }
 }
 
-fn source_contains(source: &[u8], marker: &[u8]) -> bool {
-    source.windows(marker.len()).any(|window| window == marker)
+fn desktop_features(starter: ProjectStarter) -> &'static [&'static str] {
+    if starter.has_action_map() {
+        &DESKTOP_NARA_FEATURES
+    } else {
+        &DESKTOP_NARA_FEATURES[..3]
+    }
+}
+
+fn gilrs_local_path(receipt: &NaraDependencyReceipt) -> Option<String> {
+    receipt
+        .local_cargo_path()
+        .map(|path| format!("{}/crates/nara_gilrs", path.trim_end_matches('/')))
+}
+
+fn validate_gamepad_dependency(
+    target: Option<&Value>,
+    engine: &toml::Table,
+    receipt: &NaraDependencyReceipt,
+) -> Result<(), &'static str> {
+    let invalid = "generated Windows gamepad dependency disagrees with the starter";
+    let targets = target.and_then(Value::as_table).ok_or(invalid)?;
+    let windows = targets
+        .get("cfg(windows)")
+        .and_then(Value::as_table)
+        .ok_or(invalid)?;
+    let dependencies = windows
+        .get("dependencies")
+        .and_then(Value::as_table)
+        .ok_or(invalid)?;
+    let gilrs = dependencies
+        .get("nara_gilrs")
+        .and_then(Value::as_table)
+        .ok_or(invalid)?;
+    let coordinate_matches = match receipt.kind() {
+        NaraDependencySourceKind::LocalCheckout => {
+            gilrs.len() == 2
+                && gilrs.get("path").and_then(Value::as_str) == gilrs_local_path(receipt).as_deref()
+        }
+        NaraDependencySourceKind::ImmutableGit => {
+            gilrs.len() == 3
+                && gilrs.get("git") == engine.get("git")
+                && gilrs.get("rev") == engine.get("rev")
+        }
+    };
+    if targets.len() != 1
+        || windows.len() != 1
+        || dependencies.len() != 1
+        || gilrs.get("optional").and_then(Value::as_bool) != Some(true)
+        || !coordinate_matches
+    {
+        return Err(invalid);
+    }
+    Ok(())
 }

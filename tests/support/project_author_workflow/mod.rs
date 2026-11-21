@@ -18,6 +18,8 @@ use nara::{
 #[allow(dead_code)]
 #[path = "../project_cook/process.rs"]
 mod process;
+#[cfg(feature = "tooling")]
+pub(super) mod puzzle;
 mod workspace;
 
 use process::{Custody, Output, install, remove_owned_tree};
@@ -460,6 +462,7 @@ fn build(
                 "gameplay-plugin/Cargo.toml",
                 "gameplay-plugin/src/lib.rs",
                 "gameplay-plugin/src/input.rs",
+                "gameplay-plugin/src/walking.rs",
                 "gameplay-plugin/schema/component-schema-generation-1.json",
             ]
             .map(|name| RelativePath::new(name).unwrap()),

@@ -4,6 +4,7 @@ use nara_fs::{DirectoryCapability, FsError, FsOperation, RelativeComponent, Rela
 
 use super::super::starter::{
     ProjectCreationPlan, ProjectDirectory, ProjectMember, ProjectMemberPlan,
+    STARTER_ACTION_MAP_PATH,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -56,80 +57,52 @@ pub(super) fn stage_project_tree(
     staging: DirectoryCapability,
     plan: &ProjectCreationPlan,
 ) -> Result<(), ProjectTreeStageError> {
-    let assets = create_directory(&staging, ProjectDirectory::Assets, "assets")?;
-    let prefabs = create_directory(&staging, ProjectDirectory::Prefabs, "prefabs")?;
-    let scenes = create_directory(&staging, ProjectDirectory::Scenes, "scenes")?;
-    let schema = create_directory(&staging, ProjectDirectory::Schema, "schema")?;
-    let source = create_directory(&staging, ProjectDirectory::Source, "src")?;
-    let source_binaries = create_directory(&source, ProjectDirectory::SourceBinaries, "bin")?;
-    let tree = StagedProjectTree {
-        root: staging,
-        assets,
-        prefabs,
-        scenes,
-        schema,
-        source,
-        source_binaries,
-    };
-
-    for member in plan.members() {
-        write_member(&tree, member)?;
+    let mut directories = Vec::with_capacity(plan.directories().len());
+    for &directory in plan.directories() {
+        let path = directory_path(directory);
+        let parent = match directory {
+            ProjectDirectory::SourceBinaries => {
+                directory_in(&directories, ProjectDirectory::Source)
+            }
+            _ => &staging,
+        };
+        let handle = parent
+            .create_child_directory(leaf_name(&path))
+            .map_err(|source| ProjectTreeStageError::CreateDirectory { directory, source })?;
+        directories.push((directory, handle));
     }
     for member in plan.members() {
-        verify_staged_member(&tree.root, member)?;
+        let (directory, name) = member_location(member.member());
+        let parent = directory.map_or(&staging, |directory| directory_in(&directories, directory));
+        write_member(parent, name, member)?;
     }
-    sync_directory(
-        &tree.source_binaries,
-        Some(ProjectDirectory::SourceBinaries),
-    )?;
-    sync_directory(&tree.source, Some(ProjectDirectory::Source))?;
-    sync_directory(&tree.assets, Some(ProjectDirectory::Assets))?;
-    sync_directory(&tree.prefabs, Some(ProjectDirectory::Prefabs))?;
-    sync_directory(&tree.scenes, Some(ProjectDirectory::Scenes))?;
-    sync_directory(&tree.schema, Some(ProjectDirectory::Schema))?;
-    sync_directory(&tree.root, None)?;
+    for member in plan.members() {
+        verify_staged_member(&staging, member)?;
+    }
+    for (directory, handle) in directories.iter().rev() {
+        sync_directory(handle, Some(*directory))?;
+    }
+    sync_directory(&staging, None)?;
     Ok(())
 }
 
-struct StagedProjectTree {
-    root: DirectoryCapability,
-    assets: DirectoryCapability,
-    prefabs: DirectoryCapability,
-    scenes: DirectoryCapability,
-    schema: DirectoryCapability,
-    source: DirectoryCapability,
-    source_binaries: DirectoryCapability,
-}
-
-fn create_directory(
-    parent: &DirectoryCapability,
+fn directory_in(
+    directories: &[(ProjectDirectory, DirectoryCapability)],
     directory: ProjectDirectory,
-    name: &str,
-) -> Result<DirectoryCapability, ProjectTreeStageError> {
-    parent
-        .create_child_directory(&component(name))
-        .map_err(|source| ProjectTreeStageError::CreateDirectory { directory, source })
+) -> &DirectoryCapability {
+    directories
+        .iter()
+        .find_map(|(kind, handle)| (*kind == directory).then_some(handle))
+        .expect("the closed starter plan includes each parent directory before its children")
 }
 
 fn write_member(
-    tree: &StagedProjectTree,
+    parent: &DirectoryCapability,
+    name: &str,
     member: &ProjectMemberPlan,
 ) -> Result<(), ProjectTreeStageError> {
-    let parent = match member.member() {
-        ProjectMember::CargoManifest
-        | ProjectMember::ProjectManifest
-        | ProjectMember::AuthorGuide
-        | ProjectMember::BuildScript => &tree.root,
-        ProjectMember::AuthoringSchemaBundle => &tree.schema,
-        ProjectMember::LibrarySource => &tree.source,
-        ProjectMember::HeadlessSource
-        | ProjectMember::DesktopSource
-        | ProjectMember::CookSource
-        | ProjectMember::PlayerSource => &tree.source_binaries,
-        ProjectMember::StartupScene | ProjectMember::StartupSceneMetadata => &tree.scenes,
-    };
     let mut file = parent
-        .create_child_file(&member_name(member.member()))
+        .create_child_file(&component(name))
         .map_err(|source| ProjectTreeStageError::CreateFile {
             member: member.member(),
             source,
@@ -192,41 +165,60 @@ fn sync_directory(
 }
 
 pub(super) fn member_path(member: ProjectMember) -> RelativePath {
-    RelativePath::new(match member {
-        ProjectMember::CargoManifest => "Cargo.toml",
-        ProjectMember::ProjectManifest => "nara.toml",
-        ProjectMember::AuthoringSchemaBundle => "schema/authoring.bundle.json",
-        ProjectMember::AuthorGuide => "README.md",
-        ProjectMember::BuildScript => "build.rs",
-        ProjectMember::LibrarySource => "src/lib.rs",
-        ProjectMember::HeadlessSource => "src/bin/headless.rs",
-        ProjectMember::DesktopSource => "src/bin/desktop.rs",
-        ProjectMember::CookSource => "src/bin/cook.rs",
-        ProjectMember::PlayerSource => "src/bin/player.rs",
-        ProjectMember::StartupScene => "scenes/startup.scene.json",
-        ProjectMember::StartupSceneMetadata => "scenes/startup.scene.json.meta",
-    })
+    let (directory, name) = member_location(member);
+    if let Some(directory) = directory {
+        RelativePath::new(format!("{}/{name}", directory_name(directory)))
+    } else {
+        RelativePath::new(name)
+    }
     .expect("the closed starter inventory uses valid relative paths")
 }
 
+fn member_location(member: ProjectMember) -> (Option<ProjectDirectory>, &'static str) {
+    use ProjectDirectory::{Input, Scenes, Schema, Source, SourceBinaries};
+
+    let (directory, name) = match member {
+        ProjectMember::CargoManifest => return (None, "Cargo.toml"),
+        ProjectMember::ProjectManifest => return (None, "nara.toml"),
+        ProjectMember::AuthorGuide => return (None, "README.md"),
+        ProjectMember::BuildScript => return (None, "build.rs"),
+        ProjectMember::AuthoringSchemaBundle => (Schema, "authoring.bundle.json"),
+        ProjectMember::LibrarySource => (Source, "lib.rs"),
+        ProjectMember::GameplaySource => (Source, "gameplay.rs"),
+        ProjectMember::HeadlessSource => (SourceBinaries, "headless.rs"),
+        ProjectMember::DesktopSource => (SourceBinaries, "desktop.rs"),
+        ProjectMember::CookSource => (SourceBinaries, "cook.rs"),
+        ProjectMember::PlayerSource => (SourceBinaries, "player.rs"),
+        ProjectMember::StartupScene => (Scenes, "startup.scene.json"),
+        ProjectMember::StartupSceneMetadata => (Scenes, "startup.scene.json.meta"),
+        ProjectMember::InputActionMap => {
+            (Input, STARTER_ACTION_MAP_PATH.rsplit_once('/').unwrap().1)
+        }
+    };
+    (Some(directory), name)
+}
+
 pub(super) fn directory_path(directory: ProjectDirectory) -> RelativePath {
-    RelativePath::new(match directory {
+    RelativePath::new(directory_name(directory))
+        .expect("the closed starter inventory uses valid relative paths")
+}
+
+fn directory_name(directory: ProjectDirectory) -> &'static str {
+    match directory {
         ProjectDirectory::Assets => "assets",
+        ProjectDirectory::Input => "input",
         ProjectDirectory::Prefabs => "prefabs",
         ProjectDirectory::Scenes => "scenes",
         ProjectDirectory::Schema => "schema",
         ProjectDirectory::Source => "src",
         ProjectDirectory::SourceBinaries => "src/bin",
-    })
-    .expect("the closed starter inventory uses valid relative paths")
+    }
 }
 
-fn member_name(member: ProjectMember) -> RelativeComponent {
-    member_path(member)
-        .components()
+fn leaf_name(path: &RelativePath) -> &RelativeComponent {
+    path.components()
         .last()
-        .cloned()
-        .expect("the closed starter inventory has non-empty relative paths")
+        .expect("the closed starter inventory has a non-empty relative path")
 }
 
 fn component(name: &str) -> RelativeComponent {

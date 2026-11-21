@@ -43,9 +43,11 @@ Example (after creating my-game):
 ";
 
 const NEW: &str = "\
-Create a desktop 2D Rust project from the desktop-2d/v1 starter.
+Create a desktop 2D Rust project. Use desktop-2d/v2 for editable keyboard and gamepad bindings.
 
 Usage:
+  nara new desktop-2d/v2 <slug> --parent <directory> --local-checkout <directory>
+  nara new desktop-2d/v2 <slug> --parent <directory> --git <https-url> --rev <object-id>
   nara new desktop-2d/v1 <slug> --parent <directory> --local-checkout <directory>
   nara new desktop-2d/v1 <slug> --parent <directory> --git <https-url> --rev <object-id>
   nara new --help
@@ -58,6 +60,9 @@ Options:
   -h, --help                  Show this help without creating a project.
 
 Example (from a Nara checkout; creates my-game in its parent directory):
+  nara new desktop-2d/v2 my-game --parent .. --local-checkout .
+
+The desktop-2d/v1 camera-only starter is also available:
   nara new desktop-2d/v1 my-game --parent .. --local-checkout .
 ";
 

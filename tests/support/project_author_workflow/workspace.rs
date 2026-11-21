@@ -10,7 +10,7 @@ use nara::{
     project_tooling::host_fs,
     project_workflow::{
         LocalDependencyRelation, NaraDependencySource, ProjectCreationOutcome,
-        ProjectCreationRequest, ProjectSlug, prepare_desktop_2d_project,
+        ProjectCreationRequest, ProjectSlug, ProjectStarter, prepare_desktop_2d_project,
     },
 };
 
@@ -44,6 +44,7 @@ impl Project {
         let shared = host_fs::writable_directory(ancestor).unwrap();
         let parent = shared.open_directory(&relative).unwrap();
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             parent,
             ProjectSlug::new(PACKAGE).unwrap(),
             NaraDependencySource::local(LocalDependencyRelation::new(
@@ -131,6 +132,8 @@ impl Project {
             "gameplay-plugin/Cargo.toml",
             "gameplay-plugin/src/lib.rs",
             "gameplay-plugin/src/input.rs",
+            "gameplay-plugin/src/walking.rs",
+            "gameplay-plugin/src/inventory_tests.rs",
             "gameplay-plugin/schema/component-schema-generation-1.json",
             "scenes/startup.scene.json",
             "prefabs/player.prefab.json",

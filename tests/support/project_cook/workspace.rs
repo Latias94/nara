@@ -14,7 +14,7 @@ use nara::{
     project_tooling::host_fs,
     project_workflow::{
         LocalDependencyRelation, NaraDependencySource, ProjectCreationOutcome,
-        ProjectCreationRequest, ProjectSlug, prepare_desktop_2d_project,
+        ProjectCreationRequest, ProjectSlug, ProjectStarter, prepare_desktop_2d_project,
     },
     reflect::{ComponentSchemaVersion, ComponentTypeId, PersistentComponentProvider},
     scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord},
@@ -46,6 +46,7 @@ impl Project {
         let relative = RelativePath::new(coordinate).unwrap();
         let parent = ancestor.open_directory(&relative).unwrap();
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             parent,
             ProjectSlug::new(PACKAGE).unwrap(),
             NaraDependencySource::local(LocalDependencyRelation::new(

@@ -55,6 +55,11 @@ fn scoped_help_has_usable_syntax_and_examples_without_required_operands() {
             "nara new desktop-2d/v1 my-game --parent .. --local-checkout .",
         ),
         (
+            vec!["new", "desktop-2d/v2"],
+            "nara new desktop-2d/v2 <slug> --parent <directory> --local-checkout <directory>",
+            "nara new desktop-2d/v2 my-game --parent .. --local-checkout .",
+        ),
+        (
             vec!["export"],
             "nara export <project-directory> --parent <directory> --destination <name>",
             "nara export ./my-game --parent . --destination my-game-export",

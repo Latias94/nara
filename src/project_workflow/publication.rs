@@ -673,7 +673,7 @@ mod tests {
     use super::*;
     use crate::project_workflow::{
         LocalDependencyRelation, NaraDependencySource, ProjectCreationRequest, ProjectSlug,
-        prepare_desktop_2d_project,
+        ProjectStarter, prepare_desktop_2d_project,
     };
 
     const GIT_REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
@@ -708,6 +708,7 @@ mod tests {
     fn entropy_failure_rejects_before_allocating_a_staging_name() {
         let root = TestRoot::new();
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             root.capability(),
             ProjectSlug::new("entropy-failure").unwrap(),
             NaraDependencySource::immutable_git(
@@ -747,6 +748,7 @@ mod tests {
     fn admission_failure_retains_the_published_directory_and_publication_receipt() {
         let root = TestRoot::new();
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             root.capability(),
             ProjectSlug::new("unadmitted-game").unwrap(),
             NaraDependencySource::immutable_git(
@@ -802,6 +804,7 @@ mod tests {
     fn post_publication_member_change_prevents_creation_success() {
         let root = TestRoot::new();
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             root.capability(),
             ProjectSlug::new("changed-after-publication").unwrap(),
             NaraDependencySource::immutable_git(
@@ -833,9 +836,54 @@ mod tests {
     }
 
     #[test]
+    fn admitting_a_different_valid_action_map_refuses_creation_success() {
+        let root = TestRoot::new();
+        let destination = "changed-action-map";
+        let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV2,
+            root.capability(),
+            ProjectSlug::new(destination).unwrap(),
+            NaraDependencySource::immutable_git(
+                "https://github.com/nara-engine/nara.git",
+                GIT_REVISION,
+            )
+            .unwrap(),
+        ))
+        .unwrap();
+        let path = root
+            .path
+            .join(destination)
+            .join("input/starter.actions.json");
+        let outcome = publish_prepared_with(prepared, |parent, publication, plan, dependency| {
+            let original = fs::read_to_string(&path).unwrap();
+            let replacement = original.replacen("\"d\"", "\"l\"", 1);
+            assert_ne!(replacement, original);
+            nara_input::ActionMapFileCandidate::decode_json_bytes(replacement.as_bytes()).unwrap();
+            fs::write(&path, replacement).unwrap();
+            admit_published(parent, publication, plan, dependency)
+        });
+        if publication_is_unavailable_and_clean(&outcome, &root.path, destination) {
+            return;
+        }
+        let ProjectCreationOutcome::PublishedButUnadmitted(outcome) = outcome else {
+            panic!("expected an unadmitted published directory: {outcome:?}");
+        };
+        assert!(path.is_file());
+        assert_eq!(
+            outcome.error().kind(),
+            ProjectCreationAdmissionErrorKind::PublishedMember
+        );
+        assert_eq!(
+            outcome.error().member(),
+            Some(ProjectMember::InputActionMap)
+        );
+    }
+
+    #[test]
     fn post_publication_startup_metadata_change_prevents_creation_success() {
         let root = TestRoot::new();
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             root.capability(),
             ProjectSlug::new("changed-metadata-after-publication").unwrap(),
             NaraDependencySource::immutable_git(
@@ -893,6 +941,7 @@ mod tests {
     fn manifest_parsing_rejects_bytes_that_do_not_match_the_plan_digest() {
         let root = TestRoot::new();
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             root.capability(),
             ProjectSlug::new("changed-manifest-after-publication").unwrap(),
             NaraDependencySource::immutable_git(
@@ -952,6 +1001,7 @@ mod tests {
     fn startup_scene_parsing_rejects_bytes_that_do_not_match_the_plan_digest() {
         let root = TestRoot::new();
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             root.capability(),
             ProjectSlug::new("changed-scene-after-publication").unwrap(),
             NaraDependencySource::immutable_git(
@@ -1004,6 +1054,7 @@ mod tests {
             .open_directory(&RelativePath::new("projects").unwrap())
             .unwrap();
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             publication_parent,
             ProjectSlug::new("moved-after-publication").unwrap(),
             NaraDependencySource::local(LocalDependencyRelation::new(
@@ -1048,6 +1099,7 @@ mod tests {
             .open_directory(&RelativePath::new("games").unwrap())
             .unwrap();
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             parent,
             ProjectSlug::new("changed-checkout").unwrap(),
             NaraDependencySource::local(LocalDependencyRelation::new(
@@ -1084,6 +1136,7 @@ mod tests {
     fn post_publication_directory_removal_prevents_creation_success() {
         let root = TestRoot::new();
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             root.capability(),
             ProjectSlug::new("missing-directory-after-publication").unwrap(),
             NaraDependencySource::immutable_git(

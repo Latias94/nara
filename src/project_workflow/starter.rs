@@ -1,21 +1,29 @@
 use std::fmt::{self, Debug, Formatter};
 
-use nara_asset::{AssetMeta, AssetMetaIdentity, AssetPath, AssetSourceKind, StableAssetId};
+use nara_asset::{
+    AssetMeta, AssetMetaIdentity, AssetPath, AssetProductRef, AssetSourceKind, ImportedProductId,
+    StableAssetId,
+};
 use nara_fs::{ContentDigest, PathValidationError, RelativeComponent};
-use nara_project::{CURRENT_PROJECT_SCHEMA_VERSION, SourceUniverseId};
+use nara_input::{
+    ActionBinding, ActionContext, ActionId, ActionMapBuilder, ActionMapFileCandidate,
+    ActionMapLimits, GamepadButton, KeyCode,
+};
+use nara_project::CURRENT_PROJECT_SCHEMA_VERSION;
 use nara_reflect::{AuthoringSchemaBundle, ComponentSchemaProviderDefinition};
 use thiserror::Error;
 
-use super::dependency::NaraDependencyReceipt;
+use super::{creation::StarterSourceIdentities, dependency::NaraDependencyReceipt};
 
 mod product_contract;
 
-pub(crate) use product_contract::product_recipe as desktop_2d_v1_product_recipe;
+pub(crate) use product_contract::product_recipe as desktop_2d_product_recipe;
 use product_contract::{ProductContractSources, render_cargo_manifest, render_project_manifest};
 
 const MAX_PROJECT_SLUG_BYTES: usize = 64;
 const MAX_STARTER_MEMBER_BYTES: usize = 256 * 1024;
-const DESKTOP_2D_V1_SCENE_FORMAT_VERSION: u32 = 1;
+const STARTER_SCENE_FORMAT_VERSION: u32 = 1;
+pub(super) const STARTER_ACTION_MAP_PATH: &str = "input/starter.actions.json";
 
 const AUTHOR_GUIDE_BODY: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -29,6 +37,18 @@ const LIBRARY_SOURCE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/starters/desktop-2d/v1/src/lib.rs"
 ));
+const ACTION_GUIDE_BODY: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/starters/desktop-2d/v2/README.md"
+));
+const ACTION_LIBRARY_SOURCE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/starters/desktop-2d/v2/src/lib.rs"
+));
+const GAMEPLAY_SOURCE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/starters/desktop-2d/v2/src/gameplay.rs"
+));
 const HEADLESS_SOURCE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/starters/desktop-2d/v1/src/bin/headless.rs"
@@ -36,6 +56,10 @@ const HEADLESS_SOURCE: &[u8] = include_bytes!(concat!(
 const DESKTOP_SOURCE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/starters/desktop-2d/v1/src/bin/desktop.rs"
+));
+const V2_DESKTOP_SOURCE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/starters/desktop-2d/v2/src/bin/desktop.rs"
 ));
 const COOK_SOURCE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -53,6 +77,7 @@ const STARTUP_SCENE: &[u8] = include_bytes!(concat!(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProjectStarter {
     Desktop2dV1,
+    Desktop2dV2,
 }
 
 impl ProjectStarter {
@@ -60,21 +85,32 @@ impl ProjectStarter {
     pub const fn id(self) -> &'static str {
         match self {
             Self::Desktop2dV1 => "desktop-2d/v1",
+            Self::Desktop2dV2 => "desktop-2d/v2",
+        }
+    }
+
+    #[must_use]
+    pub fn from_id(id: &str) -> Option<Self> {
+        [Self::Desktop2dV1, Self::Desktop2dV2]
+            .into_iter()
+            .find(|starter| starter.id() == id)
+    }
+
+    pub(super) const fn has_action_map(self) -> bool {
+        match self {
+            Self::Desktop2dV1 => false,
+            Self::Desktop2dV2 => true,
         }
     }
 
     #[must_use]
     pub const fn manifest_schema_version(self) -> u32 {
-        match self {
-            Self::Desktop2dV1 => CURRENT_PROJECT_SCHEMA_VERSION,
-        }
+        CURRENT_PROJECT_SCHEMA_VERSION
     }
 
     #[must_use]
     pub const fn scene_format_version(self) -> u32 {
-        match self {
-            Self::Desktop2dV1 => DESKTOP_2D_V1_SCENE_FORMAT_VERSION,
-        }
+        STARTER_SCENE_FORMAT_VERSION
     }
 }
 
@@ -132,6 +168,7 @@ impl ProjectSlugError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProjectDirectory {
     Assets,
+    Input,
     Prefabs,
     Scenes,
     Schema,
@@ -146,6 +183,7 @@ pub enum ProjectMember {
     AuthorGuide,
     BuildScript,
     LibrarySource,
+    GameplaySource,
     HeadlessSource,
     DesktopSource,
     CookSource,
@@ -153,6 +191,7 @@ pub enum ProjectMember {
     StartupScene,
     StartupSceneMetadata,
     AuthoringSchemaBundle,
+    InputActionMap,
 }
 
 pub struct ProjectMemberPlan {
@@ -189,6 +228,7 @@ impl Debug for ProjectMemberPlan {
 }
 
 pub struct ProjectCreationPlan {
+    starter: ProjectStarter,
     slug: ProjectSlug,
     dependency: super::dependency::NaraDependencyReceipt,
     members: Box<[ProjectMemberPlan]>,
@@ -271,7 +311,7 @@ impl ProjectCreationPlanReceipt {
 impl ProjectCreationPlan {
     #[must_use]
     pub const fn starter(&self) -> ProjectStarter {
-        ProjectStarter::Desktop2dV1
+        self.starter
     }
 
     #[must_use]
@@ -286,7 +326,13 @@ impl ProjectCreationPlan {
 
     #[must_use]
     pub const fn directories(&self) -> &'static [ProjectDirectory] {
-        &PROJECT_DIRECTORIES
+        if self.starter.has_action_map() {
+            &PROJECT_DIRECTORIES
+        } else {
+            PROJECT_DIRECTORIES
+                .split_at(PROJECT_DIRECTORIES.len() - 1)
+                .0
+        }
     }
 
     #[must_use]
@@ -333,16 +379,17 @@ impl Debug for ProjectCreationPlan {
     }
 }
 
-const PROJECT_DIRECTORIES: [ProjectDirectory; 6] = [
+const PROJECT_DIRECTORIES: [ProjectDirectory; 7] = [
     ProjectDirectory::Assets,
     ProjectDirectory::Prefabs,
     ProjectDirectory::Scenes,
     ProjectDirectory::Schema,
     ProjectDirectory::Source,
     ProjectDirectory::SourceBinaries,
+    ProjectDirectory::Input,
 ];
 
-const DESKTOP_2D_V1_AUTHORING_SCHEMA_PROVIDERS: [ComponentSchemaProviderDefinition; 6] = [
+const AUTHORING_SCHEMA_PROVIDERS: [ComponentSchemaProviderDefinition; 6] = [
     nara_scene::SCENE_COMPONENTS_SCHEMA_PROVIDER,
     nara_transform::TRANSFORM_SCHEMA_PROVIDER,
     nara_render::RENDER_SCHEMA_PROVIDER,
@@ -351,19 +398,24 @@ const DESKTOP_2D_V1_AUTHORING_SCHEMA_PROVIDERS: [ComponentSchemaProviderDefiniti
     nara_material::MATERIAL_SCHEMA_PROVIDER,
 ];
 
-pub(crate) fn build_desktop_2d_v1_plan(
+pub(super) fn build_creation_plan(
+    starter: ProjectStarter,
     slug: ProjectSlug,
-    source_universe: SourceUniverseId,
-    startup_scene_identity: StableAssetId,
+    identities: StarterSourceIdentities,
     dependency_manifest_fragment: &str,
     creation_command_arguments: &str,
     dependency_receipt: NaraDependencyReceipt,
 ) -> Result<ProjectCreationPlan, &'static str> {
-    let cargo_manifest = render_cargo_manifest(&slug, dependency_manifest_fragment);
-    let project_manifest = render_project_manifest(&slug, source_universe);
+    let cargo_manifest = render_cargo_manifest(
+        starter,
+        &slug,
+        dependency_manifest_fragment,
+        &dependency_receipt,
+    );
+    let project_manifest = render_project_manifest(starter, &slug, identities.universe);
     let startup_metadata = AssetMeta::new(
         AssetMetaIdentity::new(
-            startup_scene_identity,
+            identities.scene,
             AssetPath::new("startup.scene.json").expect("the starter Scene path is valid"),
             AssetSourceKind::Scene,
         ),
@@ -372,46 +424,50 @@ pub(crate) fn build_desktop_2d_v1_plan(
     let startup_metadata_json = startup_metadata
         .to_json_string()
         .map_err(|_| "starter Scene metadata could not be encoded")?;
-    let authoring_schema_bundle = desktop_2d_v1_authoring_schema_bundle()?;
+    let authoring_schema_bundle =
+        AuthoringSchemaBundle::from_trusted_provider_definitions(AUTHORING_SCHEMA_PROVIDERS)
+            .map_err(|_| "starter authoring schema bundle could not be composed")?;
     let authoring_schema_bundle_json = authoring_schema_bundle
         .to_json_string()
         .map_err(|_| "starter authoring schema bundle could not be encoded")?;
     let author_guide = render_author_guide(
+        starter,
         &slug,
         dependency_manifest_fragment,
         creation_command_arguments,
     );
     product_contract::validate(
+        starter,
         &slug,
         &dependency_receipt,
         ProductContractSources {
-            source_universe,
+            source_universe: identities.universe,
             expected_startup_metadata: startup_metadata.identity(),
             startup_metadata: startup_metadata_json.as_bytes(),
             cargo_manifest: cargo_manifest.as_bytes(),
             project_manifest: project_manifest.as_bytes(),
             authoring_schema_bundle: authoring_schema_bundle_json.as_bytes(),
             expected_authoring_schema_bundle: &authoring_schema_bundle,
-            dependency_manifest_fragment,
-            creation_command_arguments,
-            author_guide: &author_guide,
-            library: LIBRARY_SOURCE,
-            headless: HEADLESS_SOURCE,
-            desktop: DESKTOP_SOURCE,
-            cook: COOK_SOURCE,
-            player: PLAYER_SOURCE,
             startup_scene: STARTUP_SCENE,
         },
     )?;
 
-    let members = [
+    let library_source = match starter {
+        ProjectStarter::Desktop2dV1 => LIBRARY_SOURCE,
+        ProjectStarter::Desktop2dV2 => ACTION_LIBRARY_SOURCE,
+    };
+    let desktop_source = match starter {
+        ProjectStarter::Desktop2dV1 => DESKTOP_SOURCE,
+        ProjectStarter::Desktop2dV2 => V2_DESKTOP_SOURCE,
+    };
+    let mut members = vec![
         member(ProjectMember::CargoManifest, cargo_manifest.as_bytes())?,
         member(ProjectMember::ProjectManifest, project_manifest.as_bytes())?,
         member(ProjectMember::AuthorGuide, author_guide.as_bytes())?,
         member(ProjectMember::BuildScript, BUILD_SCRIPT)?,
-        member(ProjectMember::LibrarySource, LIBRARY_SOURCE)?,
+        member(ProjectMember::LibrarySource, library_source)?,
         member(ProjectMember::HeadlessSource, HEADLESS_SOURCE)?,
-        member(ProjectMember::DesktopSource, DESKTOP_SOURCE)?,
+        member(ProjectMember::DesktopSource, desktop_source)?,
         member(ProjectMember::CookSource, COOK_SOURCE)?,
         member(ProjectMember::PlayerSource, PLAYER_SOURCE)?,
         member(ProjectMember::StartupScene, STARTUP_SCENE)?,
@@ -424,40 +480,83 @@ pub(crate) fn build_desktop_2d_v1_plan(
             authoring_schema_bundle_json.as_bytes(),
         )?,
     ];
-    if members.iter().any(|member| {
-        member.bytes().windows(2).any(|window| window == b"{{")
-            || member
-                .bytes()
-                .windows(b"reference-game".len())
-                .any(|window| window == b"reference-game")
-    }) {
-        return Err("starter members contain a forbidden placeholder or fixture identity");
+    if let Some(identity) = identities.action_map {
+        members.push(member(ProjectMember::GameplaySource, GAMEPLAY_SOURCE)?);
+        members.push(member(
+            ProjectMember::InputActionMap,
+            action_map(identity)?.as_bytes(),
+        )?);
     }
 
     Ok(ProjectCreationPlan {
+        starter,
         slug,
         dependency: dependency_receipt,
-        members: Box::new(members),
+        members: members.into_boxed_slice(),
     })
 }
 
-fn desktop_2d_v1_authoring_schema_bundle() -> Result<AuthoringSchemaBundle, &'static str> {
-    AuthoringSchemaBundle::from_trusted_provider_definitions(
-        DESKTOP_2D_V1_AUTHORING_SCHEMA_PROVIDERS,
-    )
-    .map_err(|_| "starter authoring schema bundle could not be composed")
+fn action_map(identity: StableAssetId) -> Result<String, &'static str> {
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    let context = ActionContext::gameplay();
+    builder
+        .declare_context(context.clone(), true)
+        .map_err(|_| "starter Input context could not be declared")?;
+    for (action, key, button) in [
+        (
+            "move.left",
+            KeyCode::Character('a'),
+            GamepadButton::DPadLeft,
+        ),
+        (
+            "move.right",
+            KeyCode::Character('d'),
+            GamepadButton::DPadRight,
+        ),
+        ("move.up", KeyCode::Character('w'), GamepadButton::DPadUp),
+        (
+            "move.down",
+            KeyCode::Character('s'),
+            GamepadButton::DPadDown,
+        ),
+        ("confirm", KeyCode::Enter, GamepadButton::South),
+    ] {
+        let action = ActionId::new(action).map_err(|_| "starter action name is invalid")?;
+        for binding in [
+            ActionBinding::key(action.clone(), key),
+            ActionBinding::gamepad_button(action, button.code()),
+        ] {
+            builder
+                .bind(binding.with_context(context.clone()))
+                .map_err(|_| "starter Input binding is invalid")?;
+        }
+    }
+    let product = AssetProductRef::new(identity, ImportedProductId::PRIMARY)
+        .map_err(|_| "starter Input identity is invalid")?;
+    let definition = builder
+        .compile()
+        .map_err(|_| "starter Input bindings could not be compiled")?;
+    ActionMapFileCandidate::new(product, definition)
+        .map_err(|_| "starter Input file is invalid")?
+        .to_json_string()
+        .map_err(|_| "starter Input file could not be encoded")
 }
 
 fn render_author_guide(
+    starter: ProjectStarter,
     slug: &ProjectSlug,
     dependency_manifest_fragment: &str,
     creation_command_arguments: &str,
 ) -> String {
+    let body = match starter {
+        ProjectStarter::Desktop2dV1 => AUTHOR_GUIDE_BODY,
+        ProjectStarter::Desktop2dV2 => ACTION_GUIDE_BODY,
+    };
+    let id = starter.id();
     format!(
-        "# {} author guide\n\n## Pinned identity\n\n- Starter: `desktop-2d/v1`\n- Nara dependency: `{dependency_manifest_fragment}`\n\n## Creation command\n\nRun this PowerShell command from the authorized destination parent. Local paths use literal quoting:\n\n```powershell\nnara new desktop-2d/v1 {} --parent . {creation_command_arguments}\n```\n\n{body}",
+        "# {} author guide\n\n## Pinned identity\n\n- Starter: `{id}`\n- Nara dependency: `{dependency_manifest_fragment}`\n\n## Creation command\n\nRun this PowerShell command from the authorized destination parent. Local paths use literal quoting:\n\n```powershell\nnara new {id} {} --parent . {creation_command_arguments}\n```\n\n{body}",
         slug.as_str(),
         slug.as_str(),
-        body = AUTHOR_GUIDE_BODY,
     )
 }
 

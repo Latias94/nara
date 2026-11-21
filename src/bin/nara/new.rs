@@ -57,6 +57,7 @@ pub(crate) fn execute(arguments: NewArguments) -> Result<ProjectCreationOutcome,
         ),
     };
     let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+        arguments.starter,
         publication_parent,
         slug,
         dependency,

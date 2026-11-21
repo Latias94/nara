@@ -4,24 +4,30 @@
 //! this package. Callers supply an already-authorized request and receive the public preparation or
 //! terminal publication outcome unchanged.
 
-use nara::project::ProjectPath;
 use nara::project_host::{
     ProjectContentDeliveryReceipt, ProjectContentError, ProjectContentLoader,
     ProjectContentSnapshot, ProjectSettingsCandidate, RuntimePlan, StartupContentClosureReceipt,
 };
 use nara::project_workflow::{
-    PreparedProjectCreation, PreparedProjectExport, ProjectCheckError, ProjectCheckRequest,
-    ProjectCreationOutcome, ProjectCreationPlanError, ProjectCreationRequest, ProjectExportOutcome,
-    ProjectExportPlanError, ProjectExportRequest, ProjectStartupSceneRepairError,
-    ProjectStartupSceneRepairOutcome, ProjectStartupSceneRepairRequest, check_project,
-    prepare_desktop_2d_project, prepare_project_export, repair_startup_scene,
+    NaraDependencySource, PreparedProjectCreation, PreparedProjectExport, ProjectCheckError,
+    ProjectCheckRequest, ProjectCreationOutcome, ProjectCreationPlanError, ProjectCreationRequest,
+    ProjectExportOutcome, ProjectExportPlanError, ProjectExportRequest, ProjectSlug,
+    ProjectStarter, ProjectStartupSceneRepairError, ProjectStartupSceneRepairOutcome,
+    ProjectStartupSceneRepairRequest, check_project, prepare_desktop_2d_project,
+    prepare_project_export, repair_startup_scene,
 };
+use nara::{fs::DirectoryCapability, project::ProjectPath};
 
-/// Prepares the immutable `desktop-2d/v1` creation plan through the public root Module.
+/// Prepares the explicitly selected Desktop 2D starter through the public root Module.
 pub fn prepare_creation(
-    request: ProjectCreationRequest,
+    starter: ProjectStarter,
+    parent: DirectoryCapability,
+    slug: ProjectSlug,
+    dependency: NaraDependencySource,
 ) -> Result<PreparedProjectCreation, ProjectCreationPlanError> {
-    prepare_desktop_2d_project(request)
+    prepare_desktop_2d_project(ProjectCreationRequest::new(
+        starter, parent, slug, dependency,
+    ))
 }
 
 /// Publishes one prepared project and preserves the complete terminal outcome family.

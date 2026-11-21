@@ -12,7 +12,7 @@ use nara::{
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
     project_workflow::{
         LocalDependencyRelation, NaraDependencySource, ProjectCreationOutcome,
-        ProjectCreationRequest, ProjectSlug, prepare_desktop_2d_project,
+        ProjectCreationRequest, ProjectSlug, ProjectStarter, prepare_desktop_2d_project,
     },
 };
 
@@ -54,6 +54,7 @@ impl CleanRoomSupervisedPlayProject {
             .open_directory(&parent_relation)
             .expect("the clean-room publication parent is authorized");
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             publication_parent,
             ProjectSlug::new(PROJECT_SLUG).expect("the clean-room slug is valid"),
             NaraDependencySource::local(LocalDependencyRelation::new(

@@ -17,6 +17,8 @@ Nara project workflow
 Usage:
   nara check <project-directory> [--profile <name>]
   nara schema <project-directory> (--check | --write) [--profile <name>]
+  nara new desktop-2d/v2 <slug> --parent <directory> --local-checkout <directory>
+  nara new desktop-2d/v2 <slug> --parent <directory> --git <https-url> --rev <object-id>
   nara new desktop-2d/v1 <slug> --parent <directory> --local-checkout <directory>
   nara new desktop-2d/v1 <slug> --parent <directory> --git <https-url> --rev <object-id>
   nara export <project-directory> --parent <directory> --destination <name>

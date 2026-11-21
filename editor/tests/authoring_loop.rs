@@ -27,7 +27,7 @@ use nara::{
     project_workflow::{
         LocalDependencyRelation, NaraDependencySource, ProjectCheckRequest,
         ProjectContentMemberKind, ProjectCreationOutcome, ProjectCreationRequest, ProjectSlug,
-        check_project, prepare_desktop_2d_project,
+        ProjectStarter, check_project, prepare_desktop_2d_project,
     },
     reflect::{ComponentFieldId, ComponentPropertyPath, ComponentTypeId, ComponentValue},
     render::Extent2d,
@@ -710,6 +710,7 @@ fn create_project(root: &TrajectoryRoot) -> PathBuf {
         .open_directory(root.project_parent_relation())
         .unwrap();
     let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+        ProjectStarter::Desktop2dV1,
         publication_parent,
         ProjectSlug::new(PROJECT_SLUG).unwrap(),
         NaraDependencySource::local(LocalDependencyRelation::new(

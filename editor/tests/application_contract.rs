@@ -21,7 +21,7 @@ use nara::{
     project_host::{EditorUiAuthoringEditError, TrustedCompiledEditorProjectIntent},
     project_workflow::{
         NaraDependencySource, ProjectCreationRequest, ProjectDirectory, ProjectMember, ProjectSlug,
-        prepare_desktop_2d_project,
+        ProjectStarter, prepare_desktop_2d_project,
     },
     reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind},
     render::Extent2d,
@@ -1768,6 +1768,7 @@ impl StarterProject {
         fs::create_dir(&parent).unwrap();
         let slug = ProjectSlug::new("editor-app").unwrap();
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            ProjectStarter::Desktop2dV1,
             directory_capability(&parent),
             slug,
             NaraDependencySource::immutable_git(
@@ -1823,6 +1824,7 @@ fn unique_test_path(label: &str) -> PathBuf {
 fn directory_path(directory: ProjectDirectory) -> &'static str {
     match directory {
         ProjectDirectory::Assets => "assets",
+        ProjectDirectory::Input => "input",
         ProjectDirectory::Prefabs => "prefabs",
         ProjectDirectory::Scenes => "scenes",
         ProjectDirectory::Schema => "schema",
@@ -1838,6 +1840,7 @@ fn member_path(member: ProjectMember) -> &'static str {
         ProjectMember::ProjectManifest => "nara.toml",
         ProjectMember::AuthorGuide => "README.md",
         ProjectMember::LibrarySource => "src/lib.rs",
+        ProjectMember::GameplaySource => "src/gameplay.rs",
         ProjectMember::HeadlessSource => "src/bin/headless.rs",
         ProjectMember::DesktopSource => "src/bin/desktop.rs",
         ProjectMember::CookSource => "src/bin/cook.rs",
@@ -1845,6 +1848,7 @@ fn member_path(member: ProjectMember) -> &'static str {
         ProjectMember::StartupScene => "scenes/startup.scene.json",
         ProjectMember::StartupSceneMetadata => "scenes/startup.scene.json.meta",
         ProjectMember::AuthoringSchemaBundle => "schema/authoring.bundle.json",
+        ProjectMember::InputActionMap => "input/starter.actions.json",
     }
 }
 
