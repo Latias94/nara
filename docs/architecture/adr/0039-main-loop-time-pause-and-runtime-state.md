@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-19
+**Last Revised**: 2026-11-21
 **Refines**: ADR 0013, ADR 0018, ADR 0024, ADR 0035, ADR 0036
 **Refined By**: ADR 0041: Input Routing, Actions, Text Input, UI Focus, and Accessibility; ADR 0057:
 Authoritative Fixed-Tick and Command Ingress; ADR 0076: Play Runtime Debug Control and Observation
@@ -58,12 +58,19 @@ The product contract is:
   window housekeeping, asset IO observation, and backend liveness.
 - **Virtual time** is scaled and pausable game time. Gameplay `Update` systems that should obey
   pause read virtual time.
+- The elapsed-frame plan clamps each real interval before applying its configured binary32 rate.
+  It publishes completed virtual nanoseconds to both virtual and fixed time and carries the
+  remaining fraction in the fixed scheduling phase. Changing the rate or timestep preserves
+  the already accumulated virtual fraction. Paused and zero-scale intervals leave it alone.
+  Equal sums of admitted real intervals at the same rate produce equal accumulated virtual
+  time. Each frame still applies its own clamp, work cap and debt policy.
 - **Fixed time** is the authoritative simulation tick domain. `FixedTime` exposes the current
   monotonic tick, per-tick delta, elapsed duration, whole-tick debt, and sub-tick remainder. It
   advances immediately before each fixed schedule run.
 - **Render interpolation** reads the settled `RenderTime` sample. App publishes the completed
   fixed clock, its timestep, and its remainder and interpolation fraction together. A timestep
   change after the fixed schedule configures the next transaction and preserves this sample.
+  The interpolation remainder stays at the precision of `Duration`.
 - Render extraction copies the settled fixed sample, real and virtual clocks, and time settings
   together with the validated presented-spatial sample and actual interpolation decision. Later
   preparation, target adaptation and replay keep the original clock observation. The clock
@@ -73,8 +80,9 @@ The product contract is:
   render transaction counters remain distinct. The render owner defines the bounded GPU
   projection of these facts without becoming another time owner.
 - Fresh-runtime continuation carries pending fixed scheduling phase and actual time policy
-  through the original managed time owner. The receiver validates its own policy, preserves its
-  local clock history and derives interpolation from the applied phase. Initialization is outside
+  through the original managed time owner, including the fraction held for the next elapsed
+  conversion. The receiver validates its own policy, preserves its local clock history and
+  derives interpolation from the applied phase. Initialization is outside
   an active frame and invalidates the previous completed-paused boundary; the next full paused
   maintenance frame reestablishes it. ADR0024 owns the bounded continuation contract.
 - `run_once(delta)` receives real elapsed time. It must not silently mean virtual or fixed delta.
@@ -110,7 +118,7 @@ The product contract is:
   control state.
 - One accepted exact fixed-tick step is a dedicated App transaction, not a temporary resume or an
   ordinary elapsed-time frame. It advances real time by the supplied real delta, virtual and fixed
-  time by exactly one fixed timestep, preserves pre-existing pending time, debt, remainder, render
+  time by exactly one fixed timestep, preserves pending time including the scaled fraction, render
   interpolation, time scale, and paused settings, runs the complete fixed transaction once, clears
   trackers once, and returns to paused only after success.
   The original App intent-preparation phase resolves pending input and runs registered local

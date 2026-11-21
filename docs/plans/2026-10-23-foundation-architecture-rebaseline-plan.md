@@ -2349,6 +2349,12 @@ records `16 ms / 12 ms / 0.75` on the change frame and `32 ms / 8 ms / 0.25` on 
 It replays retained captures after camera and clock changes. Nextest
 `c46484b9-485c-48fb-8889-914c563c5802`.
 
+The [fractional scaled-time successor](2026-11-13-rust-state-reconstruction-plan.md#fractional-scaled-time-continuation)
+at `e25612d` holds subnanosecond virtual phase in the App's existing elapsed-frame plan and
+restores it through the original managed continuation. A real relocated Server executes the
+same command at the same logical tick under four interval partitions and after a fresh process
+starts. The linked record covers Windows desktop presentation and actual rebuilt game processes.
+
 ## R11: UI Content Association, Text Admission And Platform Qualification
 
 **Design:** D13, D17. **State:** in progress; the [owned Inspector unit](2026-11-04-owned-inspector-and-editable-text-plan.md)

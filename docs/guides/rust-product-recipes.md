@@ -791,7 +791,9 @@ complete state format. A GPU presentation, an empty command batch or a copied ga
 not a substitute for these checks.
 
 `capture_time_continuation()` reads actual scheduling phase and policy through the original
-time owner at that same boundary. `restore_time_continuation(value)` requires matching policy,
+time owner at that same boundary. Keep both `pending()` and `scaled_remainder()` when encoding
+the value for another process. `ScaledTimeRemainder::from_words` admits the normalized three-word
+representation. `restore_time_continuation(value)` requires matching policy,
 preserves local history and derives interpolation, then requests original paused maintenance.
 A refusal preserves the prior boundary; an applied result, including an applied-before-fault
 result, invalidates it. The typed error retains actual application and fault facts. Headless

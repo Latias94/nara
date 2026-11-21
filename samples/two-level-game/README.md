@@ -30,10 +30,9 @@ Enter from that error screen attempts a new round.
 Menus stop game time while Input, tasks, rendering and native cleanup remain active. Continuing
 drains old ordinary gameplay intent through the original fixed transaction before reopening the
 gameplay context. Held keys require release and a fresh press. The additional flow and mapping
-lifetime are not part of exact Resume capture. Default exploration, existing cooked Players,
-checkpoint saves are unchanged. The processed Server continuation is now version three so it can
-carry an optional same-host checkpoint commitment. The `play-flow` manifest profile owns
-the UI composition; compiling that feature alone does not enable the flow on the normal desktop.
+lifetime are not part of exact Resume capture. The `play-flow` manifest profile owns the UI
+composition. Compiling that feature makes the profile available, and the default desktop
+continues to use the ordinary exploration profile.
 
 These are the default physical keys in [the authored action map](input/explorer.actions.json),
 selected by `[input] action_map` in `nara.toml`. Edit its key bindings without changing gameplay
@@ -605,13 +604,14 @@ Use a candidate from the same compatible package. Capture checks that the commit
 Product matches the active level. The candidate checks the admitted catalog, Schema and App
 configuration, reconstructs the game, and compares its canonical capture before
 `TWO_LEVEL_SERVER_READY` reports `restored: true`.
-The format contains player pose, progress, held semantic movement, logical game time, fixed debt
-and remainder, and at most 128 pending commands from the Server control stream. It also records
-whether Side Room and Lookout are closed, open or have a found relic. The candidate opens the
+The format contains player pose, progress, held semantic movement, logical game time, pending
+fixed time including the carried fraction of a nanosecond, and at most 128 pending commands from
+the Server control stream. It also records whether Side Room and Lookout are closed, open or
+have a found relic. The candidate opens the
 recorded rooms through their current level's portals before Ready. Command offsets and order are
 preserved in the new queue. Its Runtime tick and queue counters start in the fresh process. A live
-Scene request or pending native-service work refuses capture. Use the current version-three
-continuation file for this workflow.
+Scene request or pending native-service work refuses capture. Use a current version-four
+continuation file and a candidate with the same time policy.
 
 If the incumbent uses `--save`, start the candidate with both paths:
 
@@ -750,10 +750,11 @@ cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --lo
 The separate `resume` format preserves the complete supported game semantics: progress across
 level instances, the live player transform, held movement intent, logical game time, fixed
 scheduling phase and actual time policy, counters and admitted configuration/Schema/content
-identities. Resume format version two requires an explicit time value; version one is refused
-rather than assumed to have zero phase. The finite continuity protocol also moves to version
-two, so an older child is refused at the version gate. The progress-save slot above retains its original
-anchor-based behavior and its separate version-one migration.
+identities. Resume format version three includes the scaled fraction in the time value.
+The decoder requires the current version. The `scaled_remainder` value contains three unsigned
+64-bit words in least-significant-first order, in units of `2^-149` ns. Preserve the exact
+integers when carrying a capture through another process. The progress save slot uses its
+separate anchor-based format and version-one migration.
 
 With `local-player`, use `capture_resume(&session)` after the original `HeadlessSession` has
 completed a paused frame.
@@ -840,7 +841,9 @@ left, right, up and down. Other operations are `marker`, `travel`, `instance` an
 
 Both paths use the fixed interactive source/headless recipe, remaining paused between steps.
 Ordinary paused maintenance waits for Scene activation, reconstruction and task return without
-adding simulation ticks. Playback compares each newly produced supported state; source drift or
+adding simulation ticks. Version-two recordings encode the exact scheduling phase and require
+zero pending whole and fractional time throughout this exact-step workflow. The command program
+uses version one. Playback compares each newly produced supported state; source drift or
 a mismatched recorded result fails. This profile excludes Save/Restore, open save slots, native
 audio/desktop output, cooked Players, arbitrary runtime services and cross-platform determinism.
 
@@ -1033,9 +1036,10 @@ Run the production desktop Host's actual body/private-structure edit qualificati
 cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_desktop --run-ignored only --test-threads=1 --no-fail-fast
 ```
 
-This game-owned development protocol is version six and requires explicit placement in every
-reply. Original bounded envelope decoding and version checks refuse old children. The resume format remains version
-two; progress saves and the supervised Editor Play protocol retain their separate formats.
+This game-owned development protocol is version seven and requires explicit placement in every
+reply and version-three resume state in Capture and Restore. Original bounded envelope decoding
+and version checks refuse old children. Progress saves and supervised Editor Play use their own
+formats.
 
 For continuous desktop play, call `activate_input`, then `resume`. Query `execution_status` while
 the original native pump runs; its Runtime state is independent of the game's travel phase.
@@ -1126,9 +1130,8 @@ Canonical capture also requires original admitted tasks to have physically retur
 Cancelled terminals and zero queued/running statistics are insufficient while a capture's
 Drop is still owned by an executor. The game uses `TaskPools::return_state()` and refuses
 pending return or cleanup failure without changing game state. Child startup/capture/restore
-waits preserve their original deadlines. A failed task's eventual physical Close remains a
-failure; it does not become a successful capture or clean shutdown. Resume format v2 and
-the game-owned protocol v6 retain their existing field definitions outside the explicit audio extension.
+waits preserve their original deadlines. A failed task's eventual physical Close retains the
+original failure. The explicit audio reset and resume both use the current game-owned protocol.
 
 ## Native Request Notifications
 

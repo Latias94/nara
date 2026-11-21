@@ -117,8 +117,9 @@ a distributed runtime, a universal VM snapshot or a mandatory author language.
 ### Fresh-Runtime Scheduling Continuation
 
 The time owner may capture a portable fixed scheduling continuation at a healthy, complete
-paused App-frame boundary. It includes unconsumed virtual time and the actual timestep,
-work/debt caps, catch-up policy, scale and maximum delta. These policy facts must match the
+paused App-frame boundary. It includes unconsumed whole virtual nanoseconds, the normalized
+fraction of a nanosecond carried across elapsed conversions, and the actual timestep, work/debt
+caps, catch-up policy, scale and maximum delta. These policy facts must match the
 receiving Runtime. PreserveDebt continuations retain at most the configured whole-tick debt;
 the owner never clears phase to make incompatible state acceptable.
 
@@ -134,6 +135,9 @@ An explicit Headless resume can use a supplied elapsed interval for its first ru
 That frame's existing work cap applies once to the restored debt and the new interval. The
 processed Server uses it for paused `advance` and keeps the original fixed queue responsible
 for command execution and acknowledgement. [Processed Server continuation](../../plans/2026-11-13-rust-state-reconstruction-plan.md#processed-server-continuation-successor)
+
+The [fractional scaling successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#fractional-scaled-time-continuation)
+preserves the accumulated fraction while old Runtime identifiers and history stay local.
 
 ## Alternatives Considered
 

@@ -116,6 +116,8 @@ Rules:
 - A local control caller may retain a paused Server while an independently started process
   reconstructs the game's selected state. The committed Host-managed Scene Product must match
   the active game level. Compatibility binds its original catalog, Schema and App configuration.
+  A compatible time scale carries both whole pending time and the fraction needed for the
+  next elapsed conversion.
   The game owns the continuation format and comparison before Ready. The caller selects the active
   command route and may explicitly retire the still-paused incumbent without running its queued
   intents.

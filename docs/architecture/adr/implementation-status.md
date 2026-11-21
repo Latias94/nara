@@ -3422,6 +3422,13 @@ report a fault while returning success, with before/after application regression
 retains actual rebuild evidence and platform limits. Complete desktop reconstruction, input/service eligibility,
 adoption, foreign execution, costs and full R12 remain open.
 
+The [fractional scaled-time successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#fractional-scaled-time-continuation)
+at `e25612d` implements exact elapsed conversion and fresh-Runtime phase transfer under ADRs
+0024, 0039 and 0056. The App carries the scaled fraction alongside fixed debt and remainder,
+and the sample's source and cooked continuation formats require it. The processed Server
+retains a compatible rate through handoff. Windows App, relocated Server, native presentation
+and real-build continuation qualification pass within the linked scope.
+
 The November 14 [keyboard continuation successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#keyboard-continuation-and-native-activation-qualification)
 restores finite declared Button holds through the original Input owner with fresh local members,
 silent held projections and separate admission/terminal provenance. Exact steps reuse the original

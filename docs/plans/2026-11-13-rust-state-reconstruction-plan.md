@@ -1094,6 +1094,102 @@ This is a scheduling continuation prerequisite, not desktop canonical reconstruc
 held-key transfer, scanout, physical mixed-DPI or full R12. The existing desktop control consumer
 and actual rebuilt-game trajectories must retain their separate execution evidence. UI stays paused.
 
+### Fractional Scaled Time Continuation
+
+Implementation and consumer migration: `e25612d`.
+
+The [November 21 Server audit](../audits/2026-11-21-scene-admission-input-order-and-material-dependencies.md#p2--per-frame-rounding-at-half-speed-changes-when-an-authoritative-command-executes)
+shows that three elapsed frames totalling 40 ms can remain short of the first 20 ms fixed tick at
+half speed. The same duration in one frame runs the tick and acknowledges the command. Correct
+the App's elapsed-frame plan and the game's fresh-runtime continuation together.
+
+- Clamp real time first and scale the admitted duration by the exact configured binary32 rate.
+  Carry the remaining fraction of a virtual nanosecond between elapsed frames. Publish completed
+  nanoseconds to the existing virtual and fixed clocks. Preserve the fraction through zero scale,
+  Pause, exact Step, later rate/timestep changes and whole-tick debt discard. A planning refusal
+  leaves the fraction and clock history intact.
+- Capture the fraction alongside pending fixed duration and policy. Restore it through the same
+  healthy paused boundary and original World. Preserve the new Runtime's local history and its
+  existing rule for elapsed Resume. Keep render interpolation at `Duration` precision.
+- Encode the fraction in the game's source and processed resume records and the relevant owning
+  transport versions. Keep the persistent progress checkpoint independent. Compare exact
+  acknowledgement and visible game state for the audit's partitions through the relocated
+  Server. Capture a paused Server with an outstanding command immediately before a tick, start
+  a fresh process, and use the same remaining elapsed nanosecond to execute that command once.
+
+Bevy scales each variable delta before its clamp and keeps fixed overstep in `Duration`. Its
+unit-speed path bypasses multiplication. Godot retains fractional process time in a `double`
+accumulator and applies the scale to the selected physics-step durations. Nara keeps its own
+clamp-before-scale order and integer fixed ticks. The App retains the exact binary remainder
+at the existing conversion and reconstructs it with pending duration.
+[Bevy virtual time](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_time/src/virt.rs#L240-L257)
+[Godot tick accumulator](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/main/main_timer_sync.cpp#L348-L357)
+[Godot physics step](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/main/main.cpp#L5045-L5050)
+
+`RuntimeTimeContinuation::new` requires the normalized fraction. `from_clocks` reads the actual
+fixed phase, including during the game's exact reconstruction step. `FixedTime::scaled_remainder`
+also supports a live read during catch-up, when the in-frame debt may exceed the completed-frame
+continuation limit. The sample preserves the original policy and configuration checks. Its
+processed Server admits compatible non-unit scales, while the source player retains its unit-scale
+eligibility rule.
+
+Source resume format 3, processed format 4, continuity protocol 7 and exact-step recording
+format 2 carry the new field. The project-authored command program remains format 1. Exact-step
+recording admits zero pending whole and fractional time in the initial state and every recorded
+result. The durable progress checkpoint has its separate format and migration.
+
+Before the correction, the public `RuntimeInstance` partition regression reproduced tick 0 at the
+first 40 ms boundary with the audit's three intervals. The single interval and four equal
+intervals had already reached tick 1 in the same run, `2c11610a-db10-48a8-a7ee-514744cc3f0c`.
+
+The final App cohort passes 203/203 with one intentional skip
+(`7a3ea1e6-df56-46ee-892f-703999b36fec`). The four half-speed partitions now complete the same
+64 ticks. Focused cases cover all fractional binary32 powers, carry overflow at `Duration::MAX`,
+pause, zero and unit rates, rate and timestep changes, clamping, debt discard and a refused
+debt plan. During catch-up, fixed systems can read the actual fraction before the debt settles.
+
+The release Server acceptance passes 2/2 on Windows x64 with Rust 1.95.0
+(`80a7bd55-7f8d-4eec-8820-4cceda09ce02`). It builds, relocates and runs both installations after
+removing project and cache access. At half speed all four 40 ms partitions produce the same
+first logical tick, marker, command acknowledgement and empty queue. At `39,999,999 ns` the
+incumbent captures portable `19,999,999 + 0.5 ns` pending time and one command at offset 1.
+The fresh process reproduces the complete capture before Ready. After the incumbent retires,
+advancing the candidate by zero leaves its command queued. Advancing by one real nanosecond
+executes and acknowledges it once, matching the uninterrupted game at logical tick 1. The
+ordinary unit-rate package also retains relative intent, checkpoint claim and replaced-file
+conflict protection. The two cases run for 771.905 seconds including their nested Cook builds.
+
+The affected sample cohort passes 227/227 with five separately selected cases skipped
+(`30abac5d-2b74-4dd0-9b14-4572bb2a3dc3`). It covers source half-speed game-capture refusal
+alongside successful public time capture, strict portable integer words, protocol round trips
+and actual CLI recording/fresh-process playback. Winit CPU polling passes 29/29
+(`b9031f99-7046-4afa-9fe8-a7b3ec8d2787`). Windows native polling passes 4/4
+(`ce51462f-f495-42fe-aa65-422721c0a414`), including restore and recapture of a fraction on the
+same hidden-then-revealed window. These Winit runs precede the final live fraction accessor.
+
+The ordinary desktop control child passes on hardware DX12, 1/1
+(`24cfa5af-8fa2-4cf0-8e6f-24c105e3a3c1`). It applies a continuation carrying 13 ms and a
+nonzero fraction through `DesktopRun`, recaptures it after paused maintenance, and reads the
+same fraction in the final canonical game state and accepted presentation. The original
+gameplay, input reconciliation, native retirement and independent GPU replay checks also pass.
+This exercises phase transfer through native presentation. Render interpolation continues to
+use the whole-nanosecond fixed remainder.
+
+The source/headless real-build suite passes 2/2 (`b7d8b756-aa2c-4a82-b76a-51bb4ec26a13`,
+520.384 seconds including nested Cargo). It reconstructs after edits to a function body and a
+private type through the current process protocol. The production Development Host also probes,
+starts a fresh adopter, routes commands and retires the predecessor while preserving game state.
+Independent reviews checked arithmetic boundaries, live and portable phase, elapsed and exact
+control, and each changed consumer. Review led to a live fraction accessor, a carry-overflow
+regression, independent program and recording versions, and explicit zero-phase admission on
+every exact-step recording row. Correctness Clippy passes for all App and Winit targets and
+features and for the affected sample targets. Root/sample formatting and changed local links
+also pass.
+
+This unit qualifies the listed Windows paths. Platform timing, reconnecting remote clients and
+broader replay equivalence have separate acceptance. In particular, per-frame clamps and fixed
+work limits still apply to each supplied interval.
+
 ### Desktop Service Inventory And Placement
 
 The ordinary desktop profile adds the following ten plugins to the supported headless inventory.

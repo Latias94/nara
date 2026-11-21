@@ -393,9 +393,9 @@ while completed traversals release their temporary file and directory counters. 
 revalidates the original delivery stamp. Discovery rescans for newly demanded stock identities
 outside its initial coverage. Unused contributions still fail the complete delivery.
 
-Frame partition rounding of fractional scaled nanoseconds remains an App time and continuation
-issue. This Server slice qualifies pacing, acknowledged work and shutdown behavior under the
-existing Runtime time contract.
+This Server slice qualifies pacing, acknowledged work and shutdown behavior. The separate
+[fractional scaled-time successor](2026-11-13-rust-state-reconstruction-plan.md#fractional-scaled-time-continuation)
+owns interval partitioning and preservation of scaled phase across processes.
 
 On Windows x64 and Rust 1.95.0, the engine Cook and Material cohort passes 52/52
 (`e93d2fe5-b604-4642-8fdd-6da1bb4d6389`). The independently locked Cook and processed
