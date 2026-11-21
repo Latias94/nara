@@ -340,7 +340,14 @@ impl GameInputWorkflow<'_> {
             return Err("the zero-size result did not identify the other window".into());
         }
         self.native
-            .settle_game_image(self.application, None, None, &[skipped], None, None)
+            .settle_game_image(
+                self.application,
+                None,
+                std::iter::once(&skipped),
+                None,
+                None,
+                None,
+            )
             .map_err(|error| self.frame_error("settle other unavailable window", error))?;
         if self.native.game_composite_receipt() != Some(incumbent.receipt)
             || self.native.game_candidate != Some(incumbent.submitted.identity)
@@ -359,7 +366,14 @@ impl GameInputWorkflow<'_> {
             );
         }
         self.native
-            .settle_game_image(self.application, None, Some(&clear), &[], None, None)
+            .settle_game_image(
+                self.application,
+                None,
+                std::iter::once(&clear),
+                None,
+                None,
+                None,
+            )
             .map_err(|error| self.frame_error("settle the displaced Game image", error))?;
         if self.native.game_composite_receipt().is_some()
             || self.native.game_candidate != Some(incumbent.submitted.identity)
@@ -413,7 +427,14 @@ impl GameInputWorkflow<'_> {
         });
         let overlay = pending.overlay.is_some();
         self.native
-            .settle_game_image(self.application, Some(pending), None, &[], None, None)
+            .settle_game_image(
+                self.application,
+                Some(pending),
+                std::iter::empty(),
+                None,
+                None,
+                None,
+            )
             .map_err(|error| self.frame_error("settle uncomposited HUD", error))?;
         if !overlay || !original_ui {
             return Err("the uncomposited upload did not carry the original HUD submission".into());

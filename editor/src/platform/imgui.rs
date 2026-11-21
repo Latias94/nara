@@ -5,7 +5,7 @@ use std::{
 
 use dear_imgui_rs::{Context, FontConfig, FontSource, StbTrueTypeFontData};
 use dear_imgui_wgpu::{ExternalTextureId, wgpu};
-use dear_imgui_winit::{HiDpiMode, WinitPlatform, WinitPlatformAction};
+use dear_imgui_winit::{HiDpiMode, WinitPlatform, WinitPlatformAction, WinitWindowSnapshot};
 use nara::{
     project_host::{
         EditorGameStartRequest, EditorGameViewCandidateIdentity, EditorGameViewCompletion,
@@ -790,6 +790,22 @@ impl PresentedGameImage {
     }
 }
 
+fn game_composite_target_available(
+    receipt: WgpuImageCompositeReceipt,
+    windows: Option<&[WinitWindowSnapshot]>,
+) -> bool {
+    let Some(instance) = receipt.window().delegated_native_instance() else {
+        return true;
+    };
+    windows.is_none_or(|windows| {
+        windows.iter().any(|window| {
+            !window.target.is_main
+                && window.target.instance_id.get().get() == instance
+                && window.native_state.minimized != Some(true)
+        })
+    })
+}
+
 impl PendingGameImage {
     fn matches(&self, receipt: WgpuImageCompositeReceipt) -> bool {
         receipt.image() == self.display.receipt()
@@ -1153,6 +1169,7 @@ impl NativeImgui {
         let pending_game = self.submit_game(application, window_packet)?;
         let mut secondary_outcomes = Vec::new();
         let mut secondary_windows = Vec::new();
+        let mut platform_windows = None;
         let canvas_presented = if let Some(frame) = application.current_ui_authoring_frame() {
             self.canvas.is_current(&self.scene, &frame)
         } else {
@@ -1212,11 +1229,9 @@ impl NativeImgui {
                 &submissions,
                 &mut secondary_outcomes,
             );
-            let snapshots = self.platform.window_snapshots().map_err(imgui_error)?;
-            for snapshot in snapshots
-                .into_iter()
-                .filter(|snapshot| !snapshot.target.is_main)
-            {
+            let snapshots =
+                platform_windows.insert(self.platform.window_snapshots().map_err(imgui_error)?);
+            for snapshot in snapshots.iter().filter(|snapshot| !snapshot.target.is_main) {
                 let window = self
                     .gpu
                     .imgui_window_id(snapshot.target.instance_id)
@@ -1256,12 +1271,14 @@ impl NativeImgui {
         self.presented = secondary_outcomes
             .iter()
             .any(|outcome| outcome.window().is_some());
+        let platform_windows = platform_windows.as_deref();
         let game_receipt = self.routed_game_composite(
             frontend_output
                 .as_ref()
                 .and_then(|output| output.game_image),
             primary_viewport,
             &secondary_windows,
+            platform_windows,
             rendered
                 .as_ref()
                 .ok()
@@ -1271,10 +1288,14 @@ impl NativeImgui {
         self.settle_game_image(
             application,
             pending_game,
-            rendered.as_ref().ok(),
-            &secondary_outcomes,
+            rendered
+                .as_ref()
+                .ok()
+                .into_iter()
+                .chain(&secondary_outcomes),
             rendered.as_ref().err(),
             game_receipt,
+            platform_windows,
         )?;
         let outcome = match rendered {
             Ok(rendered) => rendered,
@@ -1920,14 +1941,14 @@ impl NativeImgui {
         Ok(Some(pending))
     }
 
-    fn settle_game_image(
+    fn settle_game_image<'a>(
         &mut self,
         application: &mut EditorApplication,
         pending: Option<PendingGameImage>,
-        primary: Option<&WgpuWindowFrameOutcome>,
-        secondary: &[WgpuWindowFrameOutcome],
+        outcomes: impl Iterator<Item = &'a WgpuWindowFrameOutcome> + Clone,
         error: Option<&EditorRunError>,
         routed: Option<WgpuImageCompositeReceipt>,
+        platform_windows: Option<&[WinitWindowSnapshot]>,
     ) -> Result<(), EditorRunError> {
         use EditorGameViewCompletionDisposition::{ContentRejected, Deferred, Presented};
 
@@ -1940,20 +1961,22 @@ impl NativeImgui {
         } else {
             false
         };
-        let outcomes = primary.into_iter().chain(secondary);
         let incumbent_displaced = !incumbent_represented
-            && self
-                .presented_game_image
-                .as_ref()
-                .is_some_and(|incumbent| incumbent.displaced_by(outcomes.clone()));
+            && self.presented_game_image.as_ref().is_some_and(|incumbent| {
+                !game_composite_target_available(incumbent.receipt, platform_windows)
+                    || incumbent.displaced_by(outcomes.clone())
+            });
         if incumbent_displaced {
             self.revoke_game_composite();
         }
         let Some(mut pending) = pending else {
             return Ok(());
         };
-        let receipt =
-            pending.composite(outcomes.flat_map(|outcome| outcome.composites().iter().copied()));
+        let receipt = pending.composite(
+            outcomes
+                .flat_map(|outcome| outcome.composites().iter().copied())
+                .filter(|receipt| game_composite_target_available(*receipt, platform_windows)),
+        );
         let identity = pending.identity;
         let overlay = pending.overlay;
         let selected = pending.display.occurrence();
@@ -1997,6 +2020,7 @@ impl NativeImgui {
         image: Option<ImguiImageInteraction>,
         primary_viewport: dear_imgui_rs::Id,
         secondary_windows: &[(dear_imgui_rs::Id, WindowId, NaraWindowId)],
+        platform_windows: Option<&[WinitWindowSnapshot]>,
         outcomes: impl Iterator<Item = &'a WgpuWindowFrameOutcome>,
     ) -> Option<WgpuImageCompositeReceipt> {
         let image = image?;
@@ -2017,6 +2041,7 @@ impl NativeImgui {
                 receipt.window().window_id() == window
                     && receipt.image() == display.receipt()
                     && receipt.occurrence() == display.occurrence()
+                    && game_composite_target_available(*receipt, platform_windows)
             })
     }
 

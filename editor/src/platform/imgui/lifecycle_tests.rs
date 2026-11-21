@@ -2,12 +2,14 @@
 
 use super::*;
 use crate::{EditorLaunchOptions, frontend::imgui::UiProject};
+use dear_imgui_rs::NativeWindowInstanceId;
 use nara::{
     render_wgpu::WgpuRenderProducerId,
     tooling::{EditorAction, EditorPlayAction},
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE, ShowWindow,
+use windows_sys::Win32::{
+    Foundation::HWND,
+    UI::WindowsAndMessaging::{IsWindow, SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE, ShowWindow},
 };
 use winit::{
     platform::windows::EventLoopBuilderExtWindows,
@@ -20,6 +22,8 @@ struct NativeLifecycleProof {
     primary_frames: u32,
     secondary_frames: u32,
     minimized_secondary_frames: u32,
+    minimized_game_frames: u32,
+    detached_game: Option<DetachedGamePresentation>,
     returned_frames: u32,
     game_closed_frames: u32,
     scene_closed_frames: u32,
@@ -34,12 +38,20 @@ struct NativeLifecycleProof {
     reopened_game_view: Option<WgpuRenderProducerId>,
 }
 
+struct DetachedGamePresentation {
+    instance: NativeWindowInstanceId,
+    hwnd: HWND,
+    receipt: WgpuImageCompositeReceipt,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LifecyclePhase {
     Primary,
     Detached,
     Minimized,
     RestoringPrimary,
+    MinimizedGame,
+    RestoringGame,
     Returned,
     GameClosed,
     GameReopening,
@@ -59,6 +71,8 @@ impl NativeLifecycleProof {
             primary_frames: 0,
             secondary_frames: 0,
             minimized_secondary_frames: 0,
+            minimized_game_frames: 0,
+            detached_game: None,
             returned_frames: 0,
             game_closed_frames: 0,
             scene_closed_frames: 0,
@@ -78,6 +92,7 @@ impl NativeLifecycleProof {
 impl NativeLifecycleProof {
     fn observe(
         &mut self,
+        event_loop: &ActiveEventLoop,
         native: &mut NativeImgui,
         application: &mut EditorApplication,
         outcome: WgpuWindowFrameOutcome,
@@ -168,14 +183,21 @@ impl NativeLifecycleProof {
             let secondary_game = secondary_outcomes
                 .iter()
                 .flat_map(WgpuWindowFrameOutcome::composites)
-                .any(|receipt| {
+                .find(|receipt| {
                     Some(receipt.image()) == game
                         && native
                             .game
                             .display
                             .as_ref()
                             .is_some_and(|display| display.occurrence() == receipt.occurrence())
-                });
+                })
+                .copied();
+            let guarded_game = secondary_game.filter(|receipt| {
+                native
+                    .presented_game_image
+                    .as_ref()
+                    .is_some_and(|image| image.receipt == *receipt && image.world_revoker.is_some())
+            });
             if let Some(frame) = application.current_frame() {
                 if frame.play().state() == EditorPlayState::Empty
                     && proof.phase == LifecyclePhase::Primary
@@ -212,7 +234,7 @@ impl NativeLifecycleProof {
                         proof.phase = LifecyclePhase::Detached;
                     }
                 }
-                LifecyclePhase::Detached if primary_scene && secondary_game => {
+                LifecyclePhase::Detached if primary_scene && secondary_game.is_some() => {
                     proof.secondary_frames += 1;
                     if proof.secondary_frames >= 4 {
                         set_minimized_without_activation(&native.window, true)?;
@@ -220,7 +242,7 @@ impl NativeLifecycleProof {
                     }
                 }
                 LifecyclePhase::Minimized
-                    if secondary_game && native.window.is_minimized() == Some(true) =>
+                    if secondary_game.is_some() && native.window.is_minimized() == Some(true) =>
                 {
                     proof.minimized_secondary_frames += 1;
                     if proof.minimized_secondary_frames >= 4 {
@@ -229,14 +251,114 @@ impl NativeLifecycleProof {
                     }
                 }
                 LifecyclePhase::RestoringPrimary
-                    if primary_scene
-                        && secondary_game
-                        && native.window.is_minimized() == Some(false) =>
+                    if primary_scene && native.window.is_minimized() == Some(false) =>
                 {
+                    let Some(receipt) = guarded_game else {
+                        return Ok(false);
+                    };
+                    let windows = native.platform.window_snapshots().map_err(imgui_error)?;
+                    let snapshot = windows
+                        .iter()
+                        .find(|window| {
+                            !window.target.is_main
+                                && Some(window.target.instance_id.get().get())
+                                    == receipt.window().delegated_native_instance()
+                        })
+                        .ok_or_else(|| {
+                            imgui_error("the detached Game receipt has no native window")
+                        })?;
+                    // A real primary presentation without a secondary renderer outcome is
+                    // insufficient to displace Game while the same native registration is usable.
+                    native.settle_game_image(
+                        application,
+                        None,
+                        std::iter::once(&outcome),
+                        None,
+                        None,
+                        Some(&windows),
+                    )?;
+                    if native.game_composite_receipt() != Some(receipt) {
+                        return Err(imgui_error("omitting a live window displaced Game"));
+                    }
+                    let instance = snapshot.target.instance_id;
+                    let hwnd = native
+                        .platform
+                        .with_window(instance, |window| {
+                            set_minimized_without_activation(window, true)
+                        })
+                        .map_err(imgui_error)?
+                        .ok_or_else(|| imgui_error("the detached Game HWND was retired early"))??;
+                    proof.detached_game = Some(DetachedGamePresentation {
+                        instance,
+                        hwnd,
+                        receipt,
+                    });
+                    proof.phase = LifecyclePhase::MinimizedGame;
+                }
+                LifecyclePhase::MinimizedGame if outcome.window().is_some() => {
+                    let detached = proof.detached_game.as_ref().unwrap();
+                    let snapshot = native
+                        .platform
+                        .window_snapshot_for_instance(detached.instance)
+                        .map_err(imgui_error)?
+                        .ok_or_else(|| imgui_error("minimizing Game retired its native window"))?;
+                    if snapshot.native_state.minimized != Some(true)
+                        || attempted_window(
+                            &secondary_outcomes,
+                            detached.receipt.window().window_id(),
+                        )
+                    {
+                        proof.minimized_game_frames = 0;
+                        return Ok(false);
+                    }
+                    if native.game_composite_receipt().is_some() || native.game_candidate.is_none()
+                    {
+                        return Err(imgui_error(
+                            "the minimized native Game window did not lose only its composite",
+                        ));
+                    }
+                    proof.minimized_game_frames += 1;
+                    if proof.minimized_game_frames >= 3 {
+                        native
+                            .platform
+                            .with_window(detached.instance, |window| {
+                                set_minimized_without_activation(window, false)
+                            })
+                            .map_err(imgui_error)?
+                            .ok_or_else(|| imgui_error("the minimized Game HWND was retired"))??;
+                        proof.phase = LifecyclePhase::RestoringGame;
+                    }
+                }
+                LifecyclePhase::RestoringGame if primary_scene => {
+                    let Some(receipt) = guarded_game else {
+                        return Ok(false);
+                    };
+                    let detached = proof.detached_game.as_ref().unwrap();
+                    if receipt.window().delegated_native_instance()
+                        != Some(detached.instance.get().get())
+                        || receipt.presentation_generation()
+                            <= detached.receipt.presentation_generation()
+                    {
+                        return Err(imgui_error(
+                            "Game failed to re-present on its restored HWND",
+                        ));
+                    }
+                    retire_detached_game_window(
+                        event_loop,
+                        native,
+                        application,
+                        detached.instance,
+                        receipt,
+                    )?;
                     native.frontend.place_test_game(false);
                     proof.phase = LifecyclePhase::Returned;
                 }
                 LifecyclePhase::Returned if primary_scene && primary_game => {
+                    let detached = proof.detached_game.as_ref().unwrap();
+                    // SAFETY: IsWindow accepts a retired HWND as a non-owning validity query.
+                    if unsafe { IsWindow(detached.hwnd) } != 0 {
+                        return Ok(false);
+                    }
                     proof.returned_frames += 1;
                     if proof.returned_frames >= 4 {
                         if !proof.retained_display_accepted {
@@ -399,6 +521,64 @@ impl NativeLifecycleProof {
     }
 }
 
+fn attempted_window(outcomes: &[WgpuWindowFrameOutcome], window: NaraWindowId) -> bool {
+    outcomes.iter().any(|outcome| {
+        outcome.unavailable_window() == Some(window)
+            || outcome
+                .window()
+                .is_some_and(|receipt| receipt.window_id() == window)
+    })
+}
+
+fn retire_detached_game_window(
+    event_loop: &ActiveEventLoop,
+    native: &mut NativeImgui,
+    application: &mut EditorApplication,
+    instance: NativeWindowInstanceId,
+    receipt: WgpuImageCompositeReceipt,
+) -> Result<(), EditorRunError> {
+    // Omit the Game widget from toolkit composition to retire its HWND while the Session's
+    // Game source and last completed composite are still installed.
+    for _ in 0..3 {
+        let (primary, secondary) =
+            present_registered_images_with_secondary(native, event_loop, &[])
+                .map_err(imgui_error)?;
+        let windows = native.platform.window_snapshots().map_err(imgui_error)?;
+        if windows
+            .iter()
+            .any(|window| window.target.instance_id == instance)
+        {
+            continue;
+        }
+        if primary.window().is_none() || attempted_window(&secondary, receipt.window().window_id())
+        {
+            return Err(imgui_error(
+                "the retired HWND must have no renderer outcome",
+            ));
+        }
+        if native.game_composite_receipt() != Some(receipt) {
+            return Err(imgui_error(
+                "the Game receipt was lost before platform reconciliation",
+            ));
+        }
+        native.settle_game_image(
+            application,
+            None,
+            std::iter::once(&primary).chain(&secondary),
+            None,
+            None,
+            Some(&windows),
+        )?;
+        if native.game_composite_receipt().is_some() || native.game_candidate.is_none() {
+            return Err(imgui_error(
+                "the retired HWND retained Game composite authority",
+            ));
+        }
+        return Ok(());
+    }
+    Err(imgui_error("the Game HWND registration never retired"))
+}
+
 fn set_panel_open(workspace: &mut crate::workspace::EditorPanelWorkspace, kind: &str, open: bool) {
     let ids = workspace
         .layout()
@@ -419,18 +599,19 @@ fn set_panel_open(workspace: &mut crate::workspace::EditorPanelWorkspace, kind: 
 fn set_minimized_without_activation(
     window: &Window,
     minimized: bool,
-) -> Result<(), EditorRunError> {
+) -> Result<HWND, EditorRunError> {
     let handle = window.window_handle().map_err(imgui_error)?;
     let RawWindowHandle::Win32(handle) = handle.as_raw() else {
         return Err(imgui_error(
             "the Windows lifecycle test did not receive its owned HWND",
         ));
     };
+    let hwnd = handle.hwnd.get() as HWND;
     // Winit uses SW_RESTORE, which can take focus from the user's foreground app. This test
     // changes only its owned HWND with the non-activating Win32 minimize/restore commands.
     unsafe {
         ShowWindow(
-            handle.hwnd.get() as _,
+            hwnd,
             if minimized {
                 SW_SHOWMINNOACTIVE
             } else {
@@ -438,7 +619,7 @@ fn set_minimized_without_activation(
             },
         );
     }
-    Ok(())
+    Ok(hwnd)
 }
 
 pub(super) fn hidden_window(
@@ -547,10 +728,13 @@ impl ApplicationHandler<EditorUserEvent> for LifecycleTestHost {
                     );
                     return;
                 }
-                match self
-                    .proof
-                    .observe(native, &mut self.host.application, outcome, secondary)
-                {
+                match self.proof.observe(
+                    event_loop,
+                    native,
+                    &mut self.host.application,
+                    outcome,
+                    secondary,
+                ) {
                     Ok(true) => {
                         self.finished = true;
                         event_loop.exit();
@@ -712,6 +896,7 @@ fn native_views_detach_minimize_reopen_recover_and_retire_with_exact_receipts() 
     assert!(test.proof.primary_frames >= 4);
     assert!(test.proof.secondary_frames >= 4);
     assert!(test.proof.minimized_secondary_frames >= 4);
+    assert!(test.proof.minimized_game_frames >= 3);
     assert!(test.proof.returned_frames >= 4);
     assert!(test.proof.game_closed_frames >= 4);
     assert!(test.proof.scene_closed_frames >= 4);
@@ -735,6 +920,14 @@ pub(super) fn present_registered_images(
     event_loop: &ActiveEventLoop,
     images: &[(ExternalTextureId, WgpuImageDisplay)],
 ) -> Result<WgpuWindowFrameOutcome, String> {
+    present_registered_images_with_secondary(native, event_loop, images).map(|(primary, _)| primary)
+}
+
+fn present_registered_images_with_secondary(
+    native: &mut NativeImgui,
+    event_loop: &ActiveEventLoop,
+    images: &[(ExternalTextureId, WgpuImageDisplay)],
+) -> Result<(WgpuWindowFrameOutcome, Vec<WgpuWindowFrameOutcome>), String> {
     native.frame_index += 1;
     let window = editor_window_packet(&native.window);
     native
@@ -804,5 +997,6 @@ pub(super) fn present_registered_images(
             |frame| renderer.paint(prepared, frame),
             || native.window.pre_present_notify(),
         )
+        .map(|primary| (primary, secondary))
         .map_err(|error| error.to_string())
 }

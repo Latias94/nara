@@ -486,6 +486,14 @@ the tests actually executed, without claiming the complete group passed.
 They cover same-output Game resize and authoring input, pause/resume cadence, exact Game input and Step, independent view close/reopen, detachment/minimization, device recovery, and retirement.
 The ordinary non-native Editor suite separately protects cadence policy and source-diverged Restart admission.
 
+The November 21 affected lifecycle, Game Overlay and exact Game input run passes 3/3 on
+Windows DX12 (`3a15244f-796c-4a47-b086-daada144dae9`). While a detached Game window remains live,
+a missing renderer outcome alone preserves its composite. Three main-window frames while
+the detached window is minimized leave the Game candidate intact and revoke its old presented
+authority. Restoring the same HWND presents a new composite, then a retired registration and
+the destroyed HWND invalidate that receipt. The existing move-back, overlay rollback,
+paused Step and original device retirement controls still pass in the same selection.
+
 For toolkit/input upgrades, also exercise the real Nara Project path/Profile fields through the
 registered native backend and core IME composition:
 
