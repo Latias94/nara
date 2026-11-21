@@ -519,14 +519,14 @@ fn program_and_recording_import_enforce_versions_and_the_documented_byte_boundar
     let recording = record_program(project.root(), &program).unwrap();
     let recording_bytes = encode_recording(&recording).unwrap();
     let recording_json: serde_json::Value = serde_json::from_slice(&recording_bytes).unwrap();
-    assert_eq!(
-        program_json["format"].as_u64(),
-        Some(u64::from(recording.format))
-    );
-    for version in [0, recording.format.checked_add(1).unwrap()] {
+    assert_eq!(program_json["format"], 1);
+    assert_eq!(recording_json["format"], 2);
+    for version in [0, 2] {
         let mut program_json = program_json.clone();
         program_json["format"] = serde_json::json!(version);
         assert!(decode_program(&serde_json::to_vec(&program_json).unwrap()).is_err());
+    }
+    for version in [0, 1, 3] {
         let mut recording_json = recording_json.clone();
         recording_json["format"] = serde_json::json!(version);
         assert!(decode_recording(&serde_json::to_vec(&recording_json).unwrap()).is_err());

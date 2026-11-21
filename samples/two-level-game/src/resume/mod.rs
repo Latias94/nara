@@ -24,7 +24,7 @@ use crate::{
 
 const KIND: &str = "two_level_resume";
 const MAX_TIMESTEP_NANOS: u64 = 1_000_000_000;
-pub const CURRENT_FORMAT_VERSION: u32 = 2;
+pub const CURRENT_FORMAT_VERSION: u32 = 3;
 pub const GAME_COMPATIBILITY: u32 = 1;
 pub const MAX_RESUME_BYTES: usize = 128 * 1024;
 
@@ -36,7 +36,7 @@ pub struct ResumeState<C = ResumeCompatibility> {
     pub player: PlayerState,
     pub held: [bool; 4],
     pub clock: GameClock,
-    #[serde(deserialize_with = "runtime_time::deserialize_object")]
+    #[serde(deserialize_with = "RuntimeTimeState::deserialize_object")]
     pub runtime_time: RuntimeTimeState,
     pub counters: SessionCounters,
     pub compatibility: C,
@@ -272,6 +272,8 @@ pub enum ResumeError {
         pending_steps: u64,
         max_debt_steps: u32,
     },
+    #[error("resume scaled time remainder must be less than one nanosecond")]
+    InvalidScaledRemainder,
     #[error("Runtime time duration {field} cannot be represented in u64 nanoseconds")]
     RuntimeDurationOutOfRange { field: &'static str },
     #[error("Runtime time continuation is invalid: {0}")]
@@ -286,7 +288,7 @@ pub enum ResumeError {
     MissingLevel(LevelId),
 }
 
-/// Produces canonical, bounded version-two bytes without file I/O or content admission.
+/// Produces canonical, bounded version-three bytes without file I/O or content admission.
 pub fn encode_resume(state: &ResumeState) -> Result<Vec<u8>, ResumeError> {
     state.validate()?;
     let mut state = state.clone();
@@ -307,7 +309,7 @@ pub fn encode_resume(state: &ResumeState) -> Result<Vec<u8>, ResumeError> {
 /// Successful decoding does not prove that recorded hashes match the fresh App and admitted
 /// content or that referenced objects exist. Hashes are full recorded values; no special byte
 /// pattern proves or disproves compatibility. This format has no checkpoint-save migration path.
-/// Version one is refused because it does not record Runtime scheduling phase.
+/// Versions one and two are refused because they lack the exact scaled time remainder.
 pub fn decode_resume(bytes: &[u8]) -> Result<ResumeState, ResumeError> {
     preflight(bytes)?;
     let header: Header = serde_json::from_slice(bytes).map_err(ResumeError::Json)?;

@@ -231,10 +231,14 @@ fn supplied_unused_pump_survives_initial_failure_and_runs_the_next_app() {
 #[test]
 #[ignore = "requires an interactive Windows desktop; run in its own nextest process"]
 fn bounded_polls_keep_the_original_hidden_paused_window_until_reveal_and_close() {
+    use nara_app::{FixedTime, RuntimeTimeContinuation, RuntimeTimeSettings, ScaledTimeRemainder};
+
     let mut builder = EventLoop::<WinitUserEvent>::with_user_event();
     builder.with_any_thread(true);
     let event_loop = WinitEventLoop::from_native(builder.build().unwrap());
     let mut app = App::new();
+    app.insert_resource(RuntimeTimeSettings::default().with_time_scale(0.5).unwrap())
+        .unwrap();
     app.add_plugin(WindowPlugin {
         primary_window: Some(Window::new(
             "nara hidden polling session",
@@ -286,6 +290,16 @@ fn bounded_polls_keep_the_original_hidden_paused_window_until_reveal_and_close()
         assert_eq!(session.runtime().generation(), generation);
         assert_eq!(session.runtime().state(), RuntimeState::Paused);
     }
+    let world = session.runtime().world();
+    let phase = RuntimeTimeContinuation::new(
+        world.resource::<RuntimeTimeSettings>(),
+        world.resource::<FixedTime>(),
+        Duration::from_millis(13),
+        ScaledTimeRemainder::from_words([0, 0, 1 << 20]).unwrap(),
+    )
+    .unwrap();
+    session.restore_time_continuation(phase).unwrap();
+    assert!(session.capture_time_continuation().is_err());
     session.reveal().unwrap();
     assert!(!session.paused_frame_complete());
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -296,6 +310,7 @@ fn bounded_polls_keep_the_original_hidden_paused_window_until_reveal_and_close()
         );
     }
     assert!(session.paused_frame_complete());
+    assert_eq!(session.capture_time_continuation().unwrap(), phase);
     {
         let app = session.app.as_ref().unwrap();
         let window = app.platform_windows.get(&WindowId::PRIMARY).unwrap();

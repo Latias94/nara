@@ -166,14 +166,8 @@ fn retain_stock_input(
         state.failure = Some("original game fixed timestep cannot be represented".into());
         return;
     };
-    let runtime_time = time
-        .debt()
-        .checked_add(time.remainder())
-        .ok_or_else(|| "original pending time overflowed".to_owned())
-        .and_then(|pending| {
-            RuntimeTimeContinuation::new(&settings, &time, pending)
-                .map_err(|error| error.to_string())
-        })
+    let runtime_time = RuntimeTimeContinuation::from_clocks(&settings, &time)
+        .map_err(|error| error.to_string())
         .and_then(|value| {
             RuntimeTimeState::from_continuation(value).map_err(|error| error.to_string())
         });

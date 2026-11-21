@@ -1118,6 +1118,45 @@ fn nonzero_runtime_phase_reconstructs_meaningful_game_and_matches_next_deltas() 
 }
 
 #[test]
+fn source_game_capture_refuses_nonunit_scale_even_when_the_runtime_phase_is_portable() {
+    let project = ProjectCopy::new();
+    let path = project.root().join("nara.toml");
+    let manifest = fs::read_to_string(&path).unwrap();
+    assert_eq!(manifest.matches("[runtime]").count(), 1);
+    fs::write(
+        &path,
+        manifest.replace("[runtime]", "[runtime]\ntime_scale = 0.5"),
+    )
+    .unwrap();
+
+    let mut game = Game::from_project(project.root());
+    game.session.resume().unwrap();
+    game.session
+        .frame(Duration::from_nanos(39_999_999))
+        .unwrap();
+    game.session.pause().unwrap();
+    game.settle();
+    let before = game.snapshot();
+    let queue = game.queue();
+    let phase = game.session.capture_time_continuation().unwrap();
+    assert_eq!(before.tick, 0);
+    assert_eq!(phase.pending(), Duration::from_nanos(19_999_999));
+    assert_eq!(phase.scaled_remainder().words(), [0, 0, 1 << 20]);
+    assert!(matches!(
+        capture_resume(&game.session),
+        Err(GameResumeError::Ineligible(reason)) if reason.contains("non-unit time scale")
+    ));
+    let after = game.snapshot();
+    assert_eq!(after.tick, before.tick);
+    assert_eq!(after.logical_tick, before.logical_tick);
+    assert_eq!(after.current_instance, before.current_instance);
+    assert_eq!(after.player, before.player);
+    assert_eq!(game.queue(), queue);
+    assert_eq!(game.session.capture_time_continuation().unwrap(), phase);
+    game.close();
+}
+
+#[test]
 fn incompatible_time_policy_preserves_a_fresh_candidate_and_the_incumbent() {
     let mut original = Game::source();
     let state = meaningful_game(&mut original);

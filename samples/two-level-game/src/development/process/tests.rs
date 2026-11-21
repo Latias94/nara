@@ -1,4 +1,5 @@
 use nara::identity::SceneEntityId;
+use serde_json::json;
 
 use super::*;
 use crate::{
@@ -90,6 +91,7 @@ fn resume_state() -> ResumeState {
             time_scale: 1.0,
             max_delta_nanos: 250_000_000,
             pending_nanos: 0,
+            scaled_remainder: [u64::MAX, 9_007_199_254_740_993, (1 << 21) - 1],
         },
         counters: SessionCounters::default(),
         compatibility: ResumeCompatibility {
@@ -233,24 +235,72 @@ fn wrong_pause_and_resume_states_preserve_diagnostics() {
 
 #[test]
 fn invalid_capture_state_preserves_diagnostics() {
-    let mut state = resume_state();
+    let state = resume_state();
     crate::resume::encode_resume(&state).unwrap();
-    state.player.translation[0] = 281.0;
-    let response = response(Ok(Reply::Captured { state }));
-    for previous in [None, Some(diagnostics(1))] {
-        let mut cached = previous;
-        let error = commit_exchange_response(
-            &mut cached,
-            &mut None,
-            response.placement,
-            1,
-            &Command::Capture,
-            &response,
-        )
-        .unwrap_err();
-        assert!(error.contains("the game returned invalid resume state"));
-        assert_eq!(cached, previous);
+    let mut invalid_position = state.clone();
+    invalid_position.player.translation[0] = 281.0;
+    let mut invalid_fraction = state;
+    invalid_fraction.runtime_time.scaled_remainder = [0, 0, 1 << 21];
+    for state in [invalid_position, invalid_fraction] {
+        let response = response(Ok(Reply::Captured { state }));
+        for previous in [None, Some(diagnostics(1))] {
+            let mut cached = previous;
+            let error = commit_exchange_response(
+                &mut cached,
+                &mut None,
+                response.placement,
+                1,
+                &Command::Capture,
+                &response,
+            )
+            .unwrap_err();
+            assert!(error.contains("the game returned invalid resume state"));
+            assert_eq!(cached, previous);
+        }
     }
+}
+
+#[test]
+fn continuity_packets_require_and_preserve_the_exact_scaled_remainder() {
+    let state = resume_state();
+    let request = Request {
+        version: PROTOCOL_VERSION,
+        session: "session".into(),
+        generation: "generation".into(),
+        request: 1,
+        command: Command::Restore {
+            state: state.clone(),
+        },
+    };
+    let response = response(Ok(Reply::Captured { state }));
+    let expected = json!([u64::MAX, 9_007_199_254_740_993_u64, (1 << 21) - 1]);
+
+    let mut wire = serde_json::to_value(&request).unwrap();
+    assert_eq!(wire["version"], 7);
+    assert_eq!(
+        wire["command"]["state"]["runtime_time"]["scaled_remainder"],
+        expected
+    );
+    assert_eq!(
+        serde_json::from_value::<Request>(wire.clone()).unwrap(),
+        request
+    );
+    wire["command"]["state"]["runtime_time"]
+        .as_object_mut()
+        .unwrap()
+        .remove("scaled_remainder");
+    assert!(serde_json::from_value::<Request>(wire).is_err());
+
+    let mut wire = serde_json::to_value(&response).unwrap();
+    assert_eq!(wire["version"], 7);
+    let time = &mut wire["result"]["Ok"]["state"]["runtime_time"];
+    assert_eq!(time["scaled_remainder"], expected);
+    assert_eq!(
+        decode_response(&serde_json::to_vec(&response).unwrap()).unwrap(),
+        response
+    );
+    time.as_object_mut().unwrap().remove("scaled_remainder");
+    assert!(decode_response(&serde_json::to_vec(&wire).unwrap()).is_err());
 }
 
 #[test]

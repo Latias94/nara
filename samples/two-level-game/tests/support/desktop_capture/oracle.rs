@@ -764,6 +764,7 @@ mod tests {
                 time_scale: 1.0,
                 max_delta_nanos: 250_000_000,
                 pending_nanos: 0,
+                scaled_remainder: [0; 3],
             },
             counters: SessionCounters::default(),
             compatibility: ResumeCompatibility {

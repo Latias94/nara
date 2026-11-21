@@ -29,6 +29,7 @@ mod execution;
 mod failure_metadata;
 mod plugin;
 mod runtime;
+mod scaled_time;
 mod time_continuation;
 
 pub use execution::{AppConfigurationFingerprint, ExecutionProfile, ExecutionProfileError};
@@ -46,6 +47,7 @@ pub use plugin::{
     SealedApp,
 };
 pub use runtime::*;
+pub use scaled_time::ScaledTimeRemainder;
 pub use time_continuation::{
     RuntimeTimeContinuation, RuntimeTimeContinuationError, RuntimeTimeContinuationRejection,
 };
@@ -650,20 +652,23 @@ impl RuntimeTimeSettings {
         !self.paused && self.time_scale > 0.0
     }
 
-    fn plan_virtual_delta(&self, real_delta: Duration) -> Result<(Duration, bool), TimeFrameError> {
+    fn plan_virtual_delta(
+        &self,
+        real_delta: Duration,
+        remainder: ScaledTimeRemainder,
+    ) -> Result<(Duration, ScaledTimeRemainder, bool), TimeFrameError> {
         let clamped = real_delta.min(self.max_delta);
         let was_clamped = clamped != real_delta;
         if self.paused {
-            return Ok((Duration::ZERO, was_clamped));
+            return Ok((Duration::ZERO, remainder, was_clamped));
         }
-        let scaled_seconds = clamped.as_secs_f64() * f64::from(self.time_scale);
-        let virtual_delta = Duration::try_from_secs_f64(scaled_seconds).map_err(|_| {
+        let (virtual_delta, remainder) = remainder.advance(clamped, self.time_scale).ok_or(
             TimeFrameError::VirtualDeltaOverflow {
                 clamped_real_delta: clamped,
                 time_scale: self.time_scale,
-            }
-        })?;
-        Ok((virtual_delta, was_clamped))
+            },
+        )?;
+        Ok((virtual_delta, remainder, was_clamped))
     }
 }
 
@@ -719,6 +724,7 @@ pub struct FixedTime {
     max_debt_steps: NonZeroU32,
     catch_up_policy: FixedCatchUpPolicy,
     pending: Duration,
+    scaled_remainder: ScaledTimeRemainder,
     remainder: Duration,
     debt: Duration,
     delta: Duration,
@@ -741,6 +747,7 @@ impl Default for FixedTime {
                 .expect("the default fixed debt cap is non-zero"),
             catch_up_policy: FixedCatchUpPolicy::default(),
             pending: Duration::ZERO,
+            scaled_remainder: ScaledTimeRemainder::ZERO,
             remainder: Duration::ZERO,
             debt: Duration::ZERO,
             delta: Duration::ZERO,
@@ -808,6 +815,12 @@ impl FixedTime {
     #[must_use]
     pub fn remainder(&self) -> Duration {
         self.remainder
+    }
+
+    /// The fraction carried into the next elapsed-time conversion.
+    #[must_use]
+    pub const fn scaled_remainder(&self) -> ScaledTimeRemainder {
+        self.scaled_remainder
     }
 
     #[must_use]
@@ -1065,12 +1078,13 @@ impl TimeFramePlan {
         }
         let real_time = required_frame_resource::<RealTime>(world, TimeFrameResource::RealTime)?
             .plan_advance(real_delta)?;
-        let (virtual_delta, real_delta_clamped) = settings.plan_virtual_delta(real_delta)?;
         let virtual_time =
-            required_frame_resource::<VirtualTime>(world, TimeFrameResource::VirtualTime)?
-                .plan_advance(virtual_delta)?;
+            required_frame_resource::<VirtualTime>(world, TimeFrameResource::VirtualTime)?;
         let mut fixed_time =
             *required_frame_resource::<FixedTime>(world, TimeFrameResource::FixedTime)?;
+        let (virtual_delta, scaled_remainder, real_delta_clamped) =
+            settings.plan_virtual_delta(real_delta, fixed_time.scaled_remainder)?;
+        let virtual_time = virtual_time.plan_advance(virtual_delta)?;
         required_frame_resource::<RenderTime>(world, TimeFrameResource::RenderTime)?;
         required_frame_resource::<RuntimeFrameStatus>(
             world,
@@ -1081,6 +1095,7 @@ impl TimeFramePlan {
             .plan_frame(virtual_delta, settings.fixed_time_enabled())
             .map_err(TimeFrameError::Fixed)?;
         fixed_time.begin_frame(fixed_frame);
+        fixed_time.scaled_remainder = scaled_remainder;
 
         Ok(Self {
             real_time,
@@ -3538,6 +3553,42 @@ mod tests {
                 incoming: FixedTime::DEFAULT_TIMESTEP,
             }),
         );
+    }
+
+    #[test]
+    fn fixed_debt_refusal_does_not_commit_scaled_time() {
+        let nanos = Duration::from_nanos(1);
+        let mut app = App::new();
+        app.insert_resource(RuntimeTimeSettings::default().with_time_scale(0.5).unwrap())
+            .unwrap();
+        app.insert_resource(
+            FixedTime::new(nanos)
+                .unwrap()
+                .with_max_steps_per_frame(1)
+                .unwrap()
+                .with_max_debt_steps(1)
+                .unwrap()
+                .with_catch_up_policy(FixedCatchUpPolicy::PreserveDebt),
+        )
+        .unwrap();
+        assert_eq!(
+            run_frame(&mut app, nanos).unwrap().status.virtual_delta,
+            Duration::ZERO
+        );
+        assert_time_frame_error_is_atomic(
+            &mut app,
+            nanos * 5,
+            TimeFrameError::Fixed(FixedTimeError::CatchUpDebtExceeded {
+                pending_steps: 3,
+                max_steps_per_frame: 1,
+                max_debt_steps: 1,
+            }),
+        );
+        let accepted = run_frame(&mut app, nanos).unwrap().status;
+        assert_eq!(accepted.virtual_delta, nanos);
+        assert_eq!(accepted.fixed_tick, 1);
+        assert_eq!(accepted.fixed_debt, Duration::ZERO);
+        assert_eq!(app.world().resource::<RealTime>().elapsed, nanos * 2);
     }
 
     #[test]

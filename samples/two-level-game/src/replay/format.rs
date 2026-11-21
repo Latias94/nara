@@ -24,7 +24,8 @@ use crate::{
     save::Checkpoint,
 };
 
-pub const CURRENT_FORMAT_VERSION: u32 = 1;
+const PROGRAM_FORMAT_VERSION: u32 = 1;
+pub(super) const RECORDING_FORMAT_VERSION: u32 = 2;
 pub const MAX_STEPS: usize = 1024;
 pub const MAX_COMMANDS_PER_STEP: usize = 8;
 pub const MAX_RECORDING_BYTES: usize = 16 * 1024 * 1024;
@@ -46,7 +47,7 @@ impl GameProgram {
             validate_commands(commands.iter(), index + 1)?;
         }
         Ok(Self {
-            format: CURRENT_FORMAT_VERSION,
+            format: PROGRAM_FORMAT_VERSION,
             steps,
         })
     }
@@ -67,7 +68,12 @@ pub fn decode_program(bytes: &[u8]) -> Result<GameProgram, String> {
         steps: Vec<Vec<SemanticCommand>>,
     }
     let wire: Wire = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
-    validate_version(wire.format)?;
+    if wire.format != PROGRAM_FORMAT_VERSION {
+        return Err(format!(
+            "unsupported source-game replay format {}",
+            wire.format
+        ));
+    }
     GameProgram::new(wire.steps)
 }
 
@@ -86,6 +92,7 @@ pub struct RecordedState {
     pub player: PlayerState,
     pub held: [bool; 4],
     pub clock: GameClock,
+    #[serde(deserialize_with = "RuntimeTimeState::deserialize_object")]
     pub runtime_time: RuntimeTimeState,
     pub counters: SessionCounters,
     pub schema: [u8; 32],
@@ -157,8 +164,9 @@ pub struct RecordedStep {
     pub after: RecordedState,
 }
 
-/// A finite recording from the fixed source/headless semantic-program profile.
+/// A finite version-two recording from the fixed source/headless semantic-program profile.
 ///
+/// The initial state and every completed step have zero pending whole and fractional time.
 /// Configuration is original recording provenance. Playback uses its own Replay-only recipe
 /// and compares [`RecordedState::canonical_bytes`] without importing old command authority.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -176,12 +184,12 @@ impl GameRecording {
     /// State validation belongs to the resume encoder. Whole-file byte accounting is linear;
     /// live recording must charge each new row incrementally rather than call this after each row.
     pub fn validate(&self) -> Result<(), String> {
-        validate_version(self.format)?;
+        validate_recording_version(self.format)?;
         validate_step_count(self.steps.len())?;
         self.initial
             .canonical_bytes()
             .map_err(|error| format!("recording initial state: {error}"))?;
-        if self.initial.clock.ticks != 0 || self.initial.runtime_time.pending_nanos != 0 {
+        if self.initial.clock.ticks != 0 || self.initial.runtime_time.has_pending_time() {
             return Err("recording must start at logical tick zero with no pending time".into());
         }
 
@@ -215,6 +223,12 @@ impl GameRecording {
             step.after
                 .canonical_bytes()
                 .map_err(|error| format!("recording step {} state: {error}", step.tick))?;
+            if step.after.runtime_time.has_pending_time() {
+                return Err(format!(
+                    "recording step {} must end with no pending time",
+                    step.tick
+                ));
+            }
             if step.after.schema != self.initial.schema {
                 return Err(format!("recording Schema changed at step {}", step.tick));
             }
@@ -250,9 +264,9 @@ pub fn encode_recording(recording: &GameRecording) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn validate_version(format: u32) -> Result<(), String> {
-    if format != CURRENT_FORMAT_VERSION {
-        return Err(format!("unsupported source-game replay format {format}"));
+fn validate_recording_version(format: u32) -> Result<(), String> {
+    if format != RECORDING_FORMAT_VERSION {
+        return Err(format!("unsupported source-game recording format {format}"));
     }
     Ok(())
 }

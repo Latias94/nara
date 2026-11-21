@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use nara::{
-    app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeContinuation, RuntimeTimeSettings},
+    app::{
+        FixedCatchUpPolicy, FixedTime, RuntimeTimeContinuation, RuntimeTimeSettings,
+        ScaledTimeRemainder,
+    },
     identity::SceneEntityId,
 };
 use serde_json::{Value, json};
@@ -20,7 +23,7 @@ fn canonical_resume_has_an_exact_round_trip() {
     let state = example();
     let bytes = encode_resume(&state).unwrap();
     let expected = concat!(
-        r#"{"kind":"two_level_resume","format_version":2,"game_compatibility":1,"payload":{"progress":{"#,
+        r#"{"kind":"two_level_resume","format_version":3,"game_compatibility":1,"payload":{"progress":{"#,
         r#""location":{"level":{"level":"cavern","instance":2},"anchor":"checkpoint"},"score":20,"#,
         r#""collected":[{"level":{"level":"meadow","instance":0},"entity":"gem-near"},"#,
         r#"{"level":{"level":"cavern","instance":2},"entity":"gem-away"}],"#,
@@ -29,7 +32,8 @@ fn canonical_resume_has_an_exact_round_trip() {
         r#""player":{"translation":[17.25,-31.5],"rotation":0.5,"scale":[-1.5,2.0]},"#,
         r#""held":[true,false,false,true],"clock":{"ticks":12,"elapsed_nanos":300000000,"timestep_nanos":25000000},"#,
         r#""runtime_time":{"timestep_nanos":25000000,"max_steps_per_frame":5,"max_debt_steps":120,"#,
-        r#""catch_up_policy":"discard_excess","time_scale":1.0,"max_delta_nanos":250000000,"pending_nanos":13000000},"#,
+        r#""catch_up_policy":"discard_excess","time_scale":1.0,"max_delta_nanos":250000000,"pending_nanos":13000000,"#,
+        r#""scaled_remainder":[18446744073709551615,9007199254740993,2097151]},"#,
         r#""counters":{"travel_count":3,"restarts":2,"saves":4,"restores":1},"compatibility":{"schema":"#,
         "[9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9],",
         r#""configuration":"#,
@@ -349,18 +353,23 @@ fn runtime_time_preserves_phase_and_the_exact_debt_cap_with_a_remainder() {
 }
 
 #[test]
-fn runtime_time_continuation_round_trip_preserves_u64_max_nanoseconds() {
+fn runtime_time_continuation_round_trip_preserves_full_duration_and_fraction_ranges() {
     let maximum = Duration::from_nanos(u64::MAX);
     let settings = RuntimeTimeSettings::new(true, 1.0, maximum).unwrap();
     let fixed = FixedTime::new(Duration::from_nanos(MAX_TIMESTEP_NANOS))
         .unwrap()
         .with_catch_up_policy(FixedCatchUpPolicy::DiscardExcess);
-    let continuation = RuntimeTimeContinuation::new(&settings, &fixed, maximum).unwrap();
-    let state = RuntimeTimeState::from_continuation(continuation).unwrap();
+    for words in [[0; 3], [1, 0, 0], [u64::MAX, u64::MAX, (1 << 21) - 1]] {
+        let remainder = ScaledTimeRemainder::from_words(words).unwrap();
+        let continuation =
+            RuntimeTimeContinuation::new(&settings, &fixed, maximum, remainder).unwrap();
+        let state = RuntimeTimeState::from_continuation(continuation).unwrap();
 
-    assert_eq!(state.max_delta_nanos, u64::MAX);
-    assert_eq!(state.pending_nanos, u64::MAX);
-    assert_eq!(state.to_continuation().unwrap(), continuation);
+        assert_eq!(state.max_delta_nanos, u64::MAX);
+        assert_eq!(state.pending_nanos, u64::MAX);
+        assert_eq!(state.scaled_remainder, words);
+        assert_eq!(state.to_continuation().unwrap(), continuation);
+    }
 }
 
 #[test]
@@ -376,7 +385,9 @@ fn runtime_time_continuation_refuses_durations_above_u64_nanoseconds() {
         ("pending", maximum, oversized),
     ] {
         let settings = RuntimeTimeSettings::new(true, 1.0, max_delta).unwrap();
-        let continuation = RuntimeTimeContinuation::new(&settings, &fixed, pending).unwrap();
+        let continuation =
+            RuntimeTimeContinuation::new(&settings, &fixed, pending, ScaledTimeRemainder::ZERO)
+                .unwrap();
         assert!(
             matches!(
                 RuntimeTimeState::from_continuation(continuation),
@@ -459,6 +470,7 @@ fn preserve_debt_supports_the_full_nonzero_u32_caps_without_multiplication_overf
         time_scale: 1.0,
         max_delta_nanos: u64::MAX,
         pending_nanos: u64::from(u32::MAX) * MAX_TIMESTEP_NANOS + MAX_TIMESTEP_NANOS - 1,
+        scaled_remainder: [u64::MAX, u64::MAX, (1 << 21) - 1],
     };
     assert_eq!(
         decode_resume(&encode_resume(&state).unwrap()).unwrap(),
@@ -774,6 +786,7 @@ fn maximum_progress_capacity_fits_with_full_content_stamps_and_identifier_length
         time_scale: f32::MAX,
         max_delta_nanos: u64::MAX,
         pending_nanos: u64::MAX,
+        scaled_remainder: [u64::MAX, u64::MAX, (1 << 21) - 1],
     };
     let bytes = encode_resume(&state).unwrap();
     assert!(bytes.len() < MAX_RESUME_BYTES);
@@ -808,10 +821,10 @@ fn incompatible_headers_have_explicit_errors_before_payload_decoding() {
     wire["kind"] = json!("scene");
     assert!(matches!(decode_value(&wire), Err(ResumeError::WrongKind)));
     wire["kind"] = json!(KIND);
-    wire["format_version"] = json!(3);
+    wire["format_version"] = json!(4);
     assert!(matches!(
         decode_value(&wire),
-        Err(ResumeError::UnsupportedVersion(3))
+        Err(ResumeError::UnsupportedVersion(4))
     ));
     wire["format_version"] = json!(CURRENT_FORMAT_VERSION);
     wire["game_compatibility"] = json!(2);
@@ -822,13 +835,18 @@ fn incompatible_headers_have_explicit_errors_before_payload_decoding() {
 }
 
 #[test]
-fn version_one_is_refused_without_implicitly_assuming_zero_phase() {
+fn older_versions_are_refused_without_implicitly_assuming_zero_phase() {
     let mut wire = example_wire();
-    wire["format_version"] = json!(1);
+    wire["format_version"] = json!(2);
+    wire["payload"]["runtime_time"]
+        .as_object_mut()
+        .unwrap()
+        .remove("scaled_remainder");
     assert!(matches!(
         decode_value(&wire),
-        Err(ResumeError::UnsupportedVersion(1))
+        Err(ResumeError::UnsupportedVersion(2))
     ));
+    wire["format_version"] = json!(1);
     wire["payload"]
         .as_object_mut()
         .unwrap()
@@ -851,6 +869,7 @@ fn runtime_time_requires_every_field_and_refuses_independent_remainder_or_debt()
         "time_scale",
         "max_delta_nanos",
         "pending_nanos",
+        "scaled_remainder",
     ] {
         let mut wire = example_wire();
         wire["payload"]["runtime_time"]
@@ -887,7 +906,8 @@ fn runtime_time_requires_an_object_and_exact_snake_case_policy_strings() {
             "discard_excess",
             1.0,
             250_000_000,
-            13_000_000
+            13_000_000,
+            [0, 0, 0]
         ]),
     ] {
         let mut wire = example_wire();
@@ -967,6 +987,47 @@ fn runtime_time_numeric_fields_refuse_malformed_shapes_and_values_outside_their_
     let mut wire = example_wire();
     wire["payload"]["runtime_time"]["time_scale"] = json!(1e100);
     assert!(decode_value(&wire).is_err());
+}
+
+#[test]
+fn scaled_remainder_requires_three_unsigned_integer_words() {
+    let mut wire = example_wire();
+    for value in [
+        Value::Null,
+        json!(0),
+        json!({"words": [0, 0, 0]}),
+        json!([0, 0]),
+        json!([0, 0, 0, 0]),
+        json!([-1, 0, 0]),
+        json!([0, 1.0, 0]),
+        json!([0, 0, "1"]),
+    ] {
+        wire["payload"]["runtime_time"]["scaled_remainder"] = value;
+        assert!(matches!(decode_value(&wire), Err(ResumeError::Json(_))));
+    }
+    wire["payload"]["runtime_time"]["scaled_remainder"] = json!(["18446744073709551616", 0, 0]);
+    let bytes = serde_json::to_string(&wire)
+        .unwrap()
+        .replace("\"18446744073709551616\"", "18446744073709551616");
+    assert!(matches!(
+        decode_resume(bytes.as_bytes()),
+        Err(ResumeError::Json(_))
+    ));
+}
+
+#[test]
+fn scaled_remainder_refuses_one_nanosecond_or_more_on_every_entry() {
+    let mut state = example();
+    for words in [[0, 0, 1 << 21], [u64::MAX; 3]] {
+        state.runtime_time.scaled_remainder = words;
+        for result in [
+            state.runtime_time.to_continuation().map(|_| ()),
+            encode_resume(&state).map(|_| ()),
+            decode_resume(&wire_bytes(&state)).map(|_| ()),
+        ] {
+            assert!(matches!(result, Err(ResumeError::InvalidScaledRemainder)));
+        }
+    }
 }
 
 #[test]
@@ -1226,6 +1287,7 @@ fn example() -> ResumeState {
             time_scale: 1.0,
             max_delta_nanos: 250_000_000,
             pending_nanos: 13_000_000,
+            scaled_remainder: [u64::MAX, 9_007_199_254_740_993, (1 << 21) - 1],
         },
         counters: SessionCounters {
             travel_count: 3,

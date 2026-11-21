@@ -12,7 +12,7 @@ use super::{GAME_COMPATIBILITY, Header, MAX_RESUME_BYTES, ResumeError, ResumeSta
 use crate::command::ServerCommand;
 
 const KIND: &str = "two_level_processed_resume";
-const FORMAT_VERSION: u32 = 3;
+const FORMAT_VERSION: u32 = 4;
 const MAX_TICK_OFFSET: u64 = 600;
 
 /// Maximum encoded size of a processed continuation, including any JSON whitespace.
@@ -216,7 +216,7 @@ pub enum ProcessedResumeError {
     InvalidCommand { index: usize, reason: String },
 }
 
-/// Produces bounded, canonical version-three bytes, preserving the order of pending commands.
+/// Produces bounded, canonical version-four bytes, preserving the order of pending commands.
 pub fn encode_processed_resume(
     state: &ProcessedResumeState,
 ) -> Result<Vec<u8>, ProcessedResumeError> {

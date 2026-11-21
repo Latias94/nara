@@ -495,14 +495,11 @@ pub(super) fn begin_from_command(
         )
     };
     validate_current_placement(world, &activation.game).map_err(|error| error.to_string())?;
-    let fixed = world.resource::<FixedTime>();
-    let pending = fixed
-        .debt()
-        .checked_add(fixed.remainder())
-        .ok_or("candidate scheduling phase overflowed")?;
-    let actual_time =
-        RuntimeTimeContinuation::new(world.resource::<RuntimeTimeSettings>(), fixed, pending)
-            .map_err(|error| error.to_string())?;
+    let actual_time = RuntimeTimeContinuation::from_clocks(
+        world.resource::<RuntimeTimeSettings>(),
+        world.resource::<FixedTime>(),
+    )
+    .map_err(|error| error.to_string())?;
     if activation
         .game
         .runtime_time

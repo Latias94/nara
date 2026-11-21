@@ -598,6 +598,17 @@ impl<'a> Service<'a> {
         }
     }
 
+    pub(super) fn spawn_scaled(
+        custody: &'a mut Custody,
+        executable: &Path,
+        launch: Launch<'_>,
+        name: &str,
+    ) -> Self {
+        let mut service = Self::spawn(custody, executable, launch, name);
+        service.unit_time_scale = false;
+        service
+    }
+
     pub(super) fn ready(&mut self, paused: bool, checkpoint: bool) -> Value {
         let ready = self.read(READY, STARTUP_TIMEOUT);
         assert_eq!(ready["version"], 1, "{ready}");
@@ -733,6 +744,15 @@ impl<'a> Service<'a> {
 
     pub(super) fn observe(&mut self) -> Value {
         self.exchange_observation(&request("observe"), "observed")
+    }
+
+    pub(super) fn advance(&mut self, elapsed_nanos: u64) -> Value {
+        let advanced = self.exchange_observation(
+            &json!({"request": "advance", "elapsed_nanos": elapsed_nanos}),
+            "advanced",
+        );
+        assert_eq!(advanced["paused"], true, "{advanced}");
+        advanced
     }
 
     pub(super) fn exchange_observation(&mut self, request: &Value, status: &str) -> Value {

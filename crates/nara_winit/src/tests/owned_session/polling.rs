@@ -1,7 +1,7 @@
 use super::*;
 use nara_app::{
     CoreStage, FixedCatchUpPolicy, FixedTime, RenderTime, RuntimeControlFailure,
-    RuntimeFaultReporter, RuntimeTimeSettings, VirtualTime,
+    RuntimeFaultReporter, RuntimeTimeSettings, ScaledTimeRemainder, VirtualTime,
 };
 use nara_ecs::{Res, ResMut, Resource};
 
@@ -83,6 +83,7 @@ fn continuation(session: &WinitSession, pending: Duration) -> RuntimeTimeContinu
         world.resource::<RuntimeTimeSettings>(),
         world.resource::<FixedTime>(),
         pending,
+        ScaledTimeRemainder::ZERO,
     )
     .unwrap()
 }
@@ -380,6 +381,49 @@ fn resume_settles_a_long_paused_wait_and_preserves_the_next_tick_phase() {
 }
 
 #[test]
+fn elapsed_native_wait_retains_the_fraction_needed_by_the_next_frame() {
+    let mut app = counted_time_app(false);
+    app.insert_resource(RuntimeTimeSettings::default().with_time_scale(0.5).unwrap())
+        .unwrap();
+    let mut session = cpu_session(app, WinitControlFlow::Wait);
+    let first = session.app.as_ref().unwrap().last_frame + Duration::from_nanos(39_999_999);
+    assert_eq!(poll_cpu_at(&mut session, first), WinitRunProgress::Running);
+    accepted(session.request_control(RuntimeControl::Pause));
+    assert_eq!(poll_cpu_at(&mut session, first), WinitRunProgress::Running);
+    let phase = session.capture_time_continuation().unwrap();
+    assert_eq!(phase.pending(), Duration::from_nanos(19_999_999));
+    assert_eq!(phase.scaled_remainder().words(), [0, 0, 1 << 20]);
+
+    let resumed_at = first + Duration::from_secs(10);
+    assert_eq!(
+        poll_cpu_at(&mut session, resumed_at),
+        WinitRunProgress::Running
+    );
+    assert_eq!(session.capture_time_continuation().unwrap(), phase);
+    accepted(session.request_control(RuntimeControl::Resume));
+    assert_eq!(
+        poll_cpu_at(&mut session, resumed_at),
+        WinitRunProgress::Running
+    );
+    let (real, virtual_time, fixed, _) = time_resources(&session);
+    assert_eq!(real.delta, Duration::from_secs(10));
+    assert_eq!(virtual_time.delta, Duration::ZERO);
+    assert_eq!(fixed.tick(), 0);
+
+    session.app.as_mut().unwrap().request_frame();
+    assert_eq!(
+        poll_cpu_at(&mut session, resumed_at + Duration::from_nanos(1)),
+        WinitRunProgress::Running
+    );
+    let (_, virtual_time, fixed, _) = time_resources(&session);
+    assert_eq!(virtual_time.delta, Duration::from_nanos(1));
+    assert_eq!(fixed.tick(), 1);
+    assert_eq!(fixed.remainder(), Duration::ZERO);
+    session.request_close();
+    assert_eq!(session.execute(), WinitRunProgress::Retired);
+}
+
+#[test]
 fn hidden_paused_restore_preserves_refusal_eligibility_and_requires_original_maintenance() {
     let mut session = cpu_session(counted_time_app(true), WinitControlFlow::Wait);
     session.app.as_mut().unwrap().initial_visibility = false;
@@ -402,6 +446,7 @@ fn hidden_paused_restore_preserves_refusal_eligibility_and_requires_original_mai
             .unwrap(),
         &before.2,
         phase.pending(),
+        phase.scaled_remainder(),
     )
     .unwrap();
     let error = session.restore_time_continuation(mismatched).unwrap_err();

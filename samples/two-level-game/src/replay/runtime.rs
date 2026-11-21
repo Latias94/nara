@@ -143,7 +143,7 @@ impl Game {
         }
         self.settle(0)?;
         let state = self.capture()?;
-        if state.clock.ticks != 0 || state.runtime_time.pending_nanos != 0 {
+        if state.clock.ticks != 0 || state.runtime_time.has_pending_time() {
             return Err(ReplayError::new(
                 "recording requires fresh paused game time",
             ));

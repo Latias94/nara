@@ -44,6 +44,7 @@ fn state(tick: u64) -> RecordedState {
             time_scale: 1.0,
             max_delta_nanos: 250_000_000,
             pending_nanos: 0,
+            scaled_remainder: [0; 3],
         },
         counters: SessionCounters::default(),
         schema: [9; 32],
@@ -94,7 +95,7 @@ fn recording() -> GameRecording {
         })
         .collect();
     GameRecording {
-        format: CURRENT_FORMAT_VERSION,
+        format: RECORDING_FORMAT_VERSION,
         configuration: [10; 32],
         initial: state(0),
         steps,
@@ -215,6 +216,8 @@ fn state_comparison_reuses_resume_canonicalization_and_omits_recipe_configuratio
     let mut left = decode_resume(&state(0).canonical_bytes().unwrap()).unwrap();
     left.compatibility.configuration = [1; 32];
     left.compatibility.levels.push(stamp(LevelId::Cavern));
+    let fraction = [u64::MAX, u64::MAX, (1 << 21) - 1];
+    left.runtime_time.scaled_remainder = fraction;
     let mut right = left.clone();
     right.compatibility.configuration = [2; 32];
     right.compatibility.levels.reverse();
@@ -223,13 +226,12 @@ fn state_comparison_reuses_resume_canonicalization_and_omits_recipe_configuratio
         RecordedState::from(right).canonical_bytes().unwrap(),
         canonical,
     );
-    assert_eq!(
-        decode_resume(&canonical)
-            .unwrap()
-            .compatibility
-            .configuration,
-        [0; 32],
-    );
+    let decoded = decode_resume(&canonical).unwrap();
+    assert_eq!(decoded.compatibility.configuration, [0; 32]);
+    assert_eq!(decoded.runtime_time.scaled_remainder, fraction);
+    let mut different_phase = RecordedState::from(decoded);
+    different_phase.runtime_time.scaled_remainder = [0; 3];
+    assert_ne!(different_phase.canonical_bytes().unwrap(), canonical);
     let mut invalid = state(0);
     invalid.progress.score = 10;
     assert!(invalid.canonical_bytes().is_err());
@@ -241,6 +243,11 @@ fn recording_round_trip_keeps_provenance_without_serializing_another_payload() {
     let bytes = encode_recording(&recording).unwrap();
     assert_eq!(decode_recording(&bytes).unwrap(), recording);
     let wire: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(wire["format"], 2);
+    assert_eq!(
+        wire["steps"][0]["after"]["runtime_time"]["scaled_remainder"],
+        json!([0, 0, 0])
+    );
     assert_eq!(
         wire["steps"][0]["commands"][0],
         json!({
@@ -252,4 +259,75 @@ fn recording_round_trip_keeps_provenance_without_serializing_another_payload() {
             },
         }),
     );
+}
+
+#[test]
+fn version_one_programs_keep_their_wire_meaning_and_version_one_recordings_are_refused() {
+    let bytes = br#"{"format":1,"steps":[[],[{"operation":"marker"}]]}"#;
+    let program = decode_program(bytes).unwrap();
+    assert_eq!(program.steps(), &[vec![], vec![SemanticCommand::Marker]]);
+    assert_eq!(encode_program(&program).unwrap().as_slice(), bytes);
+
+    let mut old = recording();
+    old.format = 1;
+    let unsupported = "unsupported source-game recording format 1";
+    assert_eq!(encode_recording(&old).unwrap_err(), unsupported);
+    assert_eq!(
+        decode_recording(&serde_json::to_vec(&old).unwrap()).unwrap_err(),
+        unsupported
+    );
+    let mut wire = serde_json::to_value(old).unwrap();
+    wire["initial"]["runtime_time"]
+        .as_object_mut()
+        .unwrap()
+        .remove("scaled_remainder");
+    for step in wire["steps"].as_array_mut().unwrap() {
+        step["after"]["runtime_time"]
+            .as_object_mut()
+            .unwrap()
+            .remove("scaled_remainder");
+    }
+    let error = decode_recording(&serde_json::to_vec(&wire).unwrap()).unwrap_err();
+    assert!(
+        error.contains("missing field `scaled_remainder`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn recording_requires_a_valid_fraction_and_zero_initial_phase() {
+    let mut recording = recording();
+    let mut wire = serde_json::to_value(&recording).unwrap();
+    wire["initial"]["runtime_time"]
+        .as_object_mut()
+        .unwrap()
+        .remove("scaled_remainder");
+    let error = decode_recording(&serde_json::to_vec(&wire).unwrap()).unwrap_err();
+    assert!(
+        error.contains("missing field `scaled_remainder`"),
+        "{error}"
+    );
+
+    recording.steps[0].after.runtime_time.scaled_remainder = [0, 0, 1 << 21];
+    let error = decode_recording(&serde_json::to_vec(&recording).unwrap()).unwrap_err();
+    assert!(error.contains("less than one nanosecond"), "{error}");
+
+    recording.steps[0].after.runtime_time.scaled_remainder = [0; 3];
+    for (pending_nanos, scaled_remainder) in [(1, [0; 3]), (0, [1, 0, 0])] {
+        recording.initial.runtime_time.pending_nanos = pending_nanos;
+        recording.initial.runtime_time.scaled_remainder = scaled_remainder;
+        let error = encode_recording(&recording).unwrap_err();
+        assert!(error.contains("no pending time"), "{error}");
+    }
+}
+
+#[test]
+fn recording_refuses_pending_fraction_in_a_later_step() {
+    let mut recording = recording();
+    recording.steps[1].after.runtime_time.scaled_remainder = [1, 0, 0];
+    let expected = "recording step 2 must end with no pending time";
+
+    assert_eq!(encode_recording(&recording).unwrap_err(), expected);
+    let bytes = serde_json::to_vec(&recording).unwrap();
+    assert_eq!(decode_recording(&bytes).unwrap_err(), expected);
 }

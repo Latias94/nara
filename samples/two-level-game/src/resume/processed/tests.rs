@@ -29,6 +29,10 @@ fn processed_round_trip_canonicalizes_game_records_and_keeps_equal_tick_order() 
         wire["payload"]["rooms"],
         json!({ "side_room": "open", "lookout": "relic_found" })
     );
+    assert_eq!(
+        wire["payload"]["game"]["runtime_time"]["scaled_remainder"],
+        json!([u64::MAX, u64::MAX, (1 << 21) - 1])
+    );
     assert_eq!(encode_processed_resume(&reversed).unwrap(), bytes);
     let restored = decode_processed_resume(&wire_bytes(&reversed)).unwrap();
     assert_eq!(restored, canonical);
@@ -122,6 +126,15 @@ fn processed_game_uses_shared_state_validation() {
             ProcessedResumeError::Resume(ResumeError::ClockMismatch { .. })
         )
     });
+
+    let mut state = example();
+    state.game.runtime_time.scaled_remainder = [0, 0, 1 << 21];
+    assert_rejected(&state, |error| {
+        matches!(
+            error,
+            ProcessedResumeError::Resume(ResumeError::InvalidScaledRemainder)
+        )
+    });
 }
 
 #[test]
@@ -173,7 +186,7 @@ fn wrong_format_versions_and_non_schema_fields_are_refused() {
     let bytes = encode_processed_resume(&example()).unwrap();
     let wire: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(wire["kind"], "two_level_processed_resume");
-    assert_eq!(wire["format_version"], 3);
+    assert_eq!(wire["format_version"], 4);
     assert_eq!(
         wire["payload"]["rooms"],
         json!({ "side_room": "closed", "lookout": "closed" })
@@ -184,7 +197,19 @@ fn wrong_format_versions_and_non_schema_fields_are_refused() {
         Err(ResumeError::WrongKind)
     ));
 
-    let mut v2 = wire.clone();
+    let mut v3 = wire.clone();
+    v3["format_version"] = json!(3);
+    v3["payload"]["game"]["runtime_time"]
+        .as_object_mut()
+        .unwrap()
+        .remove("scaled_remainder");
+    assert!(matches!(
+        decode_processed_resume(&serde_json::to_vec(&v3).unwrap()),
+        Err(ProcessedResumeError::Resume(
+            ResumeError::UnsupportedVersion(3)
+        ))
+    ));
+    let mut v2 = v3;
     v2["format_version"] = json!(2);
     v2["payload"].as_object_mut().unwrap().remove("checkpoint");
     assert!(matches!(
@@ -203,11 +228,11 @@ fn wrong_format_versions_and_non_schema_fields_are_refused() {
         ))
     ));
     let mut invalid = wire.clone();
-    invalid["format_version"] = json!(4);
+    invalid["format_version"] = json!(5);
     assert!(matches!(
         decode_processed_resume(&serde_json::to_vec(&invalid).unwrap()),
         Err(ProcessedResumeError::Resume(
-            ResumeError::UnsupportedVersion(4)
+            ResumeError::UnsupportedVersion(5)
         ))
     ));
     let mut invalid = wire.clone();
@@ -230,6 +255,12 @@ fn wrong_format_versions_and_non_schema_fields_are_refused() {
         invalid.pointer_mut(path).unwrap()[field] = json!([]);
         assert_invalid_json(&invalid);
     }
+    let mut invalid = wire.clone();
+    invalid["payload"]["game"]["runtime_time"]
+        .as_object_mut()
+        .unwrap()
+        .remove("scaled_remainder");
+    assert_invalid_json(&invalid);
     let mut invalid = wire.clone();
     invalid["payload"]["game"]["compatibility"] = json!([vec![0; 32], vec![0; 32]]);
     assert_invalid_json(&invalid);
@@ -388,9 +419,10 @@ fn example() -> ProcessedResumeState {
                 max_steps_per_frame: 5,
                 max_debt_steps: 120,
                 catch_up_policy: RuntimeCatchUpPolicy::PreserveDebt,
-                time_scale: 1.0,
+                time_scale: 0.5,
                 max_delta_nanos: 250_000_000,
                 pending_nanos: 38_000_000,
+                scaled_remainder: [u64::MAX, u64::MAX, (1 << 21) - 1],
             },
             counters: SessionCounters {
                 travel_count: 3,

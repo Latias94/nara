@@ -2,7 +2,7 @@
 use nara::project_host::DesktopRun;
 use nara::{
     advanced_prelude::CurrentScene,
-    app::{FixedTime, RuntimeTimeSettings},
+    app::FixedTime,
     ecs::World,
     fs::ContentDigest,
     gameplay::{GameplayCommandBatch, GameplayCommandQueue, LocalGameplayCommands},
@@ -11,6 +11,7 @@ use nara::{
 };
 #[cfg(feature = "local-player")]
 use nara::{
+    app::RuntimeTimeSettings,
     asset::Assets,
     material::{Material2d, Material2dAsset},
     project_host::HeadlessSession,
@@ -42,6 +43,11 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
         ));
     }
     quiescent(world, false)?;
+    if world.resource::<RuntimeTimeSettings>().time_scale() != 1.0 {
+        return Err(reject(
+            "this game does not support continuation at a non-unit time scale",
+        ));
+    }
     require_unconfigured_checkpoint(world)?;
     Rooms::require_closed(world).map_err(GameResumeError::Ineligible)?;
     super::input_capture_eligible(world)?;
@@ -128,11 +134,6 @@ pub(super) fn quiescent(
     {
         return Err(reject(
             "gameplay commands are pending, active or unacknowledged",
-        ));
-    }
-    if world.resource::<RuntimeTimeSettings>().time_scale() != 1.0 {
-        return Err(reject(
-            "this game does not support continuation at a non-unit time scale",
         ));
     }
     match world.resource::<TaskPools>().return_state() {

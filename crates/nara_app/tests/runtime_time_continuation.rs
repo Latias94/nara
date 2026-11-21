@@ -13,11 +13,13 @@ use nara_app::{
     RuntimeControlStatus, RuntimeDriveError, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
     RuntimeFrameKind, RuntimeFrameStatus, RuntimeInstance, RuntimeState, RuntimeTimeContinuation,
     RuntimeTimeContinuationError, RuntimeTimeContinuationRejection, RuntimeTimeSettings,
-    TimeFrameError, TimeFrameResource, VirtualTime,
+    ScaledTimeRemainder, TimeFrameError, TimeFrameResource, VirtualTime,
 };
-use nara_ecs::{Commands, ResMut, Resource, World};
+use nara_ecs::{Commands, Res, ResMut, Resource, World};
 
 const STEP: Duration = Duration::from_millis(20);
+const NS: Duration = Duration::from_nanos(1);
+const HALF_NS: ScaledTimeRemainder = ScaledTimeRemainder::from_words([0, 0, 1 << 20]).unwrap();
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
 struct Runs {
@@ -65,6 +67,185 @@ fn control(runtime: &mut RuntimeInstance, control: RuntimeControl) {
 
 fn phase(runtime: &RuntimeInstance) -> RuntimeTimeContinuation {
     runtime.capture_time_continuation().unwrap()
+}
+
+#[test]
+fn half_speed_completes_the_same_ticks_for_equal_elapsed_partitions() {
+    for intervals in [
+        &[40_000_000][..],
+        &[10_000_000; 4],
+        &[16_666_667, 16_666_667, 6_666_666],
+        &[9_999_999, 9_999_999, 9_999_999, 10_000_003],
+    ] {
+        let mut configured = app(false, FixedCatchUpPolicy::PreserveDebt);
+        configured
+            .insert_resource(RuntimeTimeSettings::default().with_time_scale(0.5).unwrap())
+            .unwrap();
+        let mut runtime = RuntimeInstance::start(configured).unwrap();
+        for expected_tick in 1..=64 {
+            for &real_nanos in intervals {
+                runtime.drive(Duration::from_nanos(real_nanos)).unwrap();
+            }
+            let fixed = runtime.world().resource::<FixedTime>();
+            let virtual_time = runtime.world().resource::<VirtualTime>();
+            assert_eq!(fixed.tick(), u64::from(expected_tick), "{intervals:?}");
+            assert_eq!(fixed.debt(), Duration::ZERO);
+            assert_eq!(fixed.remainder(), Duration::ZERO);
+            assert_eq!(virtual_time.elapsed, STEP * expected_tick);
+        }
+        runtime.finish().unwrap();
+    }
+}
+
+#[test]
+fn clamp_scale_changes_and_whole_tick_discard_keep_the_fraction() {
+    let mut configured = app(false, FixedCatchUpPolicy::DiscardExcess);
+    configured
+        .insert_resource(RuntimeTimeSettings::new(false, 0.5, NS * 3).unwrap())
+        .unwrap();
+    configured
+        .insert_resource(
+            FixedTime::new(NS)
+                .unwrap()
+                .with_max_steps_per_frame(1)
+                .unwrap(),
+        )
+        .unwrap();
+    configured
+        .add_systems(
+            CoreStage::Last,
+            |real: Res<RealTime>,
+             mut settings: ResMut<RuntimeTimeSettings>,
+             mut fixed: ResMut<FixedTime>| {
+                let rate = match real.frame {
+                    1 => -0.0,
+                    2 => 1.0,
+                    3 => {
+                        fixed.set_timestep(NS * 2).unwrap();
+                        0.25
+                    }
+                    _ => return,
+                };
+                settings.set_time_scale(rate).unwrap();
+            },
+        )
+        .unwrap();
+    let mut runtime = RuntimeInstance::start(configured).unwrap();
+    let quarter = ScaledTimeRemainder::from_words([0, 0, 1 << 19]).unwrap();
+    for (delta, emitted, discarded, tick, fraction) in [
+        (5, 1, 0, 1, HALF_NS),
+        (3, 0, 0, 1, HALF_NS),
+        (3, 3, 2, 2, HALF_NS),
+        (7, 1, 0, 2, quarter),
+        (3, 1, 0, 3, ScaledTimeRemainder::ZERO),
+    ] {
+        let frame = runtime.drive(NS * delta).unwrap().frame().unwrap();
+        assert_eq!(frame.status.real_delta, NS * delta);
+        assert_eq!(frame.status.real_delta_clamped, delta > 3);
+        assert_eq!(frame.status.virtual_delta, NS * emitted);
+        assert_eq!(frame.status.fixed_discarded, NS * discarded);
+        assert_eq!(frame.status.fixed_tick, tick);
+        let world = runtime.world();
+        let clocks = RuntimeTimeContinuation::from_clocks(
+            world.resource::<RuntimeTimeSettings>(),
+            world.resource::<FixedTime>(),
+        )
+        .unwrap();
+        assert_eq!(clocks.scaled_remainder(), fraction);
+    }
+    assert_eq!(runtime.world().resource::<VirtualTime>().elapsed, NS * 6);
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn catch_up_systems_can_read_fraction_before_debt_settles() {
+    #[derive(Default, Resource)]
+    struct Observations(Vec<(Duration, ScaledTimeRemainder)>);
+
+    let mut configured = app(false, FixedCatchUpPolicy::PreserveDebt);
+    configured
+        .insert_resource(RuntimeTimeSettings::default().with_time_scale(0.5).unwrap())
+        .unwrap();
+    configured
+        .insert_resource(
+            fixed(FixedCatchUpPolicy::PreserveDebt)
+                .with_max_debt_steps(1)
+                .unwrap(),
+        )
+        .unwrap();
+    configured.init_resource::<Observations>().unwrap();
+    configured
+        .add_systems(
+            CoreStage::FixedUpdate,
+            |fixed: Res<FixedTime>, mut seen: ResMut<Observations>| {
+                seen.0.push((fixed.debt(), fixed.scaled_remainder()));
+            },
+        )
+        .unwrap();
+
+    let mut runtime = RuntimeInstance::start(configured).unwrap();
+    let frame = runtime.drive(STEP * 6 + NS).unwrap().frame().unwrap();
+    assert_eq!(frame.status.fixed_steps, 2);
+    assert_eq!(frame.status.fixed_debt, STEP);
+    assert_eq!(
+        runtime.world().resource::<Observations>().0,
+        [(STEP * 2, HALF_NS), (STEP, HALF_NS)]
+    );
+    control(&mut runtime, RuntimeControl::Pause);
+    let continuation = phase(&runtime);
+    assert_eq!(continuation.debt(), STEP);
+    assert_eq!(continuation.scaled_remainder(), HALF_NS);
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn restored_fraction_survives_exact_step_and_elapsed_resume() {
+    let scaled_app = |paused| {
+        let mut configured = app(paused, FixedCatchUpPolicy::PreserveDebt);
+        configured
+            .insert_resource(RuntimeTimeSettings::new(paused, 0.5, Duration::from_secs(1)).unwrap())
+            .unwrap();
+        configured
+    };
+    let mut source = RuntimeInstance::start(scaled_app(false)).unwrap();
+    let frame = source.drive(STEP * 2 - NS).unwrap().frame().unwrap();
+    assert_eq!(frame.status.fixed_tick, 0);
+    assert_eq!(frame.status.virtual_delta, STEP - NS);
+    control(&mut source, RuntimeControl::Pause);
+    let saved = phase(&source);
+    assert_eq!(saved.pending(), STEP - NS);
+    assert_eq!(saved.scaled_remainder(), HALF_NS);
+
+    let mut candidate = RuntimeInstance::start(scaled_app(true)).unwrap();
+    candidate.drive(Duration::ZERO).unwrap();
+    let virtual_before = *candidate.world().resource::<VirtualTime>();
+    candidate.restore_time_continuation(saved).unwrap();
+    assert_eq!(*candidate.world().resource::<VirtualTime>(), virtual_before);
+    candidate.drive(Duration::ZERO).unwrap();
+    assert_eq!(phase(&candidate), saved);
+    for runtime in [&mut source, &mut candidate] {
+        control(runtime, RuntimeControl::StepFixedTick);
+        runtime.drive(Duration::ZERO).unwrap();
+        assert_eq!(phase(runtime), saved);
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Resume),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        let settling = runtime.drive_elapsed(Duration::from_secs(60)).unwrap();
+        assert!(settling.frame().unwrap().status.simulation_paused);
+        assert_eq!(
+            settling.frame().unwrap().status.virtual_delta,
+            Duration::ZERO
+        );
+        let next = runtime.drive_elapsed(NS).unwrap();
+        assert_eq!(next.frame().unwrap().status.virtual_delta, NS);
+        assert_eq!(next.frame().unwrap().status.fixed_steps, 1);
+        assert_eq!(next.frame().unwrap().status.fixed_remainder, Duration::ZERO);
+        control(runtime, RuntimeControl::Pause);
+        assert_eq!(phase(runtime).scaled_remainder(), ScaledTimeRemainder::ZERO);
+    }
+    source.finish().unwrap();
+    candidate.finish().unwrap();
 }
 
 #[test]
@@ -330,7 +511,8 @@ fn every_policy_mismatch_refuses_without_clock_or_schedule_mutation() {
             _ => unreachable!(),
         }
         let incompatible =
-            RuntimeTimeContinuation::new(&settings, &config, Duration::from_millis(7)).unwrap();
+            RuntimeTimeContinuation::new(&settings, &config, Duration::from_millis(7), HALF_NS)
+                .unwrap();
         assert_eq!(
             runtime.restore_time_continuation(incompatible),
             Err(RuntimeTimeContinuationError::Rejected(
@@ -348,11 +530,16 @@ fn portable_value_checks_preserved_debt_and_exact_scale_bits() {
     let settings = RuntimeTimeSettings::default();
     let config = fixed(FixedCatchUpPolicy::PreserveDebt);
     assert!(
-        RuntimeTimeContinuation::new(&settings, &config, STEP * 4 + Duration::from_millis(19))
-            .is_ok()
+        RuntimeTimeContinuation::new(
+            &settings,
+            &config,
+            STEP * 4 + Duration::from_millis(19),
+            HALF_NS
+        )
+        .is_ok()
     );
     assert!(matches!(
-        RuntimeTimeContinuation::new(&settings, &config, STEP * 5),
+        RuntimeTimeContinuation::new(&settings, &config, STEP * 5, HALF_NS),
         Err(RuntimeTimeContinuationRejection::DebtExceeded {
             whole_ticks: 5,
             maximum: 4
@@ -362,7 +549,8 @@ fn portable_value_checks_preserved_debt_and_exact_scale_bits() {
         RuntimeTimeContinuation::new(
             &settings,
             &fixed(FixedCatchUpPolicy::DiscardExcess),
-            Duration::MAX
+            Duration::MAX,
+            HALF_NS,
         )
         .is_ok()
     );
@@ -370,12 +558,14 @@ fn portable_value_checks_preserved_debt_and_exact_scale_bits() {
         &settings.with_time_scale(0.0).unwrap(),
         &config,
         Duration::ZERO,
+        ScaledTimeRemainder::ZERO,
     )
     .unwrap();
     let negative_zero = RuntimeTimeContinuation::new(
         &settings.with_time_scale(-0.0).unwrap(),
         &config,
         Duration::ZERO,
+        ScaledTimeRemainder::ZERO,
     )
     .unwrap();
     assert_ne!(zero, negative_zero);
@@ -415,6 +605,7 @@ fn post_application_authority_fault_retains_the_actual_applied_phase() {
         &RuntimeTimeSettings::default(),
         &fixed(FixedCatchUpPolicy::DiscardExcess),
         Duration::from_millis(13),
+        HALF_NS,
     )
     .unwrap();
     armed.store(true, Ordering::Release);
@@ -436,6 +627,14 @@ fn post_application_authority_fault_retains_the_actual_applied_phase() {
     assert_eq!(
         runtime.world().resource::<FixedTime>().remainder(),
         value.remainder()
+    );
+    assert_eq!(
+        RuntimeTimeContinuation::from_clocks(
+            runtime.world().resource::<RuntimeTimeSettings>(),
+            runtime.world().resource::<FixedTime>(),
+        )
+        .unwrap(),
+        value
     );
     assert_eq!(runtime.world().resource::<Runs>().fixed, 0);
     assert!(!runtime.capture_time_continuation().unwrap_err().applied());
@@ -481,6 +680,7 @@ fn a_validator_reporting_a_fault_with_ok_cannot_return_capture_or_initialize_tim
                 &RuntimeTimeSettings::default(),
                 &fixed(FixedCatchUpPolicy::DiscardExcess),
                 Duration::from_millis(13),
+                HALF_NS,
             )
             .unwrap();
             runtime.restore_time_continuation(value).unwrap_err()
@@ -516,6 +716,7 @@ fn current_policy_changes_at_last_are_captured_and_old_values_refuse() {
         &RuntimeTimeSettings::default(),
         &fixed(FixedCatchUpPolicy::DiscardExcess),
         Duration::from_millis(13),
+        HALF_NS,
     )
     .unwrap();
     assert_eq!(
@@ -559,6 +760,7 @@ fn missing_time_resources_refuse_without_partial_phase_or_schedule_changes() {
             &RuntimeTimeSettings::default(),
             &fixed(FixedCatchUpPolicy::DiscardExcess),
             Duration::from_millis(13),
+            HALF_NS,
         )
         .unwrap();
         assert_eq!(

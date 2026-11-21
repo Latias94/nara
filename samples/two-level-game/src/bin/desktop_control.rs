@@ -211,21 +211,20 @@ impl Game {
         )
         .map_err(|error| error.to_string())?;
         initial_time.pending_nanos = 13_000_000;
+        initial_time.scaled_remainder = [7, 0, 1 << 20];
+        let initial_phase = initial_time
+            .to_continuation()
+            .map_err(|error| error.to_string())?;
         self.run
-            .restore_time_continuation(
-                initial_time
-                    .to_continuation()
-                    .map_err(|error| error.to_string())?,
-            )
+            .restore_time_continuation(initial_phase)
             .map_err(|error| error.to_string())?;
         assert!(self.run.capture(|_| ()).is_err());
         self.settle()?;
         assert_eq!(
             self.run
                 .capture_time_continuation()
-                .map_err(|error| error.to_string())?
-                .pending(),
-            Duration::from_millis(13)
+                .map_err(|error| error.to_string())?,
+            initial_phase,
         );
         let initial = self.snapshot()?;
         assert_eq!(initial.player.to_array(), [-120.0, 0.0]);
@@ -324,6 +323,7 @@ impl Game {
                 .map_err(|error| error.to_string())?,
         )
         .map_err(|error| error.to_string())?;
+        assert_eq!(runtime_time.scaled_remainder, initial_time.scaled_remainder);
         let expected =
             visual_expectation(&final_snapshot, meadow_marker, meadow, cavern, runtime_time);
         let captured =
@@ -343,6 +343,7 @@ impl Game {
             .unwrap()
             .assert_expected(&captured)
             .map_err(|error| error.to_string())?;
+        println!("two_level_desktop_scaled_phase: ok restored=true captured=true presented=true");
         self.expected = Some(expected);
         assert!(self.run.capture(|_| ()).is_ok());
         Ok(())

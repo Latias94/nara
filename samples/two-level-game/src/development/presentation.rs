@@ -148,11 +148,11 @@ fn retain_sealed_state(
 }
 
 fn world_time(world: &World) -> Option<RuntimeTimeState> {
-    let fixed = world.resource::<FixedTime>();
-    let pending = fixed.debt().checked_add(fixed.remainder())?;
-    let continuation =
-        RuntimeTimeContinuation::new(world.resource::<RuntimeTimeSettings>(), fixed, pending)
-            .ok()?;
+    let continuation = RuntimeTimeContinuation::from_clocks(
+        world.resource::<RuntimeTimeSettings>(),
+        world.resource::<FixedTime>(),
+    )
+    .ok()?;
     RuntimeTimeState::from_continuation(continuation).ok()
 }
 

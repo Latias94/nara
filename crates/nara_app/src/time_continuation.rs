@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::{
     FixedCatchUpPolicy, FixedTime, RenderTime, RuntimeFault, RuntimeState, RuntimeTimeSettings,
-    duration_remainder,
+    ScaledTimeRemainder, duration_remainder,
 };
 
 /// Fixed scheduling phase and policy, independently of a Runtime's identity or clock history.
@@ -19,18 +19,21 @@ pub struct RuntimeTimeContinuation {
     max_debt_steps: u32,
     catch_up_policy: FixedCatchUpPolicy,
     pending: Duration,
+    scaled_remainder: ScaledTimeRemainder,
 }
 
 impl RuntimeTimeContinuation {
     /// Constructs a portable phase from validated policy and unconsumed virtual time.
     ///
     /// Only the fixed clock's configuration is read. Its ticks, elapsed time and frame fields
-    /// are not copied. Pause is imposed by the receiving managed boundary, so the settings'
-    /// paused bit is normalized. PreserveDebt must fit the completed-frame debt allowance.
+    /// are not copied. `pending` carries completed nanoseconds and `scaled_remainder` carries
+    /// the fraction kept for the next elapsed conversion. Pause is imposed by the receiving
+    /// managed boundary. PreserveDebt must fit the completed-frame debt allowance.
     pub fn new(
         settings: &RuntimeTimeSettings,
         fixed: &FixedTime,
         pending: Duration,
+        scaled_remainder: ScaledTimeRemainder,
     ) -> Result<Self, RuntimeTimeContinuationRejection> {
         let whole_ticks = pending.as_nanos() / fixed.timestep.as_nanos();
         if fixed.catch_up_policy == FixedCatchUpPolicy::PreserveDebt
@@ -48,7 +51,21 @@ impl RuntimeTimeContinuation {
             max_debt_steps: fixed.max_debt_steps.get(),
             catch_up_policy: fixed.catch_up_policy,
             pending,
+            scaled_remainder,
         })
+    }
+
+    /// Builds a portable continuation from the supplied time resources.
+    ///
+    /// PreserveDebt must fit the completed-frame debt allowance. During catch-up, systems can
+    /// read the live fraction with [`FixedTime::scaled_remainder`] before the debt settles.
+    /// Authorization to capture or restore a managed Runtime belongs to its completed paused
+    /// boundary.
+    pub fn from_clocks(
+        settings: &RuntimeTimeSettings,
+        fixed: &FixedTime,
+    ) -> Result<Self, RuntimeTimeContinuationRejection> {
+        Self::new(settings, fixed, fixed.pending, fixed.scaled_remainder)
     }
 
     #[must_use]
@@ -87,6 +104,11 @@ impl RuntimeTimeContinuation {
     }
 
     #[must_use]
+    pub const fn scaled_remainder(self) -> ScaledTimeRemainder {
+        self.scaled_remainder
+    }
+
+    #[must_use]
     pub fn remainder(self) -> Duration {
         duration_remainder(self.pending, self.timestep)
     }
@@ -115,7 +137,7 @@ impl RuntimeTimeContinuation {
         if fixed.frame_active {
             return Err(RuntimeTimeContinuationRejection::FrameActive);
         }
-        Self::new(settings, fixed, fixed.pending)
+        Self::from_clocks(settings, fixed)
     }
 
     pub(crate) fn apply(self, world: &mut World) -> Result<(), RuntimeTimeContinuationRejection> {
@@ -136,6 +158,7 @@ impl RuntimeTimeContinuation {
         }
         let mut updated = *fixed;
         updated.pending = self.pending;
+        updated.scaled_remainder = self.scaled_remainder;
         updated.update_pending_parts();
         let mut render = *world.resource::<RenderTime>();
         render.update_from_fixed(&updated);
@@ -154,6 +177,7 @@ impl PartialEq for RuntimeTimeContinuation {
             && self.max_debt_steps == other.max_debt_steps
             && self.catch_up_policy == other.catch_up_policy
             && self.pending == other.pending
+            && self.scaled_remainder == other.scaled_remainder
     }
 }
 

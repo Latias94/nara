@@ -143,7 +143,7 @@ pub fn record_program(project: &Path, program: &GameProgram) -> Result<GameRecor
             steps.push(row);
         }
         let recording = GameRecording {
-            format: 1,
+            format: format::RECORDING_FORMAT_VERSION,
             configuration,
             initial,
             steps,

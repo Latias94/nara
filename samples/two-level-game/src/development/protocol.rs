@@ -10,7 +10,7 @@ pub use crate::command::SemanticCommand;
 use crate::resume::ResumeState;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 pub const MAX_IDENTITY_BYTES: usize = 128;
 pub const MAX_STEP_COMMANDS: usize = 8;
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn game_audio_placement_and_commands_have_explicit_wire_values() {
-        assert_eq!(PROTOCOL_VERSION, 6);
+        assert_eq!(PROTOCOL_VERSION, 7);
         assert_eq!(
             DevelopmentPlacement::default(),
             DevelopmentPlacement::SourceHeadless

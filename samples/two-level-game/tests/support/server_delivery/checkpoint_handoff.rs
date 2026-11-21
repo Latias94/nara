@@ -429,7 +429,7 @@ fn step(server: &mut Service<'_>) -> Value {
 fn capture(server: &mut Service<'_>) -> (ProcessedResumeState, Vec<u8>) {
     let reply = server.exchange(&request("capture"), "captured");
     let wire = &reply["state"];
-    assert_eq!(wire["format_version"], 3, "{reply}");
+    assert_eq!(wire["format_version"], 4, "{reply}");
     assert!(wire["payload"]["checkpoint"].is_array(), "{reply}");
     let state = decode_processed_resume(&serde_json::to_vec(wire).unwrap()).unwrap();
     let bytes = encode_processed_resume(&state).unwrap();

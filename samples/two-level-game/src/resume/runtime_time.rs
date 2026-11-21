@@ -1,6 +1,9 @@
 use std::{fmt, time::Duration};
 
-use nara::app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeContinuation, RuntimeTimeSettings};
+use nara::app::{
+    FixedCatchUpPolicy, FixedTime, RuntimeTimeContinuation, RuntimeTimeSettings,
+    ScaledTimeRemainder,
+};
 
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -9,13 +12,14 @@ use serde::{
 
 use super::{MAX_TIMESTEP_NANOS, ResumeError};
 
-/// Runtime scheduling settings and pending virtual time, without old clock or frame identities.
+/// Runtime scheduling settings and exact pending virtual time, without old clock or frame identities.
 ///
 /// The game bounds the timestep to one second. Both caps retain the engine's complete nonzero
 /// `u32` range. Durations use the complete `u64` nanosecond range; values outside that portable
 /// representation must be refused by capture rather than truncated or clamped. In particular,
 /// the engine's default 250 ms maximum delta is supported without limiting longer native deltas.
-/// Pending time is the single source for whole-tick debt and the sub-tick interpolation remainder.
+/// Whole pending nanoseconds determine fixed debt and the interpolation remainder. The scaled
+/// fraction carries subnanosecond time into the next elapsed frame.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeTimeState {
@@ -30,6 +34,8 @@ pub struct RuntimeTimeState {
     pub max_delta_nanos: u64,
     /// May be zero; only `PreserveDebt` bounds the whole-tick quotient by `max_debt_steps`.
     pub pending_nanos: u64,
+    /// Fraction of a nanosecond in units of `2^-149` ns, least-significant word first.
+    pub scaled_remainder: [u64; 3],
 }
 
 /// Game-owned wire names for the engine's two fixed catch-up policies.
@@ -43,6 +49,11 @@ pub enum RuntimeCatchUpPolicy {
 }
 
 impl RuntimeTimeState {
+    #[cfg(feature = "development")]
+    pub(crate) fn has_pending_time(&self) -> bool {
+        self.pending_nanos != 0 || self.scaled_remainder != [0; 3]
+    }
+
     /// Encodes actual time-owner facts without truncating a larger native Duration.
     pub fn from_continuation(value: RuntimeTimeContinuation) -> Result<Self, ResumeError> {
         let nanos = |field, duration: Duration| {
@@ -60,6 +71,7 @@ impl RuntimeTimeState {
             time_scale: value.time_scale(),
             max_delta_nanos: nanos("max_delta", value.max_delta())?,
             pending_nanos: nanos("pending", value.pending())?,
+            scaled_remainder: value.scaled_remainder().words(),
         };
         state.validate()?;
         Ok(state)
@@ -67,7 +79,7 @@ impl RuntimeTimeState {
 
     /// Reconstructs validated portable data; applying it still requires the original Runtime.
     pub fn to_continuation(self) -> Result<RuntimeTimeContinuation, ResumeError> {
-        self.validate()?;
+        let scaled_remainder = self.validate()?;
         let invalid = |error: nara::app::TimeSettingsError| {
             ResumeError::InvalidRuntimeTime(error.to_string())
         };
@@ -85,11 +97,16 @@ impl RuntimeTimeState {
                 RuntimeCatchUpPolicy::DiscardExcess => FixedCatchUpPolicy::DiscardExcess,
                 RuntimeCatchUpPolicy::PreserveDebt => FixedCatchUpPolicy::PreserveDebt,
             });
-        RuntimeTimeContinuation::new(&settings, &fixed, Duration::from_nanos(self.pending_nanos))
-            .map_err(|error| ResumeError::InvalidRuntimeTime(error.to_string()))
+        RuntimeTimeContinuation::new(
+            &settings,
+            &fixed,
+            Duration::from_nanos(self.pending_nanos),
+            scaled_remainder,
+        )
+        .map_err(|error| ResumeError::InvalidRuntimeTime(error.to_string()))
     }
 
-    pub(super) fn validate(&self) -> Result<(), ResumeError> {
+    pub(super) fn validate(&self) -> Result<ScaledTimeRemainder, ResumeError> {
         if self.timestep_nanos == 0 || self.timestep_nanos > MAX_TIMESTEP_NANOS {
             return Err(ResumeError::InvalidTimestep(self.timestep_nanos));
         }
@@ -116,7 +133,32 @@ impl RuntimeTimeState {
                 max_debt_steps: self.max_debt_steps,
             });
         }
-        Ok(())
+        ScaledTimeRemainder::from_words(self.scaled_remainder)
+            .ok_or(ResumeError::InvalidScaledRemainder)
+    }
+
+    pub(crate) fn deserialize_object<'de, D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct TimeObject;
+
+        impl<'de> Visitor<'de> for TimeObject {
+            type Value = RuntimeTimeState;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a Runtime time object")
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                RuntimeTimeState::deserialize(MapAccessDeserializer::new(map))
+            }
+        }
+
+        deserializer.deserialize_map(TimeObject)
     }
 }
 
@@ -126,28 +168,4 @@ where
 {
     let policy = String::deserialize(deserializer)?;
     RuntimeCatchUpPolicy::deserialize(serde::de::value::StrDeserializer::new(&policy))
-}
-
-pub(super) fn deserialize_object<'de, D>(deserializer: D) -> Result<RuntimeTimeState, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    struct TimeObject;
-
-    impl<'de> Visitor<'de> for TimeObject {
-        type Value = RuntimeTimeState;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            formatter.write_str("a Runtime time object")
-        }
-
-        fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
-        where
-            A: MapAccess<'de>,
-        {
-            RuntimeTimeState::deserialize(MapAccessDeserializer::new(map))
-        }
-    }
-
-    deserializer.deserialize_map(TimeObject)
 }
