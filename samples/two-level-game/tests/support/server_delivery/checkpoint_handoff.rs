@@ -1,7 +1,13 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    io::Write,
+    path::Path,
+    thread,
+    time::{Duration, Instant},
+};
 
 use nara::{
-    fs::{DirectoryCapability, FileIdentity, FsError, RelativeComponent},
+    fs::{DirectoryCapability, ExpectedTarget, FileIdentity, FsError, RelativeComponent},
     project_tooling::host_fs,
 };
 use serde_json::{Value, json};
@@ -9,8 +15,8 @@ use two_level_game::{
     command::ServerCommand,
     levels::{LevelId, LevelKey},
     resume::processed::{
-        MAX_PROCESSED_RESUME_BYTES, PendingServerCommand, decode_processed_resume,
-        encode_processed_resume,
+        MAX_PROCESSED_RESUME_BYTES, PendingServerCommand, ProcessedResumeState,
+        decode_processed_resume, encode_processed_resume,
     },
     save::{MAX_CHECKPOINT_BYTES, decode_checkpoint, io::SaveIoError},
 };
@@ -33,7 +39,7 @@ pub(super) fn accept(
     candidate_executable: &Path,
 ) {
     let storage = custody.fixture().directory("server-checkpoint-handoff");
-    let directory = host_fs::readable_directory(&storage).unwrap();
+    let directory = host_fs::writable_directory(&storage).unwrap();
     let contention = FsError::LockContended.to_string();
     let claim = request("claim_checkpoint");
 
@@ -71,7 +77,15 @@ pub(super) fn accept(
         assert_eq!(boundary["checkpoint_pending"], false, "{boundary}");
         assert_eq!(boundary["commands"]["retained"], 1, "{boundary}");
         assert_eq!(boundary["time"]["fixed_debt_nanos"], 0, "{boundary}");
-        let bytes = capture(&mut incumbent);
+        let (captured, bytes) = capture(&mut incumbent);
+        assert_eq!(
+            captured.pending,
+            [PendingServerCommand {
+                tick_offset: 1,
+                command: ServerCommand::Save,
+            }]
+        );
+        assert_eq!(captured.game.counters.restores, 0);
         fs::write(&resume_path, &bytes).unwrap();
 
         if !replace {
@@ -129,7 +143,7 @@ pub(super) fn accept(
         }
         assert_eq!(candidate.observe(), staged);
         assert_eq!(
-            capture(&mut candidate),
+            capture(&mut candidate).1,
             bytes,
             "checkpoint resume bytes changed"
         );
@@ -169,13 +183,34 @@ pub(super) fn accept(
             let refused = Service::spawn(custody, executable, cold(), "server-checkpoint-busy")
                 .startup_refusal();
             assert_refusal(&refused, &contention);
+            let completed_resume = storage.join("completed-restore-state.json");
             let published = continue_with_checkpoint(
                 candidate,
                 &claimed["state"],
                 &directory,
                 &name,
                 &original,
+                &completed_resume,
             );
+            let mut fresh = Service::spawn(
+                candidate_custody,
+                candidate_executable,
+                Launch::PausedCheckpoint {
+                    save: &path,
+                    resume: Some(&completed_resume),
+                },
+                "server-checkpoint-completed-restore",
+            );
+            let ready = fresh.ready(true, true);
+            assert_eq!(ready["state"]["restores"], 1, "{ready}");
+            assert_eq!(
+                capture(&mut fresh).1,
+                read_bounded(&completed_resume, MAX_PROCESSED_RESUME_BYTES)
+            );
+            fresh.exchange(&claim, "checkpoint_claimed");
+            fresh.send(&request("shutdown"));
+            let closed = fresh.finish("shutdown", None);
+            assert_eq!(closed["state"]["restores"], 1, "{closed}");
             (published, "claimed")
         };
         assert_eq!(read_checkpoint(&directory, &name), final_checkpoint);
@@ -235,6 +270,7 @@ fn continue_with_checkpoint(
     directory: &DirectoryCapability,
     name: &RelativeComponent,
     original: &(FileIdentity, Vec<u8>),
+    completed_resume: &Path,
 ) -> (FileIdentity, Vec<u8>) {
     let handed_off = step(&mut candidate);
     let state = &handed_off["state"];
@@ -267,19 +303,96 @@ fn continue_with_checkpoint(
     candidate.admit(&action("marker"));
     let unsaved = step(&mut candidate);
     assert_progress(&unsaved["state"], MEADOW, 10, &[1, 2, 3]);
+
+    let temporary = RelativeComponent::new("restore-replacement.tmp").unwrap();
+    let mut replacement = directory.create_temp(&temporary).unwrap();
+    replacement.write_all(&saved_file.1).unwrap();
+    let restore_tick = candidate.admit(&request("restore"));
+    let preparing = step(&mut candidate);
+    assert_eq!(preparing["state"]["phase"], "Preparing", "{preparing}");
+    assert_eq!(tick(&preparing["state"]), restore_tick, "{preparing}");
+    assert_eq!(preparing["state"]["restores"], 0, "{preparing}");
+    directory
+        .replace_temp(replacement, name, ExpectedTarget::Identity(saved_file.0))
+        .unwrap();
+    let replacement = read_checkpoint(directory, name);
+    assert_ne!(replacement.0, saved_file.0);
+    assert_eq!(replacement.1, saved_file.1);
+
+    let degraded = wait_for_restore_settlement(&mut candidate);
+    let conflict = SaveIoError::Conflict.to_string();
+    assert_eq!(degraded["state"]["phase"], "Degraded", "{degraded}");
+    assert_eq!(
+        degraded["state"]["error"],
+        format!("restored checkpoint baseline changed: {conflict}"),
+        "{degraded}"
+    );
+    assert_eq!(degraded["state"]["restores"], 0, "{degraded}");
+
+    candidate.admit(&action("retry"));
+    let retried = step(&mut candidate);
+    assert_progress(&retried["state"], MEADOW, 10, &[1, 2]);
+    assert_eq!(retried["state"]["restores"], 0, "{retried}");
+
+    let save_tick = candidate.admit(&request("save"));
+    let refused = candidate.exchange(&advance_request(), "advanced");
+    assert_eq!(refused["paused"], true, "{refused}");
+    assert_eq!(tick(&refused["state"]), save_tick, "{refused}");
+    assert_eq!(refused["commands"]["retained"], 0, "{refused}");
+    let rejections = &refused["gameplay_rejections"];
+    assert_eq!(rejections["count"], 1, "{refused}");
+    assert_eq!(rejections["latest"]["message"], conflict, "{refused}");
+    assert_eq!(refused["state"]["saves"], 3, "{refused}");
+    assert_eq!(refused["state"]["restores"], 0, "{refused}");
+    assert_eq!(read_checkpoint(directory, name), replacement);
+
     candidate.admit(&request("restore"));
     step(&mut candidate);
     let restored = candidate.until("the claimed checkpoint to restore", |state| {
-        state["restores"] == 1 && state["phase"] == "Running" && state["restoring"] == false
+        state["phase"] == "Running" && state["restoring"] == false
     });
     assert_progress(&restored, MEADOW, 10, &[1, 2]);
+    assert_eq!(restored["restores"], 1, "{restored}");
     assert_eq!(restored["saves"], 3, "{restored}");
     assert_eq!(player(&restored), ANCHOR_POSITION);
+
+    candidate.admit(&request("save"));
+    let resaved = step(&mut candidate);
+    assert_eq!(resaved["state"]["saves"], 4, "{resaved}");
+    assert_eq!(resaved["state"]["restores"], 1, "{resaved}");
+    let resaved_file = read_checkpoint(directory, name);
+    assert_ne!(resaved_file.0, replacement.0);
+    assert_checkpoint(&resaved_file.1, &[position; 2]);
+
+    let (captured, bytes) = capture(&mut candidate);
+    assert!(captured.pending.is_empty());
+    assert_eq!(captured.game.counters.restores, 1);
+    fs::write(completed_resume, bytes).unwrap();
     candidate.send(&request("shutdown"));
     let closed = candidate.finish("shutdown", None);
-    assert_eq!(closed["state"], restored, "{closed}");
-    assert_eq!(closed["server_evidence"]["gameplay_rejections"]["count"], 0);
-    saved_file
+    assert_eq!(closed["state"], resaved["state"], "{closed}");
+    assert_eq!(closed["server_evidence"]["gameplay_rejections"]["count"], 1);
+    resaved_file
+}
+
+fn wait_for_restore_settlement(server: &mut Service<'_>) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let observe = request("observe");
+    loop {
+        let observed = server.exchange(&observe, "observed");
+        assert_eq!(observed["paused"], true, "{observed}");
+        if !matches!(
+            observed["state"]["phase"].as_str(),
+            Some("Preparing" | "Reconstructing")
+        ) {
+            return observed;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "checkpoint Restore remained pending: {observed}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn retire(mut server: Service<'_>, boundary: &Value) {
@@ -313,22 +426,15 @@ fn step(server: &mut Service<'_>) -> Value {
     advanced
 }
 
-fn capture(server: &mut Service<'_>) -> Vec<u8> {
+fn capture(server: &mut Service<'_>) -> (ProcessedResumeState, Vec<u8>) {
     let reply = server.exchange(&request("capture"), "captured");
     let wire = &reply["state"];
     assert_eq!(wire["format_version"], 3, "{reply}");
     assert!(wire["payload"]["checkpoint"].is_array(), "{reply}");
     let state = decode_processed_resume(&serde_json::to_vec(wire).unwrap()).unwrap();
-    assert_eq!(
-        state.pending,
-        [PendingServerCommand {
-            tick_offset: 1,
-            command: ServerCommand::Save,
-        }]
-    );
     let bytes = encode_processed_resume(&state).unwrap();
     assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), *wire);
-    bytes
+    (state, bytes)
 }
 
 fn read_checkpoint(

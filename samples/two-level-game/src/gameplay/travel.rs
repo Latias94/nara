@@ -507,19 +507,22 @@ pub(super) fn advance(world: &mut World) {
         session.markers.clear();
         session.phase = GamePhase::Reconstructing;
         session.travel_count = session.travel_count.saturating_add(1);
-        session.restores = session.restores.saturating_add(u32::from(restore));
     }
     match reconstruct(world) {
         Ok(()) => {
-            if let TravelKind::RestoreCheckpoint(binding) = pending.kind {
-                if let Err(error) = world.resource::<Storage>().accept_load(binding) {
-                    fail(
-                        world,
-                        format!("restored checkpoint baseline changed: {error}"),
-                    );
-                    return;
+            let restored_checkpoint = match pending.kind {
+                TravelKind::RestoreCheckpoint(binding) => {
+                    if let Err(error) = world.resource::<Storage>().accept_load(binding) {
+                        fail(
+                            world,
+                            format!("restored checkpoint baseline changed: {error}"),
+                        );
+                        return;
+                    }
+                    true
                 }
-            }
+                TravelKind::Travel | TravelKind::Resume => false,
+            };
             let held = [false; 4];
             #[cfg(feature = "local-player")]
             let held = if local_player
@@ -532,6 +535,9 @@ pub(super) fn advance(world: &mut World) {
             };
             let mut session = world.resource_mut::<Session>();
             session.held = held;
+            session.restores = session
+                .restores
+                .saturating_add(u32::from(restored_checkpoint));
             session.phase = GamePhase::Running;
             #[cfg(all(windows, feature = "audio-cpal", feature = "local-player"))]
             if local_player && !restore {
