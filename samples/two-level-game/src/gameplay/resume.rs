@@ -33,6 +33,7 @@ use crate::{
         decode_resume, encode_resume,
         processed::{ProcessedResumeError, ProcessedRooms, decode_processed_resume},
     },
+    save::io::SaveIoError,
 };
 
 #[cfg(feature = "desktop")]
@@ -42,7 +43,9 @@ pub use capture::capture_resume;
 pub(crate) use capture::capture_world;
 #[cfg(feature = "desktop")]
 pub use desktop::restore_desktop_resume;
-pub use processed::{capture_processed_resume, restore_processed_resume};
+pub use processed::{
+    capture_processed_resume, claim_processed_checkpoint, restore_processed_resume,
+};
 pub(super) const RESTORE_STATE: &str = "two-level-game.resume-state";
 const RESUME_SOURCE: &str = "two-level-game.resume";
 
@@ -58,6 +61,8 @@ pub enum GameResumeError {
     Format(#[from] ResumeError),
     #[error(transparent)]
     ProcessedFormat(#[from] ProcessedResumeError),
+    #[error(transparent)]
+    Checkpoint(#[from] SaveIoError),
     #[error("game state is not eligible for reconstruction: {0}")]
     Ineligible(String),
 }
@@ -423,7 +428,9 @@ pub(super) fn begin_from_command(
         || command.source_sequence().get() != 1
         || command.target().is_some()
         || payload.len() != 1
-        || !world.resource::<super::storage::Storage>().permits_resume()
+        || !world
+            .resource::<super::storage::Storage>()
+            .is_unconfigured()
     {
         return Err(
             "resume command requires its original isolated ingress and no open SaveSlot".into(),
@@ -460,6 +467,7 @@ pub(super) fn begin_from_command(
         let state =
             decode_processed_resume(encoded.as_bytes()).map_err(|error| error.to_string())?;
         if !state.pending.is_empty()
+            || state.checkpoint.is_some()
             || capture::hosted_catalog(world).map_err(|error| error.to_string())?
                 != state.catalog.into()
         {

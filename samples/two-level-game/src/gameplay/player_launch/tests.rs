@@ -91,7 +91,7 @@ fn observe<const SAVE_VIA_ORIGINAL: bool>(world: &mut World) {
         snapshot: world.resource::<GameSnapshot>().clone(),
         launch: player_launch_result(world).map(|result| result.map_err(str::to_owned)),
         interactive: world.resource::<Verification>().is_interactive(),
-        empty_slot: world.resource::<Storage>().permits_resume(),
+        empty_slot: world.resource::<Storage>().is_unconfigured(),
     };
     if SAVE_VIA_ORIGINAL && frame.snapshot.tick == 1 {
         let result = world

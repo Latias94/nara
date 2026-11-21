@@ -31,6 +31,12 @@ Rules:
   before committing, then reconstructs transient simulation under its existing owners.
 - Checkpoint restore is distinct from arbitrary-tick quicksave, deterministic replay and native
   backend rollback. Generalize those contracts only when a real consumer requires them.
+- The Two-Level Server holds one cooperating writer lock per configured checkpoint. A local
+  continuation observes the live marker and conflict baseline. Its candidate stages that baseline
+  while the incumbent holds the lock. After the incumbent retires, the candidate takes the marker
+  lock and revalidates the exact baseline before allowing Save or Restore. The progress file keeps
+  its own format and transactional write owner.
+  [Checkpoint slot handoff](../../plans/2026-11-13-rust-state-reconstruction-plan.md#processed-continuation-with-a-checkpoint-slot)
 
 ## Alternatives Considered
 

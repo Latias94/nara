@@ -23,11 +23,11 @@ pub(super) const OBLIGATION: PluginShutdownObligationId =
 #[derive(Resource, Clone)]
 pub(super) struct Storage(Arc<Mutex<Option<SaveSlot>>>);
 impl Storage {
-    pub(super) fn permits_resume(&self) -> bool {
+    pub(super) fn is_unconfigured(&self) -> bool {
         self.0.try_lock().is_ok_and(|slot| slot.is_none())
     }
 
-    pub(super) fn open_slot(&self, path: Option<&Path>) -> Result<(), String> {
+    pub(super) fn open_slot(&self, path: Option<&Path>, served: bool) -> Result<(), String> {
         let mut slot = self
             .0
             .try_lock()
@@ -36,11 +36,45 @@ impl Storage {
             return Err("the application save slot is already configured".into());
         }
         let opened = path
-            .map(SaveSlot::open)
+            .map(if served {
+                SaveSlot::open_server
+            } else {
+                SaveSlot::open
+            })
             .transpose()
             .map_err(|error| error.to_string())?;
         *slot = opened;
         Ok(())
+    }
+
+    pub(super) fn handoff_stamp(&self) -> Result<Option<[u8; 32]>, SaveIoError> {
+        self.0
+            .try_lock()
+            .map_err(|_| SaveIoError::HandoffUnavailable)?
+            .as_ref()
+            .map(SaveSlot::handoff_stamp)
+            .transpose()
+    }
+
+    pub(super) fn stage_server_slot(&self, candidate: SaveSlot) -> Result<(), SaveIoError> {
+        let mut slot = self
+            .0
+            .try_lock()
+            .map_err(|_| SaveIoError::HandoffUnavailable)?;
+        if slot.is_some() {
+            return Err(SaveIoError::HandoffUnavailable);
+        }
+        *slot = Some(candidate);
+        Ok(())
+    }
+
+    pub(super) fn claim_server_slot(&self) -> Result<(), SaveIoError> {
+        self.0
+            .try_lock()
+            .map_err(|_| SaveIoError::HandoffUnavailable)?
+            .as_mut()
+            .ok_or(SaveIoError::HandoffUnavailable)?
+            .claim_server_handoff()
     }
 
     pub fn save(&self, checkpoint: &Checkpoint) -> Result<(), String> {
@@ -100,7 +134,8 @@ impl Close {
             Err(TryLockError::WouldBlock) => return RuntimeCloseProgress::Pending,
             Err(TryLockError::Poisoned(error)) => error.into_inner(),
         };
-        if slot.as_mut().is_none_or(SaveSlot::retry_cleanup) {
+        if slot.as_mut().is_none_or(SaveSlot::retry_close) {
+            *slot = None;
             RuntimeCloseProgress::Complete
         } else {
             RuntimeCloseProgress::Pending

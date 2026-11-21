@@ -1,4 +1,4 @@
-//! Portable continuation data for the cooked Two-Level Server.
+//! Transient continuation data for the cooked Two-Level Server.
 
 use std::{fmt, marker::PhantomData};
 
@@ -12,7 +12,7 @@ use super::{GAME_COMPATIBILITY, Header, MAX_RESUME_BYTES, ResumeError, ResumeSta
 use crate::command::ServerCommand;
 
 const KIND: &str = "two_level_processed_resume";
-const FORMAT_VERSION: u32 = 2;
+const FORMAT_VERSION: u32 = 3;
 const MAX_TICK_OFFSET: u64 = 600;
 
 /// Maximum encoded size of a processed continuation, including any JSON whitespace.
@@ -34,6 +34,12 @@ pub struct ProcessedResumeState {
     pub rooms: ProcessedRooms,
     #[serde(deserialize_with = "deserialize_object")]
     pub catalog: ProcessedCatalogStamp,
+    /// Commitment to the observed same-host SaveSlot marker and conflict baseline.
+    ///
+    /// An unconfigured slot is encoded as `null`. The receiving Server verifies the
+    /// commitment against its own slot and obtains write access separately.
+    #[serde(deserialize_with = "Deserialize::deserialize")]
+    pub checkpoint: Option<[u8; 32]>,
     pub pending: Vec<PendingServerCommand>,
 }
 
@@ -175,7 +181,9 @@ impl ProcessedResumeState {
                     previous_offset,
                 });
             }
-            if matches!(&entry.command, ServerCommand::Save | ServerCommand::Restore) {
+            if self.checkpoint.is_none()
+                && matches!(&entry.command, ServerCommand::Save | ServerCommand::Restore)
+            {
                 return Err(ProcessedResumeError::SaveSlotCommand { index });
             }
             entry
@@ -202,13 +210,13 @@ pub enum ProcessedResumeError {
         tick_offset: u64,
         previous_offset: u64,
     },
-    #[error("pending command {index} requires a live SaveSlot")]
+    #[error("pending command {index} requires a SaveSlot commitment")]
     SaveSlotCommand { index: usize },
     #[error("pending command {index} is invalid: {reason}")]
     InvalidCommand { index: usize, reason: String },
 }
 
-/// Produces bounded, canonical version-two bytes, preserving the order of pending commands.
+/// Produces bounded, canonical version-three bytes, preserving the order of pending commands.
 pub fn encode_processed_resume(
     state: &ProcessedResumeState,
 ) -> Result<Vec<u8>, ProcessedResumeError> {

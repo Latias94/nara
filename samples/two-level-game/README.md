@@ -31,7 +31,8 @@ Menus stop game time while Input, tasks, rendering and native cleanup remain act
 drains old ordinary gameplay intent through the original fixed transaction before reopening the
 gameplay context. Held keys require release and a fresh press. The additional flow and mapping
 lifetime are not part of exact Resume capture. Default exploration, existing cooked Players,
-checkpoint saves and Resume wire formats are unchanged. The `play-flow` manifest profile owns
+checkpoint saves are unchanged. The processed Server continuation is now version three so it can
+carry an optional same-host checkpoint commitment. The `play-flow` manifest profile owns
 the UI composition; compiling that feature alone does not enable the flow on the normal desktop.
 
 These are the default physical keys in [the authored action map](input/explorer.actions.json),
@@ -50,7 +51,8 @@ members or native services still need the original capture eligibility. Other va
 continuation. Native Windows reconciliation supports the same named keys, lowercase ASCII letters
 and digits as ordinary physical ingress. It does not guess uppercase or Unicode key positions.
 The original pre-Startup selection remains the reconstruction baseline; later runtime context or
-definition changes are not serialized by the game. The resume and checkpoint formats are unchanged.
+definition changes are not serialized by the game. Source and durable checkpoint formats remain
+separate from the processed Server continuation format.
 
 The game-owned [animation selection](src/animation.rs) uses the authored
 [explorer clips](assets/animations/explorer.sprite-animations.json) and shared
@@ -555,8 +557,9 @@ Send one UTF-8 JSON object per line, up to 4,096 bytes including its newline. Fo
 Movement directions 0 through 3 mean west, east, north and south. The `command` request also
 accepts `marker`, `travel`, `instance` and `retry` as its nested `operation`. The top-level
 `lookout`, `restore`, `save` and `side_room` requests take no other fields. The checkpoint slot
-remains selected until exit. Use `restore` on a fresh `--serve` process to continue a prior
-checkpoint.
+remains selected until exit. Keep its sibling writer marker in place whenever a Server owns the
+slot or a staged handoff refers to it. Use `restore` on a fresh `--serve` process to continue a
+prior checkpoint.
 
 `TWO_LEVEL_SERVER_READY` reports startup and whether the checkpoint slot was configured.
 `TWO_LEVEL_SERVER_REPLY` reports an accepted `(tick, source, sequence)`, a rejection, or an
@@ -601,15 +604,28 @@ and remainder, and at most 128 pending commands from the Server control stream. 
 whether Side Room and Lookout are closed, open or have a found relic. The candidate opens the
 recorded rooms through their current level's portals before Ready. Command offsets and order are
 preserved in the new queue. Its Runtime tick and queue counters start in the fresh process. A live
-`--save` slot or pending Scene or native-service work refuses capture. Use the current version-two
-continuation file for this workflow. Progress checkpoints have their existing format.
+Scene request or pending native-service work refuses capture. Use the current version-three
+continuation file for this workflow.
 
-Keep the incumbent paused until the candidate is ready. The operator selects the new command
-route and sends `resume` or an explicit `advance` to that process. Send `retire` to a paused
-incumbent to close it without executing its pending commands. Its final receipt reports the
-retained count. While paused, ordinary `shutdown` requires settled work. EOF with unsettled work
-reports an error and closes the session. A failed candidate can be discarded and the incumbent
-can continue.
+If the incumbent uses `--save`, start the candidate with both paths:
+
+```text
+server --serve --paused --resume-state ABSOLUTE_STATE_PATH --save ABSOLUTE_CHECKPOINT_PATH
+```
+
+The checkpoint path must select the original file slot. Ready reports `checkpoint_pending: true`
+while the incumbent retains its write lock. The candidate can report observations or capture
+state at this point. Wait for the incumbent's successful retirement and exit, then send
+`{"request":"claim_checkpoint"}` to the candidate. Resume or advance after the
+`checkpoint_claimed` reply. Save and Restore use the original on-disk conflict baseline. Pending
+checkpoint commands run at their transferred relative ticks. A contended or conflicting claim
+leaves the candidate paused. A pending candidate can be closed with `retire`.
+
+Keep the incumbent paused until the candidate is ready. Send `retire` to close the incumbent
+without executing its pending commands. Its final receipt reports the retained count. Drive the
+candidate after completing any required checkpoint claim. While paused, ordinary `shutdown`
+requires settled work. EOF with unsettled work reports an error and closes the session. If startup
+of the candidate fails, discard it and continue with the retained incumbent.
 
 The installed server regression builds, inspects, relocates and launches the actual package.
 Run it from the engine root with the same shared target and serial environment as the Player

@@ -300,6 +300,10 @@ fn assert_gameplay_rejection(custody: &mut Custody, executable: &Path) {
 pub(super) enum Launch<'a> {
     Paced(Option<&'a Path>),
     Paused(Option<&'a Path>),
+    PausedCheckpoint {
+        save: &'a Path,
+        resume: Option<&'a Path>,
+    },
 }
 
 pub(super) struct Service<'a> {
@@ -338,17 +342,19 @@ impl<'a> Service<'a> {
     ) -> Self {
         let cwd = custody.fixture().directory(name);
         let mut arguments = vec![OsString::from("--serve")];
-        let restored = matches!(launch, Launch::Paused(Some(_)));
-        let file = match launch {
-            Launch::Paced(save) => save.map(|path| ("--save", path)),
-            Launch::Paused(resume) => {
-                arguments.push("--paused".into());
-                resume.map(|path| ("--resume-state", path))
-            }
+        let (paused, resume, save) = match launch {
+            Launch::Paced(save) => (false, None, save),
+            Launch::Paused(resume) => (true, resume, None),
+            Launch::PausedCheckpoint { save, resume } => (true, resume, Some(save)),
         };
-        if let Some((flag, path)) = file {
-            assert!(path.is_absolute());
-            arguments.extend([OsString::from(flag), path.as_os_str().to_owned()]);
+        if paused {
+            arguments.push("--paused".into());
+        }
+        for (flag, path) in [("--resume-state", resume), ("--save", save)] {
+            if let Some(path) = path {
+                assert!(path.is_absolute());
+                arguments.extend([OsString::from(flag), path.as_os_str().to_owned()]);
+            }
         }
         let command =
             SupervisedProductProcessCommand::new(SupervisedProductEnvironmentPolicy::Sealed, &cwd)
@@ -363,8 +369,8 @@ impl<'a> Service<'a> {
             stderr: Vec::new(),
             cursor: 0,
             receipt: None,
-            restored,
-            startup_commands: u64::from(file.is_some()),
+            restored: resume.is_some(),
+            startup_commands: u64::from(resume.is_some() || save.is_some()),
             last_tick: 0,
             admitted_ticks: Vec::new(),
         }
@@ -375,6 +381,11 @@ impl<'a> Service<'a> {
         assert_eq!(ready["version"], 1, "{ready}");
         assert_eq!(ready["timestep_nanos"], TIMESTEP_NANOS, "{ready}");
         assert_eq!(ready["checkpoint_configured"], checkpoint, "{ready}");
+        assert_eq!(
+            ready["checkpoint_pending"],
+            self.restored && checkpoint,
+            "{ready}"
+        );
         assert_eq!(ready["paused"], paused, "{ready}");
         assert_eq!(ready["restored"], self.restored, "{ready}");
         self.last_tick = tick(&ready["state"]);

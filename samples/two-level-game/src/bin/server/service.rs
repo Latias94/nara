@@ -16,7 +16,7 @@ use nara::{
 use serde_json::{Value, json};
 use two_level_game::{
     GamePhase, GameSnapshot, RunOptions, Scenario, ServerCommandRejections, SideRoomPhase,
-    capture_processed_resume,
+    capture_processed_resume, claim_processed_checkpoint,
     command::ServerCommand,
     restore_processed_resume,
     resume::processed::{
@@ -50,26 +50,38 @@ pub(super) fn run(
     let checkpoint_configured = options.save_path.is_some();
     let max_delta = session.observe(|world| world.resource::<RuntimeTimeSettings>().max_delta())?;
     let mut clock = FrameClock::new(Instant::now(), timestep, max_delta);
-    let launch_options = RunOptions {
-        scenario: Scenario::Interactive,
-        save_path: options.save_path,
+    let restore_paths = if let Some(path) = options.resume_state {
+        Some((path, options.save_path))
+    } else {
+        let launch_options = RunOptions {
+            scenario: Scenario::Interactive,
+            save_path: options.save_path,
+        };
+        if let Some(launch) =
+            two_level_game::player_launch(launch_options).map_err(Failure::Rejected)?
+        {
+            session.submit(launch)?;
+            apply_launch(session, &mut clock, startup_deadline)?;
+        }
+        None
     };
-    if let Some(launch) =
-        two_level_game::player_launch(launch_options).map_err(Failure::Rejected)?
-    {
-        session.submit(launch)?;
-        apply_launch(session, &mut clock, startup_deadline)?;
-    }
     if options.paused && session.pause()?.is_some() {
         return Err("Server exited before paused startup completed".into());
     }
-    let (restored, sequence) = if let Some(path) = options.resume_state.as_deref() {
-        let resume = read_resume_state(path)?;
-        restore_processed_resume(session, &resume, startup_deadline)
+    let restored = restore_paths.is_some();
+    let (sequence, checkpoint_pending) = match restore_paths {
+        Some((resume_path, checkpoint_path)) => {
+            let resume = read_resume_state(&resume_path)?;
+            restore_processed_resume(
+                session,
+                &resume,
+                checkpoint_path.as_deref(),
+                startup_deadline,
+            )
             .map_err(|error| Failure::Rejected(format!("restore Server resume state: {error}")))?;
-        (true, resume.pending.len() as u64)
-    } else {
-        (false, 0)
+            (resume.pending.len() as u64, resume.checkpoint.is_some())
+        }
+        None => (0, false),
     };
     let initial = Observation::read(session)?;
     let (input, reader) = control::spawn()
@@ -89,6 +101,7 @@ pub(super) fn run(
         output,
         clock,
         checkpoint_configured,
+        checkpoint_pending,
         paused: options.paused,
         sequence,
     };
@@ -100,6 +113,7 @@ pub(super) fn run(
                 "state": report.state,
                 "timestep_nanos": timestep.as_nanos(),
                 "checkpoint_configured": checkpoint_configured,
+                "checkpoint_pending": checkpoint_pending,
                 "paused": options.paused,
                 "restored": restored,
                 "commands": initial.commands(),
@@ -215,6 +229,7 @@ struct Service<'a> {
     output: &'a Output,
     clock: FrameClock,
     checkpoint_configured: bool,
+    checkpoint_pending: bool,
     paused: bool,
     sequence: u64,
 }
@@ -225,7 +240,9 @@ impl Service<'_> {
         loop {
             self.output.check()?;
             let now = Instant::now();
-            let wait = if self.paused {
+            let wait = if self.checkpoint_pending {
+                PAUSED_POLL
+            } else if self.paused {
                 if now >= next_maintenance {
                     next_maintenance = now + PAUSED_POLL;
                     let pending = self
@@ -337,6 +354,13 @@ impl Service<'_> {
     }
 
     fn respond(&mut self, request: Request) -> Result<Option<Stop>, Failure> {
+        if self.checkpoint_pending && !request.allowed_while_checkpoint_pending() {
+            reject(
+                self.output,
+                "Server checkpoint is pending. Send claim_checkpoint before driving or admitting gameplay commands",
+            )?;
+            return Ok(None);
+        }
         match request {
             Request::Observe {} => self.send_observation("observed")?,
             Request::Pause {} => {
@@ -377,6 +401,7 @@ impl Service<'_> {
                 return self.advance(Duration::from_nanos(elapsed_nanos));
             }
             Request::Capture {} => self.capture()?,
+            Request::ClaimCheckpoint {} => self.claim_checkpoint()?,
             Request::Command {
                 command,
                 after_ticks,
@@ -401,6 +426,8 @@ impl Service<'_> {
             json!({
                 "status": status,
                 "paused": self.paused,
+                "checkpoint_configured": self.checkpoint_configured,
+                "checkpoint_pending": self.checkpoint_pending,
                 "state": state(&observation.game),
                 "commands": observation.commands(),
                 "gameplay_rejections": observation.rejections,
@@ -457,6 +484,17 @@ impl Service<'_> {
         self.output
             .send(REPLY, json!({"status": "captured", "state": wire}))?;
         Ok(())
+    }
+
+    fn claim_checkpoint(&mut self) -> Result<(), Failure> {
+        if !self.checkpoint_pending {
+            return reject(self.output, "Server has no pending checkpoint claim");
+        }
+        if let Err(error) = claim_processed_checkpoint(self.session) {
+            return reject(self.output, &error.to_string());
+        }
+        self.checkpoint_pending = false;
+        self.send_observation("checkpoint_claimed")
     }
 
     fn admit(&mut self, command: ServerCommand, after_ticks: NonZeroU64) -> Result<(), Failure> {

@@ -95,6 +95,24 @@ fn pending_limits_and_unrepresented_effects_are_refused_on_every_entry() {
 }
 
 #[test]
+fn pending_save_and_restore_round_trip_with_a_checkpoint_commitment() {
+    let mut state = example();
+    let commitment = [42; 32];
+    state.checkpoint = Some(commitment);
+    state.pending = vec![
+        pending(1, ServerCommand::Save),
+        pending(1, ServerCommand::Restore),
+    ];
+
+    let bytes = encode_processed_resume(&state).unwrap();
+    let wire: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(wire["payload"]["checkpoint"], json!(commitment));
+    let restored = decode_processed_resume(&bytes).unwrap();
+    assert_eq!(restored, state);
+    assert_eq!(encode_processed_resume(&restored).unwrap(), bytes);
+}
+
+#[test]
 fn processed_game_uses_shared_state_validation() {
     let mut state = example();
     state.game.clock.elapsed_nanos += 1;
@@ -109,6 +127,7 @@ fn processed_game_uses_shared_state_validation() {
 #[test]
 fn maximum_game_and_queue_can_reencode_after_decoding_at_the_byte_limit() {
     let mut state = example();
+    state.checkpoint = Some([255; 32]);
     let progress = &mut state.game.progress;
     let level = progress.location.level;
     progress.location.anchor = SceneEntityId::new("a".repeat(MAX_OBJECT_ID_BYTES)).unwrap();
@@ -154,7 +173,7 @@ fn wrong_format_versions_and_non_schema_fields_are_refused() {
     let bytes = encode_processed_resume(&example()).unwrap();
     let wire: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(wire["kind"], "two_level_processed_resume");
-    assert_eq!(wire["format_version"], 2);
+    assert_eq!(wire["format_version"], 3);
     assert_eq!(
         wire["payload"]["rooms"],
         json!({ "side_room": "closed", "lookout": "closed" })
@@ -165,7 +184,16 @@ fn wrong_format_versions_and_non_schema_fields_are_refused() {
         Err(ResumeError::WrongKind)
     ));
 
-    let mut v1 = wire.clone();
+    let mut v2 = wire.clone();
+    v2["format_version"] = json!(2);
+    v2["payload"].as_object_mut().unwrap().remove("checkpoint");
+    assert!(matches!(
+        decode_processed_resume(&serde_json::to_vec(&v2).unwrap()),
+        Err(ProcessedResumeError::Resume(
+            ResumeError::UnsupportedVersion(2)
+        ))
+    ));
+    let mut v1 = v2;
     v1["format_version"] = json!(1);
     v1["payload"].as_object_mut().unwrap().remove("rooms");
     assert!(matches!(
@@ -175,11 +203,11 @@ fn wrong_format_versions_and_non_schema_fields_are_refused() {
         ))
     ));
     let mut invalid = wire.clone();
-    invalid["format_version"] = json!(3);
+    invalid["format_version"] = json!(4);
     assert!(matches!(
         decode_processed_resume(&serde_json::to_vec(&invalid).unwrap()),
         Err(ProcessedResumeError::Resume(
-            ResumeError::UnsupportedVersion(3)
+            ResumeError::UnsupportedVersion(4)
         ))
     ));
     let mut invalid = wire.clone();
@@ -211,6 +239,29 @@ fn wrong_format_versions_and_non_schema_fields_are_refused() {
     let mut invalid = wire.clone();
     invalid["payload"]["pending"][0] = json!([1, wire["payload"]["pending"][0]["command"]]);
     assert_invalid_json(&invalid);
+}
+
+#[test]
+fn processed_checkpoint_requires_an_explicit_null_or_32_byte_array() {
+    let mut wire: Value =
+        serde_json::from_slice(&encode_processed_resume(&example()).unwrap()).unwrap();
+    assert_eq!(wire["payload"].get("checkpoint"), Some(&Value::Null));
+    wire["payload"]
+        .as_object_mut()
+        .unwrap()
+        .remove("checkpoint");
+    assert_invalid_json(&wire);
+
+    for checkpoint in [
+        json!(vec![0; 31]),
+        json!(vec![0; 33]),
+        json!(vec![256; 32]),
+        json!("checkpoint.json"),
+        json!({ "path": "checkpoint.json" }),
+    ] {
+        wire["payload"]["checkpoint"] = checkpoint;
+        assert_invalid_json(&wire);
+    }
 }
 
 #[test]
@@ -354,6 +405,7 @@ fn example() -> ProcessedResumeState {
         },
         rooms: ProcessedRooms::default(),
         catalog: ContentDigest::from_parts(u64::MAX, [255; 32]).into(),
+        checkpoint: None,
         pending: vec![
             pending(
                 1,

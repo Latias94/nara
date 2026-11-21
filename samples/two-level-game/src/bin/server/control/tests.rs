@@ -4,7 +4,7 @@ use std::{
     thread,
 };
 
-use super::{CloseRequest, Event, Request, SemanticCommand, read_events};
+use super::{CloseRequest, Event, Request, SemanticCommand, parse_request, read_events};
 
 fn collect_events(reader: impl BufRead + Send) -> Vec<Event> {
     thread::scope(|scope| {
@@ -107,6 +107,54 @@ fn paused_controls_and_delayed_commands_keep_exact_elapsed_and_offsets() {
         panic!("unexpected control events: {events:?}");
     };
     assert_eq!(after_ticks.get(), 5);
+}
+
+#[test]
+fn checkpoint_claim_takes_no_fields_and_keeps_the_control_stream_open() {
+    let events = collect_events(
+        br#"{"request":"claim_checkpoint","path":"foreign"}
+{"request":"claim_checkpoint"}
+{"request":"observe"}
+"#
+        .as_slice(),
+    );
+    let [
+        Event::Rejected(unknown),
+        Event::Request(Request::ClaimCheckpoint {}),
+        Event::Request(Request::Observe {}),
+        Event::Eof,
+    ] = events.as_slice()
+    else {
+        panic!("unexpected control events: {events:?}");
+    };
+    assert!(unknown.contains("unknown field `path`"), "{unknown}");
+}
+
+#[test]
+fn pending_checkpoint_blocks_frame_drives_and_all_new_admissions() {
+    for line in [
+        r#"{"request":"observe"}"#,
+        r#"{"request":"pause"}"#,
+        r#"{"request":"capture"}"#,
+        r#"{"request":"claim_checkpoint"}"#,
+        r#"{"request":"shutdown"}"#,
+        r#"{"request":"retire"}"#,
+    ] {
+        let request = parse_request(line.as_bytes()).unwrap();
+        assert!(request.allowed_while_checkpoint_pending(), "{line}");
+    }
+    for line in [
+        r#"{"request":"resume"}"#,
+        r#"{"request":"advance","elapsed_nanos":0}"#,
+        r#"{"request":"command","after_ticks":2,"command":{"operation":"marker"}}"#,
+        r#"{"request":"side_room"}"#,
+        r#"{"request":"lookout"}"#,
+        r#"{"request":"save"}"#,
+        r#"{"request":"restore"}"#,
+    ] {
+        let request = parse_request(line.as_bytes()).unwrap();
+        assert!(!request.allowed_while_checkpoint_pending(), "{line}");
+    }
 }
 
 #[test]

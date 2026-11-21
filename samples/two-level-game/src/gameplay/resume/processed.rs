@@ -1,4 +1,5 @@
 use std::{
+    path::Path,
     thread,
     time::{Duration, Instant},
 };
@@ -20,7 +21,7 @@ use super::{
 use crate::{
     GameSnapshot,
     command::{SERVER_COMMAND_SOURCE, ServerCommand},
-    gameplay::side_room::Rooms,
+    gameplay::{side_room::Rooms, storage::Storage},
     resume::{
         RuntimeCatchUpPolicy, RuntimeTimeState,
         processed::{
@@ -28,21 +29,34 @@ use crate::{
             ProcessedResumeState, encode_processed_resume,
         },
     },
+    save::io::SaveSlot,
 };
 
 /// Captures the game, live rooms and pending external intent from a completed paused Server frame.
 ///
 /// The one supported producer is the game's local Server command stream. Commands retain their
 /// relative fixed tick and canonical order. Historical queue keys and service handles do not
-/// cross the process boundary. A live SaveSlot, unsettled room, or unknown producer refuses capture.
+/// cross the process boundary. A coordinated checkpoint contributes its verified local baseline.
+/// An unsettled room, changed checkpoint, or unknown producer refuses capture.
 pub fn capture_processed_resume(
     session: &HeadlessSession,
+) -> Result<ProcessedResumeState, GameResumeError> {
+    capture_state(session, None)
+}
+
+fn capture_state(
+    session: &HeadlessSession,
+    staged_checkpoint: Option<&SaveSlot>,
 ) -> Result<ProcessedResumeState, GameResumeError> {
     let time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;
     session.capture(|world| {
         let catalog = capture::hosted_catalog(world)?.into();
         let rooms = Rooms::capture_processed(world).map_err(refuse)?;
         capture::quiescent(world, true)?;
+        let checkpoint = match staged_checkpoint {
+            Some(slot) => Some(slot.handoff_stamp()?),
+            None => world.resource::<Storage>().handoff_stamp()?,
+        };
         if time.catch_up_policy != RuntimeCatchUpPolicy::PreserveDebt {
             return Err(refuse("processed continuation requires the Server debt policy"));
         }
@@ -65,7 +79,7 @@ pub fn capture_processed_resume(
             });
         }
         let game = capture::game(world, time, capture::compatibility(world)?)?;
-        let state = ProcessedResumeState { game, catalog, rooms, pending };
+        let state = ProcessedResumeState { game, catalog, rooms, checkpoint, pending };
         state.validate()?;
         Ok(state)
     })?
@@ -76,9 +90,12 @@ pub fn capture_processed_resume(
 /// Callers retain and close the original candidate after any failure. A failure after entry may
 /// leave that candidate changed. These operations do not act on the incumbent or adopt a route.
 /// The deadline bounds cooperative maintenance around ordinary Runtime and Scene operations.
+/// A captured checkpoint needs the separately supplied absolute path. The checkpoint remains
+/// unavailable for Save and Restore until [`claim_processed_checkpoint`] succeeds.
 pub fn restore_processed_resume(
     session: &mut HeadlessSession,
     state: &ProcessedResumeState,
+    checkpoint_path: Option<&Path>,
     deadline: Instant,
 ) -> Result<(), GameResumeError> {
     check_deadline(deadline)?;
@@ -91,6 +108,7 @@ pub fn restore_processed_resume(
         }
         fresh_runtime(world)?;
         capture::quiescent(world, false)?;
+        capture::require_unconfigured_checkpoint(world)?;
         Rooms::require_closed(world).map_err(refuse)?;
         if capture::compatibility(world)? != state.game.compatibility {
             return Err(refuse(
@@ -117,8 +135,18 @@ pub fn restore_processed_resume(
         validate_current_placement(world, &state.game)
     })??;
 
+    let staged = match (state.checkpoint, checkpoint_path) {
+        (Some(stamp), Some(path)) => Some(SaveSlot::prepare_server_handoff(path, stamp)?),
+        (None, None) => None,
+        _ => {
+            return Err(refuse(
+                "the checkpoint option must match the captured Server state",
+            ));
+        }
+    };
     let mut initializer = state.clone();
     initializer.pending.clear();
+    initializer.checkpoint = None;
     let entry = restore_command(encode_processed_resume(&initializer)?)?;
     check_deadline(deadline)?;
     enter_headless_resume(session, state.game.runtime_time, entry)?;
@@ -168,13 +196,29 @@ pub fn restore_processed_resume(
             tick, source, sequence, draft,
         ))?;
     }
-    let actual = capture_processed_resume(session)?;
+    let actual = capture_state(session, staged.as_ref())?;
     if encode_processed_resume(&actual)? != expected {
         return Err(refuse(
             "Server reconstruction differs from the complete canonical state",
         ));
     }
-    check_deadline(deadline)
+    check_deadline(deadline)?;
+    if let Some(slot) = staged {
+        session.capture(|world| world.resource::<Storage>().stage_server_slot(slot))??;
+    }
+    Ok(())
+}
+
+/// Claims the candidate's staged checkpoint after the incumbent releases the writer lock.
+///
+/// The original checkpoint and lock marker are rechecked under the new lock. A failed claim
+/// leaves the candidate paused with the same staged checkpoint observation.
+pub fn claim_processed_checkpoint(session: &HeadlessSession) -> Result<(), GameResumeError> {
+    session.capture(|world| -> Result<(), GameResumeError> {
+        capture::hosted_catalog(world)?;
+        world.resource::<Storage>().claim_server_slot()?;
+        Ok(())
+    })?
 }
 
 fn check_deadline(deadline: Instant) -> Result<(), GameResumeError> {

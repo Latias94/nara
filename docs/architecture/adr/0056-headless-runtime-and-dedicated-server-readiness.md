@@ -115,6 +115,11 @@ Rules:
   to obtain fresh instance receipts. The Two-Level Server reinstates the open and found state of
   its two rooms before Ready. In-flight Scene requests stay with their original Runtime.
   [Live region continuation](../../plans/2026-11-13-rust-state-reconstruction-plan.md#processed-continuation-with-live-regions)
+- For a configured checkpoint, the candidate reports readiness with storage still pending.
+  The local caller waits for retirement and explicitly claims the slot before driving the
+  candidate. The game's storage owner rechecks the marker and file under the acquired lock.
+  Pending checkpoint commands keep their relative ticks and execute only after the claim.
+  [Checkpoint slot handoff](../../plans/2026-11-13-rust-state-reconstruction-plan.md#processed-continuation-with-a-checkpoint-slot)
 
 ## Input and Command Boundary
 

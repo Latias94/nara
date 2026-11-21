@@ -5695,6 +5695,11 @@ uses the original managed Scene, fixed-time and gameplay-queue owners across a r
 handoff. A mismatched candidate leaves the incumbent paused and inspectable. In the successful
 case, the original retires with work still pending while the new process executes that work once
 at its relative tick. The renamed HeadlessSession consumer covers the shared control surface.
+The checkpoint successor adds same-host SaveSlot ownership to that route. Its version-three record
+retains only a local marker and file baseline commitment. A candidate receives no write authority
+until the incumbent retires and the candidate explicitly revalidates the baseline under the
+marker lock. Windows NTFS and Linux ext4 production cases pass, while cross-machine coordination
+and arbitrary service or World migration remain open.
 
 The [Two-Level Game side room](2026-10-20-persistent-two-level-game-plan.md#deferred-additive-region-execution-evidence)
 extends the existing source and cooked Players through the same Deferred Scene and Image owners.

@@ -8,7 +8,7 @@ use std::{
 
 use nara::fs::{
     CapabilityRights, ConflictProtection, ContentDigest, DirectoryCapability, ExpectedTarget,
-    FileIdentity, FsError, LockMode, PublicationAtomicity, RelativeComponent, StageStatus,
+    FileCapability, FsError, LockMode, PublicationAtomicity, RelativeComponent, StageStatus,
     TemporaryFile, TemporaryFileCleanup, TemporaryFileFailure,
 };
 
@@ -16,6 +16,9 @@ use super::{
     Checkpoint, CheckpointError, DecodedCheckpoint, MAX_CHECKPOINT_BYTES, decode_checkpoint,
     encode_checkpoint,
 };
+
+mod server;
+use server::{ServerSlot, server_file_error};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SaveIoError {
@@ -27,6 +30,8 @@ pub enum SaveIoError {
     File(#[from] FsError),
     #[error("the checkpoint changed since this slot was observed")]
     Conflict,
+    #[error("the Server checkpoint operation is unavailable in the current handoff state")]
+    HandoffUnavailable,
     #[error("temporary checkpoint cleanup remains pending")]
     CleanupPending,
     #[error("publication needs explicit readback reconciliation")]
@@ -44,11 +49,10 @@ pub struct SaveReceipt {
     pub parent_directory_sync: StageStatus,
 }
 
-#[derive(Clone, Copy)]
 enum Binding {
     Missing,
     Existing {
-        identity: FileIdentity,
+        file: FileCapability,
         digest: ContentDigest,
     },
 }
@@ -56,10 +60,39 @@ enum Binding {
 pub(crate) struct CheckpointBinding(Binding);
 
 impl Binding {
-    fn expected(self) -> ExpectedTarget {
+    fn observe(file: Option<FileCapability>) -> Result<Self, SaveIoError> {
+        let Some(file) = file else {
+            return Ok(Self::Missing);
+        };
+        let bytes = file.read_to_end_bounded(MAX_CHECKPOINT_BYTES as u64)?;
+        Ok(Self::Existing {
+            file,
+            digest: ContentDigest::of_bytes(&bytes),
+        })
+    }
+
+    fn expected(&self) -> ExpectedTarget {
         match self {
             Self::Missing => ExpectedTarget::Missing,
-            Self::Existing { identity, .. } => ExpectedTarget::Identity(identity),
+            Self::Existing { file, .. } => ExpectedTarget::Identity(file.identity()),
+        }
+    }
+
+    fn verify(
+        &self,
+        observed: Option<FileCapability>,
+    ) -> Result<Option<FileCapability>, SaveIoError> {
+        match (self, observed) {
+            (Self::Missing, None) => Ok(None),
+            (Self::Existing { file, digest }, Some(observed))
+                if file.identity() == observed.identity() =>
+            {
+                observed
+                    .verify_digest(*digest, MAX_CHECKPOINT_BYTES as u64)
+                    .map_err(|_| SaveIoError::Conflict)?;
+                Ok(Some(observed))
+            }
+            _ => Err(SaveIoError::Conflict),
         }
     }
 }
@@ -70,6 +103,7 @@ pub struct SaveSlot {
     parent: DirectoryCapability,
     target: RelativeComponent,
     binding: Binding,
+    server: Option<ServerSlot>,
     cleanup: Option<TemporaryFileCleanup>,
     uncertain: bool,
     #[cfg(test)]
@@ -80,38 +114,36 @@ pub struct SaveSlot {
 
 impl SaveSlot {
     pub fn open(path: &Path) -> Result<Self, SaveIoError> {
-        if !path.is_absolute() {
-            return Err(SaveIoError::InvalidPath);
-        }
-        let parent = path.parent().ok_or(SaveIoError::InvalidPath)?;
-        let target = RelativeComponent::new(
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .ok_or(SaveIoError::InvalidPath)?,
-        )
-        .map_err(|_| SaveIoError::InvalidPath)?;
-        Self::from_parent(
-            crate::host::directory(parent, CapabilityRights::ReadWrite)?,
-            target,
-        )
+        let (parent, target) = open_path(path)?;
+        Self::from_parent(parent, target)
     }
 
     pub fn from_parent(
         parent: DirectoryCapability,
         target: RelativeComponent,
     ) -> Result<Self, SaveIoError> {
-        let binding = observe(&parent, &target)?;
-        Ok(Self {
+        let binding = Binding::observe(optional_file(parent.open_child_file(&target))?)?;
+        Ok(Self::with_binding(parent, target, binding, None))
+    }
+
+    fn with_binding(
+        parent: DirectoryCapability,
+        target: RelativeComponent,
+        binding: Binding,
+        server: Option<ServerSlot>,
+    ) -> Self {
+        Self {
             parent,
             target,
             binding,
+            server,
             cleanup: None,
             uncertain: false,
             #[cfg(test)]
             interrupt_after_write: false,
             #[cfg(test)]
             after_replace: None,
-        })
+        }
     }
 
     /// Reads and validates before changing the conflict baseline, including after uncertain save.
@@ -124,27 +156,33 @@ impl SaveSlot {
     pub(crate) fn prepare_load(
         &mut self,
     ) -> Result<(DecodedCheckpoint, CheckpointBinding), SaveIoError> {
+        self.verify_server_access()?;
         if !self.retry_cleanup() {
             return Err(SaveIoError::CleanupPending);
         }
-        let file = self.parent.open_child_file(&self.target)?;
+        let file = self.open_checkpoint()?;
         let bytes = file.read_to_end_bounded(MAX_CHECKPOINT_BYTES as u64)?;
         let decoded = decode_checkpoint(&bytes)?;
         let digest = ContentDigest::of_bytes(&bytes);
         file.verify_digest(digest, MAX_CHECKPOINT_BYTES as u64)?;
-        let binding = CheckpointBinding(Binding::Existing {
-            identity: file.identity(),
-            digest,
-        });
+        let binding = CheckpointBinding(Binding::Existing { file, digest });
         Ok((decoded, binding))
     }
 
     pub(crate) fn accept_load(&mut self, binding: CheckpointBinding) {
+        if self
+            .server
+            .as_ref()
+            .is_some_and(|server| !server.is_active())
+        {
+            return;
+        }
         self.binding = binding.0;
         self.uncertain = false;
     }
 
     pub fn save(&mut self, checkpoint: &Checkpoint) -> Result<SaveReceipt, SaveIoError> {
+        self.verify_server_access()?;
         let bytes = encode_checkpoint(checkpoint)?;
         if !self.retry_cleanup() {
             return Err(SaveIoError::CleanupPending);
@@ -152,34 +190,29 @@ impl SaveSlot {
         if self.uncertain {
             return Err(SaveIoError::Uncertain);
         }
-        self.parent.preflight_replace(self.binding.expected())?;
-        let existing = match self.binding {
-            Binding::Missing => None,
-            Binding::Existing { identity, digest } => {
-                let file = self
-                    .parent
+        let expected = self.binding.expected();
+        self.parent.preflight_replace(expected)?;
+        let observed = match (&self.server, &self.binding) {
+            (Some(server), _) => server.observe_target()?,
+            (None, Binding::Missing) => None,
+            (None, Binding::Existing { .. }) => Some(
+                self.parent
                     .open_child_file(&self.target)
-                    .map_err(|_| SaveIoError::Conflict)?;
-                if file.identity() != identity
-                    || file
-                        .verify_digest(digest, MAX_CHECKPOINT_BYTES as u64)
-                        .is_err()
-                {
-                    return Err(SaveIoError::Conflict);
-                }
-                Some(file)
-            }
+                    .map_err(|_| SaveIoError::Conflict)?,
+            ),
         };
-        let existing = existing
+        let existing = self
+            .binding
+            .verify(observed)?
             .map(|file| file.try_lock(LockMode::Exclusive))
             .transpose()
             .map_err(|failure| {
                 let (error, _file) = failure.into_parts();
                 SaveIoError::File(error)
             })?;
-        if let (Some(file), Binding::Existing { digest, .. }) = (&existing, self.binding)
+        if let (Some(file), Binding::Existing { digest, .. }) = (&existing, &self.binding)
             && file
-                .verify_digest(digest, MAX_CHECKPOINT_BYTES as u64)
+                .verify_digest(*digest, MAX_CHECKPOINT_BYTES as u64)
                 .is_err()
         {
             return Err(SaveIoError::Conflict);
@@ -213,50 +246,51 @@ impl SaveSlot {
             self.cleanup = Some(candidate.into_cleanup());
             return Err(SaveIoError::UnsupportedGuarantee);
         }
-        let receipt =
-            match self
-                .parent
-                .replace_temp(candidate, &self.target, self.binding.expected())
-            {
-                Ok(receipt) => receipt,
-                Err(failure) => return Err(self.retain_failure(failure)),
-            };
+        if let Err(error) = self.verify_server_access() {
+            self.cleanup = Some(candidate.into_cleanup());
+            return Err(error);
+        }
+        let receipt = match self.parent.replace_temp(candidate, &self.target, expected) {
+            Ok(receipt) => receipt,
+            Err(failure) => return Err(self.retain_failure(failure)),
+        };
         self.uncertain = true;
         #[cfg(test)]
         if let Some(after_replace) = self.after_replace.take() {
             after_replace();
         }
-        let expected_previous = match self.binding {
+        let expected_previous = match &self.binding {
             Binding::Missing => None,
-            Binding::Existing { identity, .. } => Some(identity),
+            Binding::Existing { file, .. } => Some(file.identity()),
         };
+        let digest = ContentDigest::of_bytes(&bytes);
         if receipt.previous_identity() != expected_previous
             || receipt.publication_atomicity() != PublicationAtomicity::AtomicNameSwitch
             || (expected_previous.is_none()
                 && receipt.conflict_protection() != ConflictProtection::StrongCompareAndSwap)
             || receipt.published_identity() != Some(receipt.candidate_identity())
-            || receipt.verified_content_digest() != Some(ContentDigest::of_bytes(&bytes))
+            || receipt.verified_content_digest() != Some(digest)
             || receipt.durability().data_synced() != StageStatus::Achieved
             || receipt.durability().file_metadata_synced() != StageStatus::Achieved
             || receipt.durability().name_published() != StageStatus::Achieved
         {
-            self.uncertain = true;
             return Err(SaveIoError::Uncertain);
         }
-        let file = self.parent.open_child_file(&self.target)?;
+        self.verify_server_access()
+            .map_err(|_| SaveIoError::Uncertain)?;
+        let file = match self.open_checkpoint() {
+            Ok(file) => file,
+            Err(error) if self.server.is_none() => return Err(error),
+            Err(_) => return Err(SaveIoError::Uncertain),
+        };
         if file.identity() != receipt.candidate_identity()
             || file
-                .verify_digest(ContentDigest::of_bytes(&bytes), MAX_CHECKPOINT_BYTES as u64)
+                .verify_digest(digest, MAX_CHECKPOINT_BYTES as u64)
                 .is_err()
         {
-            self.uncertain = true;
             return Err(SaveIoError::Uncertain);
         }
-        let digest = ContentDigest::of_bytes(&bytes);
-        self.binding = Binding::Existing {
-            identity: file.identity(),
-            digest,
-        };
+        self.binding = Binding::Existing { file, digest };
         self.uncertain = false;
         let parent_directory_sync = self.parent.sync().map_or(StageStatus::Unknown, |sync| {
             sync.progress().parent_directory_synced()
@@ -283,6 +317,19 @@ impl SaveSlot {
     #[must_use]
     pub fn cleanup_pending(&self) -> bool {
         self.cleanup.is_some()
+    }
+
+    fn verify_server_access(&self) -> Result<(), SaveIoError> {
+        self.server
+            .as_ref()
+            .map_or(Ok(()), ServerSlot::verify_access)
+    }
+
+    fn open_checkpoint(&self) -> Result<FileCapability, SaveIoError> {
+        match &self.server {
+            Some(server) => server.open_target().map_err(server_file_error),
+            None => Ok(self.parent.open_child_file(&self.target)?),
+        }
     }
 
     fn retain_failure(&mut self, failure: TemporaryFileFailure) -> SaveIoError {
@@ -318,22 +365,30 @@ impl SaveSlot {
     }
 }
 
-fn observe(
-    parent: &DirectoryCapability,
-    target: &RelativeComponent,
-) -> Result<Binding, SaveIoError> {
-    match parent.open_child_file(target) {
-        Ok(file) => {
-            let bytes = file.read_to_end_bounded(MAX_CHECKPOINT_BYTES as u64)?;
-            Ok(Binding::Existing {
-                identity: file.identity(),
-                digest: ContentDigest::of_bytes(&bytes),
-            })
-        }
+fn open_path(path: &Path) -> Result<(DirectoryCapability, RelativeComponent), SaveIoError> {
+    if !path.is_absolute() {
+        return Err(SaveIoError::InvalidPath);
+    }
+    let parent = path.parent().ok_or(SaveIoError::InvalidPath)?;
+    let target = RelativeComponent::new(
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .ok_or(SaveIoError::InvalidPath)?,
+    )
+    .map_err(|_| SaveIoError::InvalidPath)?;
+    Ok((
+        crate::host::directory(parent, CapabilityRights::ReadWrite)?,
+        target,
+    ))
+}
+
+fn optional_file(file: Result<FileCapability, FsError>) -> Result<Option<FileCapability>, FsError> {
+    match file {
+        Ok(file) => Ok(Some(file)),
         Err(FsError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
-            Ok(Binding::Missing)
+            Ok(None)
         }
-        Err(error) => Err(error.into()),
+        Err(error) => Err(error),
     }
 }
 

@@ -19,6 +19,7 @@ use crate::{
     },
 };
 
+mod checkpoint_handoff;
 mod continuation;
 mod graph;
 mod package;
@@ -212,18 +213,10 @@ pub(super) fn accept(cooker: &Path) {
     assert!(refused.stderr.contains(&message), "{}", refused.stderr);
 
     service::accept(&mut custody, &server);
-    continuation::accept(
-        &mut custody,
-        &server,
-        &mut candidate,
-        &candidate_installation.join(&executable_name),
-    );
-    continuation::accept_open_rooms(
-        &mut custody,
-        &server,
-        &mut candidate,
-        &candidate_installation.join(&executable_name),
-    );
+    let candidate_server = candidate_installation.join(&executable_name);
+    continuation::accept(&mut custody, &server, &mut candidate, &candidate_server);
+    continuation::accept_open_rooms(&mut custody, &server, &mut candidate, &candidate_server);
+    checkpoint_handoff::accept(&mut custody, &server, &mut candidate, &candidate_server);
     package.assert_unchanged(&relocated);
     package.assert_unchanged(&candidate_installation);
     assert_sources_gone(&project, &cache);

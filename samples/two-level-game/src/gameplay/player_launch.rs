@@ -168,7 +168,7 @@ fn apply(world: &mut World) -> Result<(), String> {
         || world.resource::<Session>().clock.ticks != 0
         || world.resource::<Session>().phase != GamePhase::Running
         || !world.resource::<Verification>().is_interactive()
-        || !world.resource::<Storage>().permits_resume()
+        || !world.resource::<Storage>().is_unconfigured()
         || batch
             .commands()
             .iter()
@@ -179,9 +179,11 @@ fn apply(world: &mut World) -> Result<(), String> {
                 .into(),
         );
     }
+    let served =
+        !world.resource::<Session>().local_player && options.scenario == Scenario::Interactive;
     world
         .resource::<Storage>()
-        .open_slot(options.save_path.as_deref())?;
+        .open_slot(options.save_path.as_deref(), served)?;
     *world.resource_mut::<Verification>() = Verification::new(options.scenario);
     Ok(())
 }

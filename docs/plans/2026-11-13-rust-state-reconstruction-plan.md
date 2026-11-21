@@ -291,8 +291,63 @@ The shared Windows DX12 desktop reconstruction regression also passes 1/1
 window, surface and event-loop cleanup through the shared source reconstruction owner.
 
 The completed workflow transfers game state between separate Server processes from one compatible
-package on the same host. Cross-machine transport, open SaveSlot custody and arbitrary Scene or
-plugin state remain separate from this qualification.
+package on the same host. The [checkpoint handoff successor](#processed-continuation-with-a-checkpoint-slot)
+records the SaveSlot extension. Cross-machine transport and arbitrary Scene or plugin state
+have separate qualification.
+
+## Processed Continuation With A Checkpoint Slot
+
+Use the installed Two-Level Server with a live `--save` slot. The original storage owner
+retains a cooperative native writer lock on a persistent sibling marker. It keeps the marker
+separate from the replaceable checkpoint file. Capture joins the exact current content digest
+with the original live marker and checkpoint object observations. Capture refuses unresolved
+publication or cleanup, a changed baseline, or a slot outside the coordinated Server workflow.
+
+The version-three resume record contains an explicit optional local checkpoint commitment. The
+operator supplies the absolute path independently to the candidate. The candidate retains a
+read-only observation of the same marker and checkpoint baseline, reconstructs the game and
+verifies the complete recapture. Ready reports that the checkpoint is still pending. Until the
+claim succeeds, observe and capture remain available, while the caller cannot drive gameplay or
+admit commands through the Server stream. Save and Restore also require active storage access
+inside the game. Queued checkpoint commands transfer by relative tick when the slot is present.
+
+The caller waits for the incumbent's original retirement, then requests a checkpoint claim.
+The staged storage owner locks the original marker and rechecks its exact file observation before
+accepting writes. A refused or contended claim leaves the staged candidate available for retry or
+close. The storage close participant completes its original temporary cleanup and releases its
+writer lock. The cooperating applications leave the marker in place for the next writer. The
+game's ordinary progress save, source reconstruction and processed Scene activation remain under
+their current owners.
+
+Run this trajectory against real relocated packaged Servers on Windows and Linux. The original
+process writes progress, captures with a pending Save, and remains the writer while the candidate
+reconstructs. Prove an early claim and attempted drive refuse, then retire the original, claim,
+execute the Save at its transferred tick, and use the same Restore and close paths. Test a
+checkpoint replaced with identical bytes and a configured file missing at capture. The witness
+is local to live overlapping observations of the same trusted filesystem. Any operator-driven
+filesystem edits or other independent writers continue to use the existing conflict semantics.
+
+### Checkpoint Handoff Qualification
+
+The focused Server, processed-wire, SaveSlot and control suite passes 189/189 on Windows
+(`7435eccb-59c9-496f-a802-6f2d761e010f`). The two targeted Cook runtime refusals pass 2/2
+(`9675178e-d7a7-46b4-9da0-0420f1ad8667`). The relocated Windows production package passes 1/1
+(`773ee57d-0cf5-450b-8b3b-2b4d9af651f5`). It writes a real checkpoint, preserves a pending Save
+across the candidate boundary, rejects an early claim and drive, claims after incumbent
+retirement, executes Save and Restore, rejects a same-byte replacement with a different file
+identity, and completes native process cleanup.
+
+Ubuntu 26.04 WSL2 passes the same relocated production package 1/1 on a local ext4 directory
+(`8edf4b59-e64e-4d66-be43-54bb78b50bc0`). An initial `/tmp` attempt was refused by the existing
+same-parent directory-publication guarantee because that filesystem tier was unsupported. The
+test was rerun with its temporary publication directory on ext4. This qualifies same-host
+Windows NTFS and Linux ext4 handoff only. Cross-machine transport, network coordination and
+arbitrary plugin or World state remain outside the contract.
+
+Bevy separates the per-asset encoder from the host path writer. Godot's binary resource saver
+likewise constructs its own saver for the chosen storage path. Nara's cooperative process
+handoff belongs to the game storage owner and uses its existing file-capability primitives.
+[Bevy asset writer](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_asset/src/io/mod.rs#L339-L356) · [Godot binary saver](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/core/io/resource_format_binary.cpp#L2446-L2451)
 
 ## Qualification
 

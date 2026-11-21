@@ -1092,6 +1092,7 @@ mod atlas_content {
                     restore_processed_resume(
                         session,
                         &requested,
+                        None,
                         Instant::now() + Duration::from_secs(10),
                     ),
                 ] {
@@ -1261,6 +1262,7 @@ mod atlas_content {
                 let result = restore_processed_resume(
                     candidate,
                     &requested,
+                    None,
                     Instant::now() + Duration::from_secs(10),
                 );
                 assert!(

@@ -4865,6 +4865,14 @@ pre-admitted catalogue copies and actual Tilemap reference/selection scratch rep
 failure paths. Earlier qualification retains its own scope; full input/build/package delivery,
 third-party native publication and rendering/custom UI are not implied complete.
 
+The November 21 processed Server continuation update extends ADRs 0027, 0056 and 0070 with a
+same-host SaveSlot handoff. Version-three transient records carry an explicit local checkpoint
+commitment. A candidate retains read-only observations while the incumbent owns the marker lock,
+then revalidates the marker and checkpoint object after retirement before accepting Save or
+Restore. The focused Windows suite passes 189/189, the relocated Windows package passes 1/1 and
+the Linux ext4 package passes 1/1. Cross-machine coordination and arbitrary service or World
+state remain outside the accepted consumer scope.
+
 ## Implementation Index
 
 | ADR | Decision | Implementation | Owner | Code | Verification | Coverage and remaining gap | Revisit trigger | Last qualified |

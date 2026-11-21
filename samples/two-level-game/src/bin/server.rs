@@ -35,7 +35,7 @@ use std::{
 use serde_json::{Value, json};
 use two_level_game::{RunOptions, Scenario};
 
-const USAGE: &str = "usage: server [--serve [--paused] [--save ABSOLUTE_PATH] | --serve --paused --resume-state ABSOLUTE_PATH | --verify-travel | --verify-save ABSOLUTE_PATH | --verify-restore ABSOLUTE_PATH | --verify-regions]";
+const USAGE: &str = "usage: server [--serve [--paused] [--save ABSOLUTE_PATH] | --serve --paused --resume-state ABSOLUTE_PATH [--save ABSOLUTE_PATH] | --verify-travel | --verify-save ABSOLUTE_PATH | --verify-restore ABSOLUTE_PATH | --verify-regions]";
 const RESULT: &str = "TWO_LEVEL_SERVER_RESULT";
 
 enum Invocation {
@@ -112,8 +112,8 @@ impl ServeOptions {
                 return Err(USAGE);
             }
         }
-        if options.resume_state.is_some() && (!options.paused || options.save_path.is_some()) {
-            return Err("Server --resume-state requires --paused and conflicts with --save");
+        if options.resume_state.is_some() && !options.paused {
+            return Err("Server --resume-state requires --paused");
         }
         Ok(options)
     }
@@ -239,8 +239,9 @@ mod tests {
     }
 
     #[test]
-    fn exact_continuation_requires_an_explicit_paused_service_without_a_save_slot() {
+    fn exact_continuation_requires_an_explicit_paused_service() {
         let path = std::env::temp_dir().join("server-continuation.json");
+        let checkpoint = std::env::temp_dir().join("server-checkpoint.json");
         let Ok(Invocation::Serve(options)) = Invocation::parse([
             "--serve".into(),
             "--paused".into(),
@@ -259,6 +260,13 @@ mod tests {
                 "--resume-state".into(),
                 path.clone().into(),
             ],
+            vec![
+                "--serve".into(),
+                "--resume-state".into(),
+                path.clone().into(),
+                "--save".into(),
+                checkpoint.into(),
+            ],
             vec!["--serve".into(), "--paused".into(), "--resume-state".into()],
             vec![
                 "--serve".into(),
@@ -266,17 +274,45 @@ mod tests {
                 "--resume-state".into(),
                 "relative.json".into(),
             ],
-            vec![
-                "--serve".into(),
-                "--paused".into(),
-                "--resume-state".into(),
-                path.clone().into(),
-                "--save".into(),
-                path.clone().into(),
-            ],
             vec!["--serve".into(), "--paused".into(), "--paused".into()],
         ] {
             assert!(Invocation::parse(arguments).is_err());
+        }
+    }
+
+    #[test]
+    fn paused_continuation_accepts_one_explicit_absolute_save_path() {
+        let resume = std::env::temp_dir().join("server-continuation.json");
+        let checkpoint = std::env::temp_dir().join("server-checkpoint.json");
+        let arguments = [
+            "--serve".into(),
+            "--paused".into(),
+            "--resume-state".into(),
+            resume.clone().into(),
+        ];
+        let Ok(Invocation::Serve(options)) = Invocation::parse(
+            arguments
+                .clone()
+                .into_iter()
+                .chain(["--save".into(), checkpoint.clone().into()]),
+        ) else {
+            panic!("expected a paused continuation candidate with a checkpoint path");
+        };
+        assert!(options.paused);
+        assert_eq!(options.resume_state.as_deref(), Some(resume.as_path()));
+        assert_eq!(options.save_path.as_deref(), Some(checkpoint.as_path()));
+
+        for invalid_save in [
+            vec!["--save".into()],
+            vec!["--save".into(), "relative.json".into()],
+            vec![
+                "--save".into(),
+                checkpoint.clone().into(),
+                "--save".into(),
+                checkpoint.into(),
+            ],
+        ] {
+            assert!(Invocation::parse(arguments.clone().into_iter().chain(invalid_save)).is_err());
         }
     }
 }

@@ -21,7 +21,8 @@ use super::{GameResumeError, ResumeControl};
 use crate::gameplay::ActiveLevel;
 use crate::{
     gameplay::{
-        GamePhase, Progress, Session, player, side_room::Rooms, travel, verification::Verification,
+        GamePhase, Progress, Session, player, side_room::Rooms, storage::Storage, travel,
+        verification::Verification,
     },
     resume::{
         PlayerState, ResumeCompatibility, ResumeState, RuntimeTimeState, SessionCounters,
@@ -38,6 +39,7 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
         ));
     }
     quiescent(world, false)?;
+    require_unconfigured_checkpoint(world)?;
     Rooms::require_closed(world).map_err(GameResumeError::Ineligible)?;
     #[cfg(feature = "local-player")]
     {
@@ -102,14 +104,6 @@ pub(super) fn quiescent(
             "scripted verification is not an interactive resume state",
         ));
     }
-    if !world
-        .resource::<crate::gameplay::storage::Storage>()
-        .permits_resume()
-    {
-        return Err(reject(
-            "an open SaveSlot has no candidate reconstruction policy",
-        ));
-    }
     let control = world.resource::<ResumeControl>();
     if !control.unsupported.is_empty() {
         return Err(reject(&format!(
@@ -149,6 +143,15 @@ pub(super) fn quiescent(
         TaskReturnState::CleanupFailed => {
             return Err(reject("authoritative task cleanup failed"));
         }
+    }
+    Ok(())
+}
+
+pub(super) fn require_unconfigured_checkpoint(world: &World) -> Result<(), GameResumeError> {
+    if !world.resource::<Storage>().is_unconfigured() {
+        return Err(GameResumeError::Ineligible(
+            "an open SaveSlot has no candidate reconstruction policy for this operation".into(),
+        ));
     }
     Ok(())
 }

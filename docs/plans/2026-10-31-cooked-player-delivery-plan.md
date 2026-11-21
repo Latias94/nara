@@ -309,6 +309,12 @@ both rooms and their relic state from the packaged Scenes. The test hands off a 
 with pending movement, exercises independent room closure and ordinary travel, and observes a
 candidate's refusal when its selected level cannot supply those rooms.
 
+The checkpoint handoff successor extends this same package workflow with a version-three local
+SaveSlot commitment. Its Windows production case and Linux ext4 production case pass 1/1 each.
+The candidate stays paused with storage pending until the original writer retires and an explicit
+claim revalidates the marker and checkpoint object. The existing checkpoint format and ordinary
+SaveSlot owner remain separate from this transient continuation record.
+
 ## Shared Compiled Project Cook Entry
 
 Status: implemented and qualified for the scoped Windows Rust 1.95.0 workflows below, after

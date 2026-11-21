@@ -8,7 +8,7 @@ use std::{
 use crate::{
     CapabilityRights, ContentDigest, DurabilityProgress, FileIdentity, FileKind, FileLockError,
     FileSyncReceipt, FileSyncTier, FsError, FsOperation, LockMode, LockedFileCapability,
-    ResolutionTier, RestrictiveCapabilityHandleLease, StageStatus, TrustMode,
+    NativeFileIdentity, ResolutionTier, RestrictiveCapabilityHandleLease, StageStatus, TrustMode,
     capability::new_host_session, platform,
 };
 
@@ -114,6 +114,71 @@ impl FileCapability {
             });
         }
         Ok(left.identity == right.identity)
+    }
+
+    /// Returns a live file object stamp for a staged checkpoint handoff on the same host.
+    ///
+    /// Keep both file handles continuously open from their respective observations through the
+    /// handoff. The receiver independently opens a file under its own authority and compares
+    /// the stamp from that handle with the sender's. Native identities can be reused after
+    /// deletion and close. Verify checkpoint contents separately.
+    ///
+    /// Returns [`FsError::Unproven`] if local native identity cannot be established.
+    pub fn local_object_stamp(&self) -> Result<[u8; 32], FsError> {
+        let unproven = FsError::Unproven {
+            operation: FsOperation::InspectHandle,
+            proof: "a local object stamp requires proven native file identity",
+        };
+        let facts = match platform::facts(&self.file) {
+            Ok(facts) => facts,
+            Err(FsError::Unsupported { .. } | FsError::IdentityUnavailable) => {
+                return Err(unproven);
+            }
+            Err(error) => return Err(error),
+        };
+        if facts.kind != FileKind::Regular {
+            return Err(FsError::NotRegularFile);
+        }
+        if let Some(tag) = facts.reparse_tag {
+            return Err(FsError::ReparsePoint { tag });
+        }
+        if !facts.identity_proven {
+            return Err(unproven);
+        }
+        if facts.identity != self.identity.native() {
+            return Err(FsError::CapabilityIdentityDrift {
+                operation: FsOperation::InspectHandle,
+            });
+        }
+        if facts.link_count != 1 {
+            return Err(FsError::MultipleLinks {
+                links: facts.link_count,
+            });
+        }
+
+        #[cfg(any(unix, windows))]
+        let mut hasher = blake3::Hasher::new_derive_key("nara.fs.local-object-stamp.v1");
+        match facts.identity {
+            #[cfg(windows)]
+            NativeFileIdentity::Windows {
+                volume_serial,
+                file_id,
+            } => {
+                hasher.update(b"windows\0");
+                hasher.update(&volume_serial.to_le_bytes());
+                hasher.update(&file_id);
+                Ok(*hasher.finalize().as_bytes())
+            }
+            #[cfg(unix)]
+            NativeFileIdentity::Unix { device, inode } => {
+                hasher.update(b"unix\0");
+                hasher.update(&device.to_le_bytes());
+                hasher.update(&inode.to_le_bytes());
+                Ok(*hasher.finalize().as_bytes())
+            }
+            #[cfg(not(any(unix, windows)))]
+            NativeFileIdentity::Unsupported => Err(unproven),
+        }
     }
 
     #[must_use]
@@ -543,6 +608,56 @@ mod tests {
         ));
         drop((first, second));
         fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn local_object_stamp_compares_live_files_across_independent_sessions() {
+        use std::{
+            fs::{self, File},
+            path::Path,
+        };
+
+        use crate::{FileCapability, FileFacts, FsError, TrustMode, platform};
+
+        let directory =
+            std::env::temp_dir().join(format!("nara_fs_local_object_stamp_{}", std::process::id()));
+        fs::create_dir(&directory).unwrap();
+        let original = directory.join("original.bin");
+        let copy = directory.join("copy.bin");
+        fs::write(&original, b"checkpoint").unwrap();
+        fs::copy(&original, &copy).unwrap();
+
+        let open = |path: &Path, generation| {
+            FileCapability::from_host_handle(
+                File::open(path).unwrap(),
+                TrustMode::TrustedLocal,
+                generation,
+            )
+            .unwrap()
+        };
+        let first = open(&original, 1);
+        let second = open(&original, 2);
+        let different = open(&copy, 3);
+
+        assert_ne!(first.identity().session(), second.identity().session());
+        let stamp = first.local_object_stamp().unwrap();
+        assert_eq!(stamp, second.local_object_stamp().unwrap());
+        assert_ne!(stamp, different.local_object_stamp().unwrap());
+
+        let linked = FileFacts {
+            link_count: 2,
+            ..platform::facts(&first.file).unwrap()
+        };
+        assert!(matches!(
+            platform::with_test_facts_override(linked, || first.local_object_stamp()),
+            Err(FsError::MultipleLinks { links: 2 })
+        ));
+
+        drop((first, second, different));
+        fs::remove_file(original).unwrap();
+        fs::remove_file(copy).unwrap();
+        fs::remove_dir(directory).unwrap();
     }
 
     #[test]

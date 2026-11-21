@@ -58,6 +58,11 @@ flowchart LR
   root without elevating either capability's authority. Equality does not equate session-scoped
   `FileIdentity` values or merge trust, rights, or generations. This is ordinary live-object proof,
   not immutable-content evidence or a persistent ID.
+- `FileCapability::local_object_stamp` lets the game compare live observations across local
+  processes. The stamp commits to proven native identity from an already-opened single-link
+  file. Both applications retain their observations during handoff. The receiver independently
+  opens the file and compares its own stamp. Authority remains with the local capability and
+  any native lock. The stamp carries no persistent identity or file contents.
 - `DirectoryCapability::strict_read_only` derives a narrower capability over the same held
   directory, rechecking proven identity and strict resolution before permitting descendant
   traversal. It preserves Session/generation, the live root identity and volume boundary,

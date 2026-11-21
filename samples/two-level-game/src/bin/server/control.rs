@@ -56,6 +56,7 @@ pub(super) enum Request {
         elapsed_nanos: u64,
     },
     Capture {},
+    ClaimCheckpoint {},
     Shutdown {},
     Retire {},
     Command {
@@ -68,6 +69,20 @@ pub(super) enum Request {
     Lookout {},
     Save {},
     Restore {},
+}
+
+impl Request {
+    pub(super) fn allowed_while_checkpoint_pending(&self) -> bool {
+        matches!(
+            self,
+            Self::Observe {}
+                | Self::Pause {}
+                | Self::Capture {}
+                | Self::ClaimCheckpoint {}
+                | Self::Shutdown {}
+                | Self::Retire {}
+        )
+    }
 }
 
 fn next_tick() -> NonZeroU64 {
