@@ -289,6 +289,20 @@ load, longer soaks, standalone Linux hosts and networking have separate scope.
 Windows correctness Clippy passes for the selected generated Server binary and the affected
 library and consumer test targets. Root and sample formatting and changed document links pass.
 
+### Packaged Server Continuation
+
+Implementation: `c488d72`. Process acceptance: `196f003`.
+
+The installed Server supports a local handoff at a completed paused frame. The operator can
+capture the game's logical state, fixed-time phase and supported pending commands, then start
+a fresh candidate from the compatible package. The committed Scene identity, content catalog,
+Schema and App configuration govern admission. Ready follows reconstruction and canonical
+recapture. The caller holds the original process and chooses the command route after Ready.
+The original Host drives both processes through their ordinary retirement paths.
+The selected release Player and Server relocation cases pass on Windows and on Ubuntu 26.04
+WSL2. Each Server comparison uses two processes from one compatible package on its own platform.
+[Continuation contract and process evidence](2026-11-13-rust-state-reconstruction-plan.md#processed-server-continuation-successor)
+
 ## Shared Compiled Project Cook Entry
 
 Status: implemented and qualified for the scoped Windows Rust 1.95.0 workflows below, after

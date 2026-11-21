@@ -130,6 +130,11 @@ that phase. Game state and logical time remain the game's separate reconstructio
 Refusal has no time mutation; a fault after application retains the applied fact and original
 fault. No operation runs user schedules or exposes mutable World access during initialization.
 
+An explicit Headless resume can use a supplied elapsed interval for its first running App frame.
+That frame's existing work cap applies once to the restored debt and the new interval. The
+processed Server uses it for paused `advance` and keeps the original fixed queue responsible
+for command execution and acknowledgement. [Processed Server continuation](../../plans/2026-11-13-rust-state-reconstruction-plan.md#processed-server-continuation-successor)
+
 ## Alternatives Considered
 
 ### Option A: Best-effort frame-rate-dependent simulation

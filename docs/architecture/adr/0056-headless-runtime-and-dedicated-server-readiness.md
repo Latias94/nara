@@ -103,6 +103,13 @@ Rules:
   the authored frame clamp as an error before driving that interval. Its input runner submits
   commands through the typed fixed ingress, observes completed state, and requests close through
   the original Host. [Two-Level server operation](../../../samples/two-level-game/README.md#operate-the-server)
+- A local control caller may retain a paused Server while an independently started process
+  reconstructs the game's selected state. The committed Host-managed Scene Product must match
+  the active game level. Compatibility binds its original catalog, Schema and App configuration.
+  The game owns the continuation format and comparison before Ready. The caller selects the active
+  command route and may explicitly retire the still-paused incumbent without running its queued
+  intents.
+  [Processed Server continuation](../../plans/2026-11-13-rust-state-reconstruction-plan.md#processed-server-continuation-successor)
 
 ## Input and Command Boundary
 

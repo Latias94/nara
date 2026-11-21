@@ -2412,6 +2412,14 @@ exact checkpoint bytes under the supported local filesystem authority. The Windo
 relocation runs pass. The isolated WSL2 Server continues advancing with idle input for about
 65 seconds, and the delivery record includes frame overrun and output pipe failure controls.
 
+The [processed Server continuation](../../plans/2026-11-13-rust-state-reconstruction-plan.md#processed-server-continuation-successor)
+adds paused capture and clean reconstruction through the original Host. The game checks the exact
+committed Scene Product, catalog, Schema and App configuration. The candidate admits the captured
+command order against its new queue watermark and recaptures the same canonical game and timing
+state before readiness. The local control client selects the command route and the original native
+process owners verify retirement. The production Cooker and relocated Player and Server cases
+pass on Windows x64 and on Ubuntu 26.04 WSL2 using Rust 1.95.0.
+
 Commit `ddabcab` uses the existing exact capability read before admitting typed bytes to the
 source cache. In the Windows Sound Bank controls, Check rejects the wrong spelling. Once corrected,
 Cook and the Runtime codec preserve both original PCM clips. Engine 143/143, Two-Level 68/68 and

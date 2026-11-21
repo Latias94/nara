@@ -1439,6 +1439,12 @@ advances more than 3,200 ticks while its control stream is idle, then closes nor
 linked qualification records elapsed-interval and blocked-output failure probes. Load and
 separate-machine deployment remain open.
 
+The [packaged Server continuation](2026-10-31-cooked-player-delivery-plan.md#packaged-server-continuation)
+uses the ordinary source-free installation for both processes. The receiving Server checks the
+exact compatible catalog, reconstructs the selected Scene and game state, and confirms byte
+equivalence of a new capture before announcing Ready. The actual Windows and Linux WSL2 package
+tests pass. Process routing remains at the caller.
+
 ## R8: External Render Feature And Host-Local Execution
 
 **Design:** D14. **State:** private CPU/DX12/cost comparison, internal device ownership, original
@@ -5677,6 +5683,12 @@ the registry ownership sub-unit is qualified; the complete production/consolidat
 For the selected completed units, run independent direct/renamed/public consumers and relevant
 root/Editor/native paths serially. Verify unknown data, exact operation results, content/identity
 retention, close and old-generation rejection together. Review adapters, not only owner unit tests.
+
+The [processed continuation consumer](2026-11-13-rust-state-reconstruction-plan.md#processed-server-continuation-successor)
+uses the original managed Scene, fixed-time and gameplay-queue owners across a real local Server
+handoff. A mismatched candidate leaves the incumbent paused and inspectable. In the successful
+case, the original retires with work still pending while the new process executes that work once
+at its relative tick. The renamed HeadlessSession consumer covers the shared control surface.
 
 The [Two-Level Game side room](2026-10-20-persistent-two-level-game-plan.md#deferred-additive-region-execution-evidence)
 extends the existing source and cooked Players through the same Deferred Scene and Image owners.

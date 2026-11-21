@@ -576,6 +576,38 @@ terminal record. The exit code also accounts for output delivery. A stalled pipe
 output wait after Runtime retirement. This is a local process control stream. Network transport
 and replication are outside this workflow.
 
+### Continue In A Fresh Server Process
+
+Send `{"request":"pause"}` to an ordinary `server --serve` session, or start with `--paused`.
+The `paused` reply reports the settled game and fixed-time state. While paused, send
+`{"request":"advance","elapsed_nanos":20000000}` to run one App frame and pause again. The
+game's time policy determines how many fixed ticks run. A `command` request may include
+`"after_ticks":2` to target the second future fixed tick. Omit the field to target the next tick.
+
+Send `{"request":"capture"}` at a completed paused boundary. The `captured` reply contains a
+`state` object. Write that object by itself to an application-owned file and start a separate
+candidate from the installed package:
+
+```text
+server --serve --paused --resume-state ABSOLUTE_STATE_PATH
+```
+
+Use a candidate from the same compatible package. Capture checks that the committed Scene
+Product matches the active level. The candidate checks the admitted catalog, Schema and App
+configuration, reconstructs the game, and compares its canonical capture before
+`TWO_LEVEL_SERVER_READY` reports `restored: true`.
+The format contains player pose, progress, held semantic movement, logical game time, fixed debt
+and remainder, and at most 128 pending commands from the Server control stream. Command offsets
+and order are preserved in the new queue. Its Runtime tick and queue counters start in the fresh
+process. A live `--save` slot, open rooms, or pending Scene or native-service work refuses capture.
+
+Keep the incumbent paused until the candidate is ready. The operator selects the new command
+route and sends `resume` or an explicit `advance` to that process. Send `retire` to a paused
+incumbent to close it without executing its pending commands. Its final receipt reports the
+retained count. While paused, ordinary `shutdown` requires settled work. EOF with unsettled work
+reports an error and closes the session. A failed candidate can be discarded and the incumbent
+can continue.
+
 The installed server regression builds, inspects, relocates and launches the actual package.
 Run it from the engine root with the same shared target and serial environment as the Player
 acceptance above:

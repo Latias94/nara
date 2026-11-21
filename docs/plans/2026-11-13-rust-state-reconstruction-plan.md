@@ -1,9 +1,10 @@
 # Rust State Capture, Rebuild And Reconstruction
 
-Date: 2026-11-13. Updated: 2026-11-18. Status: qualified for the shipped Windows source/headless
+Date: 2026-11-13. Updated: 2026-11-21. Status: qualified for the shipped Windows source/headless
 workflow and explicit source/desktop reconstruction/adoption through the finite development Host.
-Continuous Editor Play integration and complete R12 remain open. Owner: the foundation rebaseline
-R12 runtime lane.
+The packaged Server continuation also passes Windows and Linux WSL2 release execution. Continuous
+Editor Play integration and complete R12 remain open. Owner: the foundation rebaseline R12 runtime
+lane.
 Editor/UI/Dialogue product work remains paused. Physical mixed-DPI testing is separately
 authorized and has bounded [Runtime drawing/picking qualification](2026-11-14-durable-material-and-shader-plan.md#presented-drawing-and-picking-successor).
 The qualified functional successor joins the existing desktop development Host to the actual
@@ -129,6 +130,99 @@ cross-path level identity. Initial public tests exposed that mistaken comparison
 run `9b06f78b-fe80-4964-8c0f-e2657b4baab6`); the game format removes that redundant field rather
 than changing the content owner's digest meaning. A dedicated regression restores initial Meadow,
 first Cavern and returned Meadow through the same complete candidate path.
+
+## Processed Server Continuation Successor
+
+Status: implemented at `c488d72` with process qualification at `196f003`. Windows x64 and Linux
+x86-64 WSL2 package execution qualified. Use the ordinary packaged Two-Level dedicated Server as
+the consumer. Capture at the original completed paused frame and restore in a separately
+started candidate. Preserve the game's selected progress, pose, held intent, counters,
+scheduling phase and still-pending semantic commands from the Server's external stream. Keep
+source-level stamps for source reconstruction. A processed capture observes the exact committed
+Scene Product and its catalog digest under one Host-owned source view. The product must match
+the selected game level. The capture also binds the existing App and Schema fingerprints.
+
+Observe pending intent through the original gameplay queue. Form a game-owned bounded value
+using offsets from the acknowledged boundary and retain order within a tick. Reconstruct the
+semantic commands through ordinary admission against the candidate's fresh fixed watermark.
+The old queue counters and Runtime generation stay process-local. Eligibility still requires
+closed rooms, no open checkpoint slot, no unresolved Scene work or unsupported native services,
+and a healthy queue without an active or quarantined batch. An unknown pending producer or an
+unrepresented effect must refuse capture.
+
+Use the existing `--serve` control stream for pause, capture and explicit drives. A fresh
+`--serve --paused --resume-state` startup loads the game's bounded continuation format, applies
+its original Scene transaction and time policy, and compares a fresh canonical capture before
+Ready. The control client can retain and explicitly retire a paused incumbent without executing
+its transferred pending work. This is a local handoff workflow. The command-ingress, Scene,
+Runtime and physical process owners keep their existing responsibilities.
+
+Compare separately launched processes from the ordinary relocated Cook package across a
+non-anchor pose, checkpoint progress, held movement, nonzero remainder and preserved debt,
+pending commands at different relative ticks, and continued execution. Prove fresh queue
+watermarks, exact canonical equivalence, a refused incompatible candidate with the incumbent
+still usable, and original process cleanup. Target the selected Windows and Linux headless
+deliveries. Keep the regular paced service, progress checkpoint and source reconstruction
+controls in the affected regression scope.
+
+Bevy's fixed clock accumulates overstep in the time owner, and Godot's main timer derives
+physics steps from its own accumulated time. Their Scene loading recreates instances from
+admitted Scene content. Nara uses its existing time and Scene owners and the game's explicit
+continuation inventory to cross a process boundary.
+[Bevy fixed time](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_time/src/fixed.rs) · [Bevy resolved Scene](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_scene/src/resolved_scene.rs) · [Godot timer](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/main/main_timer_sync.cpp) · [Godot Scene instantiation](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/scene/resources/packed_scene.cpp)
+
+### Processed Continuation Qualification
+
+The Windows Rust 1.95.0 release Server run `0a6db4fb-40c0-446d-92a3-f5a85b9eec2b` passes the
+ordinary Cooker, relocation and source-free processes. The incumbent reaches a non-anchor Cavern
+instance after collecting three pickups and authoring three markers. It captures at local tick
+53 with 20 ms of preserved fixed debt, 7 ms of remainder, and three pending commands at offsets
+2, 4 and 8. A candidate with the wrong catalog digest refuses before Ready. An independently
+launched candidate from the admitted installation starts its local fixed history at tick 1.
+Its new paused capture matches all 1,747 canonical bytes. Both processes follow the same six
+elapsed frames and converge after the first two pending commands. The incumbent retires with the
+last command still pending. The candidate executes that command once at its relative boundary,
+resumes paced operation, accepts new input and closes. The process owner verifies complete native
+retirement for all sessions. The previous live Server, checkpoint and mismatched-pack controls
+remain part of this execution. [Packaged continuation test](../../samples/two-level-game/tests/support/server_delivery/continuation.rs)
+
+The first source/processed format suite passes 44/44 (`b9443c91-89ae-45e7-af13-6bad09511905`).
+The Windows source reconstruction, task return, gameplay, replay, authored content, collision
+and Server control selection passes 232/232 (`ad26d952-613d-4303-a038-5537159e6c16`).
+
+Independent review found that a Cook with the same game's startup and travel roots swapped could
+capture the committed Cavern as Meadow, that an unrelated recipe could panic during capture or
+restore, and that a nested positional command could enter the version-one format. The game now
+compares the hosted Product with the level before state capture or reconstruction. It refuses a
+missing dedicated game recipe before reading game-owned state. The processed command payload
+requires a named object, while source and desktop command readers keep their existing grammar.
+The follow-up Windows release run passes 194/194 (`ab47d1cc-2f06-4ae2-8caa-f9e066a855ac`). Its
+Cook controls start both mismatched sessions at tick zero and prove that the typed refusals leave
+the original committed Scene instance in place. The related Gameplay and independent renamed
+HeadlessSession suites pass 58/58 and 12/12 (`7274497e-035b-41d3-99e9-93a0b3c2beaa` and
+`e987408a-4951-4326-aea9-6482cf051eab`).
+
+After the review corrections, the Windows production Cooker and relocated headless Player and
+Server pass 2/2 (`0cc96951-e541-4331-9f56-909f0b896e5f`). Both start with no source or Cook
+cache. The Server keeps the original live control and checkpoint trajectories and repeats the
+full compatible continuation and incompatible-candidate refusal.
+
+Ubuntu 26.04 on WSL2 passes the same Rust 1.95.0 release delivery cases 2/2 on ext4
+(`5e67915b-32d7-4c7f-9e53-2e5db441b897`). Both cases use the locked Cooker and their ordinary
+relocated processes. Each Server handoff compares the exact captured bytes and closes its own
+native owners. Verification covers process handoff within one compatible package on each tested
+platform. Cross-machine continuation, networking, live SaveSlot transfer and arbitrary plugin
+state remain open.
+
+The minimal `cooked-server` release library passes 54/54 after the review corrections
+(`c277cb1f-47c0-4a9f-bd28-dff8cc77502d`). Correctness Clippy passes for the generated shipping
+Server and the affected sample library, Cook and packaged test targets. Root and sample
+formatting and added document links pass.
+
+The shared source reconstruction path also passes its original Windows DX12 hardware case
+(`0d0a288c-178d-43af-a343-6a031d402bbc`, 1/1). It checks fresh Runtime and native owners,
+the captured player and animation pixels, reconciled keyboard holds, and complete window,
+surface and physical event-loop retirement.
 
 ## Qualification
 

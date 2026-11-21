@@ -67,6 +67,11 @@ sequenceDiagram
 - `GameplayCommandEnvelope` is created only by admission. Its fields are immutable through public
   APIs and it is serializable for replay capture.
 - Runtime `GameplayCommandQueue` and `GameplayCommandBatch` state is not serializable.
+- A caller can borrow commands still waiting in the queue, in canonical tick, source and
+  sequence order. A game's paused continuation adapter may select an explicit set of semantic
+  commands and preserve their offsets from its acknowledged tick. A fresh Runtime admits these
+  commands through the existing ingress with its own ticks and producer sequences. The borrowed
+  view grants observation only. Active and quarantined work have separate ownership.
 - `GameplayCommandTime`, frame provenance, optional/zero ticks, arrival sequence, and runtime
   `Entity` values are not part of the command contract.
 
