@@ -337,6 +337,12 @@ across the candidate boundary, rejects an early claim and drive, claims after in
 retirement, executes Save and Restore, rejects a same-byte replacement with a different file
 identity, and completes native process cleanup.
 
+Restore keeps its observed checkpoint binding provisional through Scene reconstruction. The
+storage owner reopens and revalidates the current file identity and digest before rebinding the
+Save baseline. A file replacement during reconstruction therefore remains a typed conflict and
+cannot authorize a later Save. The focused SaveSlot regression covers this read-then-replace
+boundary, and the production handoff still passes its Save/Restore trajectory.
+
 Ubuntu 26.04 WSL2 passes the same relocated production package 1/1 on a local ext4 directory
 (`8edf4b59-e64e-4d66-be43-54bb78b50bc0`). An initial `/tmp` attempt was refused by the existing
 same-parent directory-publication guarantee because that filesystem tier was unsupported. The

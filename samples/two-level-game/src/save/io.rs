@@ -149,7 +149,7 @@ impl SaveSlot {
     /// Reads and validates before changing the conflict baseline, including after uncertain save.
     pub fn load(&mut self) -> Result<DecodedCheckpoint, SaveIoError> {
         let (decoded, binding) = self.prepare_load()?;
-        self.accept_load(binding);
+        self.accept_load(binding)?;
         Ok(decoded)
     }
 
@@ -169,16 +169,14 @@ impl SaveSlot {
         Ok((decoded, binding))
     }
 
-    pub(crate) fn accept_load(&mut self, binding: CheckpointBinding) {
-        if self
-            .server
-            .as_ref()
-            .is_some_and(|server| !server.is_active())
-        {
-            return;
-        }
-        self.binding = binding.0;
+    pub(crate) fn accept_load(&mut self, binding: CheckpointBinding) -> Result<(), SaveIoError> {
+        self.verify_server_access()?;
+        let observed = self.open_checkpoint()?;
+        let CheckpointBinding(binding) = binding;
+        binding.verify(Some(observed))?;
+        self.binding = binding;
         self.uncertain = false;
+        Ok(())
     }
 
     pub fn save(&mut self, checkpoint: &Checkpoint) -> Result<SaveReceipt, SaveIoError> {

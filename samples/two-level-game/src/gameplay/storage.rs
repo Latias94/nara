@@ -98,13 +98,14 @@ impl Storage {
             .map_err(|error| error.to_string())
     }
 
-    pub(super) fn accept_load(&self, binding: CheckpointBinding) {
+    pub(super) fn accept_load(&self, binding: CheckpointBinding) -> Result<(), String> {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .as_mut()
             .expect("a prepared checkpoint read has the original application save slot")
-            .accept_load(binding);
+            .accept_load(binding)
+            .map_err(|error| error.to_string())
     }
 }
 

@@ -116,7 +116,10 @@ fn a_committed_read_does_not_authorize_a_later_file_replacement() {
     ));
 
     let latest = other.save(&checkpoint(4)).unwrap();
-    slot.accept_load(binding);
+    assert!(matches!(
+        slot.accept_load(binding),
+        Err(SaveIoError::Conflict)
+    ));
     assert!(matches!(
         slot.save(&checkpoint(5)),
         Err(SaveIoError::Conflict)
@@ -540,6 +543,6 @@ fn uncertain_publication_blocks_handoff_until_committed_load_rebinds_the_slot() 
     let (decoded, binding) = slot.prepare_load().unwrap();
     assert_eq!(decoded.checkpoint.score, 2);
     assert!(matches!(slot.handoff_stamp(), Err(SaveIoError::Uncertain)));
-    slot.accept_load(binding);
+    slot.accept_load(binding).unwrap();
     assert_ne!(slot.handoff_stamp().unwrap(), before);
 }

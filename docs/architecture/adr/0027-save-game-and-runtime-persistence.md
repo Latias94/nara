@@ -37,6 +37,9 @@ Rules:
   lock and revalidates the exact baseline before allowing Save or Restore. The progress file keeps
   its own format and transactional write owner.
   [Checkpoint slot handoff](../../plans/2026-11-13-rust-state-reconstruction-plan.md#processed-continuation-with-a-checkpoint-slot)
+- A normal Restore keeps its read binding provisional until the target Scene has reconstructed
+  successfully. Rebinding the Save baseline reopens the current file and verifies its identity
+  and digest, so a file replacement during reconstruction remains a conflict.
 
 ## Alternatives Considered
 

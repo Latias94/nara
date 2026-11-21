@@ -242,59 +242,55 @@ fn assert_gameplay_rejection(custody: &mut Custody, executable: &Path) {
         .fixture()
         .directory("server-service-missing-checkpoint")
         .join("checkpoint.json");
-    let mut server = Service::start(
+    let mut server = Service::spawn(
         custody,
         executable,
-        Some(&missing),
+        Launch::PausedCheckpoint {
+            save: &missing,
+            resume: None,
+        },
         "server-service-rejection",
     );
-    for attempt in 1..=8 {
-        server.write(&format!("{}\n{}\n", request("restore"), action("marker")));
-        let restore_tick = server.read_admission();
-        let marker_tick = server.read_admission();
-        let deadline = Instant::now() + CONTROL_TIMEOUT;
-        let settled = loop {
-            server.send(&request("observe"));
-            let observation = server.reply("observed");
-            if tick(&observation["state"]) >= marker_tick {
-                break observation;
-            }
-            assert!(Instant::now() < deadline, "{observation}");
-            thread::sleep(POLL);
-        };
-        let expected_markers: Vec<u64> = (1..=attempt).collect();
-        server.check_observation(&settled["state"], &settled);
-        assert_progress(
-            &settled["state"],
-            LevelKey::main(LevelId::Meadow),
-            0,
-            &expected_markers,
-        );
-        assert_eq!(settled["state"]["restores"], 0);
-        assert!(!missing.exists());
-        let rejections = &settled["gameplay_rejections"];
-        assert_eq!(rejections["count"], attempt, "{settled}");
-        let latest = &rejections["latest"];
-        let key: GameplayCommandKey = serde_json::from_value(latest["key"].clone()).unwrap();
-        assert_eq!(key.tick().get(), restore_tick);
-        assert_eq!(key.source_sequence().get(), attempt * 2 - 1);
-        assert_eq!(key.source().id().unwrap().as_str(), SOURCE);
-        assert!(
-            latest["message"]
-                .as_str()
-                .is_some_and(|value| !value.is_empty())
-        );
-        if restore_tick == marker_tick {
-            server.send(&request("shutdown"));
-            let closed = server.finish("shutdown", None);
-            assert_eq!(
-                closed["server_evidence"]["gameplay_rejections"],
-                *rejections
-            );
-            return;
-        }
-    }
-    panic!("no Restore and Marker pair reached the same admitted fixed tick");
+    server.ready(true, true);
+    server.write(&format!("{}\n{}\n", request("restore"), action("marker")));
+    let restore_tick = server.read_admission();
+    let marker_tick = server.read_admission();
+    assert_eq!(restore_tick, marker_tick);
+    let settled = server.exchange_observation(
+        &json!({
+            "request": "advance",
+            "elapsed_nanos": TIMESTEP_NANOS,
+        }),
+        "advanced",
+    );
+    let expected_markers = vec![1];
+    server.check_observation(&settled["state"], &settled);
+    assert_progress(
+        &settled["state"],
+        LevelKey::main(LevelId::Meadow),
+        0,
+        &expected_markers,
+    );
+    assert_eq!(settled["state"]["restores"], 0);
+    assert!(!missing.exists());
+    let rejections = &settled["gameplay_rejections"];
+    assert_eq!(rejections["count"], 1, "{settled}");
+    let latest = &rejections["latest"];
+    let key: GameplayCommandKey = serde_json::from_value(latest["key"].clone()).unwrap();
+    assert_eq!(key.tick().get(), restore_tick);
+    assert_eq!(key.source_sequence().get(), 1);
+    assert_eq!(key.source().id().unwrap().as_str(), SOURCE);
+    assert!(
+        latest["message"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
+    server.send(&request("shutdown"));
+    let closed = server.finish("shutdown", None);
+    assert_eq!(
+        closed["server_evidence"]["gameplay_rejections"],
+        *rejections
+    );
 }
 
 pub(super) enum Launch<'a> {

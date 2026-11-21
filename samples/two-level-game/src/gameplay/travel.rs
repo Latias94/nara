@@ -496,9 +496,6 @@ pub(super) fn advance(world: &mut World) {
         return;
     }
     super::resume::commit_content(world, pending.content);
-    if let TravelKind::RestoreCheckpoint(binding) = pending.kind {
-        world.resource::<Storage>().accept_load(binding);
-    }
     *world.resource_mut::<Rooms>() = Rooms::default();
     #[cfg(all(windows, feature = "audio-cpal", feature = "local-player"))]
     if local_player {
@@ -514,6 +511,15 @@ pub(super) fn advance(world: &mut World) {
     }
     match reconstruct(world) {
         Ok(()) => {
+            if let TravelKind::RestoreCheckpoint(binding) = pending.kind {
+                if let Err(error) = world.resource::<Storage>().accept_load(binding) {
+                    fail(
+                        world,
+                        format!("restored checkpoint baseline changed: {error}"),
+                    );
+                    return;
+                }
+            }
             let held = [false; 4];
             #[cfg(feature = "local-player")]
             let held = if local_player
