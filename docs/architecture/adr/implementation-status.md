@@ -2403,6 +2403,15 @@ native exit and wrong-pack controls pass. Both CLI-produced packages also Save a
 isolated same-instance namespaces with the package and its ELF dependencies as runtime inputs.
 Networking and separate-machine deployment retain separate qualification.
 
+The [sustained Server operation](../../plans/2026-10-31-cooked-player-delivery-plan.md#sustained-dedicated-server-operation)
+adds a local `--serve` driver over the original processed `HeadlessSession`. The installed server
+advances from measured elapsed time, reports fixed command admission and original queue facts, and
+retains the latest synchronous refusal with its original command key. Explicit shutdown and EOF
+settle admitted work before the original close. The packaged tests also verify fresh Restore and
+exact checkpoint bytes under the supported local filesystem authority. The Windows and Linux
+relocation runs pass. The isolated WSL2 Server continues advancing with idle input for about
+65 seconds, and the delivery record includes frame overrun and output pipe failure controls.
+
 Commit `ddabcab` uses the existing exact capability read before admitting typed bytes to the
 source cache. In the Windows Sound Bank controls, Check rejects the wrong spelling. Once corrected,
 Cook and the Runtime codec preserve both original PCM clips. Engine 143/143, Two-Level 68/68 and

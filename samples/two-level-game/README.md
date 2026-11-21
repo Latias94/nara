@@ -531,8 +531,50 @@ server --verify-restore ABSOLUTE_CHECKPOINT_PATH
 
 The finite runners report `TWO_LEVEL_SERVER_RESULT`. `--verify-regions` sends external semantic
 commands through the same queue used by the game. Save and Restore use separate invocations.
-The sample provides a local authoritative simulation and finite verification entry points.
-Networking and a persistent service loop remain future work. [Dedicated Cook workflow](../../docs/guides/cooked-player-delivery.md#cook-a-dedicated-server)
+[Dedicated Cook workflow](../../docs/guides/cooked-player-delivery.md#cook-a-dedicated-server)
+
+### Operate The Server
+
+Run `server --serve` from a terminal or a parent process that keeps standard input open and
+reads standard output. Add `--save ABSOLUTE_CHECKPOINT_PATH` to enable checkpoint operations.
+Create the checkpoint's parent directory before launch and keep application saves outside the
+installation. The server uses the compiled pack and the authored fixed timestep. Simulation
+continues while the input stream is idle.
+
+Send one UTF-8 JSON object per line, up to 4,096 bytes including its newline. For example:
+
+```jsonl
+{"request":"observe"}
+{"request":"command","command":{"operation":"move","direction":1,"pressed":true}}
+{"request":"command","command":{"operation":"move","direction":1,"pressed":false}}
+{"request":"side_room"}
+{"request":"save"}
+{"request":"shutdown"}
+```
+
+Movement directions 0 through 3 mean west, east, north and south. The `command` request also
+accepts `marker`, `travel`, `instance` and `retry` as its nested `operation`. The top-level
+`lookout`, `restore`, `save` and `side_room` requests take no other fields. The checkpoint slot
+remains selected until exit. Use `restore` on a fresh `--serve` process to continue a prior
+checkpoint.
+
+`TWO_LEVEL_SERVER_READY` reports startup and whether the checkpoint slot was configured.
+`TWO_LEVEL_SERVER_REPLY` reports an accepted `(tick, source, sequence)`, a rejection, or an
+observation with game state and the original queue and time counters. `accepted` means the fixed
+queue retained an intent. `gameplay_rejections` counts synchronous game refusals and retains the
+latest refusal with its original command key. It survives later successful commands. The state
+reports errors from later Scene preparation or commit. Wait for the acknowledged tick and the
+gameplay result before sending a dependent operation. For example, wait for the Cavern state
+after `travel` before sending `save`.
+
+`shutdown` and end-of-input stop accepting commands. The process settles admitted commands
+and pending Scene work before retiring the session and emitting `TWO_LEVEL_SERVER_RESULT`.
+A malformed complete line receives a rejection. A line that exceeds the byte limit, a truncated
+line at EOF or an unsupported elapsed interval closes the session with an error. The server also
+closes with an error if the bounded reply queue fills. The parent must drain stdout to receive the
+terminal record. The exit code also accounts for output delivery. A stalled pipe has a bounded
+output wait after Runtime retirement. This is a local process control stream. Network transport
+and replication are outside this workflow.
 
 The installed server regression builds, inspects, relocates and launches the actual package.
 Run it from the engine root with the same shared target and serial environment as the Player

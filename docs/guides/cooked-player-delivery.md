@@ -147,6 +147,11 @@ CPU asset admission as the local Player. Source-backed constructors and stock Im
 Material publication use `runtime-2d`. Keep a separate Cargo selection for the cooker, since it
 reads the authored project using the client feature set.
 
+The published Two-Level `server --serve` drives the original session at the authored frame
+cadence, accepts local semantic controls from standard input and reports admission, observed
+state and final cleanup. An optional absolute checkpoint path selects the game's existing save
+slot. [Run the installed server](../../samples/two-level-game/README.md#operate-the-server)
+
 `ProductRecipe::add_runtime_asset_codec` and its `ProductRecipeError::RuntimeCodec` variant are
 available with `runtime-core` and `serde`. Exhaustive matches in that configuration need to
 handle codec selection failures.

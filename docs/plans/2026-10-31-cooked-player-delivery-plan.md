@@ -1,7 +1,7 @@
 # Cooked Content And Captured Player Delivery
 
-Date: 2026-10-31. Status: implemented and qualified for the recorded finite Windows and
-Linux headless deliveries. Broader target and platform delivery remains open.
+Date: 2026-10-31. Status: implemented and qualified for the recorded Windows and Linux
+headless deliveries and local sustained Server operation. Broader target delivery remains open.
 Parent: [foundation R7](2026-10-23-foundation-architecture-rebaseline-plan.md#r7-target-build-and-base-source-free-delivery).
 Prerequisite: [explicit Cargo selection](2026-10-31-explicit-cargo-build-selection-plan.md).
 Broader direction: Proposed [ADR 0088](../architecture/adr/0088-target-build-cook-package-and-runtime-content-catalog.md).
@@ -194,6 +194,100 @@ as tmpfs. Selecting an ext4 `TMPDIR` satisfied the existing cooperative-writer p
 This qualifies native Linux headless execution on the observed WSL2 environment. Desktop
 presentation, older distributions and a separate runtime machine retain their own evidence gates.
 [Sample acceptance setup](../../samples/two-level-game/README.md#source-free-dedicated-server) · [Filesystem transaction authority](../architecture/adr/0110-first-party-project-workflow-and-source-carrying-export.md#filesystem-transaction-authority)
+
+### Sustained Dedicated Server Operation
+
+Implementation: `23127bd`.
+
+Run the published Two-Level Server with `--serve` and an optional explicit checkpoint path.
+Keep one original `HeadlessSession`, the authored fixed timestep, and the ordinary processed Scene
+and storage owners. Pace full frames by monotonic elapsed time and let Runtime settle fixed steps
+and debt. The wake interval can be shorter than the fixed step when required by the frame clamp.
+The executable reports a terminal error if elapsed time crosses that clamp. Startup and shutdown
+waits remain bounded. Idle input leaves the Runtime advancing.
+
+Use a local standard-input management stream for state observation, game commands, checkpoint
+Save/Restore, and an ordered shutdown. A finite reader hands messages to the Runtime thread.
+The game allocates authoritative tick and source sequence through its existing external command
+path. Report queue admission separately from applied ticks and observed gameplay state. Shutdown
+and EOF close ingress, settle already admitted work and let the original Host retire the live
+session. A separate bounded writer keeps pipe backpressure away from fixed execution and Host
+retirement. The server reports gameplay errors and results through its structured observations.
+The existing explicit verification invocations keep their finite drivers.
+
+Qualify the relocated executable through the ordinary Cooker and original process owner on
+Windows and Linux. Observe tick advances without input, refuse a malformed command, admit live
+commands with their original identities, run travel and checkpoint publication, start a fresh
+process for Restore, and close through both an explicit request and EOF. Confirm that the runtime
+data and executable selection continue to exclude client and tooling dependencies. Transport and
+replication retain the scope in [ADR 0028](../architecture/adr/0028-networking-and-replication-scope.md).
+
+Bevy's pinned `ScheduleRunnerPlugin` keeps wait policy outside schedule execution and deducts the
+work already spent in the interval. Godot's pinned main loop computes elapsed frame time and
+lets its physics loop consume fixed steps. The Two-Level executable owns wake and input policy
+while Nara keeps its existing fixed-time and close authorities.
+[Bevy schedule runner](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_app/src/schedule_runner.rs) · [Godot main loop](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/main/main.cpp)
+
+The Windows Rust 1.95.0 release run passes the production Cooker and relocated Server test
+in `598292b4-8649-4dff-9936-b4a59a749384`. The locked Windows graph still has 142 packages and
+the cooked pack still contains five Scenes and zero non-Scene members. With input held open
+and idle, the served World advances from tick 1 to 10 and the explorer stays at the authored
+anchor. The test opens both rooms, collects the three expected pickup identities over Meadow
+and two Cavern instances, and saves exact marker positions. A fresh process restores the
+score of 30, the selected Cavern instance and its marker. Saving again preserves the original
+630 checkpoint bytes. The two ordinary exits acknowledge 17 and 4 commands respectively,
+each with zero retained commands and a joined input reader. The original native process owner
+reports ordinary exit, empty containment and drained output.
+
+The same test refuses malformed complete requests during play and invalid checkpoint startup
+before Ready. Oversized input and incomplete input at EOF settle the previously admitted
+marker before closing with an error. The finite travel, collision, region, checkpoint and
+wrong-package controls still use their original admission and cleanup assertions. The separate
+Windows binary run passes 13/13 argument, input and clock cases
+(`139bf400-ea12-47c8-80ff-407bf519139e`).
+[Sustained process trajectory](../../samples/two-level-game/tests/support/server_delivery/service.rs)
+
+The first Linux release run passes the relocated Server and headless Player 2/2
+(`a9570b46-6c32-43ab-988b-ceca5d45bc71`). Two additional probes of that published Server expose
+failures. Dropping the stdout reader and sending a single observation leaves the process running
+with stdin open. Submitting a missing-file Restore followed by Marker at tick 2 clears the active
+error before observation. The revised loop detects a failed output writer during its regular wake.
+The game observes the original failed external key separately from the current active error. The
+settlement loop also checks its deadline after work returns. These waits are cooperative around
+original Runtime calls and file operations.
+
+The revised Windows release run passes both relocated placements 2/2
+(`0a4b0a21-053e-4efd-9563-6aea052e796e`). The exact same-tick regression observes the successful
+Marker and the failed Restore's original tick, source and sequence in the same result, and
+preserves that evidence through original process cleanup. The ordinary Restore path still
+resaves its own 629-byte checkpoint byte-for-byte. The different checkpoint sizes across independent
+runs reflect actual player positions after elapsed input intervals.
+
+The final selected Windows release run passes 196/196 across Server arguments, clock and input,
+the sample library, ordinary gameplay, collision, pickups and auxiliary regions
+(`b4a842c0-9146-467c-80b7-880fb45308f8`). The revised Linux release run also passes both relocated
+placements 2/2 (`1eab5d19-76cd-41e8-b1e3-109f6a3a6b38`). The Linux Server retains 143 locked
+packages and the same five Scenes. It restores the same selected Cavern instance, preserves all
+three pickup and marker identities, and resaves its own 631-byte checkpoint byte-for-byte. The
+original input reader joins and the native process owner reports normal cleanup on both orderly
+stop paths.
+
+The ordinary Linux Cooker CLI publishes a second final Server installation for process probes.
+With the stdout reader closed and stdin still open, a single `observe` now exits with status 1.
+A 4 KiB stdout pipe filled by observation replies triggers output backpressure. Restoring the
+reader after 250 ms delivers the terminal error record with complete original Runtime close.
+Keeping the pipe full instead returns status 1 after about two seconds. That process cannot
+deliver a terminal record to its blocked reader. Suspending the owned process for 400 ms also
+reports a 250 ms frame clamp violation and complete original Runtime close.
+
+In an isolated WSL2 mount and user namespace with only the installation and its ELF libraries,
+the Server advances 3,249 fixed ticks across 64.988 seconds of idle simulation. It accepts zero
+gameplay commands during that interval. The final explicit shutdown reports original Runtime
+close, a joined input reader and normal exit. This is a sustained local execution check. Service
+load, longer soaks, standalone Linux hosts and networking have separate scope.
+
+Windows correctness Clippy passes for the selected generated Server binary and the affected
+library and consumer test targets. Root and sample formatting and changed document links pass.
 
 ## Shared Compiled Project Cook Entry
 

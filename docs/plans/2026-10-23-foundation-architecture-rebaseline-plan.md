@@ -1426,7 +1426,18 @@ runs both release deliveries through the original Cooker and relocated executabl
 locked dependency graph has 143 packages. Both CLI-produced installations also complete Save
 and fresh-process Restore with only the package, its ELF dependencies and private checkpoint
 storage mounted in isolated namespaces on the same WSL2 instance. Separate-machine deployment,
-networking and long-running service operation retain their own qualification.
+networking and load qualification remain open.
+
+The [sustained Server successor](2026-10-31-cooked-player-delivery-plan.md#sustained-dedicated-server-operation)
+runs the ordinary installed Server from monotonic intervals with its existing processed
+`HeadlessSession`. A bounded local command stream observes progress and uses fixed-step ingress for
+movement, rooms, travel and checkpoints. Explicit shutdown and EOF drive admitted work to its
+completed boundaries before the original Host closes. The state and keyed rejection observations
+give the caller separate evidence for queue acknowledgement and a retained gameplay refusal.
+The relocated Server and Player pass on Windows and Linux WSL2. An isolated Linux Server
+advances more than 3,200 ticks while its control stream is idle, then closes normally. The
+linked qualification records elapsed-interval and blocked-output failure probes. Load and
+separate-machine deployment remain open.
 
 ## R8: External Render Feature And Host-Local Execution
 

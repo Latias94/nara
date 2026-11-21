@@ -97,6 +97,12 @@ Rules:
   First-party source loading and the stock Image, Material and TileSet publications select
   `runtime-2d`. Processed CPU products still use their selected codecs and the Host's typed
   collections. `Transform2d` is available to the simulation through the core feature.
+- A sustained server executable owns its wait policy and local management stream. It can drive
+  the existing session with measured monotonic intervals. The original time owner computes
+  fixed steps and enforces the debt bound. The Two-Level executable treats an interval beyond
+  the authored frame clamp as an error before driving that interval. Its input runner submits
+  commands through the typed fixed ingress, observes completed state, and requests close through
+  the original Host. [Two-Level server operation](../../../samples/two-level-game/README.md#operate-the-server)
 
 ## Input and Command Boundary
 
