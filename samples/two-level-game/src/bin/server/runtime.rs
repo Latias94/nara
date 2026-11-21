@@ -10,6 +10,10 @@ use nara::{
     advanced_prelude::CurrentScene,
     app::{FixedCatchUpPolicy, FixedTime},
     fs::{ContentDigest, RelativePath},
+    gameplay::{
+        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandKey,
+        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTick,
+    },
     identity::EntityLookup,
     input::{
         ActionMaps, ActionOutcomes, ButtonInput, InputTimeline, KeyCode, MouseButton, PointerState,
@@ -37,6 +41,7 @@ use nara::{
 use serde_json::{Value, json};
 use two_level_game::{
     GamePhase, GameSnapshot, RunOptions, Scenario,
+    command::SERVER_COMMAND_SOURCE,
     delivery::{PlayerSelection, RuntimeKind},
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
     markers::marker_product,
@@ -44,7 +49,9 @@ use two_level_game::{
     side_room,
 };
 
-use super::{Invocation, Report, generated, regions};
+use super::{
+    Invocation, RESULT, Report, clock::FrameOverrun, generated, output::Output, regions, service,
+};
 
 pub(super) const MAX_FRAMES: usize = 200_000;
 
@@ -74,8 +81,28 @@ impl From<HeadlessSessionError> for Failure {
     }
 }
 
+impl From<io::Error> for Failure {
+    fn from(error: io::Error) -> Self {
+        Self::Error(error.to_string())
+    }
+}
+
+impl From<FrameOverrun> for Failure {
+    fn from(error: FrameOverrun) -> Self {
+        Self::Error(error.to_string())
+    }
+}
+
 pub(super) fn run(invocation: Invocation) -> ExitCode {
     let mut report = Report::new(Some(invocation.name()), "open_pack");
+    let output = if matches!(&invocation, Invocation::Serve(_)) {
+        match Output::spawn() {
+            Ok(output) => Some(output),
+            Err(error) => return report.emit("error", Some(&error.to_string())),
+        }
+    } else {
+        None
+    };
     let mut session = None;
     let deadline = Instant::now() + Duration::from_secs(60);
     let outcome = catch_unwind(AssertUnwindSafe(|| -> Result<(), Failure> {
@@ -99,9 +126,11 @@ pub(super) fn run(invocation: Invocation) -> ExitCode {
             ));
         }
         verify_runtime(original, &initial)?;
-        report.ready = true;
         report.state = Some(state(&initial));
-        report.stage = "scenario";
+        if !matches!(&invocation, Invocation::Serve(_)) {
+            report.ready = true;
+            report.stage = "scenario";
+        }
         match invocation {
             Invocation::Player(options) => {
                 run_player(original, options, timestep, deadline, &mut report)?;
@@ -113,6 +142,18 @@ pub(super) fn run(invocation: Invocation) -> ExitCode {
                 report.visited_levels = json!(LevelId::ALL);
                 report.server_evidence = Some(evidence);
             }
+            Invocation::Serve(options) => {
+                service::run(
+                    original,
+                    options,
+                    timestep,
+                    deadline,
+                    output
+                        .as_ref()
+                        .expect("Server service owns the output writer"),
+                    &mut report,
+                )?;
+            }
         }
         Ok(())
     }));
@@ -121,7 +162,7 @@ pub(super) fn run(invocation: Invocation) -> ExitCode {
         report.close = close_original(original);
         report.cleanup_complete = matches!(report.close, "complete" | "failed");
         let failed = original.diagnostics().has_errors();
-        if failed {
+        if failed && output.is_none() {
             let _ = writeln!(
                 io::stderr().lock(),
                 "two_level_server: {:?}",
@@ -156,7 +197,16 @@ pub(super) fn run(invocation: Invocation) -> ExitCode {
         }
     };
     let cleanup_complete = report.cleanup_complete;
-    let exit = report.emit(status, message.as_deref());
+    let exit = if let Some(output) = output {
+        let result = report.into_record(status, message.as_deref());
+        if output.finish(RESULT, result).is_ok() && status == "ok" {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        }
+    } else {
+        report.emit(status, message.as_deref())
+    };
     if !cleanup_complete {
         std::process::exit(1);
     }
@@ -343,6 +393,32 @@ pub(super) fn frame(
     Ok(snapshot)
 }
 
+pub(super) fn submit_external(
+    session: &mut HeadlessSession,
+    last_sequence: &mut u64,
+    draft: GameplayCommandDraft,
+) -> Result<GameplayCommandKey, Failure> {
+    let current_tick = session.observe(|world| world.resource::<FixedTime>().tick())?;
+    let tick = current_tick
+        .checked_add(1)
+        .and_then(GameplayCommandTick::new)
+        .ok_or("Server tick cannot accept another command")?;
+    let sequence = last_sequence
+        .checked_add(1)
+        .and_then(GameplayCommandSourceSequence::new)
+        .ok_or("Server command sequence exhausted")?;
+    let source = GameplayCommandIngressSource::external(SERVER_COMMAND_SOURCE)
+        .expect("static Server command source");
+    let command = GameplayCommandSubmission::new(tick, source, sequence, draft);
+    let expected = command.key();
+    let admitted = session.submit(command)?;
+    if admitted != expected {
+        return Err("Server command queue changed the submitted external identity".into());
+    }
+    *last_sequence = sequence.get();
+    Ok(admitted)
+}
+
 fn checkpoint(
     options: &RunOptions,
     restored: Option<&GameSnapshot>,
@@ -404,7 +480,7 @@ fn checkpoint(
     })))
 }
 
-fn state(snapshot: &GameSnapshot) -> Value {
+pub(super) fn state(snapshot: &GameSnapshot) -> Value {
     json!({
         "tick": snapshot.tick,
         "logical_tick": snapshot.logical_tick,
@@ -422,6 +498,9 @@ fn state(snapshot: &GameSnapshot) -> Value {
         "initialized": snapshot.initialized,
         "verified": snapshot.verified,
         "scene_members": snapshot.scene_members,
+        "held": snapshot.held,
+        "error": snapshot.error.as_deref().map(|error| error.chars().take(2048).collect::<String>()),
+        "restoring": snapshot.restoring,
         "side_room": snapshot.side_room,
         "lookout": snapshot.lookout,
     })

@@ -21,6 +21,7 @@ use crate::{
 
 mod graph;
 mod package;
+mod service;
 
 const GAME: &str = "two-level-game";
 const BIN: &str = "server";
@@ -194,6 +195,8 @@ pub(super) fn accept(cooker: &Path) {
     let message = RuntimeContentError::CatalogDigestMismatch.to_string();
     assert_eq!(rejected["message"], message, "{rejected}");
     assert!(refused.stderr.contains(&message), "{}", refused.stderr);
+
+    service::accept(&mut custody, &server);
     package.assert_unchanged(&relocated);
     assert_sources_gone(&project, &cache);
     println!(concat!(
@@ -211,6 +214,18 @@ fn assert_success(
 ) -> Value {
     output.assert_player_exit(true);
     let result: Value = record(&output.stdout, RESULT).unwrap();
+    assert_complete(&result, scenario);
+    assert_eq!(result["visited_levels"], json!(LevelId::ALL), "{result}");
+    let state = &result["state"];
+    positive_tick(state);
+    assert_eq!(state["phase"], "Running", "{result}");
+    assert_eq!(state["level"], json!(LevelKey::main(level)), "{result}");
+    assert_eq!(state["score"], score, "{result}");
+    assert_eq!(state["markers"], json!(markers), "{result}");
+    result
+}
+
+fn assert_complete(result: &Value, scenario: &str) {
     assert_eq!(result["status"], "ok", "{result}");
     assert_eq!(result["success"], true, "{result}");
     assert_eq!(result["scenario"], scenario, "{result}");
@@ -221,14 +236,6 @@ fn assert_success(
     assert_eq!(result["initialized"], true, "{result}");
     assert_eq!(result["close"], "complete", "{result}");
     assert_eq!(result["cleanup_complete"], true, "{result}");
-    assert_eq!(result["visited_levels"], json!(LevelId::ALL), "{result}");
-    let state = &result["state"];
-    positive_tick(state);
-    assert_eq!(state["phase"], "Running", "{result}");
-    assert_eq!(state["level"], json!(LevelKey::main(level)), "{result}");
-    assert_eq!(state["score"], score, "{result}");
-    assert_eq!(state["markers"], json!(markers), "{result}");
-    result
 }
 
 fn positive_tick(state: &Value) -> u64 {

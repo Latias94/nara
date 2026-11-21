@@ -162,9 +162,9 @@ pub mod native {
             host_fs,
             process::{
                 ExactExecutableLaunchAuthority, ProcessLogLimits, ProcessOutputStream,
-                SupervisedProcessCleanupReceipt, SupervisedProcessCommand, SupervisedProcessOwner,
-                SupervisedProcessState, SupervisedProductEnvironmentPolicy,
-                SupervisedProductProcessCommand,
+                SupervisedBootstrapChannel, SupervisedProcessCleanupReceipt,
+                SupervisedProcessCommand, SupervisedProcessOwner, SupervisedProcessState,
+                SupervisedProductEnvironmentPolicy, SupervisedProductProcessCommand,
             },
             project_cook::project_rust_input_inventory,
         },
@@ -318,32 +318,7 @@ pub mod native {
             let mut stdout = Vec::new();
             let mut stderr = Vec::new();
             loop {
-                let owner = self.process.as_mut().unwrap();
-                let (_, outputs) =
-                    owner
-                        .advance_with_output(Instant::now())
-                        .unwrap_or_else(|error| {
-                            panic!("native observation: {error}; {}", diagnostics(owner))
-                        });
-                for output in outputs {
-                    let bytes = match output.stream() {
-                        ProcessOutputStream::Stdout => &mut stdout,
-                        ProcessOutputStream::Stderr => &mut stderr,
-                    };
-                    assert!(
-                        !output.loss() && output.bytes().len() <= OUTPUT_BYTES - bytes.len(),
-                        "native output exceeded its exact finite allowance: {}",
-                        diagnostics(owner),
-                    );
-                    bytes.extend_from_slice(output.bytes());
-                }
-                if owner.state() == SupervisedProcessState::Complete {
-                    let receipt = owner
-                        .cleanup_receipt()
-                        .expect("original native cleanup receipt");
-                    NativeExit::from(receipt).assert_clean();
-                    assert!(!owner.output_loss_observed(), "{}", diagnostics(owner));
-                    self.process.take();
+                if let Some(receipt) = self.poll_output(&mut stdout, &mut stderr) {
                     return Output {
                         stdout: String::from_utf8(stdout).expect("native stdout must be UTF-8"),
                         stderr: String::from_utf8(stderr).expect("native stderr must be UTF-8"),
@@ -353,10 +328,62 @@ pub mod native {
                 assert!(
                     Instant::now() < deadline,
                     "native process exceeded {timeout:?}: {}",
-                    diagnostics(owner),
+                    diagnostics(self.process.as_ref().unwrap()),
                 );
                 thread::sleep(POLL);
             }
+        }
+
+        pub(crate) fn start_interactive_product(
+            &mut self,
+            executable: &Path,
+            command: &SupervisedProductProcessCommand,
+        ) -> SupervisedBootstrapChannel {
+            assert!(self.process.is_none(), "all native operations are serial");
+            assert!(command.bootstrap_requested());
+            let process = SupervisedProcessOwner::spawn_exact(
+                exact_authority(executable),
+                command,
+                log_limits(),
+            )
+            .unwrap();
+            self.process
+                .insert(process)
+                .take_bootstrap()
+                .expect("original native stdin endpoint")
+        }
+
+        pub(crate) fn poll_output(
+            &mut self,
+            stdout: &mut Vec<u8>,
+            stderr: &mut Vec<u8>,
+        ) -> Option<SupervisedProcessCleanupReceipt> {
+            let owner = self
+                .process
+                .as_mut()
+                .expect("original native process owner");
+            let (_, outputs) = owner
+                .advance_with_output(Instant::now())
+                .unwrap_or_else(|error| {
+                    panic!("native observation: {error}; {}", diagnostics(owner))
+                });
+            for output in outputs {
+                let bytes = match output.stream() {
+                    ProcessOutputStream::Stdout => &mut *stdout,
+                    ProcessOutputStream::Stderr => &mut *stderr,
+                };
+                assert!(
+                    !output.loss() && bytes.len() + output.bytes().len() <= OUTPUT_BYTES,
+                    "native output exceeded its exact finite allowance: {}",
+                    diagnostics(owner),
+                );
+                bytes.extend_from_slice(output.bytes());
+            }
+            assert!(!owner.output_loss_observed(), "{}", diagnostics(owner));
+            let receipt = owner.cleanup_receipt()?;
+            NativeExit::from(receipt).assert_clean();
+            self.process.take();
+            Some(receipt)
         }
 
         pub(crate) fn fixture(&self) -> &Fixture {

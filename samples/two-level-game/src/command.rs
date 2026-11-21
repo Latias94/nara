@@ -5,6 +5,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::gameplay::commands;
 
+/// External producer ID for commands submitted by the cooked Server.
+pub const SERVER_COMMAND_SOURCE: &str = "two-level-game.server";
+
 /// A game operation independent of its physical input binding or command ingress source.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
@@ -83,6 +86,34 @@ impl SemanticCommand {
             commands::RETRY => Ok(Self::Retry),
             kind => Err(format!("unsupported semantic game command {kind}")),
         }
+    }
+}
+
+/// Commands available to an operator of the cooked dedicated server.
+#[cfg(feature = "cooked-server")]
+pub enum ServerCommand {
+    Gameplay(SemanticCommand),
+    SideRoom,
+    Lookout,
+    Save,
+    Restore,
+}
+
+#[cfg(feature = "cooked-server")]
+impl ServerCommand {
+    /// Lowers an operator command through the game's existing fixed-step command vocabulary.
+    pub fn into_draft(self) -> Result<GameplayCommandDraft, String> {
+        let action = match self {
+            Self::Gameplay(command) => {
+                command.validate()?;
+                return Ok(command.draft());
+            }
+            Self::SideRoom => commands::SIDE_ROOM,
+            Self::Lookout => commands::LOOKOUT,
+            Self::Save => commands::SAVE,
+            Self::Restore => commands::RESTORE,
+        };
+        Ok(commands::action(action))
     }
 }
 

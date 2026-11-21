@@ -138,7 +138,9 @@ pub(super) fn add_marker(world: &mut World) -> Result<(), String> {
         .translation;
     let key = world.resource::<ActiveLevel>().key();
     let id = world.resource_mut::<Progress>().add_marker(key, position)?;
-    println!("two_level_game: marker={} level={key:?}", id.get());
+    if world.resource::<Session>().local_player {
+        println!("two_level_game: marker={} level={key:?}", id.get());
+    }
     if let Err(error) = rebuild(world) {
         fail(world, error);
     }

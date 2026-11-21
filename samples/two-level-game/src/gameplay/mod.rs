@@ -21,7 +21,7 @@ use nara::{
     advanced_prelude::{CurrentScene, add_startup_scene_activation_systems},
     app::{PluginCategory, PluginDeclaration, PluginId, PluginSchemaProviderId},
     ecs::{Entity, World, schedule::IntoScheduleConfigs},
-    gameplay::{GameplayCommandSet, add_local_gameplay_command_systems},
+    gameplay::{GameplayCommandKey, GameplayCommandSet, add_local_gameplay_command_systems},
     identity::{EntityLookup, SceneEntityId},
     prelude::{App, CoreStage, FixedUpdateSet, Plugin, PluginError, Resource, Transform2d, Vec2},
     reflect::{
@@ -35,6 +35,7 @@ use nara::{
 };
 #[cfg(feature = "local-player")]
 use nara::{core::ItemLimit, project_host::ProjectContentLimits, sprite::Sprite};
+use serde::Serialize;
 
 use crate::{
     levels::{LevelId, LevelKey},
@@ -123,6 +124,31 @@ pub struct GameSnapshot {
     pub restoring: bool,
     pub side_room: SideRoomPhase,
     pub lookout: SideRoomPhase,
+}
+
+/// Synchronous rejections observed for the cooked Server's command stream.
+#[derive(Debug, Default, Clone, Resource, Serialize)]
+pub struct ServerCommandRejections {
+    count: u64,
+    latest: Option<ServerCommandRejection>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ServerCommandRejection {
+    key: GameplayCommandKey,
+    message: String,
+}
+
+impl ServerCommandRejections {
+    fn record(&mut self, key: GameplayCommandKey, message: &str) {
+        const MAX_MESSAGE_BYTES: usize = 1024;
+
+        self.count = self.count.saturating_add(1);
+        self.latest = Some(ServerCommandRejection {
+            key,
+            message: message[..message.floor_char_boundary(MAX_MESSAGE_BYTES)].to_owned(),
+        });
+    }
 }
 
 /// Stable owner identity with a bounded write counter; ordinary mutations never allocate it.
@@ -323,6 +349,9 @@ impl Plugin for ExplorationPlugin {
         .insert_resource(travel::Travel::default())?
         .insert_resource(Rooms::default())?
         .insert_resource(verification::Verification::new(scenario))?;
+        if !local_player {
+            app.insert_resource(ServerCommandRejections::default())?;
+        }
         resume::install(app)?;
         storage::install(app, save_path)?;
         add_startup_scene_activation_systems(app, initialize)?;
@@ -523,11 +552,11 @@ fn initialize(world: &mut World) {
                 fail(world, error);
             } else {
                 world.resource_mut::<Session>().initialized = true;
-                #[cfg(feature = "local-player")]
                 if world.resource::<Session>().local_player {
+                    #[cfg(feature = "local-player")]
                     project_animation(world);
+                    println!("two_level_game: entered Meadow instance=0");
                 }
-                println!("two_level_game: entered Meadow instance=0");
             }
         }
         Err(error) => fail(world, error),
@@ -536,8 +565,10 @@ fn initialize(world: &mut World) {
 
 fn fail(world: &mut World, error: String) {
     resume::reject_pending(world);
-    eprintln!("two_level_game: reconstruction degraded: {error}");
     let mut session = world.resource_mut::<Session>();
+    if session.local_player {
+        eprintln!("two_level_game: reconstruction degraded: {error}");
+    }
     session.phase = GamePhase::Degraded;
     session.held = [false; 4];
     session.error = Some(error);
@@ -635,9 +666,10 @@ fn collect_pickups(world: &mut World) {
             (position.distance(player_position) <= 16.0).then(|| (id.clone(), entity))
         })
         .collect::<Vec<_>>();
+    let local_player = world.resource::<Session>().local_player;
     for (id, entity) in nearby {
         #[cfg(feature = "local-player")]
-        if world.resource::<Session>().local_player && world.get::<Sprite>(entity).is_none() {
+        if local_player && world.get::<Sprite>(entity).is_none() {
             continue;
         }
         let pickup = CollectedPickup {
@@ -649,15 +681,15 @@ fn collect_pickups(world: &mut World) {
             continue;
         }
         let score = progress.checkpoint().score;
-        #[cfg(feature = "local-player")]
-        if world.resource::<Session>().local_player {
+        if local_player {
+            #[cfg(feature = "local-player")]
             hide_sprite(world, entity);
+            println!("two_level_game: collected={id} level={key:?} score={score}");
         }
         #[cfg(not(feature = "local-player"))]
         let _ = entity;
-        println!("two_level_game: collected={id} level={key:?} score={score}");
         #[cfg(all(windows, feature = "audio-cpal", feature = "local-player"))]
-        if world.resource::<Session>().local_player {
+        if local_player {
             crate::audio::pickup_collected(world, key, id);
         }
     }

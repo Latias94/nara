@@ -98,6 +98,10 @@ pub(super) fn inspect(
         "Cargo.toml",
         "build.rs",
         "src/bin/server.rs",
+        "src/bin/server/clock.rs",
+        "src/bin/server/control.rs",
+        "src/bin/server/output.rs",
+        "src/bin/server/service.rs",
         "src/delivery.rs",
     ] {
         assert!(

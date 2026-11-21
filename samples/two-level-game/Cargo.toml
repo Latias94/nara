@@ -167,7 +167,7 @@ bench = false
 name = "server"
 path = "src/bin/server.rs"
 required-features = ["cooked-server"]
-test = false
+test = true
 bench = false
 
 [patch.crates-io]

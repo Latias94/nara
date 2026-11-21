@@ -2,13 +2,7 @@ use std::time::{Duration, Instant};
 
 use nara::{
     advanced_prelude::CurrentScene,
-    app::FixedTime,
-    gameplay::{
-        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandPayload,
-        GameplayCommandQueue, GameplayCommandQueueStats, GameplayCommandSourceSequence,
-        GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
-        GameplayCommandValue,
-    },
+    gameplay::{GameplayCommandQueue, GameplayCommandQueueStats},
     identity::{
         EntityLookup, IdentityDomainError, SceneEntityId, SpawnedSceneInstance, WorldIdentityDomain,
     },
@@ -19,17 +13,13 @@ use nara::{
 use serde_json::{Value, json};
 use two_level_game::{
     CollisionBox, GamePhase, GameSnapshot, SideRoomPhase,
+    command::{SERVER_COMMAND_SOURCE, SemanticCommand, ServerCommand},
     levels::{LevelId, LevelKey},
     side_room::{LOOKOUT_RELIC, RELIC},
 };
 
-use super::runtime::{Failure, MAX_FRAMES, frame};
+use super::runtime::{Failure, MAX_FRAMES, frame, submit_external};
 
-const SOURCE: &str = "two-level-game.server";
-const SIDE_ROOM: &str = "two-level-game.side-room";
-const LOOKOUT: &str = "two-level-game.lookout";
-const TRAVEL: &str = "two-level-game.travel";
-const MOVE: &str = "two-level-game.move";
 const WEST_WALL: &str = "wall-west";
 const CONTACT_MARGIN: f32 = 0.01;
 const CONTACT_TOLERANCE: f32 = 0.001;
@@ -66,7 +56,7 @@ pub(super) fn verify(
     {
         return Err("Server region verification requires a fresh interactive game".into());
     }
-    driver.action(SIDE_ROOM)?;
+    driver.submit(ServerCommand::SideRoom)?;
     let first_opened = driver.until(MAX_FRAMES, "Side Room to open", |snapshot| {
         snapshot.side_room == SideRoomPhase::Open
     })?;
@@ -78,7 +68,7 @@ pub(super) fn verify(
     let first_side_room = driver.room_receipt(RELIC)?;
     driver.verify_residency(instances + 1, &[&meadow, &first_side_room], &[])?;
 
-    driver.action(LOOKOUT)?;
+    driver.submit(ServerCommand::Lookout)?;
     let opened = driver.until(MAX_FRAMES, "Lookout to open", |snapshot| {
         snapshot.lookout == SideRoomPhase::Open
     })?;
@@ -92,7 +82,7 @@ pub(super) fn verify(
 
     let side_room_found = driver.find_relic(2, |snapshot| snapshot.side_room)?;
     let lookout_found = driver.find_relic(3, |snapshot| snapshot.lookout)?;
-    driver.action(SIDE_ROOM)?;
+    driver.submit(ServerCommand::SideRoom)?;
     let closed = driver.frame()?;
     if closed.side_room != SideRoomPhase::Closed
         || closed.lookout != SideRoomPhase::RelicFound
@@ -102,7 +92,7 @@ pub(super) fn verify(
     }
     driver.verify_residency(instances + 1, &[&meadow, &lookout], &[&first_side_room])?;
 
-    driver.action(SIDE_ROOM)?;
+    driver.submit(ServerCommand::SideRoom)?;
     let reopened = driver.until(MAX_FRAMES, "Side Room to reopen", |snapshot| {
         snapshot.side_room == SideRoomPhase::Open
     })?;
@@ -148,7 +138,7 @@ pub(super) fn verify(
     }
 
     driver.verify_residency(instances + 2, &[&meadow, &side_room, &lookout], &[])?;
-    driver.action(TRAVEL)?;
+    driver.submit(ServerCommand::Gameplay(SemanticCommand::Travel))?;
     let travelled = driver.until(MAX_FRAMES, "the Cavern Travel to commit", |snapshot| {
         snapshot.phase == GamePhase::Running
             && snapshot.level == Some(LevelKey::main(LevelId::Cavern))
@@ -173,7 +163,7 @@ pub(super) fn verify(
         return Err("Server did not acknowledge the exact external semantic command stream".into());
     }
     let evidence = json!({
-        "source": SOURCE,
+        "source": SERVER_COMMAND_SOURCE,
         "commands_consumed": queue.acknowledged,
         "rooms": {
             "side_room": { "phase": side_room_found, "closed": travelled.side_room == SideRoomPhase::Closed },
@@ -293,7 +283,7 @@ impl Driver<'_> {
 
     fn find_relic(
         &mut self,
-        direction: i64,
+        direction: usize,
         phase: impl Fn(&GameSnapshot) -> SideRoomPhase,
     ) -> Result<SideRoomPhase, Failure> {
         self.movement(direction, true)?;
@@ -302,7 +292,7 @@ impl Driver<'_> {
         })?;
         self.movement(direction, false)?;
         let released = self.frame()?;
-        if released.held[direction as usize] || phase(&released) != SideRoomPhase::RelicFound {
+        if released.held[direction] || phase(&released) != SideRoomPhase::RelicFound {
             return Err(
                 "Server did not retain the relic observation after releasing movement".into(),
             );
@@ -310,42 +300,16 @@ impl Driver<'_> {
         Ok(phase(&released))
     }
 
-    fn action(&mut self, name: &str) -> Result<(), Failure> {
-        self.submit(GameplayCommandDraft::new(
-            GameplayCommandTypeId::new(name).map_err(|error| Failure::Error(error.to_string()))?,
-        ))
+    fn movement(&mut self, direction: usize, pressed: bool) -> Result<(), Failure> {
+        self.submit(ServerCommand::Gameplay(SemanticCommand::Move {
+            direction,
+            pressed,
+        }))
     }
 
-    fn movement(&mut self, direction: i64, pressed: bool) -> Result<(), Failure> {
-        let mut payload = GameplayCommandPayload::new();
-        payload
-            .insert("direction", GameplayCommandValue::I64(direction))
-            .map_err(|error| Failure::Error(error.to_string()))?;
-        payload
-            .insert("pressed", GameplayCommandValue::Bool(pressed))
-            .map_err(|error| Failure::Error(error.to_string()))?;
-        let kind = GameplayCommandTypeId::new(MOVE).expect("static movement command type");
-        self.submit(GameplayCommandDraft::new(kind).with_payload(payload))
-    }
-
-    fn submit(&mut self, draft: GameplayCommandDraft) -> Result<(), Failure> {
-        let tick = self
-            .session
-            .observe(|world| world.resource::<FixedTime>().tick())?;
-        let tick = tick
-            .checked_add(1)
-            .and_then(GameplayCommandTick::new)
-            .ok_or("Server tick cannot accept another command")?;
-        self.sequence += 1;
-        let source =
-            GameplayCommandIngressSource::external(SOURCE).expect("static Server command source");
-        let sequence = GameplayCommandSourceSequence::new(self.sequence)
-            .expect("nonzero Server command sequence");
-        let command = GameplayCommandSubmission::new(tick, source, sequence, draft);
-        let key = command.key();
-        if self.session.submit(command)? != key {
-            return Err("Server command queue changed the submitted external identity".into());
-        }
+    fn submit(&mut self, command: ServerCommand) -> Result<(), Failure> {
+        let draft = command.into_draft().map_err(Failure::Error)?;
+        submit_external(self.session, &mut self.sequence, draft)?;
         Ok(())
     }
 }

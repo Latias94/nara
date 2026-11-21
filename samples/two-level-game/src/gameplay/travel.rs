@@ -7,15 +7,15 @@ pub(super) use reconstruction::reconstruct;
 
 use std::collections::BTreeSet;
 
-#[cfg(feature = "local-player")]
-use nara::gameplay::GameplayCommandSource;
 use nara::{
     advanced_prelude::{
         CurrentScene, commit_prepared_project_scene, restart_current_scene_with_product,
     },
     core::ItemLimit,
     ecs::World,
-    gameplay::{GameplayCommandBatch, GameplayCommandPayload},
+    gameplay::{
+        GameplayCommandBatch, GameplayCommandKey, GameplayCommandPayload, GameplayCommandSource,
+    },
     identity::SceneEntityId,
     prelude::Resource,
     project_host::{
@@ -25,7 +25,7 @@ use nara::{
 };
 
 use super::{
-    ActiveLevel, GamePhase, Progress, Session,
+    ActiveLevel, GamePhase, Progress, ServerCommandRejections, Session,
     commands::*,
     content::Content,
     fail,
@@ -33,7 +33,7 @@ use super::{
     storage::Storage,
 };
 use crate::{
-    command::decode_movement,
+    command::{SERVER_COMMAND_SOURCE, decode_movement},
     levels::{LevelId, LevelKey},
     resume::LevelContentStamp,
     save::{Checkpoint, CheckpointLocation, MAX_MARKERS, io::CheckpointBinding},
@@ -71,8 +71,11 @@ enum ConsumedInput {
 pub(super) fn consume(world: &mut World) {
     let launch_error = super::player_launch::consume(world).err();
     if let Some(error) = &launch_error {
-        eprintln!("two_level_game: Player launch rejected: {error}");
-        world.resource_mut::<Session>().error = Some(error.clone());
+        let mut session = world.resource_mut::<Session>();
+        if session.local_player {
+            eprintln!("two_level_game: Player launch rejected: {error}");
+        }
+        session.error = Some(error.clone());
     }
     #[cfg(feature = "local-player")]
     let (blocked, mut round_saves) = if world.resource::<Session>().local_player {
@@ -82,51 +85,65 @@ pub(super) fn consume(world: &mut World) {
     };
     #[cfg(not(feature = "local-player"))]
     let blocked = false;
+    let observe_rejections = world.contains_resource::<ServerCommandRejections>();
     let commands = world
         .resource::<GameplayCommandBatch>()
         .commands()
         .iter()
-        .filter_map(|command| match command.command_type().as_str() {
-            MOVE => Some(ConsumedInput::Movement(decode_movement(command))),
-            ROUND_SAVE => {
-                #[cfg(feature = "local-player")]
-                if round_saves != 0 && command.source() == &GameplayCommandSource::LocalAction {
-                    round_saves -= 1;
-                    return Some(ConsumedInput::Action(
-                        SAVE.to_owned(),
-                        command.payload().clone(),
-                    ));
+        .filter_map(|command| {
+            let input = match command.command_type().as_str() {
+                MOVE => ConsumedInput::Movement(decode_movement(command)),
+                ROUND_SAVE => {
+                    #[cfg(feature = "local-player")]
+                    if round_saves != 0 && command.source() == &GameplayCommandSource::LocalAction {
+                        round_saves -= 1;
+                        return Some((
+                            ConsumedInput::Action(SAVE.to_owned(), command.payload().clone()),
+                            None,
+                        ));
+                    }
+                    return None;
                 }
+                PLAYER_LAUNCH => return None,
+                _ if blocked => return None,
+                kind => ConsumedInput::Action(kind.to_owned(), command.payload().clone()),
+            };
+            let server_key = if observe_rejections
+                && let GameplayCommandSource::External { producer } = command.source()
+                && producer.as_str() == SERVER_COMMAND_SOURCE
+            {
+                Some(command.key().clone())
+            } else {
                 None
-            }
-            _ if blocked => None,
-            kind => Some(ConsumedInput::Action(
-                kind.to_owned(),
-                command.payload().clone(),
-            )),
+            };
+            Some((input, server_key))
         })
         .collect::<Vec<_>>();
-    for command in commands {
+    for (command, server_key) in commands {
         let (kind, payload) = match command {
             ConsumedInput::Movement(Ok((direction, pressed))) => {
-                if !pressed || (!blocked && world.resource::<Session>().phase == GamePhase::Running)
-                {
-                    world.resource_mut::<Session>().held[direction] = pressed;
+                if pressed {
+                    if blocked {
+                        continue;
+                    }
+                    let phase = world.resource::<Session>().phase;
+                    if phase != GamePhase::Running {
+                        record_phase_rejection(world, server_key, phase);
+                        continue;
+                    }
                 }
+                world.resource_mut::<Session>().held[direction] = pressed;
                 continue;
             }
             ConsumedInput::Movement(Err(_)) if blocked => continue,
             ConsumedInput::Movement(Err(error)) => {
-                eprintln!("two_level_game: action rejected: {error}");
-                world.resource_mut::<Session>().error = Some(error);
+                reject_action(world, server_key, error);
                 continue;
             }
             ConsumedInput::Action(kind, payload) => (kind, payload),
         };
-        if kind == PLAYER_LAUNCH {
-            continue;
-        }
-        if kind == RETRY && world.resource::<Session>().phase == GamePhase::Degraded {
+        let phase = world.resource::<Session>().phase;
+        if kind == RETRY && phase == GamePhase::Degraded {
             world.resource_mut::<Session>().phase = GamePhase::Reconstructing;
             match reconstruct(world) {
                 Ok(()) => {
@@ -135,11 +152,15 @@ pub(super) fn consume(world: &mut World) {
                     session.phase = GamePhase::Running;
                     session.error = None;
                 }
-                Err(error) => fail(world, error),
+                Err(error) => {
+                    record_server_rejection(world, server_key, &error);
+                    fail(world, error);
+                }
             }
             continue;
         }
-        if world.resource::<Session>().phase != GamePhase::Running {
+        if phase != GamePhase::Running {
+            record_phase_rejection(world, server_key, phase);
             continue;
         }
         let result = match kind.as_str() {
@@ -182,8 +203,7 @@ pub(super) fn consume(world: &mut World) {
             _ => Ok(()),
         };
         if let Err(error) = result {
-            eprintln!("two_level_game: action rejected: {error}");
-            world.resource_mut::<Session>().error = Some(error);
+            reject_action(world, server_key, error);
         } else if world.resource::<Session>().phase == GamePhase::Running {
             world.resource_mut::<Session>().error = None;
         }
@@ -193,13 +213,42 @@ pub(super) fn consume(world: &mut World) {
     }
 }
 
+fn reject_action(world: &mut World, key: Option<GameplayCommandKey>, error: String) {
+    record_server_rejection(world, key, &error);
+    let mut session = world.resource_mut::<Session>();
+    if session.local_player {
+        eprintln!("two_level_game: action rejected: {error}");
+    }
+    session.error = Some(error);
+}
+
+fn record_phase_rejection(world: &mut World, key: Option<GameplayCommandKey>, phase: GamePhase) {
+    let message = match phase {
+        GamePhase::Running => return,
+        GamePhase::Preparing => "command skipped while level preparation is pending",
+        GamePhase::Reconstructing => "command skipped during level reconstruction",
+        GamePhase::Degraded => "command skipped while gameplay is degraded",
+    };
+    record_server_rejection(world, key, message);
+}
+
+fn record_server_rejection(world: &mut World, key: Option<GameplayCommandKey>, message: &str) {
+    if let Some(key) = key {
+        world
+            .resource_mut::<ServerCommandRejections>()
+            .record(key, message);
+    }
+}
+
 fn save_checkpoint(world: &mut World) -> Result<(), String> {
     let checkpoint = world.resource::<Progress>().checkpoint();
     world.resource::<Storage>().save(checkpoint)?;
-    println!(
-        "two_level_game: checkpoint file published and verified at {:?} score={}",
-        checkpoint.location.level, checkpoint.score
-    );
+    if world.resource::<Session>().local_player {
+        println!(
+            "two_level_game: checkpoint file published and verified at {:?} score={}",
+            checkpoint.location.level, checkpoint.score
+        );
+    }
     let mut session = world.resource_mut::<Session>();
     session.saves = session.saves.saturating_add(1);
     Ok(())
@@ -482,10 +531,12 @@ pub(super) fn advance(world: &mut World) {
             if local_player && !restore {
                 crate::audio::travel_entered(world, pending.target);
             }
-            println!(
-                "two_level_game: entered {:?} score={} restored={}",
-                pending.target, pending.checkpoint.score, restore
-            );
+            if local_player {
+                println!(
+                    "two_level_game: entered {:?} score={} restored={}",
+                    pending.target, pending.checkpoint.score, restore
+                );
+            }
         }
         Err(error) => fail(world, error),
     }
@@ -493,8 +544,12 @@ pub(super) fn advance(world: &mut World) {
 
 fn reject(world: &mut World, error: String) {
     super::resume::reject_pending(world);
-    eprintln!("two_level_game: level preparation/commit rejected; current game retained: {error}");
     let mut session = world.resource_mut::<Session>();
+    if session.local_player {
+        eprintln!(
+            "two_level_game: level preparation/commit rejected; current game retained: {error}"
+        );
+    }
     session.phase = GamePhase::Running;
     session.error = Some(error);
 }

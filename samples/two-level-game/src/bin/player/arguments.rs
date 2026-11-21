@@ -24,18 +24,7 @@ pub(super) fn parse(
     let save_path = if scenario == Scenario::Travel {
         None
     } else {
-        let path = PathBuf::from(arguments.next().ok_or(USAGE)?);
-        let text = path.to_str().ok_or("Player save path must be UTF-8")?;
-        if text.len() > MAX_SAVE_PATH_BYTES
-            || text.contains('\0')
-            || !path.is_absolute()
-            || path.file_name().is_none()
-        {
-            return Err(
-                "Player save path must be absolute with a file name and at most 4096 UTF-8 bytes; create its parent explicitly",
-            );
-        }
-        Some(path)
+        Some(parse_save_path(arguments.next().ok_or(USAGE)?)?)
     };
     if arguments.next().is_some() {
         return Err(USAGE);
@@ -44,6 +33,21 @@ pub(super) fn parse(
         scenario,
         save_path,
     })
+}
+
+pub(super) fn parse_save_path(value: OsString) -> Result<PathBuf, &'static str> {
+    let path = PathBuf::from(value);
+    let text = path.to_str().ok_or("Player save path must be UTF-8")?;
+    if text.len() > MAX_SAVE_PATH_BYTES
+        || text.contains('\0')
+        || !path.is_absolute()
+        || path.file_name().is_none()
+    {
+        return Err(
+            "Player save path must be absolute with a file name and at most 4096 UTF-8 bytes; create its parent explicitly",
+        );
+    }
+    Ok(path)
 }
 
 #[cfg(test)]

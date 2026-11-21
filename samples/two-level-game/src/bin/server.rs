@@ -2,16 +2,28 @@
 
 #[path = "player/arguments.rs"]
 mod arguments;
+#[cfg(any(nara_cooked_player, test))]
+#[path = "server/clock.rs"]
+mod clock;
+#[cfg(any(nara_cooked_player, test))]
+#[path = "server/control.rs"]
+mod control;
 #[cfg(nara_cooked_player)]
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/nara-player-bootstrap.rs"));
 }
+#[cfg(nara_cooked_player)]
+#[path = "server/output.rs"]
+mod output;
 #[cfg(nara_cooked_player)]
 #[path = "server/regions.rs"]
 mod regions;
 #[cfg(nara_cooked_player)]
 #[path = "server/runtime.rs"]
 mod runtime;
+#[cfg(nara_cooked_player)]
+#[path = "server/service.rs"]
+mod service;
 
 use std::{
     ffi::OsString,
@@ -22,16 +34,34 @@ use std::{
 use serde_json::{Value, json};
 use two_level_game::{RunOptions, Scenario};
 
-const USAGE: &str = "usage: server [--verify-travel | --verify-save ABSOLUTE_PATH | --verify-restore ABSOLUTE_PATH | --verify-regions]";
+const USAGE: &str = "usage: server [--serve [--save ABSOLUTE_PATH] | --verify-travel | --verify-save ABSOLUTE_PATH | --verify-restore ABSOLUTE_PATH | --verify-regions]";
+const RESULT: &str = "TWO_LEVEL_SERVER_RESULT";
 
 enum Invocation {
     Player(RunOptions),
+    Serve(#[cfg_attr(not(nara_cooked_player), allow(dead_code))] RunOptions),
     Regions,
 }
 
 impl Invocation {
     fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Self, &'static str> {
         let mut arguments = arguments.into_iter().peekable();
+        if arguments.next_if(|flag| flag == "--serve").is_some() {
+            let save_path = match arguments.next() {
+                None => None,
+                Some(flag) if flag == "--save" => {
+                    Some(arguments::parse_save_path(arguments.next().ok_or(USAGE)?)?)
+                }
+                Some(_) => return Err(USAGE),
+            };
+            if arguments.next().is_some() {
+                return Err(USAGE);
+            }
+            return Ok(Self::Serve(RunOptions {
+                scenario: Scenario::Interactive,
+                save_path,
+            }));
+        }
         if arguments
             .next_if(|flag| flag == "--verify-regions")
             .is_some()
@@ -61,6 +91,7 @@ impl Invocation {
                 Scenario::Save => "save",
                 Scenario::Restore => "restore",
             },
+            Self::Serve(_) => "serve",
             Self::Regions => "regions",
         }
     }
@@ -94,18 +125,28 @@ impl Report {
     }
 
     fn emit(self, status: &'static str, message: Option<&str>) -> ExitCode {
-        let message = message.map(|message| message.chars().take(2048).collect::<String>());
-        if let Some(message) = &message {
+        let result = self.into_record(status, message);
+        if let Some(message) = result["message"].as_str() {
             let _ = writeln!(io::stderr().lock(), "two_level_server: {message}");
         }
-        let success = status == "ok";
+        let mut output = io::stdout().lock();
+        let written = writeln!(output, "{RESULT} {result}").and_then(|()| output.flush());
+        if status == "ok" && written.is_ok() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        }
+    }
+
+    fn into_record(self, status: &'static str, message: Option<&str>) -> Value {
+        let message = message.map(|message| message.chars().take(2048).collect::<String>());
         let initialized = self
             .state
             .as_ref()
             .is_some_and(|state| state["initialized"] == true);
-        let result = json!({
+        json!({
             "status": status,
-            "success": success,
+            "success": status == "ok",
             "scenario": self.scenario,
             "stage": self.stage,
             "ready": self.ready,
@@ -120,15 +161,7 @@ impl Report {
             "server_evidence": self.server_evidence,
             "message": message,
             "error": message,
-        });
-        let mut output = io::stdout().lock();
-        let written =
-            writeln!(output, "TWO_LEVEL_SERVER_RESULT {result}").and_then(|()| output.flush());
-        if success && written.is_ok() {
-            ExitCode::SUCCESS
-        } else {
-            ExitCode::FAILURE
-        }
+        })
     }
 }
 
@@ -147,5 +180,37 @@ fn main() -> ExitCode {
             "rejected",
             Some("Server requires a generated cooked-content expectation from the two-level game cooker"),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sustained_mode_keeps_checkpoint_selection_explicit() {
+        let path = std::env::temp_dir().join("server-checkpoint.json");
+        let Ok(Invocation::Serve(options)) =
+            Invocation::parse(["--serve".into(), "--save".into(), path.clone().into()])
+        else {
+            panic!("expected sustained operation with a checkpoint");
+        };
+        assert_eq!(options.scenario, Scenario::Interactive);
+        assert_eq!(options.save_path, Some(path));
+        assert!(matches!(
+            Invocation::parse(["--serve".into()]),
+            Ok(Invocation::Serve(RunOptions {
+                save_path: None,
+                ..
+            }))
+        ));
+        for arguments in [
+            vec!["--serve", "--save"],
+            vec!["--serve", "--save", "relative.json"],
+            vec!["--serve", "--verify-regions"],
+            vec!["--verify-regions", "--serve"],
+        ] {
+            assert!(Invocation::parse(arguments.into_iter().map(OsString::from)).is_err());
+        }
     }
 }
