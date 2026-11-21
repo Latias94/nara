@@ -529,10 +529,13 @@ second real adapter or stronger isolation pressure.
 - Fixed-step interpolation is an explicit `FixedTransformInterpolation` presentation policy.
   The transform owner retains previous/current local samples around simulation, composes their
   interpolated hierarchy into private render matrices, and shares those matrices with camera,
-  sprite and tile extraction. Simulation components remain unchanged. Default, paused, newly
-  authored and newly spawned state uses current transforms. Repeated extraction does not rotate
-  history. `DisplayMapping2d` owns target-to-panel fit and inverse input mapping; integer scaling
-  keeps the logical canvas, fits physical pixels and selects nearest native texture registration.
+  sprite and tile extraction. Handedness changes retain a valid current basis, while equivalent
+  half-turn representations use one deterministic midpoint direction and equal subnormal scales
+  use monotonic interpolation. A genuinely singular camera still rejects publication. Simulation
+  components remain unchanged. Default, paused, newly authored and newly spawned state uses current
+  transforms. Repeated extraction does not rotate history. `DisplayMapping2d` owns target-to-panel
+  fit and inverse input mapping; integer scaling keeps the logical canvas, fits physical pixels and
+  selects nearest native texture registration.
 - Native window targets use an owning provider plus an explicit lifecycle authority. Atomic surface
   acquisition issues one non-cloneable handle source and one control lease; safe wgpu surface
   creation consumes the handle source, whose `Drop` acknowledges actual owner release. Controlled

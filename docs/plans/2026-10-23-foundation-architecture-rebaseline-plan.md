@@ -1101,6 +1101,10 @@ tracks mirror-safe camera interpolation, checkpoint write authority and recovery
 the relation between Cook source selection and publication. The UI interaction owner uses the
 presented rectangle's snapped edges for pointer hits and preserves the existing focus when a
 direction has no neighbor. The selected collection-edit workflow remains under R2.
+The follow-up `de005f6` keeps the same owner boundary while making the interpolation path robust to
+equal subnormal parent/child scales and equivalent `+π`/`−π` representations. Its 43-transform and
+11 captured-time Runtime cases pass on Windows/Rust 1.95.0. The native Vulkan evidence and the
+cross-platform camera scope remain those of the linked repair record.
 
 ### November 20 Pending Recovery And Authoring Review
 

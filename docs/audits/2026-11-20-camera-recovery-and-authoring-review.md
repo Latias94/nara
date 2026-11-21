@@ -211,6 +211,18 @@ GeForce RTX 4090. The mirror case checks six complete 960 × 540 outputs, includ
 fixed step, interpolation fractions 0.45, 0.5 and 0.55, and continued execution through tick 2.
 These captures are replayed after the original Runtime retires.
 
+The follow-up `de005f6` closes two numeric edges found during review. Transform translation and
+same-handed scale interpolation use the monotonic form, so equal subnormal endpoint scales do not
+underflow at an interior fraction. Half-turn angles are canonicalized to one signed endpoint before
+the shortest-arc calculation, so equivalent `+π` and `−π` authored representations retain one
+deterministic midpoint direction and the existing double-mirror trajectory. The added parented
+Camera2d case keeps an identical non-singular world basis at the midpoint while a zero-scale
+endpoint still follows the original `SingularTransform` refusal. The complete `nara_transform`
+library passes 43/43 in `060d3e72-23d9-4a8f-8077-ae803a2479d5`; the affected captured-time
+`nara_render` cohort passes 11/11 in `b0df2200-319a-469a-82df-acf8a5b8dbd9`. These are Windows
+CPU/Runtime results. The earlier Vulkan evidence remains the native pixel scope, and no new
+cross-platform or native GPU qualification is implied by this follow-up.
+
 `6491618` stages the exact checkpoint binding and observed level stamps in the game-owned
 travel request. Only successful Scene replacement publishes them. The Two-Level Windows
 suite passes 166/166 in run `8606d075-bb23-43ec-92c2-e0c7956f8384`. It covers direct and pending
