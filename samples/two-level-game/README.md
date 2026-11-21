@@ -568,8 +568,16 @@ reports errors from later Scene preparation or commit. Wait for the acknowledged
 gameplay result before sending a dependent operation. For example, wait for the Cavern state
 after `travel` before sending `save`.
 
-`shutdown` and end-of-input stop accepting commands. The process settles admitted commands
+`shutdown` and end-of-input stop accepting commands. A running Server settles admitted commands
 and pending Scene work before retiring the session and emitting `TWO_LEVEL_SERVER_RESULT`.
+Scaled simulation continues toward accepted fixed ticks. Ten seconds without progress results
+in an error and the final receipt reports the remaining work. The result lists the distinct
+levels whose Scenes were committed from this process's Ready boundary onward.
+The live loop shortens its wake interval at faster time scales and passes measured elapsed time
+to Runtime. The authored fixed-step and debt limits still apply. With `--paused` or an
+initially paused profile, the server configures a requested checkpoint in an exact startup
+tick and remains paused at Ready. The finite `--verify-*` commands drive exact ticks and
+Scene maintenance under any admitted time scale.
 A malformed complete line receives a rejection. A line that exceeds the byte limit, a truncated
 line at EOF or an unsupported elapsed interval closes the session with an error. The server also
 closes with an error if the bounded reply queue fills. The parent must drain stdout to receive the
@@ -633,6 +641,13 @@ the Player acceptance above.
 
 ```text
 cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features cook --test server_delivery --run-ignored only -E 'test(=production_cooker_delivers_the_source_free_two_level_server)' --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The scaled Server regression builds its own matching packages for each timing profile and
+exercises the live command stream, both stop routes, and the finite region verifier.
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features cook --test server_delivery --run-ignored only -E 'test(=production_cooker_delivers_scaled_two_level_server_timing)' --test-threads=1 --no-fail-fast --no-tests fail
 ```
 
 ## Source-Free Desktop Player

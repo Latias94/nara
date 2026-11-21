@@ -1453,6 +1453,12 @@ advances more than 3,200 ticks while its control stream is idle, then closes nor
 linked qualification records elapsed-interval and blocked-output failure probes. Load and
 separate-machine deployment remain open.
 
+The [scaled Server and cooked consumer repairs](2026-10-31-cooked-player-delivery-plan.md#scaled-server-and-cooked-consumer-repairs)
+cover deadline-driven live simulation, progress-based drain and exact-tick verification.
+The same unit gives cooked Material CPU acquisition and native publication separate admission
+and accepts verified build groups whose Products are first reached from other built dependencies.
+The owning plan records the process, public consumer and negative controls.
+
 The [packaged Server continuation](2026-10-31-cooked-player-delivery-plan.md#packaged-server-continuation)
 uses the ordinary source-free installation for both processes. The receiving Server checks the
 exact compatible catalog, reconstructs the selected Scene and game state, and confirms byte

@@ -352,6 +352,83 @@ load, longer soaks, standalone Linux hosts and networking have separate scope.
 Windows correctness Clippy passes for the selected generated Server binary and the affected
 library and consumer test targets. Root and sample formatting and changed document links pass.
 
+### Scaled Server And Cooked Consumer Repairs
+
+Server pacing and verification are implemented at `e438b66`. Restore completion is implemented
+at `246d4b6`.
+
+The [November 21 workflow audit](../audits/2026-11-21-server-residency-input-and-cook-review.md)
+and [follow-up](../audits/2026-11-21-scene-admission-input-order-and-material-dependencies.md)
+exercise the original installed Server, multi-profile processed Host and verified artifact
+groups. The sustained Server uses the resolved fixed-step settings and time scale for wake
+cadence, feeds measured elapsed time to the original Runtime and drains admitted work according
+to acknowledged commands and fixed-time progress toward pending ticks. It bounds stalled work
+and retains the original frame clamp and fixed debt budget. Short live waits sleep until the
+monotonic frame deadline even with silent stdin. The input channel can wake longer waits. Finite
+travel and region verification use exact ticks with Scene maintenance. Region verification
+waits for the admitted command's acknowledged tick and checks wall contact across distinct
+completed ticks. The terminal receipt accumulates level definitions visited from Ready through
+live, paused and drain driving. Startup uses the admitted processed Scene membership. Either
+source of startup pause lets a configured checkpoint settle through its first exact tick before
+Ready, including at zero scale.
+
+Checkpoint Restore counts completion after successful Scene reconstruction and SaveSlot
+rebinding. If a different file object replaces the checkpoint during reconstruction, its bytes
+stay protected and Retry cannot authorize a Save against the refused binding.
+
+An explicit processed Material codec facet publishes only when the resolved plan includes
+the Material plugin. The typed CPU collection retains its original verified acquisitions in
+either placement. Deep validation and preparation use the same Material and Image eligibility.
+Published Material defaults require their own Required Image edge. CPU codecs may retain a
+Reference edge for explicit later acquisition. The existing native residency owner handles
+publication, sharing and retirement.
+
+A Project Cook contributor can submit a complete verified group before another product names
+one of its outputs. Cook selects the group from its admitted domain registry and consumes the
+complete group when Required or Reference demand reaches it. That admission checks the current
+source, verified build seed and output ownership. A catalogue record alone does not establish
+that a build source entered the Scene closure. Late sources share the original delivery file
+allowance and publication fence. Scene replay retains supplemental observations and allocations
+while completed traversals release their temporary file and directory counters. The replay
+revalidates the original delivery stamp. Discovery rescans for newly demanded stock identities
+outside its initial coverage. Unused contributions still fail the complete delivery.
+
+Frame partition rounding of fractional scaled nanoseconds remains an App time and continuation
+issue. This Server slice qualifies pacing, acknowledged work and shutdown behavior under the
+existing Runtime time contract.
+
+On Windows x64 and Rust 1.95.0, the engine Cook and Material cohort passes 52/52
+(`e93d2fe5-b604-4642-8fdd-6da1bb4d6389`). The independently locked Cook and processed
+Material consumers pass 22/22 (`03d1630d-c5bd-4cf3-8752-e11576da6ac2`). They cover same- and
+cross-domain late groups, exact Product and subproduct selection, both contribution orders,
+source and identity drift, bounded Scene replay, and the same native Material requirements
+at deep validation and preparation. Material publication is committed at `23c4634` and Cook
+group admission at `d9592f1`.
+
+The ordinary and scaled Server Cook-to-installation tests pass 2/2 on Windows x64 with
+Rust 1.95.0 (`11ff3d46-220b-4535-8410-442c8263252a`). Both 0.5× stop routes reach tick 600
+in about 24 seconds, and 2× shutdown reaches it in about 6 seconds. Each acknowledges the
+accepted command and reports zero pending work. At 8× the Server reaches tick 1224 with
+stdin idle for about three seconds. Both stop routes preserve visits through an edited Scene.
+The 20-second timestep shows progress through the fixed remainder before the first tick.
+At zero scale, the paused startup applies its checkpoint command in one exact tick. The
+running zero-scale case reports a stall and the original pending command. Travel and region
+verifiers use exact ticks at the tested scales and with an authored pause.
+
+The ordinary package also passes same-host checkpoint handoff and the replacement control.
+When a byte-identical file replaces the checkpoint during Restore, the refused attempt keeps
+the count at zero. Retry leaves Save conflict protection intact. A fresh successful Restore
+counts once and a newly started process reopens the slot. The first packaged run completed the
+half- and double-speed drain assertions, then exposed two fixture errors. The corrected tests
+allocate each zero-scale run its own working directory and account for the exact startup tick
+separately from measured wall time. Hosted load, networking and this timing repair on other
+platforms remain unqualified.
+
+The final Server binary cohort passes 20/20 (`cf3b48fd-12d3-4942-b7c8-0a8cad2ab937`).
+Correctness Clippy passes for the sample library, ordinary Server and public delivery test,
+and for the isolated Server binary with a Cook-generated bootstrap. Root and sample formatting
+and changed document links pass.
+
 ### Packaged Server Continuation
 
 Implementation: `c488d72`. Process acceptance: `196f003`.

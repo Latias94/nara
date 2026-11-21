@@ -108,7 +108,11 @@ Rules:
   fixed steps and enforces the debt bound. The Two-Level executable treats an interval beyond
   the authored frame clamp as an error before driving that interval. Its input runner submits
   commands through the typed fixed ingress, observes completed state, and requests close through
-  the original Host. [Two-Level server operation](../../../samples/two-level-game/README.md#operate-the-server)
+  the original Host. On orderly shutdown or EOF, a running Server drives admitted work until
+  it settles or fixed-time and acknowledgement progress stall. A paused Server leaves tick
+  advancement to the caller. Finite verification uses the same managed exact-tick entry point
+  as other headless consumers.
+  [Two-Level server operation](../../../samples/two-level-game/README.md#operate-the-server)
 - A local control caller may retain a paused Server while an independently started process
   reconstructs the game's selected state. The committed Host-managed Scene Product must match
   the active game level. Compatibility binds its original catalog, Schema and App configuration.
