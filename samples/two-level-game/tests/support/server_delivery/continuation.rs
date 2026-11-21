@@ -9,7 +9,7 @@ use two_level_game::{
         RuntimeCatchUpPolicy, SessionCounters,
         processed::{
             MAX_PROCESSED_RESUME_BYTES, PendingServerCommand, ProcessedResumeState,
-            decode_processed_resume, encode_processed_resume,
+            ProcessedRoomState, ProcessedRooms, decode_processed_resume, encode_processed_resume,
         },
     },
 };
@@ -30,6 +30,9 @@ const HANDOFF_OFFSET: u64 = 8;
 const HELD_RIGHT: [bool; 4] = [false, true, false, false];
 const MAX_WALK_TICKS: usize = 128;
 const CATALOG_REFUSAL: &str = "resume Runtime catalog differs from the admitted Server catalog";
+const UP: usize = 2;
+const DOWN: usize = 3;
+const HELD_UP: [bool; 4] = [false, false, true, false];
 
 pub(super) fn accept(
     custody: &mut Custody,
@@ -206,6 +209,241 @@ pub(super) fn accept(
          handoff_offset={HANDOFF_OFFSET} \
          incompatible=refused_before_ready incumbent=retired candidate=shutdown",
         bytes.len(),
+    );
+}
+
+pub(super) fn accept_open_rooms(
+    custody: &mut Custody,
+    executable: &Path,
+    candidate_custody: &mut Custody,
+    candidate_executable: &Path,
+) {
+    let meadow = LevelKey::main(LevelId::Meadow);
+    let cavern = LevelKey::main(LevelId::Cavern);
+    let mut incumbent = Service::spawn(custody, executable, Launch::Paused(None), "server-rooms");
+    let ready = incumbent.ready(true, false);
+    assert_eq!(tick(&ready["state"]), 0, "{ready}");
+
+    incumbent.admit(&request("lookout"));
+    advance(&mut incumbent, TIMESTEP_NANOS);
+    let lookout = incumbent.until("Lookout to open", |state| state["lookout"] == "open");
+    assert_eq!(lookout["side_room"], "closed", "{lookout}");
+    incumbent.admit(&request("side_room"));
+    advance(&mut incumbent, TIMESTEP_NANOS);
+    let opened = incumbent.until("Side Room to open", |state| state["side_room"] == "open");
+    assert_eq!(opened["lookout"], "open", "{opened}");
+
+    let found = walk_to_relic(&mut incumbent, "side_room", UP);
+    assert_progress(&found, meadow, 0, &[]);
+    assert_eq!(found["lookout"], "open", "{found}");
+    assert!(player(&found)[1] > ANCHOR_POSITION[1], "{found}");
+    let original_tick = tick(&found);
+    advance(&mut incumbent, INITIAL_REMAINDER);
+    assert_eq!(
+        incumbent.admit(&after_ticks(vertical_movement(UP, false), RELEASE_OFFSET)),
+        original_tick + RELEASE_OFFSET
+    );
+    let boundary = incumbent.observe();
+    assert_eq!(boundary["paused"], true, "{boundary}");
+    assert_eq!(boundary["state"], found, "{boundary}");
+    assert_eq!(boundary["state"]["held"], json!(HELD_UP), "{boundary}");
+    assert_eq!(boundary["time"]["fixed_debt_nanos"], 0, "{boundary}");
+    assert_eq!(
+        boundary["time"]["fixed_remainder_nanos"], INITIAL_REMAINDER,
+        "{boundary}"
+    );
+    let (captured, bytes) = capture(&mut incumbent);
+    assert_eq!(
+        captured.rooms,
+        ProcessedRooms {
+            side_room: ProcessedRoomState::RelicFound,
+            lookout: ProcessedRoomState::Open,
+        }
+    );
+    assert_eq!(captured.game.clock.ticks, number(&found, "logical_tick"));
+    assert_eq!(captured.game.runtime_time.pending_nanos, INITIAL_REMAINDER);
+    assert_eq!(
+        captured.pending,
+        [PendingServerCommand {
+            tick_offset: RELEASE_OFFSET,
+            command: ServerCommand::Gameplay(SemanticCommand::Move {
+                direction: UP,
+                pressed: false,
+            }),
+        }]
+    );
+
+    let storage = candidate_custody
+        .fixture()
+        .directory("server-room-resume-state");
+    let incompatible_path = storage.join("cavern-with-rooms.json");
+    let mut incompatible = captured;
+    incompatible.game.progress.location.level = cavern;
+    incompatible.game.player.translation = ANCHOR_POSITION;
+    fs::write(
+        &incompatible_path,
+        encode_processed_resume(&incompatible).unwrap(),
+    )
+    .unwrap();
+    let refusal = Service::spawn(
+        candidate_custody,
+        candidate_executable,
+        Launch::Paused(Some(&incompatible_path)),
+        "server-rooms-incompatible-resume",
+    )
+    .startup_refusal();
+    assert!(
+        refusal["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("the current level has no side room portal")),
+        "{refusal}"
+    );
+    assert_eq!(incumbent.observe(), boundary);
+    assert_eq!(capture(&mut incumbent).1, bytes);
+
+    let resume_path = storage.join("meadow-with-rooms.json");
+    fs::write(&resume_path, &bytes).unwrap();
+    let mut candidate = Service::spawn(
+        candidate_custody,
+        candidate_executable,
+        Launch::Paused(Some(&resume_path)),
+        "server-rooms-restored-resume",
+    );
+    let ready = candidate.ready(true, false);
+    let restored_tick = tick(&ready["state"]);
+    assert_eq!(restored_tick, 1, "{ready}");
+    assert!(original_tick > restored_tick, "{boundary}\n{ready}");
+    candidate.expect_restored_pending(&[RELEASE_OFFSET]);
+    let restored = candidate.observe();
+    for field in ["paused", "state", "commands", "time"] {
+        assert_eq!(restored[field], ready[field], "{ready}\n{restored}");
+    }
+    assert_same_game(&boundary["state"], &restored["state"]);
+    for field in ["fixed_debt_nanos", "fixed_remainder_nanos"] {
+        assert_eq!(
+            restored["time"][field], boundary["time"][field],
+            "{restored}"
+        );
+    }
+    assert_eq!(restored["time"]["elapsed_nanos"], 0, "{restored}");
+    assert_eq!(
+        capture(&mut candidate).1,
+        bytes,
+        "room resume bytes changed"
+    );
+
+    incumbent.send(&request("retire"));
+    let retired = incumbent.finish("retired", None);
+    assert_eq!(retired["state"], boundary["state"], "{retired}");
+    for field in ["paused", "commands", "time"] {
+        assert_eq!(
+            retired["server_evidence"][field], boundary[field],
+            "{retired}"
+        );
+    }
+
+    let travelled = continue_open_rooms(&mut candidate, &restored["state"], meadow, cavern);
+    candidate.send(&request("shutdown"));
+    let shutdown = candidate.finish("shutdown", None);
+    assert_eq!(shutdown["state"], travelled, "{shutdown}");
+    assert_eq!(
+        shutdown["server_evidence"]["gameplay_rejections"]["count"], 0,
+        "{shutdown}"
+    );
+
+    println!(
+        "TWO_LEVEL_SERVER_OPEN_ROOMS_CONTINUATION original_tick={original_tick} \
+         restored_tick={restored_tick} canonical_bytes={} release_offset={RELEASE_OFFSET} \
+         incompatible=refused_before_ready incumbent=retired candidate=shutdown",
+        bytes.len(),
+    );
+}
+
+fn continue_open_rooms(
+    candidate: &mut Service<'_>,
+    restored: &Value,
+    meadow: LevelKey,
+    cavern: LevelKey,
+) -> Value {
+    let moving = advance(candidate, TIMESTEP_NANOS - INITIAL_REMAINDER);
+    assert_eq!(tick(&moving["state"]), tick(restored) + 1, "{moving}");
+    assert_eq!(moving["commands"]["retained"], 1, "{moving}");
+    assert_eq!(moving["time"]["fixed_remainder_nanos"], 0, "{moving}");
+    assert_eq!(moving["state"]["held"], json!(HELD_UP), "{moving}");
+    assert!(
+        player(&moving["state"])[1] > player(restored)[1],
+        "{moving}"
+    );
+    let released = advance(candidate, TIMESTEP_NANOS);
+    assert_eq!(tick(&released["state"]), tick(restored) + RELEASE_OFFSET);
+    assert_eq!(
+        number(&released["state"], "logical_tick"),
+        number(restored, "logical_tick") + RELEASE_OFFSET
+    );
+    assert_eq!(released["commands"]["retained"], 0, "{released}");
+    assert_eq!(released["state"]["held"], json!(RELEASED), "{released}");
+    assert_eq!(player(&released["state"]), player(&moving["state"]));
+    assert_eq!(released["state"]["side_room"], "relic_found", "{released}");
+    assert_eq!(released["state"]["lookout"], "open", "{released}");
+
+    let found = walk_to_relic(candidate, "lookout", DOWN);
+    assert_progress(&found, meadow, 0, &[]);
+    assert_eq!(found["side_room"], "relic_found", "{found}");
+    assert!(player(&found)[1] < ANCHOR_POSITION[1], "{found}");
+    candidate.admit(&vertical_movement(DOWN, false));
+    candidate.admit(&request("lookout"));
+    let closed = advance(candidate, TIMESTEP_NANOS);
+    assert_progress(&closed["state"], meadow, 0, &[]);
+    assert_eq!(closed["state"]["held"], json!(RELEASED), "{closed}");
+    assert_eq!(closed["state"]["travel_count"], 0, "{closed}");
+    assert_eq!(closed["state"]["side_room"], "relic_found", "{closed}");
+    assert_eq!(closed["state"]["lookout"], "closed", "{closed}");
+    assert_eq!(
+        capture(candidate).0.rooms,
+        ProcessedRooms {
+            side_room: ProcessedRoomState::RelicFound,
+            lookout: ProcessedRoomState::Closed,
+        }
+    );
+
+    candidate.admit(&action("travel"));
+    advance(candidate, TIMESTEP_NANOS);
+    let travelled = candidate.until("Cavern Travel to commit", |state| {
+        state["level"] == json!(cavern) && state["phase"] == "Running"
+    });
+    assert_progress(&travelled, cavern, 0, &[]);
+    assert_eq!(travelled["travel_count"], 1, "{travelled}");
+    assert_eq!(travelled["held"], json!(RELEASED), "{travelled}");
+    assert_eq!(travelled["side_room"], "closed", "{travelled}");
+    assert_eq!(travelled["lookout"], "closed", "{travelled}");
+    assert_eq!(player(&travelled), ANCHOR_POSITION);
+    assert_eq!(
+        capture(candidate).0.rooms,
+        ProcessedRooms {
+            side_room: ProcessedRoomState::Closed,
+            lookout: ProcessedRoomState::Closed,
+        }
+    );
+    travelled
+}
+
+fn vertical_movement(direction: usize, pressed: bool) -> Value {
+    json!({"request": "command", "command": SemanticCommand::Move { direction, pressed }})
+}
+
+fn walk_to_relic(server: &mut Service<'_>, room: &str, direction: usize) -> Value {
+    server.admit(&vertical_movement(direction, true));
+    for _ in 0..MAX_WALK_TICKS {
+        let observation = advance(server, TIMESTEP_NANOS);
+        let state = &observation["state"];
+        if state[room] == "relic_found" {
+            assert_eq!(state["held"][direction], true, "{state}");
+            return state.clone();
+        }
+    }
+    panic!(
+        "expected the {room} relic after {MAX_WALK_TICKS} ticks: {}",
+        server.observe()
     );
 }
 

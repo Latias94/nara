@@ -1112,6 +1112,256 @@ mod atlas_content {
         }
     }
 
+    #[test]
+    fn processed_continuation_refuses_lookout_after_restoring_side_room() {
+        use nara::{
+            app::FixedTime,
+            gameplay::GameplayCommandQueue,
+            identity::{PrefabEntityTarget, SceneEntityId},
+            prelude::Transform2d,
+            scene::SceneDocumentCandidate,
+        };
+        use two_level_game::{
+            GameResumeError, capture_processed_resume,
+            command::{SERVER_COMMAND_SOURCE, ServerCommand},
+            restore_processed_resume,
+            resume::processed::{PendingServerCommand, ProcessedRoomState, ProcessedRooms},
+        };
+
+        let cache = Cache::new();
+        let project = cache.project();
+        let lookout_path = project.join("scenes").join(side_room::LOOKOUT_SCENE_PATH);
+        let authored_lookout = fs::read(&lookout_path).unwrap();
+        let mut lookout = SceneDocumentCandidate::decode_json_bytes(&authored_lookout)
+            .unwrap()
+            .into_composition_source()
+            .unwrap();
+        let relic = SceneEntityId::new(side_room::LOOKOUT_RELIC).unwrap();
+        let renamed = SceneEntityId::new("lookout-decoration").unwrap();
+        lookout
+            .entities
+            .iter_mut()
+            .find(|entity| entity.id == relic)
+            .unwrap()
+            .id = renamed.clone();
+        let target = PrefabEntityTarget::source(relic);
+        lookout
+            .placements
+            .iter_mut()
+            .find(|placement| placement.target == target)
+            .unwrap()
+            .target = PrefabEntityTarget::source(renamed);
+        fs::write(lookout_path, lookout.to_json_string().unwrap()).unwrap();
+
+        let store = cache.path.join("store");
+        fs::create_dir(&store).unwrap();
+        let (prepared, _) = content::prepare(
+            &host_fs::readable_directory(&project).unwrap(),
+            &host_fs::writable_directory(&store).unwrap(),
+            "x86_64-pc-windows-msvc",
+            keyboard(RuntimeKind::Server),
+        )
+        .unwrap()
+        .into_parts();
+        let base = prepared.into_base();
+        let [room_source, lookout_source] = [
+            side_room::scene_product(),
+            side_room::lookout_scene_product(),
+        ]
+        .map(|product| {
+            let member = base.member(product).unwrap();
+            let RuntimeContentMemberKind::Scene { source } = member.kind() else {
+                panic!("the cooked region Product must be a Scene");
+            };
+            source
+        });
+        let room_relic = SceneEntityId::new(side_room::RELIC).unwrap();
+        let live_side_room = |world: &World| {
+            let domain = world.resource::<WorldIdentityDomain>();
+            assert_eq!(domain.stats().active_scene_instances, 2);
+            let members = world
+                .iter_entities()
+                .filter_map(|entity| {
+                    let source = entity.get::<SceneEntitySource>()?;
+                    assert_ne!(source.containing_source(), lookout_source);
+                    (source.containing_source() == room_source).then_some((source, entity.id()))
+                })
+                .collect::<Vec<_>>();
+            let (source, relic) = members
+                .iter()
+                .find(|(source, _)| source.entity_id == room_relic)
+                .expect("the active Side Room has its authored relic");
+            let room = domain
+                .active_scene_instance(world, source.instance_id)
+                .unwrap();
+            let primary = CurrentScene::get(world).unwrap();
+            assert_ne!(room.instance_id(), primary.receipt().instance_id());
+            assert_eq!(
+                domain
+                    .active_scene_instance(world, primary.receipt().instance_id())
+                    .unwrap(),
+                *primary.receipt()
+            );
+            assert_eq!(room.len(), members.len());
+            assert!(world.get::<Transform2d>(*relic).is_some());
+            for (source, entity) in members {
+                assert_eq!(source.instance_id, room.instance_id());
+                assert_eq!(
+                    room.resolve(world, &source.entity_id),
+                    EntityLookup::Resolved(entity)
+                );
+            }
+            room
+        };
+        let submit_side_room = |session: &mut HeadlessSession, tick| {
+            session
+                .submit(GameplayCommandSubmission::new(
+                    GameplayCommandTick::new(tick).unwrap(),
+                    GameplayCommandIngressSource::external(SERVER_COMMAND_SOURCE).unwrap(),
+                    GameplayCommandSourceSequence::new(tick).unwrap(),
+                    ServerCommand::SideRoom.into_draft().unwrap(),
+                ))
+                .unwrap();
+        };
+
+        with_paused_content(base.clone(), |incumbent| {
+            submit_side_room(incumbent, 1);
+            let captured = capture_processed_resume(incumbent).unwrap();
+            assert_eq!(
+                captured.rooms,
+                ProcessedRooms {
+                    side_room: ProcessedRoomState::Closed,
+                    lookout: ProcessedRoomState::Closed,
+                }
+            );
+            assert_eq!(
+                captured.pending,
+                [PendingServerCommand {
+                    tick_offset: 1,
+                    command: ServerCommand::SideRoom,
+                }]
+            );
+            let mut requested = captured.clone();
+            requested.rooms = ProcessedRooms {
+                side_room: ProcessedRoomState::RelicFound,
+                lookout: ProcessedRoomState::Open,
+            };
+            let observe_incumbent = |world: &World| {
+                (
+                    world.resource::<FixedTime>().tick(),
+                    CurrentScene::get(world).unwrap().receipt().clone(),
+                    world.resource::<GameplayCommandQueue>().stats(),
+                )
+            };
+            let generation = incumbent.runtime_generation().unwrap();
+            let before = incumbent.capture(observe_incumbent).unwrap();
+            assert_eq!(before.0, 0);
+
+            with_paused_content(base.clone(), |candidate| {
+                let result = restore_processed_resume(
+                    candidate,
+                    &requested,
+                    Instant::now() + Duration::from_secs(10),
+                );
+                assert!(
+                    matches!(&result, Err(GameResumeError::Ineligible(reason))
+                        if reason == "the lookout requires its authored relic"),
+                    "{result:?}"
+                );
+                let observe_refusal = |world: &World| {
+                    let snapshot = world.resource::<GameSnapshot>();
+                    assert_eq!(snapshot.phase, GamePhase::Degraded);
+                    assert_eq!(snapshot.side_room, SideRoomPhase::RelicFound);
+                    assert_eq!(snapshot.lookout, SideRoomPhase::Closed);
+                    assert!(!snapshot.restoring);
+                    assert_eq!(world.resource::<FixedTime>().tick(), 1);
+                    let queue = world.resource::<GameplayCommandQueue>();
+                    assert!(queue.is_idle());
+                    let stats = queue.stats();
+                    assert_eq!(stats.accepted, 1);
+                    assert_eq!(stats.acknowledged_through_tick, 1);
+                    live_side_room(world)
+                };
+                let room = candidate.capture(observe_refusal).unwrap();
+                assert_ne!(room.domain_id(), before.1.domain_id());
+                assert_eq!(candidate.frame(Duration::ZERO).unwrap(), None);
+                assert_eq!(candidate.capture(observe_refusal).unwrap(), room);
+            });
+
+            assert_eq!(capture_processed_resume(incumbent).unwrap(), captured);
+            assert_eq!(incumbent.runtime_generation(), Some(generation));
+            assert_eq!(incumbent.capture(observe_incumbent).unwrap(), before);
+
+            let release = hold_io_workers(incumbent);
+            assert_eq!(incumbent.step().unwrap(), None);
+            assert_eq!(
+                incumbent
+                    .capture(|world| world.resource::<GameSnapshot>().side_room)
+                    .unwrap(),
+                SideRoomPhase::Preparing
+            );
+            let result = capture_processed_resume(incumbent);
+            assert!(
+                matches!(&result, Err(GameResumeError::Ineligible(reason))
+                    if reason == "the side room is still preparing"),
+                "{result:?}"
+            );
+            drop(release);
+            wait_for_snapshot(incumbent, "incumbent Side Room did not open", |snapshot| {
+                snapshot.side_room == SideRoomPhase::Open
+            })
+            .unwrap();
+            let room = incumbent.capture(live_side_room).unwrap();
+            submit_side_room(incumbent, 2);
+            assert_eq!(incumbent.step().unwrap(), None);
+            incumbent
+                .capture(|world| {
+                    let snapshot = world.resource::<GameSnapshot>();
+                    assert_eq!(snapshot.tick, 2);
+                    assert_eq!(snapshot.phase, GamePhase::Running);
+                    assert_eq!(snapshot.side_room, SideRoomPhase::Closed);
+                    assert!(snapshot.error.is_none());
+                    assert_eq!(CurrentScene::get(world).unwrap().receipt(), &before.1);
+                    assert_retired(world, &room);
+                })
+                .unwrap();
+        });
+    }
+
+    fn hold_io_workers(session: &HeadlessSession) -> Vec<std::sync::mpsc::Sender<()>> {
+        use std::sync::mpsc;
+
+        use nara::tasks::{TaskDomainKey, TaskPoolKind, TaskPools, TaskSpawnRequest};
+
+        let (entered, started) = mpsc::channel();
+        let releases: Vec<_> = session
+            .observe(|world| {
+                let pools = world.resource::<TaskPools>();
+                let workers = pools.config().kind(TaskPoolKind::Io).workers().get();
+                let request = TaskSpawnRequest::new(0, TaskDomainKey::new(0));
+                (0..workers)
+                    .map(|_| {
+                        let (release, held) = mpsc::channel();
+                        let entered = entered.clone();
+                        pools
+                            .spawn(TaskPoolKind::Io, request, move |_| {
+                                let _ = entered.send(());
+                                let _ = held.recv();
+                            })
+                            .into_handle()
+                            .unwrap();
+                        release
+                    })
+                    .collect()
+            })
+            .unwrap();
+        drop(entered);
+        for _ in &releases {
+            started.recv_timeout(Duration::from_secs(10)).unwrap();
+        }
+        releases
+    }
+
     fn with_paused_content<R>(
         base: nara::runtime_content::RuntimeContentBase,
         action: impl FnOnce(&mut HeadlessSession) -> R,

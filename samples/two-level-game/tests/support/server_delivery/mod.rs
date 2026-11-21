@@ -218,6 +218,12 @@ pub(super) fn accept(cooker: &Path) {
         &mut candidate,
         &candidate_installation.join(&executable_name),
     );
+    continuation::accept_open_rooms(
+        &mut custody,
+        &server,
+        &mut candidate,
+        &candidate_installation.join(&executable_name),
+    );
     package.assert_unchanged(&relocated);
     package.assert_unchanged(&candidate_installation);
     assert_sources_gone(&project, &cache);
