@@ -193,23 +193,21 @@ impl WgpuStockStages {
         })
     }
 
-    /// Validates original logical View, Sprite and UI routing without native work.
+    /// Validates original target, View, Sprite and UI routing without native work.
     pub fn validate_capture(
         packet: &RenderFramePacket,
         capture: &WgpuStockCapture,
     ) -> Result<(), WgpuRenderProgramError> {
         let views = packet.views();
-        let Some(first) = views.first() else {
-            return Err(WgpuRenderProgramError::feature(
-                "invalid stock world View count",
-            ));
-        };
         if views.len() > nara_render::MAX_VIEWS_PER_TARGET {
             return Err(WgpuRenderProgramError::feature(
                 "invalid stock world View count",
             ));
         }
-        if !matches!(first.load, ViewLoadOp::Clear(_)) {
+        if views
+            .first()
+            .is_some_and(|first| !matches!(first.load, ViewLoadOp::Clear(_)))
+        {
             return Err(WgpuRenderProgramError::feature(
                 "the first world View must clear its target",
             ));
@@ -230,14 +228,25 @@ impl WgpuStockStages {
         }
         #[cfg(feature = "stock-ui")]
         if !capture.ui_packets.is_empty() {
-            let logical_target = capture.logical_target.unwrap_or(first.target);
-            if views.iter().any(|view| {
-                !ui_targets_match(logical_target, view.target, capture.primary_window_id)
-            }) || capture.ui_packets.iter().any(|packet| {
-                !ui_targets_match(packet.target(), logical_target, capture.primary_window_id)
-            }) {
+            let logical_target = capture.logical_target.unwrap_or(packet.logical_target());
+            let wrong_target = if views.is_empty() {
+                !ui_targets_match(
+                    logical_target,
+                    packet.logical_target(),
+                    capture.primary_window_id,
+                )
+            } else {
+                views.iter().any(|view| {
+                    !ui_targets_match(logical_target, view.target, capture.primary_window_id)
+                })
+            };
+            if wrong_target
+                || capture.ui_packets.iter().any(|packet| {
+                    !ui_targets_match(packet.target(), logical_target, capture.primary_window_id)
+                })
+            {
                 return Err(WgpuRenderProgramError::feature(
-                    "UI packets and their logical target must belong to the captured Views",
+                    "UI packets must belong to the captured logical target",
                 ));
             }
         }
@@ -395,13 +404,19 @@ impl WgpuStockProgramBuilder<'_> {
             };
         }
         let scene = self.graph.texture::<WgpuWorldColor>(world_descriptor)?;
-        let Some(ViewLoadOp::Clear(clear)) = packet.views().first().map(|view| view.load) else {
-            return Err(WgpuRenderProgramError::feature(
-                "the first world View must clear its target",
-            ));
+        let clear = match packet.views().first().map(|view| view.load) {
+            Some(ViewLoadOp::Clear(clear)) => clear,
+            Some(ViewLoadOp::Load) => {
+                return Err(WgpuRenderProgramError::feature(
+                    "the first world View must clear its target",
+                ));
+            }
+            None => nara_render::Color::BLACK,
         };
         #[cfg(feature = "stock-sprite")]
-        if let Some(batches) = self.capture.sprite_batches.as_ref() {
+        if let Some(batches) = self.capture.sprite_batches.as_ref()
+            && !packet.views().is_empty()
+        {
             let (source_slots, material_count) = batches
                 .as_slice()
                 .iter()
@@ -439,32 +454,27 @@ impl WgpuStockProgramBuilder<'_> {
                 &reads,
                 &[scene.clear(premultiplied_clear_color(clear), AccessRole::Attachment)],
             )?;
+            return Ok(scene);
         }
-        #[cfg(feature = "stock-sprite")]
-        let initialize_only = self.capture.sprite_batches.is_none();
-        #[cfg(not(feature = "stock-sprite"))]
-        let initialize_only = true;
-        if initialize_only {
-            if !bindings.is_empty() {
-                return Err(WgpuRenderProgramError::feature(
-                    "material program texture selections require a captured Sprite draw",
-                ));
-            }
-            // With no world drawing, the last whole-attachment clear is the complete result.
-            let clear = packet
-                .views()
-                .iter()
-                .filter_map(|view| match view.load {
-                    ViewLoadOp::Clear(color) => Some(color),
-                    ViewLoadOp::Load => None,
-                })
-                .next_back()
-                .unwrap_or(clear);
-            self.graph.initialize(
-                operation,
-                &[scene.clear(premultiplied_clear_color(clear), AccessRole::Attachment)],
-            )?;
+        if !bindings.is_empty() {
+            return Err(WgpuRenderProgramError::feature(
+                "material program texture selections require a captured Sprite draw",
+            ));
         }
+        // With no world drawing, the last whole-attachment clear is the complete result.
+        let clear = packet
+            .views()
+            .iter()
+            .filter_map(|view| match view.load {
+                ViewLoadOp::Clear(color) => Some(color),
+                ViewLoadOp::Load => None,
+            })
+            .next_back()
+            .unwrap_or(clear);
+        self.graph.initialize(
+            operation,
+            &[scene.clear(premultiplied_clear_color(clear), AccessRole::Attachment)],
+        )?;
         Ok(scene)
     }
 
@@ -540,7 +550,7 @@ impl WgpuStockProgramBuilder<'_> {
                 &self.capture.ui_packets,
                 self.capture
                     .logical_target
-                    .unwrap_or(self.context.packet().views()[0].target),
+                    .unwrap_or(self.context.packet().logical_target()),
                 self.capture.primary_window_id,
                 final_color.clone(),
                 ViewportRect::from_extent(extent).expect("admitted target extent"),

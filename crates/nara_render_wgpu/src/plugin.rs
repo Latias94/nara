@@ -377,7 +377,24 @@ fn seal_wgpu_frame_packet(
                 resolution: window.resolution,
                 present_mode: window.present_mode,
             });
-        slot.seal_no_views(generation.as_deref().copied().zip(window), *frame_start);
+        let source = generation.as_deref().copied().zip(window);
+        #[cfg(feature = "stock-ui")]
+        if slot.allow_window_overlay
+            && let Some((generation, window)) = source
+            && primary_window_id
+                .as_ref()
+                .is_some_and(|primary| primary.0 == window.id)
+        {
+            let packet = nara_render::__private::build_window_overlay_frame_packet(
+                generation,
+                frame.index,
+                window,
+                views.captured_time(),
+            );
+            slot.seal(Ok(packet), frame_start.frame(), frame_start.started_at());
+            return;
+        }
+        slot.seal_no_views(source, *frame_start);
         return;
     }
     let Some(generation) = generation.map(|generation| *generation) else {
@@ -668,7 +685,10 @@ fn emit_stock_capture(
     let captured = if let Some(ui) = frame.ui.take() {
         writer
             .capture_with_ui(&installation, capture, ui)
-            .map(|()| true)
+            .map(|()| {
+                writer.slot.allow_window_overlay = true;
+                true
+            })
             .map_err(|failure| {
                 let (error, ui) = failure.into_parts();
                 frame.ui = Some(ui);

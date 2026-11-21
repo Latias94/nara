@@ -132,7 +132,7 @@ impl Plugin for CaptureRefusalPlugin {
 
 #[cfg(feature = "presentation-ui")]
 #[test]
-fn empty_or_failed_policy_capture_returns_original_ui_outcomes_before_stop() {
+fn overlay_only_or_invalid_policy_capture_returns_original_ui_outcomes_before_stop() {
     for refusal in [CaptureRefusal::EmptyViews, CaptureRefusal::InvalidViews] {
         let name = match refusal {
             CaptureRefusal::EmptyViews => "game-view-empty-capture-ui-outcomes",
@@ -148,9 +148,17 @@ fn empty_or_failed_policy_capture_returns_original_ui_outcomes_before_stop() {
         let (mut editor, request) = open_game_awaiting_target(&project, true, recipe);
         let activation = editor.prepare_game_start_activation(request).unwrap();
         editor.commit_game_start_activation(activation);
+        if matches!(refusal, CaptureRefusal::EmptyViews) {
+            let candidate = take_candidate(&mut editor);
+            assert!(candidate.packet().views().is_empty());
+            assert!(candidate.input().world_input_mapping().is_none());
+            assert_eq!(candidate.identity().start(), request);
+            let completion = candidate.content_rejected("settle the overlay-only CPU capture");
+            assert_eq!(completion.test_ui_outcomes().len(), 1);
+            editor.complete_game_view_candidate(completion).unwrap();
+        }
         let deadline = Instant::now() + Duration::from_secs(5);
         let receiver = loop {
-            editor.drive_editor_frame(Duration::ZERO);
             let world = editor.test_game_view_runtime().world();
             if world
                 .resource::<crate::ui_presentation::UiPresentationBridgeStats>()
@@ -163,6 +171,7 @@ fn empty_or_failed_policy_capture_returns_original_ui_outcomes_before_stop() {
                 Instant::now() < deadline,
                 "capture did not return its original UI outcomes",
             );
+            editor.drive_editor_frame(Duration::ZERO);
             std::thread::sleep(Duration::from_millis(1));
         };
         assert_eq!(receiver.pending_backend_count(), 0);
@@ -431,15 +440,22 @@ fn step_completes_without_presentation_when_resize_clips_every_game_view() {
 }
 
 #[test]
-fn step_uses_sealed_no_views_after_extracted_views_change() {
+fn step_uses_the_original_sealed_capture_after_extracted_views_change() {
+    assert_step_after_late_view_change(false);
+    #[cfg(feature = "presentation-ui")]
+    assert_step_after_late_view_change(true);
+}
+
+fn assert_step_after_late_view_change(with_ui: bool) {
     let project = TestProject::new("game-view-step-with-post-seal-view-mutation");
     #[cfg(feature = "presentation-ui")]
-    project.write_ui_authoring_documents(None, None);
+    if with_ui {
+        project.write_ui_authoring_documents(None, None);
+    }
     let recipe = crate::ProductRecipe::new()
         .add_plugin::<RepopulateViewsAfterSeal>()
         .unwrap();
-    let (mut editor, request) =
-        open_game_awaiting_target(&project, cfg!(feature = "presentation-ui"), recipe);
+    let (mut editor, request) = open_game_awaiting_target(&project, with_ui, recipe);
     let activation = editor.prepare_game_start_activation(request).unwrap();
     editor.commit_game_start_activation(activation);
     let initial = take_candidate(&mut editor);
@@ -454,11 +470,13 @@ fn step_uses_sealed_no_views_after_extracted_views_change() {
     );
     let before = fixed_tick(&mut editor);
     #[cfg(feature = "presentation-ui")]
-    let rejected_before = editor
-        .test_game_view_runtime()
-        .world()
-        .resource::<crate::ui_presentation::UiPresentationBridgeStats>()
-        .content_rejections;
+    let rejected_before = with_ui.then(|| {
+        editor
+            .test_game_view_runtime()
+            .world()
+            .resource::<crate::ui_presentation::UiPresentationBridgeStats>()
+            .content_rejections
+    });
 
     assert_eq!(
         dispatch_game_play_action(&mut editor, EditorPlayAction::StepFixedTick),
@@ -468,21 +486,47 @@ fn step_uses_sealed_no_views_after_extracted_views_change() {
         editor.drive_editor_frame(Duration::ZERO).play().state(),
         EditorPlayState::Stepping,
     );
-    let paused = editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(paused.play().state(), EditorPlayState::Paused);
-    assert_eq!(
-        paused.play().result(),
-        Some(EditorPlayOperationResult::Applied {
+    editor.drive_editor_frame(Duration::ZERO);
+    let expected = if with_ui {
+        assert_eq!(editor.play_view().state(), EditorPlayState::Stepping);
+        assert_eq!(
+            editor.play_view().result(),
+            Some(EditorPlayOperationResult::Pending {
+                operation: EditorPlayOperation::StepFixedTick,
+            })
+        );
+        let candidate = editor.take_game_view_candidate().unwrap().unwrap();
+        assert!(candidate.packet().views().is_empty());
+        assert!(candidate.input().world_input_mapping().is_none());
+        let active = editor.active_game_start_request().unwrap();
+        assert_eq!(candidate.identity().start(), active);
+        assert_eq!(
+            candidate.packet().target().extent(),
+            Extent2d::new(480, 540).unwrap()
+        );
+        editor
+            .complete_game_view_candidate(
+                candidate.content_rejected("reject the original overlay-only Step"),
+            )
+            .unwrap();
+        EditorPlayOperationResult::Failed {
+            operation: EditorPlayOperation::StepFixedTick,
+            failure: EditorPlayFailure::Presentation,
+        }
+    } else {
+        EditorPlayOperationResult::Applied {
             operation: EditorPlayOperation::StepFixedTick,
             generation: Some(request.runtime_generation().get()),
-        }),
-    );
+        }
+    };
+    assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
+    assert_eq!(editor.play_view().result(), Some(expected),);
     assert_eq!(fixed_tick(&mut editor), before + 1);
     assert!(editor.take_game_view_candidate().unwrap().is_none());
     let world = editor.test_game_view_runtime().world();
     assert_eq!(world.resource::<ExtractedViews>().len(), 1);
     #[cfg(feature = "presentation-ui")]
-    {
+    if let Some(rejected_before) = rejected_before {
         assert_eq!(
             world
                 .resource::<crate::ui_presentation::UiPresentationBridgeStats>()

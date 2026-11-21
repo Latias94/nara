@@ -1,4 +1,5 @@
-use super::delegated_window_id;
+use super::{delegated_window_id, secondary_window_unavailable};
+use dear_imgui_wgpu::{WgpuFrameOutcome, WgpuFrameSkipReason};
 use nara_window::WindowId;
 
 #[test]
@@ -11,6 +12,32 @@ fn secondary_identity_mapping_excludes_any_primary_without_reusing_surfaces() {
         assert!(!mapped.contains(&WindowId::new(primary)));
     }
     assert!(delegated_window_id(WindowId::PRIMARY, u64::MAX).is_none());
+}
+
+#[test]
+fn secondary_target_unavailability_uses_exact_skip_reasons() {
+    use WgpuFrameSkipReason::{
+        Lost, NoDrawCommands, NoDrawData, Occluded, Outdated, RetiredTarget, TargetBusy, Timeout,
+        ZeroSize,
+    };
+
+    for (reason, unavailable) in [
+        (Lost, true),
+        (RetiredTarget, true),
+        (ZeroSize, true),
+        (Timeout, false),
+        (Occluded, false),
+        (Outdated, false),
+        (NoDrawData, false),
+        (NoDrawCommands, false),
+        (TargetBusy, false),
+    ] {
+        assert_eq!(
+            secondary_window_unavailable(&WgpuFrameOutcome::Skipped(reason)),
+            unavailable,
+            "{reason:?}"
+        );
+    }
 }
 
 struct OffscreenGpu {

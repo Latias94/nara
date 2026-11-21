@@ -1038,12 +1038,26 @@ impl<'frame> WgpuWindowFrame<'frame> {
 pub struct WgpuWindowFrameOutcome {
     window: Option<WgpuWindowPresentedReceipt>,
     composites: Vec<WgpuImageCompositeReceipt>,
+    unavailable_window: Option<WindowId>,
 }
 
 impl WgpuWindowFrameOutcome {
+    fn unavailable(window_id: WindowId) -> Self {
+        Self {
+            unavailable_window: Some(window_id),
+            ..Self::default()
+        }
+    }
+
     #[must_use]
     pub const fn window(&self) -> Option<WgpuWindowPresentedReceipt> {
         self.window
+    }
+
+    /// The exact native window whose presentation target was unavailable for this attempt.
+    #[must_use]
+    pub const fn unavailable_window(&self) -> Option<WindowId> {
+        self.unavailable_window
     }
 
     #[must_use]
@@ -3006,6 +3020,10 @@ impl WgpuRenderHost {
             .ok_or(WgpuRenderHostError::FrameTransactionUnavailable)?;
         native_use_count(viewport_submissions.len(), "window image displays")?;
         self.maintain_producers()?;
+        if window.resolution.physical_width == 0 || window.resolution.physical_height == 0 {
+            self.backend.check_device_health()?;
+            return Ok(WgpuWindowFrameOutcome::unavailable(window.id));
+        }
         let WindowPaintStorage {
             retained,
             mut samples,
@@ -3017,11 +3035,15 @@ impl WgpuRenderHost {
         for display in viewport_submissions {
             self.validate_viewport_submission(&namespace, display.output())?;
         }
-        if window.resolution.physical_width == 0 || window.resolution.physical_height == 0 {
-            return Ok(WgpuWindowFrameOutcome::default());
-        }
         let Some(acquired) = self.backend.acquire_editor_surface(window.id)? else {
-            return Ok(WgpuWindowFrameOutcome::default());
+            return Ok(WgpuWindowFrameOutcome {
+                unavailable_window: self
+                    .backend
+                    .configured_surface_extent(window.id)
+                    .is_none()
+                    .then_some(window.id),
+                ..Default::default()
+            });
         };
         let WgpuEditorAcquiredSurface {
             texture,
@@ -3150,6 +3172,7 @@ impl WgpuRenderHost {
         Ok(WgpuWindowFrameOutcome {
             window: Some(window_receipt),
             composites,
+            unavailable_window: None,
         })
     }
 

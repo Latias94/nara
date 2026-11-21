@@ -773,6 +773,13 @@ enum EditorGameViewBridgeSlot {
     InFlight(EditorGameViewRuntimeCandidateIdentity),
 }
 
+#[derive(Debug)]
+#[cfg_attr(not(feature = "render-wgpu"), allow(dead_code))]
+enum PendingWorldPresentation {
+    Mapped(PresentedWorldFrame, WorldPresentationGuard),
+    OverlayOnly,
+}
+
 #[derive(Debug, Resource)]
 struct EditorGameViewBridge {
     config: EditorGameViewCaptureConfig,
@@ -781,7 +788,7 @@ struct EditorGameViewBridge {
     next_sequence: u64,
     slot: EditorGameViewBridgeSlot,
     failure: Option<EditorGameViewBridgeFailure>,
-    pending_world_presentation: Option<(PresentedWorldFrame, WorldPresentationGuard)>,
+    pending_world_presentation: Option<PendingWorldPresentation>,
     world_presentation_guard: Option<WorldPresentationGuard>,
     #[cfg(feature = "presentation-ui")]
     rejected_ui_outcomes: Vec<UiCompletedBackendOutcome>,
@@ -845,17 +852,25 @@ impl EditorGameViewBridge {
             app_frame_index: captured.app_frame_index,
             sequence,
         };
-        self.pending_world_presentation = captured
-            .input
-            .world_input_mapping()
-            .and_then(|mapping| prepare_world_presentation(captured.input.packet(), mapping));
+        let packet = captured.input.packet();
+        self.pending_world_presentation = if packet.views().is_empty() {
+            Some(PendingWorldPresentation::OverlayOnly)
+        } else {
+            captured
+                .input
+                .world_input_mapping()
+                .and_then(|mapping| prepare_world_presentation(packet, mapping))
+                .map(|(frame, guard)| PendingWorldPresentation::Mapped(frame, guard))
+        };
         self.slot = EditorGameViewBridgeSlot::Buffered(PendingEditorGameViewCandidate {
             identity,
             input: captured.input,
-            world_presentation_revoker: self
-                .pending_world_presentation
-                .as_ref()
-                .map(|(_, guard)| guard.revoker()),
+            world_presentation_revoker: self.pending_world_presentation.as_ref().and_then(
+                |pending| match pending {
+                    PendingWorldPresentation::Mapped(_, guard) => Some(guard.revoker()),
+                    PendingWorldPresentation::OverlayOnly => None,
+                },
+            ),
             #[cfg(feature = "presentation-ui")]
             ui_submission: captured.ui_submission,
         });
@@ -949,17 +964,21 @@ impl EditorGameViewBridge {
         disposition: EditorGameViewCompletionDisposition,
     ) {
         let pending = self.pending_world_presentation.take();
-        if disposition != EditorGameViewCompletionDisposition::Presented || !self.capture_enabled {
-            self.world_presentation_guard = None;
-            return;
+        if self.capture_enabled {
+            use EditorGameViewCompletionDisposition::{ContentRejected, Deferred, Presented};
+
+            match (disposition, pending) {
+                (Presented, Some(PendingWorldPresentation::Mapped(presented, guard))) => {
+                    guard.mark_presented();
+                    world.insert_resource(presented);
+                    self.world_presentation_guard = Some(guard);
+                    return;
+                }
+                (Deferred | ContentRejected, Some(PendingWorldPresentation::OverlayOnly)) => return,
+                _ => {}
+            }
         }
-        if let Some((presented, guard)) = pending {
-            guard.mark_presented();
-            world.insert_resource(presented);
-            self.world_presentation_guard = Some(guard);
-        } else {
-            self.world_presentation_guard = None;
-        }
+        self.world_presentation_guard = None;
     }
 }
 
@@ -2116,6 +2135,7 @@ mod input_batch_tests {
 #[cfg(all(test, feature = "render-wgpu"))]
 mod world_presentation_tests {
     use super::*;
+    use EditorGameViewCompletionDisposition::{ContentRejected, Deferred, Failed, Presented};
     use nara_core::{Color, Mat3, Vec2};
     use nara_ecs::{Entity, bevy_ecs::system::SystemState};
     use nara_render::{
@@ -2200,11 +2220,14 @@ mod world_presentation_tests {
         candidate.identity
     }
 
-    fn complete(world: &mut World, identity: EditorGameViewRuntimeCandidateIdentity) {
+    fn complete(
+        world: &mut World,
+        identity: EditorGameViewRuntimeCandidateIdentity,
+        disposition: EditorGameViewCompletionDisposition,
+    ) {
         world.resource_scope(|world, mut bridge: Mut<'_, EditorGameViewBridge>| {
             assert!(bridge.accepts_completion(identity));
-            bridge
-                .complete_world_presentation(world, EditorGameViewCompletionDisposition::Presented);
+            bridge.complete_world_presentation(world, disposition);
             bridge.finish_completion(identity);
         });
     }
@@ -2229,12 +2252,13 @@ mod world_presentation_tests {
         world.spawn(window.clone());
         world.insert_resource(generation);
         world.insert_resource(canvas);
+        let logical_window = RenderWindowPacket {
+            id: window.id,
+            resolution: window.resolution,
+            present_mode: window.present_mode,
+        };
         world.insert_resource(EditorGameViewBridge::new(EditorGameViewCaptureConfig {
-            logical_window: RenderWindowPacket {
-                id: window.id,
-                resolution: window.resolution,
-                present_mode: window.present_mode,
-            },
+            logical_window,
             resizable: true,
             sprites: false,
             ui: false,
@@ -2268,7 +2292,7 @@ mod world_presentation_tests {
             pick(&mut world, camera).is_none(),
             "capture does not confer display authority"
         );
-        complete(&mut world, first);
+        complete(&mut world, first, Presented);
         assert_eq!(pick(&mut world, camera), Some(Vec2::ZERO));
         assert!(world.resource::<EditorGameViewBridge>().is_idle());
 
@@ -2278,7 +2302,7 @@ mod world_presentation_tests {
 
         let retired = capture(&mut world, packet(2), true);
         invalidate(&mut world);
-        complete(&mut world, retired);
+        complete(&mut world, retired, Presented);
         assert!(
             pick(&mut world, camera).is_none(),
             "a discarded pending guard cannot revive"
@@ -2286,16 +2310,42 @@ mod world_presentation_tests {
 
         let fresh = capture(&mut world, packet(3), true);
         assert!(pick(&mut world, camera).is_none());
-        complete(&mut world, fresh);
+        complete(&mut world, fresh, Presented);
         assert_eq!(pick(&mut world, camera), Some(Vec2::ZERO));
 
         let unmapped = capture(&mut world, packet(4), false);
         assert_eq!(pick(&mut world, camera), Some(Vec2::ZERO));
-        complete(&mut world, unmapped);
+        complete(&mut world, unmapped, Presented);
         assert!(pick(&mut world, camera).is_none());
         let recovered = capture(&mut world, packet(5), true);
         assert!(pick(&mut world, camera).is_none());
-        complete(&mut world, recovered);
+        complete(&mut world, recovered, Presented);
         assert_eq!(pick(&mut world, camera), Some(Vec2::ZERO));
+
+        let overlay = |frame| {
+            nara_render::__private::build_window_overlay_frame_packet(
+                generation,
+                frame,
+                logical_window,
+                None,
+            )
+            .unwrap()
+        };
+        for (frame, disposition) in [(6, Deferred), (7, ContentRejected), (8, Presented)] {
+            let candidate = capture(&mut world, overlay(frame), true);
+            assert_eq!(pick(&mut world, camera), Some(Vec2::ZERO));
+            complete(&mut world, candidate, disposition);
+            assert_eq!(
+                pick(&mut world, camera),
+                (disposition != Presented).then_some(Vec2::ZERO),
+            );
+        }
+
+        let recovered = capture(&mut world, packet(9), true);
+        complete(&mut world, recovered, Presented);
+        assert_eq!(pick(&mut world, camera), Some(Vec2::ZERO));
+        let failed = capture(&mut world, overlay(10), true);
+        complete(&mut world, failed, Failed);
+        assert!(pick(&mut world, camera).is_none());
     }
 }

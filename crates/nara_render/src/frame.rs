@@ -82,7 +82,8 @@ impl From<RuntimeGeneration> for RenderFrameSourceGeneration {
     }
 }
 
-/// Owned, bounded, ordered world views for one exclusive destination transaction.
+/// One exclusive destination transaction with bounded, ordered world views.
+/// A window overlay can present without world views.
 /// A fixed world canvas adds one owner-local image-to-window edge without changing target identity.
 /// Cloning preserves CPU facts only; target acquisition, execution and UI permissions have
 /// separate owners and cannot be duplicated by this packet.
@@ -91,6 +92,7 @@ pub struct RenderFramePacket {
     pub(crate) source_generation: RenderFrameSourceGeneration,
     frame_index: u64,
     pub(crate) target: RenderFrameTarget,
+    logical_target: RenderTarget,
     views: Vec<ExtractedView>,
     world_canvas: Option<WorldCanvasFrame>,
     captured_time: Option<CapturedRenderTime>,
@@ -108,6 +110,11 @@ impl RenderFramePacket {
     #[must_use]
     pub const fn target(&self) -> RenderFrameTarget {
         self.target
+    }
+    /// The captured destination before any physical image-target adaptation.
+    #[must_use]
+    pub const fn logical_target(&self) -> RenderTarget {
+        self.logical_target
     }
     #[must_use]
     pub fn views(&self) -> &[ExtractedView] {
@@ -158,11 +165,34 @@ impl RenderFramePacket {
             source_generation: self.source_generation,
             frame_index: self.frame_index,
             target: RenderFrameTarget::Image(target),
+            logical_target: self.logical_target,
             views: self.views.to_vec(),
             world_canvas: self.world_canvas,
             captured_time: self.captured_time,
         })
     }
+}
+
+/// Captures a window-space overlay after its composer has admitted the original window.
+#[must_use]
+pub fn build_window_overlay_frame_packet(
+    generation: RuntimeGeneration,
+    frame_index: u64,
+    window: RenderWindowPacket,
+    captured_time: Option<CapturedRenderTime>,
+) -> Option<RenderFramePacket> {
+    if window.resolution.is_zero_sized() {
+        return None;
+    }
+    Some(RenderFramePacket {
+        source_generation: RenderFrameSourceGeneration::runtime(generation),
+        frame_index,
+        target: RenderFrameTarget::Window(window),
+        logical_target: RenderTarget::Window(window.id),
+        views: Vec::new(),
+        world_canvas: None,
+        captured_time,
+    })
 }
 
 /// Captures the admitted desktop topology before any surface acquisition.
@@ -314,6 +344,7 @@ pub(crate) fn build_render_frame_packet_for_source<'a>(
         source_generation,
         frame_index,
         target,
+        logical_target: first.target,
         views: views.as_slice().to_vec(),
         world_canvas,
         captured_time: views.captured_time(),

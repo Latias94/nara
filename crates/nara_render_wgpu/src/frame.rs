@@ -379,6 +379,8 @@ pub(crate) struct WgpuFramePacketSlot {
     no_views: Option<WgpuCapturedNoViews>,
     #[cfg(feature = "stock-ui")]
     ui_submissions: Option<WgpuUiSubmissionState>,
+    #[cfg(feature = "stock-ui")]
+    pub(crate) allow_window_overlay: bool,
 }
 
 impl std::fmt::Debug for WgpuFramePacketSlot {
@@ -434,6 +436,7 @@ impl WgpuFramePacketSlot {
         #[cfg(feature = "stock-ui")]
         {
             self.ui_submissions = None;
+            self.allow_window_overlay = false;
         }
     }
 
@@ -444,6 +447,10 @@ impl WgpuFramePacketSlot {
         }
         if self.phase == CapturePhase::Collecting {
             return;
+        }
+        #[cfg(feature = "stock-ui")]
+        {
+            self.allow_window_overlay = false;
         }
         self.phase = CapturePhase::Collecting;
     }

@@ -1,7 +1,7 @@
 use dear_imgui_rs::{Context, ContextId, FrameToken};
 use dear_imgui_wgpu::{
-    ExternalTextureBinding, ExternalTextureId, WgpuDrawDependencies, WgpuFrameStage, WgpuInitInfo,
-    WgpuRenderer,
+    ExternalTextureBinding, ExternalTextureId, WgpuDrawDependencies, WgpuFrameOutcome,
+    WgpuFrameSkipReason, WgpuFrameStage, WgpuInitInfo, WgpuRenderer,
     multi_viewport::{WgpuPreparedMainFrame, WgpuViewportFrameReport, WinitViewportRoute},
 };
 use dear_imgui_winit::WinitPlatform;
@@ -22,6 +22,17 @@ fn delegated_window_id(primary: WindowId, instance: u64) -> Option<WindowId> {
         instance
     };
     Some(WindowId::new(raw))
+}
+
+fn secondary_window_unavailable(outcome: &WgpuFrameOutcome) -> bool {
+    matches!(
+        outcome,
+        WgpuFrameOutcome::Skipped(
+            WgpuFrameSkipReason::Lost
+                | WgpuFrameSkipReason::RetiredTarget
+                | WgpuFrameSkipReason::ZeroSize
+        )
+    )
 }
 
 enum RendererOwner {
@@ -361,8 +372,9 @@ impl WgpuRenderHost {
     }
     /// Completes secondary work and joins its observations before acquiring the primary surface.
     ///
-    /// Partial successful presentations are appended before any toolkit error is returned. Each
-    /// binding retains its immutable output independently of subsequent producer changes.
+    /// Partial successful presentations and unavailable secondary targets are appended before any
+    /// toolkit error is returned. Each binding retains its immutable output independently of
+    /// subsequent producer changes.
     pub fn prepare_imgui_frame<'context>(
         &mut self,
         window: RenderWindowPacket,
@@ -492,16 +504,19 @@ impl WgpuRenderHost {
             renderer.last_secondary_scope = Some(scope);
         }
         for observed in report.into_observations() {
-            if observed.stage != WgpuFrameStage::PresentationRequested || observed.target.is_main {
+            if observed.target.is_main {
+                continue;
+            }
+            let unavailable = secondary_window_unavailable(&observed.outcome);
+            if !unavailable && observed.stage != WgpuFrameStage::PresentationRequested {
+                continue;
+            }
+            let window_id = self.imgui_window_id(observed.target.instance_id)?;
+            if unavailable {
+                outcomes.push(WgpuWindowFrameOutcome::unavailable(window_id));
                 continue;
             }
             let instance = observed.target.instance_id.get().get();
-            let window_id =
-                delegated_window_id(self.primary_window_id, instance).ok_or_else(|| {
-                    WgpuRenderHostError::window_paint(
-                        "the secondary window identity space was exhausted",
-                    )
-                })?;
             let samples = viewport_submissions
                 .iter()
                 .filter(|display| renderer.samples(&observed.dependencies, display))
@@ -527,6 +542,7 @@ impl WgpuRenderHost {
             outcomes.push(WgpuWindowFrameOutcome {
                 window: Some(window),
                 composites,
+                unavailable_window: None,
             });
         }
         Ok(())

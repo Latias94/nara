@@ -39,6 +39,7 @@ use nara_window::{PrimaryWindowId, Window, WindowId};
 #[doc(hidden)]
 pub mod __private {
     use crate::frame::build_render_frame_packet_for_source;
+    pub use crate::frame::build_window_overlay_frame_packet;
     pub use crate::world_pointer::{
         PresentedWorldFrame, WorldPresentationGuard, WorldPresentationRevoker,
         prepare_world_presentation,

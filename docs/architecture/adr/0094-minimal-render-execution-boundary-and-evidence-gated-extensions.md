@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-16
-**Last Revised**: 2026-11-15 (captured View and Shader clock facts)
+**Last Revised**: 2026-11-21 (stock window UI without world Views)
 **Supersedes**: [ADR 0077](0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0016](0016-extension-seams-for-backends-and-domain-modules.md),
@@ -351,6 +351,17 @@ before or after optional Canvas resolution. It may export the untouched original
 exact version. No implicit latest slot or universal pre-UI pixel space is introduced. Final UI
 lowering selects the exact chosen Scene version, preserves full-resolution HUD drawing and supplies
 the original UI binding validated by the existing Host.
+
+When the default stock policy collects the window UI contribution, a renderable single primary
+window may seal a packet with zero world Views. The packet retains its original logical window
+target and time sample through image adaptation. The stock program initializes the physical
+target to opaque black and composites any captured UI at native resolution. An empty UI
+contribution can clear the last visible menu. The original UI completion follows the submitted
+frame, and that frame revokes world picking until a mapped world View presents again. Custom
+policy collection and render-only collection keep their existing empty-View disposition.
+An embedded Game View keeps the previous picking authority when the overlay-only candidate is
+deferred or content-rejected and the original display is still valid. Target retirement,
+reconfiguration and terminal backend failure still revoke it.
 
 Stock capture collection is independent of the selected policy type. An admitted handoff transfers
 the immutable stock drawing and original optional move-only UI sidecar to its composing collector.

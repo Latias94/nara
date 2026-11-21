@@ -9,17 +9,18 @@ use dear_imgui_winit::{HiDpiMode, WinitPlatform, WinitPlatformAction};
 use nara::{
     project_host::{
         EditorGameStartRequest, EditorGameViewCandidateIdentity, EditorGameViewCompletion,
+        EditorGameViewCompletionDisposition,
     },
     render::{
-        __private::editor_viewport_image_target, Extent2d, RenderFrameSourceGeneration,
-        RenderImagePacket, RenderWindowPacket,
+        __private::{WorldPresentationRevoker, editor_viewport_image_target},
+        Extent2d, RenderFrameSourceGeneration, RenderImagePacket, RenderWindowPacket,
     },
     render_wgpu::{
         __private::{WgpuEditorImguiFrame, WgpuEditorImguiRenderer},
-        WgpuDeviceRequirements, WgpuGpuRetirement, WgpuImageCompositeReceipt, WgpuImageDisplay,
-        WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuRenderHost, WgpuRenderHostError,
-        WgpuRenderProducer, WgpuSubmittedImageReceipt, WgpuUiImageSubmission, WgpuWindowFrame,
-        WgpuWindowFrameOutcome,
+        WgpuDeviceRequirements, WgpuDisplayOccurrence, WgpuGpuRetirement,
+        WgpuImageCompositeReceipt, WgpuImageDisplay, WgpuImageTargetActivation,
+        WgpuImageTargetIdentity, WgpuRenderHost, WgpuRenderHostError, WgpuRenderProducer,
+        WgpuSubmittedImageReceipt, WgpuUiImageSubmission, WgpuWindowFrame, WgpuWindowFrameOutcome,
     },
     tooling::{EditorActionBatch, EditorPlayState, EditorRuntimeAvailability},
     window::{WindowId as NaraWindowId, backend::WindowHandleProvider},
@@ -32,7 +33,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use crate::frontend::imgui::{ImguiEditorFrontend, ImguiViewImage};
+use crate::frontend::imgui::{ImguiEditorFrontend, ImguiImageInteraction, ImguiViewImage};
 use crate::{EditorApplication, supervised_play::SupervisedPlayWake};
 
 use super::{
@@ -508,6 +509,7 @@ struct NativeImgui {
     rejected_completion: Option<EditorGameViewCompletion>,
     input: ImguiInput,
     game_candidate: Option<EditorGameViewCandidateIdentity>,
+    presented_game_image: Option<PresentedGameImage>,
     game_source_active: bool,
     layout_loaded: bool,
     presented: bool,
@@ -639,6 +641,30 @@ impl ImguiTarget {
         self.display.as_ref() == Some(display) && self.texture.is_some()
     }
 
+    fn discard_selected_display(
+        &mut self,
+        selected: WgpuDisplayOccurrence,
+        previous: Option<WgpuDisplayOccurrence>,
+    ) {
+        assert_eq!(
+            self.display.as_ref().map(WgpuImageDisplay::occurrence),
+            Some(selected)
+        );
+        let discarded = (self.texture.take().unwrap(), self.display.take().unwrap());
+        self.submitted = None;
+        if let Some(previous) = previous {
+            let (texture, display) = self
+                .obsolete
+                .pop()
+                .expect("the original display registration");
+            assert_eq!(display.occurrence(), previous);
+            self.submitted = Some(display.receipt());
+            self.texture = Some(texture);
+            self.display = Some(display);
+        }
+        self.obsolete.push(discarded);
+    }
+
     // Called before a new toolkit frame: every previous main/secondary frame has settled.
     fn release_obsolete(&mut self, renderer: &mut ImguiRenderer) -> Result<(), EditorRunError> {
         while let Some((texture, _)) = self.obsolete.last() {
@@ -721,6 +747,47 @@ struct PendingGameImage {
     identity: EditorGameViewCandidateIdentity,
     display: WgpuImageDisplay,
     ui: Option<WgpuUiImageSubmission>,
+    overlay: Option<PendingGameOverlay>,
+    world_revoker: Option<WorldPresentationRevoker>,
+}
+
+#[derive(Clone, Copy)]
+struct PendingGameOverlay {
+    previous: Option<WgpuImageCompositeReceipt>,
+}
+
+struct PresentedGameImage {
+    receipt: WgpuImageCompositeReceipt,
+    world_revoker: Option<WorldPresentationRevoker>,
+}
+
+impl PresentedGameImage {
+    fn matches(&self, receipt: WgpuImageCompositeReceipt) -> bool {
+        self.receipt.image() == receipt.image() && self.receipt.occurrence() == receipt.occurrence()
+    }
+
+    fn displaced_by<'a>(
+        &self,
+        mut outcomes: impl Iterator<Item = &'a WgpuWindowFrameOutcome>,
+    ) -> bool {
+        let window = self.receipt.window().window_id();
+        outcomes.any(|outcome| {
+            outcome.unavailable_window() == Some(window)
+                || outcome
+                    .window()
+                    .is_some_and(|receipt| receipt.window_id() == window)
+                    && !outcome
+                        .composites()
+                        .iter()
+                        .any(|receipt| self.matches(*receipt))
+        })
+    }
+
+    fn revoke(self) {
+        if let Some(revoker) = self.world_revoker {
+            revoker.invalidate();
+        }
+    }
 }
 
 impl PendingGameImage {
@@ -736,8 +803,17 @@ impl PendingGameImage {
         receipts.into_iter().find(|receipt| self.matches(*receipt))
     }
 
-    fn finish(self, receipt: Option<WgpuImageCompositeReceipt>) -> EditorGameViewCompletion {
+    fn finish(
+        self,
+        receipt: Option<WgpuImageCompositeReceipt>,
+        error: Option<&EditorRunError>,
+    ) -> EditorGameViewCompletion {
         let receipt = receipt.filter(|receipt| self.matches(*receipt));
+        if receipt.is_none()
+            && let Some(error) = error
+        {
+            return self.fail(error);
+        }
         match (self.ui, receipt) {
             (Some(ui), Some(receipt)) => match ui.presented(receipt) {
                 Ok(outcomes) => EditorGameViewCompletion::with_ui(self.identity, outcomes),
@@ -748,23 +824,10 @@ impl PendingGameImage {
             },
             (Some(ui), None) => EditorGameViewCompletion::with_ui_deferred(
                 self.identity,
-                ui.deferred(
-                    "the exact Game image was not presented in the primary window".to_owned(),
-                ),
+                ui.deferred("the exact Game image had no native composition receipt".to_owned()),
             ),
             (None, Some(_)) => EditorGameViewCompletion::without_ui(self.identity),
             (None, None) => EditorGameViewCompletion::without_ui_deferred(self.identity),
-        }
-    }
-
-    fn finish_after_error(
-        self,
-        receipts: impl IntoIterator<Item = WgpuImageCompositeReceipt>,
-        error: &EditorRunError,
-    ) -> EditorGameViewCompletion {
-        match self.composite(receipts) {
-            Some(receipt) => self.finish(Some(receipt)),
-            None => self.fail(error),
         }
     }
 
@@ -869,6 +932,7 @@ impl NativeImgui {
             rejected_completion: None,
             input: ImguiInput::default(),
             game_candidate: None,
+            presented_game_image: None,
             game_source_active: false,
             layout_loaded: false,
             presented: false,
@@ -1087,7 +1151,6 @@ impl NativeImgui {
         }
         self.prepare_game_start(application, window_packet)?;
         let pending_game = self.submit_game(application, window_packet)?;
-        let pending_identity = pending_game.as_ref().map(|pending| pending.identity);
         let mut secondary_outcomes = Vec::new();
         let mut secondary_windows = Vec::new();
         let canvas_presented = if let Some(frame) = application.current_ui_authoring_frame() {
@@ -1193,6 +1256,26 @@ impl NativeImgui {
         self.presented = secondary_outcomes
             .iter()
             .any(|outcome| outcome.window().is_some());
+        let game_receipt = self.routed_game_composite(
+            frontend_output
+                .as_ref()
+                .and_then(|output| output.game_image),
+            primary_viewport,
+            &secondary_windows,
+            rendered
+                .as_ref()
+                .ok()
+                .into_iter()
+                .chain(&secondary_outcomes),
+        );
+        self.settle_game_image(
+            application,
+            pending_game,
+            rendered.as_ref().ok(),
+            &secondary_outcomes,
+            rendered.as_ref().err(),
+            game_receipt,
+        )?;
         let outcome = match rendered {
             Ok(rendered) => rendered,
             Err(error) => {
@@ -1215,16 +1298,6 @@ impl NativeImgui {
                         self.frontend
                             .submit_and_drive(application, batch, Duration::ZERO);
                     }
-                }
-                if let Some(pending) = pending_game {
-                    let completion = pending.finish_after_error(
-                        secondary_outcomes
-                            .iter()
-                            .flat_map(WgpuWindowFrameOutcome::composites)
-                            .copied(),
-                        &error,
-                    );
-                    self.return_game_completion(application, completion)?;
                 }
                 self.input.flush(application)?;
                 return Err(error);
@@ -1336,49 +1409,16 @@ impl NativeImgui {
                 output.text_owner = None;
             }
         }
-        if let Some(pending) = pending_game {
-            let receipt = pending.composite(
-                outcome
-                    .composites()
-                    .iter()
-                    .chain(
-                        secondary_outcomes
-                            .iter()
-                            .flat_map(WgpuWindowFrameOutcome::composites),
-                    )
-                    .copied(),
-            );
-            self.return_game_completion(application, pending.finish(receipt))?;
-        }
-        if pending_identity.is_some() {
-            self.game_candidate = pending_identity;
-        }
-        let game_window = output.game_image.and_then(|image| {
-            input::native_window(
-                image.viewport,
-                self.window.id(),
-                primary_viewport,
-                &secondary_windows,
-            )
-            .map(|(_, window)| window)
+        let game_receipt = game_receipt.filter(|receipt| {
+            self.game.display.as_ref().is_some_and(|display| {
+                receipt.image() == display.receipt() && receipt.occurrence() == display.occurrence()
+            })
         });
-        let game_receipt = outcome
-            .composites()
-            .iter()
-            .chain(
-                secondary_outcomes
-                    .iter()
-                    .flat_map(WgpuWindowFrameOutcome::composites),
-            )
-            .copied()
-            .find(|receipt| {
-                self.game.display.as_ref().is_some_and(|display| {
-                    receipt.image() == display.receipt()
-                        && receipt.occurrence() == display.occurrence()
-                }) && Some(receipt.window().window_id()) == game_window
-                    && Some(receipt.occurrence())
-                        == output.game_image.and_then(|image| image.occurrence)
-            });
+        if let Some(receipt) = game_receipt
+            && self.game_candidate.is_some()
+        {
+            self.observe_game_composite(receipt);
+        }
         self.input.observe(
             output.game_image,
             output.text_owner,
@@ -1552,6 +1592,7 @@ impl NativeImgui {
                     self.input
                         .invalidate_after_control(application.active_game_start_request());
                     self.game_candidate = None;
+                    self.revoke_game_composite();
                 }
                 Some(dispatch)
             });
@@ -1592,6 +1633,7 @@ impl NativeImgui {
             let resized = application.resize_game_view(extent).map_err(imgui_error)?;
             if resized {
                 self.game_candidate = None;
+                self.revoke_game_composite();
                 self.window.request_redraw();
             }
             resized
@@ -1666,6 +1708,7 @@ impl NativeImgui {
                 self.input
                     .invalidate_after_control(application.active_game_start_request());
                 self.game_candidate = None;
+                self.revoke_game_composite();
                 self.game.retire(&mut self.gpu, &mut self.renderer)?;
             }
             return Ok(());
@@ -1705,6 +1748,7 @@ impl NativeImgui {
                     self.game_source_active = false;
                 }
                 self.game_candidate = None;
+                self.revoke_game_composite();
                 self.game.retire(&mut self.gpu, &mut self.renderer)?;
                 return Ok(());
             }
@@ -1744,6 +1788,7 @@ impl NativeImgui {
         let content = game_input_tests::GameCandidateContent::captured(candidate.input());
         let world_presentation_revoker = candidate.world_presentation_revoker();
         let (identity, input, runtime_ui) = candidate.into_parts().into_submission_parts();
+        let overlay_only = input.packet().views().is_empty();
         let Some((view, target)) = self.game.view.as_ref().zip(self.game.target) else {
             let completion = match runtime_ui {
                 Some(ui) => EditorGameViewCompletion::with_ui_failed(
@@ -1769,7 +1814,7 @@ impl NativeImgui {
                 return Err(imgui_error(error));
             }
         };
-        if let Some(revoker) = world_presentation_revoker {
+        if let Some(revoker) = world_presentation_revoker.clone() {
             if let Err(error) = self
                 .gpu
                 .retain_game_world_presentation(view, window, revoker)
@@ -1792,6 +1837,22 @@ impl NativeImgui {
                     Ok(ui) => (ui.display().clone(), Some(ui)),
                     Err(failure) => {
                         let (error, outcomes) = failure.complete();
+                        if overlay_only && error.is_deferred() {
+                            self.return_game_completion(
+                                application,
+                                EditorGameViewCompletion::with_ui_deferred(identity, outcomes),
+                            )?;
+                            return Ok(None);
+                        }
+                        if overlay_only && error.is_content_rejected() {
+                            self.return_game_completion(
+                                application,
+                                EditorGameViewCompletion::with_ui_content_rejected(
+                                    identity, outcomes,
+                                ),
+                            )?;
+                            return Ok(None);
+                        }
                         self.return_game_completion(
                             application,
                             EditorGameViewCompletion::with_ui_failed(identity, outcomes),
@@ -1827,6 +1888,17 @@ impl NativeImgui {
             identity,
             display,
             ui,
+            overlay: overlay_only.then(|| PendingGameOverlay {
+                previous: self.game_composite_receipt().filter(|previous| {
+                    self.game_candidate
+                        .is_some_and(|earlier| earlier.start() == identity.start())
+                        && self.game.display.as_ref().is_some_and(|display| {
+                            display.occurrence() == previous.occurrence()
+                                && display.receipt() == previous.image()
+                        })
+                }),
+            }),
+            world_revoker: world_presentation_revoker,
         };
         if let Err(error) = self
             .game
@@ -1846,6 +1918,132 @@ impl NativeImgui {
                 });
         }
         Ok(Some(pending))
+    }
+
+    fn settle_game_image(
+        &mut self,
+        application: &mut EditorApplication,
+        pending: Option<PendingGameImage>,
+        primary: Option<&WgpuWindowFrameOutcome>,
+        secondary: &[WgpuWindowFrameOutcome],
+        error: Option<&EditorRunError>,
+        routed: Option<WgpuImageCompositeReceipt>,
+    ) -> Result<(), EditorRunError> {
+        use EditorGameViewCompletionDisposition::{ContentRejected, Deferred, Presented};
+
+        let incumbent_represented = if let Some((incumbent, receipt)) =
+            self.presented_game_image.as_mut().zip(routed)
+            && incumbent.matches(receipt)
+        {
+            incumbent.receipt = receipt;
+            true
+        } else {
+            false
+        };
+        let outcomes = primary.into_iter().chain(secondary);
+        let incumbent_displaced = !incumbent_represented
+            && self
+                .presented_game_image
+                .as_ref()
+                .is_some_and(|incumbent| incumbent.displaced_by(outcomes.clone()));
+        if incumbent_displaced {
+            self.revoke_game_composite();
+        }
+        let Some(mut pending) = pending else {
+            return Ok(());
+        };
+        let receipt =
+            pending.composite(outcomes.flat_map(|outcome| outcome.composites().iter().copied()));
+        let identity = pending.identity;
+        let overlay = pending.overlay;
+        let selected = pending.display.occurrence();
+        let world_revoker = pending.world_revoker.take();
+        let predecessor_invalid = receipt.is_none()
+            && incumbent_displaced
+            && overlay.is_some_and(|overlay| overlay.previous.is_some());
+        let target_failure = predecessor_invalid
+            .then(|| imgui_error("the previous Game image no longer has a presented target"));
+        let completion = pending.finish(receipt, target_failure.as_ref().or(error));
+        let disposition = completion.disposition();
+        if let Some(overlay) = overlay
+            && disposition != Presented
+        {
+            let previous = if matches!(disposition, Deferred | ContentRejected) {
+                overlay.previous.map(WgpuImageCompositeReceipt::occurrence)
+            } else {
+                None
+            };
+            self.game.discard_selected_display(selected, previous);
+            if previous.is_none() {
+                self.game_candidate = None;
+                self.revoke_game_composite();
+            }
+        }
+        self.return_game_completion(application, completion)?;
+        if disposition == Presented || overlay.is_none() && error.is_none() {
+            self.game_candidate = Some(identity);
+        }
+        if disposition == Presented {
+            self.presented_game_image = receipt.map(|receipt| PresentedGameImage {
+                receipt,
+                world_revoker,
+            });
+        }
+        Ok(())
+    }
+
+    fn routed_game_composite<'a>(
+        &self,
+        image: Option<ImguiImageInteraction>,
+        primary_viewport: dear_imgui_rs::Id,
+        secondary_windows: &[(dear_imgui_rs::Id, WindowId, NaraWindowId)],
+        outcomes: impl Iterator<Item = &'a WgpuWindowFrameOutcome>,
+    ) -> Option<WgpuImageCompositeReceipt> {
+        let image = image?;
+        let display = self.game.display.as_ref()?;
+        if image.occurrence != Some(display.occurrence()) {
+            return None;
+        }
+        let (_, window) = input::native_window(
+            image.viewport,
+            self.window.id(),
+            primary_viewport,
+            secondary_windows,
+        )?;
+        outcomes
+            .flat_map(WgpuWindowFrameOutcome::composites)
+            .copied()
+            .find(|receipt| {
+                receipt.window().window_id() == window
+                    && receipt.image() == display.receipt()
+                    && receipt.occurrence() == display.occurrence()
+            })
+    }
+
+    fn game_composite_receipt(&self) -> Option<WgpuImageCompositeReceipt> {
+        self.presented_game_image
+            .as_ref()
+            .map(|image| image.receipt)
+    }
+
+    fn observe_game_composite(&mut self, receipt: WgpuImageCompositeReceipt) {
+        if let Some(incumbent) = &mut self.presented_game_image
+            && incumbent.matches(receipt)
+        {
+            incumbent.receipt = receipt;
+        } else {
+            self.revoke_game_composite();
+            self.presented_game_image = Some(PresentedGameImage {
+                receipt,
+                world_revoker: None,
+            });
+        }
+    }
+
+    fn revoke_game_composite(&mut self) {
+        if let Some(incumbent) = self.presented_game_image.take() {
+            incumbent.revoke();
+        }
     }
 
     fn return_game_completion(

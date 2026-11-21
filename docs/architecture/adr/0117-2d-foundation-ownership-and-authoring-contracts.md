@@ -3,8 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-10-15
 **Amended**: 2026-10-23 for explicit phase spatial cuts, common asset mutation admission and
-borrowed/scoped current-Scene access; refined 2026-11-01 for captured View lifetimes and
-2026-11-14 for admitted material/Shader generations
+borrowed/scoped current-Scene access, 2026-11-01 for captured View lifetimes, 2026-11-14 for
+admitted material/Shader generations, and 2026-11-21 for stock window overlay-only frames
 **Owner**: game composition, managed execution, content, domain plugins, rendering, and tooling
 **Implementation Plan**: [2D foundation contracts](../../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
 
@@ -361,6 +361,11 @@ camera configuration and derives projection, clear order and presented picking f
 rectangles. Without Window geometry, an explicit rectangle allows extraction and the actual target
 descriptor checks it at packet admission. Caller-built packets must supply valid in-bounds
 rectangles.
+
+The default stock window UI contribution can present over a full-resolution clear when every
+world View is omitted. Window geometry continues to drive UI layout, painting and input. A
+presented overlay-only frame carries no WorldCanvas or world-picking authority. When a View
+returns after clipping, it retains its authored settings and original lifetime identity.
 
 Each captured View carries a non-reused process-local lifetime identity, separate from its camera
 Entity, target, raster extent and ordering. Camera removal/readdition starts a new lifetime even

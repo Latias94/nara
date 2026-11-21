@@ -226,6 +226,25 @@ The final command includes physical mixed-DPI acceptance, the injected-failure c
 resize. To select checks that run on one display, add
 `-E 'not test(ordinary_runtime_picking_matches_pixels_across_actual_mixed_dpi_displays)'`.
 
+### Stock window UI without world Views
+
+`examples/hud_only_window.rs` drives an ordinary stock Runtime through a real 480 × 240 →
+320 × 240 → 480 × 240 client resize. It checks the original UI packet and its presentation
+receipt while the camera is fully clipped. A synthetic gamepad activates the menu through that
+receipt. The original View and world picking recover after the resize. After Runtime, HWND and
+pump retirement, the consumer replays the original clipped input offscreen and reads the HUD
+and opaque black background pixels. The native test requires a Windows DX12 hardware adapter.
+`NARA_STOCK_HUD_ONLY_WINDOW_EXE` can select an absolute prebuilt example path.
+
+```powershell
+$env:CARGO_BUILD_JOBS = '1'
+$env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
+$env:WGPU_BACKEND = 'dx12'
+$env:NARA_WGPU_FORCE_FALLBACK = '0'
+cargo +1.95.0 build --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --offline --release --example hud_only_window
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --offline --release --test hud_only_window --run-ignored only --test-threads=1 --no-tests fail --success-output immediate
+```
+
 ### Owning and source consumers
 
 Run from the repository root after the parent has aligned this workspace's lock. Reuse the normal

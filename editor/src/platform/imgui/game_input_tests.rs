@@ -1,6 +1,7 @@
 #![cfg(target_os = "windows")]
 
 mod canvas;
+mod overlay;
 mod source_continuity;
 mod work_costs;
 
@@ -62,6 +63,7 @@ use crate::{
 /// only after matching their exact submitted image to an actual native composite receipt.
 #[derive(Clone, Copy)]
 pub(super) struct GameCandidateContent {
+    world_views: usize,
     sprite_instances: usize,
     center_x: Option<f32>,
     runtime_ui_present: bool,
@@ -71,12 +73,13 @@ impl GameCandidateContent {
     pub(super) fn captured(input: &WgpuRenderInput) -> Option<Self> {
         let capture = input.captured::<WgpuStockPolicy>()?;
         Some(Self::new(
+            input.packet().views().len(),
             capture.sprite_batches(),
             !capture.ui_packets().is_empty(),
         ))
     }
 
-    fn new(sprites: Option<&SpriteBatches>, runtime_ui_present: bool) -> Self {
+    fn new(world_views: usize, sprites: Option<&SpriteBatches>, runtime_ui_present: bool) -> Self {
         let center_x = sprites.and_then(|sprites| {
             let mut centers = sprites
                 .as_slice()
@@ -87,6 +90,7 @@ impl GameCandidateContent {
             centers.next().is_none().then_some(center)
         });
         Self {
+            world_views,
             sprite_instances: sprites.map_or(0, SpriteBatches::total_instances),
             center_x,
             runtime_ui_present,
@@ -394,7 +398,24 @@ fn run_game_workflow_with_device_requirements<T>(
     requirements: &WgpuDeviceRequirements,
     run: impl FnOnce(GameInputWorkflow<'_>) -> Result<T, String>,
 ) -> Result<T, String> {
-    let intent = game_view_intent()?;
+    run_game_workflow_with_intent(
+        event_loop,
+        project,
+        canvas_buttons,
+        requirements,
+        game_view_intent()?,
+        run,
+    )
+}
+
+fn run_game_workflow_with_intent<T>(
+    event_loop: &ActiveEventLoop,
+    project: &Path,
+    canvas_buttons: bool,
+    requirements: &WgpuDeviceRequirements,
+    intent: TrustedCompiledEditorProjectIntent,
+    run: impl FnOnce(GameInputWorkflow<'_>) -> Result<T, String>,
+) -> Result<T, String> {
     let window = hidden_window(event_loop, "Nara native Game input workflow")
         .map_err(|error| error.to_string())?;
     let mut native = initialize_native_with_requirements_for_test(
@@ -648,9 +669,12 @@ impl GameInputWorkflow<'_> {
         if !input.is_captured() {
             return Err("the exact designated interaction did not capture input".to_owned());
         }
-        let completion = pending.finish_after_error(
-            [mirror_receipt, designated_receipt],
-            &super::imgui_error("primary paint failed after secondary Game presentation"),
+        let receipt = pending.composite([mirror_receipt, designated_receipt]);
+        let completion = pending.finish(
+            receipt,
+            Some(&super::imgui_error(
+                "primary paint failed after secondary Game presentation",
+            )),
         );
         self.native
             .return_game_completion(self.application, completion)
@@ -685,6 +709,10 @@ impl GameInputWorkflow<'_> {
         }
         self.application
             .drive_editor_frame(Duration::from_millis(20), false, true);
+        self.paint_current(input)
+    }
+
+    fn paint_current(&mut self, input: impl FnOnce(&mut Context)) -> Result<(), String> {
         let origin = self.native.context.main_viewport().pos();
         let scale = f64::from(self.native.context.io().display_framebuffer_scale()[0]);
         let event = WindowEvent::CursorMoved {
@@ -783,6 +811,7 @@ impl GameInputWorkflow<'_> {
                 .input
                 .invalidate_after_control(self.application.active_game_start_request());
             self.native.game_candidate = None;
+            self.native.revoke_game_composite();
         }
         self.application.drive_editor_frame(
             Duration::ZERO,

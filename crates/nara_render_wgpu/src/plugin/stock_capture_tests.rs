@@ -200,10 +200,12 @@ mod ui {
     use nara_ui_render::{
         __private::{
             UiPresentationOutcomes, UiPresentationRoute, backend_outcome_receiver,
-            replace_ui_backend_frame, replace_ui_presentation_routes, snapshot_ui_paint_packets,
+            commit_ui_backend_outcomes, replace_ui_backend_frame, replace_ui_presentation_routes,
+            snapshot_ui_paint_packets,
         },
-        UiPaintPacket, UiPresentationOutcome,
+        UiPaintPacket, UiPresentationOutcome, drain_ui_presentation_outcomes,
     };
+    use nara_window::WindowId;
 
     use crate::frame::WgpuUiSubmissionState;
 
@@ -218,7 +220,7 @@ mod ui {
         app
     }
 
-    fn queue_ui_frame(world: &mut World) -> Arc<UiPaintPacket> {
+    fn queue_ui_frame(world: &mut World, window_id: WindowId) -> Arc<UiPaintPacket> {
         use nara_ui_kernel::{
             UiAuthoringSnapshotBuilder, UiCompiler, UiEnvironment, UiLayer, UiRoot, UiRootKey,
             UiStyle, UiSurfaceId, UiTheme,
@@ -227,7 +229,7 @@ mod ui {
         let surface = UiSurfaceId::new(1).unwrap();
         replace_ui_presentation_routes(
             world,
-            [UiPresentationRoute::new(surface, nara_window::WindowId::PRIMARY).unwrap()],
+            [UiPresentationRoute::new(surface, window_id).unwrap()],
         )
         .unwrap();
         let snapshot = UiAuthoringSnapshotBuilder::new(1)
@@ -263,6 +265,132 @@ mod ui {
     }
 
     #[test]
+    fn only_the_stock_window_ui_route_seals_empty_world_views() {
+        use nara_app::{CoreStage, RuntimeInstance};
+        use nara_render::{RenderFrameTarget, RenderImage2d, RenderImagePacket, RenderTarget};
+        use nara_window::{WindowPlugin, WindowResolution};
+        use std::time::Duration;
+
+        let foreign = WindowId::new(9);
+        for (stock_ui, ui_window, width) in [
+            (true, Some(WindowId::PRIMARY), 16),
+            (true, Some(foreign), 16),
+            (true, None, 16),
+            (false, None, 16),
+            (true, None, 0),
+        ] {
+            let mut app = super::super::tests::capture_app();
+            let window = Window::new("Empty world", WindowResolution::new(width, 16));
+            let target = RenderWindowPacket {
+                id: window.id,
+                resolution: window.resolution,
+                present_mode: window.present_mode,
+            };
+            app.add_plugins((
+                WindowPlugin {
+                    primary_window: Some(window),
+                },
+                WgpuStockCapturePlugin,
+                WgpuStockPolicyPlugin,
+            ))
+            .unwrap();
+            app.insert_resource(nara_render::WorldCanvas::new(8, 8).unwrap())
+                .unwrap();
+            if stock_ui {
+                app.add_plugins((
+                    nara_image::ImagePreparePlugin,
+                    nara_ui_render::UiRenderPlugin::default(),
+                    WgpuStockUiPlugin,
+                ))
+                .unwrap();
+            }
+            let original = ui_window.map(|window| queue_ui_frame(app.world_mut().unwrap(), window));
+            app.add_systems(CoreStage::Last, move |world: &mut World| {
+                let generation = *world.resource::<RuntimeGeneration>();
+                let views = world.resource::<ExtractedViews>();
+                assert!(views.as_slice().is_empty());
+                assert!(views.world_canvas().is_some());
+                let original_time = views.captured_time().unwrap();
+                let batch = crate::take_captured_policy_batch(world).unwrap();
+                let no_views = batch.no_views_app_frame(generation, target);
+                let app_frame = batch.app_frame_index();
+                let (input, ui) = batch.into_parts();
+                assert_eq!(ui.is_some(), stock_ui);
+                if ui_window == Some(foreign) {
+                    let Err(WgpuFrameCaptureError::Policy(error)) = input else {
+                        panic!("a different window's UI packet cannot target this window");
+                    };
+                    let message = error.to_string();
+                    assert!(
+                        message.contains("UI packets must belong to the captured logical target")
+                    );
+                    assert_eq!(app_frame, None);
+                    let completions = ui.unwrap().content_rejected(message);
+                    assert_eq!(completions.len(), 1);
+                    commit_ui_backend_outcomes(world, completions).unwrap();
+                    let outcomes = drain_ui_presentation_outcomes(world).unwrap();
+                    assert!(matches!(
+                        outcomes.as_slice(),
+                        [UiPresentationOutcome::ContentRejected { attempt, .. }]
+                            if attempt.admission_id().unwrap().get() == 83
+                                && attempt.target() == Some(RenderTarget::Window(foreign))
+                                && attempt.packet() == original.as_ref().unwrap().identity()
+                    ));
+                    assert!(drain_ui_presentation_outcomes(world).unwrap().is_empty());
+                    return;
+                }
+                if stock_ui && width != 0 {
+                    let input = input.unwrap().unwrap();
+                    let packet = input.packet();
+                    assert_eq!(no_views, None);
+                    assert!(app_frame.is_some());
+                    assert_eq!(
+                        packet.source_generation().runtime_generation(),
+                        Some(generation)
+                    );
+                    assert_eq!(packet.target(), RenderFrameTarget::Window(target));
+                    assert_eq!(packet.logical_target(), RenderTarget::Window(target.id));
+                    assert_eq!(packet.captured_time(), Some(original_time));
+                    assert!(packet.views().is_empty());
+                    assert!(packet.world_canvas().is_none());
+                    assert!(input.world_input_mapping().is_none());
+                    let stock = input.captured::<WgpuStockPolicy>().unwrap();
+                    assert_eq!(stock.ui_packets().len(), usize::from(original.is_some()));
+                    if let Some(original) = &original {
+                        assert!(Arc::ptr_eq(&stock.ui_packets()[0], original));
+                    }
+                    let image = RenderImagePacket::new(
+                        RenderImage2d::allocate_handle().unwrap(),
+                        packet.target().extent(),
+                    )
+                    .unwrap();
+                    let adapted = input.with_image_target(image).unwrap();
+                    assert_eq!(adapted.packet().target(), RenderFrameTarget::Image(image));
+                    assert_eq!(adapted.packet().logical_target(), packet.logical_target());
+                    assert!(adapted.world_input_mapping().is_none());
+                } else {
+                    assert!(input.unwrap().is_none());
+                    assert_eq!(app_frame.is_some(), width != 0);
+                    assert_eq!(no_views, app_frame);
+                }
+                if let Some(ui) = ui {
+                    let submissions = ui.into_prepared_submissions().unwrap();
+                    assert_eq!(submissions.len(), usize::from(original.is_some()));
+                    if let Some(original) = &original {
+                        let submission = submissions[0].submission();
+                        assert_eq!(submission.identity().admission_id().get(), 83);
+                        assert!(Arc::ptr_eq(submission.packet(), original));
+                    }
+                }
+            })
+            .unwrap();
+            let mut runtime = RuntimeInstance::start(app).unwrap();
+            runtime.drive(Duration::ZERO).unwrap();
+            runtime.finish().unwrap();
+        }
+    }
+
+    #[test]
     fn ui_collector_leaves_the_queue_untouched_when_capture_is_unavailable() {
         #[derive(Clone, Copy, Debug)]
         enum Unavailable {
@@ -282,7 +410,7 @@ mod ui {
         ] {
             let mut app = ui_app();
             let world = app.world_mut().unwrap();
-            let packet = queue_ui_frame(world);
+            let packet = queue_ui_frame(world, WindowId::PRIMARY);
             let receiver = backend_outcome_receiver(world).unwrap();
             begin_stock_capture(world);
             match case {
@@ -337,7 +465,7 @@ mod ui {
     fn ui_collector_hands_the_custom_policy_original_packets_and_sidecar() {
         let mut app = ui_app();
         let world = app.world_mut().unwrap();
-        let packet = queue_ui_frame(world);
+        let packet = queue_ui_frame(world, WindowId::PRIMARY);
         let receiver = backend_outcome_receiver(world).unwrap();
         begin_stock_capture(world);
         world.run_system_once(collect_stock_ui).unwrap();
@@ -377,7 +505,7 @@ mod ui {
     fn ui_collection_retries_after_the_first_admission_refusal_is_resolved() {
         let mut app = ui_app();
         let world = app.world_mut().unwrap();
-        let packet = queue_ui_frame(world);
+        let packet = queue_ui_frame(world, WindowId::PRIMARY);
         let receiver = backend_outcome_receiver(world).unwrap();
         let blocker = crate::tests::admit_ui_attempt(
             &mut world.resource_mut::<UiPresentationOutcomes>(),

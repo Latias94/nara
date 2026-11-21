@@ -178,6 +178,13 @@ interpretation, epoch and shared allocation guard, without retaining the complet
 reports, scratch or CPU capture. Import that exact lease with the normal `import_texture` path
 for further composition or declared readback.
 
+With the default stock policy and the stock window UI contributor, the primary window keeps
+presenting when all world Views are clipped. Its packet has an empty View list and the original
+`logical_target()`. The program clears the native target to opaque black before drawing the HUD.
+UI input uses the ordinary presentation receipt. A world-picking route becomes available when
+a mapped world View presents again. Custom policies continue to receive their existing
+empty-View disposition.
+
 For normal stock collection with a custom policy, explicitly install `WgpuStockCapturePlugin`
 and the selected domain contributors. Compose in `WgpuStockCaptureSet::Compose` using
 `WgpuStockFrameReader::take(&installation, &writer)`. A foreign/closed route, busy connection or

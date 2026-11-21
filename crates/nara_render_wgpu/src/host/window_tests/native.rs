@@ -101,6 +101,25 @@ fn verify_custody(event_loop: &ActiveEventLoop) {
     };
     let mut host =
         WgpuRenderHost::new(packet.id, WindowHandleProvider::new(Arc::clone(&window))).unwrap();
+
+    host.begin_frame(0).unwrap();
+    let mut zero_extent = packet;
+    zero_extent.resolution.physical_width = 0;
+    let outcome = host
+        .present_window(
+            zero_extent,
+            0,
+            &[],
+            |_| panic!("a zero-extent window cannot be painted"),
+            || panic!("a zero-extent window cannot be presented"),
+        )
+        .unwrap();
+    assert_eq!(outcome.unavailable_window(), Some(packet.id));
+    assert!(outcome.window().is_none());
+    assert!(outcome.composites().is_empty());
+    assert_eq!(host.frame_transaction_stats().surface_acquire_attempts(), 0);
+    assert_eq!(host.frame_transaction_stats().presents(), 0);
+
     for (frame_index, attempt) in [
         Attempt::Success,
         Attempt::PaintRefusal,
@@ -201,7 +220,11 @@ fn verify_custody(event_loop: &ActiveEventLoop) {
             },
         );
         match attempt {
-            Attempt::Success => assert!(outcome.unwrap().window().is_some()),
+            Attempt::Success => {
+                let outcome = outcome.unwrap();
+                assert!(outcome.window().is_some());
+                assert!(outcome.unavailable_window().is_none());
+            }
             Attempt::PaintRefusal => assert!(matches!(
                 outcome,
                 Err(WgpuRenderHostError::WindowPaint { .. })

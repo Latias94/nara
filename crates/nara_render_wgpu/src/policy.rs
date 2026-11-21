@@ -302,9 +302,12 @@ impl WgpuRenderInput {
         self.capture.admission().id
     }
 
-    /// Returns the World input mapping frozen by this input's original policy and capture.
+    /// Returns the original policy's World input mapping when the packet has world views.
     #[must_use]
     pub fn world_input_mapping(&self) -> Option<WorldInputMapping2d> {
+        if self.packet.views().is_empty() {
+            return None;
+        }
         self.capture.world_input_mapping()
     }
 
