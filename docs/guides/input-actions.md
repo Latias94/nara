@@ -2,8 +2,14 @@
 
 `nara_input` maps normalized keyboard, mouse and gamepad input to named actions. Gameplay reads
 `SemanticActions` for seat-local held values and Started/Changed/Released outcomes.
-`ActionOutcomes` exposes each physical binding edge, including its route and event provenance. Gameplay command mapping remains
-game-owned through `nara_gameplay::ActionCommandMap`.
+`ActionOutcomes` exposes each physical binding edge, including its route and event provenance.
+
+Local gameplay can read held values directly in its simulation systems. Handle one-shot outcomes
+once during the frame that produced them. Games that admit commands at a specific tick, record
+semantic replay or accept Server commands define their own command types and payloads. The
+optional `nara_gameplay::ActionCommandMap` maps resolved actions to drafts supplied by the game.
+With a project-owned action map, changing a key or gamepad binding keeps the same action identity
+for the gameplay systems that read it.
 
 The [Two-Level Game](../../samples/two-level-game/README.md) is a complete authored-keyboard
 consumer. Its source manifest selects a native action-map file; the cooker carries that file's

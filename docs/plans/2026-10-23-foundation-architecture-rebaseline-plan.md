@@ -5719,6 +5719,24 @@ For the selected completed units, run independent direct/renamed/public consumer
 root/Editor/native paths serially. Verify unknown data, exact operation results, content/identity
 retention, close and old-generation rejection together. Review adapters, not only owner unit tests.
 
+Qualify the next Desktop 2D starter with a game outside the engine checkout whose loop differs
+from [Collect Game](../../samples/collect-game/README.md). A small push-box game can exercise
+authored pressure plates and doors, document Undo, Save and Reopen, and the ordinary
+Cook-to-Player path. Ship editable default bindings with the new starter version. Verify the
+same movement action in fresh Runtime starts after switching from WASD to a gamepad in the
+project action map. Change continuous movement to a grid step in the project's gameplay code.
+The [Input guide](../guides/input-actions.md) covers direct action reads and optional command
+mapping. Games that need replay or Server ingress choose their own vocabulary and use the
+existing tick queue. Compare the game-owned conversions in both projects before considering a
+typed helper in `nara_gameplay`.
+
+Record the recipe registrations, command conversions, edit-to-result time and any required
+engine-source changes along that workflow. Use the next resource with a concrete native consumer
+to measure integration work across registration, Cook and residency. When Editor work resumes,
+remeasure the [single-property edit baseline](../benchmarks/2026-11-04-ui-work-baseline.md).
+At 10,001 entities it averaged 20,002 scanned records per edit with zero Hierarchy row callbacks.
+Compare direct selection lookup while preserving document revision, Undo and Save.
+
 The [processed continuation consumer](2026-11-13-rust-state-reconstruction-plan.md#processed-server-continuation-successor)
 uses the original managed Scene, fixed-time and gameplay-queue owners across a real local Server
 handoff. A mismatched candidate leaves the incumbent paused and inspectable. In the successful
