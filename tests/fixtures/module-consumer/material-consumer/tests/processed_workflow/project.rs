@@ -164,9 +164,10 @@ impl Fixture {
         let recipe = ProductRecipe::new()
             .add_configured_plugin(probe.clone(), |probe| InspectPalette(probe.clone()))
             .unwrap()
-            .add_runtime_asset_codec::<Material2dDomain, Material2dRuntimeCodec>(
-                RuntimeCodecDefinitionId::new("consumer.processed-palette.material", 1),
-            )
+            .add_runtime_material_codec::<Material2dRuntimeCodec>(RuntimeCodecDefinitionId::new(
+                "consumer.processed-palette.material",
+                1,
+            ))
             .unwrap()
             .add_runtime_image_codec::<ImageRuntimeCodec>(RuntimeCodecDefinitionId::new(
                 "consumer.processed-palette.image",

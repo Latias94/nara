@@ -2,16 +2,62 @@ use std::{any::Any, mem::size_of, sync::Arc};
 
 use nara_asset::{AssetProductRef, AssetRef, AssetRuntimeError};
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
-use nara_material::{Material2dAsset, Material2dDeclaration, Material2dRecord};
+use nara_image::ImageDomain;
+use nara_material::{MATERIAL_PLUGIN_ID, Material2dAsset, Material2dDeclaration, Material2dRecord};
 use nara_scene::CompiledSceneComponent;
 
 use super::{
-    DecodeLease, RuntimeContentBase, RuntimeContentBudgetKind, RuntimeContentError, checked_add,
+    DecodeLease, RuntimeCodecRole, RuntimeContentBase, RuntimeContentBudgetKind,
+    RuntimeContentError, RuntimeContentMember, checked_add,
 };
 use crate::project_content::materials::material_record_work_bytes;
 
 #[cfg(test)]
 mod tests;
+
+impl RuntimeContentBase {
+    pub(super) fn selects_material_publication(&self) -> bool {
+        self.plan()
+            .plugin_plan()
+            .entries()
+            .iter()
+            .any(|entry| entry.plugin_id() == MATERIAL_PLUGIN_ID)
+    }
+
+    pub(super) fn validate_material_defaults(
+        &self,
+        member: &RuntimeContentMember,
+        material: &Material2dAsset,
+        native: bool,
+    ) -> Result<(), RuntimeContentError> {
+        let codecs = self.plan().runtime_codecs();
+        for (slot, reference) in material.textures() {
+            let AssetRef::Product(target) = reference else {
+                return Err(RuntimeContentError::ProductIdentityMismatch);
+            };
+            let target_member = self
+                .member(*target)
+                .ok_or(RuntimeContentError::UndeclaredProduct)?;
+            let valid = if native {
+                codecs.role(target_member) == Some(RuntimeCodecRole::Image)
+            } else {
+                codecs.selects_family::<ImageDomain>(target_member)
+            };
+            if !valid {
+                let _work = self.inner.budget.reserve(0, slot.len())?;
+                return Err(RuntimeContentError::MaterialTextureKindMismatch {
+                    material: material.product(),
+                    slot: slot.clone(),
+                    target: *target,
+                });
+            }
+            if native {
+                self.validate_immediate_dependency(member, *target)?;
+            }
+        }
+        Ok(())
+    }
+}
 
 pub(super) struct SceneMaterialBinding {
     record: Material2dRecord,

@@ -505,6 +505,25 @@ impl ProductRecipe {
         Ok(self)
     }
 
+    /// Selects Runtime Material decode and publication when the plan installs `Material2dPlugin`.
+    ///
+    /// A plan without that plugin uses the same decoder for typed CPU acquisition.
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub fn add_runtime_material_codec<C>(
+        mut self,
+        definition: crate::runtime_content::RuntimeCodecDefinitionId,
+    ) -> Result<Self, ProductRecipeError>
+    where
+        C: nara_asset::RuntimeAssetCodec<nara_material::Material2dAsset>,
+    {
+        self.runtime_codecs
+            .add::<nara_material::Material2dDomain, C>(
+                definition,
+                crate::runtime_content::RuntimeCodecRole::Material2d,
+            )?;
+        Ok(self)
+    }
+
     pub fn entries(&self) -> impl ExactSizeIterator<Item = &ProductRecipeEntry> {
         self.entries.values()
     }

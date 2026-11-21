@@ -5,8 +5,8 @@ use engine::{
     asset::{AssetProductRef, ImportedProductId, StableAssetId},
     image::ImageRuntimeCodec,
     material::{
-        AlphaMode2d, Material2dDeclaration, Material2dDomain, Material2dRuntimeCodec,
-        MaterialParameterValues, MaterialParameters, MaterialTextureDeclaration,
+        AlphaMode2d, Material2dDeclaration, Material2dRuntimeCodec, MaterialParameterValues,
+        MaterialParameters, MaterialTextureDeclaration,
     },
     runtime_content::RuntimeCodecDefinitionId,
 };
@@ -70,14 +70,19 @@ pub fn scene_product() -> AssetProductRef {
 }
 
 fn primary(id: &str) -> AssetProductRef {
-    AssetProductRef::new(StableAssetId::parse_str(id).unwrap(), ImportedProductId::PRIMARY).unwrap()
+    AssetProductRef::new(
+        StableAssetId::parse_str(id).unwrap(),
+        ImportedProductId::PRIMARY,
+    )
+    .unwrap()
 }
 
 pub fn recipe() -> ProductRecipe {
     ProductRecipe::new()
-        .add_runtime_asset_codec::<Material2dDomain, Material2dRuntimeCodec>(
-            RuntimeCodecDefinitionId::new("consumer.palette.cooked.material", 1),
-        )
+        .add_runtime_material_codec::<Material2dRuntimeCodec>(RuntimeCodecDefinitionId::new(
+            "consumer.palette.cooked.material",
+            1,
+        ))
         .unwrap()
         .add_runtime_image_codec::<ImageRuntimeCodec>(RuntimeCodecDefinitionId::new(
             "consumer.palette.cooked.image",

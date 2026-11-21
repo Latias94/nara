@@ -374,12 +374,7 @@ impl MaterialPublications {
                     }
                 }
                 ResidencyInput::Processed(content) => {
-                    if collection.source_records().len() != 0
-                        || collection.runtime_acquisitions().len() != collection.iter().len()
-                    {
-                        return Err(identity_conflict());
-                    }
-                    for acquired in collection.runtime_acquisitions() {
+                    for acquired in &content.materials {
                         let value = acquired.product();
                         let product = value.product();
                         if !content.base().same_base(acquired.base())
@@ -617,36 +612,47 @@ fn metadata_bytes(
 ) -> Result<usize, HostFault> {
     let mut bytes =
         size_of::<MaterialCustody>() + size_of::<MaterialMetadataLease>() + ARC_CONTROL_BLOCK_BYTES;
-    if let Some(collection) = content.domain_assets().collection::<Material2dDomain>() {
-        for value in collection.iter() {
-            let canonical_bytes = value
-                .canonicalization_retained_bytes()
-                .ok_or_else(metadata_overflow)?;
-            add_bytes(&mut bytes, canonical_bytes)?;
-            add_bytes(
-                &mut bytes,
-                size_of::<MaterialPublication>()
-                    + size_of::<MaterialIdentity>()
-                    + ARC_CONTROL_BLOCK_BYTES
-                    + 3 * size_of::<OwnedMaterial>()
-                    + size_of::<AssetId>()
-                    + 2 * size_of::<AssetProductRef>()
-                    + 3 * BTREE_ENTRY_OVERHEAD,
-            )?;
-            let owner_bytes = match content {
-                ResidencyInput::Source(_) => size_of::<SourceMaterialOwner>(),
-                ResidencyInput::Processed(_) => size_of::<RuntimeMaterialOwner>(),
-            };
-            add_bytes(&mut bytes, owner_bytes + ARC_CONTROL_BLOCK_BYTES)?;
-            add_bytes(
-                &mut bytes,
-                value
-                    .generation()
-                    .lifetime_owner_retained_bytes()
-                    .ok_or_else(metadata_overflow)?,
-            )?;
-            for reference in value.textures().values() {
-                if let ResidencyInput::Source(snapshot) = content {
+    let (source, processed) = match content {
+        ResidencyInput::Source(snapshot) => (
+            snapshot.domain_assets().collection::<Material2dDomain>(),
+            &[][..],
+        ),
+        ResidencyInput::Processed(content) => (None, content.materials.as_slice()),
+    };
+    for value in source
+        .into_iter()
+        .flat_map(|collection| collection.iter())
+        .chain(processed.iter().map(RuntimeContentAsset::product))
+    {
+        let canonical_bytes = value
+            .canonicalization_retained_bytes()
+            .ok_or_else(metadata_overflow)?;
+        add_bytes(&mut bytes, canonical_bytes)?;
+        add_bytes(
+            &mut bytes,
+            size_of::<MaterialPublication>()
+                + size_of::<MaterialIdentity>()
+                + ARC_CONTROL_BLOCK_BYTES
+                + 3 * size_of::<OwnedMaterial>()
+                + size_of::<AssetId>()
+                + 2 * size_of::<AssetProductRef>()
+                + 3 * BTREE_ENTRY_OVERHEAD,
+        )?;
+        let owner_bytes = match content {
+            ResidencyInput::Source(_) => size_of::<SourceMaterialOwner>(),
+            ResidencyInput::Processed(_) => size_of::<RuntimeMaterialOwner>(),
+        };
+        add_bytes(&mut bytes, owner_bytes + ARC_CONTROL_BLOCK_BYTES)?;
+        add_bytes(
+            &mut bytes,
+            value
+                .generation()
+                .lifetime_owner_retained_bytes()
+                .ok_or_else(metadata_overflow)?,
+        )?;
+        match content {
+            ResidencyInput::Source(snapshot) => {
+                for reference in value.textures().values() {
                     let work = snapshot
                         .asset_resolution()
                         .resolution_work_bytes(reference)
@@ -655,20 +661,23 @@ fn metadata_bytes(
                     add_bytes(&mut bytes, work)?;
                 }
             }
-            if matches!(content, ResidencyInput::Processed(_)) {
+            ResidencyInput::Processed(_) => {
                 let growth = AssetServer::checked_product_binding_retained_bytes(None)
                     .ok_or_else(metadata_overflow)?;
                 add_bytes(&mut bytes, growth)?;
                 add_bytes(&mut bytes, growth)?;
             }
         }
-        for record in collection.source_records() {
-            add_bytes(
-                &mut bytes,
-                asset_record_retained_bytes(record)
-                    .map_err(|error| HostFault::new(error.diagnostics().clone()))?,
-            )?;
-        }
+    }
+    for record in source
+        .into_iter()
+        .flat_map(|collection| collection.source_records())
+    {
+        add_bytes(
+            &mut bytes,
+            asset_record_retained_bytes(record)
+                .map_err(|error| HostFault::new(error.diagnostics().clone()))?,
+        )?;
     }
     for _material in change.owned() {
         add_bytes(

@@ -78,7 +78,7 @@ impl Stock {
             Self::Material => recipe()
                 .add_asset_domain::<Material2dDomain>()
                 .unwrap()
-                .add_runtime_asset_codec::<Material2dDomain, Material2dRuntimeCodec>(
+                .add_runtime_material_codec::<Material2dRuntimeCodec>(
                     RuntimeCodecDefinitionId::new("consumer.cook-badge.material", 1),
                 )
                 .unwrap(),

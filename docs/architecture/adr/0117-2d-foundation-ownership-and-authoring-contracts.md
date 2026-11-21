@@ -432,6 +432,13 @@ Editor authoring allowlist. It adds no per-material native component definition.
 families and source/processed import codecs remain compiled recipe choices, and the Editor's
 authoring lane does not execute arbitrary Runtime or Schema plugins from that recipe.
 
+Processed Material decode supplies the typed CPU collection. A recipe can select the native
+Material publication facet, which contributes to its codec fingerprint. The resolved plan
+must also install the Material plugin for the prepared closure to publish a native value.
+Deep validation and Scene preparation both require that publication for a native carrier.
+Native Material defaults require their own Required Image edges and Image publication facets.
+CPU-only consumers can acquire the same Material and typed Image dependencies in a Server plan.
+
 ### Semantic input owns held-action lifetimes
 
 Physical button state and per-binding `ActionOutcomes` remain distinct from gameplay-facing

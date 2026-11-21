@@ -8,7 +8,7 @@ use nara_asset::AssetRef;
 #[cfg(feature = "runtime-2d")]
 use nara_image::{ImageAsset, ImageDomain};
 #[cfg(feature = "runtime-2d")]
-use nara_material::Material2dDomain;
+use nara_material::{Material2dAsset, Material2dDomain};
 #[cfg(feature = "runtime-2d")]
 use nara_tilemap::{
     TileSetDescriptor, TileSetDomain, tilemap_membership_work_bytes,
@@ -39,6 +39,8 @@ pub(crate) struct ProcessedSceneContent {
     pub(crate) images: Vec<RuntimeContentAsset<ImageAsset>>,
     #[cfg(feature = "runtime-2d")]
     pub(crate) tilesets: Vec<RuntimeContentAsset<TileSetDescriptor>>,
+    #[cfg(feature = "runtime-2d")]
+    pub(crate) materials: Vec<RuntimeContentAsset<Material2dAsset>>,
     // Drop the actual closure and its indices before releasing their metadata reservation.
     pub(crate) _lease: RuntimeContentLease,
 }
@@ -182,7 +184,7 @@ impl RuntimeContentBase {
             .and_then(|bytes| bytes.checked_add(crate::scene_retention::ARC_CONTROL_BLOCK_BYTES))
             .ok_or(RuntimeContentError::BudgetOverflow { kind })?;
         #[cfg(feature = "runtime-2d")]
-        let (image_count, tileset_count, bytes) = {
+        let (image_count, tileset_count, material_count, bytes) = {
             let image_count = decoded
                 .assets
                 .iter()
@@ -197,6 +199,18 @@ impl RuntimeContentBase {
                     codecs.role(&members[asset.member]) == Some(RuntimeCodecRole::TileSet)
                 })
                 .count();
+            let publishes_materials = self.selects_material_publication();
+            let mut material_count = 0;
+            for asset in &decoded.assets {
+                let Some(material) = asset.typed::<Material2dDomain>() else {
+                    continue;
+                };
+                let member = &members[asset.member];
+                let native = publishes_materials
+                    && codecs.role(member) == Some(RuntimeCodecRole::Material2d);
+                self.validate_material_defaults(member, material.product(), native)?;
+                material_count += usize::from(native);
+            }
             let bytes = image_count
                 .checked_mul(size_of::<RuntimeContentAsset<ImageAsset>>())
                 .and_then(|image_bytes| bytes.checked_add(image_bytes))
@@ -206,8 +220,14 @@ impl RuntimeContentBase {
                             .checked_mul(size_of::<RuntimeContentAsset<TileSetDescriptor>>())?,
                     )
                 })
+                .and_then(|bytes| {
+                    bytes.checked_add(
+                        material_count
+                            .checked_mul(size_of::<RuntimeContentAsset<Material2dAsset>>())?,
+                    )
+                })
                 .ok_or(RuntimeContentError::BudgetOverflow { kind })?;
-            (image_count, tileset_count, bytes)
+            (image_count, tileset_count, material_count, bytes)
         };
         let lease = self.reserve_retained(bytes)?;
         let mut deferred_products = Vec::with_capacity(deferred_count);
@@ -222,7 +242,7 @@ impl RuntimeContentBase {
         }
         let domains = codecs.prepare_collections(self, &decoded.assets)?;
         #[cfg(feature = "runtime-2d")]
-        let (images, tilesets) = {
+        let (images, tilesets, materials) = {
             let mut images = Vec::with_capacity(image_count);
             if let Some(collection) = domains.collection::<ImageDomain>() {
                 images.extend(
@@ -251,7 +271,22 @@ impl RuntimeContentBase {
                         .cloned(),
                 );
             }
-            (images, tilesets)
+            let mut materials = Vec::with_capacity(material_count);
+            if material_count != 0 {
+                materials.extend(
+                    decoded
+                        .assets
+                        .iter()
+                        .filter(|asset| {
+                            codecs.role(&members[asset.member])
+                                == Some(RuntimeCodecRole::Material2d)
+                        })
+                        .filter_map(DecodedAsset::typed::<Material2dDomain>)
+                        .cloned(),
+                );
+                materials.sort_unstable_by_key(RuntimeContentAsset::reference);
+            }
+            (images, tilesets, materials)
         };
         // Typed collections and native preparations share these acquisitions. Only the discovery
         // wrappers are temporary; no codec runs again when the final collections are assembled.
@@ -296,7 +331,6 @@ impl RuntimeContentBase {
                 .map_err(RuntimeContentError::Tilemap)?;
             }
             let material = nara_reflect::ComponentTypeId::new("nara.material2d");
-            let materials = domains.collection::<Material2dDomain>();
             for entity in std::iter::once(&scene)
                 .chain(dependencies.iter())
                 .flat_map(|scene| scene.candidate().document().entities())
@@ -307,8 +341,11 @@ impl RuntimeContentBase {
                 let binding = SceneMaterialBinding::read(self, record)?;
                 binding.validate(
                     |product| {
-                        let asset = materials?.get(&AssetRef::Product(product))?;
-                        Some((asset.product(), asset.generation().declaration()))
+                        let index = materials
+                            .binary_search_by_key(&product, RuntimeContentAsset::reference)
+                            .ok()?;
+                        let value = materials[index].product();
+                        Some((value.product(), value.generation().declaration()))
                     },
                     |product| images.iter().any(|image| image.reference() == product),
                 )?;
@@ -323,6 +360,8 @@ impl RuntimeContentBase {
             images,
             #[cfg(feature = "runtime-2d")]
             tilesets,
+            #[cfg(feature = "runtime-2d")]
+            materials,
             _lease: lease,
         }))
     }

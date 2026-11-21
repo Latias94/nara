@@ -127,9 +127,10 @@ fn import_material(
 
 fn recipe() -> ProductRecipe {
     ProductRecipe::new()
-        .add_runtime_asset_codec::<Material2dDomain, Material2dRuntimeCodec>(
-            RuntimeCodecDefinitionId::new("nara.test.material-residency", 1),
-        )
+        .add_runtime_material_codec::<Material2dRuntimeCodec>(RuntimeCodecDefinitionId::new(
+            "nara.test.material-residency",
+            1,
+        ))
         .unwrap()
 }
 

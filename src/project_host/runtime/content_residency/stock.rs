@@ -57,9 +57,13 @@ impl ProjectSceneResidency {
 
 impl ResidencyInput<'_> {
     pub(super) fn material_count(self) -> usize {
-        self.domain_assets()
-            .collection::<Material2dDomain>()
-            .map_or(0, |collection| collection.iter().len())
+        match self {
+            Self::Source(snapshot) => snapshot
+                .domain_assets()
+                .collection::<Material2dDomain>()
+                .map_or(0, |collection| collection.iter().len()),
+            Self::Processed(content) => content.materials.len(),
+        }
     }
 
     pub(super) fn image_count(self) -> usize {

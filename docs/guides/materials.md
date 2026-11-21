@@ -231,8 +231,16 @@ code-first `Material2dBinding` remains a valid separate input. Supplying both in
 entity is ambiguous and skips that entity with a `missing_materials` observation.
 
 For processed delivery, resolve default texture selections to complete Products through the
-admitted catalogue, select the material Runtime codec in the recipe, and call the existing
-`CookedContentBuilder::add_material` alongside the real Image artifact groups and Scene. The
+admitted catalogue. Use `ProductRecipe::add_runtime_material_codec::<Material2dRuntimeCodec>`
+when the selected plan's `Material2dPlugin` should publish a native asset. Use
+`add_runtime_asset_codec::<Material2dDomain, Material2dRuntimeCodec>` for typed CPU reads.
+A Server plan without the material plugin can use either registration to read CPU data. A
+processed `Material2d` assignment requires the native registration and native Image publications.
+Every default Image of a published Material must be a `Required` dependency of that Material.
+Recook existing native Material packages when switching their codec
+registration so the package and executable agree on the recipe fingerprint.
+
+Call `CookedContentBuilder::add_material` alongside the real Image artifact groups and Scene. The
 Runtime material format stores the original user WGSL body, declaration, defaults and complete
 Product dependencies. It compiles that body through the same Naga authority without inventing
 source paths or observations. Its source/processed generation uses sequence zero; sequence is

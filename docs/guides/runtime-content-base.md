@@ -315,6 +315,11 @@ Live CPU collections, actual Image/TileSet stores and current-Scene ownership ch
 the successful shared publication tail. Failed preparation or native retirement retains the same
 last-good and retry/discard owners as the source path. Cancellation waits for physical worker return.
 
+Material follows the [recipe's native publication selection](materials.md#persistent-products-and-scene-values).
+The typed collection keeps every prepared Material. The native store receives Material only
+when its codec opts into publication and the resolved Host installs the Material plugin. An
+authored Material carrier requires that joint selection during deep validation and preparation.
+
 `prepared.scene_dependency(scene_product)` on a `PreparedProjectSceneView` returns a borrowed
 `Option<&CompiledSceneDocument>` for an Immediate Scene data dependency already prepared for that request.
 For example, an encounter/rule Scene can supply CPU data without being instantiated. The selected

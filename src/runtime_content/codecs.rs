@@ -94,6 +94,8 @@ pub(crate) enum RuntimeCodecRole {
     Image,
     #[cfg(feature = "runtime-2d")]
     TileSet,
+    #[cfg(feature = "runtime-2d")]
+    Material2d,
 }
 
 #[derive(Clone)]
@@ -303,6 +305,8 @@ impl RuntimeCodecs {
                 RuntimeCodecRole::Image => 1,
                 #[cfg(feature = "runtime-2d")]
                 RuntimeCodecRole::TileSet => 2,
+                #[cfg(feature = "runtime-2d")]
+                RuntimeCodecRole::Material2d => 3,
             }]);
             for bytes in [
                 definition.limits.encoded_bytes().get(),
@@ -357,6 +361,13 @@ impl RuntimeCodecs {
             .iter()
             .find(|definition| definition.matches(member))
             .map(|definition| definition.role)
+    }
+
+    #[cfg(feature = "runtime-2d")]
+    pub(super) fn selects_family<D: AssetDomain>(&self, member: &RuntimeContentMember) -> bool {
+        self.definitions
+            .iter()
+            .any(|definition| definition.family == TypeId::of::<D>() && definition.matches(member))
     }
 
     pub(super) fn definition(

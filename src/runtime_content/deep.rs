@@ -252,23 +252,6 @@ impl NativeFacts {
         member: usize,
         material: &Material2dAsset,
     ) -> Result<(), RuntimeContentError> {
-        for (slot, reference) in material.textures() {
-            let AssetRef::Product(target) = reference else {
-                return Err(RuntimeContentError::ProductIdentityMismatch);
-            };
-            let target_member = base
-                .member(*target)
-                .ok_or(RuntimeContentError::UndeclaredProduct)?;
-            if base.plan().runtime_codecs().role(target_member) != Some(RuntimeCodecRole::Image) {
-                let _work = base.inner.budget.reserve(0, slot.len())?;
-                return Err(RuntimeContentError::MaterialTextureKindMismatch {
-                    material: material.product(),
-                    slot: slot.clone(),
-                    target: *target,
-                });
-            }
-        }
-
         // Keep only the declaration needed by Scene bindings after the decoded Shader drops.
         let declaration = material.generation().declaration();
         let fields = declaration.parameters().fields();
@@ -472,6 +455,8 @@ impl RuntimeContentBase {
         }
         #[cfg(feature = "runtime-2d")]
         let mut facts = NativeFacts::new(self)?;
+        #[cfg(feature = "runtime-2d")]
+        let publishes_materials = self.selects_material_publication();
         let mut members = 0;
         let mut products = 0;
         while let Some(index) = pending.next() {
@@ -505,9 +490,18 @@ impl RuntimeContentBase {
                             self.validate_tileset_member(tileset.reference(), tileset.product())?;
                             facts.tilesets.push((index, *tileset.product()));
                         }
-                        Some(RuntimeCodecRole::Cpu) => {
+                        Some(role @ (RuntimeCodecRole::Cpu | RuntimeCodecRole::Material2d)) => {
                             if let Some(material) = asset.typed::<Material2dDomain>() {
-                                facts.capture_material(self, index, material.product())?;
+                                let native =
+                                    role == RuntimeCodecRole::Material2d && publishes_materials;
+                                self.validate_material_defaults(
+                                    member,
+                                    material.product(),
+                                    native,
+                                )?;
+                                if native {
+                                    facts.capture_material(self, index, material.product())?;
+                                }
                             }
                         }
                         None => return Err(RuntimeContentError::CodecNotSelected),

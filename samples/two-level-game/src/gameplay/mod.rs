@@ -444,12 +444,9 @@ pub fn configured_recipe(options: RunOptions) -> ProductRecipe {
         .expect("the game's Input Runtime codec is valid")
         .add_asset_domain::<nara::material::Material2dDomain>()
         .expect("the region Material source importer is valid")
-        .add_runtime_asset_codec::<
-            nara::material::Material2dDomain,
-            nara::material::Material2dRuntimeCodec,
-        >(nara::runtime_content::RuntimeCodecDefinitionId::new(
-            "two-level-game.region-material", 1,
-        ))
+        .add_runtime_material_codec::<nara::material::Material2dRuntimeCodec>(
+            nara::runtime_content::RuntimeCodecDefinitionId::new("two-level-game.region-material", 1),
+        )
         .expect("the region Material Runtime codec is valid")
         .add_runtime_tileset_codec::<nara::tilemap::TileSetRuntimeCodec>(
             nara::runtime_content::RuntimeCodecDefinitionId::new("two-level-game.region-tileset", 1),
