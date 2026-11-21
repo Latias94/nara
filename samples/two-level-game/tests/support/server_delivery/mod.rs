@@ -23,7 +23,10 @@ mod checkpoint_handoff;
 mod continuation;
 mod graph;
 mod package;
+mod scaled;
 mod service;
+
+pub(super) use scaled::accept as accept_scaled;
 
 const GAME: &str = "two-level-game";
 const BIN: &str = "server";
@@ -45,35 +48,8 @@ pub(super) fn accept(cooker: &Path) {
     let lock_path = fixture.project.join("Cargo.lock");
     let lock = read_bounded(&lock_path, 1024 * 1024);
     let output_parent = fixture.directory("cook-output");
-    let command = SupervisedProcessCommand::new(cooker, &fixture.root)
-        .arguments([
-            OsString::from("--runtime"),
-            OsString::from(BIN),
-            OsString::from("--project-root"),
-            fixture.project.as_os_str().to_owned(),
-            OsString::from("--output-parent"),
-            output_parent.as_os_str().to_owned(),
-            OsString::from("--name"),
-            OsString::from(INSTALLATION),
-            OsString::from("--target-dir"),
-            target.as_os_str().to_owned(),
-            OsString::from("--target"),
-            OsString::from(&triple),
-            OsString::from("--cargo"),
-            tools.cargo_path().as_os_str().to_owned(),
-            OsString::from("--rustc"),
-            tools.rustc_path().as_os_str().to_owned(),
-            OsString::from("--profile"),
-            OsString::from(PROFILE),
-        ])
-        .environment("CARGO_BUILD_JOBS", "1")
-        .environment("CARGO_NET_OFFLINE", "true")
-        .environment("CARGO_TARGET_DIR", &target)
-        .environment("RUSTUP_TOOLCHAIN", "1.95.0")
-        .environment("RUSTUP_AUTO_INSTALL", "0")
-        .environment("CARGO", tools.cargo_path())
-        .environment("RUSTC", tools.rustc_path())
-        .bounded_stdout(NonZeroUsize::new(2 * 1024 * 1024).unwrap());
+    let command = cook_command(cooker, fixture, &tools, &target, &triple, &output_parent)
+        .arguments(["--name", INSTALLATION]);
     let (tree, graph_before) = graph::audit(&mut custody, &tools, &target, &selection);
     let cooked = custody.tool(&command, Duration::from_secs(30 * 60));
     assert_eq!(
@@ -233,6 +209,43 @@ pub(super) fn accept(cooker: &Path) {
         "TWO_LEVEL_SERVER_DELIVERY travel=complete regions=complete save=complete ",
         "fresh_restore=complete wrong_content=open_pack_refused native_cleanup=normal"
     ));
+}
+
+fn cook_command(
+    cooker: &Path,
+    fixture: &Fixture,
+    tools: &CargoBuildTools,
+    target: &Path,
+    triple: &str,
+    output_parent: &Path,
+) -> SupervisedProcessCommand {
+    SupervisedProcessCommand::new(cooker, &fixture.root)
+        .arguments([
+            OsString::from("--runtime"),
+            OsString::from(BIN),
+            OsString::from("--project-root"),
+            fixture.project.as_os_str().to_owned(),
+            OsString::from("--output-parent"),
+            output_parent.as_os_str().to_owned(),
+            OsString::from("--target-dir"),
+            target.as_os_str().to_owned(),
+            OsString::from("--target"),
+            OsString::from(triple),
+            OsString::from("--cargo"),
+            tools.cargo_path().as_os_str().to_owned(),
+            OsString::from("--rustc"),
+            tools.rustc_path().as_os_str().to_owned(),
+            OsString::from("--profile"),
+            OsString::from(PROFILE),
+        ])
+        .environment("CARGO_BUILD_JOBS", "1")
+        .environment("CARGO_NET_OFFLINE", "true")
+        .environment("CARGO_TARGET_DIR", target)
+        .environment("RUSTUP_TOOLCHAIN", "1.95.0")
+        .environment("RUSTUP_AUTO_INSTALL", "0")
+        .environment("CARGO", tools.cargo_path())
+        .environment("RUSTC", tools.rustc_path())
+        .bounded_stdout(NonZeroUsize::new(2 * 1024 * 1024).unwrap())
 }
 
 fn assert_success(

@@ -29,6 +29,7 @@ pub(super) const TIMESTEP_NANOS: u64 = 20_000_000;
 const POLL: Duration = Duration::from_millis(10);
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(15);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(65);
+const HORIZON_DRAIN_TIMEOUT: Duration = Duration::from_secs(40);
 pub(super) const RELEASED: [bool; 4] = [false; 4];
 pub(super) const ANCHOR_POSITION: [f32; 2] = [-120.0, 0.0];
 
@@ -151,6 +152,11 @@ pub(super) fn accept(custody: &mut Custody, executable: &Path) {
     server.read_admission();
     let shutdown = server.finish("shutdown", None);
     assert_progress(&shutdown["state"], instance, 30, &[3, 4]);
+    assert_eq!(
+        shutdown["visited_levels"],
+        json!(LevelId::ALL),
+        "{shutdown}"
+    );
     assert_eq!(shutdown["state"]["saves"], 1);
     assert_eq!(read_bounded(&path, MAX_CHECKPOINT_BYTES), bytes);
 
@@ -174,6 +180,7 @@ pub(super) fn accept(custody: &mut Custody, executable: &Path) {
     fresh.close_input();
     let eof = fresh.finish("stdin_eof", None);
     assert_progress(&eof["state"], instance, 30, &[3, 4]);
+    assert_eq!(eof["visited_levels"], json!(LevelId::ALL), "{eof}");
     assert_eq!(eof["state"]["restores"], 1);
     assert_eq!(read_bounded(&path, MAX_CHECKPOINT_BYTES), bytes);
 
@@ -191,6 +198,219 @@ pub(super) fn accept(custody: &mut Custody, executable: &Path) {
             "restored_state": restored,
             "shutdown": shutdown["server_evidence"],
             "eof": eof["server_evidence"],
+        })
+    );
+}
+
+pub(super) fn assert_horizon_drain(
+    custody: &mut Custody,
+    executable: &Path,
+    name: &str,
+    eof: bool,
+) {
+    const DUE_TICK: u64 = 600;
+
+    let mut server = Service::spawn(custody, executable, Launch::Paused(None), name);
+    server.unit_time_scale = false;
+    let ready = server.ready(true, false);
+    assert_eq!(tick(&ready["state"]), 0, "{ready}");
+    let mut marker = action("marker");
+    marker["after_ticks"] = json!(DUE_TICK);
+    assert_eq!(server.admit(&marker), DUE_TICK);
+
+    let resume = request("resume");
+    let stop = if eof {
+        server.send(&resume);
+        server.close_input();
+        "stdin_eof"
+    } else {
+        server.write(&format!("{resume}\n{}\n", request("shutdown")));
+        "shutdown"
+    };
+    let resumed = server.reply("resumed");
+    assert_eq!(resumed["paused"], false, "{resumed}");
+    assert!(tick(&resumed["state"]) < DUE_TICK, "{resumed}");
+    assert_eq!(resumed["state"]["markers"], json!([]), "{resumed}");
+    server.check_observation(&resumed["state"], &resumed);
+
+    let result = server.finish_with_timeout(stop, None, HORIZON_DRAIN_TIMEOUT);
+    assert!(tick(&result["state"]) >= DUE_TICK, "{result}");
+    assert_progress(&result["state"], LevelKey::main(LevelId::Meadow), 0, &[1]);
+    assert_eq!(
+        result["visited_levels"],
+        json!([LevelId::Meadow]),
+        "{result}"
+    );
+    print_scaled_service_evidence(name, &result);
+}
+
+pub(super) fn assert_stalled_drain(custody: &mut Custody, executable: &Path) {
+    let name = "server-zero-stall";
+    let mut server = Service::spawn(custody, executable, Launch::Paced(None), name);
+    server.unit_time_scale = false;
+    let ready = server.ready(false, false);
+    assert_eq!(tick(&ready["state"]), 0, "{ready}");
+    assert_eq!(server.admit(&action("marker")), 1);
+    server.send(&request("shutdown"));
+
+    let result = server.finish_with_timeout(
+        "shutdown",
+        Some("Server made no progress settling admitted work during shutdown"),
+        CONTROL_TIMEOUT,
+    );
+    assert_eq!(tick(&result["state"]), 0, "{result}");
+    assert_progress(&result["state"], LevelKey::main(LevelId::Meadow), 0, &[]);
+    assert_eq!(
+        result["visited_levels"],
+        json!([LevelId::Meadow]),
+        "{result}"
+    );
+    let evidence = &result["server_evidence"];
+    assert_eq!(evidence["paused"], false, "{result}");
+    assert_eq!(evidence["commands"]["retained"], 1, "{result}");
+    let time = &evidence["time"];
+    assert!(
+        number(time, "frames") > number(&ready["time"], "frames"),
+        "{result}"
+    );
+    assert!(
+        number(time, "elapsed_nanos") > number(&ready["time"], "elapsed_nanos"),
+        "{result}"
+    );
+    print_scaled_service_evidence(name, &result);
+}
+
+pub(super) fn assert_zero_scale_checkpoint(custody: &mut Custody, executable: &Path) {
+    let name = "server-zero-paused-checkpoint";
+    let checkpoint = custody
+        .fixture()
+        .directory("server-zero-checkpoint-save")
+        .join("checkpoint.json");
+    let mut server = Service::spawn(
+        custody,
+        executable,
+        Launch::PausedCheckpoint {
+            save: &checkpoint,
+            resume: None,
+        },
+        name,
+    );
+    server.unit_time_scale = false;
+    let ready = server.ready(true, true);
+    assert_eq!(tick(&ready["state"]), 1, "{ready}");
+    assert_eq!(ready["commands"]["acknowledged"], 1, "{ready}");
+    assert_eq!(ready["commands"]["pending"], 0, "{ready}");
+    let observed = server.observe();
+    assert_eq!(tick(&observed["state"]), 1, "{observed}");
+    server.send(&request("shutdown"));
+    let result = server.finish("shutdown", None);
+    assert_eq!(tick(&result["state"]), 1, "{result}");
+    assert!(!checkpoint.exists());
+    print_scaled_service_evidence(name, &result);
+}
+
+pub(super) fn assert_long_tick_drain(custody: &mut Custody, executable: &Path) {
+    let name = "server-long-tick-shutdown";
+    let mut server = Service::spawn(custody, executable, Launch::Paced(None), name);
+    server.timestep_nanos = 20_000_000_000;
+    let ready = server.ready(false, false);
+    assert_eq!(tick(&ready["state"]), 0, "{ready}");
+    assert_eq!(server.admit(&action("travel")), 1);
+    server.send(&request("shutdown"));
+
+    let result = server.finish_with_timeout("shutdown", None, HORIZON_DRAIN_TIMEOUT);
+    assert_progress(&result["state"], LevelKey::main(LevelId::Cavern), 0, &[]);
+    assert_eq!(result["state"]["travel_count"], 1, "{result}");
+    assert_eq!(result["visited_levels"], json!(LevelId::ALL), "{result}");
+    print_scaled_service_evidence(name, &result);
+}
+
+pub(super) fn assert_fast_silent_server(custody: &mut Custody, executable: &Path) {
+    let name = "server-fast-silent-stdin";
+    let mut server = Service::spawn(custody, executable, Launch::Paced(None), name);
+    server.unit_time_scale = false;
+    server.ready(false, false);
+    let mut marker = action("marker");
+    marker["after_ticks"] = json!(600);
+    let due = server.admit(&marker);
+
+    thread::sleep(Duration::from_secs(3));
+    let observed = server.observe();
+    assert!(tick(&observed["state"]) >= due, "{observed}");
+    assert_progress(&observed["state"], LevelKey::main(LevelId::Meadow), 0, &[1]);
+    assert_eq!(observed["commands"]["pending"], 0, "{observed}");
+
+    server.send(&request("shutdown"));
+    let result = server.finish("shutdown", None);
+    assert_progress(&result["state"], LevelKey::main(LevelId::Meadow), 0, &[1]);
+    print_scaled_service_evidence(name, &result);
+}
+
+pub(super) fn assert_fast_edited_server(custody: &mut Custody, executable: &Path) {
+    let checkpoint = custody
+        .fixture()
+        .directory("server-fast-save")
+        .join("checkpoint.json");
+    for (eof, name) in [(false, "server-fast-shutdown"), (true, "server-fast-eof")] {
+        let mut server = Service::spawn(
+            custody,
+            executable,
+            Launch::PausedCheckpoint {
+                save: &checkpoint,
+                resume: None,
+            },
+            name,
+        );
+        server.unit_time_scale = false;
+        let ready = server.ready(true, true);
+        assert_eq!(tick(&ready["state"]), 1, "{ready}");
+        assert_eq!(
+            ready["state"]["scene_members"],
+            AUTHORED_LEVEL_MEMBERS + 1,
+            "{ready}"
+        );
+        server.exchange_observation(&request("resume"), "resumed");
+        let mut marker = action("marker");
+        marker["after_ticks"] = json!(201);
+        let due = server.admit(&marker);
+        let stop = if eof {
+            server.close_input();
+            "stdin_eof"
+        } else {
+            server.send(&request("shutdown"));
+            "shutdown"
+        };
+        let result = server.finish_with_timeout(stop, None, HORIZON_DRAIN_TIMEOUT);
+        assert!(tick(&result["state"]) >= due, "{result}");
+        assert_eq!(result["state"]["markers"], json!([1]), "{result}");
+        assert_eq!(
+            result["state"]["scene_members"],
+            AUTHORED_LEVEL_MEMBERS + 1,
+            "{result}"
+        );
+        assert_eq!(
+            result["visited_levels"],
+            json!([LevelId::Meadow]),
+            "{result}"
+        );
+        print_scaled_service_evidence(name, &result);
+    }
+}
+
+fn print_scaled_service_evidence(case: &str, result: &Value) {
+    let evidence = &result["server_evidence"];
+    let commands = &evidence["commands"];
+    println!(
+        "TWO_LEVEL_SERVER_SCALED_SERVICE {}",
+        json!({
+            "case": case,
+            "stop": evidence["stop"],
+            "accepted": commands["accepted"],
+            "acknowledged": commands["acknowledged"],
+            "pending": commands["pending"],
+            "retained": commands["retained"],
+            "tick": result["state"]["tick"],
+            "elapsed_nanos": evidence["time"]["elapsed_nanos"],
         })
     );
 }
@@ -311,7 +531,10 @@ pub(super) struct Service<'a> {
     cursor: usize,
     receipt: Option<SupervisedProcessCleanupReceipt>,
     restored: bool,
+    unit_time_scale: bool,
+    timestep_nanos: u64,
     startup_commands: u64,
+    exact_startup_ticks: u64,
     last_tick: u64,
     admitted_ticks: Vec<u64>,
 }
@@ -366,7 +589,10 @@ impl<'a> Service<'a> {
             cursor: 0,
             receipt: None,
             restored: resume.is_some(),
+            unit_time_scale: true,
+            timestep_nanos: TIMESTEP_NANOS,
             startup_commands: u64::from(resume.is_some() || save.is_some()),
+            exact_startup_ticks: u64::from(paused && resume.is_none() && save.is_some()),
             last_tick: 0,
             admitted_ticks: Vec::new(),
         }
@@ -375,7 +601,7 @@ impl<'a> Service<'a> {
     pub(super) fn ready(&mut self, paused: bool, checkpoint: bool) -> Value {
         let ready = self.read(READY, STARTUP_TIMEOUT);
         assert_eq!(ready["version"], 1, "{ready}");
-        assert_eq!(ready["timestep_nanos"], TIMESTEP_NANOS, "{ready}");
+        assert_eq!(ready["timestep_nanos"], self.timestep_nanos, "{ready}");
         assert_eq!(ready["checkpoint_configured"], checkpoint, "{ready}");
         assert_eq!(
             ready["checkpoint_pending"],
@@ -386,6 +612,10 @@ impl<'a> Service<'a> {
         assert_eq!(ready["restored"], self.restored, "{ready}");
         self.last_tick = tick(&ready["state"]);
         assert!(self.last_tick >= self.startup_commands, "{ready}");
+        if self.exact_startup_ticks != 0 {
+            assert_eq!(self.last_tick, self.exact_startup_ticks, "{ready}");
+            assert_eq!(ready["time"]["elapsed_nanos"], 0, "{ready}");
+        }
         ready
     }
 
@@ -532,11 +762,11 @@ impl<'a> Service<'a> {
         assert!(number(time, "frames") > 0, "{evidence}");
         let debt = number(time, "fixed_debt_nanos");
         let remainder = number(time, "fixed_remainder_nanos");
-        assert_eq!(debt % TIMESTEP_NANOS, 0, "{evidence}");
-        assert!(remainder < TIMESTEP_NANOS, "{evidence}");
-        if !self.restored {
+        assert_eq!(debt % self.timestep_nanos, 0, "{evidence}");
+        assert!(remainder < self.timestep_nanos, "{evidence}");
+        if self.unit_time_scale && !self.restored {
             assert_eq!(
-                state_tick * TIMESTEP_NANOS + debt + remainder,
+                (state_tick - self.exact_startup_ticks) * self.timestep_nanos + debt + remainder,
                 number(time, "elapsed_nanos"),
                 "{state}\n{time}"
             );
@@ -615,8 +845,19 @@ impl<'a> Service<'a> {
         self.receipt = self.custody.poll_output(&mut self.stdout, &mut self.stderr);
     }
 
-    pub(super) fn finish(mut self, stop: &str, error: Option<&str>) -> Value {
-        let result = self.read(RESULT, CONTROL_TIMEOUT);
+    pub(super) fn finish(self, stop: &str, error: Option<&str>) -> Value {
+        let result = self.finish_with_timeout(stop, error, CONTROL_TIMEOUT);
+        if stop != "retired" {
+            assert_eq!(
+                result["server_evidence"]["commands"]["retained"], 0,
+                "{result}"
+            );
+        }
+        result
+    }
+
+    fn finish_with_timeout(mut self, stop: &str, error: Option<&str>, timeout: Duration) -> Value {
+        let result = self.read(RESULT, timeout);
         let code = if let Some(message) = error {
             assert_eq!(result["scenario"], "serve", "{result}");
             assert_eq!(result["status"], "error", "{result}");
@@ -641,9 +882,6 @@ impl<'a> Service<'a> {
         assert_eq!(evidence["stop"], stop, "{result}");
         assert_eq!(evidence["input_reader_joined"], true, "{result}");
         self.check_observation(&result["state"], evidence);
-        if stop != "retired" {
-            assert_eq!(evidence["commands"]["retained"], 0, "{result}");
-        }
         self.assert_native_exit(code, &result);
         result
     }

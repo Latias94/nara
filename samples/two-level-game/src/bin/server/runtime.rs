@@ -32,7 +32,7 @@ use two_level_game::{
     GamePhase, GameSnapshot, RunOptions, Scenario,
     command::SERVER_COMMAND_SOURCE,
     delivery::{PlayerSelection, RuntimeKind},
-    levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
+    levels::{LevelId, LevelKey},
     markers::marker_product,
     save::{CURRENT_FORMAT_VERSION, io::SaveSlot},
     side_room,
@@ -96,7 +96,6 @@ pub(super) fn run(invocation: Invocation) -> ExitCode {
     let deadline = Instant::now() + Duration::from_secs(60);
     let outcome = catch_unwind(AssertUnwindSafe(|| -> Result<(), Failure> {
         let base = open_pack().map_err(Failure::Rejected)?;
-        let timestep = base.plan().settings().runtime().fixed_time().timestep();
         report.stage = "startup";
         let original = session.insert(HeadlessSession::from_runtime_content(base));
         original
@@ -104,7 +103,10 @@ pub(super) fn run(invocation: Invocation) -> ExitCode {
             .map_err(|error| match Failure::from(error) {
                 Failure::Error(message) | Failure::Rejected(message) => Failure::Rejected(message),
             })?;
-        let initial = frame(original, Duration::ZERO, deadline)?;
+        if Instant::now() >= deadline || original.frame(Duration::ZERO)?.is_some() {
+            return Err("Server did not complete its initial maintenance frame".into());
+        }
+        let initial = snapshot(original)?;
         if initial.tick != 0
             || !initial.initialized
             || initial.phase != GamePhase::Running
@@ -122,10 +124,11 @@ pub(super) fn run(invocation: Invocation) -> ExitCode {
         }
         match invocation {
             Invocation::Player(options) => {
-                run_player(original, options, timestep, deadline, &mut report)?;
+                run_player(original, options, deadline, &mut report)?;
             }
             Invocation::Regions => {
-                let (snapshot, evidence) = regions::verify(original, initial, timestep, deadline)?;
+                prepare_verification(original)?;
+                let (snapshot, evidence) = regions::verify(original, initial, deadline)?;
                 verify_runtime(original, &snapshot)?;
                 report.state = Some(state(&snapshot));
                 report.visited_levels = json!(LevelId::ALL);
@@ -135,7 +138,6 @@ pub(super) fn run(invocation: Invocation) -> ExitCode {
                 service::run(
                     original,
                     options,
-                    timestep,
                     deadline,
                     output
                         .as_ref()
@@ -265,17 +267,19 @@ fn verify_runtime(session: &HeadlessSession, snapshot: &GameSnapshot) -> Result<
         }
         let current = CurrentScene::get(world).ok_or("Server has no live Scene receipt")?;
         let receipt = current.receipt();
-        let processed = current.source_view().with_runtime_scene(|_| ()).is_some();
+        let processed = current.source_view().with_runtime_scene(|candidate| {
+            let entities = candidate.document().entities();
+            receipt.len() == entities.len()
+                && entities.iter().all(|entity| {
+                    matches!(
+                        receipt.resolve(world, entity.id()),
+                        EntityLookup::Resolved(_)
+                    )
+                })
+        }) == Some(true);
         #[cfg(feature = "local-player")]
         let processed = processed && current.source_content_stamp().is_none();
-        if !processed
-            || Some(receipt.instance_id()) != snapshot.current_instance
-            || receipt.len() != AUTHORED_LEVEL_MEMBERS
-            || receipt
-                .entity_ids()
-                .iter()
-                .any(|id| !matches!(receipt.resolve(world, id), EntityLookup::Resolved(_)))
-        {
+        if !processed || Some(receipt.instance_id()) != snapshot.current_instance {
             return Err("Server did not retain the live processed Scene members".into());
         }
         Ok(())
@@ -285,7 +289,6 @@ fn verify_runtime(session: &HeadlessSession, snapshot: &GameSnapshot) -> Result<
 fn run_player(
     session: &mut HeadlessSession,
     options: RunOptions,
-    timestep: Duration,
     deadline: Instant,
     report: &mut Report,
 ) -> Result<(), Failure> {
@@ -295,11 +298,12 @@ fn run_player(
         report.visited_levels = json!([LevelId::Meadow]);
         return Ok(());
     };
+    prepare_verification(session)?;
     session.submit(command)?;
     let mut visited = BTreeSet::from([LevelId::Meadow]);
     let mut restored = None;
     for _ in 0..MAX_FRAMES {
-        let snapshot = frame(session, timestep, deadline)?;
+        let snapshot = verification_step(session, deadline)?;
         if let Some(level) = snapshot.level {
             visited.insert(level.level());
         }
@@ -344,17 +348,27 @@ fn run_player(
     Err("Server exhausted its finite 200000-frame budget".into())
 }
 
-pub(super) fn frame(
+fn prepare_verification(session: &mut HeadlessSession) -> Result<(), Failure> {
+    if session.pause()?.is_some() {
+        return Err("Server exited before entering exact-tick verification".into());
+    }
+    Ok(())
+}
+
+pub(super) fn verification_step(
     session: &mut HeadlessSession,
-    delta: Duration,
     deadline: Instant,
 ) -> Result<GameSnapshot, Failure> {
     if Instant::now() >= deadline {
         return Err("Server exceeded its 60-second execution deadline".into());
     }
-    if session.frame(delta)?.is_some() {
+    if session.step()?.is_some() {
         return Err("Server exited before the finite scenario completed".into());
     }
+    snapshot(session)
+}
+
+fn snapshot(session: &HeadlessSession) -> Result<GameSnapshot, Failure> {
     let snapshot = session.observe(|world| world.resource::<GameSnapshot>().clone())?;
     if let Some(error) = &snapshot.error {
         return Err(Failure::Rejected(format!(

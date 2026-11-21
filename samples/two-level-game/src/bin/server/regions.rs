@@ -1,8 +1,9 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use nara::{
     advanced_prelude::CurrentScene,
-    gameplay::{GameplayCommandQueue, GameplayCommandQueueStats},
+    app::FixedTime,
+    gameplay::{GameplayCommandKey, GameplayCommandQueue, GameplayCommandQueueStats},
     identity::{
         EntityLookup, IdentityDomainError, SceneEntityId, SpawnedSceneInstance, WorldIdentityDomain,
     },
@@ -18,7 +19,7 @@ use two_level_game::{
     side_room::{LOOKOUT_RELIC, RELIC},
 };
 
-use super::runtime::{Failure, MAX_FRAMES, frame, submit_external};
+use super::runtime::{Failure, MAX_FRAMES, submit_external, verification_step};
 
 const WEST_WALL: &str = "wall-west";
 const CONTACT_MARGIN: f32 = 0.01;
@@ -28,7 +29,6 @@ const MAX_MOVEMENT_TICKS: usize = 192;
 pub(super) fn verify(
     session: &mut HeadlessSession,
     startup: GameSnapshot,
-    timestep: Duration,
     deadline: Instant,
 ) -> Result<(GameSnapshot, Value), Failure> {
     let (meadow, instances) = session.observe(|world| {
@@ -43,7 +43,6 @@ pub(super) fn verify(
     let meadow = meadow.ok_or("Server has no original Meadow Scene receipt")?;
     let mut driver = Driver {
         session,
-        timestep,
         deadline,
         sequence: 0,
     };
@@ -82,8 +81,8 @@ pub(super) fn verify(
 
     let side_room_found = driver.find_relic(2, |snapshot| snapshot.side_room)?;
     let lookout_found = driver.find_relic(3, |snapshot| snapshot.lookout)?;
-    driver.submit(ServerCommand::SideRoom)?;
-    let closed = driver.frame()?;
+    let close = driver.submit(ServerCommand::SideRoom)?;
+    let closed = driver.after_command(close)?;
     if closed.side_room != SideRoomPhase::Closed
         || closed.lookout != SideRoomPhase::RelicFound
         || closed.current_instance != startup.current_instance
@@ -118,17 +117,16 @@ pub(super) fn verify(
         "contact with the west wall",
         |snapshot| snapshot.held[0] && (snapshot.player.x - target_x).abs() <= CONTACT_TOLERANCE,
     )?;
-    let blocked = driver.frame()?;
-    if !blocked.held[0]
-        || blocked.tick != contact.tick + 1
-        || blocked.player.distance(contact.player) > CONTACT_TOLERANCE
-    {
+    let blocked = driver.until(1, "another fixed tick at the west wall", |snapshot| {
+        snapshot.tick > contact.tick
+    })?;
+    if !blocked.held[0] || blocked.player.distance(contact.player) > CONTACT_TOLERANCE {
         return Err(
             "Server actor continued moving into the wall while the command was held".into(),
         );
     }
-    driver.movement(0, false)?;
-    let released = driver.frame()?;
+    let release = driver.movement(0, false)?;
+    let released = driver.after_command(release)?;
     if released.held[0]
         || released.current_instance != startup.current_instance
         || released.side_room != SideRoomPhase::Open
@@ -182,32 +180,46 @@ pub(super) fn verify(
 
 struct Driver<'a> {
     session: &'a mut HeadlessSession,
-    timestep: Duration,
     deadline: Instant,
     sequence: u64,
 }
 
 impl Driver<'_> {
-    fn frame(&mut self) -> Result<GameSnapshot, Failure> {
-        frame(self.session, self.timestep, self.deadline)
-    }
-
     fn until(
         &mut self,
         ticks: usize,
         expected: &str,
         predicate: impl Fn(&GameSnapshot) -> bool,
     ) -> Result<GameSnapshot, Failure> {
-        for _ in 0..ticks {
-            let snapshot = self.frame()?;
+        let start = self
+            .session
+            .observe(|world| world.resource::<FixedTime>().tick())?;
+        for _ in 0..MAX_FRAMES {
+            let snapshot = verification_step(self.session, self.deadline)?;
             if predicate(&snapshot) {
                 return Ok(snapshot);
+            }
+            if snapshot.tick.saturating_sub(start) >= ticks as u64 {
+                break;
             }
             std::thread::yield_now();
         }
         Err(Failure::Error(format!(
-            "Server ran out of ticks waiting for {expected}"
+            "Server exhausted its verification budget waiting for {expected}"
         )))
+    }
+
+    fn after_command(&mut self, command: GameplayCommandKey) -> Result<GameSnapshot, Failure> {
+        let tick = command.tick().get();
+        let snapshot = self.until(
+            MAX_FRAMES,
+            "the admitted command's fixed tick",
+            |snapshot| snapshot.tick >= tick,
+        )?;
+        if self.queue()?.acknowledged_through_tick < tick {
+            return Err("Server did not acknowledge the completed command tick".into());
+        }
+        Ok(snapshot)
     }
 
     fn queue(&self) -> Result<GameplayCommandQueueStats, Failure> {
@@ -290,8 +302,8 @@ impl Driver<'_> {
         self.until(MAX_MOVEMENT_TICKS, "the region relic", |snapshot| {
             phase(snapshot) == SideRoomPhase::RelicFound
         })?;
-        self.movement(direction, false)?;
-        let released = self.frame()?;
+        let release = self.movement(direction, false)?;
+        let released = self.after_command(release)?;
         if released.held[direction] || phase(&released) != SideRoomPhase::RelicFound {
             return Err(
                 "Server did not retain the relic observation after releasing movement".into(),
@@ -300,17 +312,16 @@ impl Driver<'_> {
         Ok(phase(&released))
     }
 
-    fn movement(&mut self, direction: usize, pressed: bool) -> Result<(), Failure> {
+    fn movement(&mut self, direction: usize, pressed: bool) -> Result<GameplayCommandKey, Failure> {
         self.submit(ServerCommand::Gameplay(SemanticCommand::Move {
             direction,
             pressed,
         }))
     }
 
-    fn submit(&mut self, command: ServerCommand) -> Result<(), Failure> {
+    fn submit(&mut self, command: ServerCommand) -> Result<GameplayCommandKey, Failure> {
         let draft = command.into_draft().map_err(Failure::Error)?;
-        submit_external(self.session, &mut self.sequence, draft)?;
-        Ok(())
+        submit_external(self.session, &mut self.sequence, draft)
     }
 }
 

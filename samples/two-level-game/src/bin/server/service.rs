@@ -1,9 +1,10 @@
 use std::{
+    collections::BTreeSet,
     fs::{self, File},
     io::Read,
     num::NonZeroU64,
     path::Path,
-    sync::mpsc::{Receiver, RecvTimeoutError, Sender},
+    sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError},
     thread,
     time::{Duration, Instant},
 };
@@ -18,6 +19,7 @@ use two_level_game::{
     GamePhase, GameSnapshot, RunOptions, Scenario, ServerCommandRejections, SideRoomPhase,
     capture_processed_resume, claim_processed_checkpoint,
     command::ServerCommand,
+    levels::{LevelId, LevelKey},
     restore_processed_resume,
     resume::processed::{
         MAX_PROCESSED_RESUME_BYTES, ProcessedResumeState, decode_processed_resume,
@@ -35,21 +37,27 @@ use super::{
 
 const READY: &str = "TWO_LEVEL_SERVER_READY";
 const REPLY: &str = "TWO_LEVEL_SERVER_REPLY";
-const DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
-const PAUSED_POLL: Duration = Duration::from_millis(50);
+const DRAIN_STALL_TIMEOUT: Duration = Duration::from_secs(10);
+const SCENE_POLL: Duration = Duration::from_millis(50);
+const SHORT_FRAME_WAIT: Duration = Duration::from_millis(10);
 
 pub(super) fn run(
     session: &mut HeadlessSession,
     options: ServeOptions,
-    timestep: Duration,
     startup_deadline: Instant,
     output: &Output,
     report: &mut Report,
 ) -> Result<(), Failure> {
     report.stage = "service_startup";
     let checkpoint_configured = options.save_path.is_some();
-    let max_delta = session.observe(|world| world.resource::<RuntimeTimeSettings>().max_delta())?;
-    let mut clock = FrameClock::new(Instant::now(), timestep, max_delta);
+    let (fixed, time) = session.observe(|world| {
+        (
+            *world.resource::<FixedTime>(),
+            *world.resource::<RuntimeTimeSettings>(),
+        )
+    })?;
+    let paused = options.paused || time.paused();
+    let mut clock = FrameClock::new(Instant::now(), fixed, time);
     let restore_paths = if let Some(path) = options.resume_state {
         Some((path, options.save_path))
     } else {
@@ -61,11 +69,20 @@ pub(super) fn run(
             two_level_game::player_launch(launch_options).map_err(Failure::Rejected)?
         {
             session.submit(launch)?;
-            apply_launch(session, &mut clock, startup_deadline)?;
+            if paused {
+                if session.pause()?.is_some() || session.step()?.is_some() {
+                    return Err("Server exited before its checkpoint launch was applied".into());
+                }
+                launch_result(session)?
+                    .ok_or("Server did not apply its first-tick checkpoint launch")?
+                    .map_err(Failure::Rejected)?;
+            } else {
+                apply_launch(session, &mut clock, startup_deadline)?;
+            }
         }
         None
     };
-    if options.paused && session.pause()?.is_some() {
+    if paused && session.state() != Some(RuntimeState::Paused) && session.pause()?.is_some() {
         return Err("Server exited before paused startup completed".into());
     }
     let restored = restore_paths.is_some();
@@ -90,7 +107,7 @@ pub(super) fn run(
     if now >= startup_deadline {
         return Err("Server startup finished after its readiness deadline".into());
     }
-    if !options.paused {
+    if !paused {
         clock.elapsed(now)?;
     }
     report.ready = true;
@@ -102,19 +119,25 @@ pub(super) fn run(
         clock,
         checkpoint_configured,
         checkpoint_pending,
-        paused: options.paused,
+        paused,
         sequence,
+        visited_levels: initial
+            .game
+            .level
+            .map(LevelKey::level)
+            .into_iter()
+            .collect(),
     };
-    let outcome = output
+    let stop = output
         .send(
             READY,
             json!({
                 "version": 1,
                 "state": report.state,
-                "timestep_nanos": timestep.as_nanos(),
+                "timestep_nanos": fixed.timestep().as_nanos(),
                 "checkpoint_configured": checkpoint_configured,
                 "checkpoint_pending": checkpoint_pending,
-                "paused": options.paused,
+                "paused": paused,
                 "restored": restored,
                 "commands": initial.commands(),
                 "time": initial.time(),
@@ -125,7 +148,7 @@ pub(super) fn run(
     drop(input);
 
     let reader_sent_stop = matches!(
-        &outcome,
+        &stop,
         Ok(Stop::Shutdown | Stop::Retired | Stop::Eof | Stop::InputError(_))
     );
     let reader_joined = if reader_sent_stop || reader.is_finished() {
@@ -133,11 +156,19 @@ pub(super) fn run(
     } else {
         false
     };
+    let drain = if !service.paused
+        && matches!(&stop, Ok(Stop::Shutdown | Stop::Eof | Stop::InputError(_)))
+    {
+        service.drain()
+    } else {
+        Ok(())
+    };
     let observation = Observation::read(service.session);
+    report.visited_levels = json!(service.visited_levels);
     if let Ok(observation) = &observation {
         report.state = Some(state(&observation.game));
         report.server_evidence = Some(json!({
-            "stop": outcome.as_ref().map_or("error", Stop::name),
+            "stop": stop.as_ref().map_or("error", Stop::name),
             "commands": observation.commands(),
             "gameplay_rejections": observation.rejections,
             "time": observation.time(),
@@ -145,7 +176,8 @@ pub(super) fn run(
             "input_reader_joined": reader_joined,
         }));
     }
-    let stop = outcome?;
+    let stop = stop?;
+    drain?;
     if reader_sent_stop && !reader_joined {
         return Err("Server input reader failed to retire after orderly stop".into());
     }
@@ -215,13 +247,16 @@ fn apply_launch(
         if Instant::now() >= deadline {
             return Err("Server checkpoint launch finished after the startup deadline".into());
         }
-        let launch = session.observe(|world| {
-            two_level_game::player_launch_result(world).map(|result| result.map_err(str::to_owned))
-        })?;
-        if let Some(result) = launch {
+        if let Some(result) = launch_result(session)? {
             return result.map_err(Failure::Rejected);
         }
     }
+}
+
+fn launch_result(session: &HeadlessSession) -> Result<Option<Result<(), String>>, Failure> {
+    Ok(session.observe(|world| {
+        two_level_game::player_launch_result(world).map(|result| result.map_err(str::to_owned))
+    })?)
 }
 
 struct Service<'a> {
@@ -232,24 +267,28 @@ struct Service<'a> {
     checkpoint_pending: bool,
     paused: bool,
     sequence: u64,
+    visited_levels: BTreeSet<LevelId>,
 }
 
 impl Service<'_> {
     fn drive(&mut self, input: &Receiver<Event>) -> Result<Stop, Failure> {
-        let mut next_maintenance = Instant::now() + PAUSED_POLL;
+        let mut next_maintenance = Instant::now() + SCENE_POLL;
         loop {
             self.output.check()?;
             let now = Instant::now();
             let wait = if self.checkpoint_pending {
-                PAUSED_POLL
+                SCENE_POLL
             } else if self.paused {
                 if now >= next_maintenance {
-                    next_maintenance = now + PAUSED_POLL;
+                    next_maintenance = now + SCENE_POLL;
                     let pending = self
                         .session
                         .observe(|world| scene_work_pending(world.resource::<GameSnapshot>()))?;
-                    if pending && self.session.frame(Duration::ZERO)?.is_some() {
-                        return Ok(Stop::AppExit);
+                    if pending {
+                        if self.session.frame(Duration::ZERO)?.is_some() {
+                            return Ok(Stop::AppExit);
+                        }
+                        self.record_visit()?;
                     }
                 }
                 next_maintenance.saturating_duration_since(Instant::now())
@@ -261,7 +300,19 @@ impl Service<'_> {
                 }
                 self.clock.remaining(Instant::now())
             };
-            let stop = match input.recv_timeout(wait) {
+            let event = if !self.paused && wait <= SHORT_FRAME_WAIT {
+                match input.try_recv() {
+                    Ok(event) => Ok(event),
+                    Err(TryRecvError::Empty) => {
+                        thread::sleep(wait);
+                        continue;
+                    }
+                    Err(TryRecvError::Disconnected) => Err(RecvTimeoutError::Disconnected),
+                }
+            } else {
+                input.recv_timeout(wait)
+            };
+            let stop = match event {
                 Ok(Event::Request(request)) => self.respond(request)?,
                 Ok(Event::Close {
                     request,
@@ -279,9 +330,6 @@ impl Service<'_> {
                 }
             };
             if let Some(stop) = stop {
-                if !self.paused && !matches!(stop, Stop::AppExit) {
-                    self.drain()?;
-                }
                 return Ok(stop);
             }
         }
@@ -293,44 +341,50 @@ impl Service<'_> {
         } else {
             self.session.frame(delta)?
         };
-        Ok(exit.is_some())
+        if exit.is_some() {
+            return Ok(true);
+        }
+        self.record_visit()?;
+        Ok(false)
+    }
+
+    fn record_visit(&mut self) -> Result<(), Failure> {
+        let level = self.session.observe(|world| {
+            let game = world.resource::<GameSnapshot>();
+            game.current_instance.and(game.level).map(LevelKey::level)
+        })?;
+        self.visited_levels.extend(level);
+        Ok(())
     }
 
     fn drain(&mut self) -> Result<(), Failure> {
-        let scheduled_delay = self.session.observe(|world| {
-            let fixed = world.resource::<FixedTime>();
-            let queue = world.resource::<GameplayCommandQueue>().stats();
-            let future_ticks = queue
-                .furthest_pending_tick
-                .unwrap_or(fixed.tick())
-                .saturating_sub(fixed.tick())
-                .saturating_sub(1);
-            fixed
-                .timestep()
-                .saturating_mul(u32::try_from(future_ticks).unwrap_or(u32::MAX))
-        })?;
-        let deadline = Instant::now()
-            .checked_add(DRAIN_TIMEOUT.saturating_add(scheduled_delay))
-            .ok_or("Server command drain deadline cannot be represented")?;
-        loop {
-            let complete = settled(self.session)?;
+        self.clock.cap_period(SCENE_POLL);
+        let mut status = DrainStatus::read(self.session)?;
+        let mut last_progress = Instant::now();
+        while !status.settled {
             let now = Instant::now();
-            if now >= deadline {
+            let remaining = DRAIN_STALL_TIMEOUT.saturating_sub(now.duration_since(last_progress));
+            if remaining.is_zero() {
                 return Err(
-                    "Server could not settle admitted work before the shutdown deadline".into(),
+                    "Server made no progress settling admitted work during shutdown".into(),
                 );
             }
-            if complete {
-                return Ok(());
+            let Some(delta) = self.clock.take_due(now)? else {
+                thread::sleep(self.clock.remaining(now).min(remaining));
+                continue;
+            };
+            if self.drive_live_frame(delta)? && !settled(self.session)? {
+                return Err("Server exited before admitted gameplay work settled".into());
             }
-            if let Some(delta) = self.clock.take_due(now)? {
-                if self.drive_live_frame(delta)? && !settled(self.session)? {
-                    return Err("Server exited before admitted gameplay work settled".into());
-                }
-            } else {
-                thread::sleep(self.clock.remaining(now).min(deadline - now));
+            let next = DrainStatus::read(self.session)?;
+            if next.acknowledged > status.acknowledged
+                || next.toward_pending_tick > status.toward_pending_tick
+            {
+                last_progress = Instant::now();
             }
+            status = next;
         }
+        Ok(())
     }
 
     fn handle_close(
@@ -374,6 +428,7 @@ impl Service<'_> {
                     if exit.is_some() {
                         return Ok(Some(Stop::AppExit));
                     }
+                    self.record_visit()?;
                 }
                 self.send_observation("paused")?;
             }
@@ -455,13 +510,14 @@ impl Service<'_> {
             )?;
             return Ok(None);
         }
-        if self.session.resume_with_frame(elapsed)?.is_some() {
+        if self.drive_live_frame(elapsed)? {
             self.paused = false;
             return Ok(Some(Stop::AppExit));
         }
         if self.session.pause()?.is_some() {
             return Ok(Some(Stop::AppExit));
         }
+        self.record_visit()?;
         self.send_observation("advanced")?;
         Ok(None)
     }
@@ -539,6 +595,30 @@ fn settled(session: &HeadlessSession) -> Result<bool, Failure> {
         world.resource::<GameplayCommandQueue>().is_idle()
             && !scene_work_pending(world.resource::<GameSnapshot>())
     })?)
+}
+
+struct DrainStatus {
+    settled: bool,
+    acknowledged: u64,
+    toward_pending_tick: Option<(u64, Duration)>,
+}
+
+impl DrainStatus {
+    fn read(session: &HeadlessSession) -> Result<Self, Failure> {
+        Ok(session.observe(|world| {
+            let queue = world.resource::<GameplayCommandQueue>();
+            let fixed = world.resource::<FixedTime>();
+            let stats = queue.stats();
+            Self {
+                settled: queue.is_idle() && !scene_work_pending(world.resource::<GameSnapshot>()),
+                acknowledged: stats.acknowledged,
+                toward_pending_tick: stats
+                    .furthest_pending_tick
+                    .filter(|&pending| pending > fixed.tick())
+                    .map(|_| (fixed.tick(), fixed.remainder())),
+            }
+        })?)
+    }
 }
 
 fn reject(output: &Output, message: &str) -> Result<(), Failure> {
