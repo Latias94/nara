@@ -2910,6 +2910,10 @@ CPU input replay and immutable typed outputs after original native/World retirem
 hardware passes 3/3 including the injected observer panic; Vulkan hardware passes actual mixed
 DPI and DX12 software passes one display. The current 150%/125% crossing settles original
 client extents `384x256 -> 320x213 -> 384x256`, with native and captured geometry agreement.
+The same active 125%/150% pair was rerun on November 21 after rebuilding the independent example.
+DX12 hardware passed the mixed-DPI trajectory 1/1 in `1d184ec8-a84d-4b76-8f35-13d6b9231351`,
+including all nine stages, WorldPointer and original native retirement. This is repeat evidence for
+the existing contract, not a new platform or performance claim.
 The linked qualification records owner/bridge checks, separate OS title-bar dragging, exact
 prefix/resource cleanup and review corrections. The render/WGPU libraries pass 515/515,
 original native guard controls 4/4 and affected Game bridge controls 20/20; correctness Clippy,

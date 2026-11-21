@@ -1543,6 +1543,14 @@ readback, physical scanout or GPU-duration measurements.
 | Original Game capture/input/completion/Stop bridge, with desktop feature closure | 20/20, 2.257 s; 1,642 cases outside selection | `5ffbb723-0d6e-4b17-938d-e63a9e6fe8b7` |
 | DX12 software: injected original observer failure and native retirement | 1/1, 0.845 s; two cases outside selection | `0850b217-1145-4ca7-ba32-3c54ccd9b0a8` |
 
+The physical mixed-DPI trajectory was repeated on November 21 after rebuilding the independent
+Release example from the current workspace. The same active DISPLAY1/DISPLAY2 pair reported DPI
+120/144, and DX12 selected the RTX 4090 without fallback. The single ignored native case passed in
+`1d184ec8-a84d-4b76-8f35-13d6b9231351` in 4.817 seconds. It again observed the complete
+384x256 -> 320x213 -> 384x256 sequence, nine presentation/pixel stages, all mirror and mapping
+states, `WorldPointer`, original Runtime/window/pump retirement and `monitor_scales=2`. This is a
+repeat of the existing mixed-DPI contract, not a source change or a new performance result.
+
 The first ordinary release build passes in 15m40s; after formatting the final example rebuild
 passes in 17.36 s. These are local build observations, not latency distributions or speedups.
 The only root/independent lock changes add the existing `windows-sys 0.61.2` dependency edge

@@ -343,6 +343,16 @@ legs settle at `424x272` on DISPLAY1 and `360x240` on DISPLAY2. Original native/
 geometry, requested destination, HWND destruction and mouse-button/cursor restoration pass.
 This repeat requires no additional Winit behavior change or display-configuration change.
 
+The same physical pair was available again on November 21. The independent stock-composition
+consumer rebuilt its Release `picking_window` example from the current workspace and reran the
+actual mixed-DPI DX12 trajectory. DISPLAY1 remained `[-2560,533,0,1973]` at DPI 120 (125%) and
+DISPLAY2 remained `[0,0,3840,2160]` at DPI 144 (150%). The native test passed 1/1 in
+`1d184ec8-a84d-4b76-8f35-13d6b9231351` in 4.817 seconds with the RTX 4090 and no fallback. It
+observed both physical client extents, all nine presentation/pixel stages, the mapped and unmapped
+effects, `WorldPointer`, and original Runtime/HWND/pump retirement. This repeat contributes current
+Windows evidence for the existing contract. It adds no Winit or display-configuration change and
+does not establish scanout, human input feel, another platform or a performance budget.
+
 The separate [ordinary Runtime drawing/picking consumer](../plans/2026-11-14-durable-material-and-shader-plan.md#independent-native-drawing-and-picking-qualification)
 now qualifies actual native presentations and public World picking during programmatic
 source/destination/source movement on DX12 and Vulkan RTX 4090. It joins native/captured geometry
