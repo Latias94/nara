@@ -153,9 +153,9 @@ state and final cleanup. An optional absolute checkpoint path selects the game's
 slot. [Run the installed server](../../samples/two-level-game/README.md#operate-the-server)
 
 For exact game continuation, the installed Server captures from a paused boundary and checks a
-fresh candidate before it reports Ready. The game-owned state includes scheduling phase and the
-remaining supported command stream. The caller retains the incumbent until the candidate is
-ready and chooses which process receives new work.
+fresh candidate before it reports Ready. The game-owned state includes scheduling phase, settled
+room and relic state, and the remaining supported command stream. The caller retains the
+incumbent until the candidate is ready and chooses which process receives new work.
 [Continue in a fresh Server process](../../samples/two-level-game/README.md#continue-in-a-fresh-server-process)
 
 `ProductRecipe::add_runtime_asset_codec` and its `ProductRecipeError::RuntimeCodec` variant are

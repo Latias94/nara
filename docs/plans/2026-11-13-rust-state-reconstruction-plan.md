@@ -145,10 +145,11 @@ the selected game level. The capture also binds the existing App and Schema fing
 Observe pending intent through the original gameplay queue. Form a game-owned bounded value
 using offsets from the acknowledged boundary and retain order within a tick. Reconstruct the
 semantic commands through ordinary admission against the candidate's fresh fixed watermark.
-The old queue counters and Runtime generation stay process-local. Eligibility still requires
-closed rooms, no open checkpoint slot, no unresolved Scene work or unsupported native services,
-and a healthy queue without an active or quarantined batch. An unknown pending producer or an
-unrepresented effect must refuse capture.
+The old queue counters and Runtime generation stay process-local. Eligibility requires no open
+checkpoint slot, no unresolved Scene work or unsupported native services, and a healthy queue
+without an active or quarantined batch. An unknown pending producer or an unrepresented effect
+must refuse capture. The original format also required both rooms closed. See the
+[live regions successor](#processed-continuation-with-live-regions) for the current room policy.
 
 Use the existing `--serve` control stream for pause, capture and explicit drives. A fresh
 `--serve --paused --resume-state` startup loads the game's bounded continuation format, applies
@@ -223,6 +224,75 @@ The shared source reconstruction path also passes its original Windows DX12 hard
 (`0d0a288c-178d-43af-a343-6a031d402bbc`, 1/1). It checks fresh Runtime and native owners,
 the captured player and animation pixels, reconciled keyboard holds, and complete window,
 surface and physical event-loop retirement.
+
+## Processed Continuation With Live Regions
+
+Implementation: `b73a45d`. Process acceptance: `ac68e70`.
+
+The packaged Two-Level Server can transfer its two settled Deferred regions. The portable
+state identifies each authored slot as closed, open with a live relic, or open with the relic
+already found. Capture checks every recorded room against its original live Scene membership
+and verifies that the product has only its represented Scene instances. A room still preparing
+or retiring a request must settle before capture. Existing save slots and unsupported native
+services retain their own eligibility rules.
+
+Reconstruct and commit the selected primary Scene first. The room owner then prepares the
+requested Products through their current authored portals, one at a time through the original
+Host request slot. Each successful activation issues fresh Scene identities and installs its
+captured relic state. The reconstruction driver advances paused maintenance until both rooms
+and authoritative tasks settle, without adding fixed ticks beyond the isolated entry. Only
+then does it restore pending external intent and require an exact canonical recapture before
+Ready. A rejection or deadline leaves the candidate under its own original close authority.
+
+The ephemeral Server format uses version two with an explicit object for both slots. Version
+one is refused at the format gate. Source reconstruction and durable progress saves keep their
+existing formats and resource inventories.
+
+Qualify two separate production Server processes with both rooms live and one relic already
+found. Check the first candidate observation before any normal simulation, then drive the
+original commands, collect the remaining relic, close a room independently and travel with
+the other room still open. Check a same-catalog candidate with an unavailable portal and a
+Cooked Room whose required relic is missing. Both must refuse reconstruction while retaining
+the incumbent and the original cleanup owners.
+
+Bevy resolves a Scene and then applies it to a newly spawned root. Godot instantiates nodes
+from `PackedScene` state and publishes the scene-instantiated notification. The existing Nara
+Host likewise instantiates from admitted content. The sample preserves the gameplay state it
+owns and receives new Scene receipts in the candidate.
+[Bevy resolved Scene](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_scene/src/resolved_scene.rs#L47-L57) · [Godot PackedScene](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/scene/resources/packed_scene.cpp#L2585-L2608)
+
+### Live Region Continuation Qualification
+
+The Windows x64 release Server case passes `c55825ba-651b-4cd2-af28-d2018d771f24`.
+The Linux x86-64 WSL2/ext4 release Server and Player cases pass 2/2 under
+`b66e507a-cd37-4c54-89ef-b2a8d4148ad6`. Each compiles and relocates an actual production
+package before running the installed executables without the source project. Both Server runs
+capture at tick 14 with Side Room found, Lookout open and a pending release at offset two.
+The candidate matches all 1,253 bytes on Windows and all 1,267 bytes on Linux at its tick 1.
+Each comparison uses its own package and catalog. The candidate collects Lookout, closes it
+independently, and retires the remaining Side Room through travel to Cavern. An incompatible
+candidate selects Cavern from the same catalog and fails its room portal check before Ready.
+The original remains unchanged and retires with its pending release. The successful candidate
+executes the release once at the recorded offset. Both runs retain the original closed-room
+continuation, including its fixed debt, progress across three level instances and continued
+marker placement.
+[Packaged continuation trajectory](../../samples/two-level-game/tests/support/server_delivery/continuation.rs)
+
+The Windows Rust 1.95.0 minimum `cooked-server` release suite passes 55/55
+(`954c0722-5375-4f00-b065-6833177352b1`). The targeted Cook, source reconstruction, task return
+and room suite passes 209/209 (`4a616d90-84ca-4232-81ce-417252b59bb0`). A valid cooked Lookout
+with a renamed relic refuses after the candidate activates Side Room. The original private
+candidate remains at tick 1 with its Side Room receipt and no transferred queue entries until
+close. The incumbent keeps its original receipt and pending command, refuses capture during a
+controlled outstanding room request, and opens and closes the room after its I/O worker returns.
+Generated Server and affected consumer correctness Clippy and root and sample formatting pass.
+The shared Windows DX12 desktop reconstruction regression also passes 1/1
+(`10f95af5-bf7f-42ef-af30-299476f7d315`). It verifies the original keyboard, presented pixels,
+window, surface and event-loop cleanup through the shared source reconstruction owner.
+
+The completed workflow transfers game state between separate Server processes from one compatible
+package on the same host. Cross-machine transport, open SaveSlot custody and arbitrary Scene or
+plugin state remain separate from this qualification.
 
 ## Qualification
 

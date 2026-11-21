@@ -597,9 +597,12 @@ Product matches the active level. The candidate checks the admitted catalog, Sch
 configuration, reconstructs the game, and compares its canonical capture before
 `TWO_LEVEL_SERVER_READY` reports `restored: true`.
 The format contains player pose, progress, held semantic movement, logical game time, fixed debt
-and remainder, and at most 128 pending commands from the Server control stream. Command offsets
-and order are preserved in the new queue. Its Runtime tick and queue counters start in the fresh
-process. A live `--save` slot, open rooms, or pending Scene or native-service work refuses capture.
+and remainder, and at most 128 pending commands from the Server control stream. It also records
+whether Side Room and Lookout are closed, open or have a found relic. The candidate opens the
+recorded rooms through their current level's portals before Ready. Command offsets and order are
+preserved in the new queue. Its Runtime tick and queue counters start in the fresh process. A live
+`--save` slot or pending Scene or native-service work refuses capture. Use the current version-two
+continuation file for this workflow. Progress checkpoints have their existing format.
 
 Keep the incumbent paused until the candidate is ready. The operator selects the new command
 route and sends `resume` or an explicit `advance` to that process. Send `retire` to a paused

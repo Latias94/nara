@@ -303,6 +303,12 @@ The selected release Player and Server relocation cases pass on Windows and on U
 WSL2. Each Server comparison uses two processes from one compatible package on its own platform.
 [Continuation contract and process evidence](2026-11-13-rust-state-reconstruction-plan.md#processed-server-continuation-successor)
 
+The [live regions successor](2026-11-13-rust-state-reconstruction-plan.md#processed-continuation-with-live-regions)
+at `b73a45d` passes packaged execution on Windows x64 and Linux WSL2. The candidate reconstructs
+both rooms and their relic state from the packaged Scenes. The test hands off a paused session
+with pending movement, exercises independent room closure and ordinary travel, and observes a
+candidate's refusal when its selected level cannot supply those rooms.
+
 ## Shared Compiled Project Cook Entry
 
 Status: implemented and qualified for the scoped Windows Rust 1.95.0 workflows below, after

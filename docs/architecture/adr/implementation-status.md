@@ -2420,6 +2420,14 @@ state before readiness. The local control client selects the command route and t
 process owners verify retirement. The production Cooker and relocated Player and Server cases
 pass on Windows x64 and on Ubuntu 26.04 WSL2 using Rust 1.95.0.
 
+The [settled region successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#processed-continuation-with-live-regions)
+at `b73a45d` adds explicit Side Room and Lookout status to the version-two Server continuation.
+The candidate recommits its primary Scene, activates the rooms through the original Deferred
+Scene request owner, and reinstates the recorded relic flags before readiness. The new receipts
+stay local to their owning Runtime. The actual source-free package on Windows and Linux WSL2
+proves continued command execution, room closure, travel and old-process retirement. Progress
+checkpoints retain their own format.
+
 Commit `ddabcab` uses the existing exact capability read before admitting typed bytes to the
 source cache. In the Windows Sound Bank controls, Check rejects the wrong spelling. Once corrected,
 Cook and the Runtime codec preserve both original PCM clips. Engine 143/143, Two-Level 68/68 and

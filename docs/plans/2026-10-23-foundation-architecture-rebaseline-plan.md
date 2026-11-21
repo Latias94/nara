@@ -1445,6 +1445,12 @@ exact compatible catalog, reconstructs the selected Scene and game state, and co
 equivalence of a new capture before announcing Ready. The actual Windows and Linux WSL2 package
 tests pass. Process routing remains at the caller.
 
+The [live regions successor](2026-11-13-rust-state-reconstruction-plan.md#processed-continuation-with-live-regions)
+at `b73a45d` joins both settled Deferred rooms to the same handoff. Before readiness, the game
+activates each room through its admitted portal, reinstates its relic state and verifies the
+live Scene inventory. Windows and Linux WSL2 packaged candidates resume ordinary movement,
+independent room closure and coordinated travel through the original owners.
+
 ## R8: External Render Feature And Host-Local Execution
 
 **Design:** D14. **State:** private CPU/DX12/cost comparison, internal device ownership, original

@@ -110,6 +110,11 @@ Rules:
   command route and may explicitly retire the still-paused incumbent without running its queued
   intents.
   [Processed Server continuation](../../plans/2026-11-13-rust-state-reconstruction-plan.md#processed-server-continuation-successor)
+- A game may transfer settled Deferred region state explicitly. The receiving game uses the
+  current primary Scene's admitted references and the original Host request and activation path
+  to obtain fresh instance receipts. The Two-Level Server reinstates the open and found state of
+  its two rooms before Ready. In-flight Scene requests stay with their original Runtime.
+  [Live region continuation](../../plans/2026-11-13-rust-state-reconstruction-plan.md#processed-continuation-with-live-regions)
 
 ## Input and Command Boundary
 
