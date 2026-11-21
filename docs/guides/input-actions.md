@@ -310,6 +310,12 @@ an already adopted original member, but cannot newly adopt that stale member.
 
 ## Source Project Selection
 
+`nara new desktop-2d/v2` generates `input/starter.actions.json` with WASD and D-pad movement,
+plus Enter and South for `confirm`. The generated Rust game reads those actions directly in its
+fixed-step system. Edit physical bindings in the action file and restart the game. Change movement
+rules in `src/gameplay.rs`. The `desktop` feature installs the native controller collector on
+Windows. The generated headless Player uses the processed action map and starts with neutral input.
+
 Select the PRIMARY startup file in `nara.toml`:
 
 ```toml

@@ -273,6 +273,102 @@ Memory render/check and validate are required for new evidence shards.
 - Follow-up ergonomic findings identify a real obstacle and trigger; they do not
   create an unimplemented framework or imply Linux/macOS release acceptance.
 
+## Desktop 2D Starter With Editable Actions
+
+Foundation R12 uses a second game to test the cost of writing gameplay and taking it through an
+external project workflow. `nara new desktop-2d/v2` ships a movement example and an editable action map
+with its own primary Product. The existing creation owner stages and admits the selected version's
+inventory. The generated Windows desktop target selects the controller collector from the same
+Nara checkout or immutable Git revision. Headless, Cook and Player use the shared project recipe.
+[Foundation R12](2026-10-23-foundation-architecture-rebaseline-plan.md#r12-consumer-integration-and-canonical-contract-consolidation)
+
+The push-box consumer adds an authored pressure plate and door through one project-owned Schema
+contribution. Its fixed-step system reads the same actions, buffers presses in order and tries one
+grid move per tick. The independent trajectory compares fresh keyboard and normalized gamepad runs.
+It edits a plate through the prepared source document owner without selecting it, exercises
+Undo/Redo and Save/Reopen, and follows the original Cook-to-Player path after moving the installation.
+
+The comparison follows Godot's project-owned action definitions and Bevy's direct gameplay reads.
+The input map changes device bindings. The game source decides how those actions affect play.
+[Godot Input Map](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/core/input/input_map.cpp) ·
+[Bevy keyboard example](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/examples/input/keyboard_input.rs)
+
+### Run the independent v2 workflow
+
+The public fixture creates and builds a new project beside the engine checkout. The first test
+needs a supported local publication filesystem, Rust 1.95 and a populated offline Cargo cache.
+The second test also needs an interactive Windows desktop
+with WGI and a usable DX12 adapter. Run the two tests serially. The shell example uses the engine's
+existing target directory. [Public fixture](../../tests/project_author_workflow.rs)
+
+```powershell
+$env:RUSTUP_TOOLCHAIN = '1.95.0'
+$env:CARGO_BUILD_JOBS = '1'
+$env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
+$env:CARGO_NET_OFFLINE = 'true'
+cargo nextest run --release --locked --offline -p nara --no-default-features --features project-workflow-cli,tooling --test project_author_workflow --run-ignored only -E 'test(=generated_v2_puzzle_observes_the_edited_scene_and_input_after_source_removal)' --test-threads=1 --success-output immediate
+$env:WGPU_BACKEND = 'dx12'
+$env:NARA_WGPU_FORCE_FALLBACK = '0'
+cargo nextest run --release --locked --offline -p nara --no-default-features --features project-workflow-cli,tooling --test project_author_workflow --run-ignored only -E 'test(=generated_v2_desktop_verifies_first_present)' --test-threads=1 --success-output immediate
+```
+
+### Authoring and delivery evidence
+
+The generated project runs one fixed tick through its normal Headless entry. An independent
+fixed-step observer drives the unmodified movement recipe through public Input and checks that
+holding D moves on consecutive ticks, releasing D stops movement, and Enter resets the player.
+The push-box game replaces its project-owned gameplay and authors two persistent components under
+one Schema provider. It uses one gameplay plugin and five action names. The common sequence uses
+`move.right` and the binding-order control also exercises `move.up`. The game converts semantic
+presses directly into local controls, with zero generic gameplay-command encodes or decodes.
+The external project uses the published engine interfaces for each change. The engine changes
+needed to ship this template concern creation, the generated inventory and dependency selection.
+
+The data-only Editor selects the camera while reading the pressure plate. It previews column 3
+from the prepared candidate while the live column remains 2, rejects a stale candidate and
+obsolete query bases, and verifies history, the actual Save digest and Reopen. The same normalized
+input sequence opens the door at tick 2 before the edit and at tick 6 after it. A plate behind
+the door leaves the player and box blocked outside it. Two taps delivered together move the box
+in two fixed ticks. Two actions admitted by one input retain their order. A fresh run with only
+D-pad Right bound to `move.right` matches the keyboard baseline for the saved Scene.
+
+The actual generated Cook publishes the Player, pack and package manifest. The test moves those
+files, removes its source project and local Cook cache, and launches from an unrelated empty
+directory. The processed Scenes and input map reproduce the source trace. The sealed exact launch
+also completes 4,096 ticks with neutral input. The Windows run exercises both first presentations,
+Headless with the shared `desktop` Cargo feature, and both source Export product observations.
+The exported Scene, Schema and action map are byte-identical to the project sources.
+
+The implementation is recorded in `45748c2`. Five process scenarios passed on Windows x64 with
+Rust 1.95.0 on November 22
+(`c3e27c79-c8ff-4ff2-8df7-8b2ef207a898`). The run covers the two v2 scenarios, v1 dual-project
+delivery and Prefab metadata recovery, and the existing custom-Schema Cook path. The native run
+selected DX12 with `NARA_WGPU_FORCE_FALLBACK=0`. The first Export attempt reached the cold release
+build and crossed the fixture's 900-second deadline. The retry raised the fixture's Export
+allowance to 1,800 seconds and reused completed Cargo artifacts. The v1 delivery fixture also
+needed `walking.rs` in its project copy and Cook input lists. Native input evidence covers WGI
+startup and teardown. Gameplay traces use normalized keyboard and gamepad events. Physical
+controller use, other native targets, a graphical cooked Player and general performance budgets
+remain separate qualification work.
+
+The CPU batch passed 41 of 42 tests (`8de315b0-4416-408c-9232-5d72c4b1ce1e`). The existing
+`hosted_ci_runs_complete_locked_suites_on_supported_platforms` assertion rejects the
+`reference-game` dependency patches already present at `910ca36` before it reads the CI workflow.
+Both the manifest and the assertion retain their baseline contents. The edited workflow passed
+YAML parsing and the Windows run executed the new source-free scenario.
+
+The targeted workflow owner run passed all 104 tests (`91a8c8d9-328d-48b1-9901-95457fc690a1`),
+including refusal of creation success when ordinary startup admits a different valid action map.
+The independently locked project-workflow consumer and the Editor application contract,
+authoring loop, and supervised Play clean-room targets passed compile checks.
+The root workflow targets passed correctness Clippy. The workspace, independent consumer and
+embedded starter sources passed formatting checks.
+
+One warm-cache observation on the i9-13900KF workstation measured 24,017 ms from installing the
+game change to the verified result, including compiled Schema and Check. The Scene path took
+165 ms from preparing the edit through history, Save/Reopen and a fresh source run. The binding
+edit took 140 ms through a fresh source run. These are single developer-workflow observations.
+
 ## Appendix
 
 Local design evidence: ADRs 0090, 0110, 0114-0117; starter/product_contract.rs;

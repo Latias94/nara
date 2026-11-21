@@ -17,6 +17,10 @@ uses in-window docking. Full native accessibility is not yet provided.
 
 ## Build the tools and create a project
 
+Use `desktop-2d/v2` for a new project with editable keyboard and gamepad actions and a running
+movement example. Its generated `README.md` explains how to change the bindings and gameplay.
+The Collect Game walkthrough below uses `desktop-2d/v1` and adds all gameplay as a local plugin.
+
 From the engine checkout:
 
 ```powershell
@@ -166,6 +170,7 @@ project_rust_input_inventory(&project)?.into_iter().chain([
     "gameplay-plugin/Cargo.toml",
     "gameplay-plugin/src/lib.rs",
     "gameplay-plugin/src/input.rs",
+    "gameplay-plugin/src/walking.rs",
     "gameplay-plugin/schema/component-schema-generation-1.json",
 ].into_iter().map(|path| RelativePath::new(path).expect("fixed local plugin input"))),
 ```

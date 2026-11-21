@@ -347,9 +347,11 @@ worker physically returns. Inspect `diagnostics(id)` for a rejected request's sa
 cannot acknowledge or commit another request. These APIs preserve one current Scene and explicit
 game-owned session state; they do not provide additive loading or arbitrary native-state rollback.
 
-The project owns one recipe function shared by headless, desktop, Check, Export, and startup-Scene
-Repair. Add the `project-tooling` Nara feature to the headless dependency, declare the tool entry in
-the project's Cargo manifest, and dispatch it before normal argument parsing or gameplay startup:
+The project owns one gameplay and content recipe shared by headless, desktop, Check, Export, and
+startup-Scene Repair. A desktop entry can extend it with native collectors, as `desktop-2d/v2`
+does for Windows controllers. Add the `project-tooling` Nara feature to the headless dependency,
+declare the tool entry in the project's Cargo manifest, and dispatch it before normal argument
+parsing or gameplay startup:
 
 ```toml
 [package.metadata.nara]

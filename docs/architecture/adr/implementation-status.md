@@ -4814,6 +4814,14 @@ tracks exact-byte v1 Prefab extraction and Schema upgrade recovery, bound Scene 
 encoding, and replay of selected edits to omitted defaults. It also records cross-profile
 source Export, menu capture and native Tab, and the sample's live pickup and audio history repairs.
 
+The Desktop 2D v2 starter implements the versioned creation contract in ADR 0110. The external
+push-box game exercises ADR 0047's prepared source edit, selection-independent read, history and
+persistence. Its source and cooked runs use ADR 0041's Input owner, with editable bindings and
+game-owned rules. The five Windows process scenarios cover DX12 first presentation, source Export
+and a relocated Cooked Player with the original source removed. Physical controller interaction,
+other native platforms and the remaining Foundation R2/R12 work retain their own acceptance scope.
+[Desktop 2D v2 qualification](../../plans/2026-10-16-0940-feat-first-2d-author-workflow-plan.md#authoring-and-delivery-evidence)
+
 Rows retain their own last-qualified source and scope. Some older broad decisions remain partial
 or proposed while narrower Accepted ADRs implement particular workflows. Read the relevant Accepted
 refinement before treating an older gap as the current product's behavior. Links are selected

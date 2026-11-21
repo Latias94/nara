@@ -592,8 +592,13 @@ retain validated positions in the exact source or Schema owner and remove the li
 from the first selected read. Compact canonical RON keeps the reviewed large document inside
 the original publication limits. The [bound encoding and omitted-default regressions](../audits/2026-11-20-recovery-format-and-runtime-input-review.md#repair-status)
 also verify prepared non-active edits, exact history and persistence through the independent
-registered panel. Complete field query coverage, preparation locality and larger-workload
-comparisons stay open.
+registered panel.
+
+The external push-box game uses the same public query and prepared candidate with a project-defined
+Schema. The camera remains selected through pressure-plate editing and Save. A new source process
+observes the saved rule change after Reopen. Complete field query coverage, preparation locality
+and larger-workload comparisons stay open.
+[External push-box workflow](2026-10-16-0940-feat-first-2d-author-workflow-plan.md#desktop-2d-starter-with-editable-actions)
 
 ## R3: Behavior Representation And Immutable Module Publications
 
@@ -5725,21 +5730,19 @@ For the selected completed units, run independent direct/renamed/public consumer
 root/Editor/native paths serially. Verify unknown data, exact operation results, content/identity
 retention, close and old-generation rejection together. Review adapters, not only owner unit tests.
 
-Qualify the next Desktop 2D starter with a game outside the engine checkout whose loop differs
-from [Collect Game](../../samples/collect-game/README.md). A small push-box game can exercise
-authored pressure plates and doors, document Undo, Save and Reopen, and the ordinary
-Cook-to-Player path. Ship editable default bindings with the new starter version. Verify the
-same movement action in fresh Runtime starts after switching from WASD to a gamepad in the
-project action map. Change continuous movement to a grid step in the project's gameplay code.
-The [Input guide](../guides/input-actions.md) covers direct action reads and optional command
-mapping. Games that need replay or Server ingress choose their own vocabulary and use the
-existing tick queue. Compare the game-owned conversions in both projects before considering a
-typed helper in `nara_gameplay`.
+The Desktop 2D v2 starter and external push-box consumer exercise a different game loop from Collect
+Game. The starter ships editable defaults and continuous movement. The independent project defines a
+grid push, pressure plate and door in game code, uses the existing source document owner, and
+delivers the edited Scene and bindings through Cook. Games that need replay or Server ingress
+choose their vocabulary and use the existing tick queue. A typed `nara_gameplay` helper stays
+open pending repeated needs from command-using games.
+[Desktop 2D v2 workflow](2026-10-16-0940-feat-first-2d-author-workflow-plan.md#desktop-2d-starter-with-editable-actions) ·
+[Collect Game](../../samples/collect-game/README.md) · [Input guide](../guides/input-actions.md)
 
-Record the recipe registrations, command conversions, edit-to-result time and any required
-engine-source changes along that workflow. Use the next resource with a concrete native consumer
-to measure integration work across registration, Cook and residency. When Editor work resumes,
-remeasure the [single-property edit baseline](../benchmarks/2026-11-04-ui-work-baseline.md).
+The starter evidence records recipe registration, command conversions, edit-to-result time and
+the engine changes needed to ship the template. Use the next resource with a concrete native
+consumer to measure integration work across registration, Cook and residency. When Editor work
+resumes, remeasure the [single-property edit baseline](../benchmarks/2026-11-04-ui-work-baseline.md).
 At 10,001 entities it averaged 20,002 scanned records per edit with zero Hierarchy row callbacks.
 Compare direct selection lookup while preserving document revision, Undo and Save.
 

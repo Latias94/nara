@@ -49,7 +49,7 @@ schema editing.
 
 ## Decision
 
-Nara adopts one first-party `desktop-2d/v1` starter and one root project-workflow Module. The Module
+Nara adopts a versioned first-party Desktop 2D starter and one root project-workflow Module. The Module
 owns concrete creation, check, source-carrying declared-content export and startup-selection repair
 transactions. A thin CLI owns argument parsing and terminal rendering; a separate private
 Cargo/process Adapter owns invocation and JSON artifact selection. Future Editor UI may call the
@@ -242,12 +242,21 @@ actual consumer qualification; selecting this contract alone does not mark it co
 
 ### Starter and dependency authority
 
-- `desktop-2d/v1` is a closed, source-controlled starter. One creation request produces matching
-  generated binaries, Cargo features, `nara.toml` capabilities, ProductRecipe, built-in schema and
-  initial content. Starter member bytes are compiled into the workflow Module rather than discovered
-  through a runtime checkout-relative path. The generated Cargo manifest declares its own
-  `[workspace]` with resolver `3`, preventing accidental membership in an ancestor checkout workspace.
-  The starter CLI exposes no per-layer override surface.
+- Each Desktop 2D starter version declares a closed inventory. One creation request produces
+  matching generated binaries, Cargo features, `nara.toml` capabilities, ProductRecipe, built-in
+  schema and initial content. The workflow Module embeds the starter source. The generated Cargo
+  manifest declares its own `[workspace]` with resolver `3`, preventing accidental membership in
+  an ancestor checkout workspace. The starter CLI exposes no per-layer override surface.
+- The creation request names the version explicitly. `desktop-2d/v1` generates the camera tutorial.
+  `desktop-2d/v2` also generates `input/starter.actions.json` and `src/gameplay.rs`. Creation mints
+  the action map's intrinsic primary Product identity once. Both profiles select that file, and
+  successful creation requires the ordinary startup receipt to match its prepared digest. Cook
+  uses the compiled recipe's Action Map codec to package the processed definition for Player.
+- The v2 action names, defaults and movement are project source. The Input Module owns device
+  normalization, bindings and action state. The gameplay plugin reads those actions and defines
+  the simulation. The Windows desktop entry adds the Gilrs collector from the same selected Nara
+  dependency revision or checkout. Headless and compiled tool entry points use the shared recipe
+  even when Cargo resolves the `desktop` feature for source Export.
 - Existing direct-App and advanced product-composition Interfaces remain independent code-first
   authorities and are not narrowed by project creation.
 - Dependency distribution is a separate typed fact. Local creation names the selected Nara checkout
@@ -556,7 +565,8 @@ schema can diverge before first run, and no typed receipt identifies the chosen 
 
 **Pros**: Appears extensible and could host future products.
 
-**Cons**: There is one first-party starter, one Cargo Adapter, one export shape and one repair case.
+**Cons**: Each first-party starter version has a finite inventory. There is one Cargo Adapter, one
+export shape and one repair case.
 Registries, erased providers and callbacks would freeze speculation instead of hiding complexity.
 
 **Decision**: Rejected. Concrete deep Modules precede generalization.

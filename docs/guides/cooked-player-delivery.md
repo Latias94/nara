@@ -84,16 +84,15 @@ and code checks at the original publication checkpoints. Keep typed Cargo/packag
 their native cleanup custody completes. Neither the inventory helper nor the Cook entry resolves
 Cargo dependencies or analyzes Rust includes.
 
-The generated `desktop-2d/v1` project includes a headless `cook` and `player` alongside its existing
-source `headless` and `desktop` binaries. Follow its generated README for the explicit Cook command.
-Its Player reads only its compiled executable-relative pack; `--frames N` selects a finite run
-length, without overriding content expectations. This headless entry does not replace the source
-desktop Export or establish foreign-target/native-library support.
+Generated Desktop 2D projects include `cook` and a headless `player`, alongside the source
+`headless` and `desktop` binaries. Follow the generated README for the explicit Cook command.
+The Player reads the executable-relative pack selected at compile time. `--frames N` selects a
+finite run length under that expectation. The v2 pack includes the processed startup action map.
 
-Consumers that exhaustively match `ProjectMember` must handle `BuildScript`, `CookSource` and
-`PlayerSource`. The starter publishes twelve members and four binary targets. Source-carrying
-Export continues selecting its original `headless` and `desktop` products; Cook and Player are
-additional project-owned entry points, not extra source Export executables.
+Set the `ProjectStarter` explicitly when constructing a `ProjectCreationRequest`. `Desktop2dV1`
+publishes twelve members. `Desktop2dV2` adds `ProjectMember::GameplaySource`,
+`ProjectMember::InputActionMap`, and `ProjectDirectory::Input`. Both generate the same four binary
+targets. Source-carrying Export continues to select `headless` and `desktop`.
 
 The cooker uses `project_workflow::cooked_content` under the `project-workflow` feature.
 Construct `CookedContentRequest` with the complete startup/travel Scene set, explicit addressable
