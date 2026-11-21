@@ -1813,6 +1813,15 @@ Captured-input pixel replay is distinct from screen readback/scanout. General no
 UI hit retargeting, maximized/snap/keyboard movements, foreign execution and numerical budgets
 remain separate; Editor/Dialogue product work stays paused and full R8/R9/R12/Foundation active.
 
+The [stock window overlay successor](2026-10-31-render-composition-and-host-execution-plan.md#stock-window-ui-without-world-views)
+at `ec035f0` keeps the original window, captured time and UI contribution presentable when all world Views
+are clipped. The default compositor clears the drawable primary target to opaque black and
+composes the overlay at its captured extent. The original UI receipt grants interaction and the
+accepted overlay withdraws world picking until a world View presents again. The embedded Game
+bridge and Dear host settle the original candidate against its actual composition receipt.
+Render-only and custom capture retain the sealed `NoViews` path. The linked qualification covers
+the independent Runtime window and the embedded Game path under their own native targets.
+
 The [measured geometry successor](2026-11-14-durable-material-and-shader-plan.md#measured-sprite-and-tile-geometry-successor)
 starts from the independent public domain-module consumer at `10cd109`. Its six optimized
 Vulkan/RTX 4090 processes compare plain/bound values, three populations, one/two Views and

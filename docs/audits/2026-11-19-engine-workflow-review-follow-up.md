@@ -166,5 +166,7 @@ tests in nextest run `5c0fca1c-0175-48d8-98be-09b7c61e1f21`. The cohort includes
 relocation regression, source drift and staged identity collision controls. The earlier owner
 suite passed 418 of 419; the one Gilrs regression passed after correction in the 256-test cohort.
 
-The HUD policy for a window with no visible world camera remains open. The current Step settles
-the executed tick with the sealed `NoViews` result.
+The [stock window overlay decision](../plans/2026-10-31-render-composition-and-host-execution-plan.md#stock-window-ui-without-world-views)
+resolves the HUD policy for a single drawable primary window. The stock UI path submits the
+original overlay against a black target when every world View is clipped. The render-only Step
+continues to settle from the sealed `NoViews` result.

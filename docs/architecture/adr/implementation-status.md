@@ -2921,6 +2921,14 @@ format and document checks pass with their recorded overlapping scope. Replay pi
 front-buffer/scanout readback. Nonlinear effects, UI hit retargeting, foreign native execution and numerical budgets
 retain separate scope. Editor/Dialogue remains paused; full R8/R9/R12/Foundation stays active.
 
+The [stock window overlay successor](../../plans/2026-10-31-render-composition-and-host-execution-plan.md#stock-window-ui-without-world-views)
+at `ec035f0` admits zero-world-View frames under ADR0094 and ADR0117 for the default single-primary-window UI
+composer. The captured logical target and time survive equal-size image adaptation. Actual overlay
+presentation grants its original UI authority and withdraws world picking. A recoverably deferred
+or rejected embedded overlay preserves the incumbent on a live target. The linked qualification
+records native Runtime and embedded Game scopes separately. Custom and render-only capture keep
+`NoViews`.
+
 The [measured geometry successor](../../plans/2026-11-14-durable-material-and-shader-plan.md#measured-sprite-and-tile-geometry-successor)
 at `10cd109` supplies an independently locked domain-module Runtime/stock-policy/Host consumer.
 The private Material value-sharing correction `c796594`, measured at `94fc219`, preserves

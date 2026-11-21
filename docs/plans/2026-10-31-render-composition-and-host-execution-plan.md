@@ -289,6 +289,75 @@ prefix custody are exercised within the fixture's bounded scope. These results c
 measurement entry nor the production steps above. They select no cost winner, publish no engine
 API and do not promote Proposed ADR0121.
 
+## Stock Window UI Without World Views
+
+The [workflow review](../audits/2026-11-19-engine-workflow-review-follow-up.md#a-rendering-policy-to-decide-before-extending-split-screen-ui)
+observed that completely clipping the world cameras also stopped a live window's HUD. At
+`ec035f0` the default stock compositor admits an overlay-only frame when its window UI contributor
+collects and the original single primary window has a nonzero extent. The packet retains the
+window and captured time. The same graph clears the window to opaque black and draws the UI at
+the target extent. A blank UI contribution can clear previously presented pixels. The
+render-only and custom capture routes keep their current `NoViews` disposition.
+
+This follows the existing split between target geometry and View geometry. Godot requests the
+target clear and draws 2D canvas content independently of its 3D camera branch. Bevy extracts
+UI subviews from eligible Cameras. Nara's stock window overlay already has a window route, so
+it continues to use the exact Window without allocating a substitute camera or `WorldCanvas`.
+[Godot viewport](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/servers/rendering/renderer_viewport.cpp#L408-L425) · [Bevy UI extraction](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_ui_render/src/lib.rs#L1419-L1455)
+
+Qualify the default Runtime through an ordinary native window. Require an original UI
+presentation receipt while the world View is clipped, no world picking during that interval,
+and recovery of the original View and picking when the viewport returns. Read the HUD and
+clear pixels from the retained input after native retirement. Separate CPU cases cover the
+original sidecar, blank color-only capture, suspended target and unchanged custom route.
+
+The rebuilt independently locked Windows x64 release run `d1ee39d1-cacc-4dfa-af82-a9dc304e56a2`
+passes 1/1 on DX12 hardware. The same 480 × 240 window shrinks to 320 × 240 and recovers its
+original size. Four joined submissions contain 1, 0, 0 and 1 world Views in order. The
+synthetic gamepad activates the clipped frame's original menu exactly once. The restored
+View retains its identity and world picking returns. The original Runtime, HWND and event
+pump retire before equal-size image adaptation and readback of the clipped input. The white HUD
+rectangle and the sampled opaque black background pixels match exact bytes.
+[Independent native consumer](../../tests/fixtures/stock-composition-consumer/README.md#stock-window-ui-without-world-views)
+
+Independent review identified an early picking revocation in the embedded Game View. The
+bridge now retains the incumbent guard on same-target overlay deferral and content refusal.
+Successful overlay completion and terminal failure settle that guard through the original
+World presentation owner. The Dear adapter rolls back an uncomposited overlay upload to the
+confirmed display registration. Each native redraw also checks whether the corresponding
+window became unavailable or presented without that exact image. It can revoke the original
+World guard even when a paused Runtime issued no candidate. The immutable image can still
+repaint after displacement without reviving the revoked guard. An exact same-image handoff
+to the current Game viewport preserves the registration and guard across native windows.
+
+The Windows x64 release cohort passes 274/274 in `24c15c59-f242-49f5-88b3-9a96c5f6afd2`.
+It covers the Runtime owner, selected View and clock tests, world picking, stock UI target
+admission, an exact foreign-packet rejection, embedded Step and the independently compiled
+custom UI policy. The separate DX12 Host gate passes 5/5 in
+`826cf0e2-acf5-4b94-825d-240675fcf376`. It includes a zero-size Window result with no
+acquisition, an exact presented-window clear, and isolated World guard retirement and recovery.
+
+The Windows DX12 Editor run `96161619-6468-4d91-a882-543986bb094e` passes 5/5. The new case
+moves an unchanged paused Game image from the primary window to a secondary window and back,
+preserving the submitted image, occurrence and candidate. It then observes an unrelated
+unavailable window and a primary presentation without that image, and repaints the retained
+image without regranting world authority. After a fixed tick clips the camera, an actual HUD
+upload deliberately stops before composition. The same target keeps its incumbent, the Step
+remains pending, and the later HUD composition settles Step to Paused. The old and discarded
+occurrences cannot claim that new input route. The other four native tests cover ordinary Game
+input, fixed WorldCanvas, paused redraw cadence, and detach/minimize/reopen/retirement. The
+first Editor build required a fixture-only `Duration` import before these tests could execute.
+The selected Editor input and Game UI CPU coverage passes 7/7 in
+`92ef2548-1ea4-4929-8ef1-ef7f1ed88fa0`. The feature-free WGPU library compiles. Correctness
+Clippy passes for Render, WGPU, Editor, the root Runtime bridge and the independent example
+and test, with warnings outside the denied correctness group. Targeted formatting passes.
+
+These runs cover a single primary Runtime output and the existing embedded Game adapter on
+Windows x64. The stock Runtime pixel check uses replay of the captured input. The paused
+handoff checks same-image presentation custody with a fixed logical Game target. Multi-target
+Runtime overlay policy, foreign native execution, physical controller input and scanout remain
+separate qualification scopes. Proposed ADR0121 stays Proposed.
+
 ## References
 
 - [Render source/design review](../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
