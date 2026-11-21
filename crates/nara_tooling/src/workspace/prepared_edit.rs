@@ -4,19 +4,15 @@ use super::{
     EditorDocumentId, EditorDocumentKind, EditorDocumentSlot, EditorWorkspace,
     EditorWorkspaceCommandReport, WorkspaceDocumentContext, authoring_command_error_report,
     authoring_document_error_report,
-    authoring_query::{PropertySource, read_property_page, rejected_basis_report},
+    authoring_query::{AuthoringSource, EditorPreparedDocumentPreview, rejected_basis_report},
     report_for_document, report_for_document_patch, workspace_document_error_report,
     workspace_revision_error_report,
 };
-use crate::{
-    EditorDocumentQueryBasis, EditorDocumentQueryRejection, EditorPropertyObservation,
-    EditorPropertyPage, EditorPropertyPageRead, EditorPropertyRead,
-    authoring_query::PropertyValuePageOwner, document_query::EditorDocumentQueryOwner,
-};
+use crate::{EditorDocumentQueryBasis, document_query::EditorDocumentQueryOwner};
 use nara_scene::{
-    AuthoringEntityView, AuthoringPropertyEdit, AuthoringReadError, PrefabDeclarationLimits,
-    PrefabInstancePath, PrefabRevert, PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit,
-    SceneAuthoringRevision, SceneEntityId, ScenePatchDocument,
+    AuthoringPropertyEdit, PrefabDeclarationLimits, PrefabInstancePath, PrefabRevert,
+    PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit, SceneAuthoringRevision,
+    ScenePatchDocument,
 };
 
 /// A move-only edit of one explicitly named open document; it owns no workspace or selection.
@@ -25,7 +21,7 @@ pub struct PreparedEditorDocumentEdit {
     basis: EditorDocumentQueryBasis,
     edit: PreparedDocumentEdit,
     origin: PreparedEditOrigin,
-    page_owner: EditorDocumentQueryOwner,
+    query_owner: EditorDocumentQueryOwner,
 }
 
 #[derive(Debug)]
@@ -93,52 +89,14 @@ impl PreparedEditorDocumentEdit {
         }
     }
 
-    /// Reads a proposed property from the exact candidate retained for commit.
-    ///
-    /// Use the original preparation basis in the request. The returned target refers to that
-    /// basis and the value comes from this candidate. An intervening live edit does not change
-    /// the preview or grant permission to commit it.
-    pub fn preview_property(
-        &self,
-        request: EditorPropertyRead,
-    ) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
-        self.validate_preview_basis(&request.target.basis)?;
-        PropertySource::Prepared(self).read_property(request)
-    }
-
-    /// Reads one bounded value page from the candidate. Continue on this same prepared edit.
-    pub fn preview_property_page(
-        &self,
-        request: EditorPropertyPageRead,
-    ) -> Result<EditorPropertyPage, EditorDocumentQueryRejection> {
-        read_property_page(
-            request,
-            PropertyValuePageOwner::Prepared(self.page_owner.clone()),
-            |basis, _| {
-                self.validate_preview_basis(basis)?;
-                Ok(PropertySource::Prepared(self))
-            },
-        )
-    }
-
-    fn validate_preview_basis(
-        &self,
-        basis: &EditorDocumentQueryBasis,
-    ) -> Result<(), EditorDocumentQueryRejection> {
-        if basis.document != self.document() {
-            return Err(EditorDocumentQueryRejection::WrongPreparedEdit);
-        }
-        basis.require_exact_source(self.base_revision(), || self.basis.schema.clone())
-    }
-
-    pub(super) fn authoring_entity_view(
-        &self,
-        entity: &SceneEntityId,
-    ) -> Result<AuthoringEntityView<'_>, AuthoringReadError> {
-        match &self.edit {
-            PreparedDocumentEdit::Scene(edit) => edit.authoring_entity_view(entity),
-            PreparedDocumentEdit::Prefab(edit) => edit.authoring_entity_view(entity),
-        }
+    /// Borrows the exact candidate retained for commit, including fields and stored claims.
+    #[must_use]
+    pub fn preview(&self) -> EditorPreparedDocumentPreview<'_> {
+        let source = match &self.edit {
+            PreparedDocumentEdit::Scene(edit) => AuthoringSource::PreparedScene(edit),
+            PreparedDocumentEdit::Prefab(edit) => AuthoringSource::PreparedPrefab(edit),
+        };
+        EditorPreparedDocumentPreview::new(&self.basis, &self.query_owner, source)
     }
 }
 
@@ -242,7 +200,7 @@ impl EditorWorkspace {
                 basis: basis.clone(),
                 edit,
                 origin,
-                page_owner: EditorDocumentQueryOwner::default(),
+                query_owner: EditorDocumentQueryOwner::prepared(),
             })
             .map_err(|patch_report| self.authoring_preparation_error(document, slot, patch_report))
     }

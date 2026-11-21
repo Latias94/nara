@@ -64,7 +64,7 @@ fn prepared_property_reads_keep_the_original_basis_and_presence() {
             ),
         ] {
             let request = read(&workspace, document, field, 8);
-            let preview = prepared.preview_property(request.clone()).unwrap();
+            let preview = prepared.preview().read_property(request.clone()).unwrap();
             assert_eq!(preview.value, expected);
             assert_eq!(preview, workspace.read_document_property(request).unwrap());
         }
@@ -74,13 +74,13 @@ fn prepared_property_reads_keep_the_original_basis_and_presence() {
         invalid.target.basis.schema = None;
         invalid.limits = EditorPropertyReadLimits::new(1, 1, 1).unwrap();
         assert_eq!(
-            prepared.preview_property(invalid),
+            prepared.preview().read_property(invalid),
             Err(EditorDocumentQueryRejection::StaleSchema)
         );
         let mut invalid = original.clone();
         invalid.limits = EditorPropertyReadLimits::new(1024, 1, 7).unwrap();
         assert_eq!(
-            prepared.preview_property(invalid),
+            prepared.preview().read_property(invalid),
             Err(EditorDocumentQueryRejection::ValueBudgetExceeded)
         );
 
@@ -90,11 +90,11 @@ fn prepared_property_reads_keep_the_original_basis_and_presence() {
         assert!(workspace.commit_authoring_edit(successor).applied);
         let current = read(&workspace, document, "amount", 8);
         assert_eq!(
-            prepared.preview_property(current.clone()),
+            prepared.preview().read_property(current.clone()),
             Err(EditorDocumentQueryRejection::StaleRevision)
         );
         assert_eq!(
-            prepared.preview_property(original).unwrap().value,
+            prepared.preview().read_property(original).unwrap().value,
             EditorPropertyValue::Present(ComponentValue::U64(70))
         );
         assert!(!workspace.commit_authoring_edit(prepared).applied);

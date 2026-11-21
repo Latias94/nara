@@ -169,7 +169,7 @@ fn prepared_property_reads_observe_candidate_removals() {
                 .prepare_authoring_edit(&request.target.basis, &patch)
                 .unwrap_or_else(|report| panic!("{kind:?} {patch:?} was refused: {report:?}"));
             assert_eq!(
-                prepared.preview_property(request.clone()),
+                prepared.preview().read_property(request.clone()),
                 Err(EditorDocumentQueryRejection::Source(error))
             );
             assert_eq!(

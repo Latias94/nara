@@ -17,9 +17,10 @@ use nara::{
         ComponentValue, ComponentValueKind, EntityReference, PersistentComponentSchemaOwnerId,
     },
     scene::{
-        AuthoringPropertyEdit, PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId,
-        SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
-        ScenePlacement, ScenePlacementParent,
+        AuthoringPropertyEdit, AuthoringReadError, AuthoringRecordReadiness,
+        LocalConstructionEntity, PrefabDocument, SceneComponentRecord, SceneDocument,
+        SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
+        ScenePatchOperation, ScenePlacement, ScenePlacementParent,
     },
 };
 use nara_editor::{
@@ -36,11 +37,13 @@ use nara_tooling::{
     EditorDocumentOpenResult, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
     EditorEntityPage, EditorEntityQuery, EditorEntityQueryLimits, EditorEntityQueryPosition,
     EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
-    EditorPersistenceRequestResult, EditorPersistenceResult, EditorProjectBrowserAction,
-    EditorProjectBrowserActionOutcome, EditorPropertyObservation, EditorPropertyRead,
-    EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue, EditorReopenTarget,
-    EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentRequestResult,
-    EditorWorkspaceIntentResult, PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
+    EditorPersistenceRequestResult, EditorPersistenceResult, EditorPreparedDocumentPreview,
+    EditorProjectBrowserAction, EditorProjectBrowserActionOutcome, EditorPropertyObservation,
+    EditorPropertyPageData, EditorPropertyPagePosition, EditorPropertyPageRead,
+    EditorPropertyPageValue, EditorPropertyRead, EditorPropertyReadLimits, EditorPropertyTarget,
+    EditorPropertyValue, EditorReopenTarget, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+    EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
+    PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
 };
 
 #[path = "support/text_project.rs"]
@@ -334,6 +337,92 @@ fn root_read(
     value.clone()
 }
 
+fn single_entity_query(position: EditorEntityQueryPosition) -> EditorEntityQuery {
+    EditorEntityQuery {
+        position,
+        limits: EditorEntityQueryLimits::new(1, 1).unwrap(),
+    }
+}
+
+fn authoring_query(
+    basis: &EditorDocumentQueryBasis,
+    entity: &SceneEntityId,
+    projection: EditorAuthoringProjection,
+) -> EditorAuthoringQuery {
+    EditorAuthoringQuery {
+        position: EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+            basis: basis.clone(),
+            entity: entity.clone(),
+            projection,
+        }),
+        limits: EditorAuthoringQueryLimits::new(1, 1, 1024).unwrap(),
+    }
+}
+
+fn assert_prepared_cursor_ownership(
+    context: &ImguiEditorPanelContext<'_, '_>,
+    preview: &EditorPreparedDocumentPreview<'_>,
+    sibling: &EditorPreparedDocumentPreview<'_>,
+    entity: &SceneEntityId,
+    component: &ComponentTypeId,
+) {
+    use EditorDocumentQueryRejection::WrongPreparedEdit;
+
+    assert_eq!(preview.basis(), sibling.basis());
+    let entity_start =
+        single_entity_query(EditorEntityQueryPosition::Start(preview.basis().clone()));
+    let live_first = context
+        .query_document_entities(entity_start.clone())
+        .unwrap();
+    let candidate_first = preview.query_entities(entity_start).unwrap();
+    let live_next = single_entity_query(EditorEntityQueryPosition::Continue(
+        live_first.next.unwrap(),
+    ));
+    let candidate_next = single_entity_query(EditorEntityQueryPosition::Continue(
+        candidate_first.next.unwrap(),
+    ));
+    let next = preview.query_entities(candidate_next.clone()).unwrap();
+    assert_eq!(preview.query_entities(candidate_next.clone()), Ok(next));
+    assert_eq!(preview.query_entities(live_next), Err(WrongPreparedEdit));
+    assert_eq!(
+        context.query_document_entities(candidate_next.clone()),
+        Err(WrongPreparedEdit)
+    );
+    assert_eq!(
+        sibling.query_entities(candidate_next),
+        Err(WrongPreparedEdit)
+    );
+
+    // All three sources contain this component at the same basis and can page its roots.
+    let roots = authoring_query(
+        preview.basis(),
+        entity,
+        EditorAuthoringProjection::Roots {
+            component: component.clone(),
+        },
+    );
+    let live_first = context.query_document_authoring(roots.clone()).unwrap();
+    let candidate_first = preview.query_authoring(roots.clone()).unwrap();
+    assert_eq!(candidate_first.rows, live_first.rows);
+    let continuation = |cursor| EditorAuthoringQuery {
+        position: EditorAuthoringQueryPosition::Continue(cursor),
+        limits: roots.limits,
+    };
+    let live_next = continuation(live_first.next.unwrap());
+    let candidate_next = continuation(candidate_first.next.unwrap());
+    let next = preview.query_authoring(candidate_next.clone()).unwrap();
+    assert_eq!(preview.query_authoring(candidate_next.clone()), Ok(next));
+    assert_eq!(preview.query_authoring(live_next), Err(WrongPreparedEdit));
+    assert_eq!(
+        context.query_document_authoring(candidate_next.clone()),
+        Err(WrongPreparedEdit)
+    );
+    assert_eq!(
+        sibling.query_authoring(candidate_next),
+        Err(WrongPreparedEdit)
+    );
+}
+
 #[derive(Default)]
 struct ComputedPanelEvidence {
     observation: Option<EditorPropertyObservation>,
@@ -354,14 +443,7 @@ struct ComputedEditPanel {
 
 impl ComputedEditPanel {
     fn discover(&self, projection: EditorAuthoringProjection) -> EditorAction {
-        EditorAction::QueryDocumentAuthoring(EditorAuthoringQuery {
-            position: EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
-                basis: self.basis.clone(),
-                entity: self.entity.clone(),
-                projection,
-            }),
-            limits: EditorAuthoringQueryLimits::new(1, 1, 1024).unwrap(),
-        })
+        EditorAction::QueryDocumentAuthoring(authoring_query(&self.basis, &self.entity, projection))
     }
 }
 
@@ -396,16 +478,24 @@ impl ImguiEditorPanel for ComputedEditPanel {
             assert_eq!(cancelled.patch().operations.len(), 1);
             assert_eq!(cancelled.inverse().operations.len(), 1);
             drop(cancelled);
-            self.prepared = Some(
+            let prepare = || {
                 context
                     .prepare_authoring_property_edit(&observed.target.basis, &edits)
-                    .unwrap(),
+                    .unwrap()
+            };
+            let prepared = prepare();
+            let stale = prepare();
+            let preview = prepared.preview();
+            assert_eq!(preview.basis(), &observed.target.basis);
+            assert_prepared_cursor_ownership(
+                context,
+                &preview,
+                &stale.preview(),
+                &observed.target.entity,
+                &observed.target.component,
             );
-            self.stale = Some(
-                context
-                    .prepare_authoring_property_edit(&observed.target.basis, &edits)
-                    .unwrap(),
-            );
+            self.prepared = Some(prepared);
+            self.stale = Some(stale);
             self.evidence.borrow_mut().observation = Some(observed);
             return;
         }
@@ -696,13 +786,201 @@ fn exercise_discovered_computed_edit(
     );
 }
 
+fn collect_construction_entities(
+    basis: &EditorDocumentQueryBasis,
+    query: impl Fn(EditorEntityQuery) -> Result<EditorEntityPage, EditorDocumentQueryRejection>,
+) -> Vec<SceneEntityId> {
+    let mut position = EditorEntityQueryPosition::Start(basis.clone());
+    let mut entities = Vec::new();
+    loop {
+        let page = query(single_entity_query(position)).unwrap();
+        assert_eq!(&page.basis, basis);
+        assert_eq!(page.scanned_records, 1);
+        let [entity]: [SceneEntityId; 1] = page.entities.try_into().unwrap();
+        assert!(
+            !entities.contains(&entity),
+            "a continuation repeated an entity"
+        );
+        entities.push(entity);
+        let Some(next) = page.next else { break };
+        position = EditorEntityQueryPosition::Continue(next);
+    }
+    entities.sort();
+    entities
+}
+
+fn review_construction_link(
+    preview: &EditorPreparedDocumentPreview<'_>,
+    entity: &SceneEntityId,
+    linked: &SceneEntityId,
+    amount: u64,
+) -> [EditorPropertyObservation; 2] {
+    let components = preview
+        .query_authoring(authoring_query(
+            preview.basis(),
+            entity,
+            EditorAuthoringProjection::Components,
+        ))
+        .unwrap();
+    assert_eq!(components.scanned_entries, 1);
+    assert!(components.next.is_none());
+    let [
+        EditorAuthoringRow::Component {
+            component,
+            version: ComponentSchemaVersion::ONE,
+            readiness: AuthoringRecordReadiness::Available,
+        },
+    ] = components.rows.as_slice()
+    else {
+        panic!("expected the candidate's actual Link component, got {components:?}");
+    };
+    assert_eq!(component.as_str(), "consumer.Link");
+    let roots = authoring_query(
+        preview.basis(),
+        entity,
+        EditorAuthoringProjection::Roots {
+            component: component.clone(),
+        },
+    );
+    let first = preview.query_authoring(roots.clone()).unwrap();
+    let with_metadata_budget = |bytes| EditorAuthoringQuery {
+        limits: EditorAuthoringQueryLimits::new(1, 1, bytes).unwrap(),
+        ..roots.clone()
+    };
+    assert_eq!(
+        preview.query_authoring(with_metadata_budget(first.metadata_bytes - 1)),
+        Err(EditorDocumentQueryRejection::MetadataBudgetExceeded)
+    );
+    assert_eq!(
+        preview.query_authoring(with_metadata_budget(first.metadata_bytes)),
+        Ok(first.clone())
+    );
+    let next = first.next.expect("the first root page has a continuation");
+    let second = preview
+        .query_authoring(EditorAuthoringQuery {
+            position: EditorAuthoringQueryPosition::Continue(next),
+            limits: roots.limits,
+        })
+        .unwrap();
+    assert_eq!(second.target, first.target);
+    assert_eq!((first.scanned_entries, second.scanned_entries), (1, 1));
+    assert_eq!((first.rows.len(), second.rows.len()), (1, 1));
+    assert!(second.next.is_none());
+
+    [
+        (
+            ComponentValueKind::EntityRef,
+            ComponentValue::EntityReference(EntityReference::SceneLocal {
+                entity: linked.clone(),
+            }),
+            linked.as_str().len(),
+        ),
+        (ComponentValueKind::U64, ComponentValue::U64(amount), 8),
+    ]
+    .map(|(kind, expected, bytes)| {
+        let field = first
+            .rows
+            .iter()
+            .chain(&second.rows)
+            .find_map(|row| match row {
+                EditorAuthoringRow::Root {
+                    field,
+                    kind: actual,
+                    required: true,
+                    edit_capability: true,
+                } if *actual == kind => Some(field.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let target = EditorPropertyTarget {
+            basis: first.target.basis.clone(),
+            entity: first.target.entity.clone(),
+            component: component.clone(),
+            property: ComponentPropertyPath::new(field),
+        };
+        let limits = EditorPropertyReadLimits::new(1024, 1, bytes).unwrap();
+        assert_eq!(
+            preview.read_property(EditorPropertyRead {
+                target: target.clone(),
+                limits: EditorPropertyReadLimits::new(1024, 1, bytes - 1).unwrap(),
+            }),
+            Err(EditorDocumentQueryRejection::ValueBudgetExceeded)
+        );
+        let observed = preview
+            .read_property(EditorPropertyRead {
+                target: target.clone(),
+                limits,
+            })
+            .unwrap();
+        assert_eq!(observed.target, target);
+        assert_eq!(
+            observed.value,
+            EditorPropertyValue::Present(expected.clone())
+        );
+        assert_eq!(
+            (observed.value_nodes, observed.value_logical_bytes),
+            (1, bytes)
+        );
+        let paged = preview
+            .read_property_page(EditorPropertyPageRead {
+                position: EditorPropertyPagePosition::Start {
+                    target,
+                    path: ComponentFieldPath::empty(),
+                },
+                limits,
+            })
+            .unwrap();
+        assert_eq!(paged.target(), &observed.target);
+        assert_eq!(
+            paged.value,
+            EditorPropertyPageValue::Present(EditorPropertyPageData::Scalar(expected))
+        );
+        assert!(paged.next.is_none());
+        observed
+    })
+}
+
+struct ConstructionReview {
+    locals: [LocalConstructionEntity; 2],
+    mapped: [SceneEntityId; 2],
+    entities: Vec<SceneEntityId>,
+    properties: [[EditorPropertyObservation; 2]; 2],
+}
+
+impl ConstructionReview {
+    fn assert_live_values(
+        &self,
+        app: &EditorApplication,
+        basis: &EditorDocumentQueryBasis,
+        published: bool,
+    ) {
+        for property in self.properties.iter().flatten() {
+            let mut target = property.target.clone();
+            target.basis = basis.clone();
+            let actual = app.read_document_property(EditorPropertyRead {
+                target: target.clone(),
+                limits: EditorPropertyReadLimits::new(1024, 1, property.value_logical_bytes)
+                    .unwrap(),
+            });
+            if published {
+                let actual = actual.unwrap();
+                assert_eq!(actual.target, target);
+                assert_eq!(actual.value, property.value);
+            } else {
+                assert_eq!(
+                    actual,
+                    Err(EditorDocumentQueryRejection::Source(
+                        AuthoringReadError::EntityNotFound
+                    ))
+                );
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 struct ConstructionPanelEvidence {
-    locals: Option<(
-        nara::scene::LocalConstructionEntity,
-        nara::scene::LocalConstructionEntity,
-    )>,
-    preview: Option<(SceneEntityId, SceneEntityId)>,
+    review: Option<ConstructionReview>,
     held_frames: usize,
     submissions: Vec<PanelSubmissionId>,
     results: Vec<(PanelSubmissionId, PanelActionDispatch)>,
@@ -710,6 +988,7 @@ struct ConstructionPanelEvidence {
 
 struct ConstructionPanel {
     basis: EditorDocumentQueryBasis,
+    existing_link: SceneEntityId,
     initialized: bool,
     prepared: Option<PreparedEditorDocumentConstruction>,
     stale: Option<PreparedEditorDocumentConstruction>,
@@ -757,12 +1036,37 @@ impl ImguiEditorPanel for ConstructionPanel {
             assert_eq!(stale.base_revision(), prepared.base_revision());
             assert_eq!(prepared.patch().operations.len(), 9);
             assert_eq!(prepared.inverse().operations.len(), 9);
-            let mut evidence = self.evidence.borrow_mut();
-            evidence.preview = Some((
-                prepared.entity(&first).unwrap().clone(),
-                prepared.entity(&second).unwrap().clone(),
-            ));
-            evidence.locals = Some((first, second));
+            let preview = prepared.preview();
+            assert_eq!(preview.basis(), &self.basis);
+            assert_prepared_cursor_ownership(
+                context,
+                &preview,
+                &stale.preview(),
+                &self.existing_link,
+                &ComponentTypeId::new("consumer.Link"),
+            );
+            let entities = collect_construction_entities(preview.basis(), |request| {
+                preview.query_entities(request)
+            });
+            let mapped = [&first, &second].map(|local| {
+                let allocated = prepared.entity(local).unwrap();
+                entities
+                    .iter()
+                    .find(|entity| *entity == allocated)
+                    .expect("the candidate should enumerate each allocated entity")
+                    .clone()
+            });
+            let [first_id, second_id] = &mapped;
+            let properties = [
+                review_construction_link(&preview, first_id, second_id, 17),
+                review_construction_link(&preview, second_id, first_id, 19),
+            ];
+            self.evidence.borrow_mut().review = Some(ConstructionReview {
+                locals: [first, second],
+                mapped,
+                entities,
+                properties,
+            });
             self.prepared = Some(prepared);
             self.stale = Some(stale);
             self.initialized = true;
@@ -799,28 +1103,55 @@ fn exercise_panel_construction(
     document: EditorDocumentId,
     source: &str,
     root: &std::path::Path,
+    existing_link: &SceneEntityId,
 ) {
     let before = frame(app);
     let captured = basis(app, document);
-    let entities = |app: &mut EditorApplication, captured: EditorDocumentQueryBasis| {
-        let mut position = EditorEntityQueryPosition::Start(captured.clone());
-        let mut entities = Vec::new();
-        loop {
-            let observed = page(app, position).unwrap();
-            assert_eq!(observed.basis, captured);
-            entities.extend(observed.entities);
-            let Some(next) = observed.next else {
-                break;
-            };
-            position = EditorEntityQueryPosition::Continue(next);
-        }
-        entities.sort();
-        entities
+    let active = before.workspace().active_document.unwrap();
+    assert_ne!(active, document);
+    let selection = &before.workspace().active_scene.as_ref().unwrap().selection;
+    assert_eq!(selection.top_entity(), Some(&id("anchor")));
+    let assert_navigation = |current: &EditorFrameModel| {
+        assert_eq!(current.workspace().active_document, Some(active));
+        assert_eq!(
+            current.workspace().document(active),
+            before.workspace().document(active)
+        );
+        assert_eq!(
+            current.scene_preview_document(),
+            before.scene_preview_document()
+        );
+        assert_eq!(
+            &current.workspace().active_scene.as_ref().unwrap().selection,
+            selection
+        );
     };
-    let mut expected_entities = entities(app, captured.clone());
+    let entities = |app: &EditorApplication, basis: &EditorDocumentQueryBasis| {
+        collect_construction_entities(basis, |request| app.query_document_entities(request))
+    };
+    let original_entities = entities(app, &captured);
+    let original_read = EditorPropertyRead {
+        target: EditorPropertyTarget {
+            basis: captured.clone(),
+            entity: existing_link.clone(),
+            component: ComponentTypeId::new("consumer.Link"),
+            property: ComponentPropertyPath::new(ComponentFieldId::new("amount")),
+        },
+        limits: EditorPropertyReadLimits::new(1024, 1, 8).unwrap(),
+    };
+    let original_value = app
+        .read_document_property(original_read.clone())
+        .unwrap()
+        .value;
+    assert_eq!(
+        original_value,
+        EditorPropertyValue::Present(ComponentValue::U64(7))
+    );
     let persisted = fs::read(root.join(source)).unwrap();
     let evidence = Rc::new(RefCell::new(ConstructionPanelEvidence::default()));
     let shared = Rc::clone(&evidence);
+    let panel_basis = captured.clone();
+    let existing_link = existing_link.clone();
     let mut composition = EditorNativeComposition::new();
     composition
         .register_panel(
@@ -832,7 +1163,8 @@ fn exercise_panel_construction(
                 true,
             ),
             move || ConstructionPanel {
-                basis: captured.clone(),
+                basis: panel_basis.clone(),
+                existing_link: existing_link.clone(),
                 initialized: false,
                 prepared: None,
                 stale: None,
@@ -857,17 +1189,26 @@ fn exercise_panel_construction(
         let draw = context.begin_frame();
         let candidate = frontend.show_contributions(draw.ui(), app).unwrap();
         drop(draw);
+        let live = frame(app);
+        assert_navigation(&live);
+        assert_eq!(live.workspace().documents, before.workspace().documents);
+        assert_eq!(entities(app, &captured), original_entities);
+        assert_eq!(
+            app.read_document_property(original_read.clone())
+                .unwrap()
+                .value,
+            original_value
+        );
+        assert_eq!(fs::read(root.join(source)).unwrap(), persisted);
+        if let Some(review) = &evidence.borrow().review {
+            review.assert_live_values(app, &captured, false);
+        }
         if let Some(candidate) = candidate {
             frontend.submit_and_drive(app, candidate, Duration::ZERO);
         }
         if evidence.borrow().results.len() == 2 {
             break;
         }
-        assert_eq!(
-            frame(app).workspace().documents,
-            before.workspace().documents
-        );
-        assert_eq!(fs::read(root.join(source)).unwrap(), persisted);
     }
     let evidence = evidence.borrow();
     assert_eq!(evidence.held_frames, 2);
@@ -904,8 +1245,9 @@ fn exercise_panel_construction(
         |diagnostic| diagnostic.code().as_str() == "tooling.workspace-stale-document-revision"
     ));
     let committed: CommittedEditorDocumentConstruction = committed.clone();
-    let (first, second) = evidence.locals.as_ref().unwrap();
-    let (first_id, second_id) = evidence.preview.as_ref().unwrap();
+    let review = evidence.review.as_ref().unwrap();
+    let [first, second] = &review.locals;
+    let [first_id, second_id] = &review.mapped;
     assert_ne!(first_id, second_id);
     assert_eq!(committed.entity(first), Some(first_id));
     assert_eq!(committed.entity(second), Some(second_id));
@@ -924,23 +1266,19 @@ fn exercise_panel_construction(
     assert_eq!(committed.report().revision, Some(after_tab.revision));
     assert_eq!(rejected.revision, committed.report().revision);
     assert_eq!(after_tab.history.redo_depth, 0);
+    let mut expected_entities = original_entities.clone();
     expected_entities.extend([first_id.clone(), second_id.clone()]);
     expected_entities.sort();
+    assert_eq!(review.entities, expected_entities);
     let published = basis(app, document);
     assert_eq!(
-        entities(app, published),
+        entities(app, &published),
         expected_entities,
         "only the successful construction may add entities"
     );
+    review.assert_live_values(app, &published, true);
     assert_eq!(fs::read(root.join(source)).unwrap(), persisted);
-    assert_eq!(
-        frame(app).workspace().active_document,
-        before.workspace().active_document
-    );
-    assert_eq!(
-        frame(app).scene_preview_document(),
-        before.scene_preview_document()
-    );
+    assert_navigation(&after);
     assert_eq!(
         frame(app)
             .workspace()
@@ -973,6 +1311,16 @@ fn exercise_panel_construction(
             matches!(submit(app, EditorAction::Mutate(action)).actions(),
             [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if report.applied)
         );
+        let current = basis(app, document);
+        let expected = if redo {
+            &expected_entities
+        } else {
+            &original_entities
+        };
+        assert_eq!(&entities(app, &current), expected);
+        review.assert_live_values(app, &current, redo);
+        assert_navigation(&frame(app));
+        assert_eq!(fs::read(root.join(source)).unwrap(), persisted);
     }
     if let nara_tooling::EditorPersistenceView::Terminal { attempt, .. } = frame(app).persistence()
     {
@@ -1034,38 +1382,9 @@ fn exercise_panel_construction(
     let reopened = basis(app, document);
     assert_ne!(reopened.revision.source_id(), saving.revision.source_id());
     assert_eq!(fs::read(root.join(source)).unwrap(), bytes);
-    assert_eq!(entities(app, reopened.clone()), expected_entities);
-    for (entity, target, amount) in [(first_id, second_id, 17), (second_id, first_id, 19)] {
-        for (field, expected, logical_bytes) in [
-            (
-                "target",
-                ComponentValue::EntityReference(EntityReference::SceneLocal {
-                    entity: target.clone(),
-                }),
-                target.as_str().len(),
-            ),
-            ("amount", ComponentValue::U64(amount), 8),
-        ] {
-            let target = EditorPropertyTarget {
-                basis: reopened.clone(),
-                entity: entity.clone(),
-                component: ComponentTypeId::new("consumer.Link"),
-                property: ComponentPropertyPath::new(ComponentFieldId::new(field)),
-            };
-            let observed = root_read(
-                app,
-                EditorPropertyRead {
-                    target: target.clone(),
-                    limits: EditorPropertyReadLimits::new(1024, 1, logical_bytes).unwrap(),
-                },
-            )
-            .unwrap();
-            assert_eq!(observed.target, target);
-            assert_eq!(observed.value, EditorPropertyValue::Present(expected));
-            assert_eq!(observed.value_nodes, 1);
-            assert_eq!(observed.value_logical_bytes, logical_bytes);
-        }
-    }
+    assert_eq!(entities(app, &reopened), expected_entities);
+    review.assert_live_values(app, &reopened, true);
+    assert_navigation(&frame(app));
     assert_eq!(
         committed.entity(first),
         Some(first_id),
@@ -2015,6 +2334,16 @@ fn retained_construction_publishes_exact_ids_through_non_active_public_documents
         let old = app
             .prepare_authoring_construction(&obsolete_basis, &obsolete)
             .unwrap();
+        let first_page = old
+            .preview()
+            .query_entities(single_entity_query(EditorEntityQueryPosition::Start(
+                obsolete_basis.clone(),
+            )))
+            .unwrap();
+        let continuation = single_entity_query(EditorEntityQueryPosition::Continue(
+            first_page.next.unwrap(),
+        ));
+        let historical_page = old.preview().query_entities(continuation.clone()).unwrap();
         let attempt = frame(&app)
             .persistence()
             .attempt()
@@ -2033,9 +2362,16 @@ fn retained_construction_publishes_exact_ids_through_non_active_public_documents
             }),
         );
         settle_persistence(&mut app);
-        assert_ne!(
-            basis(&app, document).revision.source_id(),
-            revision.source_id()
+        let reopened = basis(&app, document);
+        assert_ne!(reopened.revision.source_id(), revision.source_id());
+        let preview = old.preview();
+        assert_eq!(preview.basis(), &obsolete_basis);
+        assert_eq!(preview.query_entities(continuation), Ok(historical_page));
+        assert_eq!(
+            preview.query_entities(single_entity_query(EditorEntityQueryPosition::Start(
+                reopened
+            ))),
+            Err(EditorDocumentQueryRejection::StaleIncarnation)
         );
         assert!(matches!(
             app.prepare_authoring_construction(&obsolete_basis, &obsolete),
@@ -2064,7 +2400,7 @@ fn retained_construction_publishes_exact_ids_through_non_active_public_documents
                 .selection,
             before.workspace().active_scene.as_ref().unwrap().selection
         );
-        exercise_panel_construction(&mut app, document, source, &project.root);
+        exercise_panel_construction(&mut app, document, source, &project.root, &first_id);
         assert!(app.close());
     }
 }

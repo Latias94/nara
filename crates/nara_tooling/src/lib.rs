@@ -152,11 +152,11 @@ pub use workspace::{
     EditorExtensionCommand, EditorExtensionCommandOutcome, EditorExtensionDocument,
     EditorExtensionDocumentError, EditorExtensionDocumentView, EditorExternalReloadState,
     EditorPrefabConversionCommitError, EditorPrefabConversionRequest,
-    EditorPrefabSessionPublicationError, EditorPrefabSlot, EditorSceneModel,
-    EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel, EditorSelectionSet,
-    EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceModel,
-    PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit, PreparedEditorPrefabConversion,
-    PreparedEditorWorkspaceSchemaReclassification,
+    EditorPrefabSessionPublicationError, EditorPrefabSlot, EditorPreparedDocumentPreview,
+    EditorSceneModel, EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel,
+    EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
+    EditorWorkspaceModel, PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
+    PreparedEditorPrefabConversion, PreparedEditorWorkspaceSchemaReclassification,
 };
 #[doc(hidden)]
 pub use workspace::{

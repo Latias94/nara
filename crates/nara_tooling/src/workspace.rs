@@ -26,9 +26,9 @@ use crate::composition::{
     scene_entity_components,
 };
 use crate::diagnostic;
-use crate::entity_query::{
-    EditorEntityCursor, EditorEntityPage, EditorEntityQuery, EditorEntityQueryPosition,
-};
+#[cfg(test)]
+use crate::entity_query::{EditorEntityCursor, EditorEntityQueryPosition};
+use crate::entity_query::{EditorEntityPage, EditorEntityQuery};
 use crate::inspector::{SceneInspectorCommand, SceneInspectorCommandReport};
 use crate::play::{SceneEditorModel, SceneEditorState};
 use crate::snapshot::WorldIdentitySnapshot;
@@ -54,6 +54,7 @@ pub use authored_schema_upgrade::{
     EditorWorkspaceAuthoredSchemaUpgradeBindFailure, EditorWorkspaceAuthoredSchemaUpgradeCommit,
     EditorWorkspaceAuthoredSchemaUpgradeInput, PreparedEditorWorkspaceAuthoredSchemaUpgrade,
 };
+pub use authoring_query::EditorPreparedDocumentPreview;
 pub use construction::{CommittedEditorDocumentConstruction, PreparedEditorDocumentConstruction};
 pub use extension::{
     EditorExtensionCommand, EditorExtensionCommandOutcome, EditorExtensionDocument,
@@ -672,48 +673,7 @@ impl EditorWorkspace {
         &self,
         query: EditorEntityQuery,
     ) -> Result<EditorEntityPage, EditorDocumentQueryRejection> {
-        let (basis, expected_kind, next_record) = match query.position {
-            EditorEntityQueryPosition::Start(basis) => (basis, None, 0),
-            EditorEntityQueryPosition::Continue(cursor) => {
-                if cursor.owner != self.document_query_owner {
-                    return Err(EditorDocumentQueryRejection::WrongWorkspace);
-                }
-                (cursor.basis, Some(cursor.kind), cursor.next_record)
-            }
-        };
-        let slot = self.resolve_document_query_slot(&basis, expected_kind)?;
-        let kind = slot.kind();
-        let records = match slot {
-            EditorDocumentSlot::Scene(slot) => &slot.session.document().entities,
-            EditorDocumentSlot::Prefab(slot) => &slot.session.document().entities,
-            EditorDocumentSlot::Extension(_) => {
-                return Err(EditorDocumentQueryRejection::UnsupportedDocumentKind { kind });
-            }
-        };
-        let remaining = records
-            .get(next_record..)
-            .ok_or(EditorDocumentQueryRejection::InvalidContinuation)?;
-        let scanned_records = remaining
-            .len()
-            .min(query.limits.max_scan_records())
-            .min(query.limits.max_rows());
-        let entities = remaining[..scanned_records]
-            .iter()
-            .map(|record| record.id.clone())
-            .collect();
-        let next_record = next_record + scanned_records;
-        let next = (next_record < records.len()).then(|| EditorEntityCursor {
-            owner: self.document_query_owner.clone(),
-            basis: basis.clone(),
-            kind,
-            next_record,
-        });
-        Ok(EditorEntityPage {
-            basis,
-            entities,
-            scanned_records,
-            next,
-        })
+        authoring_query::AuthoringReadScope::Live(self).query_entities(query)
     }
 
     #[must_use]

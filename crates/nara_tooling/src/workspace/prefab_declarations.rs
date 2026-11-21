@@ -5,12 +5,12 @@ use std::sync::Arc;
 use nara_reflect::ComponentPropertyPath;
 use nara_scene::{
     PrefabDeclarationError, PrefabDeclarationLimits, PrefabInstanceObservation, PrefabInstancePath,
-    PrefabOverlaySlot, PrefabPropertyClaims, PrefabPropertyIntent, PrefabRevert,
+    PrefabOverlaySlot, PrefabPropertyIntent, PrefabRevert,
 };
 
 use super::{
     EditorDocumentSlot, EditorWorkspace, EditorWorkspaceCommandReport,
-    authoring_query::rejected_basis_report,
+    authoring_query::{AuthoringReadScope, AuthoringSource, rejected_basis_report},
 };
 use crate::{
     EditorAuthoringCursor, EditorAuthoringPage, EditorAuthoringProjection,
@@ -24,22 +24,22 @@ use crate::{
     },
 };
 
-impl EditorWorkspace {
+impl<'a> AuthoringReadScope<'a> {
     pub(super) fn query_prefab_property_claims(
-        &self,
+        self,
         source: Arc<PrefabPropertyClaimSource>,
         expected_kind: Option<EditorDocumentKind>,
         mut component_index: usize,
         mut claim_index: usize,
         limits: EditorAuthoringQueryLimits,
     ) -> Result<EditorAuthoringPage, EditorDocumentQueryRejection> {
-        let slot = self.resolve_document_query_slot(&source.basis, expected_kind)?;
+        let document = self.resolve(&source.basis, expected_kind)?;
         let path_bytes = instance_path_bytes(&source.path);
         let max_metadata = limits.max_metadata_bytes();
         if path_bytes > max_metadata {
             return Err(EditorDocumentQueryRejection::MetadataBudgetExceeded);
         }
-        let claims = prefab_property_claims(slot, &source.path)?;
+        let claims = document.prefab_property_claims(&source.path)?;
         let count = claims.component_intent_count();
         let retained_path_bytes = path_bytes * 2;
         let header_cap =
@@ -116,8 +116,8 @@ impl EditorWorkspace {
             return Err(EditorDocumentQueryRejection::MetadataBudgetExceeded);
         }
         let next = has_next.then(|| EditorAuthoringCursor {
-            owner: self.document_query_owner.clone(),
-            kind: slot.kind(),
+            owner: self.owner().clone(),
+            kind: document.kind(),
             position: AuthoringCursorPosition::PrefabClaims {
                 source: Arc::clone(&source),
                 component_index,
@@ -128,7 +128,7 @@ impl EditorWorkspace {
             .into_iter()
             .map(|(slot, header)| {
                 let claim = EditorPrefabPropertyClaimTarget {
-                    owner: self.document_query_owner.clone(),
+                    owner: self.owner().clone(),
                     source: Arc::clone(&source),
                     slot,
                 };
@@ -161,23 +161,17 @@ impl EditorWorkspace {
         })
     }
 
-    /// Copies one stored property intent from the original claim target.
-    ///
-    /// A property slot from `PrefabPropertyClaims` is an indexed lookup. Metadata limits apply
-    /// to the path and value limits apply to this Set payload. Absent has no payload. The read
-    /// preserves raw intent even when the base or Schema interpretation is unavailable. Indexed
-    /// path steps have a separate source depth cap and do not consume selector scan limits.
-    pub fn read_prefab_property_claim(
-        &self,
+    pub(super) fn read_prefab_property_claim(
+        self,
         claim: &EditorPrefabPropertyClaimTarget,
         limits: EditorPropertyReadLimits,
     ) -> Result<PrefabPropertyIntent, EditorDocumentQueryRejection> {
-        let source = self.resolve_prefab_property_claim_slot(claim)?;
+        let source = self.resolve_prefab_property_claim(claim)?;
         let path = claim.path();
         if instance_path_bytes(path) > limits.max_metadata_bytes() {
             return Err(EditorDocumentQueryRejection::MetadataBudgetExceeded);
         }
-        let intent = prefab_property_claims(source, path)?.intent(claim.slot())?;
+        let intent = source.prefab_property_claims(path)?.intent(claim.slot())?;
         if let PrefabPropertyIntent::Set(value) = intent
             && value
                 .cost_up_to(limits.max_value_nodes(), limits.max_logical_bytes())
@@ -188,19 +182,39 @@ impl EditorWorkspace {
         Ok(intent.clone())
     }
 
+    fn resolve_prefab_property_claim(
+        self,
+        claim: &EditorPrefabPropertyClaimTarget,
+    ) -> Result<AuthoringSource<'a>, EditorDocumentQueryRejection> {
+        self.owner().require(&claim.owner)?;
+        self.resolve(claim.basis(), None)
+    }
+}
+
+impl EditorWorkspace {
+    /// Copies one stored property intent from the original live claim target.
+    ///
+    /// A property slot from `PrefabPropertyClaims` is an indexed lookup. Metadata limits apply
+    /// to the path and value limits apply to this Set payload. Absent has no payload. The read
+    /// preserves raw intent even when the base or Schema interpretation is unavailable. Indexed
+    /// path steps have a separate source depth cap and do not consume selector scan limits.
+    pub fn read_prefab_property_claim(
+        &self,
+        claim: &EditorPrefabPropertyClaimTarget,
+        limits: EditorPropertyReadLimits,
+    ) -> Result<PrefabPropertyIntent, EditorDocumentQueryRejection> {
+        AuthoringReadScope::Live(self).read_prefab_property_claim(claim, limits)
+    }
+
     /// Retains the discovered claim's exact source identity through ordinary Revert preparation.
     pub fn prepare_prefab_property_revert(
         &self,
         claim: &EditorPrefabPropertyClaimTarget,
         limits: PrefabDeclarationLimits,
     ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
-        if claim.owner != self.document_query_owner {
-            return Err(rejected_basis_report(
-                self,
-                claim.basis(),
-                EditorDocumentQueryRejection::WrongWorkspace,
-            ));
-        }
+        self.document_query_owner
+            .require(&claim.owner)
+            .map_err(|error| rejected_basis_report(self, claim.basis(), error))?;
         self.prepare_prefab_revert(
             claim.basis(),
             claim.path(),
@@ -214,17 +228,9 @@ impl EditorWorkspace {
         &self,
         claim: &EditorPrefabPropertyClaimTarget,
     ) -> Result<(), EditorDocumentQueryRejection> {
-        self.resolve_prefab_property_claim_slot(claim).map(|_| ())
-    }
-
-    fn resolve_prefab_property_claim_slot(
-        &self,
-        claim: &EditorPrefabPropertyClaimTarget,
-    ) -> Result<&EditorDocumentSlot, EditorDocumentQueryRejection> {
-        if claim.owner != self.document_query_owner {
-            return Err(EditorDocumentQueryRejection::WrongWorkspace);
-        }
-        self.resolve_document_query_slot(claim.basis(), None)
+        AuthoringReadScope::Live(self)
+            .resolve_prefab_property_claim(claim)
+            .map(|_| ())
     }
 
     /// Observes an optional source declaration without changing navigation or selection.
@@ -256,21 +262,4 @@ fn instance_path_bytes(path: &PrefabInstancePath) -> usize {
         .as_str()
         .len()
         .saturating_add(prefab_path_step_bytes(&path.steps))
-}
-
-fn prefab_property_claims<'a>(
-    slot: &'a EditorDocumentSlot,
-    path: &PrefabInstancePath,
-) -> Result<PrefabPropertyClaims<'a>, EditorDocumentQueryRejection> {
-    match slot {
-        EditorDocumentSlot::Scene(slot) => Ok(slot
-            .session
-            .prefab_property_claims(&path.anchor, &path.steps)?),
-        EditorDocumentSlot::Prefab(slot) => Ok(slot
-            .session
-            .prefab_property_claims(&path.anchor, &path.steps)?),
-        EditorDocumentSlot::Extension(_) => {
-            Err(EditorDocumentQueryRejection::UnsupportedDocumentKind { kind: slot.kind() })
-        }
-    }
 }

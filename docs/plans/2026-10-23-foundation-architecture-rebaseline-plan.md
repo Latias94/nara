@@ -600,6 +600,11 @@ observes the saved rule change after Reopen. Complete field query coverage, prep
 and larger-workload comparisons stay open.
 [External push-box workflow](2026-10-16-0940-feat-first-2d-author-workflow-plan.md#desktop-2d-starter-with-editable-actions)
 
+The [prepared-source discovery successor](../architecture/authoring-read-projection-design.md#discovery-in-a-prepared-source)
+uses the same bounded query operations for working documents and the exact prepared edit or
+construction. It includes candidate-only resolved entity references and stored Prefab claims.
+Commit retains the original document authority and refuses obsolete bases.
+
 ## R3: Behavior Representation And Immutable Module Publications
 
 **Design:** D02, D03, D06. **State:** the closed native/data Scene family is adopted under ADR 0006

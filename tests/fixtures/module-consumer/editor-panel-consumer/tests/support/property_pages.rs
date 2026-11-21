@@ -173,7 +173,7 @@ fn sample_on_page(page: &EditorPropertyPage, samples: &EditorPropertyTarget, off
 }
 
 fn assert_preview_score(prepared: &PreparedEditorDocumentEdit, request: &EditorPropertyRead) {
-    let observed = prepared.preview_property(request.clone()).unwrap();
+    let observed = prepared.preview().read_property(request.clone()).unwrap();
     assert_eq!(observed.target, request.target);
     assert_eq!(observed.value_nodes, 1);
     assert_eq!(observed.value_logical_bytes, 8);
@@ -183,7 +183,10 @@ fn assert_preview_score(prepared: &PreparedEditorDocumentEdit, request: &EditorP
     assert_eq!(*score, UPDATED_SCORE);
 
     let paged = root_page_request(observed.target.clone(), request.limits);
-    let page = prepared.preview_property_page(paged.clone()).unwrap();
+    let page = prepared
+        .preview()
+        .read_property_page(paged.clone())
+        .unwrap();
     assert_eq!(page.target(), &observed.target);
     assert!(page.path().is_empty());
     assert!(page.next.is_none());
@@ -194,8 +197,11 @@ fn assert_preview_score(prepared: &PreparedEditorDocumentEdit, request: &EditorP
             *score,
         )))
     );
-    assert_eq!(prepared.preview_property(request.clone()), Ok(observed));
-    assert_eq!(prepared.preview_property_page(paged), Ok(page));
+    assert_eq!(
+        prepared.preview().read_property(request.clone()),
+        Ok(observed)
+    );
+    assert_eq!(prepared.preview().read_property_page(paged), Ok(page));
 }
 
 fn prepare_from_pages(
@@ -371,14 +377,15 @@ fn prepare_from_pages(
         limits: EditorPropertyReadLimits::new(1024, 1, 8).unwrap(),
     };
     assert_eq!(
-        prepared.preview_property(whole_samples),
+        prepared.preview().read_property(whole_samples),
         Err(EditorDocumentQueryRejection::ValueBudgetExceeded)
     );
     let live_continuation = EditorPropertyPageRead { position, limits };
     for (candidate, sibling) in [(&prepared, &retained), (&retained, &prepared)] {
         assert_preview_score(candidate, &score_read);
         let first = candidate
-            .preview_property_page(samples_start.clone())
+            .preview()
+            .read_property_page(samples_start.clone())
             .unwrap();
         assert_page_limits(&first, limits);
         assert_eq!(sample_on_page(&first, &samples, 0), 19);
@@ -387,12 +394,13 @@ fn prepare_from_pages(
             limits,
         };
         let next = candidate
-            .preview_property_page(continuation.clone())
+            .preview()
+            .read_property_page(continuation.clone())
             .unwrap();
         assert_page_limits(&next, limits);
         assert_eq!(sample_on_page(&next, &samples, 1), 20);
         assert_eq!(
-            candidate.preview_property_page(continuation.clone()),
+            candidate.preview().read_property_page(continuation.clone()),
             Ok(next)
         );
         assert_eq!(
@@ -400,11 +408,13 @@ fn prepare_from_pages(
             Err(EditorDocumentQueryRejection::WrongPreparedEdit)
         );
         assert_eq!(
-            sibling.preview_property_page(continuation),
+            sibling.preview().read_property_page(continuation),
             Err(EditorDocumentQueryRejection::WrongPreparedEdit)
         );
         assert_eq!(
-            candidate.preview_property_page(live_continuation.clone()),
+            candidate
+                .preview()
+                .read_property_page(live_continuation.clone()),
             Err(EditorDocumentQueryRejection::WrongPreparedEdit)
         );
     }
@@ -837,14 +847,16 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
                     let retained = panel.retained.take().unwrap();
                     assert_preview_score(&retained, &score_read);
                     assert_eq!(
-                        retained.preview_property(EditorPropertyRead {
+                        retained.preview().read_property(EditorPropertyRead {
                             target: live_score.clone(),
                             limits: score_read.limits,
                         }),
                         Err(EditorDocumentQueryRejection::StaleRevision)
                     );
                     assert_eq!(
-                        retained.preview_property_page(score_request(live_score.clone())),
+                        retained
+                            .preview()
+                            .read_property_page(score_request(live_score.clone())),
                         Err(EditorDocumentQueryRejection::StaleRevision)
                     );
                     context.commit_authoring_edit(retained).unwrap();
@@ -1085,7 +1097,8 @@ fn assert_preview_leaf_page(
     expected: ComponentValue,
 ) {
     let page = prepared
-        .preview_property_page(root_page_request(request.target.clone(), request.limits))
+        .preview()
+        .read_property_page(root_page_request(request.target.clone(), request.limits))
         .unwrap();
     assert_eq!(page.target(), &request.target);
     assert!(page.path().is_empty());
@@ -1226,7 +1239,7 @@ fn prepare_keyed_edit(
     assert_eq!(context.read_document_property(old_score), Ok(before));
     assert_keyed_rows(
         captured,
-        |read| prepared.preview_property(read),
+        |read| prepared.preview().read_property(read),
         NEW_ROW_KEY,
         UPDATED_SCORE,
     );
@@ -1272,14 +1285,14 @@ fn prepare_note_edit(
         original,
     );
     assert_selected_scalar(
-        &prepared.preview_property(note.clone()).unwrap(),
+        &prepared.preview().read_property(note.clone()).unwrap(),
         &note,
         updated.clone(),
     );
     assert_preview_leaf_page(&prepared, &note, updated);
     assert_keyed_rows(
         captured,
-        |read| prepared.preview_property(read),
+        |read| prepared.preview().read_property(read),
         OLD_ROW_KEY,
         ORIGINAL_SCORE,
     );

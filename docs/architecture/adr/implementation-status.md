@@ -4373,6 +4373,14 @@ and Save/Reopen. The Session Close and native DX12 regressions pass 2/2 for the 
 The [release preparation comparison](../../benchmarks/2026-10-25-prepared-panel.md#november-20-release-baseline)
 records the existing dual-format admission and commit workload on 1/257 reference-bearing entities.
 
+The [prepared-source discovery successor](../authoring-read-projection-design.md#discovery-in-a-prepared-source)
+lets edits and constructions lend one bounded read view over the exact candidate. Registered
+panels discover uncommitted entities and resolved references, review stored Revert claims and use
+the same candidates through ordinary history and persistence in Scene and Prefab. The independently
+locked release cohort passes 24/24. The Windows/DX12 Drawn workflow verifies the retained preview
+alongside actual presented Inspector editing and passes 1/1. This qualifies direct source queries.
+Preparation locality and effective Prefab dependency work keep their separate gates.
+
 The [selective collection edit](../authoring-read-projection-design.md#selective-edits-in-authored-collections)
 keeps the selected replacement and previous value in the original Scene and Prefab history.
 The inverse follows a changed key. Exact final file validation and nominal Schema readmission

@@ -1,9 +1,13 @@
 use nara::{
-    reflect::{ComponentFieldId, ComponentFieldPath, ComponentPropertyPath, ComponentTypeId},
+    reflect::{
+        ComponentFieldId, ComponentFieldPath, ComponentPropertyPath, ComponentSchemaVersion,
+        ComponentTypeId, ComponentValue,
+    },
+    scene::AuthoringPropertyEdit,
     tooling::{
         EditorDocumentQueryRejection, EditorPropertyPageData, EditorPropertyPagePosition,
-        EditorPropertyPageRead, EditorPropertyPageValue, EditorPropertyReadLimits,
-        EditorPropertyTarget,
+        EditorPropertyPageRead, EditorPropertyPageValue, EditorPropertyRead,
+        EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue,
     },
 };
 use nara_ui_kernel::{UiAccessibilityInput, UiSeatId, UiSemanticFact};
@@ -176,6 +180,42 @@ impl Workflow<'_> {
         if self.native.operate(&observation, &focus).is_ok() {
             return Err("An old observed image retargeted the newly presented field".into());
         }
+        let target = self.presented_name_target(before.document, &selected)?;
+        let proposed_name = ComponentValue::String("Observed 属性 café".into());
+        let prepared = self
+            .native
+            .application
+            .prepare_authoring_property_edit(
+                &target.basis,
+                &[AuthoringPropertyEdit {
+                    entity: target.entity.clone(),
+                    component: target.component.clone(),
+                    component_version: ComponentSchemaVersion::ONE,
+                    property: target.property.clone(),
+                    value: proposed_name.clone(),
+                }],
+            )
+            .map_err(|error| format!("The presented draft could not be prepared: {error:?}"))?;
+        let read = EditorPropertyRead {
+            target,
+            limits: EditorPropertyReadLimits::new(1024, 1, 64)
+                .map_err(|error| error.to_string())?,
+        };
+        let working_copy = self
+            .native
+            .application
+            .read_document_property(read.clone())
+            .map_err(|error| error.to_string())?;
+        let preview = prepared
+            .preview()
+            .read_property(read.clone())
+            .map_err(|error| error.to_string())?;
+        if preview.value != EditorPropertyValue::Present(proposed_name)
+            || working_copy.value == preview.value
+            || self.state()? != before
+        {
+            return Err("Preparing the presented draft did not preserve the working source".into());
+        }
         let enabled = self.observation(INSPECTOR)?;
         let apply = Self::observed_control(&enabled, UiSemanticRole::Button, "Apply")?;
         let apply_action = apply
@@ -189,6 +229,9 @@ impl Workflow<'_> {
             );
         }
         let applied = self.expect_one_mutation(&before)?;
+        if prepared.preview().read_property(read) != Ok(preview) {
+            return Err("The native edit changed a retained historical preview".into());
+        }
         let disabled = self.observation(INSPECTOR)?;
         let button = Self::observed_control(&disabled, UiSemanticRole::Button, "Apply")?;
         if button.state().enabled() || !button.actions().is_empty() {
@@ -291,23 +334,31 @@ impl Workflow<'_> {
         Ok(())
     }
 
+    fn presented_name_target(
+        &self,
+        document: EditorDocumentId,
+        entity: &SceneEntityId,
+    ) -> TestResult<EditorPropertyTarget> {
+        let basis = self
+            .native
+            .application
+            .document_query_basis(document)
+            .map_err(|rejection| rejection.to_string())?;
+        Ok(EditorPropertyTarget {
+            basis,
+            entity: entity.clone(),
+            component: ComponentTypeId::new("nara.scene.Name"),
+            property: ComponentPropertyPath::new(ComponentFieldId::new("value")),
+        })
+    }
+
     fn read_presented_name(
         &mut self,
         document: EditorDocumentId,
         entity: &SceneEntityId,
         expected: &str,
     ) -> TestResult<EditorPropertyPageRead> {
-        let basis = self
-            .native
-            .application
-            .document_query_basis(document)
-            .map_err(|rejection| rejection.to_string())?;
-        let target = EditorPropertyTarget {
-            basis,
-            entity: entity.clone(),
-            component: ComponentTypeId::new("nara.scene.Name"),
-            property: ComponentPropertyPath::new(ComponentFieldId::new("value")),
-        };
+        let target = self.presented_name_target(document, entity)?;
         let limits =
             EditorPropertyReadLimits::new(1024, 1, 7).map_err(|rejection| rejection.to_string())?;
         let mut position = EditorPropertyPagePosition::Start {

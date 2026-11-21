@@ -440,7 +440,7 @@ fn keyed_edit_requires_a_fresh_revision_after_reordering_and_replays_after_schem
         let mut old_preview = read_request(workspace, document, member(&renamed_item, "score"));
         old_preview.target.basis = original_basis;
         assert_eq!(
-            old_edit.preview_property(old_preview).unwrap().value,
+            old_edit.preview().read_property(old_preview).unwrap().value,
             EditorPropertyValue::Present(ComponentValue::U64(901))
         );
         assert!(!workspace.commit_authoring_edit(old_edit).applied);
@@ -1207,7 +1207,8 @@ fn equal_catalog_readmission_invalidates_property_cursors_without_changing_the_r
             .unwrap();
         let page_limits = EditorPropertyReadLimits::new(1024, 2, 32).unwrap();
         let first_preview = edit
-            .preview_property_page(EditorPropertyPageRead {
+            .preview()
+            .read_property_page(EditorPropertyPageRead {
                 position: EditorPropertyPagePosition::Start {
                     target: read_request(&fixture.workspace, fixture.document, path("map")).target,
                     path: ComponentFieldPath::empty(),
@@ -1219,7 +1220,7 @@ fn equal_catalog_readmission_invalidates_property_cursors_without_changing_the_r
             position: EditorPropertyPagePosition::Continue(first_preview.next.unwrap()),
             limits: page_limits,
         };
-        let second_preview = edit.preview_property_page(resume.clone()).unwrap();
+        let second_preview = edit.preview().read_property_page(resume.clone()).unwrap();
         let previous = first.target.basis.schema.clone().unwrap();
         let successor = fresh_schema_basis();
         assert_ne!(previous, successor);
@@ -1247,14 +1248,17 @@ fn equal_catalog_readmission_invalidates_property_cursors_without_changing_the_r
         let mut current_amount = amount.clone();
         current_amount.target.basis = current;
         assert_eq!(
-            edit.preview_property(current_amount.clone()),
+            edit.preview().read_property(current_amount.clone()),
             Err(EditorDocumentQueryRejection::StaleSchema)
         );
         assert_eq!(
-            edit.preview_property(amount).unwrap().value,
+            edit.preview().read_property(amount).unwrap().value,
             EditorPropertyValue::Present(ComponentValue::U64(70))
         );
-        assert_eq!(edit.preview_property_page(resume).unwrap(), second_preview);
+        assert_eq!(
+            edit.preview().read_property_page(resume).unwrap(),
+            second_preview
+        );
         assert!(!fixture.workspace.commit_authoring_edit(edit).applied);
         assert_eq!(
             fixture

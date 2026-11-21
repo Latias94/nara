@@ -29,17 +29,11 @@ pub enum EditorPropertyPagePosition {
 /// Retaining the cursor holds metadata and Schema admission, not the document or its payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorPropertyPageCursor {
-    pub(crate) owner: PropertyValuePageOwner,
+    pub(crate) owner: EditorDocumentQueryOwner,
     pub(crate) kind: EditorDocumentKind,
     pub(crate) target: Arc<PropertyValuePageTarget>,
     pub(crate) read_path: Arc<ComponentFieldPath>,
     pub(crate) next: PropertyValuePagePosition,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum PropertyValuePageOwner {
-    Workspace(EditorDocumentQueryOwner),
-    Prepared(EditorDocumentQueryOwner),
 }
 
 #[derive(Debug, PartialEq, Eq)]

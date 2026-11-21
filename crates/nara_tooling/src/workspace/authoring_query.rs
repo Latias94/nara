@@ -7,28 +7,146 @@ use nara_reflect::{
 use nara_scene::{
     AuthoringComponentView, AuthoringEntityView, AuthoringPropertyChild,
     AuthoringPropertyChildrenContinuation, AuthoringPropertyChildrenPosition,
-    AuthoringPropertyValue, AuthoringRecordFact, PrefabInstancePath, SceneEntityId,
+    AuthoringPropertyValue, AuthoringRecordFact, PrefabAuthoringSession, PrefabDeclarationError,
+    PrefabInstancePath, PrefabPropertyClaims, PrefabPropertyIntent, PreparedPrefabAuthoringEdit,
+    PreparedSceneAuthoringEdit, SceneAuthoringSession, SceneEntityId, SceneEntityRecord,
 };
 
 use super::{
     EditorDocumentSlot, EditorWorkspace, EditorWorkspaceCommandReport, WorkspaceDocumentContext,
-    authoring_command_error_report, prepared_edit::PreparedEditorDocumentEdit,
-    workspace_document_error_report, workspace_error_report,
+    authoring_command_error_report, workspace_document_error_report, workspace_error_report,
 };
 use crate::{
     EditorAuthoringCursor, EditorAuthoringMemberStatus, EditorAuthoringPage,
     EditorAuthoringProjection, EditorAuthoringPropertyStatus, EditorAuthoringQuery,
     EditorAuthoringQueryPosition, EditorAuthoringQueryTarget, EditorAuthoringRow,
-    EditorDocumentKind, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
-    EditorPropertyObservation, EditorPropertyRead, EditorPropertyTarget, EditorPropertyValue,
+    EditorDocumentKind, EditorDocumentQueryBasis, EditorDocumentQueryRejection, EditorEntityPage,
+    EditorEntityQuery, EditorPrefabPropertyClaimTarget, EditorPropertyObservation,
+    EditorPropertyPage, EditorPropertyPageRead, EditorPropertyRead, EditorPropertyReadLimits,
+    EditorPropertyTarget, EditorPropertyValue,
     authoring_query::{
         AuthoringCursorPosition, AuthoringPagePosition, PrefabPropertyClaimSource,
         PropertyPagePosition, property_metadata_bytes,
     },
+    document_query::EditorDocumentQueryOwner,
 };
 
+mod entity_page;
 mod value_page;
-pub(super) use value_page::read_property_page;
+
+/// A read-only view of the exact candidate kept by a prepared edit or construction.
+///
+/// Use [`Self::basis`] to start a query and this preparation to continue it. The candidate keeps
+/// its original basis when the live document changes. Commit independently checks that basis.
+#[derive(Clone, Copy)]
+pub struct EditorPreparedDocumentPreview<'a> {
+    basis: &'a EditorDocumentQueryBasis,
+    owner: &'a EditorDocumentQueryOwner,
+    source: AuthoringSource<'a>,
+}
+
+impl<'a> EditorPreparedDocumentPreview<'a> {
+    pub(super) const fn new(
+        basis: &'a EditorDocumentQueryBasis,
+        owner: &'a EditorDocumentQueryOwner,
+        source: AuthoringSource<'a>,
+    ) -> Self {
+        Self {
+            basis,
+            owner,
+            source,
+        }
+    }
+
+    /// The exact live document observation from which this candidate was prepared.
+    #[must_use]
+    pub const fn basis(&self) -> &'a EditorDocumentQueryBasis {
+        self.basis
+    }
+
+    /// Enumerates direct entities, including additions and removals in the candidate.
+    pub fn query_entities(
+        &self,
+        request: EditorEntityQuery,
+    ) -> Result<EditorEntityPage, EditorDocumentQueryRejection> {
+        AuthoringReadScope::Prepared(*self).query_entities(request)
+    }
+
+    /// Discovers direct component and property metadata or stored Prefab claims.
+    pub fn query_authoring(
+        &self,
+        request: EditorAuthoringQuery,
+    ) -> Result<EditorAuthoringPage, EditorDocumentQueryRejection> {
+        AuthoringReadScope::Prepared(*self).query_authoring(request)
+    }
+
+    /// Copies one selected candidate property under the existing read limits.
+    pub fn read_property(
+        &self,
+        request: EditorPropertyRead,
+    ) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
+        AuthoringReadScope::Prepared(*self).read_property(request)
+    }
+
+    /// Reads a bounded page of one candidate value. Continue on this same preparation.
+    pub fn read_property_page(
+        &self,
+        request: EditorPropertyPageRead,
+    ) -> Result<EditorPropertyPage, EditorDocumentQueryRejection> {
+        AuthoringReadScope::Prepared(*self).read_property_page(request)
+    }
+
+    /// Reads the stored intent of a claim discovered in this candidate.
+    pub fn read_prefab_property_claim(
+        &self,
+        claim: &EditorPrefabPropertyClaimTarget,
+        limits: EditorPropertyReadLimits,
+    ) -> Result<PrefabPropertyIntent, EditorDocumentQueryRejection> {
+        AuthoringReadScope::Prepared(*self).read_prefab_property_claim(claim, limits)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum AuthoringReadScope<'a> {
+    Live(&'a EditorWorkspace),
+    Prepared(EditorPreparedDocumentPreview<'a>),
+}
+
+impl<'a> AuthoringReadScope<'a> {
+    pub(super) fn owner(self) -> &'a EditorDocumentQueryOwner {
+        match self {
+            Self::Live(workspace) => &workspace.document_query_owner,
+            Self::Prepared(preview) => preview.owner,
+        }
+    }
+
+    pub(super) fn resolve(
+        self,
+        basis: &EditorDocumentQueryBasis,
+        expected_kind: Option<EditorDocumentKind>,
+    ) -> Result<AuthoringSource<'a>, EditorDocumentQueryRejection> {
+        match self {
+            Self::Live(workspace) => match workspace
+                .resolve_document_query_slot(basis, expected_kind)?
+            {
+                EditorDocumentSlot::Scene(slot) => Ok(AuthoringSource::Scene(&slot.session)),
+                EditorDocumentSlot::Prefab(slot) => Ok(AuthoringSource::Prefab(&slot.session)),
+                slot @ EditorDocumentSlot::Extension(_) => {
+                    Err(EditorDocumentQueryRejection::UnsupportedDocumentKind { kind: slot.kind() })
+                }
+            },
+            Self::Prepared(preview) => {
+                if basis.document != preview.basis.document {
+                    return Err(EditorDocumentQueryRejection::WrongPreparedEdit);
+                }
+                basis.require_exact_source(preview.basis.revision, || {
+                    preview.basis.schema.clone()
+                })?;
+                Ok(preview.source)
+            }
+        }
+    }
+}
 
 pub(super) fn rejected_basis_report(
     workspace: &EditorWorkspace,
@@ -109,6 +227,24 @@ impl EditorWorkspace {
         &self,
         query: EditorAuthoringQuery,
     ) -> Result<EditorAuthoringPage, EditorDocumentQueryRejection> {
+        AuthoringReadScope::Live(self).query_authoring(query)
+    }
+
+    /// Copies only the selected property after exact-basis, scan and aggregate copy admission.
+    /// Missing/default interpretation remains with Scene/Prefab, not an Inspector or Runtime.
+    pub fn read_document_property(
+        &self,
+        request: EditorPropertyRead,
+    ) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
+        AuthoringReadScope::Live(self).read_property(request)
+    }
+}
+
+impl AuthoringReadScope<'_> {
+    fn query_authoring(
+        self,
+        query: EditorAuthoringQuery,
+    ) -> Result<EditorAuthoringPage, EditorDocumentQueryRejection> {
         let (target, expected_kind, position) = match query.position {
             EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
                 basis,
@@ -152,9 +288,7 @@ impl EditorWorkspace {
                 (target, None, position)
             }
             EditorAuthoringQueryPosition::Continue(cursor) => {
-                if cursor.owner != self.document_query_owner {
-                    return Err(EditorDocumentQueryRejection::WrongWorkspace);
-                }
+                self.owner().require(&cursor.owner)?;
                 match cursor.position {
                     AuthoringCursorPosition::Direct { target, next } => {
                         (target, Some(cursor.kind), next)
@@ -175,7 +309,7 @@ impl EditorWorkspace {
                 }
             }
         };
-        let slot = self.resolve_document_query_slot(&target.basis, expected_kind)?;
+        let source = self.resolve(&target.basis, expected_kind)?;
         let target_bytes = target.metadata_bytes();
         if target_bytes > query.limits.max_metadata_bytes() {
             return Err(EditorDocumentQueryRejection::MetadataBudgetExceeded);
@@ -188,7 +322,7 @@ impl EditorWorkspace {
             )
             .into());
         }
-        let entity = entity_view(slot, &target.entity)?;
+        let entity = source.entity_view(&target.entity)?;
         let count = query.limits.max_scan_entries().min(query.limits.max_rows());
         let mut scanned_logical_bytes = 0;
         let (rows, next, scanned_entries): (Vec<_>, _, _) = match (&target.projection, position) {
@@ -338,8 +472,8 @@ impl EditorWorkspace {
             return Err(EditorDocumentQueryRejection::MetadataBudgetExceeded);
         }
         let next = next.map(|position| EditorAuthoringCursor {
-            owner: self.document_query_owner.clone(),
-            kind: slot.kind(),
+            owner: self.owner().clone(),
+            kind: source.kind(),
             position: AuthoringCursorPosition::Direct {
                 target: target.clone(),
                 next: position.into_owned(),
@@ -356,50 +490,16 @@ impl EditorWorkspace {
         })
     }
 
-    /// Copies only the selected property after exact-basis, scan and aggregate copy admission.
-    /// Missing/default interpretation remains with Scene/Prefab, not an Inspector or Runtime.
-    pub fn read_document_property(
-        &self,
-        request: EditorPropertyRead,
-    ) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
-        let slot = self.resolve_document_query_slot(&request.target.basis, None)?;
-        PropertySource::Live(slot).read_property(request)
-    }
-}
-
-pub(super) enum PropertySource<'a> {
-    Live(&'a EditorDocumentSlot),
-    Prepared(&'a PreparedEditorDocumentEdit),
-}
-
-impl<'a> PropertySource<'a> {
-    fn kind(&self) -> EditorDocumentKind {
-        match self {
-            Self::Live(slot) => slot.kind(),
-            Self::Prepared(edit) => edit.document_kind(),
-        }
-    }
-
-    fn component(
-        &self,
-        target: &EditorPropertyTarget,
-    ) -> Result<AuthoringComponentView<'a>, EditorDocumentQueryRejection> {
-        let entity = match self {
-            Self::Live(slot) => entity_view(slot, &target.entity)?,
-            Self::Prepared(edit) => edit.authoring_entity_view(&target.entity)?,
-        };
-        Ok(entity.component(&target.component)?)
-    }
-
-    pub(super) fn read_property(
+    fn read_property(
         self,
         request: EditorPropertyRead,
     ) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
+        let source = self.resolve(&request.target.basis, None)?;
         let metadata_bytes = request
             .target
             .admitted_metadata_bytes(request.limits.max_metadata_bytes())?;
         let mut budget = request.limits.scan_budget();
-        let root = self
+        let root = source
             .component(&request.target)?
             .property_value(&request.target.property, &mut budget)?;
         let (value_nodes, value_logical_bytes) = match root {
@@ -433,15 +533,63 @@ impl<'a> PropertySource<'a> {
     }
 }
 
-fn entity_view<'a>(
-    slot: &'a EditorDocumentSlot,
-    entity: &SceneEntityId,
-) -> Result<AuthoringEntityView<'a>, EditorDocumentQueryRejection> {
-    match slot {
-        EditorDocumentSlot::Scene(slot) => Ok(slot.session.authoring_entity_view(entity)?),
-        EditorDocumentSlot::Prefab(slot) => Ok(slot.session.authoring_entity_view(entity)?),
-        EditorDocumentSlot::Extension(_) => {
-            Err(EditorDocumentQueryRejection::UnsupportedDocumentKind { kind: slot.kind() })
+#[derive(Clone, Copy)]
+pub(super) enum AuthoringSource<'a> {
+    Scene(&'a SceneAuthoringSession),
+    Prefab(&'a PrefabAuthoringSession),
+    PreparedScene(&'a PreparedSceneAuthoringEdit),
+    PreparedPrefab(&'a PreparedPrefabAuthoringEdit),
+}
+
+impl<'a> AuthoringSource<'a> {
+    pub(super) fn kind(self) -> EditorDocumentKind {
+        match self {
+            Self::Scene(_) | Self::PreparedScene(_) => EditorDocumentKind::Scene,
+            Self::Prefab(_) | Self::PreparedPrefab(_) => EditorDocumentKind::Prefab,
+        }
+    }
+
+    fn entities(self) -> &'a [SceneEntityRecord] {
+        match self {
+            Self::Scene(session) => &session.document().entities,
+            Self::Prefab(session) => &session.document().entities,
+            Self::PreparedScene(edit) => &edit.document().entities,
+            Self::PreparedPrefab(edit) => &edit.document().entities,
+        }
+    }
+
+    fn entity_view(
+        self,
+        entity: &SceneEntityId,
+    ) -> Result<AuthoringEntityView<'a>, EditorDocumentQueryRejection> {
+        let result = match self {
+            Self::Scene(session) => session.authoring_entity_view(entity),
+            Self::Prefab(session) => session.authoring_entity_view(entity),
+            Self::PreparedScene(edit) => edit.authoring_entity_view(entity),
+            Self::PreparedPrefab(edit) => edit.authoring_entity_view(entity),
+        };
+        Ok(result?)
+    }
+
+    fn component(
+        self,
+        target: &EditorPropertyTarget,
+    ) -> Result<AuthoringComponentView<'a>, EditorDocumentQueryRejection> {
+        Ok(self
+            .entity_view(&target.entity)?
+            .component(&target.component)?)
+    }
+
+    pub(super) fn prefab_property_claims(
+        self,
+        path: &PrefabInstancePath,
+    ) -> Result<PrefabPropertyClaims<'a>, PrefabDeclarationError> {
+        let PrefabInstancePath { anchor, steps } = path;
+        match self {
+            Self::Scene(session) => session.prefab_property_claims(anchor, steps),
+            Self::Prefab(session) => session.prefab_property_claims(anchor, steps),
+            Self::PreparedScene(edit) => edit.prefab_property_claims(anchor, steps),
+            Self::PreparedPrefab(edit) => edit.prefab_property_claims(anchor, steps),
         }
     }
 }

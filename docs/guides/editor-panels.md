@@ -847,18 +847,16 @@ Preparation itself validates that complete original observation, including exact
 before interpreting intent. A freshly captured basis cannot replace the observation underlying an
 older proposal. Tool publication and request identity remain the concrete tool owner's obligations.
 
-For a before/after review, read the current value through `read_document_property` and pass the
-same request to `prepared.preview_property`. Both calls use the original `EditorPropertyRead`
-and its limits. The preview reads the candidate's authored value and reports Present, Defaulted
-or Missing. For text or collections that exceed the complete read limit, use the same
-`EditorPropertyPageRead` start request with `prepared.preview_property_page`. Continue each
-series through its original read source. Passing a live continuation to a preview, or passing
-a preview continuation to the workspace or another candidate, returns `WrongPreparedEdit`.
-Exhaustive matches on `EditorDocumentQueryRejection` must handle that variant.
+Use `prepared.preview()` to borrow the candidate. For a before/after review, pass the same
+`EditorPropertyRead` to `read_document_property` and `prepared.preview().read_property`. A tool
+can also discover the candidate with `query_entities` and `query_authoring`, starting from
+`preview.basis()`. Use `read_property_page` for a value above the complete read limit and
+`read_prefab_property_claim` for a stored declaration discovered in that candidate.
 
-The preview target still carries the preparation basis. A subsequent live edit leaves the
-retained preview available for review. Commit continues to check the current source before
-publishing that candidate.
+Keep each continuation on its original read source. Moving a continuation or claim between the
+workspace and a candidate, or between candidates prepared from the same basis, returns
+`WrongPreparedEdit`. The candidate keeps its original basis and remains readable after the
+working copy changes. Commit checks the current source before publication.
 
 Mixed construction admits one bounded ordered patch: create empty direct entities, add admitted
 component templates and edit their fields/references. Final classification and forward/inverse
@@ -987,7 +985,7 @@ preparation access; it exposes no mutable Application, Session, source document 
 
 ```rust,ignore
 let prepared = context.prepare_authoring_property_edit(&observation.target.basis, &edits)?;
-let proposed = prepared.preview_property(EditorPropertyRead {
+let proposed = prepared.preview().read_property(EditorPropertyRead {
     target: observation.target.clone(),
     limits: preview_limits,
 })?;
@@ -999,6 +997,8 @@ self.prepared = Some(prepared);
 `begin_authoring_construction(&basis)` and
 `prepare_authoring_construction(&basis, &draft)` reuse the existing source-owned draft and
 fixed local-reference mapping. The source owners retain validation, inverse and history authority.
+Use `construction.preview()` to discover allocated entities and read their resolved references
+before submitting the construction.
 Preparing, inspecting or retaining a candidate changes no document, selection or dirty state.
 Drop it to cancel before submission; changing tool inputs should replace the candidate rather
 than edit it as a second document.

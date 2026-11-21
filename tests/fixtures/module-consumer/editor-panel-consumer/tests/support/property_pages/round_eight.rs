@@ -171,7 +171,7 @@ fn prepare_numeric_edit(
         )
         .unwrap();
     assert_selected_scalar(
-        &prepared.preview_property(request.clone()).unwrap(),
+        &prepared.preview().read_property(request.clone()).unwrap(),
         &request,
         value,
     );

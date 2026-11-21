@@ -252,6 +252,9 @@ struct Review {
     continuation: EditorAuthoringCursor,
     patch: ScenePatchDocument,
     inverse: ScenePatchDocument,
+    retained: PreparedEditorDocumentEdit,
+    preview_claim: EditorPrefabPropertyClaimTarget,
+    preview_continuation: EditorAuthoringQuery,
 }
 
 #[derive(Default)]
@@ -316,12 +319,10 @@ impl ClaimPanel {
             true,
         );
         assert_ne!(unavailable.slot(), left_claim.slot());
+        let opaque_limits = EditorPropertyReadLimits::new(1024, 1, 64).unwrap();
         assert_eq!(
             context
-                .read_prefab_property_claim(
-                    &unavailable,
-                    EditorPropertyReadLimits::new(1024, 1, 64).unwrap(),
-                )
+                .read_prefab_property_claim(&unavailable, opaque_limits)
                 .unwrap(),
             opaque_value()
         );
@@ -346,17 +347,99 @@ impl ClaimPanel {
         drop(prepare(&selected));
         let selected_edit = prepare(&selected);
         let competing_edit = prepare(&competing);
-        for edit in [&selected_edit, &competing_edit] {
+        let retained = prepare(&selected);
+        for edit in [&selected_edit, &competing_edit, &retained] {
             assert!(edit.is_prefab_revert());
             assert_eq!(edit.document(), self.document);
             assert_eq!(edit.base_revision(), basis.revision);
         }
+
+        let preview = retained.preview();
+        assert_eq!(preview.basis(), &basis);
+        let (rows, preview_cursor) = discover(preview.basis(), selected.path(), |query| {
+            preview.query_authoring(query).unwrap()
+        });
+        assert_eq!(rows.len(), 3);
+        let preview_guard = known(&rows, "guard", "score", true);
+        let preview_claim = known(&rows, "leaf", "note", false);
+        let preview_unavailable = find_claim(
+            &rows,
+            "leaf",
+            UNKNOWN,
+            ComponentSchemaVersion(7),
+            "score",
+            true,
+        );
+        assert_eq!(preview_claim.slot(), selected.slot());
+        assert_eq!(
+            preview.read_prefab_property_claim(&preview_guard, read_limits()),
+            Ok(score(12))
+        );
+        assert_eq!(
+            preview.read_prefab_property_claim(&preview_claim, read_limits()),
+            Ok(PrefabPropertyIntent::Absent)
+        );
+        assert_eq!(
+            preview.read_prefab_property_claim(&preview_unavailable, opaque_limits),
+            Ok(opaque_value())
+        );
+
+        let sibling = selected_edit.preview();
+        let wrong_source = EditorDocumentQueryRejection::WrongPreparedEdit;
+        for (reader, result) in [
+            (
+                "workspace",
+                context.read_prefab_property_claim(&preview_claim, read_limits()),
+            ),
+            (
+                "sibling",
+                sibling.read_prefab_property_claim(&preview_claim, read_limits()),
+            ),
+            (
+                "preview",
+                preview.read_prefab_property_claim(&selected, read_limits()),
+            ),
+        ] {
+            assert_eq!(result, Err(wrong_source.clone()), "{reader}");
+        }
+        let continue_from = |cursor| EditorAuthoringQuery {
+            position: EditorAuthoringQueryPosition::Continue(cursor),
+            limits: query_limits(),
+        };
+        let preview_continuation = continue_from(preview_cursor);
+        for (reader, result) in [
+            (
+                "workspace",
+                context.query_document_authoring(preview_continuation.clone()),
+            ),
+            (
+                "sibling",
+                sibling.query_authoring(preview_continuation.clone()),
+            ),
+            (
+                "preview",
+                preview.query_authoring(continue_from(continuation.clone())),
+            ),
+        ] {
+            assert_eq!(result, Err(wrong_source.clone()), "{reader}");
+        }
+        assert_eq!(
+            context
+                .prepare_prefab_property_revert(&preview_claim, Default::default())
+                .unwrap_err(),
+            EditorEditPreparationError::QueryBasis(wrong_source)
+        );
+        assert_eq!(read(&selected), score(LEFT_SCORE));
+
         self.evidence.borrow_mut().review = Some(Review {
             selected,
             competing,
             continuation,
             patch: selected_edit.patch().clone(),
             inverse: selected_edit.inverse().clone(),
+            retained,
+            preview_claim,
+            preview_continuation,
         });
         self.pending = Some([selected_edit, competing_edit]);
     }
@@ -731,10 +814,27 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
     };
     assert_claims(&app, true);
     assert_history(&app, true, 1, 0);
-    for redo in [false, true] {
-        replay(&mut app, redo);
-        assert_history(&app, redo, usize::from(redo), usize::from(!redo));
-    }
+    replay(&mut app, false);
+    assert_history(&app, false, 0, 1);
+
+    let preview = review.retained.preview();
+    assert_eq!(preview.basis(), &captured);
+    assert_ne!(preview.basis(), &basis(&app, document));
+    let page = preview
+        .query_authoring(review.preview_continuation)
+        .unwrap();
+    assert!(matches!(
+        page.rows.as_slice(),
+        [EditorAuthoringRow::PrefabPropertyClaim { claim, .. }] if claim == &review.preview_claim
+    ));
+    assert_eq!(
+        preview.read_prefab_property_claim(&review.preview_claim, read_limits()),
+        Ok(PrefabPropertyIntent::Absent)
+    );
+    drop(review.retained);
+
+    replay(&mut app, true);
+    assert_history(&app, true, 1, 0);
     assert_eq!(fs::read_to_string(&source_file).unwrap(), original);
 
     let saving = basis(&app, document);

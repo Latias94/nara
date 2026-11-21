@@ -234,5 +234,7 @@ speedup. No release-frame, memory or native-performance claim follows.
 | Another transaction executor accumulates | Lower through the current candidate, inverse and commit kernel; delete caller-owned allocation choreography |
 | Random identity is overstated | Check current conflicts exactly and explicitly retain the absence of arbitrary-history non-reuse guarantees |
 
-Broader field queries, panel prepared hooks, declarative Prefab overlays, dynamic Behavior and the
-remaining foundation waves remain open. No migration guide or compatibility alias is required.
+The [prepared-source discovery successor](authoring-read-projection-design.md#discovery-in-a-prepared-source)
+qualifies registered panels that inspect the candidate's allocated entities, fields and references
+before submitting the same preparation. Remaining field query coverage, declarative Prefab overlays,
+dynamic Behavior and the later foundation waves retain their own qualification.

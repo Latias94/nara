@@ -10,6 +10,7 @@ use nara_scene::{
 /// Obtain these facts from the document tab model. The revision includes its source
 /// incarnation; a source locator or saved content identity is not a substitute.
 /// `schema` is `None` for sessions without an authoring Schema admission, not a wildcard.
+/// A prepared source uses its original basis. Continuations also identify the exact candidate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorDocumentQueryBasis {
     pub document: EditorDocumentId,
@@ -46,7 +47,7 @@ pub enum EditorDocumentQueryRejection {
     Closing,
     /// The continuation belongs to another workspace, including a replaced project workspace.
     WrongWorkspace,
-    /// A prepared property query names a different read source or document.
+    /// A prepared query names a different read source or document.
     WrongPreparedEdit,
     /// The explicitly named document is no longer open, or was never open here.
     DocumentNotOpen { document: EditorDocumentId },
@@ -97,7 +98,7 @@ impl fmt::Display for EditorDocumentQueryRejection {
                 formatter.write_str("document query belongs to another workspace")
             }
             Self::WrongPreparedEdit => {
-                formatter.write_str("property query belongs to a different read source")
+                formatter.write_str("document query belongs to a different prepared source")
             }
             Self::DocumentNotOpen { .. } => {
                 formatter.write_str("document query document is not open")
@@ -160,12 +161,44 @@ impl From<PrefabDeclarationError> for EditorDocumentQueryRejection {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct EditorDocumentQueryOwner(Arc<()>);
+#[derive(Debug, Clone)]
+pub(crate) enum EditorDocumentQueryOwner {
+    Workspace(Arc<()>),
+    Prepared(Arc<()>),
+}
+
+impl EditorDocumentQueryOwner {
+    pub(crate) fn prepared() -> Self {
+        Self::Prepared(Arc::new(()))
+    }
+
+    pub(crate) fn require(&self, actual: &Self) -> Result<(), EditorDocumentQueryRejection> {
+        if self == actual {
+            return Ok(());
+        }
+        Err(match (self, actual) {
+            (Self::Workspace(_), Self::Workspace(_)) => {
+                EditorDocumentQueryRejection::WrongWorkspace
+            }
+            _ => EditorDocumentQueryRejection::WrongPreparedEdit,
+        })
+    }
+}
+
+impl Default for EditorDocumentQueryOwner {
+    fn default() -> Self {
+        Self::Workspace(Arc::new(()))
+    }
+}
 
 impl PartialEq for EditorDocumentQueryOwner {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+        match (self, other) {
+            (Self::Workspace(a), Self::Workspace(b)) | (Self::Prepared(a), Self::Prepared(b)) => {
+                Arc::ptr_eq(a, b)
+            }
+            _ => false,
+        }
     }
 }
 

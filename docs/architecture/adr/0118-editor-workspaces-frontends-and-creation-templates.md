@@ -784,7 +784,10 @@ project Session and specialized UI Prefab checks at prepare and commit. Applicat
 owned dispatch observation and subsequent drive together with IDs only for successful publication.
 NotDispatched lifecycle refusal remains distinct from a dispatched domain rejection. The mapping
 is an immutable observation of that publication, not current existence after Undo/Reopen/retirement.
-These direct hooks do not imply registered-panel prepared hooks or installable-tool qualification.
+Direct and registered-panel consumers can borrow the same candidate for exact entity and property
+discovery before submitting it. The preview uses the prepared construction's resolved local IDs
+and classified source values. Its cursors are scoped to that candidate. Installable-tool
+qualification retains its own acceptance.
 
 Finite trusted source-tool execution is a separate Project Session operation exposed by the same
 UI-neutral Application. Host configuration explicitly supplies a command and complete admitted

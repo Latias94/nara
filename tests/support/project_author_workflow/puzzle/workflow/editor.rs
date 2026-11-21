@@ -133,7 +133,11 @@ pub fn move_pressure_plate(root: &Path) -> Instant {
         .unwrap();
     assert_eq!(prepared.base_revision(), basis.revision);
     assert_eq!(
-        prepared.preview_property(request.clone()).unwrap().value,
+        prepared
+            .preview()
+            .read_property(request.clone())
+            .unwrap()
+            .value,
         EditorPropertyValue::Present(ComponentValue::I64(after))
     );
     assert_eq!(

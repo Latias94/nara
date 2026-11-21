@@ -326,6 +326,12 @@ macro_rules! construction_session {
         }
 
         impl $prepared {
+            /// Borrows the exact prepared edit that owns the construction's candidate.
+            #[must_use]
+            pub const fn prepared_edit(&self) -> &$edit {
+                &self.edit
+            }
+
             #[must_use]
             pub fn base_revision(&self) -> SceneAuthoringRevision {
                 self.edit.base_revision()

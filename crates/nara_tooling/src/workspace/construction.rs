@@ -10,13 +10,14 @@ use nara_scene::{
 use super::{
     EditorDocumentId, EditorDocumentKind, EditorDocumentSlot, EditorWorkspace,
     EditorWorkspaceCommandReport, authoring_command_error_report,
-    authoring_query::rejected_basis_report, report_for_document_patch,
+    authoring_query::{AuthoringSource, EditorPreparedDocumentPreview, rejected_basis_report},
+    report_for_document_patch,
 };
-use crate::EditorDocumentQueryBasis;
 use crate::composition::{
     PrefabCompositionEntityDraft, PrefabCompositionOutcome, SceneCompositionEntityKind,
     scene_entity_component_ids,
 };
+use crate::{EditorDocumentQueryBasis, document_query::EditorDocumentQueryOwner};
 
 #[cfg(test)]
 mod source_composition_tests;
@@ -24,8 +25,9 @@ mod source_composition_tests;
 /// One source-owned candidate and fixed local mapping, without selection or Workspace custody.
 #[derive(Debug)]
 pub struct PreparedEditorDocumentConstruction {
-    document: EditorDocumentId,
+    basis: EditorDocumentQueryBasis,
     construction: PreparedDocumentConstruction,
+    query_owner: EditorDocumentQueryOwner,
 }
 
 #[derive(Debug)]
@@ -37,7 +39,7 @@ enum PreparedDocumentConstruction {
 impl PreparedEditorDocumentConstruction {
     #[must_use]
     pub const fn document(&self) -> EditorDocumentId {
-        self.document
+        self.basis.document
     }
 
     #[must_use]
@@ -49,11 +51,22 @@ impl PreparedEditorDocumentConstruction {
     }
 
     #[must_use]
-    pub fn base_revision(&self) -> SceneAuthoringRevision {
-        match &self.construction {
-            PreparedDocumentConstruction::Scene(prepared) => prepared.base_revision(),
-            PreparedDocumentConstruction::Prefab(prepared) => prepared.base_revision(),
-        }
+    pub const fn base_revision(&self) -> SceneAuthoringRevision {
+        self.basis.revision
+    }
+
+    /// Borrows the candidate with its resolved local entities and classified fields.
+    #[must_use]
+    pub fn preview(&self) -> EditorPreparedDocumentPreview<'_> {
+        let source = match &self.construction {
+            PreparedDocumentConstruction::Scene(prepared) => {
+                AuthoringSource::PreparedScene(prepared.prepared_edit())
+            }
+            PreparedDocumentConstruction::Prefab(prepared) => {
+                AuthoringSource::PreparedPrefab(prepared.prepared_edit())
+            }
+        };
+        EditorPreparedDocumentPreview::new(&self.basis, &self.query_owner, source)
     }
 
     #[must_use]
@@ -327,8 +340,9 @@ impl EditorWorkspace {
         };
         result
             .map(|construction| PreparedEditorDocumentConstruction {
-                document,
+                basis: basis.clone(),
                 construction,
+                query_owner: EditorDocumentQueryOwner::prepared(),
             })
             .map_err(|report| self.authoring_preparation_error(document, slot, report))
     }

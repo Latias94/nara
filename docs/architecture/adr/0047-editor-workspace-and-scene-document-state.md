@@ -159,10 +159,11 @@ Rules:
   develops the paged inventory/finite-read interface; its presence is not implementation evidence.
 - Prepared edits remain owned by the document session. Workspace/Editor adapters carry their
   exact target and operation result without rebuilding validation, inverse or history logic.
-- A retained prepared edit can supply the same bounded direct-property reads and value pages
-  from its candidate and original query basis. Each continuation belongs to that particular
-  candidate. A retained preview can still be read after the live basis changes. Publication
-  requires the original prepared commit checks against the live source.
+- A prepared edit or construction lends a read-only view of its exact candidate and original
+  query basis. The same bounded entity, component, property and stored-claim queries use that
+  candidate's admitted source and classification. Each continuation and claim belongs to that
+  preparation. Live Revert accepts only live claim handles. The original preview remains readable
+  after the live basis changes, and publication still checks the live source.
 - Prefab declaration observation is selection-independent and bound to the same exact document
   query basis. It includes structural and dormant intent, not only unavailable component facts.
   Bound scanning and copied declarations before allocation. Declaration review focus is local

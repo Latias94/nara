@@ -288,7 +288,7 @@ impl ImguiEditorPanel for DefaultedPanel {
                 ));
             }
             assert_ne!(forward, inverse);
-            let preview = cancelled.preview_property(request).unwrap();
+            let preview = cancelled.preview().read_property(request).unwrap();
             assert_eq!(preview.target, observed.target);
             assert_eq!(
                 preview.value,

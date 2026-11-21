@@ -1125,13 +1125,17 @@ fn assert_renamed_row(
         };
     assert_eq!(
         prepared
-            .preview_property(read_score(new_key))
+            .preview()
+            .read_property(read_score(new_key))
             .unwrap()
             .value,
         EditorPropertyValue::Present(ComponentValue::U64(score))
     );
     assert_eq!(
-        prepared.preview_property(read_score(old_key)).unwrap_err(),
+        prepared
+            .preview()
+            .read_property(read_score(old_key))
+            .unwrap_err(),
         EditorDocumentQueryRejection::Source(AuthoringReadError::Property(
             ComponentPropertyError::ListItemNotFound {
                 step: 1,

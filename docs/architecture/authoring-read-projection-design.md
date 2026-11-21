@@ -574,6 +574,9 @@ Undo, Redo, Save and Reopen. The same run includes separate Cook and camera work
 
 ### Prepared Edit Property Preview
 
+The [prepared-source discovery successor](#discovery-in-a-prepared-source) replaces the original
+property-only interface. This section records the earlier value-read qualification.
+
 A semantic tool can read the proposed value of any direct property from a retained
 `PreparedEditorDocumentEdit`. It passes the original `EditorPropertyRead` or starts an
 `EditorPropertyPageRead` with the preparation's exact document, revision and Schema. Scene and
@@ -622,6 +625,61 @@ Windows release run `3cc801ad-76d7-461a-8fd8-8a2de1600c70` passes both the Sessi
 and the original DX12 Drawn Inspector workflow after the shared property reader change. The
 native path reads presented, committed values. Candidate reads are exercised by the independent
 panel and Tooling targets. Expanded Prefab values use the separate effective-field workflow.
+
+### Discovery In A Prepared Source
+
+A semantic tool reviewing a construction needs to discover the entities and fields that exist in
+the candidate, including a newly resolved local reference. The prepared edit and the prepared
+construction each lend an `EditorPreparedDocumentPreview`. It exposes the original `basis()` and
+uses the existing entity, authoring and property requests. The preview answers direct inventory,
+property reads and value pages. Stored Prefab claims remain observable through the same raw
+declaration operation, including in a prepared Revert. The view borrows the exact source candidate
+and the classification that commit will consume.
+
+Each preparation has its own query owner. Every continuation and stored claim identifies that
+owner. A preview can outlive a change to the live document as long as the tool retains the
+preparation. Its continuations and claims are valid only on that same candidate. Live reads and
+Revert preparation refuse preview claims. The original basis is used to describe preview facts and
+does not make them live facts. Commit still uses its original admission and history. Expanded or
+effective Prefab observation continues to use the separate admitted dependency workflow.
+
+Use the existing pagers and budgets for live and prepared sources. The candidate replaces the
+property-only preview methods with the shared view. The tool keeps one candidate for review and
+commit. It needs no mutable document handle, patch interpreter or separate preview capture. Bevy
+borrows reflected data from the entity's actual storage. Godot's section paste records the old
+and new values on the Undo action for those exact edited objects. These patterns support
+observing the owning data and retaining the same operation through review. Nara additionally
+keeps the admitted candidate and its revision-bound history before any publication.
+[Bevy ReflectComponent](https://github.com/bevyengine/bevy/blob/85503941e488152711a4695bbe248e9ed9f453fc/crates/bevy_ecs/src/reflect/component.rs#L203-L216)
+· [Godot section paste](https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/editor/inspector/editor_inspector.cpp#L2976-L2992)
+
+The registered panel uses `preview()` on the same preparation that it queues for commit. It
+enumerates allocated entities, discovers components and fields through bounded pages, and reads the
+resolved reference between two new entities. The Scene and Prefab workflows compare those values
+after commit, Undo, Redo, Save and Reopen while another document stays active. The Revert workflows
+also keep a historical candidate through live Undo and verify that the removed claim is absent from
+its inventory and that the remaining declaration retains its authored Absent intent.
+
+The independently locked Windows x64 release test target passes 24/24
+(`88e926f7-0f1d-4a97-99ab-1bca508d3462`). It verifies replay on the same preparation, refusal when
+passing an entity, authoring or value continuation to a different read source, and refusal of a
+prepared claim at the live Revert boundary. The production diff passed an independent correctness
+review. The preview covers direct source records and stored declarations. Whole-document edit
+preparation cost and effective Prefab dependency observations retain their own qualification.
+
+The Windows DX12 Drawn workflow passes 1/1 (`a4ec23d5-c2ce-4c6e-80b2-af39843af0c0`). Before
+the presented Inspector Apply, a separately retained preparation reads the multilingual draft
+while the working copy still has the earlier value. After Apply it still reads its original
+candidate. The existing native trajectory checks live pagination, Undo, Save, Reopen and close.
+[Drawn qualification procedure](../verification/native-editor-qualification.md#independent-drawn-source-workspace)
+
+The final focused Scene and Tooling owner cohort passes 254/254
+(`52036872-f4af-43ca-81dd-8769b81169f9`). It covers construction, stored claims, and the existing
+live and prepared property readers, including nominal Schema changes and value presence.
+
+The independently locked public consumers pass 12/12
+(`83f2b0c4-2d9e-48ec-8425-a3f1f0b00082`) across the direct property authoring and registered panel
+targets. The independent read surface remains window-free and does not add a document store.
 
 ### Selective Edits In Authored Collections
 

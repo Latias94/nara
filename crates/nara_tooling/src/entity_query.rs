@@ -1,4 +1,4 @@
-//! Bounded, selection-independent enumeration of open authoring source records.
+//! Bounded, selection-independent enumeration of live and prepared authoring source records.
 
 use nara_scene::SceneEntityId;
 
@@ -60,7 +60,7 @@ pub enum EditorEntityQueryPosition {
     Continue(EditorEntityCursor),
 }
 
-/// One read-only page request for direct records of an explicitly named open Scene or Prefab.
+/// One read-only page request for direct records of a live or prepared Scene or Prefab.
 ///
 /// No selection, active tab, history or dirty state changes. Limits may change between pages.
 /// This operation does not enumerate expanded Prefab projections, fields or unopened sources.
@@ -70,13 +70,12 @@ pub struct EditorEntityQuery {
     pub limits: EditorEntityQueryLimits,
 }
 
-/// A replayable, process-local continuation for one exact workspace and source-record query.
+/// A replayable, process-local continuation for one exact live or prepared source-record query.
 ///
 /// There is no public constructor or serialized representation. Retaining or cloning this value
-/// neither retains an open document nor grants mutation or persistence authority. A changed
-/// document revision, source incarnation or Schema admission invalidates it; navigation and
-/// unrelated document edits do not. Reusing it with unchanged limits returns the same page while
-/// its basis is current.
+/// neither retains its source nor grants mutation or persistence authority. A changed live
+/// revision, source incarnation or Schema admission invalidates a live cursor. A prepared cursor
+/// requires its original preparation. Navigation and unrelated document edits preserve both.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorEntityCursor {
     pub(crate) owner: EditorDocumentQueryOwner,

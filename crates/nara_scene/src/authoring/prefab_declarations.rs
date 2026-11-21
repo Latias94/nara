@@ -315,6 +315,30 @@ impl PrefabAuthoringSession {
     }
 }
 
+impl PreparedSceneAuthoringEdit {
+    /// Borrows stored claims from the exact candidate, with no dependency expansion.
+    #[doc(hidden)]
+    pub fn prefab_property_claims(
+        &self,
+        anchor: &SceneEntityId,
+        steps: &[PrefabInstancePathSegment],
+    ) -> Result<PrefabPropertyClaims<'_>, PrefabDeclarationError> {
+        property_claims(&self.document().entities, anchor, steps)
+    }
+}
+
+impl PreparedPrefabAuthoringEdit {
+    /// Borrows stored claims from the exact candidate, with no dependency expansion.
+    #[doc(hidden)]
+    pub fn prefab_property_claims(
+        &self,
+        anchor: &SceneEntityId,
+        steps: &[PrefabInstancePathSegment],
+    ) -> Result<PrefabPropertyClaims<'_>, PrefabDeclarationError> {
+        property_claims(&self.document().entities, anchor, steps)
+    }
+}
+
 fn property_claims<'a>(
     entities: &'a [SceneEntityRecord],
     anchor: &SceneEntityId,

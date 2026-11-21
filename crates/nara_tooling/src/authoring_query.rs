@@ -18,9 +18,7 @@ pub use value_page::{
     EditorPropertyPage, EditorPropertyPageCursor, EditorPropertyPageData, EditorPropertyPageItem,
     EditorPropertyPagePosition, EditorPropertyPageRead, EditorPropertyPageValue,
 };
-pub(crate) use value_page::{
-    PropertyValuePageOwner, PropertyValuePagePosition, PropertyValuePageTarget,
-};
+pub(crate) use value_page::{PropertyValuePagePosition, PropertyValuePageTarget};
 
 pub const MAX_EDITOR_AUTHORING_QUERY_ENTRIES: usize = 256;
 pub const MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES: usize = 64 * 1024;
@@ -199,8 +197,8 @@ pub struct EditorAuthoringQuery {
     pub limits: EditorAuthoringQueryLimits,
 }
 
-/// Replayable process-local continuation. Its complete target is private and cannot be retargeted.
-/// It retains an immutable Schema admission, not an open document or permission to publish edits.
+/// Replayable continuation for the original workspace or preparation. Its private target retains
+/// the Schema admission without retaining the document or granting permission to publish edits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorAuthoringCursor {
     pub(crate) owner: EditorDocumentQueryOwner,
