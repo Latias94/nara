@@ -39,6 +39,7 @@ pub struct SemanticActionOutcome {
 /// `Started` marks an inactive-to-active aggregate, `Changed` a changed active value, and
 /// `Released` an active-to-inactive value or active context/mapping cancellation. Opposing axis
 /// contributions may remain physically held while their aggregate is zero.
+/// A physical loss compares the aggregate before and after all of its member releases.
 /// Restoring a context never synthesizes activation: an old member must release or become neutral
 /// before a fresh member may activate it. [`crate::ActionOutcomes`] exposes low-level binding edges.
 ///
@@ -159,39 +160,17 @@ impl SemanticActions {
         let Some(input) = entry.action_input() else {
             return;
         };
-        let press_sequence = entry
-            .press_sequence()
-            .expect("an admitted button edge names its original member");
-        let provenance = entry.action_provenance();
         let axis = entry.axis_value();
         let phase = entry.action_transition().map(|(_, phase)| phase);
         if axis == Some(AxisValue::ZERO) || phase == Some(ButtonTransitionPhase::Released) {
-            self.held.retain(|key, held| {
-                if key.seat != entry.route().seat()
-                    || held.contributions.remove(&press_sequence).is_none()
-                {
-                    return true;
-                }
-                self.contribution_count -= 1;
-                let previous = held.value;
-                held.value = held.aggregate();
-                if let Some(phase) = value_transition(previous, held.value) {
-                    assert!(self.outcomes.len() < self.outcomes.capacity());
-                    self.outcomes.push(SemanticActionOutcome {
-                        seat: key.seat,
-                        action: key.action.clone(),
-                        context: key.context.clone(),
-                        phase,
-                        value: held.value,
-                        cause: SemanticActionCause::PhysicalInput,
-                        provenance: Some(provenance),
-                    });
-                }
-                !held.contributions.is_empty()
-            });
+            self.release_members(std::iter::once(entry));
             return;
         }
 
+        let press_sequence = entry
+            .press_sequence()
+            .expect("an admitted action edge names its original member");
+        let provenance = entry.action_provenance();
         let seat = entry.route().seat();
         let Some((action_map, revision)) = maps.get(seat).zip(staging.revision_for_seat(seat))
         else {
@@ -264,6 +243,58 @@ impl SemanticActions {
                 });
             }
         }
+    }
+
+    /// The entries are one seat's terminal releases in admission order.
+    pub(crate) fn release_members(
+        &mut self,
+        entries: impl Iterator<Item = InputTimelineEntry> + Clone,
+    ) {
+        let Some(first) = entries.clone().next() else {
+            return;
+        };
+        let seat = first.route().seat();
+        let outcome_start = self.outcomes.len();
+        self.held.retain(|key, held| {
+            if key.seat != seat {
+                return true;
+            }
+            let mut last_removed = None;
+            for entry in entries.clone() {
+                let press_sequence = entry
+                    .press_sequence()
+                    .expect("an admitted release names its original member");
+                if held.contributions.remove(&press_sequence).is_some() {
+                    self.contribution_count -= 1;
+                    last_removed = Some(entry);
+                }
+            }
+            let Some(entry) = last_removed else {
+                return true;
+            };
+            let previous = held.value;
+            held.value = held.aggregate();
+            if let Some(phase) = value_transition(previous, held.value) {
+                assert!(self.outcomes.len() < self.outcomes.capacity());
+                self.outcomes.push(SemanticActionOutcome {
+                    seat,
+                    action: key.action.clone(),
+                    context: key.context.clone(),
+                    phase,
+                    value: held.value,
+                    cause: SemanticActionCause::PhysicalInput,
+                    provenance: Some(entry.action_provenance()),
+                });
+            }
+            !held.contributions.is_empty()
+        });
+        self.outcomes[outcome_start..].sort_unstable_by(|left, right| {
+            left.provenance
+                .map(ActionInputProvenance::sequence)
+                .cmp(&right.provenance.map(ActionInputProvenance::sequence))
+                .then_with(|| left.action.cmp(&right.action))
+                .then_with(|| left.context.cmp(&right.context))
+        });
     }
 }
 

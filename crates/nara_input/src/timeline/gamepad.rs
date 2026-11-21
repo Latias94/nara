@@ -132,6 +132,7 @@ impl InputTimeline {
                 );
             }
             drafts.sort_by_key(|draft| draft.press_origin.unwrap().0);
+            let releases = drafts.len();
             let mut disconnected = owner.ordinary_draft(
                 connection.window,
                 connection.seat,
@@ -146,7 +147,7 @@ impl InputTimeline {
             drafts.push(disconnected);
             let plan =
                 owner.terminal_plan(drafts.len(), owner.topology.obligations() - drafts.len());
-            let admission = owner.publish(plan, drafts);
+            let admission = owner.publish_drafts(plan, drafts, releases);
             for member in owner
                 .topology
                 .members

@@ -1,5 +1,6 @@
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque, vec_deque},
+    num::NonZeroU64,
     sync::Arc,
 };
 
@@ -98,6 +99,35 @@ struct RetainedInput {
     action: ActionRetention,
     action_delivery: ActionDelivery,
     action_revision: Option<Arc<StagedActionRevision>>,
+    neutralization: Option<NonZeroU64>,
+}
+
+pub(crate) struct ReadyActionInputs<'a> {
+    records: vec_deque::Iter<'a, RetainedInput>,
+    neutralization: bool,
+}
+
+impl ReadyActionInputs<'_> {
+    pub(crate) fn is_neutralization(&self) -> bool {
+        self.neutralization
+    }
+
+    pub(crate) fn entries(
+        &self,
+    ) -> impl Iterator<Item = (InputTimelineEntry, &Arc<StagedActionRevision>)> + Clone {
+        self.records.clone().filter_map(|record| {
+            if record.action != ActionRetention::Deferred
+                || record.action_delivery != ActionDelivery::Gameplay
+            {
+                return None;
+            }
+            let revision = record
+                .action_revision
+                .as_ref()
+                .expect("an admitted action edge retains its actual staging basis");
+            Some((record.entry, revision))
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -936,8 +966,19 @@ impl InputTimeline {
     }
 
     fn publish(&mut self, plan: InputCapacityPlan, drafts: &[InputDraft]) -> InputAdmission {
+        self.publish_drafts(plan, drafts, 0)
+    }
+
+    fn publish_drafts(
+        &mut self,
+        plan: InputCapacityPlan,
+        drafts: &[InputDraft],
+        neutralized_members: usize,
+    ) -> InputAdmission {
         let first = plan.first_sequence();
         let last = plan.last_sequence();
+        let neutralization = first.and_then(NonZeroU64::new);
+        debug_assert!(neutralized_members <= drafts.len());
         self.commit_capacity(plan);
         for (offset, draft) in drafts.iter().copied().enumerate() {
             let sequence =
@@ -980,6 +1021,7 @@ impl InputTimeline {
                 action: ActionRetention::Unscanned,
                 action_delivery: draft.action_delivery,
                 action_revision: None,
+                neutralization: neutralization.filter(|_| offset < neutralized_members),
             });
         }
         InputAdmission {
@@ -1356,7 +1398,7 @@ impl InputTimeline {
                     - usize::from(pointer.leave)
                     - usize::from(geometry_ends);
                 let plan = owner.terminal_plan(drafts.len(), after);
-                let admission = owner.publish(plan, drafts);
+                let admission = owner.publish_drafts(plan, drafts, releases);
                 if invalidates_prepared
                     && let Some(reservation) = owner.prepared_routes.get_mut(&(window, seat))
                 {
@@ -1667,7 +1709,7 @@ impl InputTimeline {
                 - endpoint.obligations()
                 + controls_after;
             let plan = owner.terminal_plan(drafts.len(), after);
-            let admission = owner.publish(plan, drafts);
+            let admission = owner.publish_drafts(plan, drafts, releases);
             owner.revoke_route(endpoint.window, endpoint.seat, reason);
             for member in owner
                 .topology
@@ -1907,19 +1949,51 @@ impl InputTimeline {
 
     pub(crate) fn resolve_deferred_action_inputs(
         &mut self,
-        mut resolve: impl FnMut(InputTimelineEntry, Arc<StagedActionRevision>),
+        mut resolve: impl FnMut(ReadyActionInputs<'_>),
     ) {
-        for record in &mut self.retained {
-            let Some(deliver) = Self::deferred_action_delivery(&self.topology, record) else {
+        let mut start = 0;
+        let mut blocked_seats = BTreeSet::new();
+        while let Some(record) = self.retained.get(start) {
+            if record.action != ActionRetention::Deferred {
+                start += 1;
                 continue;
+            }
+            let neutralization = record.neutralization;
+            let seat = record.entry.route().seat();
+            let count = match neutralization {
+                Some(batch) => self
+                    .retained
+                    .range(start..)
+                    .take_while(|record| record.neutralization == Some(batch))
+                    .count(),
+                None => 1,
             };
-            record.action = ActionRetention::Done;
-            let revision = record
-                .action_revision
-                .take()
-                .expect("an admitted action edge retains its actual staging basis");
-            if deliver {
-                resolve(record.entry, revision);
+            let range = start..start + count;
+            start = range.end;
+            if blocked_seats.contains(&seat) {
+                continue;
+            }
+            let mut blocked = false;
+            for record in self.retained.range_mut(range.clone()) {
+                if record.action == ActionRetention::Deferred {
+                    match Self::deferred_action_delivery(&self.topology, record) {
+                        Some(true) => record.action_delivery = ActionDelivery::Gameplay,
+                        Some(false) => record.action_delivery = ActionDelivery::Ui,
+                        None => blocked = true,
+                    }
+                }
+            }
+            if blocked {
+                blocked_seats.insert(seat);
+                continue;
+            }
+            resolve(ReadyActionInputs {
+                records: self.retained.range(range.clone()),
+                neutralization: neutralization.is_some(),
+            });
+            for record in self.retained.range_mut(range) {
+                record.action = ActionRetention::Done;
+                record.action_revision = None;
             }
         }
     }
@@ -1929,7 +2003,13 @@ impl InputTimeline {
         &mut self,
     ) -> Vec<(InputTimelineEntry, Arc<StagedActionRevision>)> {
         let mut entries = Vec::new();
-        self.resolve_deferred_action_inputs(|entry, revision| entries.push((entry, revision)));
+        self.resolve_deferred_action_inputs(|batch| {
+            entries.extend(
+                batch
+                    .entries()
+                    .map(|(entry, revision)| (entry, Arc::clone(revision))),
+            );
+        });
         entries
     }
 

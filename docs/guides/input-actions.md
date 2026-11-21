@@ -264,6 +264,10 @@ Started, a changed active value emits Changed, and active-to-zero emits Released
 controls can sum to zero while both physical contributions remain held; releasing one can start
 the aggregate again. Disconnect neutralizes only the original connection's contributions and
 cannot cancel another controller or key that still contributes to the same seat/action.
+Focus loss, controller disconnect and pointer leave keep each physical release in the binding
+stream. The gameplay aggregate changes once per action for that operation. If UI routing is
+pending when an exact step runs, the seat's later events wait in admission order. Other seats
+can continue to deliver their own actions.
 
 ## Context Changes And Rebinding
 

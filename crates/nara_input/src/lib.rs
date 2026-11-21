@@ -1042,11 +1042,19 @@ fn resolve_action_outcomes(
     );
     staging.observe_maps(&action_maps);
     semantic.reconcile(&action_maps, &staging);
-    timeline.resolve_deferred_action_inputs(|entry, staged_revision| {
-        if let Some(map) = action_maps.get(entry.route().seat()) {
-            resolve_input_binding(map, entry, &mut outcomes);
+    timeline.resolve_deferred_action_inputs(|batch| {
+        let neutralization = batch.is_neutralization();
+        if neutralization {
+            semantic.release_members(batch.entries().map(|(entry, _)| entry));
         }
-        semantic.apply(&action_maps, &staging, &staged_revision, entry);
+        for (entry, staged_revision) in batch.entries() {
+            if let Some(map) = action_maps.get(entry.route().seat()) {
+                resolve_input_binding(map, entry, &mut outcomes);
+            }
+            if !neutralization {
+                semantic.apply(&action_maps, &staging, staged_revision, entry);
+            }
+        }
     });
     timeline
         .bypass_change_detection()

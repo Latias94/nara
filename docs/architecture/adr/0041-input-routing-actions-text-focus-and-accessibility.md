@@ -70,6 +70,10 @@ Rules:
   admitted while their sum is zero; removing one can start the value again. A definition rejects
   mixed value kinds and duplicate `(action, context, input)` sources. Gameplay command mapping
   consumes this semantic projection, preserving another seat's or device's contributions.
+- A focus loss, device disconnect or pointer retirement keeps the ordered binding releases and
+  compares each affected aggregate once around the admitted batch. Gameplay resolution preserves
+  admission order within each seat while earlier routing is pending. Independent seats can
+  continue resolving their input.
 - Disabling a context terminates its delivered semantic actions once. Re-enabling it while an
   input remains physically held leaves that action inactive until release and a fresh press.
   A mapping change ends the previous mapping lifetime with the same fresh-press requirement.
