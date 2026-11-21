@@ -577,6 +577,48 @@ fn catalog_requires_a_primary_single_product_member_with_the_expected_format_and
     assert!(decoded.addressable_roots().is_empty());
 }
 
+#[test]
+fn processed_headless_session_installs_the_selected_bindings_without_window_capability() {
+    use crate::project_host::{HeadlessSession, HeadlessSessionClose};
+
+    let fixture = Fixture::valid();
+    let base = fixture.open(RuntimeContentLimits::default());
+    let mut session = HeadlessSession::from_runtime_content(base);
+    let observed = session
+        .start()
+        .and_then(|()| session.frame(Duration::ZERO))
+        .and_then(|exit| {
+            session.observe(|world| {
+                let selected = nara_input::startup_action_map_bindings(world)
+                    .map(|bindings| bindings.definition().bindings().to_vec());
+                let current = world
+                    .get_resource::<ActionMaps>()
+                    .and_then(|maps| maps.get(InputSeatId::PRIMARY))
+                    .map(|map| map.bindings().to_vec());
+                (exit, selected, current)
+            })
+        });
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match session.close() {
+            HeadlessSessionClose::Pending if std::time::Instant::now() < deadline => {
+                std::thread::yield_now();
+            }
+            closed => {
+                assert_eq!(closed, HeadlessSessionClose::Complete);
+                break;
+            }
+        }
+    }
+    let (exit, selected, current) = observed.unwrap();
+    assert!(exit.is_none());
+    assert_eq!(selected, current);
+    assert_eq!(
+        selected.unwrap(),
+        asset(input_product()).definition().bindings()
+    );
+}
+
 struct OtherActionMapDomain;
 
 impl AssetDomain for OtherActionMapDomain {

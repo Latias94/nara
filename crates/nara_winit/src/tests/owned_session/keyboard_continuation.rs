@@ -143,6 +143,7 @@ fn keyboard_session(isolated: bool, paused: bool) -> WinitSession {
         .unwrap();
     app.add_plugin(InputPlugin).unwrap();
     app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+    app.add_plugin(GameplayActionPlugin).unwrap();
     let mut map = ActionMapBuilder::new(ActionMapLimits::default());
     map.declare_context(ActionContext::gameplay(), true)
         .unwrap();

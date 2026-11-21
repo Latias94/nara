@@ -81,6 +81,13 @@ AI driver, then external producer. `LocalAction` is one reserved stream; its sou
 preserves the already deterministic action/binding iteration order. Adding or reordering source
 kinds requires an ADR update rather than relying on Rust enum declaration order.
 
+`GameplayCommandPlugin` owns the queue, local command collection and fixed-step ingress without
+an Input dependency. The App's `FrameIntent` phase orders producer preparation before command
+collection, so a custom collector can read resolved Input without adding a static mapper. Client
+composition adds `GameplayActionPlugin` when it needs the static `ActionCommandMap`. Both paths
+use the original frame cursor and command queue. Static mapped commands enter before the
+collected local commands for the same frame.
+
 Static action-command bindings include the originating Input seat as well as action, context and
 phase. Their constructors select PRIMARY unless the game explicitly supplies another seat.
 Seat-local semantic actions must not match another player's static mapping merely because the
@@ -222,7 +229,7 @@ those effects before its success checks; it does not roll them back. Capture pee
 not aborted when another Capture member fails. An unrelated fault after acknowledgement does not
 retroactively reverse an already completed batch.
 
-`GameplayCommandPlugin` bridges engine-owned action-mapping loss and Admit/Acknowledge lifecycle
+The gameplay command owner bridges local command loss and Admit/Acknowledge lifecycle
 failure into the current App-owned `RuntimeFaultReporter` before a managed frame or exact step can
 report success. The first such fault is sticky for that runtime generation. Malformed, late,
 duplicate, over-budget, future-horizon, or other policy-rejected external submissions remain typed

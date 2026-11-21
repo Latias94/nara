@@ -59,9 +59,11 @@ Rules:
   structural frame failure; server policy never silently switches to `DiscardExcess`.
 - `MinimalPlugins` remains a small headless foundation, but it is not the whole server product
   profile. `HeadlessRuntimePlugins` and `ServerPlugins` compose the richer products explicitly.
-- `runtime-core` compiles `nara_input` for the local/headless product and gameplay mapping, but
-  compiled availability never implies installation. `ServerPlugins` remains free of raw input even
-  when a host binary compiled desktop, rendering, or tooling capabilities for other profiles.
+- A dedicated executable can select `runtime-core` and `serde` with default features disabled.
+  This selection excludes `nara_input` and `nara_window` from its production dependency graph.
+  The default local build selects `runtime-input` and `runtime-window` alongside `runtime-core`.
+  `ServerPlugins` installs the command queue and remains free of Input, action mapping and Window
+  services when a multi-profile host compiles those capabilities.
 - File-backed projects lower `nara.toml` profiles such as `headless`, `server`, `editor`, `dev`,
   and `release` into a runtime preset plus additive capabilities. Host composition validates the
   normalized request against the compiled product ceiling, the resolved plan's required product
@@ -96,7 +98,11 @@ Rules:
   start, Scene request, residency and close transactions for server and client configurations.
   First-party source loading and the stock Image, Material and TileSet publications select
   `runtime-2d`. Processed CPU products still use their selected codecs and the Host's typed
-  collections. `Transform2d` is available to the simulation through the core feature.
+  collections. `Transform2d` is available to the simulation through the core feature. A selected
+  startup action map requires the actual Input plugin during composition, and the processed
+  selection also requires its typed decoder. Selecting the first-party Input plugin directly in a
+  Host recipe requires `runtime-input`, including code-first binding selection. The catalog can
+  validate the version-one member declaration independently of decoder availability.
 - A sustained server executable owns its wait policy and local management stream. It can drive
   the existing session with measured monotonic intervals. The original time owner computes
   fixed steps and enforces the debt bound. The Two-Level executable treats an interval beyond

@@ -13,8 +13,8 @@ use nara_engine::{
     core::{ByteLimit, Vec2},
     ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs},
     gameplay::{
-        ActionCommandBinding, ActionCommandMap, GameplayCommandBatch, GameplayCommandPlugin,
-        GameplayCommandSet, GameplayCommandTypeId,
+        ActionCommandBinding, ActionCommandMap, GameplayActionPlugin, GameplayCommandBatch,
+        GameplayCommandPlugin, GameplayCommandSet, GameplayCommandTypeId,
     },
     input::{
         ActionBinding, ActionContext, ActionId, ActionInputProvenance, ActionMap,
@@ -231,6 +231,7 @@ fn start(
     .unwrap();
     app.insert_resource(ActionMaps::new(map)).unwrap();
     app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+    app.add_plugin(GameplayActionPlugin).unwrap();
     app.insert_resource(Configuration {
         pending: Arc::clone(&pending),
         original: original.clone(),

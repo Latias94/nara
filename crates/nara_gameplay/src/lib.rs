@@ -1,5 +1,6 @@
-//! Bounded authoritative gameplay command ingress and action mapping.
+//! Bounded authoritative gameplay command ingress with optional Input action mapping.
 
+#[cfg(feature = "input")]
 mod action;
 mod command;
 mod local;
@@ -7,8 +8,10 @@ mod local_collection;
 mod queue;
 mod schedule;
 
+#[cfg(feature = "input")]
 pub use action::{
-    ActionCommandBinding, ActionCommandMap, ActionCommandMapError, MAX_ACTION_COMMAND_BINDINGS,
+    ActionCommandBinding, ActionCommandMap, ActionCommandMapError, GAMEPLAY_ACTION_PLUGIN_ID,
+    GameplayActionPlugin, MAX_ACTION_COMMAND_BINDINGS,
 };
 pub use command::{
     GameplayCommandDraft, GameplayCommandEnvelope, GameplayCommandIdError,
@@ -32,14 +35,11 @@ pub use queue::{
 pub use schedule::GameplayCommandSet;
 
 use nara_app::{
-    __RuntimeDriverPort, App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginError, RealTime,
+    __RuntimeDriverPort, App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginError,
     RuntimeDriverScope, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration,
     RuntimeWorldAccessError,
 };
-use nara_ecs::{
-    Res, ResMut, Resource, bevy_ecs::system::ScheduleSystem, schedule::IntoScheduleConfigs,
-};
-use nara_input::SemanticActions;
+use nara_ecs::{Res, ResMut, bevy_ecs::system::ScheduleSystem, schedule::IntoScheduleConfigs};
 
 use crate::schedule::GameplayCommandInternalSet;
 
@@ -48,10 +48,11 @@ pub const GAMEPLAY_COMMAND_PLUGIN_ID: nara_app::PluginId =
 
 /// Registers semantic command producers in one shared collection schedule.
 ///
-/// Collection runs once per App frame after input action resolution and before command lowering,
-/// both in ordinary frames and exact fixed steps. Catch-up ticks do not repeat collection. The
-/// same system instances retain their local state, conditions and deferred buffers across both
-/// paths, including when Input is not installed. Ordinary paused frames do not collect commands.
+/// Collection runs once per App frame before local command submission, in ordinary frames and
+/// exact fixed steps. With `GameplayActionPlugin` installed, collection follows Input action
+/// resolution and precedes action-to-command mapping. Catch-up ticks do not repeat collection.
+/// The same systems retain their local state, conditions and deferred buffers across both paths.
+/// Ordinary paused frames do not collect commands.
 ///
 /// Ordering among supplied systems, including separate calls to this helper, belongs to the shared
 /// collection schedule. Constraints do not cross into [`CoreStage::PreUpdate`]. Register directly
@@ -85,11 +86,6 @@ pub struct GameplayCommandPlugin {
     settings: GameplayCommandQueueSettings,
 }
 
-#[derive(Debug, Default, Resource)]
-struct ActionCommandLoweringCursor {
-    frame: Option<u64>,
-}
-
 impl Default for GameplayCommandPlugin {
     fn default() -> Self {
         Self::new(GameplayCommandQueueSettings::default())
@@ -118,9 +114,6 @@ impl Plugin for GameplayCommandPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        if !app.world().contains_resource::<ActionCommandMap>() {
-            app.insert_resource(ActionCommandMap::default())?;
-        }
         if !app.world().contains_resource::<GameplayCommandQueue>() {
             app.insert_resource(GameplayCommandQueue::new(self.settings))?;
         }
@@ -130,7 +123,7 @@ impl Plugin for GameplayCommandPlugin {
         if !app.world().contains_resource::<LocalGameplayCommands>() {
             app.insert_resource(LocalGameplayCommands::default())?;
         }
-        app.insert_resource(ActionCommandLoweringCursor::default())?;
+        app.insert_resource(local_collection::LocalCommandFrameCursor::default())?;
         let admission_faults = app.world().resource::<RuntimeFaultReporter>().clone();
         let consumption_faults = admission_faults.clone();
         let acknowledgement_faults = admission_faults.clone();
@@ -138,11 +131,12 @@ impl Plugin for GameplayCommandPlugin {
             nara_app::__private::FrameIntent,
             (
                 GameplayCommandInternalSet::CollectLocalCommands
-                    .after(nara_input::InputSet::ResolveActions)
-                    .run_if(local_collection::needs_collection),
-                GameplayCommandInternalSet::MapLocalActions,
+                    .run_if(local_collection::is_new_frame),
+                GameplayCommandInternalSet::SubmitLocalCommands
+                    .run_if(local_collection::is_new_frame),
             )
-                .chain(),
+                .chain()
+                .in_set(nara_app::__private::FrameIntentSet::Collect),
         )?;
         app.configure_sets(
             CoreStage::FixedUpdate,
@@ -161,7 +155,8 @@ impl Plugin for GameplayCommandPlugin {
         )?
         .add_systems(
             nara_app::__private::FrameIntent,
-            map_action_outcomes_to_commands.in_set(GameplayCommandInternalSet::MapLocalActions),
+            local_collection::submit_collected_commands
+                .in_set(GameplayCommandInternalSet::SubmitLocalCommands),
         )?
         .add_systems(
             CoreStage::FixedUpdate,
@@ -216,49 +211,6 @@ impl Plugin for GameplayCommandPlugin {
             .in_set(GameplayCommandInternalSet::Acknowledge),
         )?;
         Ok(())
-    }
-}
-
-fn map_action_outcomes_to_commands(
-    time: Res<RealTime>,
-    mut cursor: ResMut<ActionCommandLoweringCursor>,
-    command_map: Res<ActionCommandMap>,
-    outcomes: Option<Res<SemanticActions>>,
-    mut local_commands: ResMut<LocalGameplayCommands>,
-    mut queue: ResMut<GameplayCommandQueue>,
-    faults: Res<RuntimeFaultReporter>,
-) {
-    if cursor.frame == Some(time.frame) {
-        return;
-    }
-    if let Some(outcomes) = outcomes {
-        for outcome in outcomes.as_slice() {
-            for binding in command_map.matching_bindings(
-                outcome.seat,
-                &outcome.action,
-                &outcome.context,
-                outcome.phase,
-            ) {
-                submit_local_command(&mut queue, binding.command().clone(), &faults);
-            }
-        }
-    }
-    for command in local_commands.drain() {
-        submit_local_command(&mut queue, command, &faults);
-    }
-    cursor.frame = Some(time.frame);
-}
-
-fn submit_local_command(
-    queue: &mut GameplayCommandQueue,
-    command: GameplayCommandDraft,
-    faults: &RuntimeFaultReporter,
-) {
-    if queue.submit_local_for_next_tick(command).is_err() {
-        faults.report(RuntimeFault::engine(
-            RuntimeFaultKind::LocalIntentLoss,
-            "nara.gameplay.local-action",
-        ));
     }
 }
 
@@ -349,17 +301,21 @@ fn acknowledge_gameplay_commands(
 }
 
 pub mod prelude {
+    #[cfg(feature = "input")]
     pub use crate::{
-        ActionCommandBinding, ActionCommandMap, ActionCommandMapError, GameplayCommandBatch,
-        GameplayCommandDraft, GameplayCommandEnvelope, GameplayCommandIdError,
-        GameplayCommandIngressSource, GameplayCommandKey, GameplayCommandLifecycleError,
-        GameplayCommandLimitKind, GameplayCommandPayload, GameplayCommandPayloadError,
-        GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandQueueSettings,
-        GameplayCommandQueueStats, GameplayCommandRejection, GameplayCommandSet,
-        GameplayCommandSettingsError, GameplayCommandSource, GameplayCommandSourceId,
-        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
-        GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
-        LocalGameplayCommandError, LocalGameplayCommands, MAX_ACTION_COMMAND_BINDINGS,
+        ActionCommandBinding, ActionCommandMap, ActionCommandMapError, GAMEPLAY_ACTION_PLUGIN_ID,
+        GameplayActionPlugin, MAX_ACTION_COMMAND_BINDINGS,
+    };
+    pub use crate::{
+        GameplayCommandBatch, GameplayCommandDraft, GameplayCommandEnvelope,
+        GameplayCommandIdError, GameplayCommandIngressSource, GameplayCommandKey,
+        GameplayCommandLifecycleError, GameplayCommandLimitKind, GameplayCommandPayload,
+        GameplayCommandPayloadError, GameplayCommandPlugin, GameplayCommandQueue,
+        GameplayCommandQueueSettings, GameplayCommandQueueStats, GameplayCommandRejection,
+        GameplayCommandSet, GameplayCommandSettingsError, GameplayCommandSource,
+        GameplayCommandSourceId, GameplayCommandSourceSequence, GameplayCommandSubmission,
+        GameplayCommandTarget, GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId,
+        GameplayCommandValue, LocalGameplayCommandError, LocalGameplayCommands,
         MAX_LOCAL_GAMEPLAY_COMMANDS, RuntimeEntityReference, add_local_gameplay_command_systems,
     };
 }
@@ -383,6 +339,7 @@ mod tests {
         SpawnedSceneInstance, TombstoneCause, WorldIdentityDomain, WorldIdentityDomainSettings,
         spawn_identity_entity,
     };
+    #[cfg(feature = "input")]
     use nara_input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
         ActionMaps, ActionPhase, InputPlugin, KeyCode,
@@ -438,6 +395,7 @@ mod tests {
         GameplayCommandDraft::new(GameplayCommandTypeId::new(command_type).unwrap())
     }
 
+    #[cfg(feature = "input")]
     fn action_map(binding: ActionBinding) -> ActionMaps {
         let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
         builder
@@ -540,11 +498,13 @@ mod tests {
         .unwrap()
     }
 
+    #[cfg(feature = "input")]
     #[test]
     fn local_action_survives_zero_tick_frame_and_is_consumed_once_across_three_ticks() {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
         app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.add_plugin(GameplayActionPlugin).unwrap();
         app.insert_resource(CommandsByTick::default())
             .unwrap()
             .add_systems(
@@ -616,6 +576,7 @@ mod tests {
         runtime.finish().unwrap();
     }
 
+    #[cfg(feature = "input")]
     #[test]
     fn static_action_commands_select_the_seat_before_fixed_tick_admission() {
         use nara_input::{
@@ -626,6 +587,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
         app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.add_plugin(GameplayActionPlugin).unwrap();
         app.insert_resource(CommandsByTick::default()).unwrap();
         app.add_systems(
             CoreStage::FixedUpdate,
@@ -735,11 +697,13 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "input")]
     #[test]
     fn multiple_zero_tick_frames_preserve_one_local_source_sequence() {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
         app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.add_plugin(GameplayActionPlugin).unwrap();
         app.insert_resource(CommandsByTick::default())
             .unwrap()
             .add_systems(
@@ -836,11 +800,13 @@ mod tests {
         runtime.finish().unwrap();
     }
 
+    #[cfg(feature = "input")]
     #[test]
     fn action_bridge_preserves_target_payload_and_context() {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
         app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.add_plugin(GameplayActionPlugin).unwrap();
         app.insert_resource(CommandsByTick::default())
             .unwrap()
             .add_systems(
@@ -905,10 +871,93 @@ mod tests {
         runtime.finish().unwrap();
     }
 
+    #[cfg(feature = "input")]
+    #[test]
+    fn exact_step_maps_resolved_actions_after_collection_and_submits_them_first() {
+        use nara_app::{
+            RuntimeControl, RuntimeControlRequestResult, RuntimeFrameKind, RuntimeTimeSettings,
+        };
+        use nara_input::{ButtonDriverInput, SemanticActions, apply_keyboard_driver_input};
+
+        let mut app = App::new();
+        app.add_plugins((
+            InputPlugin,
+            GameplayCommandPlugin::default(),
+            GameplayActionPlugin,
+        ))
+        .unwrap();
+        app.insert_resource(RuntimeTimeSettings::default().with_paused(true))
+            .unwrap();
+        app.insert_resource(action_map(ActionBinding::key(
+            ActionId::new("jump").unwrap(),
+            KeyCode::Space,
+        )))
+        .unwrap();
+        app.init_resource::<CommandsByTick>().unwrap();
+        add_local_gameplay_command_systems(
+            &mut app,
+            |actions: Res<SemanticActions>,
+             mut map: ResMut<ActionCommandMap>,
+             mut commands: ResMut<LocalGameplayCommands>| {
+                for outcome in actions.as_slice() {
+                    map.bind_action(
+                        outcome.action.clone(),
+                        outcome.phase,
+                        GameplayCommandTypeId::new("player.mapped").unwrap(),
+                    )
+                    .unwrap();
+                    commands.push(command("player.collected")).unwrap();
+                }
+            },
+        )
+        .unwrap();
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            capture_consumed_commands.in_set(GameplayCommandSet::Consume),
+        )
+        .unwrap();
+
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Space))
+            })
+            .unwrap()
+            .output
+            .unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        for _ in 0..2 {
+            assert!(matches!(
+                runtime.request_control(RuntimeControl::StepFixedTick),
+                RuntimeControlRequestResult::Accepted(_)
+            ));
+            let outcome = runtime.drive(Duration::ZERO).unwrap();
+            assert_eq!(outcome.frame_kind(), Some(RuntimeFrameKind::ExactFixedTick));
+        }
+
+        let observed = &runtime.world().resource::<CommandsByTick>().0;
+        let [(1, commands), (2, empty)] = observed.as_slice() else {
+            panic!("expected batches for exact ticks 1 and 2");
+        };
+        assert_eq!(
+            commands
+                .iter()
+                .map(|command| {
+                    (
+                        command.command_type().as_str(),
+                        command.source_sequence().get(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            [("player.mapped", 1), ("player.collected", 2)],
+        );
+        assert!(empty.is_empty());
+        runtime.finish().unwrap();
+    }
+
     #[test]
     fn public_local_collection_enters_the_next_authoritative_tick_once() {
         let mut app = App::new();
-        app.add_plugin(InputPlugin).unwrap();
         app.add_plugin(GameplayCommandPlugin::default()).unwrap();
         app.insert_resource(CommandsByTick::default()).unwrap();
         add_local_gameplay_command_systems(&mut app, collect_semantic_command).unwrap();
@@ -952,11 +1001,13 @@ mod tests {
         assert_eq!(commands.len(), MAX_LOCAL_GAMEPLAY_COMMANDS);
     }
 
+    #[cfg(feature = "input")]
     #[test]
     fn action_bridge_filters_by_phase() {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
         app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.add_plugin(GameplayActionPlugin).unwrap();
         app.insert_resource(CommandsByTick::default())
             .unwrap()
             .add_systems(
@@ -1017,6 +1068,7 @@ mod tests {
         runtime.finish().unwrap();
     }
 
+    #[cfg(feature = "input")]
     #[test]
     fn action_command_map_rejects_the_first_binding_past_its_hard_limit() {
         let binding = ActionCommandBinding::new(
@@ -1040,6 +1092,7 @@ mod tests {
         assert_eq!(command_map.bindings().len(), before);
     }
 
+    #[cfg(feature = "input")]
     #[test]
     fn action_command_map_rejects_runtime_entity_targets_without_mutation() {
         let entity_targets = [
@@ -1952,11 +2005,13 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "input")]
     #[test]
     fn engine_owned_local_intent_loss_reaches_the_runtime_fault_reporter() {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
         app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.add_plugin(GameplayActionPlugin).unwrap();
 
         let action = ActionId::new("interact").unwrap();
         app.insert_resource(action_map(ActionBinding::key(
@@ -3139,7 +3194,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "serde")]
+    #[cfg(all(feature = "input", feature = "serde"))]
     #[test]
     fn action_command_binding_defaults_context_to_gameplay() {
         let json = r#"{

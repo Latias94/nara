@@ -134,8 +134,9 @@ right imports.
 - The root facade should be audited soon. Backend/tooling/debug/internal render types should move
   out of `nara::prelude` into advanced or module-specific preludes.
 - Root modules, gameplay exports, advanced exports, and module preludes are all gated by the same
-  compiled product capability vocabulary; `default = ["runtime-core"]` does not compile or expose
-  2D, runtime UI, tooling, watcher, platform-adapter, or GPU-backend domains.
+  compiled product capability vocabulary. The default selects `runtime-core`, `runtime-input`
+  and `runtime-window`. 2D, runtime UI, tooling, watching, platform adapters and GPU backends
+  require their named features.
 - Examples should demonstrate explicit imports for backend adapters and tooling.
 - Repository agent guidance should route facade and prelude work to this Accepted ADR rather than
   duplicating the policy in `AGENTS.md`.

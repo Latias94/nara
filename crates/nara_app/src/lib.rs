@@ -52,12 +52,19 @@ pub use time_continuation::{
 
 #[doc(hidden)]
 pub mod __private {
-    use nara_ecs::schedule::ScheduleLabel;
+    use nara_ecs::schedule::{ScheduleLabel, SystemSet};
 
     /// Engine-owned intent collection after ordinary PreUpdate or before one exact fixed tick.
     /// Input and Gameplay place complete producers here without cloning their system state.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
     pub struct FrameIntent;
+
+    /// Orders intent preparation before command collection and submission in [`FrameIntent`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+    pub enum FrameIntentSet {
+        Prepare,
+        Collect,
+    }
 
     /// Engine-owned transient retirement after all frame or exact-step observers have completed.
     /// This is not a public gameplay ordering anchor.

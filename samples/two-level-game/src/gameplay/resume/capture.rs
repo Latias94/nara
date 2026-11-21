@@ -7,33 +7,36 @@ use nara::{
     fs::ContentDigest,
     gameplay::{GameplayCommandBatch, GameplayCommandQueue, LocalGameplayCommands},
     prelude::Transform2d,
-    project_host::HeadlessSession,
     tasks::{TaskPools, TaskReturnState},
 };
 #[cfg(feature = "local-player")]
 use nara::{
     asset::Assets,
     material::{Material2d, Material2dAsset},
+    project_host::HeadlessSession,
+    window::backend::WindowPresentationRequirement,
 };
 
 use super::{GameResumeError, ResumeControl};
 #[cfg(feature = "local-player")]
-use crate::gameplay::ActiveLevel;
+use crate::{
+    gameplay::{ActiveLevel, side_room::Rooms},
+    resume::ResumeCompatibility,
+};
 use crate::{
     gameplay::{
-        GamePhase, Progress, Session, player, side_room::Rooms, storage::Storage, travel,
-        verification::Verification,
+        GamePhase, Progress, Session, player, storage::Storage, travel, verification::Verification,
     },
     resume::{
-        PlayerState, ResumeCompatibility, ResumeState, RuntimeTimeState, SessionCounters,
+        PlayerState, ResumeState, RuntimeTimeState, SessionCounters,
         processed::ProcessedResumeCompatibility,
     },
 };
 
+#[cfg(feature = "local-player")]
 pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
     let reject = |reason: &str| GameResumeError::Ineligible(reason.into());
-    let session = world.resource::<Session>();
-    if !cfg!(feature = "local-player") || !session.local_player {
+    if !world.resource::<Session>().local_player {
         return Err(reject(
             "exact reconstruction requires the local source player",
         ));
@@ -41,23 +44,20 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
     quiescent(world, false)?;
     require_unconfigured_checkpoint(world)?;
     Rooms::require_closed(world).map_err(GameResumeError::Ineligible)?;
-    #[cfg(feature = "local-player")]
+    super::input_capture_eligible(world)?;
+    if world
+        .get_resource::<Assets<Material2dAsset>>()
+        .is_some_and(|assets| !assets.is_empty())
     {
-        super::input_capture_eligible(world)?;
-        if world
-            .get_resource::<Assets<Material2dAsset>>()
-            .is_some_and(|assets| !assets.is_empty())
-        {
-            return Err(reject("material assets are not represented by ResumeState"));
-        }
-        if world
-            .iter_entities()
-            .any(|entity| entity.contains::<Material2d>())
-        {
-            return Err(reject(
-                "material components are not represented by ResumeState",
-            ));
-        }
+        return Err(reject("material assets are not represented by ResumeState"));
+    }
+    if world
+        .iter_entities()
+        .any(|entity| entity.contains::<Material2d>())
+    {
+        return Err(reject(
+            "material components are not represented by ResumeState",
+        ));
     }
     Ok(())
 }
@@ -164,11 +164,11 @@ pub(super) fn require_unconfigured_checkpoint(world: &World) -> Result<(), GameR
 /// as do material assets or components not represented by `ResumeState`.
 /// Empty material storage and its installed Schema are supported. This value contains no
 /// World identity or native-service authority.
+#[cfg(feature = "local-player")]
 pub fn capture_resume(session: &HeadlessSession) -> Result<ResumeState, GameResumeError> {
     let runtime_time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;
     session.capture(|world| {
-        #[cfg(feature = "local-player")]
-        if world.contains_resource::<nara::window::backend::WindowPresentationRequirement>() {
+        if world.contains_resource::<WindowPresentationRequirement>() {
             return Err(GameResumeError::Ineligible(
                 "native presentation requires the desktop capture boundary".into(),
             ));
@@ -197,6 +197,7 @@ pub fn capture_desktop_resume(session: &DesktopRun) -> Result<ResumeState, GameR
     Ok(state)
 }
 
+#[cfg(feature = "local-player")]
 pub(crate) fn capture_world(
     world: &World,
     runtime_time: RuntimeTimeState,
@@ -204,36 +205,29 @@ pub(crate) fn capture_world(
     eligible(world)?;
     let reject = |reason: &str| GameResumeError::Ineligible(reason.into());
     let control = world.resource::<ResumeControl>();
-    #[cfg(feature = "local-player")]
-    {
-        let current =
-            CurrentScene::get(world).ok_or_else(|| reject("current Scene is unavailable"))?;
-        let source = current
-            .source_content_stamp()
-            .ok_or_else(|| reject("admitted source facts are unavailable"))?;
-        let level = world.resource::<ActiveLevel>().key().level();
-        if control.levels.get(&level) != Some(&super::stamp(level, source)) {
-            return Err(reject(
-                "current source no longer matches game-owned admission facts",
-            ));
-        }
+    let active = world.resource::<ActiveLevel>();
+    let current = CurrentScene::get(world).ok_or_else(|| reject("current Scene is unavailable"))?;
+    let source = current
+        .source_content_stamp()
+        .ok_or_else(|| reject("admitted source facts are unavailable"))?;
+    let level = active.key().level();
+    if control.levels.get(&level) != Some(&super::stamp(level, source)) {
+        return Err(reject(
+            "current source no longer matches game-owned admission facts",
+        ));
     }
-    #[cfg(feature = "local-player")]
+    let entity = player(world).ok_or_else(|| reject("the current player is unavailable"))?;
+    let presentation = active
+        .content()
+        .and_then(|content| content.presentation.as_ref())
+        .ok_or_else(|| reject("active animation content is unavailable"))?;
+    if !world
+        .get::<crate::animation::ExplorerAnimation>(entity)
+        .is_some_and(|component| presentation.animation.matches(component))
     {
-        let entity = player(world).ok_or_else(|| reject("the current player is unavailable"))?;
-        let presentation = world
-            .resource::<ActiveLevel>()
-            .content()
-            .and_then(|content| content.presentation.as_ref())
-            .ok_or_else(|| reject("active animation content is unavailable"))?;
-        if !world
-            .get::<crate::animation::ExplorerAnimation>(entity)
-            .is_some_and(|component| presentation.animation.matches(component))
-        {
-            return Err(reject(
-                "runtime animation configuration is not represented by admitted source",
-            ));
-        }
+        return Err(reject(
+            "runtime animation configuration is not represented by admitted source",
+        ));
     }
     let facts = compatibility(world)?;
     let state = game(

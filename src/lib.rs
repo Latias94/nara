@@ -44,7 +44,7 @@ pub mod identity {
 }
 #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
 pub use nara_image as image;
-#[cfg(feature = "runtime-core")]
+#[cfg(feature = "runtime-input")]
 pub use nara_input as input;
 #[cfg(feature = "runtime-2d")]
 pub use nara_material as material;
@@ -97,7 +97,7 @@ pub mod ui_render {
         pub use nara_ui_render::advanced::*;
     }
 }
-#[cfg(feature = "runtime-core")]
+#[cfg(feature = "runtime-window")]
 pub use nara_window as window;
 #[cfg(feature = "desktop-winit")]
 pub use nara_winit as winit;
@@ -220,9 +220,11 @@ pub mod prelude {
     pub use nara_ecs::{
         Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, SystemParam, World,
     };
+    #[cfg(feature = "runtime-input")]
+    pub use nara_gameplay::{ActionCommandBinding, ActionCommandMap, GameplayActionPlugin};
     pub use nara_gameplay::{
-        ActionCommandBinding, ActionCommandMap, GameplayCommandDraft, GameplayCommandIngressSource,
-        GameplayCommandKey, GameplayCommandPayload, GameplayCommandSource, GameplayCommandSourceId,
+        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandKey,
+        GameplayCommandPayload, GameplayCommandSource, GameplayCommandSourceId,
         GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
         GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
         LocalGameplayCommandError, LocalGameplayCommands, add_local_gameplay_command_systems,
@@ -232,6 +234,7 @@ pub mod prelude {
         EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
         PersistentRuntimeReference, RuntimeEntityReference, SceneEntityId,
     };
+    #[cfg(feature = "runtime-input")]
     pub use nara_input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionMaps, ActionOutcome,
         ActionOutcomes, ActionPhase, ActionValue, ButtonInput, ButtonTransition,
@@ -516,6 +519,7 @@ pub mod backend_prelude {
     pub use nara_render_wgpu::{
         WGPU_STOCK_UI_PLUGIN_DECLARATION, WGPU_STOCK_UI_PLUGIN_ID, WgpuStockUiPlugin,
     };
+    #[cfg(feature = "runtime-window")]
     pub use nara_window::{
         PresentMode, PrimaryWindow, PrimaryWindowId, Window, WindowCloseRequest,
         WindowCloseRequests, WindowEvent, WindowEvents, WindowId, WindowMode, WindowPlugin,
@@ -537,7 +541,9 @@ mod tests {
         app.add_plugins(MinimalPlugins).unwrap();
 
         assert!(app.world().contains_resource::<nara_asset::AssetServer>());
+        #[cfg(feature = "runtime-input")]
         assert!(app.world().contains_resource::<nara_input::PointerState>());
+        #[cfg(feature = "runtime-window")]
         assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
     }
 
@@ -550,7 +556,14 @@ mod tests {
             app.world()
                 .contains_resource::<nara_gameplay::GameplayCommandQueue>()
         );
-        assert!(app.world().contains_resource::<nara_input::PointerState>());
+        #[cfg(feature = "runtime-input")]
+        {
+            assert!(app.world().contains_resource::<nara_input::PointerState>());
+            assert!(
+                app.world()
+                    .contains_resource::<nara_gameplay::ActionCommandMap>()
+            );
+        }
     }
 
     #[test]
@@ -580,26 +593,15 @@ mod tests {
                 .get()
                 > 0
         );
-        assert!(!app.world().contains_resource::<nara_input::PointerState>());
-        assert!(
-            !app.world()
-                .contains_resource::<nara_input::ButtonInput<nara_input::KeyCode>>()
-        );
-        assert!(
-            !app.world()
-                .contains_resource::<nara_input::ButtonInput<nara_input::MouseButton>>()
-        );
-        assert!(!app.world().contains_resource::<nara_input::ActionMaps>());
-        assert!(
-            !app.world()
-                .contains_resource::<nara_input::ActionOutcomes>()
-        );
+        #[cfg(feature = "runtime-input")]
+        assert_server_omits_input(app.world());
         #[cfg(any(
             feature = "runtime-2d",
             feature = "presentation-ui",
             feature = "render-wgpu"
         ))]
         assert!(!app.world().contains_resource::<nara_render::RenderFrame>());
+        #[cfg(feature = "runtime-window")]
         assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
         assert_eq!(
             app.world()
@@ -653,6 +655,7 @@ mod tests {
         let mut app = nara_app::RuntimeInstance::start(app).unwrap();
         app.drive(std::time::Duration::ZERO).unwrap();
 
+        #[cfg(feature = "runtime-input")]
         assert!(
             !app.world()
                 .contains_resource::<nara_input::ActionOutcomes>()
@@ -741,22 +744,21 @@ mod tests {
         let mut app = nara_app::RuntimeInstance::start(app).unwrap();
         app.drive(nara_app::FixedTime::DEFAULT_TIMESTEP * 2)
             .unwrap();
-        assert!(!app.world().contains_resource::<nara_input::PointerState>());
-        assert!(
-            !app.world()
-                .contains_resource::<nara_input::ButtonInput<nara_input::KeyCode>>()
-        );
-        assert!(
-            !app.world()
-                .contains_resource::<nara_input::ButtonInput<nara_input::MouseButton>>()
-        );
-        assert!(!app.world().contains_resource::<nara_input::ActionMaps>());
-        assert!(
-            !app.world()
-                .contains_resource::<nara_input::ActionOutcomes>()
-        );
+        #[cfg(feature = "runtime-input")]
+        assert_server_omits_input(app.world());
+        #[cfg(feature = "runtime-window")]
         assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
         app.world().resource::<ObservedServerCommands>().0.clone()
+    }
+
+    #[cfg(feature = "runtime-input")]
+    fn assert_server_omits_input(world: &nara_ecs::World) {
+        assert!(!world.contains_resource::<nara_input::PointerState>());
+        assert!(!world.contains_resource::<nara_input::ButtonInput<nara_input::KeyCode>>());
+        assert!(!world.contains_resource::<nara_input::ButtonInput<nara_input::MouseButton>>());
+        assert!(!world.contains_resource::<nara_input::ActionMaps>());
+        assert!(!world.contains_resource::<nara_input::ActionOutcomes>());
+        assert!(!world.contains_resource::<nara_gameplay::ActionCommandMap>());
     }
 
     #[test]

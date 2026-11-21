@@ -17,7 +17,7 @@ pub enum GameplayCommandSet {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
 pub(crate) enum GameplayCommandInternalSet {
     CollectLocalCommands,
-    MapLocalActions,
+    SubmitLocalCommands,
     Admit,
     CompleteConsumption,
     Acknowledge,

@@ -5,8 +5,8 @@ use std::{
 };
 
 use nara::{
-    ServerPlugins, app::App, input::PointerState, project::ProductCapability,
-    project_host::compiled_product_capabilities, window::WindowEvents,
+    ServerPlugins, app::App, project::ProductCapability,
+    project_host::compiled_product_capabilities,
 };
 use serde_json::Value;
 
@@ -44,8 +44,19 @@ fn server_bundle_stays_free_of_raw_client_resources() {
     let mut app = App::new();
     app.add_plugins(ServerPlugins).unwrap();
 
-    assert!(!app.world().contains_resource::<PointerState>());
-    assert!(!app.world().contains_resource::<WindowEvents>());
+    #[cfg(feature = "runtime-input")]
+    {
+        assert!(!app.world().contains_resource::<nara::input::PointerState>());
+        assert!(
+            !app.world()
+                .contains_resource::<nara::gameplay::ActionCommandMap>()
+        );
+    }
+    #[cfg(feature = "runtime-window")]
+    assert!(
+        !app.world()
+            .contains_resource::<nara::window::WindowEvents>()
+    );
     #[cfg(feature = "render-wgpu")]
     {
         assert!(
@@ -93,6 +104,8 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
         "asset-watch",
         "default",
         "desktop-winit",
+        "editor-work-observation",
+        "parallel-executor",
         "presentation-2d",
         "presentation-ui",
         "project-tooling",
@@ -102,7 +115,10 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
         "render-wgpu",
         "runtime-2d",
         "runtime-core",
+        "runtime-input",
         "runtime-ui",
+        "runtime-window",
+        "scene-work-observation",
         "serde",
         "tooling",
     ];
@@ -110,13 +126,26 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
         features.keys().map(String::as_str).collect::<Vec<_>>(),
         expected
     );
-    assert_eq!(feature_members(features, "default"), vec!["runtime-core"]);
+    assert_eq!(
+        feature_members(features, "default"),
+        ["runtime-core", "runtime-input", "runtime-window"]
+    );
+    assert_eq!(
+        feature_members(features, "runtime-input"),
+        ["runtime-core", "dep:nara_input", "nara_gameplay/input"]
+    );
+    assert_eq!(
+        feature_members(features, "runtime-window"),
+        ["runtime-core", "dep:nara_window"]
+    );
     assert_eq!(
         feature_members(features, "runtime-2d"),
         [
-            "runtime-core",
+            "runtime-input",
+            "runtime-window",
             "dep:nara_image",
             "dep:nara_material",
+            "nara_material/material",
             "dep:nara_render",
             "dep:nara_sprite",
             "dep:nara_tilemap",
@@ -133,7 +162,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
     );
     assert_eq!(
         feature_members(features, "runtime-ui"),
-        ["runtime-core", "dep:nara_ui"]
+        ["runtime-input", "runtime-window", "dep:nara_ui"]
     );
     assert_eq!(
         feature_members(features, "presentation-ui"),
@@ -161,6 +190,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
             "nara_input?/serde",
             "nara_gameplay?/serde",
             "nara_material?/serde",
+            "nara_material?/persistent",
             "nara_reflect?/serde",
             "nara_transform?/serde",
             "nara_render?/serde",
@@ -298,22 +328,21 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
         "nara_gameplay",
         "nara_hierarchy",
         "nara_identity",
-        "nara_input",
         "nara_project",
         "nara_reflect",
         "nara_reflect_derive",
         "nara_scene",
         "nara_tasks",
         "nara_transform",
-        "nara_window",
     ]);
+    let local_runtime = with_packages(&runtime_core, &["nara_input", "nara_window"]);
     let cases = [
         (
             "no-default-features",
             vec!["--no-default-features"],
             BTreeSet::new(),
         ),
-        ("default", Vec::new(), runtime_core.clone()),
+        ("default", Vec::new(), local_runtime.clone()),
         (
             "serde-only",
             vec!["--no-default-features", "--features", "serde"],
@@ -325,13 +354,29 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             runtime_core.clone(),
         ),
         (
+            "runtime-core-serde",
+            vec!["--no-default-features", "--features", "runtime-core,serde"],
+            runtime_core.clone(),
+        ),
+        (
+            "runtime-input",
+            vec!["--no-default-features", "--features", "runtime-input"],
+            with_packages(&runtime_core, &["nara_input"]),
+        ),
+        (
+            "runtime-window",
+            vec!["--no-default-features", "--features", "runtime-window"],
+            with_packages(&runtime_core, &["nara_window"]),
+        ),
+        (
             "runtime-2d",
             vec!["--no-default-features", "--features", "runtime-2d"],
             with_packages(
-                &runtime_core,
+                &local_runtime,
                 &[
                     "nara_image",
                     "nara_material",
+                    "nara_material_derive",
                     "nara_render",
                     "nara_sprite",
                     "nara_tilemap",
@@ -342,7 +387,7 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             "runtime-ui",
             vec!["--no-default-features", "--features", "runtime-ui"],
             with_packages(
-                &runtime_core,
+                &local_runtime,
                 &[
                     "nara_image",
                     "nara_text",
@@ -356,10 +401,11 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             "presentation-2d",
             vec!["--no-default-features", "--features", "presentation-2d"],
             with_packages(
-                &runtime_core,
+                &local_runtime,
                 &[
                     "nara_image",
                     "nara_material",
+                    "nara_material_derive",
                     "nara_render",
                     "nara_sprite",
                     "nara_sprite_render",
@@ -371,7 +417,7 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             "presentation-ui",
             vec!["--no-default-features", "--features", "presentation-ui"],
             with_packages(
-                &runtime_core,
+                &local_runtime,
                 &[
                     "nara_image",
                     "nara_render",
@@ -396,22 +442,26 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
         (
             "desktop-winit",
             vec!["--no-default-features", "--features", "desktop-winit"],
-            with_packages(&runtime_core, &["nara_winit"]),
+            with_packages(&local_runtime, &["nara_winit"]),
         ),
         (
             "render-wgpu",
             vec!["--no-default-features", "--features", "render-wgpu"],
-            with_packages(&runtime_core, &["nara_render", "nara_render_wgpu"]),
+            with_packages(
+                &runtime_core,
+                &["nara_render", "nara_render_wgpu", "nara_window"],
+            ),
         ),
         (
             "all-features",
             vec!["--all-features"],
             with_packages(
-                &runtime_core,
+                &local_runtime,
                 &[
                     "nara_asset_watch",
                     "nara_image",
                     "nara_material",
+                    "nara_material_derive",
                     "nara_render",
                     "nara_render_wgpu",
                     "nara_sprite",

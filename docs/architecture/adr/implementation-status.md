@@ -2408,6 +2408,14 @@ native exit and wrong-pack controls pass. Both CLI-produced packages also Save a
 isolated same-instance namespaces with the package and its ELF dependencies as runtime inputs.
 Networking and separate-machine deployment retain separate qualification.
 
+The [command-only Server selection](../../plans/2026-10-31-cooked-player-delivery-plan.md#dedicated-server-without-input-or-window-dependencies)
+removes Input and Window from the pure-core graph while retaining the original authoritative
+queue. Local Input and Window have separate facade features. The actual Cooker and both
+relocated headless products pass on Windows and Linux WSL2. The locked Server graphs contain
+139 and 140 packages respectively. A client-capable Host also opens the Server pack,
+activates the rooms and travels with client services absent. The narrow processed Input and
+client exact Step controls keep the independent Input composition covered.
+
 The [sustained Server operation](../../plans/2026-10-31-cooked-player-delivery-plan.md#sustained-dedicated-server-operation)
 adds a local `--serve` driver over the original processed `HeadlessSession`. The installed server
 advances from measured elapsed time, reports fixed command admission and original queue facts, and

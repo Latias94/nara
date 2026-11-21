@@ -14,11 +14,7 @@ use super::commands::*;
 
 const ID: PluginId = PluginId::new("two-level-game.input");
 const DECLARATION: PluginDeclaration = PluginDeclaration::new(ID, PluginCategory::Runtime)
-    .requires_plugins(&[
-        super::PLUGIN_ID,
-        nara::input::INPUT_PLUGIN_ID,
-        nara::gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
-    ]);
+    .requires_plugins(&[super::PLUGIN_ID, nara::gameplay::GAMEPLAY_ACTION_PLUGIN_ID]);
 
 /// Project-relative path to the authored global action map.
 pub const INPUT_PATH: &str = "input/explorer.actions.json";

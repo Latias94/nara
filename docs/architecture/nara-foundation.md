@@ -817,8 +817,9 @@ preview API surface.
 - Root Cargo features form coarse compiled product-capability ceilings. The required product
   capabilities of a resolved plugin plan must fit the normalized project request, which must fit
   the compiled ceiling; plugin service requirements/conflicts close separately before any `App`
-  mutation. `default` is `runtime-core`, serde weak-forwards only into enabled domains, root engine
-  dependencies are optional, and `nara_render_wgpu` gates its sprite/UI submitters independently.
+  mutation. `default` selects `runtime-core`, `runtime-input` and `runtime-window`. Serde
+  weak-forwards only into enabled domains, root engine dependencies are optional, and
+  `nara_render_wgpu` gates its sprite/UI submitters independently.
   The gameplay prelude remains backend-free, advanced/tooling/backend surfaces are explicit, and
   `nara_audio` has been retired because it had no production consumer. Pure product/plugin closure,
   stable configurable slots, repeatable preparation, and frozen schema-provider input are
@@ -844,8 +845,10 @@ preview API surface.
   commands instead of raw device input, keep networking optional, and expose diagnostics/metrics
   without editor UI. The RGF-U6 reference product additionally proves real committed-content boot,
   a complete fixed-tick combat wave, stable terminal snapshots, bounded tick-limit failure, and a
-  privacy-safe standalone CLI. Hosted artifacts, networking transports, metrics bridges, and
-  dedicated-server delivery remain separate evidence. See ADR
+  privacy-safe standalone CLI. The [dedicated Two-Level Server](../guides/cooked-player-delivery.md#cook-a-dedicated-server)
+  uses the same processed Host with default features disabled and only `runtime-core,serde`
+  selected on the root dependency. Networking transports and metrics bridges remain separate
+  work. See ADR
   [0056](adr/0056-headless-runtime-and-dedicated-server-readiness.md).
 - Editor workspace state belongs in `nara_tooling`: open document slots, active document, selection
   sets, dirty/saved revisions, external reload conflicts, per-document undo/redo, and workspace

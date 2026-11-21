@@ -1435,6 +1435,13 @@ and fresh-process Restore with only the package, its ELF dependencies and privat
 storage mounted in isolated namespaces on the same WSL2 instance. Separate-machine deployment,
 networking and load qualification remain open.
 
+The [dedicated Server without Input or Window dependencies](2026-10-31-cooked-player-delivery-plan.md#dedicated-server-without-input-or-window-dependencies)
+selection keeps stock Input and Window compilation in independent facade features. The pure
+core and its authoritative command queue still support the original processed Server. The
+relocated Server, headless Player control, and client-capable Host that drives the Server pack
+with client services absent all pass on Windows and Linux WSL2. The owning plan
+records the locked graph and separate source, processed Input and native controls.
+
 The [sustained Server successor](2026-10-31-cooked-player-delivery-plan.md#sustained-dedicated-server-operation)
 runs the ordinary installed Server from monotonic intervals with its existing processed
 `HeadlessSession`. A bounded local command stream observes progress and uses fixed-step ingress for

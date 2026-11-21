@@ -26,6 +26,7 @@ pub const REFERENCE_DESKTOP_PLUGIN_ID: PluginId =
 const REFERENCE_DESKTOP_REQUIREMENTS: &[PluginId] = &[
     REFERENCE_RUNTIME_UI_PLUGIN_ID,
     nara::gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
+    nara::gameplay::GAMEPLAY_ACTION_PLUGIN_ID,
     nara::input::INPUT_PLUGIN_ID,
     nara::image::IMAGE_PLUGIN_ID,
     nara::render::RENDER_PLUGIN_ID,

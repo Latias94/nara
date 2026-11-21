@@ -124,21 +124,25 @@ coarser than the crate graph:
 
 | Feature | Implies | Direct root domain dependencies added |
 |---|---|---|
-| `runtime-core` | - | `nara_app`, `nara_asset`, `nara_core`, `nara_diagnostic`, `nara_ecs`, `nara_fs`, `nara_gameplay`, `nara_identity`, `nara_input`, `nara_project`, `nara_reflect`, `nara_scene`, `nara_tasks`, `nara_transform`, `nara_window` |
-| `runtime-2d` | `runtime-core` | `nara_image`, `nara_material`, `nara_render`, `nara_sprite`, `nara_sprite_render`, `nara_tilemap` |
-| `runtime-ui` | `runtime-core` | `nara_image`, `nara_material`, `nara_render`, `nara_ui`, `nara_ui_render` |
+| `runtime-core` | - | `nara_app`, `nara_asset`, `nara_core`, `nara_diagnostic`, `nara_ecs`, `nara_fs`, `nara_gameplay`, `nara_hierarchy`, `nara_identity`, `nara_project`, `nara_reflect`, `nara_scene`, `nara_tasks`, `nara_transform` |
+| `runtime-input` | `runtime-core` | `nara_input`, plus `nara_gameplay/input` |
+| `runtime-window` | `runtime-core` | `nara_window` |
+| `runtime-2d` | `runtime-input`, `runtime-window` | `nara_image`, `nara_material`, `nara_render`, `nara_sprite`, `nara_tilemap` |
+| `presentation-2d` | `runtime-2d` | `nara_sprite_render` |
+| `runtime-ui` | `runtime-input`, `runtime-window` | `nara_ui` |
+| `presentation-ui` | `runtime-ui` | `nara_image`, `nara_render`, `nara_ui_render` |
 | `tooling` | `runtime-core` | `nara_tooling` |
 | `asset-watch` | `runtime-core` | `nara_asset_watch` |
-| `desktop-winit` | `runtime-core` | `nara_winit`; backend-neutral `nara_window` is already core |
-| `render-wgpu` | `runtime-core` | `nara_render`, base `nara_render_wgpu` |
-| `tooling-egui` | `tooling` | `nara_tooling_egui` |
+| `desktop-winit` | `runtime-input`, `runtime-window` | `nara_winit` |
+| `render-wgpu` | `runtime-window` | `nara_render`, base `nara_render_wgpu` |
 | `serde` | no product capability | Weakly forwards serialization into already activated domains only |
 
-`default = ["runtime-core"]`. A no-default build activates no product domain. `serde` alone must not
-activate an optional domain. `runtime-ui` does not imply `runtime-2d`: an UI-only product must not
-compile sprite or tilemap code. `runtime-core` includes the input compilation capability because
-the local/headless product and `nara_gameplay` depend on it; this does not permit `ServerPlugins` to
-install raw-input resources.
+`default = ["runtime-core", "runtime-input", "runtime-window"]`. Disabling defaults without
+selecting another feature activates no product domain. `serde` alone must not activate an
+optional domain. A UI-only product can select `runtime-ui` without compiling Sprite or TileMap.
+An explicitly selected `runtime-core` supplies the command-only Headless Host without Input or
+Window. Root compilation features describe availability, while a resolved plugin plan governs
+installed services.
 
 The old root feature names `winit`, `wgpu`, and `egui` are removed rather than aliased. Feature-gated
 root modules and preludes expose only compiled capabilities. The gameplay prelude remains
@@ -185,12 +189,14 @@ start transaction and remains the first owner that may combine the plan and cont
 ### Product plugin groups
 
 `MinimalPlugins`, `HeadlessRuntimePlugins`, and `ServerPlugins` remain runtime-policy groups under
-`runtime-core`. `ServerPlugins` never installs raw input even though the binary may compile input.
+`runtime-core`. `MinimalPlugins` adds Input when compiled. `HeadlessRuntimePlugins` installs
+the original command owner and adds the local action adapter when compiled. `ServerPlugins`
+installs the command owner without either client service.
 
 `Runtime2dPlugins` owns transform/render/image/material/sprite/tilemap product composition and no
-runtime UI. A separate runtime-UI group owns runtime UI authoring and submission. Desktop winit,
-wgpu, and egui groups are additive adapter groups available only under their corresponding compiled
-capability. The fixed `DesktopWgpuPlugins` product bundle is removed; project capability
+runtime UI. A separate runtime-UI group owns runtime UI authoring and submission. Desktop Winit
+and WGPU groups are additive adapters available under their corresponding compiled capabilities.
+The fixed `DesktopWgpuPlugins` product bundle is removed. Project capability
 normalization composes the same pieces without hiding their closure.
 
 When a minimal project requests 2D or runtime UI, that product group supplies the shared
@@ -297,13 +303,13 @@ feature-combination test matrix.
 | Metric | Target | Measurement |
 |---|---|---|
 | No-default ceiling | No engine product-domain dependency is activated | `cargo tree` and no-default check |
-| Default ceiling | Only the declared `runtime-core` closure is active; no image/render/sprite/tilemap/UI/tooling/watch/platform adapter/audio crate | Dependency-tree assertion |
+| Default ceiling | The declared core, Input and Window closure is active, with no image/render/sprite/tilemap/UI/tooling/watch/platform adapter/audio crate | Dependency-tree assertion |
 | Weak serde | Serde alone activates no product capability; enabled domains serialize when combined | Feature-matrix checks |
 | Product combinations | Every single coarse feature, named product combination, and all-features build compiles | Local and hosted Cargo matrix |
 | Pre-mutation rejection | Missing compiled capability leaves resources, plugins, groups, schedules, and lifecycle unchanged | Composition integration test |
 | Product request closure | A resolved plan requiring an unrequested product capability is rejected before mutation and a later valid request succeeds | Composition integration test |
 | Plugin service closure | A missing service requirement or declared conflict is rejected before mutation and a later valid plan succeeds | Plugin-plan integration test |
-| Server isolation | Server installs no raw-input/window/render/tooling/backend resources even when those crates were compiled | Plugin/resource inspection test |
+| Server isolation | The dedicated executable excludes Input and Window compilation. The Server group excludes raw-input/window/render/tooling/backend resources in a client-capable executable | Locked build graph, delivery and installed-resource test |
 | Submitter isolation | Base wgpu does not compile sprite/UI submitters; 2D and UI enable only their own submitter closure | Feature-tree checks |
 | Placeholder retirement | Active workspace, facade, prelude, and lockfile contain no `nara_audio` | Stale-symbol search |
 | Crate admission | Every new workspace crate names a real consumer and at least two admission benefits | Architecture review |
@@ -323,8 +329,7 @@ feature-combination test matrix.
 
 ## Consequences
 
-- `default` means the runtime-core product rather than an empty feature list over a broad mandatory
-  graph.
+- `default` selects the local runtime foundation with Input and Window available to callers.
 - Hosts can compile a superset while projects and plugin groups install a strict subset.
 - Capability mismatch becomes retryable pre-mutation setup failure instead of partial app state.
 - Runtime 2D, runtime UI, platform adapters, and backend submitters become independently

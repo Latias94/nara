@@ -25,7 +25,7 @@ windows-sys = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
-nara_gameplay.workspace = true
+nara_gameplay = { workspace = true, features = ["input"] }
 nara_text.workspace = true
 raw-window-handle.workspace = true
 

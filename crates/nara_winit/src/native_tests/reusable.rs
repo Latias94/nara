@@ -429,6 +429,7 @@ fn native_keyboard_session(
     app.add_plugin(nara_input::InputPlugin).unwrap();
     app.add_plugin(nara_gameplay::GameplayCommandPlugin::default())
         .unwrap();
+    app.add_plugin(nara_gameplay::GameplayActionPlugin).unwrap();
     let mut map = ActionMapBuilder::new(ActionMapLimits::default());
     map.declare_context(binding.context.clone(), true).unwrap();
     map.bind(ActionBinding::key(binding.action.clone(), binding.key))

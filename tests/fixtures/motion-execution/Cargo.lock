@@ -1023,7 +1023,6 @@ dependencies = [
  "nara_core",
  "nara_ecs",
  "nara_identity",
- "nara_input",
  "thiserror",
 ]
 
@@ -1047,16 +1046,6 @@ dependencies = [
  "serde",
  "thiserror",
  "uuid",
-]
-
-[[package]]
-name = "nara_input"
-version = "0.1.0"
-dependencies = [
- "bevy_ecs",
- "nara_app",
- "nara_core",
- "nara_ecs",
 ]
 
 [[package]]

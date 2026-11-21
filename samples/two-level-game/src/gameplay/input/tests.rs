@@ -4,8 +4,8 @@ use nara::{
     app::RuntimeInstance,
     core::ByteLimit,
     gameplay::{
-        GameplayCommandPayload, GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandTypeId,
-        GameplayCommandValue,
+        GameplayActionPlugin, GameplayCommandPayload, GameplayCommandPlugin, GameplayCommandQueue,
+        GameplayCommandTypeId, GameplayCommandValue,
     },
     input::{
         ActionBinding, ActionContextDefinition, ActionMap, ActionMapFileCandidate,
@@ -368,6 +368,7 @@ fn multiple_keyboard_sources_start_and_drive_gameplay_but_refuse_exact_capture()
     let mut app = App::new();
     app.add_plugin(InputPlugin).unwrap();
     app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+    app.add_plugin(GameplayActionPlugin).unwrap();
     app.insert_resource(ActionMaps::new(map_from_candidate(candidate)))
         .unwrap();
     GameInputPlugin.build(&mut app).unwrap();

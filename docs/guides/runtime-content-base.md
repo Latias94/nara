@@ -1,7 +1,7 @@
 # Verified Runtime Content Bases
 
 The root `runtime_content` module provides bounded immutable local content capture and concrete
-typed acquisition. It is available with `runtime-2d,serde`. A base contains processed Scene and
+typed acquisition. It is available with `runtime-core,serde`. A base contains processed Scene and
 resource members plus `catalog.json`; opening it does not read `nara.toml`, source sidecars,
 an authoring Schema bundle or an import cache.
 
@@ -10,6 +10,11 @@ source-backed entries. The Editor retains its source authoring workflow. Base ca
 cook a target, select Cargo artifacts or qualify a complete packaged Player. First-party native
 residency supports the explicitly selected Image and TileSet facets; other families expose typed
 CPU collections and keep concrete native publication with their consuming owner.
+
+A dedicated executable can disable default features and use `runtime-core,serde` without linking
+Input or Window crates. It uses the same command queue, Scene request and residency APIs as the
+local Player. A selected startup action map requires `runtime-input` and the actual Input and
+codec owners in executable composition.
 
 Reference demand and deep validation have
 [bounded production qualification](../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md)
@@ -30,7 +35,7 @@ native/platform or performance qualification.
 | `RuntimeContentBase` | Admitted immutable content meaning, exact encoded backing and original configuration plan |
 | `RuntimeContentAsset<P>` / `RuntimeContentScene` | Admitted decoded output retaining its base and reservation |
 | `RuntimeContentValidationReport` | Catalog digest and counts from strict mandatory payload validation |
-| `RuntimeInputContent` | Global startup definition retaining its actual typed acquisition independently of Scene collections |
+| `RuntimeInputContent` | Global startup definition retaining its actual typed acquisition independently of Scene collections, with `runtime-input` selected |
 | Native handle and residency | Separately admitted and published state in a receiving Runtime |
 
 The Host supplies `RuntimeContentExpectation` with the expected catalog digest and target/profile.

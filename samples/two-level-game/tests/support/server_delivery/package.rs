@@ -22,6 +22,10 @@ use crate::cooked_delivery::{
 
 use super::CONTENT_PROFILE;
 
+#[cfg(feature = "local-player")]
+#[path = "../../../src/bin/server/client_services.rs"]
+mod client_services;
+
 const PACK: &str = "content.pack";
 const MANIFEST: &str = "package.json";
 const BOOTSTRAP: &str = "player-bootstrap.rs";
@@ -123,6 +127,8 @@ pub(super) fn inspect(
     let player = PlayerSelection::from_content_profile(CONTENT_PROFILE).unwrap();
     let base = open(&directory.join(PACK), &expectation, player).unwrap();
     assert_scene_closure(&base);
+    #[cfg(feature = "local-player")]
+    assert_client_services_absent(base);
     Package {
         executable: executable.to_owned(),
         executable_digest,
@@ -132,6 +138,133 @@ pub(super) fn inspect(
         expectation,
         player,
     }
+}
+
+#[cfg(feature = "local-player")]
+fn assert_client_services_absent(base: RuntimeContentBase) {
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
+        time::{Duration, Instant},
+    };
+
+    use nara::{
+        gameplay::{
+            GameplayCommandIngressSource, GameplayCommandQueue, GameplayCommandSourceSequence,
+            GameplayCommandSubmission, GameplayCommandTick,
+        },
+        project_host::{HeadlessSession, HeadlessSessionClose},
+    };
+    use two_level_game::{
+        GamePhase, GameSnapshot, SideRoomPhase,
+        command::{SERVER_COMMAND_SOURCE, SemanticCommand, ServerCommand},
+        levels::LevelKey,
+    };
+
+    let timestep = base.plan().settings().runtime().fixed_time().timestep();
+    let mut session = HeadlessSession::from_runtime_content(base);
+    let exercise = catch_unwind(AssertUnwindSafe(|| {
+        session
+            .start()
+            .expect("Server pack starts with local-player types compiled");
+        let frame = |session: &mut HeadlessSession, delta| {
+            assert_eq!(session.frame(delta).unwrap(), None);
+            session
+                .observe(|world| {
+                    let snapshot = world.resource::<GameSnapshot>();
+                    assert_eq!(
+                        client_services::verify_absent(world),
+                        Ok(()),
+                        "{snapshot:?}"
+                    );
+                    assert!(snapshot.error.is_none(), "{snapshot:?}");
+                    snapshot.clone()
+                })
+                .unwrap()
+        };
+        let startup = frame(&mut session, Duration::ZERO);
+        assert!(startup.initialized && startup.current_instance.is_some());
+        assert_eq!(startup.tick, 0);
+        assert_eq!(startup.phase, GamePhase::Running);
+        assert_eq!(startup.level, Some(LevelKey::main(LevelId::Meadow)));
+        assert_eq!(startup.side_room, SideRoomPhase::Closed);
+        assert_eq!(startup.lookout, SideRoomPhase::Closed);
+
+        let source = GameplayCommandIngressSource::external(SERVER_COMMAND_SOURCE).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut sequence = 0;
+        let mut submit_and_wait =
+            |command: ServerCommand,
+             previous: &GameSnapshot,
+             reached: fn(&GameSnapshot) -> bool| {
+                sequence += 1;
+                let submission = GameplayCommandSubmission::new(
+                    GameplayCommandTick::new(previous.tick + 1).unwrap(),
+                    source.clone(),
+                    GameplayCommandSourceSequence::new(sequence).unwrap(),
+                    command.into_draft().unwrap(),
+                );
+                let key = submission.key();
+                assert_eq!(session.submit(submission).unwrap(), key);
+                loop {
+                    let snapshot = frame(&mut session, timestep);
+                    if reached(&snapshot) {
+                        return snapshot;
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "Server did not settle command {key:?}: {snapshot:?}"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            };
+        let side_room = submit_and_wait(ServerCommand::SideRoom, &startup, |snapshot| {
+            snapshot.side_room == SideRoomPhase::Open
+        });
+        assert_eq!(side_room.current_instance, startup.current_instance);
+        let both_rooms = submit_and_wait(ServerCommand::Lookout, &side_room, |snapshot| {
+            snapshot.lookout == SideRoomPhase::Open
+        });
+        assert_eq!(both_rooms.current_instance, startup.current_instance);
+        assert_eq!(both_rooms.side_room, SideRoomPhase::Open);
+        let travelled = submit_and_wait(
+            ServerCommand::Gameplay(SemanticCommand::Travel),
+            &both_rooms,
+            |snapshot| {
+                snapshot.phase == GamePhase::Running
+                    && snapshot.level == Some(LevelKey::main(LevelId::Cavern))
+            },
+        );
+        assert!(travelled.current_instance.is_some());
+        assert_ne!(travelled.current_instance, startup.current_instance);
+        assert_eq!(travelled.travel_count, 1);
+        assert_eq!(travelled.side_room, SideRoomPhase::Closed);
+        assert_eq!(travelled.lookout, SideRoomPhase::Closed);
+        let queue = session
+            .observe(|world| world.resource::<GameplayCommandQueue>().stats())
+            .unwrap();
+        assert_eq!(queue.acknowledged, 3);
+        assert_eq!(queue.rejected, 0);
+        assert_eq!(queue.retained_commands, 0);
+    }));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let closed = loop {
+        match session.close() {
+            HeadlessSessionClose::Pending if Instant::now() < deadline => std::thread::yield_now(),
+            outcome => break outcome,
+        }
+    };
+    assert_eq!(
+        closed,
+        HeadlessSessionClose::Complete,
+        "{:?}",
+        session.diagnostics()
+    );
+    if let Err(panic) = exercise {
+        resume_unwind(panic);
+    }
+    println!(
+        "TWO_LEVEL_SERVER_CLIENT_SERVICES local_player=true services_absent=true regions=open travel=committed"
+    );
 }
 
 fn assert_scene_closure(base: &RuntimeContentBase) {

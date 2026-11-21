@@ -67,7 +67,7 @@ impl SemanticCommand {
     }
 
     /// Decodes only exact game commands, with no target or unrepresented payload fields.
-    #[cfg(feature = "development")]
+    #[cfg(any(feature = "development", test))]
     pub(crate) fn from_envelope(envelope: &GameplayCommandEnvelope) -> Result<Self, String> {
         if envelope.command_type().as_str() == commands::MOVE {
             let (direction, pressed) = decode_movement(envelope)?;

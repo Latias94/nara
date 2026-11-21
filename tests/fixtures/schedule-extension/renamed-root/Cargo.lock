@@ -659,13 +659,11 @@ dependencies = [
  "nara_gameplay",
  "nara_hierarchy",
  "nara_identity",
- "nara_input",
  "nara_project",
  "nara_reflect",
  "nara_scene",
  "nara_tasks",
  "nara_transform",
- "nara_window",
  "rustix",
  "thiserror",
  "windows-sys",
@@ -757,7 +755,6 @@ dependencies = [
  "nara_core",
  "nara_ecs",
  "nara_identity",
- "nara_input",
  "thiserror",
 ]
 
@@ -784,16 +781,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nara_input"
-version = "0.1.0"
-dependencies = [
- "bevy_ecs",
- "nara_app",
- "nara_core",
- "nara_ecs",
-]
-
-[[package]]
 name = "nara_project"
 version = "0.1.0"
 dependencies = [
@@ -803,7 +790,6 @@ dependencies = [
  "nara_diagnostic",
  "nara_ecs",
  "nara_tasks",
- "nara_window",
  "serde",
  "thiserror",
  "toml",
@@ -872,17 +858,6 @@ dependencies = [
  "nara_ecs",
  "nara_hierarchy",
  "nara_reflect",
- "thiserror",
-]
-
-[[package]]
-name = "nara_window"
-version = "0.1.0"
-dependencies = [
- "bevy_ecs",
- "nara_app",
- "nara_ecs",
- "raw-window-handle",
  "thiserror",
 ]
 

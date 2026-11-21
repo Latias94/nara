@@ -1,11 +1,13 @@
+#![cfg(feature = "input")]
+
 use nara_app::{App, CoreStage, FixedTime, RuntimeInstance};
 use nara_core::ByteLimit;
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_gameplay::{
-    ActionCommandBinding, ActionCommandMap, ActionCommandMapError, GameplayCommandBatch,
-    GameplayCommandDraft, GameplayCommandEnvelope, GameplayCommandPayload, GameplayCommandPlugin,
-    GameplayCommandQueue, GameplayCommandSet, GameplayCommandSource, GameplayCommandTarget,
-    GameplayCommandTypeId, GameplayCommandValue, RuntimeEntityReference,
+    ActionCommandBinding, ActionCommandMap, ActionCommandMapError, GameplayActionPlugin,
+    GameplayCommandBatch, GameplayCommandDraft, GameplayCommandEnvelope, GameplayCommandPayload,
+    GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandSet, GameplayCommandSource,
+    GameplayCommandTarget, GameplayCommandTypeId, GameplayCommandValue, RuntimeEntityReference,
 };
 use nara_identity::{
     PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
@@ -230,6 +232,7 @@ fn complete_drafts_dispatch_in_binding_order_with_the_original_seat_context_and_
     app.add_plugin(GameplayCommandPlugin::default()).unwrap();
     app.insert_resource(maps).unwrap();
     app.insert_resource(commands).unwrap();
+    app.add_plugin(GameplayActionPlugin).unwrap();
     app.insert_resource(Dispatched::default()).unwrap();
     app.add_systems(
         CoreStage::FixedUpdate,

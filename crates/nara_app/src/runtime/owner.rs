@@ -19,6 +19,7 @@ use nara_ecs::{
 };
 
 use crate::{
+    __private::{FrameIntent, FrameIntentSet},
     AppExitRequests, CoreStage, FixedTime, FixedUpdateSet, InstalledPlugin,
     InstalledRuntimeAuthorityValidator, PluginFailureReport, PluginHook, PluginId,
     PluginLifecycleState, PluginShutdownError, RealTime, RenderTime, RuntimeFrameStatus,
@@ -243,7 +244,7 @@ impl RuntimeOwnerState {
             .map(|stage| stage.intern())
             .chain(CoreStage::ALL.into_iter().map(|stage| stage.intern()))
             .chain([
-                crate::__private::FrameIntent.intern(),
+                FrameIntent.intern(),
                 crate::__private::FrameCleanup.intern(),
             ])
         {
@@ -262,6 +263,10 @@ impl RuntimeOwnerState {
                 )
                     .chain(),
             );
+        schedules
+            .get_mut(FrameIntent)
+            .expect("the frame-intent schedule is created above")
+            .configure_sets((FrameIntentSet::Prepare, FrameIntentSet::Collect).chain());
 
         Self {
             _thread_affinity: PhantomData,

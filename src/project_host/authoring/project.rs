@@ -2290,9 +2290,14 @@ pub(crate) enum AuthoringProjectSourceAdmissionError {
         path: ProjectPath,
         source: SceneFormatError,
     },
+    #[cfg(feature = "runtime-input")]
     InputFormat {
         path: ProjectPath,
         source: nara_input::ActionMapFileError,
+    },
+    #[cfg(not(feature = "runtime-input"))]
+    InputOwnerUnavailable {
+        path: ProjectPath,
     },
     IntrinsicSourceMetadataMismatch {
         path: AssetSourcePath,
@@ -2404,8 +2409,16 @@ impl Display for AuthoringProjectSourceAdmissionError {
             Self::SourceFormat { kind, path, .. } => {
                 write!(formatter, "{kind} source '{path}' is invalid")
             }
+            #[cfg(feature = "runtime-input")]
             Self::InputFormat { path, .. } => {
                 write!(formatter, "Input action-map source '{path}' is invalid")
+            }
+            #[cfg(not(feature = "runtime-input"))]
+            Self::InputOwnerUnavailable { path } => {
+                write!(
+                    formatter,
+                    "Input action-map source '{path}' requires runtime-input"
+                )
             }
             Self::IntrinsicSourceMetadataMismatch { path } => write!(
                 formatter,
@@ -2470,7 +2483,10 @@ impl Error for AuthoringProjectSourceAdmissionError {
             }
             Self::JoinedSourcePath(source) => Some(source),
             Self::SourceFormat { source, .. } => Some(source),
+            #[cfg(feature = "runtime-input")]
             Self::InputFormat { source, .. } => Some(source),
+            #[cfg(not(feature = "runtime-input"))]
+            Self::InputOwnerUnavailable { .. } => None,
             Self::SourceStructure { source, .. } => Some(source),
             Self::DocumentSourcePath { source, .. } => Some(source),
             Self::SourcePublication { source, .. } => Some(source),

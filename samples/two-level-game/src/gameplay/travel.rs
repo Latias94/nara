@@ -569,5 +569,8 @@ fn cancel_ack(world: &mut World, request: ProjectSceneRequestId) {
     });
 }
 
+#[cfg(test)]
+#[path = "travel/tests/admission.rs"]
+mod admission_tests;
 #[cfg(all(test, feature = "local-player"))]
 mod tests;

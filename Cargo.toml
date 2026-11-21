@@ -230,7 +230,7 @@ yaml-rust2.workspace = true
 [features]
 editor-work-observation = ["dep:tracing", "nara_scene?/work-observation"]
 scene-work-observation = ["dep:tracing", "nara_scene?/work-observation"]
-default = ["runtime-core"]
+default = ["runtime-core", "runtime-input", "runtime-window"]
 parallel-executor = ["runtime-core", "nara_app/parallel-executor"]
 runtime-core = [
     "dep:blake3",
@@ -245,17 +245,18 @@ runtime-core = [
     "dep:nara_gameplay",
     "dep:nara_hierarchy",
     "dep:nara_identity",
-    "dep:nara_input",
     "dep:nara_project",
     "dep:nara_reflect",
     "dep:nara_scene",
     "dep:nara_tasks",
     "dep:nara_transform",
-    "dep:nara_window",
     "dep:thiserror",
 ]
+runtime-input = ["runtime-core", "dep:nara_input", "nara_gameplay/input"]
+runtime-window = ["runtime-core", "dep:nara_window"]
 runtime-2d = [
-    "runtime-core",
+    "runtime-input",
+    "runtime-window",
     "dep:nara_image",
     "dep:nara_material",
     "nara_material/material",
@@ -270,7 +271,8 @@ presentation-2d = [
     "nara_render_wgpu?/stock-sprite",
 ]
 runtime-ui = [
-    "runtime-core",
+    "runtime-input",
+    "runtime-window",
     "dep:nara_ui",
 ]
 presentation-ui = [
@@ -284,8 +286,8 @@ presentation-ui = [
 ]
 tooling = ["runtime-core", "dep:nara_tooling", "dep:getrandom"]
 asset-watch = ["runtime-core", "dep:nara_asset_watch"]
-desktop-winit = ["runtime-core", "dep:nara_winit"]
-render-wgpu = ["runtime-core", "dep:nara_render", "dep:nara_render_wgpu"]
+desktop-winit = ["runtime-input", "runtime-window", "dep:nara_winit"]
+render-wgpu = ["runtime-window", "dep:nara_render", "dep:nara_render_wgpu"]
 serde = [
     "dep:serde",
     "dep:serde_json",

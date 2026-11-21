@@ -917,7 +917,8 @@ impl Plugin for InputPlugin {
                 InputSet::StageActions,
                 InputSet::ResolveActions,
             )
-                .chain(),
+                .chain()
+                .in_set(nara_app::__private::FrameIntentSet::Prepare),
         )?
         .add_systems(
             CoreStage::First,

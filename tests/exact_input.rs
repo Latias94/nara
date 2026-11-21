@@ -1,23 +1,27 @@
 #![cfg(feature = "runtime-core")]
 
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+#[cfg(feature = "runtime-input")]
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use nara::{
     app::{
         App, CoreStage, FixedTime, RealTime, RuntimeControl, RuntimeControlRequestResult,
-        RuntimeControlStatus, RuntimeDriverScope, RuntimeFrameKind, RuntimeInstance, RuntimeState,
-        RuntimeTimeSettings,
+        RuntimeControlStatus, RuntimeFrameKind, RuntimeInstance, RuntimeState,
     },
-    core::ByteLimit,
     ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs},
     gameplay::{
-        ActionCommandBinding, ActionCommandMap, GameplayCommandBatch, GameplayCommandDraft,
-        GameplayCommandEnvelope, GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandSet,
-        GameplayCommandSource, GameplayCommandTypeId, LocalGameplayCommands,
+        GameplayCommandBatch, GameplayCommandDraft, GameplayCommandEnvelope, GameplayCommandPlugin,
+        GameplayCommandQueue, GameplayCommandSet, GameplayCommandSource, GameplayCommandTypeId,
+        LocalGameplayCommands,
     },
+};
+
+#[cfg(feature = "runtime-input")]
+use nara::{
+    app::{RuntimeDriverScope, RuntimeTimeSettings},
+    core::ByteLimit,
+    gameplay::{ActionCommandBinding, ActionCommandMap, GameplayActionPlugin},
     input::{
         __private::claim_input_endpoint, ActionBinding, ActionContext, ActionId, ActionMap,
         ActionMapBuilder, ActionMapLimits, ActionMaps, ActionOutcomes, ActionPhase,
@@ -29,8 +33,11 @@ use nara::{
     },
 };
 
+#[cfg(feature = "runtime-input")]
 const WINDOW: InputWindowId = InputWindowId::new(1);
+#[cfg(feature = "runtime-input")]
 const SEAT: InputSeatId = InputSeatId::PRIMARY;
+#[cfg(feature = "runtime-input")]
 const KEY: KeyCode = KeyCode::Character('d');
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
@@ -43,6 +50,7 @@ struct Motion {
 struct TickSample {
     tick: u64,
     commands: Vec<GameplayCommandEnvelope>,
+    #[cfg(feature = "runtime-input")]
     semantic: Vec<SemanticActionOutcome>,
     motion: Motion,
 }
@@ -54,9 +62,11 @@ struct Trace {
     pre_updates: usize,
 }
 
+#[cfg(feature = "runtime-input")]
 #[derive(Debug, Default, Clone, Resource)]
 struct ContextChanges(Arc<Mutex<Option<bool>>>);
 
+#[cfg(feature = "runtime-input")]
 fn binding() -> KeyboardActionBinding {
     KeyboardActionBinding {
         key: KEY,
@@ -72,13 +82,14 @@ fn draft(name: &str) -> GameplayCommandDraft {
 fn sample_tick(
     time: &FixedTime,
     batch: &GameplayCommandBatch,
-    semantic: Option<&SemanticActions>,
+    #[cfg(feature = "runtime-input")] semantic: Option<&SemanticActions>,
     motion: Motion,
 ) -> TickSample {
     assert_eq!(batch.active_tick().unwrap().get(), time.tick());
     TickSample {
         tick: time.tick(),
         commands: batch.commands().to_vec(),
+        #[cfg(feature = "runtime-input")]
         semantic: semantic.map_or_else(Vec::new, |actions| actions.as_slice().to_vec()),
         motion,
     }
@@ -87,7 +98,7 @@ fn sample_tick(
 fn consume_commands(
     time: Res<FixedTime>,
     batch: Res<GameplayCommandBatch>,
-    semantic: Option<Res<SemanticActions>>,
+    #[cfg(feature = "runtime-input")] semantic: Option<Res<SemanticActions>>,
     mut motion: ResMut<Motion>,
     mut trace: ResMut<Trace>,
 ) {
@@ -102,29 +113,38 @@ fn consume_commands(
     if motion.moving {
         motion.position += 1;
     }
-    trace
-        .consumed
-        .push(sample_tick(&time, &batch, semantic.as_deref(), *motion));
+    trace.consumed.push(sample_tick(
+        &time,
+        &batch,
+        #[cfg(feature = "runtime-input")]
+        semantic.as_deref(),
+        *motion,
+    ));
 }
 
 fn capture_commands(
     time: Res<FixedTime>,
     batch: Res<GameplayCommandBatch>,
     queue: Res<GameplayCommandQueue>,
-    semantic: Option<Res<SemanticActions>>,
+    #[cfg(feature = "runtime-input")] semantic: Option<Res<SemanticActions>>,
     motion: Res<Motion>,
     mut trace: ResMut<Trace>,
 ) {
     assert_eq!(queue.stats().acknowledged_through_tick, time.tick() - 1);
-    trace
-        .captured
-        .push(sample_tick(&time, &batch, semantic.as_deref(), *motion));
+    trace.captured.push(sample_tick(
+        &time,
+        &batch,
+        #[cfg(feature = "runtime-input")]
+        semantic.as_deref(),
+        *motion,
+    ));
 }
 
 fn observe_pre_update(mut trace: ResMut<Trace>) {
     trace.pre_updates += 1;
 }
 
+#[cfg(feature = "runtime-input")]
 fn apply_context_change(changes: Res<ContextChanges>, mut maps: ResMut<ActionMaps>) {
     let Some(enabled) = changes.0.lock().unwrap().take() else {
         return;
@@ -159,6 +179,7 @@ fn install_gameplay(app: &mut App, moving: bool) {
     .unwrap();
 }
 
+#[cfg(feature = "runtime-input")]
 fn driver<T>(
     runtime: &mut RuntimeInstance,
     operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> T,
@@ -168,6 +189,7 @@ fn driver<T>(
     outcome.output
 }
 
+#[cfg(feature = "runtime-input")]
 fn keyboard(runtime: &mut RuntimeInstance, input: ButtonDriverInput<KeyCode>) {
     driver(runtime, |scope| {
         apply_keyboard_driver_input_at(scope, WINDOW, SEAT, input)
@@ -175,6 +197,7 @@ fn keyboard(runtime: &mut RuntimeInstance, input: ButtonDriverInput<KeyCode>) {
     .unwrap();
 }
 
+#[cfg(feature = "runtime-input")]
 fn paused_frame(runtime: &mut RuntimeInstance) {
     let tick = runtime.world().resource::<FixedTime>().tick();
     let outcome = runtime.drive(Duration::ZERO).unwrap();
@@ -222,6 +245,7 @@ fn exact_tick(runtime: &mut RuntimeInstance) {
     assert!(runtime.fault().is_none());
 }
 
+#[cfg(feature = "runtime-input")]
 fn input_runtime(moving: bool) -> RuntimeInstance {
     let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
     builder
@@ -245,6 +269,15 @@ fn input_runtime(moving: bool) -> RuntimeInstance {
     app.insert_resource(ActionMaps::new(map)).unwrap();
     app.add_plugin(InputPlugin).unwrap();
     install_gameplay(&mut app, moving);
+    app.add_plugin(GameplayActionPlugin).unwrap();
+    app.set_schedule_build_settings(
+        nara::app::__private::FrameIntent,
+        nara::ecs::bevy_ecs::schedule::ScheduleBuildSettings {
+            ambiguity_detection: nara::ecs::bevy_ecs::schedule::LogLevel::Error,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     app.init_resource::<ContextChanges>().unwrap();
     app.add_systems(
         CoreStage::First,
@@ -275,6 +308,7 @@ fn input_runtime(moving: bool) -> RuntimeInstance {
     runtime
 }
 
+#[cfg(feature = "runtime-input")]
 fn restore_movement(runtime: &mut RuntimeInstance) {
     let claim =
         claim_input_endpoint(runtime.world().resource::<InputTimeline>(), WINDOW, SEAT).unwrap();
@@ -358,6 +392,7 @@ fn assert_local_command(sample: &TickSample, command_type: &str, sequence: u64) 
     assert_eq!(command.source_sequence().get(), sequence);
 }
 
+#[cfg(feature = "runtime-input")]
 fn release_before_exact_tick(staged: bool, focus_loss: bool) {
     let mut runtime = input_runtime(true);
     restore_movement(&mut runtime);
@@ -432,6 +467,7 @@ fn release_before_exact_tick(staged: bool, focus_loss: bool) {
     runtime.finish().unwrap();
 }
 
+#[cfg(feature = "runtime-input")]
 #[test]
 fn staged_release_and_focus_loss_stop_restored_motion_before_exact_tick() {
     for focus_loss in [false, true] {
@@ -439,11 +475,13 @@ fn staged_release_and_focus_loss_stop_restored_motion_before_exact_tick() {
     }
 }
 
+#[cfg(feature = "runtime-input")]
 #[test]
 fn unscanned_release_stops_restored_motion_before_exact_tick() {
     release_before_exact_tick(false, false);
 }
 
+#[cfg(feature = "runtime-input")]
 #[test]
 fn ordinary_press_lowers_once_and_keeps_outcomes_across_three_fixed_ticks() {
     let mut runtime = input_runtime(false);
@@ -483,6 +521,7 @@ fn ordinary_press_lowers_once_and_keeps_outcomes_across_three_fixed_ticks() {
     runtime.finish().unwrap();
 }
 
+#[cfg(feature = "runtime-input")]
 #[test]
 fn late_fixed_press_uses_next_first_mapping_without_premature_staging() {
     fn admit_after_first_consume(time: Res<FixedTime>, mut timeline: ResMut<InputTimeline>) {
@@ -514,6 +553,7 @@ fn late_fixed_press_uses_next_first_mapping_without_premature_staging() {
     app.insert_resource(ActionMaps::default()).unwrap();
     app.add_plugin(InputPlugin).unwrap();
     install_gameplay(&mut app, false);
+    app.add_plugin(GameplayActionPlugin).unwrap();
     for (phase, command) in [
         (ActionPhase::Started, "player.move"),
         (ActionPhase::Released, "player.stop"),
@@ -612,6 +652,7 @@ fn late_fixed_press_uses_next_first_mapping_without_premature_staging() {
     runtime.finish().unwrap();
 }
 
+#[cfg(feature = "runtime-input")]
 #[test]
 fn context_cancellation_uses_the_original_release_command_before_exact_movement() {
     let mut runtime = input_runtime(true);

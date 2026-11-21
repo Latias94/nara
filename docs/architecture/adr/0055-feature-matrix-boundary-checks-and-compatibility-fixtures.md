@@ -19,7 +19,7 @@ nara keeps CI setup optional for now, but defines a CI-ready local verification 
 flowchart TD
     Local[Local verification] --> Matrix[Feature matrix]
     Matrix --> Empty[no default features]
-    Matrix --> Default[default runtime-core]
+    Matrix --> Default[default local runtime]
     Matrix --> Singles[each coarse product capability]
     Matrix --> Serde[weak serde alone and combined]
     Matrix --> Products[named product combinations]
@@ -39,9 +39,10 @@ Rules:
   all-features, desktop-winit/render-wgpu examples, backend dependency boundary searches, and
   persistent-format fixture tests.
 - The matrix asserts dependency membership as well as successful compilation: no-default activates
-  no product domain, default activates only `runtime-core`, runtime UI excludes sprite/tilemap,
-  base wgpu excludes sprite/UI submitters, and server installation remains stricter than compiled
-  input support.
+  no product domain, default activates core, Input and Window, runtime UI excludes sprite/tilemap,
+  and base wgpu excludes sprite/UI submitters. The dedicated Server's `runtime-core,serde` graph
+  excludes Input and Window. A client-capable build still verifies installed Server services
+  independently.
 - Boundary searches cover `wgpu`, `winit`, `egui`, `notify`, and future backend-only dependencies.
 - Persistent format fixtures are part of compatibility testing and belong to ADR 0051's envelope/migration policy.
 - CI should be introduced when the project starts accepting external contributions, when release artifacts exist, or when local verification drift becomes common.

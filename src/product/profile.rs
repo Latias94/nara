@@ -27,6 +27,7 @@ pub(crate) struct ProjectProfilePlugins {
     capabilities: ProductCapabilitySet,
     task_config: nara_tasks::TaskPoolConfig,
     time_definition: PluginDefinition,
+    #[cfg(feature = "desktop-winit")]
     primary_window: Option<nara_window::Window>,
     #[cfg(any(
         feature = "presentation-2d",
@@ -70,7 +71,8 @@ impl ProjectProfilePlugins {
             capabilities,
             task_config: settings.tasks().pool_config,
             time_definition: super::runtime_time::definition(settings.runtime()),
-            primary_window: settings.window().to_window(),
+            #[cfg(feature = "desktop-winit")]
+            primary_window: window_from_settings(settings.window()),
             #[cfg(any(
                 feature = "presentation-2d",
                 feature = "presentation-ui",
@@ -94,7 +96,6 @@ impl PluginGroup for ProjectProfilePlugins {
     const ID: PluginGroupId = PluginGroupId::new("nara.plugins.project-runtime");
 
     fn build(self) -> PluginGroupBuilder {
-        let _ = &self.primary_window;
         let task_plugin = match self.placement {
             ProjectProfilePlacement::Shipping => nara_tasks::plugin(self.task_config),
             ProjectProfilePlacement::EditorPlay => nara_tasks::lazy_plugin(self.task_config),
@@ -233,6 +234,37 @@ impl PluginGroup for ProjectProfilePlugins {
             PluginDefinition::for_default::<crate::startup_scene::StartupSceneActivationPlugin>(),
         )
     }
+}
+
+/// Lowers the admitted project window settings for a runtime window plugin.
+#[cfg(feature = "runtime-window")]
+#[must_use]
+pub fn window_from_settings(
+    settings: &nara_project::EffectiveWindowSettings,
+) -> Option<nara_window::Window> {
+    use nara_project::{ProjectPresentMode, ProjectWindowMode};
+    use nara_window::{PresentMode, Window, WindowMode, WindowResolution};
+
+    if !settings.enabled {
+        return None;
+    }
+    let resolution = WindowResolution::new(settings.width, settings.height)
+        .with_scale_factor(settings.scale_factor);
+    let mut window = Window::new(settings.title.clone(), resolution);
+    window.mode = match settings.mode {
+        ProjectWindowMode::Windowed => WindowMode::Windowed,
+        ProjectWindowMode::BorderlessFullscreen => WindowMode::BorderlessFullscreen,
+        ProjectWindowMode::Fullscreen => WindowMode::Fullscreen,
+    };
+    window.present_mode = match settings.present_mode {
+        ProjectPresentMode::AutoVsync => PresentMode::AutoVsync,
+        ProjectPresentMode::AutoNoVsync => PresentMode::AutoNoVsync,
+        ProjectPresentMode::Fifo => PresentMode::Fifo,
+        ProjectPresentMode::Immediate => PresentMode::Immediate,
+        ProjectPresentMode::Mailbox => PresentMode::Mailbox,
+    };
+    window.resizable = settings.resizable;
+    Some(window)
 }
 
 fn add_product_contributions(

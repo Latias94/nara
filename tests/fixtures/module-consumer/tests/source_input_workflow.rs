@@ -108,6 +108,7 @@ impl Plugin for ConsumerPlugin {
         .requires_plugins(&[
             nara_engine::input::INPUT_PLUGIN_ID,
             nara_engine::gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
+            nara_engine::gameplay::GAMEPLAY_ACTION_PLUGIN_ID,
         ]);
         &DECLARATION
     }

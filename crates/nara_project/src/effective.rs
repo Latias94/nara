@@ -3,7 +3,6 @@ use nara_core::SourceUniverseId;
 use nara_diagnostic::RuntimeDiagnosticsSettings;
 use nara_ecs::Resource;
 use nara_tasks::TaskPoolConfig;
-use nara_window::{PresentMode, Window, WindowMode, WindowResolution};
 
 use crate::authoring::ProjectAuthoringState;
 use crate::capability::{ProductCapabilitySet, RuntimePreset};
@@ -13,8 +12,9 @@ use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
 use crate::render::EffectiveRenderSettings;
 use crate::sections::{
-    NativeDocumentIdentity, ProjectPathsManifest, ProjectProfileKind, ProjectStartupManifest,
-    ProjectUiManifest, ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest,
+    NativeDocumentIdentity, ProjectPathsManifest, ProjectPresentMode, ProjectProfileKind,
+    ProjectStartupManifest, ProjectUiManifest, ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest,
+    ProjectWindowMode,
 };
 
 #[derive(Debug, Clone, PartialEq, Resource)]
@@ -299,26 +299,9 @@ pub struct EffectiveWindowSettings {
     pub width: u32,
     pub height: u32,
     pub scale_factor: f64,
-    pub mode: WindowMode,
-    pub present_mode: PresentMode,
+    pub mode: ProjectWindowMode,
+    pub present_mode: ProjectPresentMode,
     pub resizable: bool,
-}
-
-impl EffectiveWindowSettings {
-    #[must_use]
-    pub fn to_window(&self) -> Option<Window> {
-        if !self.enabled {
-            return None;
-        }
-
-        let resolution =
-            WindowResolution::new(self.width, self.height).with_scale_factor(self.scale_factor);
-        let mut window = Window::new(self.title.clone(), resolution);
-        window.mode = self.mode;
-        window.present_mode = self.present_mode;
-        window.resizable = self.resizable;
-        Some(window)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

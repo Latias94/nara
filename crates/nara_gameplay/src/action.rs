@@ -1,14 +1,70 @@
 use std::collections::BTreeMap;
 
-use nara_ecs::Resource;
-use nara_input::{ActionContext, ActionId, ActionPhase, InputSeatId};
+use nara_app::{
+    App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId, RuntimeFaultReporter,
+};
+use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
+use nara_input::{
+    ActionContext, ActionId, ActionPhase, INPUT_PLUGIN_ID, InputSeatId, SemanticActions,
+};
 use thiserror::Error;
 
 use crate::{
-    GameplayCommandDraft, GameplayCommandPayload, GameplayCommandTarget, GameplayCommandTypeId,
+    GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandDraft, GameplayCommandPayload, GameplayCommandQueue,
+    GameplayCommandTarget, GameplayCommandTypeId, local_collection,
+    schedule::GameplayCommandInternalSet,
 };
 
+pub const GAMEPLAY_ACTION_PLUGIN_ID: PluginId = PluginId::new("nara.gameplay.actions");
 pub const MAX_ACTION_COMMAND_BINDINGS: usize = 4_096;
+
+/// Maps resolved [`SemanticActions`] to gameplay commands through [`ActionCommandMap`].
+///
+/// Requires [`nara_input::InputPlugin`] and [`crate::GameplayCommandPlugin`].
+#[derive(Debug, Default, Clone, Copy)]
+pub struct GameplayActionPlugin;
+
+impl Plugin for GameplayActionPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        const DECLARATION: PluginDeclaration =
+            PluginDeclaration::new(GAMEPLAY_ACTION_PLUGIN_ID, PluginCategory::Runtime)
+                .requires_plugins(&[INPUT_PLUGIN_ID, GAMEPLAY_COMMAND_PLUGIN_ID]);
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.init_resource::<ActionCommandMap>()?.add_systems(
+            nara_app::__private::FrameIntent,
+            map_action_outcomes_to_commands
+                .in_set(nara_app::__private::FrameIntentSet::Collect)
+                .after(GameplayCommandInternalSet::CollectLocalCommands)
+                .before(GameplayCommandInternalSet::SubmitLocalCommands)
+                .run_if(local_collection::is_new_frame),
+        )?;
+        Ok(())
+    }
+}
+
+fn map_action_outcomes_to_commands(
+    command_map: Res<ActionCommandMap>,
+    outcomes: Option<Res<SemanticActions>>,
+    mut queue: ResMut<GameplayCommandQueue>,
+    faults: Res<RuntimeFaultReporter>,
+) {
+    let Some(outcomes) = outcomes else {
+        return;
+    };
+    for outcome in outcomes.as_slice() {
+        for binding in command_map.matching_bindings(
+            outcome.seat,
+            &outcome.action,
+            &outcome.context,
+            outcome.phase,
+        ) {
+            local_collection::submit_local_command(&mut queue, binding.command().clone(), &faults);
+        }
+    }
+}
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ActionCommandMapError {

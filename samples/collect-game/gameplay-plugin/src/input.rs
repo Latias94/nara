@@ -16,6 +16,7 @@ const DECLARATION: PluginDeclaration = PluginDeclaration::new(ID, PluginCategory
     .requires_plugins(&[
         crate::PLUGIN_ID,
         nara::gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
+        nara::gameplay::GAMEPLAY_ACTION_PLUGIN_ID,
         nara::input::INPUT_PLUGIN_ID,
     ]);
 

@@ -6,6 +6,7 @@ use crate::project_host::authoring::tests::independent_capture::{
     CaptureBoundScene, bound_source_observation,
 };
 
+#[cfg(feature = "runtime-input")]
 mod input;
 pub(super) mod prefabs;
 pub(super) mod scenes;
@@ -18,7 +19,7 @@ use source_observations::SourceCaptureMode;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
 
-#[cfg(all(test, any(windows, target_os = "linux")))]
+#[cfg(all(test, feature = "runtime-input", any(windows, target_os = "linux")))]
 #[path = "capture/tests/input.rs"]
 mod input_tests;
 
@@ -903,6 +904,7 @@ impl AuthoringSourceValidation {
                     )?;
                 }
             }
+            #[cfg(feature = "runtime-input")]
             input::revalidate_metadata_absence(
                 &self.schema.project_root,
                 self.sources.iter().map(Arc::as_ref),
@@ -1094,6 +1096,12 @@ pub(super) fn capture_scene(
     preview: AuthoringCapturePreview,
     project_input: Option<&ProjectPath>,
 ) -> Result<AuthoringDocumentCapture, AuthoringProjectSourceAdmissionError> {
+    #[cfg(not(feature = "runtime-input"))]
+    if let Some(path) = project_input {
+        return Err(
+            AuthoringProjectSourceAdmissionError::InputOwnerUnavailable { path: path.clone() },
+        );
+    }
     let mut acquisition = prefabs::AuthoringPrefabAcquisition::new(
         schema,
         scene_limits,
@@ -1163,6 +1171,7 @@ pub(super) fn capture_scene(
     }
     // Only project startup capture activates global project inputs. Ordinary document capture
     // remains driven by its selected Scene and actual dependencies.
+    #[cfg(feature = "runtime-input")]
     if let Some(path) = project_input {
         input::capture(&mut acquisition, path, &mut asset_database)?;
     }
@@ -1252,6 +1261,7 @@ pub(super) fn capture_scene(
         &catalogue,
         budget,
     )?;
+    #[cfg(feature = "runtime-input")]
     input::revalidate_metadata_absence(
         &schema.project_root,
         source_facts.values().map(Arc::as_ref),

@@ -238,6 +238,7 @@ schema command. It is not a hand-maintained second definition of component layou
 | --- | --- |
 | Default, or `--no-default-features --features development` | Source executables, game-owned rebuild Host, Cargo/process tools and the private continuity watcher |
 | `--no-default-features --features cook` | Cook/package executable and Cargo tools, without the development Host or watcher |
+| `--no-default-features --features cooked-server` | Dedicated Server with fixed-step gameplay, processed Scenes, and checkpoint and continuation workflows |
 | `--no-default-features --features cooked-player` | Headless shipping Player and shared gameplay, without Cargo tools, watcher, UI or GPU/window backends |
 | `--no-default-features --features cooked-player,desktop` | Shipping Player with the explicit native window/GPU placement, without development tools, watcher or UI |
 | `--no-default-features --features cooked-player,desktop,audio-cpal` | Explicit Windows audible Player, without development tools, watcher or UI |
@@ -254,12 +255,10 @@ cargo tree --locked --no-default-features --features cooked-player --edges norma
 cargo tree --locked --no-default-features --features cooked-player,desktop --edges normal,build
 ```
 
-Every selection includes the Sprite clip importer/codec, CPU Sound Bank importer/codec and Hound
-for WAV admission; headless and silent selections exclude CPAL and rtrb and never open an audio device.
-The shared root Runtime still includes project/schema, CPU Image and Material support, including
-Naga. This split does not claim to remove every source-oriented implementation or provide a
-complete dedicated-server product. The delivery tests check these selected dependency/features
-before generating and executing the actual relocated Players.
+Local Player selections include the Sprite clip importer and codec, CPU Sound Bank importer and
+codec, Hound for WAV admission, and CPU Image and Material support. Headless and silent Player
+selections exclude CPAL and rtrb. The delivery tests check the dependency selection and execute
+the actual relocated packages.
 
 ## Optional Windows Game Audio
 
@@ -509,11 +508,10 @@ Select `--runtime server` in the same compiled cooker. It validates the ordinary
 Scenes and Prefab, then uses the manifest's `server` profile to produce a content pack for the
 `server` binary. The target profile installs the fixed-step command runtime and uses
 `PreserveDebt`. The cooker builds the binary with default features disabled and `cooked-server`
-selected. Native window, graphics, UI, audio and controller adapters are excluded from this
-build, along with the stock Image, Material, Render, Sprite and TileMap crates and the game's
-client animation and WAV dependencies. The server uses `nara` with `runtime-core` and `serde`.
-It keeps Transform2d and Rapier for simulation and the core Input and Window vocabulary.
-The Server profile leaves the raw Input and Window services out of its World.
+selected. The Server uses `nara` with `runtime-core` and `serde`, including Transform2d and Rapier
+for simulation. The locked normal/build graph excludes `nara_input`, `nara_window`,
+`raw-window-handle`, native graphics, UI, audio and controller adapters, the stock Image,
+Material, Render, Sprite and TileMap crates, and the game's client animation and WAV dependencies.
 
 ```text
 cargo +1.95.0 run --locked --offline --release --no-default-features --features cook --bin cook -- --runtime server --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevelServer --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release
@@ -627,9 +625,11 @@ candidate after completing any required checkpoint claim. While paused, ordinary
 requires settled work. EOF with unsettled work reports an error and closes the session. If startup
 of the candidate fails, discard it and continue with the retained incumbent.
 
-The installed server regression builds, inspects, relocates and launches the actual package.
-Run it from the engine root with the same shared target and serial environment as the Player
-acceptance above:
+The installed Server regression builds, inspects, relocates and launches the actual package on
+Windows and x86-64 Linux. The `cook,development` test build also enables `local-player` and opens
+the same processed pack in a Headless session to verify that the Server World omits the compiled
+client resources. Run from the engine root with the same shared target and serial environment as
+the Player acceptance above.
 
 ```text
 cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features cook --test server_delivery --run-ignored only -E 'test(=production_cooker_delivers_the_source_free_two_level_server)' --test-threads=1 --no-fail-fast --no-tests fail
@@ -740,7 +740,8 @@ rather than assumed to have zero phase. The finite continuity protocol also move
 two, so an older child is refused at the version gate. The progress-save slot above retains its original
 anchor-based behavior and its separate version-one migration.
 
-Use `capture_resume(&session)` after the original `HeadlessSession` has completed a paused frame.
+With `local-player`, use `capture_resume(&session)` after the original `HeadlessSession` has
+completed a paused frame.
 Capture refuses pending commands, travel or authoritative tasks, scripted verification, unknown
 plugin services, an open save slot and a non-unit Runtime time scale. The shipped source/headless
 recipe is the first supported inventory. Extend that explicit inventory and compatibility policy

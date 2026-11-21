@@ -17,7 +17,6 @@ use nara::{
         PluginProductCapability,
     },
     fs::{FileCapability, TrustMode},
-    input::{INPUT_PLUGIN_ID, InputPlugin},
     project::{ProductCapability, ProjectPath, RuntimeConfiguration, RuntimePreset},
     project_host::{
         CompositionError, ProjectCandidateErrorKind, RuntimeConfigurationPlanError,
@@ -31,6 +30,8 @@ use nara::{
     transform::TRANSFORM_SCHEMA_PROVIDER_ID,
 };
 
+#[cfg(feature = "runtime-input")]
+use nara::input::{INPUT_PLUGIN_ID, InputPlugin};
 #[cfg(not(feature = "runtime-ui"))]
 use nara::project_host::compiled_product_capabilities;
 
@@ -412,27 +413,32 @@ clear_action_map = true
         assert_eq!(instances.load(Ordering::SeqCst), 0);
     }
 
-    let source = resolve_product_recipe(
-        &candidate,
-        probe_recipe(&instances)
-            .add_plugin::<InputPlugin>()
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(source.input_requirement(), Some(&input_path));
-    assert!(
-        source
-            .plugin_plan()
-            .entries()
-            .iter()
-            .any(|entry| entry.plugin_id() == INPUT_PLUGIN_ID)
-    );
-    assert_eq!(instances.load(Ordering::SeqCst), 0);
+    #[cfg(feature = "runtime-input")]
+    {
+        let source = resolve_product_recipe(
+            &candidate,
+            probe_recipe(&instances)
+                .add_plugin::<InputPlugin>()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(source.input_requirement(), Some(&input_path));
+        assert!(
+            source
+                .plugin_plan()
+                .entries()
+                .iter()
+                .any(|entry| entry.plugin_id() == INPUT_PLUGIN_ID)
+        );
+        assert_eq!(source.settings(), candidate.runtime_configuration());
+        assert_eq!(instances.load(Ordering::SeqCst), 0);
+    }
 
     let runtime =
         resolve_runtime_configuration(candidate.runtime_configuration(), probe_recipe(&instances))
             .unwrap();
-    assert_eq!(source.settings(), runtime.settings());
+    assert_eq!(candidate.runtime_configuration(), runtime.settings());
+    #[cfg(feature = "runtime-input")]
     assert!(
         !runtime
             .plugin_plan()
@@ -449,6 +455,73 @@ clear_action_map = true
         cleared_source.plugin_plan().fingerprint(),
         runtime.plugin_plan().fingerprint()
     );
+    assert_eq!(instances.load(Ordering::SeqCst), 0);
+}
+
+#[cfg(not(feature = "runtime-input"))]
+#[test]
+fn processed_input_selection_is_refused_by_core_only_composition() {
+    let mut configuration = RuntimeConfiguration::default();
+    configuration.runtime.preset = RuntimePreset::LocalHeadless;
+    let product =
+        nara::asset::StableAssetId::parse_str("7c210000-0000-4000-8000-000000000001").unwrap();
+    configuration.input.action_map = Some(
+        nara::asset::AssetProductRef::new(product, nara::asset::ImportedProductId::PRIMARY)
+            .unwrap(),
+    );
+    let instances = Arc::new(AtomicUsize::new(0));
+    let error =
+        resolve_runtime_configuration(&configuration.resolve().unwrap(), probe_recipe(&instances))
+            .unwrap_err();
+    assert!(matches!(
+        error,
+        RuntimeConfigurationPlanError::Resolution(RuntimePlanError::Composition(
+            CompositionError::InputOwnerRequired,
+        ))
+    ));
+    assert_eq!(instances.load(Ordering::SeqCst), 0);
+}
+
+#[cfg(not(feature = "runtime-input"))]
+#[test]
+fn explicit_first_party_input_requires_its_host_feature_even_without_a_selected_map() {
+    #[derive(Default)]
+    struct ExplicitInput;
+
+    impl Plugin for ExplicitInput {
+        fn declaration() -> &'static PluginDeclaration {
+            static DECLARATION: PluginDeclaration =
+                PluginDeclaration::new(PluginId::new("nara.input"), PluginCategory::Input);
+            &DECLARATION
+        }
+
+        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+            panic!("unsupported Input must be rejected before plugin build")
+        }
+    }
+
+    let configuration = RuntimeConfiguration::default().resolve().unwrap();
+    let instances = Arc::new(AtomicUsize::new(0));
+    let error = resolve_runtime_configuration(
+        &configuration,
+        probe_recipe(&instances)
+            .add_plugin::<ExplicitInput>()
+            .unwrap(),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        RuntimeConfigurationPlanError::Resolution(RuntimePlanError::Composition(
+            CompositionError::InputFeatureRequired,
+        ))
+    ));
+    resolve_runtime_configuration(
+        &configuration,
+        probe_recipe(&instances)
+            .add_plugin::<InputCategoryOnly>()
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(instances.load(Ordering::SeqCst), 0);
 }
 

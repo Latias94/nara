@@ -59,6 +59,9 @@ Rules:
 - Action maps should be able to produce semantic gameplay commands or action outcomes that can be
   consumed by replay, AI drivers, and future server-authoritative worlds without exposing raw
   device events.
+- `GameplayActionPlugin` installs the client bridge from `SemanticActions` to the original
+  gameplay command owner and declares its Input and command dependencies. A command-only
+  Runtime can use the same ingress without compiling Input.
 - `ActionOutcomes` exposes ordered low-level outcomes for each enabled physical binding.
   `SemanticActions` separately owns aggregate values for each seat/action/context. Buttons combine
   with OR; scalar axis contributions sum in admitted-member order with a wide accumulator and

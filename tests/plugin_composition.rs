@@ -2338,7 +2338,9 @@ height = 576
     );
     let manifest = TestManifest::new(&source);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
-    let definition = nara::window::plugin(candidate.settings().window.to_window());
+    let definition = nara::window::plugin(nara::project_host::advanced::window_from_settings(
+        &candidate.settings().window,
+    ));
     let request = project_runtime_plugins(&candidate).configure(definition.clone());
 
     let definition_debug = format!("{definition:?}");
@@ -2353,7 +2355,7 @@ height = 576
 #[cfg(feature = "desktop-winit")]
 #[test]
 fn desktop_project_configures_the_existing_window_plugin_slot() {
-    use nara::window::{WINDOW_PLUGIN_ID, Window};
+    use nara::window::{PresentMode, WINDOW_PLUGIN_ID, Window, WindowMode, WindowResolution};
 
     let manifest = TestManifest::new(DESKTOP_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
@@ -2376,7 +2378,10 @@ fn desktop_project_configures_the_existing_window_plugin_slot() {
         .unwrap();
     assert_eq!(
         window_entry.definition_key(),
-        nara::window::plugin(candidate.settings().window.to_window()).key()
+        nara::window::plugin(nara::project_host::advanced::window_from_settings(
+            &candidate.settings().window,
+        ))
+        .key()
     );
 
     let app = plan.plugin_plan().instantiate().unwrap();
@@ -2387,8 +2392,13 @@ fn desktop_project_configures_the_existing_window_plugin_slot() {
         .collect::<Vec<_>>();
     assert_eq!(windows.len(), 1);
     assert_eq!(windows[0].title, "Configured Nara Window");
-    assert_eq!(windows[0].resolution.physical_width, 1024);
-    assert_eq!(windows[0].resolution.physical_height, 576);
+    assert_eq!(
+        windows[0].resolution,
+        WindowResolution::new(1024, 576).with_scale_factor(1.25)
+    );
+    assert_eq!(windows[0].mode, WindowMode::BorderlessFullscreen);
+    assert_eq!(windows[0].present_mode, PresentMode::Mailbox);
+    assert!(!windows[0].resizable);
     #[cfg(feature = "presentation-ui")]
     assert!(
         !plan.plugin_plan().entries().iter().any(|entry| {
@@ -3237,6 +3247,10 @@ enabled = true
 title = "Configured Nara Window"
 width = 1024
 height = 576
+scale_factor = 1.25
+mode = "borderless-fullscreen"
+present_mode = "mailbox"
+resizable = false
 "#;
 
 #[cfg(all(

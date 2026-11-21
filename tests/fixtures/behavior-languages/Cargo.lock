@@ -1508,7 +1508,6 @@ dependencies = [
  "nara_diagnostic",
  "nara_ecs",
  "nara_tasks",
- "nara_window",
  "serde",
  "thiserror",
  "toml",

@@ -30,6 +30,8 @@ mod ui_surface;
 pub(crate) mod wgpu_policy_tests;
 
 pub(crate) use profile::ProjectProfilePlugins;
+#[cfg(feature = "runtime-window")]
+pub use profile::window_from_settings;
 #[cfg(feature = "presentation-ui")]
 pub(crate) use ui_surface::AcceptedPrimaryUiSurfaceProfile;
 #[cfg(feature = "runtime-ui")]
@@ -1150,9 +1152,12 @@ const SLOT_DIAGNOSTICS: PluginSlotId = PluginSlotId::new("nara.plugins.slot.diag
 const SLOT_TASKS: PluginSlotId = PluginSlotId::new("nara.plugins.slot.tasks");
 const SLOT_ASSET: PluginSlotId = PluginSlotId::new("nara.plugins.slot.asset");
 const SLOT_TRANSFORM: PluginSlotId = PluginSlotId::new("nara.plugins.slot.transform");
+#[cfg(feature = "runtime-input")]
 const SLOT_INPUT: PluginSlotId = PluginSlotId::new("nara.plugins.slot.input");
 const SLOT_GAMEPLAY_COMMANDS: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.gameplay-commands");
+#[cfg(feature = "runtime-input")]
+const SLOT_GAMEPLAY_ACTIONS: PluginSlotId = PluginSlotId::new("nara.plugins.slot.gameplay-actions");
 const SLOT_SERVER_TIME_POLICY: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.server-time-policy");
 #[cfg(feature = "runtime-2d")]
@@ -1215,7 +1220,7 @@ impl PluginGroup for MinimalPlugins {
     const ID: PluginGroupId = PluginGroupId::new("nara.plugins.minimal");
 
     fn build(self) -> PluginGroupBuilder {
-        PluginGroupBuilder::new()
+        let builder = PluginGroupBuilder::new()
             .add_slot(
                 PluginSlot::required(
                     SLOT_COMPONENT_REGISTRY,
@@ -1249,15 +1254,17 @@ impl PluginGroup for MinimalPlugins {
             .add_slot(
                 PluginSlot::required(SLOT_TRANSFORM, nara_transform::TRANSFORM_PLUGIN_ID),
                 PluginDefinition::for_default::<nara_transform::TransformPlugin>(),
-            )
-            .add_slot(
-                PluginSlot::required(SLOT_INPUT, nara_input::INPUT_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_input::InputPlugin>(),
-            )
+            );
+        #[cfg(feature = "runtime-input")]
+        let builder = builder.add_slot(
+            PluginSlot::required(SLOT_INPUT, nara_input::INPUT_PLUGIN_ID),
+            PluginDefinition::for_default::<nara_input::InputPlugin>(),
+        );
+        builder
     }
 }
 
-/// Local headless defaults with input observations and semantic gameplay commands.
+/// Local headless defaults with semantic commands and the selected local Input adapter.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct HeadlessRuntimePlugins;
 
@@ -1265,7 +1272,7 @@ impl PluginGroup for HeadlessRuntimePlugins {
     const ID: PluginGroupId = PluginGroupId::new("nara.plugins.headless-runtime");
 
     fn build(self) -> PluginGroupBuilder {
-        PluginGroupBuilder::new()
+        let builder = PluginGroupBuilder::new()
             .add_group(MinimalPlugins)
             .add_slot(
                 PluginSlot::required(
@@ -1273,7 +1280,16 @@ impl PluginGroup for HeadlessRuntimePlugins {
                     nara_gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
                 ),
                 PluginDefinition::for_default::<nara_gameplay::GameplayCommandPlugin>(),
-            )
+            );
+        #[cfg(feature = "runtime-input")]
+        let builder = builder.add_slot(
+            PluginSlot::required(
+                SLOT_GAMEPLAY_ACTIONS,
+                nara_gameplay::GAMEPLAY_ACTION_PLUGIN_ID,
+            ),
+            PluginDefinition::for_default::<nara_gameplay::GameplayActionPlugin>(),
+        );
+        builder
     }
 }
 

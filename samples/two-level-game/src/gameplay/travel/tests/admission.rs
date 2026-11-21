@@ -47,7 +47,7 @@ fn consume(drafts: Vec<GameplayCommandDraft>, phase: GamePhase, held: [bool; 4])
     app.init_resource::<Captured>().unwrap();
     app.add_systems(
         CoreStage::FixedUpdate,
-        super::super::consume.in_set(GameplayCommandSet::Consume),
+        super::consume.in_set(GameplayCommandSet::Consume),
     )
     .unwrap();
     app.add_systems(

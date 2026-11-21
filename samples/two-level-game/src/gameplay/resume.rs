@@ -26,11 +26,13 @@ use nara::{
 };
 
 use super::{GamePhase, Progress, Session, fail, player, side_room, travel};
+#[cfg(feature = "local-player")]
+use crate::resume::encode_resume;
 use crate::{
     levels::LevelId,
     resume::{
         LevelContentStamp, ResumeCompatibility, ResumeError, ResumeState, RuntimeTimeState,
-        decode_resume, encode_resume,
+        decode_resume,
         processed::{ProcessedResumeError, ProcessedRooms, decode_processed_resume},
     },
     save::io::SaveIoError,
@@ -38,6 +40,7 @@ use crate::{
 
 #[cfg(feature = "desktop")]
 pub use capture::capture_desktop_resume;
+#[cfg(feature = "local-player")]
 pub use capture::capture_resume;
 #[cfg(all(feature = "desktop", feature = "development"))]
 pub(crate) use capture::capture_world;
@@ -134,6 +137,7 @@ fn supported_service(id: &str, local_player: bool) -> bool {
         matches!(
             id,
             "nara.input"
+                | "nara.gameplay.actions"
                 | "nara.material2d"
                 | "nara.render-components"
                 | "nara.window"
@@ -329,6 +333,7 @@ pub(super) fn advance_clock(world: &mut World) -> Result<(), String> {
 /// Complete paused maintenance frames until `GameSnapshot::restoring` clears. Then compare
 /// `capture_resume` with the original state before allowing gameplay to continue. This request
 /// does not replace another process, publish a last-good executable or close the incumbent.
+#[cfg(feature = "local-player")]
 pub fn request_resume(
     session: &mut HeadlessSession,
     state: &ResumeState,
@@ -364,6 +369,7 @@ fn enter_headless_resume(
     Ok(())
 }
 
+#[cfg(feature = "local-player")]
 fn fresh_candidate(world: &World) -> Result<(), GameResumeError> {
     fresh_runtime(world)?;
     capture::eligible(world)

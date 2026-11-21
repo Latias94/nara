@@ -152,6 +152,7 @@ impl Plugin for ProbePlugin {
         .requires_plugins(&[
             engine::input::INPUT_PLUGIN_ID,
             engine::gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
+            engine::gameplay::GAMEPLAY_ACTION_PLUGIN_ID,
         ]);
         &DECLARATION
     }

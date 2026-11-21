@@ -247,6 +247,7 @@ enum RuntimeStartContent {
     Processed {
         base: RuntimeContentBase,
         content: Arc<ProcessedSceneContent>,
+        #[cfg(feature = "runtime-input")]
         input: Option<crate::runtime_content::RuntimeInputContent>,
     },
 }
@@ -272,6 +273,7 @@ enum RuntimeStartStamp {
     Processed {
         base: RuntimeContentBase,
         content: Weak<ProcessedSceneContent>,
+        #[cfg(feature = "runtime-input")]
         input: Option<crate::runtime_content::RuntimeInputObservation>,
         bindings: SceneComponentBindings,
     },
@@ -290,10 +292,12 @@ impl RuntimeStartStamp {
             RuntimeStartContent::Processed {
                 base,
                 content,
+                #[cfg(feature = "runtime-input")]
                 input,
             } => Self::Processed {
                 base: base.clone(),
                 content: Arc::downgrade(content),
+                #[cfg(feature = "runtime-input")]
                 input: input.as_ref().map(|input| input.observe()),
                 bindings: base.plan().schema_validation().bindings().clone(),
             },
@@ -325,17 +329,20 @@ impl RuntimeStartStamp {
                 Self::Processed {
                     base,
                     content: original,
-                    input: original_input,
+                    #[cfg(feature = "runtime-input")]
+                        input: original_input,
                     bindings,
                 },
                 RuntimeStartContent::Processed {
                     base: selected,
                     content,
+                    #[cfg(feature = "runtime-input")]
                     input,
                 },
             ) => {
-                base.same_base(selected)
-                    && match (original_input, input) {
+                #[cfg(feature = "runtime-input")]
+                {
+                    let same_input = match (original_input, input) {
                         (Some(original), Some(selected)) => {
                             original.matches(selected)
                                 && base.same_base(selected.base())
@@ -344,7 +351,12 @@ impl RuntimeStartStamp {
                         }
                         (None, None) => true,
                         _ => false,
+                    };
+                    if !same_input {
+                        return false;
                     }
+                }
+                base.same_base(selected)
                     && base.same_base(content.base())
                     && Weak::ptr_eq(original, &Arc::downgrade(content))
                     && content.product() == base.catalog().startup_scene()
@@ -978,6 +990,7 @@ impl ProjectHost {
             )));
         }
         verify_processed_runtime_plan(base.plan())?;
+        #[cfg(feature = "runtime-input")]
         let input = base
             .acquire_startup_input()
             .map_err(|error| processed_content_fault(&error))?;
@@ -1002,6 +1015,7 @@ impl ProjectHost {
             RuntimeStartContent::Processed {
                 base,
                 content,
+                #[cfg(feature = "runtime-input")]
                 input,
             },
             startup_scene,
@@ -1155,44 +1169,47 @@ impl ProjectHost {
         let materialization = Arc::new(OnceLock::new());
         let command_result = Arc::clone(&materialization);
         let admission = candidate.with_admission_scope(move |scope| {
-            let input_selection = match &admission_content {
-                #[cfg(feature = "runtime-2d")]
-                RuntimeStartContent::Source { snapshot, .. } => snapshot
-                    .input_action_map()
-                    .map(|input| input.prepare_state())
-                    .transpose()
-                    .map_err(|error| HostFault::new(error.diagnostics().clone())),
-                RuntimeStartContent::Processed { input, .. } => input
-                    .as_ref()
-                    .map(|input| input.prepare_state())
-                    .transpose()
-                    .map_err(|error| processed_content_fault(&error)),
-            };
-            let input_selection = input_selection.and_then(|selection| {
-                if admission_plan
-                    .plugin_plan()
-                    .entries()
-                    .iter()
-                    .any(|entry| entry.plugin_id() == nara_input::INPUT_PLUGIN_ID)
-                {
-                    nara_input::finalize_input_selection(scope, selection).map_err(|_| {
-                        HostFault::new(single_error(
-                            "project.run.input-selection-rejected",
-                            "Runtime Input owner refused the global selection",
-                        ))
-                    })
-                } else if selection.is_some() {
-                    Err(HostFault::new(single_error(
-                        "project.run.input-owner-missing",
-                        "Runtime global Input selection has no selected Input owner",
-                    )))
-                } else {
-                    Ok(())
+            #[cfg(feature = "runtime-input")]
+            {
+                let input_selection = match &admission_content {
+                    #[cfg(feature = "runtime-2d")]
+                    RuntimeStartContent::Source { snapshot, .. } => snapshot
+                        .input_action_map()
+                        .map(|input| input.prepare_state())
+                        .transpose()
+                        .map_err(|error| HostFault::new(error.diagnostics().clone())),
+                    RuntimeStartContent::Processed { input, .. } => input
+                        .as_ref()
+                        .map(|input| input.prepare_state())
+                        .transpose()
+                        .map_err(|error| processed_content_fault(&error)),
+                };
+                let input_selection = input_selection.and_then(|selection| {
+                    if admission_plan
+                        .plugin_plan()
+                        .entries()
+                        .iter()
+                        .any(|entry| entry.plugin_id() == nara_input::INPUT_PLUGIN_ID)
+                    {
+                        nara_input::finalize_input_selection(scope, selection).map_err(|_| {
+                            HostFault::new(single_error(
+                                "project.run.input-selection-rejected",
+                                "Runtime Input owner refused the global selection",
+                            ))
+                        })
+                    } else if selection.is_some() {
+                        Err(HostFault::new(single_error(
+                            "project.run.input-owner-missing",
+                            "Runtime global Input selection has no selected Input owner",
+                        )))
+                    } else {
+                        Ok(())
+                    }
+                });
+                if let Err(error) = input_selection {
+                    assert!(command_result.set(Err(error)).is_ok());
+                    return;
                 }
-            });
-            if let Err(error) = input_selection {
-                assert!(command_result.set(Err(error)).is_ok());
-                return;
             }
             scope.apply_command(move |world: &mut World| {
                 let value = materialize_runtime(
@@ -2238,6 +2255,7 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
     let reason = match error {
         CompositionError::ProjectLineageMismatch => "project-lineage-mismatch",
         CompositionError::InputOwnerRequired => "input-owner-required",
+        CompositionError::InputFeatureRequired => "input-feature-required",
         CompositionError::InputCodecRequired => "input-codec-required",
         CompositionError::UnsupportedDefaultConfiguration { .. } => {
             "unsupported-default-configuration"
@@ -2311,6 +2329,7 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
         }
         CompositionError::ProjectLineageMismatch
         | CompositionError::InputOwnerRequired
+        | CompositionError::InputFeatureRequired
         | CompositionError::InputCodecRequired
         | CompositionError::SchemaFreezeRejected { .. }
         | CompositionError::SceneBindingsRejected { .. }

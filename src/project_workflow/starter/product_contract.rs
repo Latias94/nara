@@ -2,7 +2,7 @@ use nara_asset::{AssetMetaIdentity, AssetMetaIdentityCandidate};
 use nara_fs::ContentDigest;
 use nara_project::{
     NativeDocumentIdentity, ProductCapability, ProductCapabilitySet, ProjectExecutionContract,
-    ProjectManifest, RuntimePreset, SourceUniverseId,
+    ProjectManifest, ProjectPresentMode, RuntimePreset, SourceUniverseId,
 };
 use nara_reflect::AuthoringSchemaBundle;
 use nara_scene::SceneDocumentCandidate;
@@ -230,7 +230,7 @@ pub(super) fn validate(
         || desktop.window.height != 720
         || desktop.window.title != slug.as_str()
         || !desktop.window.resizable
-        || desktop.window.present_mode != nara_window::PresentMode::Fifo
+        || desktop.window.present_mode != ProjectPresentMode::Fifo
     {
         return Err("generated desktop product contract disagrees with the starter");
     }

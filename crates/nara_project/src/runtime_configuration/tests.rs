@@ -3,7 +3,8 @@ use crate::{
     EffectivePrimaryUiSurface, EffectiveUiSafeArea, EffectiveWorldCanvas,
     MAX_PROJECT_FIXED_DEBT_STEPS, MAX_PROJECT_FIXED_STEPS_PER_FRAME, MAX_PROJECT_UI_LOGICAL_EXTENT,
     ProductCapability, ProjectAuthoringRecovery, ProjectAuthoringRecoveryDigest,
-    ProjectAuthoringState, ProjectManifest, ProjectPath, ProjectTaskPoolManifest,
+    ProjectAuthoringState, ProjectManifest, ProjectPath, ProjectPresentMode,
+    ProjectTaskPoolManifest, ProjectWindowMode,
 };
 use nara_app::{FixedTime, RuntimeTimeSettings};
 use nara_asset::StableAssetId;
@@ -60,7 +61,7 @@ enabled = false
 title = "Independent runtime"
 width = 1920
 height = 1080
-scale_factor = 1.25
+scale_factor = 1.2500000000000002
 mode = "borderless-fullscreen"
 present_mode = "mailbox"
 resizable = false
@@ -228,7 +229,8 @@ fn defaults_resolve_without_a_source_project() {
 
 #[test]
 fn complete_configuration_lowers_every_runtime_section() {
-    let effective = complete_configuration().resolve().unwrap();
+    let configuration = complete_configuration();
+    let effective = configuration.resolve().unwrap();
     assert_eq!(effective.runtime_preset(), RuntimePreset::LocalHeadless);
     assert_eq!(effective.requested_capabilities().len(), 4);
     assert!(
@@ -285,11 +287,21 @@ fn complete_configuration_lowers_every_runtime_section() {
             title: "Independent runtime".to_owned(),
             width: 1920,
             height: 1080,
-            scale_factor: 1.25,
-            mode: WindowMode::BorderlessFullscreen,
-            present_mode: PresentMode::Mailbox,
+            scale_factor: 1.25_f64.next_up(),
+            mode: ProjectWindowMode::BorderlessFullscreen,
+            present_mode: ProjectPresentMode::Mailbox,
             resizable: false,
         }
+    );
+    let exported = effective.to_configuration();
+    assert_eq!(exported.window, configuration.window);
+    assert_eq!(
+        serde_json::to_string(&exported.window).unwrap(),
+        concat!(
+            r#"{"enabled":false,"title":"Independent runtime","width":1920,"height":1080,"#,
+            r#""scale_factor":1.2500000000000002,"mode":"borderless-fullscreen","#,
+            r#""present_mode":"mailbox","resizable":false}"#,
+        )
     );
     assert_eq!(effective.input().action_map, Some(primary_action_map()));
     assert_eq!(effective.diagnostics().runtime.entry_limit().get(), 37);
@@ -950,7 +962,13 @@ fn source_projection_preserves_profile_input_selection_and_clear() {
 
 #[test]
 fn resolved_profile_exports_all_values_without_source_or_profile_dependencies() {
-    let settings = project_settings();
+    let manifest = project_manifest();
+    let encoded = manifest.to_canonical_toml_bytes().unwrap();
+    let reparsed = ProjectManifest::parse_toml_bytes(&encoded)
+        .manifest
+        .unwrap();
+    assert_eq!(reparsed, manifest);
+    let settings = reparsed.resolve_profile(Some("release")).unwrap();
     let effective = settings.runtime_configuration().unwrap();
     assert_eq!(effective.runtime_preset(), settings.runtime_preset);
     assert_eq!(
@@ -965,6 +983,12 @@ fn resolved_profile_exports_all_values_without_source_or_profile_dependencies() 
     assert!(effective.input().action_map.is_none());
     assert_eq!(effective.diagnostics(), &settings.diagnostics);
     assert_eq!(effective.window().title, "Resolved profile");
+    assert_eq!(effective.window().scale_factor, 1.5);
+    assert_eq!(effective.window().mode, ProjectWindowMode::Fullscreen);
+    assert_eq!(
+        effective.window().present_mode,
+        ProjectPresentMode::Immediate
+    );
     assert_eq!(effective.diagnostics().runtime.entry_limit().get(), 41);
     assert_round_trip(&effective);
 

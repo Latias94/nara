@@ -3,8 +3,8 @@ use nara_app::{
     App, RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeFaultKind, RuntimeObligationLedger,
 };
 use nara_gameplay::{
-    ActionCommandBinding, ActionCommandMap, GameplayCommandPlugin, GameplayCommandQueue,
-    GameplayCommandTypeId,
+    ActionCommandBinding, ActionCommandMap, GameplayActionPlugin, GameplayCommandPlugin,
+    GameplayCommandQueue, GameplayCommandTypeId,
 };
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
@@ -184,6 +184,7 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
     let mut app = window_app();
     app.add_plugin(InputPlugin).unwrap();
     app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+    app.add_plugin(GameplayActionPlugin).unwrap();
     let action = ActionId::new("test.move-up").unwrap();
     let mut bindings = ActionMapBuilder::new(ActionMapLimits::default());
     bindings

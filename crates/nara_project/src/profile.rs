@@ -595,10 +595,10 @@ impl ProjectWindowPatch {
             window.scale_factor = scale_factor;
         }
         if let Some(mode) = self.mode {
-            window.mode = mode.into();
+            window.mode = mode;
         }
         if let Some(present_mode) = self.present_mode {
-            window.present_mode = present_mode.into();
+            window.present_mode = present_mode;
         }
         if let Some(resizable) = self.resizable {
             window.resizable = resizable;

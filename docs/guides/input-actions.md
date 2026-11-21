@@ -389,6 +389,15 @@ scope. Ordinary source Hosts perform this step as part of startup.
 
 ## Commands And Recording
 
+The root `runtime-input` feature exposes the local action adapter. If you assemble plugins
+directly, install `InputPlugin` and `GameplayCommandPlugin` before `GameplayActionPlugin`.
+`HeadlessRuntimePlugins` installs the adapter with that feature selected. If you depend directly
+on `nara_gameplay`, enable its `input` feature for the static adapter. Custom local collectors can
+read `SemanticActions` after Input resolution with just `InputPlugin` and `GameplayCommandPlugin`.
+Command-only runtimes can install `GameplayCommandPlugin` and submit semantic intent directly into
+the queue. Recook and rebuild paired Player artifacts after changing the plugin plan, because
+startup checks the original plan fingerprint.
+
 `ActionCommandBinding::new` selects PRIMARY by default; use `with_seat` for another seat.
 When a game already has a complete `GameplayCommandDraft`, use
 `ActionCommandBinding::from_command(action, phase, draft)` to move its type, target and payload

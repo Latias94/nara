@@ -74,6 +74,7 @@ pub(super) fn accept(cooker: &Path) {
         .environment("CARGO", tools.cargo_path())
         .environment("RUSTC", tools.rustc_path())
         .bounded_stdout(NonZeroUsize::new(2 * 1024 * 1024).unwrap());
+    let (tree, graph_before) = graph::audit(&mut custody, &tools, &target, &selection);
     let cooked = custody.tool(&command, Duration::from_secs(30 * 60));
     assert_eq!(
         cooked.receipt.exit().code(),
@@ -81,6 +82,15 @@ pub(super) fn accept(cooker: &Path) {
         "server Cook failed\nstdout: {}\nstderr: {}",
         cooked.stdout,
         cooked.stderr
+    );
+    assert_eq!(
+        graph::read(&mut custody, &tree),
+        graph_before,
+        "the locked server normal/build Cargo graph changed across Cook"
+    );
+    assert!(
+        read_bounded(&lock_path, 1024 * 1024) == lock,
+        "the copied sample Cargo.lock changed across Cook and the graph probes"
     );
     let publication: Value = record(&cooked.stdout, "TWO_LEVEL_PACKAGE_PUBLISHED ").unwrap();
     let published = output_parent.join(INSTALLATION);
@@ -96,8 +106,6 @@ pub(super) fn accept(cooker: &Path) {
     );
 
     let package = package::inspect(&published, &executable_name, &selection, &lock);
-    graph::audit(&mut custody, &tools, &target, selection);
-    assert_eq!(read_bounded(&lock_path, 1024 * 1024), lock);
 
     let fixture = custody.fixture();
     let relocated = fixture

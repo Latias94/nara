@@ -157,6 +157,69 @@ and client library correctness Clippy checks pass. These runs cover Windows x64 
 execution. Foreign runtime, desktop GPU presentation and long-running server behavior have
 separate qualification.
 
+### Dedicated Server Without Input Or Window Dependencies
+
+Continue through the original processed Headless Host. Keep exact fixed-step command admission,
+the existing Scene and CPU-product owners, and the same cooked catalog format. Select
+`runtime-core,serde` for the shipping Server and keep local Input and Window compilation as
+separate root features. The local Player and ordinary default retain their existing selection.
+
+Keep the authoritative gameplay queue and local collection in `GameplayCommandPlugin`. Add
+`GameplayActionPlugin` where client action resolution feeds the queue. Retain one frame cursor and
+the ordering from resolved Input through command collection to exact admission. Keep Window
+settings as manifest values until a Window-capable Host constructs a runtime Window. A selected
+startup action map must still require its actual plugin and decoder. Its catalog member shape is
+validated before either is available.
+
+Acceptance exercises the locked production Cargo graph, public composition and command paths,
+source and processed Input clients, and the original Cooker with a relocated Server and Player.
+The Server must retain the same five Scene members and complete the original region, travel,
+checkpoint and process-continuation workflows. Running a Server profile in a client-capable test
+also verifies the absence of installed client services independently of the shipping graph.
+
+The Windows Rust 1.95.0 core-only selection passes 152/152 in
+`9b6217ed-3fc3-415f-891b-759d090bd02b`. It includes the locked root feature matrix, public
+composition and exact commands, captured Scene travel, and a version-one pack whose startup
+action map is valid metadata but has no executable Input owner. The public prelude compile probes
+pass in the preceding run. The input-enabled Gameplay and Project cohort passes 155/155 in
+`316ae9e6-1ddd-4830-8f1b-076d2dc609e9`; command-only Gameplay with serde passes 48/48 in
+`47184024-2609-4aee-9d04-9039436837af`. The isolated sample passes the `cooked-server`
+all-target check. The first checks exposed an authoring Input import, a stale client Material
+derive expectation in the graph test, and a test-only sample decoder gate. The final checks
+exercise the corrected selections.
+
+Independent review found that moving the ordering edge into the static action plugin would
+break manual clients with custom semantic collectors. The App's original intent schedule now
+orders Input preparation before command collection even without the static adapter. A strict
+schedule control runs that manual client in both registration orders. A second correction
+rejects explicit first-party Input in a pure-core Host before plugin construction, including
+code-first recipes without an authored startup map.
+
+The Windows release delivery run `3c411da3-530d-4507-b6a7-26057372e9f2` passes both original
+Cooker cases after executable relocation and source/cache removal. The Server's locked
+`normal,build` graph contains 139 packages and the copied game lock agrees across Cook. The
+client-capable control opens the same Server pack, activates both rooms, and commits travel with
+client services absent. The published Server completes the finite and sustained workflows,
+checkpoint handoff and continuation through the original owners. The normal headless Player
+control still has its selected client Input and Scene resources.
+
+The narrow processed Input cohort passes 10/10 (`e08fe631-dbfe-4ae5-b75e-4712aaad2434`),
+including a working LocalHeadless Host with Input and no Window capability. The client exact
+Step and runtime composition cohort passes 13/13 (`54d4ada2-affb-4787-8e5d-c9d18cb33242`). It
+covers the configured window contract and the source-side refusal when the selected Input plugin
+is absent. The independent source, bounded and seat Input workflows pass 17/17
+(`0f02053a-3d87-47de-a4c6-f5795770dddf`). The prebuilt processed Input profile passes its
+relocated process test (`9f2fe0f2-1397-4a3a-81e2-b4a0eb2ab316`).
+The Windows Winit keyboard controls pass 4/4 (`1e127957-1667-4a49-a43a-9c8daad03587`), covering
+Tab, Enter, focus return and exact release across a held-key gap.
+
+The same two release deliveries pass on Ubuntu 26.04 WSL2 on ext4 with Rust 1.95.0
+(`b07ce0ce-8600-428c-8a8e-846067d13126`). The Linux Server graph contains 140 packages, the
+package still contains five Scenes, and the multi-profile client-absence control passes.
+The first snapshot build omitted the embedded starter files. The retry restored those source
+inputs before building and running both actual relocated programs. The Windows and Linux
+packaging runs used the command-only feature split before the later Server timing fixes.
+
 ### Linux Headless Player And Server Qualification
 
 Both Two-Level release deliveries pass on `430f07f` with Rust 1.95.0, `x86_64-unknown-linux-gnu`,

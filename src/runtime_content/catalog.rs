@@ -32,6 +32,7 @@ use serde::{
 const FILE_KIND: &str = "runtime_content_catalog";
 const RESERVED_CATALOG_PATH: &str = "catalog.json";
 const MAX_MEMBER_PATH_BYTES: usize = 4096;
+const STARTUP_INPUT_V1_FORMAT: &str = "runtime_action_map";
 
 /// Executable target and selected build profile, independent of source project paths.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -647,16 +648,13 @@ impl RuntimeContentCatalog {
             });
         }
         if let Some(product) = self.configuration.input.action_map {
-            use nara_asset::RuntimeAssetCodec;
-            let expected_kind = nara_input::ActionMapRuntimeCodec::RUNTIME_KIND;
-            let expected_version = nara_input::ActionMapRuntimeCodec::RUNTIME_VERSION;
             let member = self.member_for_product(product);
             if product.product() != nara_asset::ImportedProductId::PRIMARY
                 || member.is_none_or(|member| member.products() != &[product])
                 || !matches!(
                     member.map(RuntimeContentMember::kind),
                     Some(RuntimeContentMemberKind::Asset { format, version })
-                        if format.as_str() == expected_kind && version.get() == expected_version
+                        if format.as_str() == STARTUP_INPUT_V1_FORMAT && *version == FormatVersion::ONE
                 )
             {
                 return Err(RuntimeContentCatalogError::InvalidStartupInput { product });

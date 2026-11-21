@@ -3,7 +3,6 @@ use std::time::Duration;
 use nara_app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeSettings};
 use nara_asset::{AssetProductRef, ImportedProductId};
 use nara_diagnostic::DiagnosticReport;
-use nara_window::{PresentMode, WindowMode};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -19,8 +18,8 @@ use crate::profile::ProjectProfileError;
 use crate::render::{EffectiveRenderSettings, ProjectRenderManifest, ProjectWorldCanvasManifest};
 use crate::sections::{
     ProjectCapabilitiesManifest, ProjectDiagnosticsManifest, ProjectFixedCatchUpPolicy,
-    ProjectPresentMode, ProjectTasksManifest, ProjectUiManifest, ProjectUiSafeAreaManifest,
-    ProjectUiSurfaceManifest, ProjectWindowManifest, ProjectWindowMode, lower_runtime_settings,
+    ProjectTasksManifest, ProjectUiManifest, ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest,
+    ProjectWindowManifest, lower_runtime_settings,
 };
 use crate::validation::{
     error, validate_fixed_step_limits, validate_nonzero_duration, validate_time_scale,
@@ -518,18 +517,8 @@ fn configuration_record(
             width: window.width,
             height: window.height,
             scale_factor: window.scale_factor,
-            mode: match window.mode {
-                WindowMode::Windowed => ProjectWindowMode::Windowed,
-                WindowMode::BorderlessFullscreen => ProjectWindowMode::BorderlessFullscreen,
-                WindowMode::Fullscreen => ProjectWindowMode::Fullscreen,
-            },
-            present_mode: match window.present_mode {
-                PresentMode::AutoVsync => ProjectPresentMode::AutoVsync,
-                PresentMode::AutoNoVsync => ProjectPresentMode::AutoNoVsync,
-                PresentMode::Fifo => ProjectPresentMode::Fifo,
-                PresentMode::Immediate => ProjectPresentMode::Immediate,
-                PresentMode::Mailbox => ProjectPresentMode::Mailbox,
-            },
+            mode: window.mode,
+            present_mode: window.present_mode,
             resizable: window.resizable,
         },
         input: input.clone(),

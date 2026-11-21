@@ -22,8 +22,9 @@ const CHECKED_IN_AUTHORING_BUNDLE: &[u8] = include_bytes!("../schema/authoring.b
 
 #[cfg(feature = "desktop")]
 use nara::{
+    gameplay::GAMEPLAY_ACTION_PLUGIN_ID,
     image::IMAGE_PREPARE_PLUGIN_ID,
-    project_host::ProjectContentLoader,
+    project_host::{ProjectContentLoader, advanced::window_from_settings},
     render::RENDER_PLUGIN_ID,
     render_wgpu::{
         WGPU_CAPTURE_PLUGIN_ID, WGPU_STOCK_POLICY_PLUGIN_ID, WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
@@ -243,9 +244,10 @@ fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
     assert_eq!(window_entries.len(), 1);
     assert_eq!(
         window_entries[0].definition_key(),
-        nara::window::plugin(candidate.settings().window.to_window()).key()
+        nara::window::plugin(window_from_settings(&candidate.settings().window)).key()
     );
     for plugin in [
+        GAMEPLAY_ACTION_PLUGIN_ID,
         RENDER_PLUGIN_ID,
         IMAGE_PREPARE_PLUGIN_ID,
         SPRITE_RENDER_PLUGIN_ID,

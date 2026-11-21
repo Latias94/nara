@@ -10,17 +10,16 @@ use crate::cooked_delivery::native::Custody;
 const REQUIRED_RUNTIME_PACKAGES: &[&str] = &[
     "nara_asset",
     "nara_gameplay",
-    "nara_input",
     "nara_rapier2d",
     "nara_scene",
     "nara_transform",
-    "nara_window",
     "rapier2d",
 ];
 
 const FORBIDDEN_PACKAGES: &[&str] = &[
     "nara_asset_watch",
     "nara_image",
+    "nara_input",
     "nara_material",
     "nara_render",
     "nara_sprite",
@@ -29,9 +28,11 @@ const FORBIDDEN_PACKAGES: &[&str] = &[
     "nara_sprite_render",
     "nara_sprite_animation",
     "nara_render_wgpu",
+    "nara_window",
     "nara_winit",
     "nara_gilrs",
     "notify",
+    "raw-window-handle",
     "winit",
     "egui",
     "gpui",
@@ -54,8 +55,8 @@ pub(super) fn audit(
     custody: &mut Custody,
     tools: &CargoBuildTools,
     target_dir: &Path,
-    selection: CargoBuildSelection,
-) {
+    selection: &CargoBuildSelection,
+) -> (SupervisedProcessCommand, String) {
     let project = &custody.fixture().project;
     let manifest = project.join("Cargo.toml");
     let binary_source = project.join("src/bin/server.rs");
@@ -86,8 +87,8 @@ pub(super) fn audit(
         "--format",
         "{p}|{f}",
     ]);
-    let read = |custody: &mut Custody, command: SupervisedProcessCommand| {
-        let command = command
+    let locked = |command: SupervisedProcessCommand| {
+        command
             .arguments([
                 "--locked",
                 "--offline",
@@ -98,15 +99,15 @@ pub(super) fn audit(
                 "never",
                 "--manifest-path",
             ])
-            .argument(&manifest);
-        let output = custody.tool(&command, Duration::from_secs(60));
-        assert_eq!(output.receipt.exit().code(), Some(0), "{}", output.stderr);
-        output.stdout
+            .argument(&manifest)
     };
-    let metadata = read(custody, declarations);
-    let invocation =
-        CargoBuildInvocation::from_metadata_declarations(metadata.as_bytes(), &manifest, selection)
-            .expect("Cargo must declare the exact shipped server binary");
+    let metadata = read(custody, &locked(declarations));
+    let invocation = CargoBuildInvocation::from_metadata_declarations(
+        metadata.as_bytes(),
+        &manifest,
+        selection.clone(),
+    )
+    .expect("Cargo must declare the exact shipped server binary");
     assert_eq!(
         invocation.source_path().canonicalize().unwrap(),
         binary_source.canonicalize().unwrap()
@@ -116,7 +117,8 @@ pub(super) fn audit(
         target_dir
     );
 
-    let graph = read(custody, tree);
+    let tree = locked(tree);
+    let graph = read(custody, &tree);
     let mut packages = BTreeSet::new();
     for line in graph.lines().filter(|line| !line.is_empty()) {
         let (package, features) = line.split_once('|').expect("Cargo tree row with {p}|{f}");
@@ -175,4 +177,11 @@ pub(super) fn audit(
         packages.len(),
         REQUIRED_RUNTIME_PACKAGES.join(",")
     );
+    (tree, graph)
+}
+
+pub(super) fn read(custody: &mut Custody, command: &SupervisedProcessCommand) -> String {
+    let output = custody.tool(command, Duration::from_secs(60));
+    assert_eq!(output.receipt.exit().code(), Some(0), "{}", output.stderr);
+    output.stdout
 }

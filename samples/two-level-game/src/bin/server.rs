@@ -2,6 +2,9 @@
 
 #[path = "player/arguments.rs"]
 mod arguments;
+#[cfg(all(nara_cooked_player, feature = "local-player"))]
+#[path = "server/client_services.rs"]
+mod client_services;
 #[cfg(any(nara_cooked_player, test))]
 #[path = "server/clock.rs"]
 mod clock;

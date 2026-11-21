@@ -13,6 +13,7 @@ mod catalog;
 mod codecs;
 mod deep;
 mod dependencies;
+#[cfg(feature = "runtime-input")]
 mod input;
 #[cfg(feature = "runtime-2d")]
 mod materials;
@@ -24,7 +25,9 @@ mod traversal;
 pub use codecs::{RuntimeCodecDefinitionId, RuntimeCodecSelectionError, RuntimeCodecsFingerprint};
 pub(crate) use codecs::{RuntimeCodecRole, RuntimeCodecs};
 pub use deep::RuntimeContentValidationReport;
+#[cfg(feature = "runtime-input")]
 pub use input::RuntimeInputContent;
+#[cfg(feature = "runtime-input")]
 pub(crate) use input::RuntimeInputObservation;
 pub(crate) use prepared::ProcessedSceneContent;
 

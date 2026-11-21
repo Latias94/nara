@@ -169,6 +169,9 @@ The manifest contract is:
   Programmatic `TaskPlugin` configuration remains valid for embedded apps, while the inline driver
   remains test-only.
 - `[window]` owns default primary-window settings for file-backed desktop launches.
+  The manifest and effective Runtime configuration retain `ProjectWindowMode` and
+  `ProjectPresentMode`. The Window-capable Host lowers those settings to a runtime `Window`
+  when composing a window owner. The configuration parser needs no Window dependency.
 - `[input]` owns named input action map files or inline action-map settings once ADRs define the
   input-action model.
 - `[profiles.<name>]` provides platform/build/profile overrides, including future `headless`,

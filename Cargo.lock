@@ -2629,7 +2629,6 @@ dependencies = [
  "nara_diagnostic",
  "nara_ecs",
  "nara_tasks",
- "nara_window",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

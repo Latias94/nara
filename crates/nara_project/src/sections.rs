@@ -10,7 +10,6 @@ use nara_tasks::{
     MAX_TASK_POOL_THREADS_TOTAL, MAX_TASK_SHUTDOWN_PHASE_TIMEOUT, MAX_TASK_SHUTDOWN_TOTAL_TIMEOUT,
     TaskKindConfig, TaskPoolConfig, TaskPoolKind, TaskShutdownPolicy,
 };
-use nara_window::{PresentMode, WindowMode};
 use serde::{Deserialize, Serialize};
 
 use crate::MAX_PROJECT_UI_LOGICAL_EXTENT;
@@ -742,8 +741,8 @@ impl ProjectWindowManifest {
             width: self.width,
             height: self.height,
             scale_factor: self.scale_factor,
-            mode: self.mode.into(),
-            present_mode: self.present_mode.into(),
+            mode: self.mode,
+            present_mode: self.present_mode,
             resizable: self.resizable,
         }
     }
@@ -758,16 +757,6 @@ pub enum ProjectWindowMode {
     Fullscreen,
 }
 
-impl From<ProjectWindowMode> for WindowMode {
-    fn from(value: ProjectWindowMode) -> Self {
-        match value {
-            ProjectWindowMode::Windowed => Self::Windowed,
-            ProjectWindowMode::BorderlessFullscreen => Self::BorderlessFullscreen,
-            ProjectWindowMode::Fullscreen => Self::Fullscreen,
-        }
-    }
-}
-
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProjectPresentMode {
@@ -777,18 +766,6 @@ pub enum ProjectPresentMode {
     Fifo,
     Immediate,
     Mailbox,
-}
-
-impl From<ProjectPresentMode> for PresentMode {
-    fn from(value: ProjectPresentMode) -> Self {
-        match value {
-            ProjectPresentMode::AutoVsync => Self::AutoVsync,
-            ProjectPresentMode::AutoNoVsync => Self::AutoNoVsync,
-            ProjectPresentMode::Fifo => Self::Fifo,
-            ProjectPresentMode::Immediate => Self::Immediate,
-            ProjectPresentMode::Mailbox => Self::Mailbox,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]

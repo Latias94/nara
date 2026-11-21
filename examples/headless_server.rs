@@ -46,11 +46,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         1
     );
     assert!(runtime.world().resource::<GameplayCommandQueue>().is_idle());
+    #[cfg(feature = "runtime-input")]
     assert!(
         !runtime
             .world()
             .contains_resource::<nara::input::PointerState>()
     );
+    #[cfg(feature = "runtime-window")]
     assert!(
         !runtime
             .world()

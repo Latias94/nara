@@ -17,10 +17,6 @@ use nara::{
         GameplayCommandTick,
     },
     identity::EntityLookup,
-    input::{
-        ActionMaps, ActionOutcomes, ButtonInput, InputTimeline, KeyCode, MouseButton, PointerState,
-        SemanticActions,
-    },
     project::{ProductCapability, ProductCapabilitySet, RuntimePreset},
     project_host::{
         HeadlessSession, HeadlessSessionClose, HeadlessSessionError,
@@ -30,15 +26,6 @@ use nara::{
         RuntimeContentBase, RuntimeContentExpectation, RuntimeContentLimits,
         RuntimeContentMemberKind, RuntimeContentTarget,
     },
-    window::{PrimaryWindowId, WindowEvents, backend::BackendWindowHandles},
-};
-#[cfg(feature = "local-player")]
-use nara::{
-    asset::Assets,
-    image::ImageAsset,
-    material::Material2dAsset,
-    render::{RenderBackendStatus, RenderFrame},
-    tilemap::TileSetAssets,
 };
 use serde_json::{Value, json};
 use two_level_game::{
@@ -271,26 +258,8 @@ fn open_pack() -> Result<RuntimeContentBase, String> {
 
 fn verify_runtime(session: &HeadlessSession, snapshot: &GameSnapshot) -> Result<(), Failure> {
     session.observe(|world| -> Result<(), Failure> {
-        let has_client_services = world.contains_resource::<InputTimeline>()
-            || world.contains_resource::<ActionMaps>()
-            || world.contains_resource::<ActionOutcomes>()
-            || world.contains_resource::<SemanticActions>()
-            || world.contains_resource::<PointerState>()
-            || world.contains_resource::<ButtonInput<KeyCode>>()
-            || world.contains_resource::<ButtonInput<MouseButton>>()
-            || world.contains_resource::<WindowEvents>()
-            || world.contains_resource::<PrimaryWindowId>()
-            || world.contains_resource::<BackendWindowHandles>();
         #[cfg(feature = "local-player")]
-        let has_client_services = has_client_services
-            || world.contains_resource::<RenderFrame>()
-            || world.contains_resource::<RenderBackendStatus>()
-            || world.contains_resource::<Assets<ImageAsset>>()
-            || world.contains_resource::<Assets<Material2dAsset>>()
-            || world.contains_resource::<TileSetAssets>();
-        if has_client_services {
-            return Err("Server World contains Input, Window or presentation services".into());
-        }
+        super::client_services::verify_absent(world)?;
         if world.resource::<FixedTime>().catch_up_policy() != FixedCatchUpPolicy::PreserveDebt {
             return Err("Server World lost its fixed-time debt policy".into());
         }

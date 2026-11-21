@@ -19,6 +19,8 @@ use super::composition::{
 use super::runtime::{HeadlessRun, HeadlessRunIntent};
 use super::{ProjectSettingsCandidate, RuntimePlan, RuntimePlanError};
 use crate::ProductRecipe;
+#[cfg(feature = "runtime-window")]
+pub use crate::product::window_from_settings;
 
 pub use super::composition::{
     ProjectRuntimePlugins, built_in_schema_providers, project_runtime_plugins, resolve_runtime_plan,

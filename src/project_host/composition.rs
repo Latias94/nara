@@ -10,6 +10,8 @@ use nara_app::{
     PluginId, PluginPlan, PluginPlanError, PluginProductCapability, PluginSchemaProviderId,
 };
 use nara_fs::{ContentDigest, FileIdentity};
+#[cfg(feature = "runtime-input")]
+use nara_input::INPUT_PLUGIN_ID;
 use nara_project::{
     EffectiveProjectSettings, EffectiveRuntimeConfiguration, ProductCapability,
     ProductCapabilitySet, ProjectPath, SourceRuntimeProjection,
@@ -513,6 +515,8 @@ pub enum CompositionError {
     ProjectLineageMismatch,
     /// A selected global action map has no actual Input plugin in the resolved plan.
     InputOwnerRequired,
+    /// The first-party Input plugin was selected without its Host integration feature.
+    InputFeatureRequired,
     /// Processed startup Input requires a selected decoder for the actual typed family and format.
     InputCodecRequired,
     UnsupportedDefaultConfiguration {
@@ -577,6 +581,7 @@ impl fmt::Display for CompositionError {
                 "project runtime request lineage does not match candidate"
             }
             Self::InputOwnerRequired => "selected input action map requires the Input plugin",
+            Self::InputFeatureRequired => "the Input plugin requires the Host runtime-input feature",
             Self::InputCodecRequired => "processed input action map requires its selected typed Runtime codec",
             Self::UnsupportedDefaultConfiguration { .. } => {
                 "product recipe configures a default absent from the selected profile"
@@ -854,12 +859,7 @@ pub fn resolve_runtime_plan(
         known_providers,
     )?;
     if candidate.input_requirement().is_some()
-        && !resolved
-            .configuration
-            .plugin_plan()
-            .entries()
-            .iter()
-            .any(|entry| entry.plugin_id() == nara_input::INPUT_PLUGIN_ID)
+        && !has_input_owner(resolved.configuration.plugin_plan())
     {
         return Err(CompositionError::InputOwnerRequired.into());
     }
@@ -876,6 +876,15 @@ struct ResolvedRuntimeComposition {
     configuration: RuntimeConfigurationPlan,
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     asset_domains: crate::project_content::ProjectAssetDomains,
+}
+
+#[cfg(not(feature = "runtime-input"))]
+const INPUT_PLUGIN_ID: PluginId = PluginId::new("nara.input");
+
+fn has_input_owner(plan: &PluginPlan) -> bool {
+    plan.entries()
+        .iter()
+        .any(|entry| entry.plugin_id() == INPUT_PLUGIN_ID)
 }
 
 fn resolve_runtime_composition(
@@ -915,15 +924,16 @@ fn resolve_runtime_composition(
             &snapshot_cell,
         )));
     let plugin_plan = PluginPlan::resolve(request)?;
+    let input_owner_selected = has_input_owner(&plugin_plan);
+    #[cfg(not(feature = "runtime-input"))]
+    if input_owner_selected {
+        return Err(CompositionError::InputFeatureRequired.into());
+    }
     if settings.input().action_map.is_some() {
-        if !plugin_plan
-            .entries()
-            .iter()
-            .any(|entry| entry.plugin_id() == nara_input::INPUT_PLUGIN_ID)
-        {
+        if !input_owner_selected {
             return Err(CompositionError::InputOwnerRequired.into());
         }
-        #[cfg(feature = "serde")]
+        #[cfg(all(feature = "serde", feature = "runtime-input"))]
         let input_codec_selected = runtime_codecs.has_family_format::<nara_input::ActionMapDomain>(
             <nara_input::ActionMapRuntimeCodec as nara_asset::RuntimeAssetCodec<
                 nara_input::ActionMapAsset,
@@ -932,7 +942,7 @@ fn resolve_runtime_composition(
                 nara_input::ActionMapAsset,
             >>::RUNTIME_VERSION,
         );
-        #[cfg(not(feature = "serde"))]
+        #[cfg(not(all(feature = "serde", feature = "runtime-input")))]
         let input_codec_selected = false;
         if !input_codec_selected {
             return Err(CompositionError::InputCodecRequired.into());

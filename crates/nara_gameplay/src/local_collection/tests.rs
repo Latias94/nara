@@ -11,22 +11,26 @@ use nara_app::{
     RealTime, RuntimeControl, RuntimeControlRequestResult, RuntimeFaultKind, RuntimeFaultReporter,
     RuntimeFrameKind, RuntimeInstance, RuntimeState, RuntimeTimeSettings, ScheduleGraphError,
 };
+#[cfg(feature = "input")]
 use nara_core::ByteLimit;
 use nara_ecs::{
     Commands, FromWorld, Local, Res, ResMut, Resource, World,
     bevy_ecs::error::BevyError,
     schedule::{IntoScheduleConfigs, ScheduleLabel},
 };
+#[cfg(feature = "input")]
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
     ActionMaps, ActionValue, AxisDirection, ButtonDriverInput, InputPlugin, KeyCode,
     SemanticActions, apply_keyboard_driver_input,
 };
 
+#[cfg(feature = "input")]
+use crate::GameplayCommandSource;
 use crate::{
     GameplayCommandBatch, GameplayCommandDraft, GameplayCommandEnvelope,
     GameplayCommandIngressSource, GameplayCommandPayload, GameplayCommandPlugin,
-    GameplayCommandQueue, GameplayCommandSet, GameplayCommandSource, GameplayCommandSourceSequence,
+    GameplayCommandQueue, GameplayCommandSet, GameplayCommandSourceSequence,
     GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
     LocalGameplayCommands, add_local_gameplay_command_systems,
 };
@@ -88,6 +92,7 @@ fn exact_tick(runtime: &mut RuntimeInstance) {
     assert_eq!(outcome.frame().unwrap().status.fixed_steps, 1);
 }
 
+#[cfg(feature = "input")]
 fn keyboard(runtime: &mut RuntimeInstance, input: ButtonDriverInput<KeyCode>) {
     let outcome = runtime
         .with_driver_scope(|scope| apply_keyboard_driver_input(scope, input))
@@ -96,6 +101,7 @@ fn keyboard(runtime: &mut RuntimeInstance, input: ButtonDriverInput<KeyCode>) {
     outcome.output.unwrap();
 }
 
+#[cfg(feature = "input")]
 fn collect_axis(actions: Res<SemanticActions>, mut commands: ResMut<LocalGameplayCommands>) {
     for outcome in actions.as_slice() {
         let ActionValue::Axis(value) = outcome.value else {
@@ -114,6 +120,7 @@ fn collect_axis(actions: Res<SemanticActions>, mut commands: ResMut<LocalGamepla
     }
 }
 
+#[cfg(feature = "input")]
 #[test]
 fn exact_step_collects_staged_axis_changes_before_admission_and_does_not_replay_on_resume() {
     for register_before_plugin in [false, true] {
@@ -145,6 +152,14 @@ fn exact_step_collects_staged_axis_changes_before_admission_and_does_not_replay_
         if !register_before_plugin {
             add_local_gameplay_command_systems(&mut app, collect_axis).unwrap();
         }
+        app.set_schedule_build_settings(
+            nara_app::__private::FrameIntent,
+            nara_ecs::bevy_ecs::schedule::ScheduleBuildSettings {
+                ambiguity_detection: nara_ecs::bevy_ecs::schedule::LogLevel::Error,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         configure_capture(&mut app, true);
         let mut runtime = RuntimeInstance::start(app).unwrap();
 

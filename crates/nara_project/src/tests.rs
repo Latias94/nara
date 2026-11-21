@@ -159,7 +159,19 @@ fn minimal_manifest_parses_and_resolves_validated_defaults() {
         settings.runtime.fixed_time().catch_up_policy(),
         FixedCatchUpPolicy::DiscardExcess
     );
-    assert!(settings.window.to_window().is_some());
+    assert_eq!(
+        settings.window,
+        EffectiveWindowSettings {
+            enabled: true,
+            title: "nara".to_owned(),
+            width: 1280,
+            height: 720,
+            scale_factor: 1.0,
+            mode: ProjectWindowMode::Windowed,
+            present_mode: ProjectPresentMode::AutoVsync,
+            resizable: true,
+        }
+    );
 }
 
 #[test]

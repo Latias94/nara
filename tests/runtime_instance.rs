@@ -27,7 +27,7 @@ use nara::{
         RuntimeWorldAccessError, SealedApp, StartupStage, VirtualTime, drive_runtime_quarantine,
         runtime_quarantine_status,
     },
-    core::{ByteLimit, ItemLimit, TimeLimit},
+    core::{ItemLimit, TimeLimit},
     ecs::{
         Commands, Res, ResMut, Resource, World, bevy_ecs::change_detection::DetectChangesMut,
         bevy_ecs::event::Event, bevy_ecs::observer::On, schedule::IntoScheduleConfigs,
@@ -38,14 +38,19 @@ use nara::{
         GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTick,
         GameplayCommandTypeId, submit_gameplay_driver_command,
     },
+    tasks::{
+        TaskDomainKey, TaskHandle, TaskKindConfig, TaskPlugin, TaskPoolConfig, TaskPoolKind,
+        TaskPools, TaskShutdownPolicy, TaskSpawnRequest, TaskTerminal,
+    },
+};
+
+#[cfg(feature = "runtime-input")]
+use nara::{
+    core::ByteLimit,
     input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
         ActionMaps, ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonInput,
         InputPlugin, KeyCode, MouseButton, apply_keyboard_driver_input, apply_mouse_driver_input,
-    },
-    tasks::{
-        TaskDomainKey, TaskHandle, TaskKindConfig, TaskPlugin, TaskPoolConfig, TaskPoolKind,
-        TaskPools, TaskShutdownPolicy, TaskSpawnRequest, TaskTerminal,
     },
 };
 
@@ -3300,9 +3305,11 @@ fn count_cleanup_update(mut counts: ResMut<StageCounts>) {
     counts.cleanup_updates += 1;
 }
 
+#[cfg(feature = "runtime-input")]
 #[derive(Debug, Default, Resource)]
 struct ObservedInputOutcomes(Vec<ActionOutcome>);
 
+#[cfg(feature = "runtime-input")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
 struct ObservedInputFrameEdges {
     key_presses: usize,
@@ -3311,6 +3318,7 @@ struct ObservedInputFrameEdges {
     mouse_releases: usize,
 }
 
+#[cfg(feature = "runtime-input")]
 fn observe_input_outcomes(
     outcomes: Res<ActionOutcomes>,
     mut observed: ResMut<ObservedInputOutcomes>,
@@ -3318,6 +3326,7 @@ fn observe_input_outcomes(
     observed.0 = outcomes.as_slice().to_vec();
 }
 
+#[cfg(feature = "runtime-input")]
 fn observe_input_frame_edges(
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -3367,6 +3376,7 @@ fn paused_driving_runs_real_time_work_without_variable_simulation() {
     assert_eq!(runtime.world().resource::<StageCounts>().cleanup_updates, 2);
 }
 
+#[cfg(feature = "runtime-input")]
 #[test]
 fn paused_input_edges_are_retained_until_the_next_resolving_frame() {
     let mut app = configured_app(FixedTime::default());
