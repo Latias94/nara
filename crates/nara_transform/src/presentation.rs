@@ -304,7 +304,9 @@ fn interpolate(previous: Transform2d, current: Transform2d, alpha: f32) -> Trans
     }
     let flip_x = previous.scale.x.is_sign_negative() != current.scale.x.is_sign_negative();
     let flip_y = previous.scale.y.is_sign_negative() != current.scale.y.is_sign_negative();
-    let translation = previous.translation.lerp(current.translation, alpha);
+    let translation = previous
+        .translation
+        .lerp_monotonic(current.translation, alpha);
     if flip_x != flip_y || degenerate_scale {
         return Transform2d {
             translation,
@@ -322,8 +324,17 @@ fn interpolate(previous: Transform2d, current: Transform2d, alpha: f32) -> Trans
             current_sin = -current_sin;
             current_cos = -current_cos;
         }
-        let previous_angle = f64::from(previous_sin).atan2(f64::from(previous_cos));
-        let current_angle = f64::from(current_sin).atan2(f64::from(current_cos));
+        let canonicalize_half_turn = |angle: f64| {
+            if (angle.abs() - std::f64::consts::PI).abs() <= 1.0e-6 {
+                -std::f64::consts::PI
+            } else {
+                angle
+            }
+        };
+        let previous_angle =
+            canonicalize_half_turn(f64::from(previous_sin).atan2(f64::from(previous_cos)));
+        let current_angle =
+            canonicalize_half_turn(f64::from(current_sin).atan2(f64::from(current_cos)));
         let delta = (current_angle - previous_angle + std::f64::consts::PI)
             .rem_euclid(std::f64::consts::TAU)
             - std::f64::consts::PI;
@@ -337,13 +348,14 @@ fn interpolate(previous: Transform2d, current: Transform2d, alpha: f32) -> Trans
     Transform2d {
         translation,
         rotation,
-        scale: previous.scale.lerp(current_scale, alpha),
+        scale: previous.scale.lerp_monotonic(current_scale, alpha),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nara_core::{Mat3, Vec2};
 
     #[test]
     fn finite_rotation_extremes_keep_interpolated_matrices_finite() {
@@ -395,5 +407,45 @@ mod tests {
         let direction = midpoint.matrix().transform_vector2(nara_core::Vec2::X);
         assert!((direction - nara_core::Vec2::NEG_X).length() < 1e-5);
         assert_eq!(interpolate(previous, previous, 0.5), previous);
+    }
+
+    #[test]
+    fn equivalent_half_turns_use_one_deterministic_direction() {
+        let previous = Transform2d::IDENTITY;
+        let positive = Transform2d {
+            rotation: std::f32::consts::PI,
+            scale: Vec2::ONE,
+            ..Transform2d::IDENTITY
+        };
+        let negative = Transform2d {
+            rotation: -std::f32::consts::PI,
+            scale: Vec2::ONE,
+            ..Transform2d::IDENTITY
+        };
+        let positive_midpoint = interpolate(previous, positive, 0.5).matrix();
+        let negative_midpoint = interpolate(previous, negative, 0.5).matrix();
+
+        assert!(positive_midpoint.abs_diff_eq(negative_midpoint, 1.0e-6));
+    }
+
+    #[test]
+    fn equal_subnormal_scales_survive_parented_midpoint_composition() {
+        let pose = |scale_x, translation| Transform2d {
+            scale: Vec2::new(scale_x, 1.0),
+            translation,
+            ..Transform2d::IDENTITY
+        };
+        let parent_previous = pose(2.0_f32.powi(126), Vec2::ZERO);
+        let parent_current = pose(2.0_f32.powi(126), Vec2::Y);
+        let child_previous = pose(f32::from_bits(1), Vec2::ZERO);
+        let child_current = pose(f32::from_bits(1), -Vec2::Y);
+        let expected = Mat3::from_scale(Vec2::new(2.0_f32.powi(-23), 1.0));
+
+        assert_eq!(parent_previous.matrix() * child_previous.matrix(), expected);
+        assert_eq!(parent_current.matrix() * child_current.matrix(), expected);
+
+        let midpoint = interpolate(parent_previous, parent_current, 0.5).matrix()
+            * interpolate(child_previous, child_current, 0.5).matrix();
+        assert_eq!(midpoint, expected);
     }
 }

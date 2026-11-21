@@ -201,6 +201,59 @@ fn exact_fixed_cut_uses_one_parent_and_child_camera_basis() {
     runtime.finish().unwrap();
 }
 
+#[test]
+fn parented_camera_preserves_a_non_singular_subnormal_midpoint() {
+    let mut app = render_app(true);
+    app.insert_resource(FixedTime::new(TIMESTEP).unwrap())
+        .unwrap();
+    app.insert_resource(FixedTransformInterpolation).unwrap();
+    let world = app.world_mut().unwrap();
+    let parent = world
+        .spawn(Transform2d {
+            scale: Vec2::new(2.0_f32.powi(126), 1.0),
+            ..Transform2d::IDENTITY
+        })
+        .id();
+    let camera = world
+        .spawn((
+            Camera2d::default(),
+            Transform2d {
+                scale: Vec2::new(f32::from_bits(1), 1.0),
+                ..Transform2d::IDENTITY
+            },
+        ))
+        .id();
+    place_parented(world, camera, parent);
+    app.add_systems(
+        CoreStage::FixedUpdate,
+        (move |mut transforms: Query<&mut Transform2d>| {
+            transforms.get_mut(parent).unwrap().translation = Vec2::Y;
+            transforms.get_mut(camera).unwrap().translation = -Vec2::Y;
+        })
+        .in_set(FixedUpdateSet::Simulate),
+    )
+    .unwrap();
+
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let initial = capture_packet(&runtime);
+    runtime.drive(TIMESTEP + TIMESTEP / 2).unwrap();
+    let midpoint = capture_packet(&runtime);
+    assert_eq!(midpoint.views()[0].mapping, initial.views()[0].mapping);
+    assert_eq!(midpoint.views()[0].id, initial.views()[0].id);
+    assert_eq!(
+        runtime
+            .drive(TIMESTEP)
+            .unwrap()
+            .frame()
+            .unwrap()
+            .status
+            .fixed_tick,
+        2
+    );
+    runtime.finish().unwrap();
+}
+
 fn capture_packet(runtime: &RuntimeInstance) -> RenderFramePacket {
     let world = runtime.world();
     let views = world.resource::<ExtractedViews>();
