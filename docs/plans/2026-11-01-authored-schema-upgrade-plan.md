@@ -492,6 +492,33 @@ retain the fence. Final guard refusal returns the same candidate for a later bin
 trigger another model admission, source preparation or allowance reset. Native source-lock and
 actual Close/Exit controls belong to the Application proof as well as the Root owner tests.
 
+### Historical RON Recovery
+
+The recovery reader verifies the original package and member digests, decodes the stored
+sources, and proves the reviewed transition against the admitted Schema. Only the producer
+compares a newly proposed successor with its current canonical encoder. A later consumer
+publishes the exact stored successor, so a change in RON formatting does not strand a Pending
+project or rewrite a member that already holds those bytes.
+
+The [independent process fixture](../../tests/fixtures/authored-upgrade-recovery/README.md)
+uses the actual Pending output of `6a3d4ac`, the predecessor of the two-space RON writer in
+`617b920`. The historical fixture changes its closed Scene and Prefab inputs to RON and
+retains the original Review bytes before confirm. The current test opens a copy of the
+complete Pending project, including its recovery package, Schema bundle and PNG. The
+mixed-state variation seeds only the two exact reviewed RON successors. This selects the
+already-published observations without depending on the current source order.
+
+On Windows x64 with Rust 1.95.0, `936cabe8-ac0d-49a7-9e27-30dabffa7f5c` passes all seven
+independently locked recovery process cases. Both historical states reproduce all eight
+successor files byte for byte. The mixed case preserves the file objects and modification times
+of the two RON leaves. Fresh public Sessions open `base` and `dormant` with distinct v2 values
+and empty history, leaving the entire Ready tree unchanged. The generated fixture retains the
+original Pending package and its BLAKE3 commitment. A separate `617b920` reader rejects the
+same four-space project with `NonCanonicalSuccessor` and leaves every file unchanged. The
+ordinary authored-upgrade command suite passes 18/18 in
+`0f794d8c-f6d3-4e73-848d-9710808c4bf0`, and the independent package passes formatting.
+This tests process-level recovery across one actual writer change on Windows.
+
 ## Separate CP2 Successor
 
 `Nested Prefab source extraction with complete occurrence remap` reuses the selected review,

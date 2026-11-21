@@ -303,3 +303,11 @@ Scene and Prefab, and the 86-row omitted default in both source kinds. The workf
 the actual bound encoding, refuses oversized explicit JSON publication, and distinguishes
 omitted from explicit state after Undo, Redo, Save and Reopen.
 [Registered panel regressions](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/property_pages/round_eight.rs)
+
+### November 21 Schema upgrade process requalification
+
+The [historical RON process case](../plans/2026-11-01-authored-schema-upgrade-plan.md#historical-ron-recovery)
+closes the separate Schema upgrade evidence gap. The current independent recovery process
+resumes actual pre-compaction v1 Pending bytes in both the all-old and mixed states, matches
+all eight original successor files, and preserves already-published file identity and modification
+time. Fresh public Open verifies the two profiles and leaves the Ready tree intact.

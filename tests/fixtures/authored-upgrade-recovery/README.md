@@ -14,7 +14,7 @@ cargo +1.95.0 build --manifest-path tests/fixtures/authored-upgrade-recovery/Car
 Set `NARA_AUTHORED_UPGRADE_RECOVERY_EXE` to the resulting executable's absolute path, then run:
 
 ```text
-cargo +1.95.0 nextest run --manifest-path tests/fixtures/behavior-languages/Cargo.toml --locked --target-dir target --test authored_upgrade_command --run-ignored only --test-threads 1 -E "test(authored_upgrade_session::process_recovery::subprocess_)"
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/behavior-languages/Cargo.toml --locked --target-dir target --test authored_upgrade_command --run-ignored only --test-threads 1 -E "test(process_recovery::) & test(subprocess_)"
 ```
 
 The producer uses the public Session operation and exits after actual Pending publication, before
@@ -22,6 +22,12 @@ driving a source step. Separate processes inspect or resume all-old, mixed and a
 refuse source/metadata/recovery conflicts, and open the actual Ready result. Inspection-time
 successor bytes are distinct from replacements performed in the current process. The tests also
 hold already-new leaves across recovery to check that they were observed without rewriting.
+
+The cross-version case replays a Pending project published by Nara at `6a3d4ac`, before the
+two-space RON writer landed in `617b920`. Its closed Scene and Prefab carry four-space RON
+successors from the original Review. The case checks all-old and mixed starts, exact stored
+successor bytes, the identity and modification times of already-published RON leaves, and
+ordinary fresh Open in the `base` and `dormant` profiles.
 
 `--stop-after-sources <count>` interrupts between source steps; `--stop-after-sources all` stops
 after sources and bundle, while the project remains Pending. `--stop-after-ready` exits after

@@ -1850,6 +1850,11 @@ records exact test cohorts, corrected failures, independent review and Windows/p
 limits. Its predecessor shards preserve the earlier implementation checkpoints. CP2 and the
 broader foundation units remain open; this does not promote complete R5 or Proposed0120/0121.
 
+The [historical Schema upgrade recovery case](../../plans/2026-11-01-authored-schema-upgrade-plan.md#historical-ron-recovery)
+adds process evidence for ADR0043 and ADR0047. The current independent recovery executable
+publishes the original Review bytes from an actual pre-compaction RON Pending project, verifies
+already-published leaves without rewriting them, and allows both profiles to reopen independently.
+
 The [CP2 extraction unit](../../plans/2026-11-02-prefab-extraction-plan.md) selects explicit root
 binding/forest mounting, source-owned typed placements, inline reference values and separate
 flat compiled output. A mixed local/inherited sibling-order counterexample requires replacing

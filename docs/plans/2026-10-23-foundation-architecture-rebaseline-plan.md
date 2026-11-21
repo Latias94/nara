@@ -1117,6 +1117,9 @@ witness in local history, with omission as the inverse. Cross-profile Export sha
 file observations. Runtime input and sample gameplay keep presentation, live pickup and device
 state under their existing owners. The independent registered panel verified both 39,500-row RON
 sources and both omitted 86-row default sources through history and disk reopen.
+The [historical Schema upgrade process case](2026-11-01-authored-schema-upgrade-plan.md#historical-ron-recovery)
+also resumes the real pre-compaction Pending project, preserves already-published RON files,
+and reopens both profiles from the exact restored bytes.
 
 The [action outcome storage correction](2026-10-30-input-endpoint-admission-and-retirement-plan.md#action-outcome-storage-at-admission)
 removes the default eager backing allocation from both action result vectors. Ordinary action

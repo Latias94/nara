@@ -23,6 +23,9 @@ use nara_engine::{
 
 use super::*;
 
+#[path = "process_recovery/legacy.rs"]
+mod legacy;
+
 const COMPANION_ENV: &str = "NARA_AUTHORED_UPGRADE_RECOVERY_EXE";
 const MODE_ENV: &str = "NARA_AUTHORED_UPGRADE_CHILD_MODE";
 const ROOT_ENV: &str = "NARA_AUTHORED_UPGRADE_CHILD_ROOT";
@@ -449,12 +452,14 @@ fn child_entry() {
             );
             println!("\nordinary-open pending=true");
         }
-        "open-ready" => {
+        mode @ ("open-ready" | "open-legacy-ready") => {
             assert_eq!(
                 manifest(&root).authoring.state,
                 ProjectAuthoringState::Ready
             );
-            assert_successor_sources(&root);
+            if mode == "open-ready" {
+                assert_successor_sources(&root);
+            }
             let mut editor = ordinary_open(&root, &profile).unwrap();
             let startup = editor.current_frame().workspace().active_document.unwrap();
             project::assert_history(&editor, startup, 0, 0);
