@@ -292,6 +292,11 @@ explicit Windows `audio-desktop` recipe opens the original WASAPI device at Runt
 Its complete native delivery acceptance, observation costs and platform limits belong to the
 [game's current unit](../plans/2026-11-03-joint-motion-execution-plan.md#source-owned-sound-bank-and-source-free-audible-player).
 
+For a dependency discovered only by a build, register its source domain in the recipe and
+supply its verified group through `add_group::<D>()`. Cook waits for a Required or Reference
+edge to a Product in the group, checks the current source and build inputs, then includes the
+complete group. A contribution that remains unreachable fails preparation.
+
 The same game selects native controllers separately with `--controllers none|gilrs`. The default
 is `none`; Gilrs requires the cooker's optional gamepad feature, a Windows target and a desktop
 placement. Silent and audible desktop recipes compose the same fixed native Input configuration.

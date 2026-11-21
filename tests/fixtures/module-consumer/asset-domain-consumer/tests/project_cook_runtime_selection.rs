@@ -63,6 +63,8 @@ use serde::Serialize;
 
 #[path = "support/project_cook_badge.rs"]
 mod badge;
+#[path = "support/project_cook_groups.rs"]
+mod groups;
 #[path = "support/project_cook_stock.rs"]
 mod stock;
 

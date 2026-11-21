@@ -102,6 +102,21 @@ impl ProjectAssetDomains {
     }
 }
 
+#[cfg(feature = "project-tooling")]
+impl ProjectContentSnapshot {
+    /// Queries the admitted Runtime plan's source registrations, including unloaded domains.
+    pub(crate) fn selects_source_domain<D: SourceAssetImporter>(&self) -> bool {
+        self.inner
+            .domain_authority
+            .providers
+            .iter()
+            .any(|provider| {
+                provider.domain_type() == std::any::TypeId::of::<D>()
+                    && provider.source_kind() == D::SOURCE_KIND
+            })
+    }
+}
+
 pub(crate) fn validate_asset_domain_kind(
     kind: &'static str,
     duplicate: bool,

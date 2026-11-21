@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, btree_map::Entry};
 
 use nara_asset::{
-    AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetProductRef, AssetRef,
-    AssetSourceKind, AssetSourcePath, ImportedProductId, ProjectAssetDatabase, StableAssetId,
+    AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetPathScope, AssetProductRef,
+    AssetRef, AssetSourceKind, AssetSourcePath, ImportedProductId, ProjectAssetDatabase,
+    StableAssetId,
 };
 use nara_fs::{ContentDigest, DirectoryCapability};
 use nara_material::{Material2dAsset, Material2dDomain};
@@ -16,7 +17,7 @@ use super::{
     ProjectImageContent, ProjectSettingsCandidate, RuntimePlan, STRING_ALLOCATION_OVERHEAD,
     catalogue::{
         CookedProductSource, ReferenceCatalogue, asset_record_retained_bytes, identity_conflict,
-        verify_selected_source,
+        metadata_source_changed, verify_selected_source,
     },
     checked_plan_sum,
     delivery::{DeliveryVisitError, delivery_member_changed, delivery_member_limit},
@@ -107,9 +108,55 @@ impl<V, D> LoadContext<'_, V, D> {
         }
         Ok(expected)
     }
+
+    fn without_member_file_charge<T, E: From<ProjectContentError>>(
+        &mut self,
+        visit: impl FnOnce(&mut Self) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let files = self.budget_value(Budget::Files);
+        self.set_budget(Budget::Files, 0)?;
+        let result = visit(self);
+        self.set_budget(Budget::Files, files)?;
+        result
+    }
 }
 
 impl DeliveryAssets<'_> {
+    pub(crate) fn discover_sources(
+        &mut self,
+        selected: &dyn Fn(StableAssetId) -> bool,
+    ) -> Result<(), ProjectContentError> {
+        if self.catalogue.is_none() {
+            self.context.without_member_file_charge(|context| {
+                context.scan_reference_catalogue(Some(selected))
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Replays the same delivery while retaining supplemental observations and allocations.
+    /// Each sequential traversal carries its own file and directory work counters.
+    pub(crate) fn during_delivery_replay<E>(
+        &mut self,
+        replay: impl FnOnce() -> Result<(), DeliveryVisitError<E>>,
+    ) -> Result<(), DeliveryVisitError<E>> {
+        let counters = [
+            Budget::Files,
+            Budget::DirectoryEntries,
+            Budget::DirectoryDepth,
+        ];
+        let prior = counters.map(|kind| (kind, self.context.budget_value(kind)));
+        let budget = self.context.budget_mut();
+        budget
+            .set_many(&counters.map(|kind| (kind, 0)))
+            .map_err(ProjectContentError::budget)?;
+        let result = replay();
+        budget
+            .set_many(&prior)
+            .map_err(ProjectContentError::budget)?;
+        result
+    }
+
     pub(crate) fn verify_source(
         &self,
         id: StableAssetId,
@@ -122,6 +169,101 @@ impl DeliveryAssets<'_> {
             &source.path,
             source.metadata,
         )
+    }
+
+    /// Reads the current facts for a demanded, explicitly contributed build source.
+    pub(crate) fn with_build_source<E>(
+        &mut self,
+        id: StableAssetId,
+        kind: &str,
+        source_bytes: usize,
+        visit: impl FnOnce(
+            &DirectoryCapability,
+            &AssetPathScope,
+            &AssetSourcePath,
+            ContentDigest,
+            ContentDigest,
+        ) -> Result<(), E>,
+    ) -> Result<bool, DeliveryVisitError<E>> {
+        let Some(record) = self.database().record_for_stable_id(id) else {
+            return Ok(false);
+        };
+        if !matches!(record.source_kind(), AssetSourceKind::Other(actual) if actual.as_str() == kind)
+        {
+            return Ok(false);
+        }
+        let Some(relative) = self.context.asset_scope.relative_path(record.path()) else {
+            return Ok(false);
+        };
+        let Some(metadata) = self
+            .reference_catalogue()
+            .and_then(|catalogue| catalogue.metadata.get(record.path()))
+            .map(|metadata| metadata.digest)
+        else {
+            return Ok(false);
+        };
+        let work_bytes = checked_plan_sum(
+            Budget::WorkBytes,
+            [
+                string_retained_bytes(record.path().as_str())?,
+                string_retained_bytes(relative)?,
+                string_retained_bytes(relative)?,
+                ".meta".len(),
+            ],
+        )?;
+        let work = self.context.reserve_work(work_bytes)?;
+        let path = self
+            .database()
+            .record_for_stable_id(id)
+            .expect("reserving work keeps the selected source")
+            .path()
+            .clone();
+        let local = self
+            .context
+            .asset_scope
+            .relativize(&path)
+            .ok_or_else(|| identity_conflict(&path))?;
+        let metadata_path = local.meta_path();
+        if self.assets.is_none() {
+            self.assets = Some(self.context.open_directory(self.asset_root)?);
+        }
+        let assets = self
+            .assets
+            .as_ref()
+            .expect("delivery assets directory is open");
+        let mut read = |name: &str, limit, kind| {
+            let (bytes, digest) = self.context.read_file_inner(
+                assets,
+                name,
+                limit,
+                ContentReadContext::ExactProjectMember {
+                    source_root: self.asset_root,
+                },
+            )?;
+            drop(bytes);
+            self.context
+                .record_member(kind, self.asset_root, name, digest)?;
+            Ok::<_, ProjectContentError>(digest)
+        };
+        let observed = read(
+            &metadata_path,
+            AssetMetaFileLimits::default().encoded_bytes().get(),
+            ProjectContentMemberKind::AssetMetadata,
+        )?;
+        if observed != metadata {
+            return Err(metadata_source_changed(path.as_str()).into());
+        }
+        let primary = read(
+            local.as_str(),
+            source_bytes,
+            ProjectContentMemberKind::AssetSource,
+        )?;
+        let result = visit(assets, &self.context.asset_scope, &path, primary, metadata);
+        drop((path, local, metadata_path));
+        self.context
+            .subtract_budget(Budget::WorkBytes, work.reserved);
+        result.map_err(DeliveryVisitError::Visit)?;
+        Ok(true)
     }
 
     /// Acquires a demanded stock definition and borrows it until the existing encoder returns.
@@ -240,11 +382,9 @@ impl DeliveryAssets<'_> {
         mut visit: impl FnMut(StableAssetId, &AssetSourcePath, ContentDigest) -> Result<(), E>,
     ) -> Result<(), DeliveryVisitError<E>> {
         if self.textures.values().any(|&requires_scan| requires_scan) {
-            let files = self.context.budget_value(Budget::Files);
-            self.context.set_budget(Budget::Files, 0)?;
-            self.context
-                .scan_reference_catalogue(Some(&|id| self.textures.get(&id) == Some(&true)))?;
-            self.context.set_budget(Budget::Files, files)?;
+            self.context.without_member_file_charge(|context| {
+                context.scan_reference_catalogue(Some(&|id| self.textures.get(&id) == Some(&true)))
+            })?;
         }
         for &id in self.textures.keys() {
             let product = AssetProductRef::new(id, ImportedProductId::PRIMARY)

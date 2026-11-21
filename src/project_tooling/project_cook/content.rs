@@ -1,6 +1,6 @@
 use std::{
     any::TypeId,
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     panic::{AssertUnwindSafe, catch_unwind},
 };
 
@@ -10,7 +10,7 @@ use crate::{
         AssetSourcePath, ImportedProductId, SourceAssetBuild, StableAssetId,
     },
     asset_build::{
-        ArtifactBuildDefinition, ArtifactBuildObservation, ArtifactBuildStore,
+        ArtifactBuildDefinition, ArtifactBuildError, ArtifactBuildObservation, ArtifactBuildStore,
         ArtifactContentDigest, ArtifactSourceRequest, VerifiedArtifactGroup, build_source,
     },
     core::FormatVersion,
@@ -24,7 +24,8 @@ use crate::{
     },
     project_host::{
         ProjectContentDeliveryReceipt, ProjectContentLoader, ProjectContentMemberKind,
-        ProjectContentSnapshot, ProjectTileSetContent, RuntimePlan, resolve_product_recipe,
+        ProjectContentSnapshot, ProjectSceneContentStamp, ProjectTileSetContent, RuntimePlan,
+        resolve_product_recipe,
     },
     project_workflow::cooked_content::{CookedContentBuilder, CookedContentRequest},
     reflect::ComponentTypeId,
@@ -86,11 +87,29 @@ impl StockAsset<'_> {
     }
 }
 
+type MatchSourceGroup = fn(
+    &ArtifactSourceRequest,
+    &ArtifactBuildStore,
+    &VerifiedArtifactGroup,
+) -> Result<bool, ArtifactBuildError>;
+
+struct StagedGroup {
+    group: VerifiedArtifactGroup,
+    domain: TypeId,
+    kind: &'static str,
+    source_bytes: usize,
+    build_id: &'static str,
+    revision: FormatVersion,
+    matches_source_group: MatchSourceGroup,
+    charge: usize,
+}
+
 #[derive(Default)]
 struct Observations {
     raw: BTreeMap<AssetSourcePath, Option<ArtifactContentDigest>>,
     processed: Vec<ArtifactBuildObservation>,
     product_sources: BTreeMap<StableAssetId, CookedProductSource>,
+    staged_groups: BTreeMap<StableAssetId, StagedGroup>,
 }
 
 impl Observations {
@@ -257,12 +276,17 @@ impl<'a> ProjectCookContext<'a> {
                 }
                 continue;
             }
+            if let Some(staged) = self.observations.staged_groups.get(&record.stable_id()) {
+                let group = staged.group.clone();
+                self.add_group::<D>(&group)?;
+                continue;
+            }
             self.builder
                 .reserve_consumer_metadata(metadata_bytes::<(StableAssetId, TypeId)>(0)?)?;
             let (request, metadata) =
                 self.source_request::<D>(scope, assets.share(), record.path())?;
             let group = build_source::<D>(self.store, &request, |_| Ok(()))?.into_group();
-            self.add_verified_group(&group)?;
+            add_verified_group(self.builder, self.outputs, self.observations, &group)?;
             self.observations.product_source(
                 self.builder,
                 record.stable_id(),
@@ -276,10 +300,10 @@ impl<'a> ProjectCookContext<'a> {
 
     /// Adds a verified group for the current typed source selection.
     ///
-    /// First admission requires the selected snapshot to contain the source. The build owner
-    /// compares its normalized settings, source identity, primary bytes and compiled definition
-    /// with the retained seed. All output Products must belong to that source. The existing
-    /// group supplies the build observations for publication.
+    /// The project recipe must select the typed domain. Sources observed in the snapshot are
+    /// validated in this call. Other groups wait for a Required or Reference edge in the assembly.
+    /// Cook checks their outputs and current build seed before adding the complete group. Unused
+    /// groups fail preparation; the builder validates reachability from the delivery roots.
     pub fn add_group<D>(&mut self, group: &VerifiedArtifactGroup) -> Result<(), ProjectCookError>
     where
         D: SourceAssetBuild,
@@ -296,20 +320,66 @@ impl<'a> ProjectCookContext<'a> {
                 )))
             };
         }
-        let record = self
+        let staged = self.observations.staged_groups.get(&source.source());
+        if let Some(staged) = staged {
+            if staged.domain != domain || staged.group.digest() != group.digest() {
+                return Err(ProjectCookError::Invalid(format!(
+                    "artifact group conflicts with an already supplied source build: {source}"
+                )));
+            }
+        } else if !self.snapshot.selects_source_domain::<D>() {
+            return Err(unselected_group(D::SOURCE_KIND, source));
+        }
+        let mut record = self
             .snapshot
             .asset_database()
             .record_for_stable_id(source.source())
             .filter(|record| {
-                matches!(record.source_kind(), AssetSourceKind::Other(kind) if kind == D::SOURCE_KIND)
-            })
-            .filter(|_| self.snapshot.domain_assets().collection::<D>().is_some())
-            .ok_or_else(|| {
-                ProjectCookError::Invalid(format!(
-                    "artifact group has no selected source for {}: {source}",
-                    D::SOURCE_KIND,
-                ))
-            })?;
+                self.snapshot
+                    .delivery_member(record.path().as_str())
+                    .is_some_and(|member| member.kind() == ProjectContentMemberKind::AssetSource)
+            });
+        if let Some(source) = record {
+            let path = source.path();
+            self.builder
+                .admit_consumer_work(path.as_str().len().checked_add(5).ok_or_else(overflow)?)?;
+            if !self
+                .snapshot
+                .delivery_member(&path.meta_path())
+                .is_some_and(|member| member.kind() == ProjectContentMemberKind::AssetMetadata)
+            {
+                record = None;
+            }
+        }
+        let Some(record) = record else {
+            if staged.is_some() {
+                return Ok(());
+            }
+            check_group_outputs(self.outputs, group)?;
+            let revision = source_build_revision::<D>()?;
+            let source_bytes = D::limits().source_bytes().get();
+            let charge = metadata_bytes::<(StableAssetId, StagedGroup)>(0)?
+                .checked_add(group.retained_bytes())
+                .ok_or_else(overflow)?;
+            self.builder.reserve_consumer_metadata(charge)?;
+            self.observations.staged_groups.insert(
+                source.source(),
+                StagedGroup {
+                    group: group.clone(),
+                    domain,
+                    kind: D::SOURCE_KIND,
+                    source_bytes,
+                    build_id: D::BUILD_ID,
+                    revision,
+                    matches_source_group: ArtifactSourceRequest::matches_source_group::<D>,
+                    charge,
+                },
+            );
+            return Ok(());
+        };
+        if !matches!(record.source_kind(), AssetSourceKind::Other(kind) if kind == D::SOURCE_KIND) {
+            return Err(unselected_group(D::SOURCE_KIND, source));
+        }
         let scope = self.snapshot.asset_resolution().scope();
         self.builder
             .reserve_consumer_metadata(metadata_bytes::<(StableAssetId, TypeId)>(0)?)?;
@@ -321,7 +391,10 @@ impl<'a> ProjectCookContext<'a> {
                 record.path(),
             )));
         }
-        self.add_verified_group(group)?;
+        if let Some(staged) = self.observations.staged_groups.remove(&source.source()) {
+            self.builder.release_consumer_metadata(staged.charge);
+        }
+        add_verified_group(self.builder, self.outputs, self.observations, group)?;
         self.observations.product_source(
             self.builder,
             record.stable_id(),
@@ -354,12 +427,6 @@ impl<'a> ProjectCookContext<'a> {
         D: SourceAssetBuild,
         D::Settings: serde::Serialize,
     {
-        let local = scope.relativize(path).ok_or_else(|| {
-            ProjectCookError::Invalid("source build escaped its admitted asset scope".into())
-        })?;
-        let revision = FormatVersion::new(D::BUILD_REVISION).ok_or_else(|| {
-            ProjectCookError::Invalid("source-build revision must be nonzero".into())
-        })?;
         let primary = self
             .snapshot
             .delivery_member(path.as_str())
@@ -368,72 +435,19 @@ impl<'a> ProjectCookContext<'a> {
             })?
             .digest();
         let metadata = selected_metadata(self.snapshot, path)?;
-        let request = ArtifactSourceRequest::new(
+        let request = source_build_request(
+            scope,
             directory,
-            scope.clone(),
-            local,
+            path,
             ArtifactBuildDefinition {
                 id: D::BUILD_ID.to_owned(),
-                revision,
+                revision: source_build_revision::<D>()?,
                 implementation: self.implementation,
             },
-        )
-        .with_source_digests(
-            ArtifactContentDigest::from_content(primary),
-            ArtifactContentDigest::from_content(metadata),
-        );
+            primary,
+            metadata,
+        )?;
         Ok((request, metadata))
-    }
-
-    fn add_verified_group(
-        &mut self,
-        group: &VerifiedArtifactGroup,
-    ) -> Result<(), ProjectCookError> {
-        let output = Output::Group(group.digest());
-        let products = group
-            .members()
-            .iter()
-            .flat_map(|member| member.products.iter());
-        let mut present = 0;
-        let mut total = 0;
-        for product in products {
-            if product.source() != group.seed().source.source() {
-                return Err(ProjectCookError::Invalid(format!(
-                    "artifact group Product {product} belongs to a different source than its seed"
-                )));
-            }
-            total += 1;
-            match self.outputs.get(product) {
-                None | Some(Output::Demanded) => {}
-                Some(previous) if *previous == output => present += 1,
-                Some(_) => {
-                    return Err(ProjectCookError::Invalid(format!(
-                        "cooked Product {product} has conflicting output"
-                    )));
-                }
-            }
-        }
-        if total != 0 && total == present {
-            return Ok(());
-        }
-        if present != 0 {
-            return Err(ProjectCookError::Invalid(
-                "a complete group overlaps an already cooked Product".into(),
-            ));
-        }
-        for product in group.members().iter().flat_map(|member| &member.products) {
-            if !self.outputs.contains_key(product) {
-                reserve_output(self.builder)?;
-            }
-        }
-        self.builder.add_group(group)?;
-        for product in group.members().iter().flat_map(|member| &member.products) {
-            self.outputs.insert(*product, output);
-        }
-        for observation in group.observations() {
-            self.observations.add(self.builder, observation)?;
-        }
-        Ok(())
     }
 
     fn select_stock(
@@ -674,6 +688,97 @@ impl<'a> ProjectCookContext<'a> {
     }
 }
 
+fn unselected_group(kind: &str, source: AssetProductRef) -> ProjectCookError {
+    ProjectCookError::Invalid(format!(
+        "artifact group has no selected source for {kind}: {source}"
+    ))
+}
+
+fn source_build_revision<D: SourceAssetBuild>() -> Result<FormatVersion, ProjectCookError>
+where
+    D::Settings: serde::Serialize,
+{
+    FormatVersion::new(D::BUILD_REVISION)
+        .ok_or_else(|| ProjectCookError::Invalid("source-build revision must be nonzero".into()))
+}
+
+fn source_build_request(
+    scope: &AssetPathScope,
+    directory: DirectoryCapability,
+    path: &AssetSourcePath,
+    definition: ArtifactBuildDefinition,
+    primary: ContentDigest,
+    metadata: ContentDigest,
+) -> Result<ArtifactSourceRequest, ProjectCookError> {
+    let local = scope.relativize(path).ok_or_else(|| {
+        ProjectCookError::Invalid("source build escaped its admitted asset scope".into())
+    })?;
+    Ok(
+        ArtifactSourceRequest::new(directory, scope.clone(), local, definition)
+            .with_source_digests(
+                ArtifactContentDigest::from_content(primary),
+                ArtifactContentDigest::from_content(metadata),
+            ),
+    )
+}
+
+/// Checks ownership and conflicts before any member of the group is added.
+fn check_group_outputs(
+    outputs: &BTreeMap<AssetProductRef, Output>,
+    group: &VerifiedArtifactGroup,
+) -> Result<bool, ProjectCookError> {
+    let products = group.members().iter().flat_map(|member| &member.products);
+    let mut present = 0;
+    let mut total = 0;
+    for product in products {
+        if product.source() != group.seed().source.source() {
+            return Err(ProjectCookError::Invalid(format!(
+                "artifact group Product {product} belongs to a different source than its seed"
+            )));
+        }
+        total += 1;
+        match outputs.get(product) {
+            None | Some(Output::Demanded) => {}
+            Some(previous) if *previous == Output::Group(group.digest()) => present += 1,
+            Some(_) => {
+                return Err(ProjectCookError::Invalid(format!(
+                    "cooked Product {product} has conflicting output"
+                )));
+            }
+        }
+    }
+    if present != 0 && present != total {
+        return Err(ProjectCookError::Invalid(
+            "a complete group overlaps an already cooked Product".into(),
+        ));
+    }
+    Ok(total == 0 || present != total)
+}
+
+fn add_verified_group(
+    builder: &mut CookedContentBuilder,
+    outputs: &mut BTreeMap<AssetProductRef, Output>,
+    observations: &mut Observations,
+    group: &VerifiedArtifactGroup,
+) -> Result<(), ProjectCookError> {
+    if !check_group_outputs(outputs, group)? {
+        return Ok(());
+    }
+    for product in group.members().iter().flat_map(|member| &member.products) {
+        if !outputs.contains_key(product) {
+            reserve_output(builder)?;
+        }
+    }
+    builder.add_group(group)?;
+    for product in group.members().iter().flat_map(|member| &member.products) {
+        outputs.insert(*product, Output::Group(group.digest()));
+    }
+    for observation in group.observations() {
+        observations.add(builder, observation)?;
+    }
+    Ok(())
+}
+
 fn selected_metadata(
     snapshot: &ProjectContentSnapshot,
     path: &AssetSourcePath,
@@ -712,6 +817,28 @@ fn mark_stock_demand(
     Ok(())
 }
 
+fn collect_new_demands(
+    builder: &mut CookedContentBuilder,
+    outputs: &mut BTreeMap<AssetProductRef, Output>,
+    inspected_members: &mut usize,
+) -> Result<(), ProjectCookError> {
+    while let Some(count) = builder
+        .pending_dependencies(*inspected_members)
+        .map(|edges| edges.len())
+    {
+        for index in 0..count {
+            let edge = builder
+                .pending_dependencies(*inspected_members)
+                .expect("assembled members retain their dependencies")[index];
+            if edge.role() != RuntimeContentDependencyRole::Soft {
+                mark_stock_demand(builder, outputs, edge.product())?;
+            }
+        }
+        *inspected_members += 1;
+    }
+    Ok(())
+}
+
 fn tileset_descriptor(
     product: AssetProductRef,
     image: AssetProductRef,
@@ -727,15 +854,128 @@ fn tileset_descriptor(
         .map_err(|error| ProjectCookError::Invalid(error.to_string()))
 }
 
+type SourceDelivery = (ProjectContentDeliveryReceipt, Option<DeliveryCatalogue>);
+
+struct CookAssembly {
+    outputs: BTreeMap<AssetProductRef, Output>,
+    builder: CookedContentBuilder,
+    built_sources: BTreeMap<StableAssetId, TypeId>,
+    observations: Observations,
+    inspected_members: usize,
+}
+
+impl CookAssembly {
+    fn needs_scene_replay(&self) -> bool {
+        self.outputs.values().any(|output| {
+            matches!(
+                output,
+                Output::Stock(StockKind::Scene, StockState::Demanded)
+            )
+        })
+    }
+
+    fn replay_scenes(
+        &mut self,
+        loader: &ProjectContentLoader,
+        request: &ProjectCookRequest<'_>,
+        plan: &RuntimePlan,
+        omitted_scene_components: &[ComponentTypeId],
+        expected: (ContentDigest, ProjectSceneContentStamp),
+    ) -> Result<SourceDelivery, DeliveryVisitError<ProjectCookError>> {
+        let replay = loader.load_delivery_with_snapshots(
+            request.candidate,
+            plan,
+            SelectedSceneProduct::Required,
+            |snapshot, phase| {
+                if phase != DeliverySnapshotPhase::Complete || !self.needs_scene_replay() {
+                    return Ok(());
+                }
+                ProjectCookContext {
+                    snapshot,
+                    root: request.root,
+                    store: request.store,
+                    implementation: request.implementation,
+                    builder: &mut self.builder,
+                    omitted_scene_components,
+                    outputs: &mut self.outputs,
+                    built_sources: &mut self.built_sources,
+                    observations: &mut self.observations,
+                }
+                .select_stock(&mut self.inspected_members, |_| Ok(()))
+            },
+        )?;
+        if delivery_stamp(&replay) != expected {
+            return Err(DeliveryVisitError::Visit(ProjectCookError::Invalid(
+                "source delivery changed while selecting cooked dependencies".into(),
+            )));
+        }
+        Ok(replay)
+    }
+
+    fn admit_demanded_groups(
+        &mut self,
+        mut validate: impl FnMut(
+            &StagedGroup,
+            &mut CookedContentBuilder,
+            &mut Observations,
+        ) -> Result<(), DeliveryVisitError<ProjectCookError>>,
+    ) -> Result<bool, DeliveryVisitError<ProjectCookError>> {
+        let mut admitted = false;
+        while let Some(source) = self
+            .observations
+            .staged_groups
+            .iter()
+            .find_map(|(&id, staged)| {
+                staged
+                    .group
+                    .members()
+                    .iter()
+                    .flat_map(|member| &member.products)
+                    .any(|product| self.outputs.get(product) == Some(&Output::Demanded))
+                    .then_some(id)
+            })
+        {
+            let staged = self
+                .observations
+                .staged_groups
+                .remove(&source)
+                .expect("the demanded group is still staged");
+            validate(&staged, &mut self.builder, &mut self.observations)?;
+            self.builder.release_consumer_metadata(staged.charge);
+            add_verified_group(
+                &mut self.builder,
+                &mut self.outputs,
+                &mut self.observations,
+                &staged.group,
+            )
+            .map_err(DeliveryVisitError::Visit)?;
+            collect_new_demands(
+                &mut self.builder,
+                &mut self.outputs,
+                &mut self.inspected_members,
+            )
+            .map_err(DeliveryVisitError::Visit)?;
+            admitted = true;
+        }
+        Ok(admitted)
+    }
+}
+
+fn delivery_stamp(delivery: &SourceDelivery) -> (ContentDigest, ProjectSceneContentStamp) {
+    let (receipt, _) = delivery;
+    (
+        receipt.delivery_digest(),
+        receipt.startup_content().content_closure().stamp(),
+    )
+}
+
 fn finish_stock_assets(
     loader: &ProjectContentLoader,
     request: &ProjectCookRequest<'_>,
     plan: &RuntimePlan,
-    delivery: &(ProjectContentDeliveryReceipt, Option<DeliveryCatalogue>),
-    outputs: &mut BTreeMap<AssetProductRef, Output>,
-    builder: &mut CookedContentBuilder,
-    observations: &mut Observations,
-    inspected_members: &mut usize,
+    delivery: &SourceDelivery,
+    assembly: &mut CookAssembly,
+    omitted_scene_components: &[ComponentTypeId],
 ) -> Result<(), DeliveryVisitError<ProjectCookError>> {
     let is_demanded_asset = |product: &AssetProductRef, output: &Output| {
         product.product() == ImportedProductId::PRIMARY
@@ -757,28 +997,146 @@ fn finish_stock_assets(
             )
         )
     };
-    if !outputs
-        .iter()
-        .any(|(product, output)| is_cooked_asset(output) || is_demanded_asset(product, output))
+    let is_selected_stock = |product: &AssetProductRef, output: &Output| {
+        is_cooked_asset(output) || is_demanded_asset(product, output)
+    };
+    let staged = !assembly.observations.staged_groups.is_empty();
+    if !staged
+        && !assembly
+            .outputs
+            .iter()
+            .any(|(product, output)| is_selected_stock(product, output))
     {
         return Ok(());
     }
 
+    let selected_stock = |outputs: &BTreeMap<AssetProductRef, Output>, id| {
+        AssetProductRef::new(id, ImportedProductId::PRIMARY)
+            .ok()
+            .is_some_and(|product| {
+                outputs
+                    .get(&product)
+                    .is_some_and(|output| is_selected_stock(&product, output))
+            })
+    };
+    let coverage_entry_bytes =
+        metadata_bytes::<StableAssetId>(0).map_err(DeliveryVisitError::Visit)?;
+    let mut covered = BTreeSet::new();
+    if staged {
+        for id in assembly.observations.staged_groups.keys().copied().chain(
+            assembly.outputs.iter().filter_map(|(product, output)| {
+                is_selected_stock(product, output).then_some(product.source())
+            }),
+        ) {
+            if !covered.contains(&id) {
+                assembly
+                    .builder
+                    .reserve_consumer_metadata(coverage_entry_bytes)
+                    .map_err(ProjectCookError::from)
+                    .map_err(DeliveryVisitError::Visit)?;
+                covered.insert(id);
+            }
+        }
+    }
     let (receipt, catalogue) = delivery;
     let mut sources = loader.delivery_assets(
         request.candidate,
         plan,
         receipt,
-        catalogue.as_ref(),
+        if staged { None } else { catalogue.as_ref() },
         &|id| {
-            AssetProductRef::new(id, ImportedProductId::PRIMARY)
-                .ok()
-                .and_then(|product| outputs.get(&product).map(|output| (product, output)))
-                .is_some_and(|(product, output)| {
-                    is_cooked_asset(output) || is_demanded_asset(&product, output)
-                })
+            if staged {
+                covered.contains(&id)
+            } else {
+                selected_stock(&assembly.outputs, id)
+            }
         },
     )?;
+    if staged {
+        loop {
+            let admitted = assembly.admit_demanded_groups(|staged, builder, observations| {
+                let group = &staged.group;
+                let source = group.seed().source;
+                let found = sources.with_build_source(
+                    source.source(),
+                    staged.kind,
+                    staged.source_bytes,
+                    |directory, scope, path, primary, metadata| {
+                        let build = source_build_request(
+                            scope,
+                            directory.share(),
+                            path,
+                            ArtifactBuildDefinition {
+                                id: staged.build_id.to_owned(),
+                                revision: staged.revision,
+                                implementation: request.implementation,
+                            },
+                            primary,
+                            metadata,
+                        )?;
+                        if !(staged.matches_source_group)(&build, request.store, group)? {
+                            return Err(ProjectCookError::Invalid(format!(
+                                "artifact group does not match the selected source build: {path}"
+                            )));
+                        }
+                        observations.product_source(builder, source.source(), path, Some(metadata))
+                    },
+                )?;
+                if !found {
+                    return Err(DeliveryVisitError::Visit(unselected_group(
+                        staged.kind,
+                        source,
+                    )));
+                }
+                Ok(())
+            })?;
+            if !admitted || !assembly.needs_scene_replay() {
+                break;
+            }
+            sources.during_delivery_replay(|| {
+                assembly
+                    .replay_scenes(
+                        loader,
+                        request,
+                        plan,
+                        omitted_scene_components,
+                        delivery_stamp(delivery),
+                    )
+                    .map(drop)
+            })?;
+            if assembly.observations.staged_groups.is_empty() {
+                break;
+            }
+        }
+        if let Some(staged) = assembly.observations.staged_groups.values().next() {
+            return Err(DeliveryVisitError::Visit(ProjectCookError::Invalid(
+                format!(
+                    "supplied artifact group is unreachable: {}",
+                    staged.group.seed().source
+                ),
+            )));
+        }
+        if assembly.outputs.iter().any(|(product, output)| {
+            is_selected_stock(product, output) && !covered.contains(&product.source())
+        }) {
+            sources.discover_sources(&|id| {
+                !covered.contains(&id) && selected_stock(&assembly.outputs, id)
+            })?;
+        }
+        let coverage_bytes = coverage_entry_bytes
+            .checked_mul(covered.len())
+            .ok_or_else(overflow)
+            .map_err(DeliveryVisitError::Visit)?;
+        drop(covered);
+        assembly.builder.release_consumer_metadata(coverage_bytes);
+    }
+    let CookAssembly {
+        outputs,
+        builder,
+        observations,
+        inspected_members,
+        ..
+    } = assembly;
     for (product, output) in &*outputs {
         if is_cooked_asset(output) {
             let id = product.source();
@@ -814,21 +1172,7 @@ fn finish_stock_assets(
     sources.verify_textures(|id, path, metadata| {
         observations.product_source(builder, id, path, Some(metadata))
     })?;
-    while let Some(count) = builder
-        .pending_dependencies(*inspected_members)
-        .map(|edges| edges.len())
-    {
-        for index in 0..count {
-            let edge = builder
-                .pending_dependencies(*inspected_members)
-                .expect("assembled stock retains its dependencies")[index];
-            if edge.role() != RuntimeContentDependencyRole::Soft {
-                mark_stock_demand(builder, outputs, edge.product())
-                    .map_err(DeliveryVisitError::Visit)?;
-            }
-        }
-        *inspected_members += 1;
-    }
+    collect_new_demands(builder, outputs, inspected_members).map_err(DeliveryVisitError::Visit)?;
     let is_demanded_image = |product: &AssetProductRef, output: &Output| {
         product.product() == ImportedProductId::PRIMARY
             && matches!(
@@ -1058,54 +1402,22 @@ fn prepare(
             },
         )
         .map_err(delivery_error)?;
-    let mut builder = builder.ok_or_else(|| {
+    let builder = builder.ok_or_else(|| {
         ProjectCookError::Invalid("source delivery produced no startup Scene".into())
     })?;
-    let needs_replay = |outputs: &BTreeMap<AssetProductRef, Output>| {
-        outputs.values().any(|output| {
-            matches!(
-                output,
-                Output::Stock(StockKind::Scene, StockState::Demanded)
-            )
-        })
+    let mut assembly = CookAssembly {
+        outputs,
+        builder,
+        built_sources,
+        observations,
+        inspected_members,
     };
-    let delivery = if needs_replay(&outputs) {
-        let (receipt, _) = &delivery;
-        let expected_delivery = receipt.delivery_digest();
-        let expected_startup = receipt.startup_content().content_closure().stamp();
+    let delivery = if assembly.needs_scene_replay() {
+        let expected = delivery_stamp(&delivery);
         drop(delivery);
-        let replay = loader
-            .load_delivery_with_snapshots(
-                request.candidate,
-                &plan,
-                scene_product,
-                |snapshot, phase| {
-                    if phase != DeliverySnapshotPhase::Complete || !needs_replay(&outputs) {
-                        return Ok(());
-                    }
-                    ProjectCookContext {
-                        snapshot,
-                        root: request.root,
-                        store: request.store,
-                        implementation: request.implementation,
-                        builder: &mut builder,
-                        omitted_scene_components,
-                        outputs: &mut outputs,
-                        built_sources: &mut built_sources,
-                        observations: &mut observations,
-                    }
-                    .select_stock(&mut inspected_members, |_| Ok(()))
-                },
-            )
-            .map_err(delivery_error)?;
-        if replay.0.delivery_digest() != expected_delivery
-            || replay.0.startup_content().content_closure().stamp() != expected_startup
-        {
-            return Err(ProjectCookError::Invalid(
-                "source delivery changed while selecting cooked dependencies".into(),
-            ));
-        }
-        replay
+        assembly
+            .replay_scenes(&loader, &request, &plan, omitted_scene_components, expected)
+            .map_err(delivery_error)?
     } else {
         delivery
     };
@@ -1114,14 +1426,19 @@ fn prepare(
         &request,
         &plan,
         &delivery,
-        &mut outputs,
-        &mut builder,
-        &mut observations,
-        &mut inspected_members,
+        &mut assembly,
+        omitted_scene_components,
     )
     .map_err(delivery_error)?;
     let (receipt, catalogue) = delivery;
     drop(catalogue);
+    let CookAssembly {
+        outputs,
+        mut builder,
+        built_sources,
+        mut observations,
+        ..
+    } = assembly;
     let output_bytes = metadata_bytes::<(AssetProductRef, Output)>(0)?
         .checked_mul(outputs.len())
         .ok_or_else(overflow)?;

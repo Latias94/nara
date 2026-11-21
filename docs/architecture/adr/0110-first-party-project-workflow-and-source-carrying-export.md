@@ -162,8 +162,9 @@ during construction, such as a PNG embedded into a typed Product, still contribu
 and build observations. The PNG becomes a separate Runtime member when an encoded Product or
 delivery root requires it. Every stock Image chosen for delivery has one stable source in the
 admitted catalogue roots. This applies to Images encoded from a Scene snapshot and Images first
-required by a verified group. If source delivery has no complete catalogue, Cook discovers the
-selected identities in one bounded pass. It uses the admitted file facts when reading the actual
+required by a verified group. If source delivery has no complete catalogue, Cook batches its
+known selected identities in a bounded pass. It revisits discovery for new demand outside that
+pass. It uses the admitted file facts when reading the actual
 PNG and typed sidecar. Additional stock files count against the same unique delivery file limit.
 The publication fence rechecks the retained file facts and the ownership of each selected Product
 source, including the owner UUID of a compound group's subproducts. The bounded catalogue pass
@@ -179,7 +180,10 @@ verified group. The original source owner resolves its unique metadata, reads th
 definition and keeps every source and Shader input it used. The original encoder emits the
 resulting Image dependency edges. The same delivery file allowance and publication fence cover
 those supplemental reads. Scene roots and enabled Material provider selection still come from
-the original project settings and recipe. Cook obtains other built products from explicit groups.
+the original project settings and recipe. A supplied group for a registered build domain can
+wait for a Required or Reference edge to one of its complete Products. At that edge Cook
+checks the current unique source identity, build seed and output ownership, then adds the
+whole group. The original closure and file fence include the group's transitive dependencies.
 
 A stock Sprite's selected `material.image` and a stock `UiVisual` image brush's `background.image`
 require the executable's Image publication codec role. Deep validation checks those bindings
