@@ -25,12 +25,12 @@ use super::{Custody, RESULT, assert_complete, read_bounded};
 const READY: &str = "TWO_LEVEL_SERVER_READY ";
 const REPLY: &str = "TWO_LEVEL_SERVER_REPLY ";
 const SOURCE: &str = "two-level-game.server";
-const TIMESTEP_NANOS: u64 = 20_000_000;
+pub(super) const TIMESTEP_NANOS: u64 = 20_000_000;
 const POLL: Duration = Duration::from_millis(10);
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(15);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(65);
-const RELEASED: [bool; 4] = [false; 4];
-const ANCHOR_POSITION: [f32; 2] = [-120.0, 0.0];
+pub(super) const RELEASED: [bool; 4] = [false; 4];
+pub(super) const ANCHOR_POSITION: [f32; 2] = [-120.0, 0.0];
 
 pub(super) fn accept(custody: &mut Custody, executable: &Path) {
     let meadow = LevelKey::main(LevelId::Meadow);
@@ -201,26 +201,13 @@ fn assert_refused_startup(custody: &mut Custody, executable: &Path) {
         .root
         .join("server-service-missing-save-parent");
     assert!(!parent.exists());
-    let mut server = Service::spawn(
+    let server = Service::spawn(
         custody,
         executable,
-        Some(&parent.join("checkpoint.json")),
+        Launch::Paced(Some(&parent.join("checkpoint.json"))),
         "server-service-refused-startup",
     );
-    let result = server.read(RESULT, STARTUP_TIMEOUT);
-    assert_eq!(result["scenario"], "serve", "{result}");
-    assert_eq!(result["status"], "rejected", "{result}");
-    assert_eq!(result["success"], false, "{result}");
-    assert_eq!(result["stage"], "service_startup", "{result}");
-    assert_eq!(result["ready"], false, "{result}");
-    assert_eq!(result["close"], "complete", "{result}");
-    assert_eq!(result["cleanup_complete"], true, "{result}");
-    assert!(
-        result["message"]
-            .as_str()
-            .is_some_and(|message| !message.is_empty())
-    );
-    server.assert_native_exit(1, &result);
+    server.startup_refusal();
     assert!(!parent.exists());
 }
 
@@ -310,7 +297,12 @@ fn assert_gameplay_rejection(custody: &mut Custody, executable: &Path) {
     panic!("no Restore and Marker pair reached the same admitted fixed tick");
 }
 
-struct Service<'a> {
+pub(super) enum Launch<'a> {
+    Paced(Option<&'a Path>),
+    Paused(Option<&'a Path>),
+}
+
+pub(super) struct Service<'a> {
     custody: &'a mut Custody,
     cwd: PathBuf,
     input: Option<SupervisedBootstrapChannel>,
@@ -318,6 +310,7 @@ struct Service<'a> {
     stderr: Vec<u8>,
     cursor: usize,
     receipt: Option<SupervisedProcessCleanupReceipt>,
+    restored: bool,
     startup_commands: u64,
     last_tick: u64,
     admitted_ticks: Vec<u64>,
@@ -325,14 +318,9 @@ struct Service<'a> {
 
 impl<'a> Service<'a> {
     fn start(custody: &'a mut Custody, executable: &Path, path: Option<&Path>, name: &str) -> Self {
-        let mut service = Self::spawn(custody, executable, path, name);
-        let ready = service.read(READY, STARTUP_TIMEOUT);
-        assert_eq!(ready["version"], 1, "{ready}");
-        assert_eq!(ready["timestep_nanos"], TIMESTEP_NANOS, "{ready}");
-        assert_eq!(ready["checkpoint_configured"], path.is_some(), "{ready}");
+        let mut service = Self::spawn(custody, executable, Launch::Paced(path), name);
+        let ready = service.ready(false, path.is_some());
         let state = &ready["state"];
-        service.last_tick = tick(state);
-        assert!(service.last_tick >= service.startup_commands, "{ready}");
         assert_progress(state, LevelKey::main(LevelId::Meadow), 0, &[]);
         assert_eq!(state["travel_count"], 0);
         assert_eq!(state["saves"], 0);
@@ -342,12 +330,25 @@ impl<'a> Service<'a> {
         service
     }
 
-    fn spawn(custody: &'a mut Custody, executable: &Path, path: Option<&Path>, name: &str) -> Self {
+    pub(super) fn spawn(
+        custody: &'a mut Custody,
+        executable: &Path,
+        launch: Launch<'_>,
+        name: &str,
+    ) -> Self {
         let cwd = custody.fixture().directory(name);
         let mut arguments = vec![OsString::from("--serve")];
-        if let Some(path) = path {
+        let restored = matches!(launch, Launch::Paused(Some(_)));
+        let file = match launch {
+            Launch::Paced(save) => save.map(|path| ("--save", path)),
+            Launch::Paused(resume) => {
+                arguments.push("--paused".into());
+                resume.map(|path| ("--resume-state", path))
+            }
+        };
+        if let Some((flag, path)) = file {
             assert!(path.is_absolute());
-            arguments.extend([OsString::from("--save"), path.as_os_str().to_owned()]);
+            arguments.extend([OsString::from(flag), path.as_os_str().to_owned()]);
         }
         let command =
             SupervisedProductProcessCommand::new(SupervisedProductEnvironmentPolicy::Sealed, &cwd)
@@ -362,10 +363,48 @@ impl<'a> Service<'a> {
             stderr: Vec::new(),
             cursor: 0,
             receipt: None,
-            startup_commands: u64::from(path.is_some()),
+            restored,
+            startup_commands: u64::from(file.is_some()),
             last_tick: 0,
             admitted_ticks: Vec::new(),
         }
+    }
+
+    pub(super) fn ready(&mut self, paused: bool, checkpoint: bool) -> Value {
+        let ready = self.read(READY, STARTUP_TIMEOUT);
+        assert_eq!(ready["version"], 1, "{ready}");
+        assert_eq!(ready["timestep_nanos"], TIMESTEP_NANOS, "{ready}");
+        assert_eq!(ready["checkpoint_configured"], checkpoint, "{ready}");
+        assert_eq!(ready["paused"], paused, "{ready}");
+        assert_eq!(ready["restored"], self.restored, "{ready}");
+        self.last_tick = tick(&ready["state"]);
+        assert!(self.last_tick >= self.startup_commands, "{ready}");
+        ready
+    }
+
+    pub(super) fn expect_restored_pending(&mut self, offsets: &[u64]) {
+        assert!(self.restored && self.admitted_ticks.is_empty());
+        self.admitted_ticks
+            .extend(offsets.iter().map(|offset| self.last_tick + offset));
+    }
+
+    pub(super) fn startup_refusal(mut self) -> Value {
+        let result = self.read(RESULT, STARTUP_TIMEOUT);
+        assert_eq!(result["scenario"], "serve", "{result}");
+        assert_eq!(result["status"], "rejected", "{result}");
+        assert_eq!(result["success"], false, "{result}");
+        assert_eq!(result["stage"], "service_startup", "{result}");
+        assert_eq!(result["ready"], false, "{result}");
+        assert_eq!(result["close"], "complete", "{result}");
+        assert_eq!(result["cleanup_complete"], true, "{result}");
+        assert!(
+            result["message"]
+                .as_str()
+                .is_some_and(|message| !message.is_empty()),
+            "{result}"
+        );
+        self.assert_native_exit(1, &result);
+        result
     }
 
     fn close_input(&mut self) {
@@ -400,7 +439,7 @@ impl<'a> Service<'a> {
         })
     }
 
-    fn until(&mut self, description: &str, reached: impl Fn(&Value) -> bool) -> Value {
+    pub(super) fn until(&mut self, description: &str, reached: impl Fn(&Value) -> bool) -> Value {
         let deadline = Instant::now() + CONTROL_TIMEOUT;
         loop {
             let observation = self.observe();
@@ -416,9 +455,9 @@ impl<'a> Service<'a> {
         }
     }
 
-    fn admit(&mut self, request: &Value) {
+    pub(super) fn admit(&mut self, request: &Value) -> u64 {
         self.send(request);
-        self.read_admission();
+        self.read_admission()
     }
 
     fn read_admission(&mut self) -> u64 {
@@ -455,9 +494,12 @@ impl<'a> Service<'a> {
         );
     }
 
-    fn observe(&mut self) -> Value {
-        self.send(&request("observe"));
-        let observed = self.reply("observed");
+    pub(super) fn observe(&mut self) -> Value {
+        self.exchange_observation(&request("observe"), "observed")
+    }
+
+    pub(super) fn exchange_observation(&mut self, request: &Value, status: &str) -> Value {
+        let observed = self.exchange(request, status);
         self.check_observation(&observed["state"], &observed);
         observed
     }
@@ -476,18 +518,30 @@ impl<'a> Service<'a> {
             + self.admitted_ticks.partition_point(|&tick| tick <= through) as u64;
         assert_eq!(commands["accepted"], accepted, "{evidence}");
         assert_eq!(commands["acknowledged"], acknowledged, "{evidence}");
+        assert_eq!(commands["pending"], accepted - acknowledged, "{evidence}");
         assert_eq!(commands["retained"], accepted - acknowledged, "{evidence}");
 
         let time = &evidence["time"];
         assert!(number(time, "frames") > 0, "{evidence}");
-        let accounted = state_tick * TIMESTEP_NANOS + number(time, "fixed_debt_nanos");
-        assert!(
-            (accounted..accounted + TIMESTEP_NANOS).contains(&number(time, "elapsed_nanos")),
-            "{state}\n{time}"
-        );
+        let debt = number(time, "fixed_debt_nanos");
+        let remainder = number(time, "fixed_remainder_nanos");
+        assert_eq!(debt % TIMESTEP_NANOS, 0, "{evidence}");
+        assert!(remainder < TIMESTEP_NANOS, "{evidence}");
+        if !self.restored {
+            assert_eq!(
+                state_tick * TIMESTEP_NANOS + debt + remainder,
+                number(time, "elapsed_nanos"),
+                "{state}\n{time}"
+            );
+        }
     }
 
-    fn send(&mut self, request: &Value) {
+    pub(super) fn exchange(&mut self, request: &Value, status: &str) -> Value {
+        self.send(request);
+        self.reply(status)
+    }
+
+    pub(super) fn send(&mut self, request: &Value) {
         self.write(&format!("{request}\n"));
     }
 
@@ -554,7 +608,7 @@ impl<'a> Service<'a> {
         self.receipt = self.custody.poll_output(&mut self.stdout, &mut self.stderr);
     }
 
-    fn finish(mut self, stop: &str, error: Option<&str>) -> Value {
+    pub(super) fn finish(mut self, stop: &str, error: Option<&str>) -> Value {
         let result = self.read(RESULT, CONTROL_TIMEOUT);
         let code = if let Some(message) = error {
             assert_eq!(result["scenario"], "serve", "{result}");
@@ -580,7 +634,9 @@ impl<'a> Service<'a> {
         assert_eq!(evidence["stop"], stop, "{result}");
         assert_eq!(evidence["input_reader_joined"], true, "{result}");
         self.check_observation(&result["state"], evidence);
-        assert_eq!(evidence["commands"]["retained"], 0, "{result}");
+        if stop != "retired" {
+            assert_eq!(evidence["commands"]["retained"], 0, "{result}");
+        }
         self.assert_native_exit(code, &result);
         result
     }
@@ -598,7 +654,8 @@ impl<'a> Service<'a> {
         assert_eq!(
             self.receipt.unwrap().exit().code(),
             Some(exit_code),
-            "{result}"
+            "{result}\nstderr: {}",
+            String::from_utf8_lossy(&self.stderr)
         );
         let tail =
             std::str::from_utf8(&self.stdout[self.cursor..]).expect("Server stdout must be UTF-8");
@@ -616,21 +673,21 @@ fn is_protocol_line(line: &str) -> bool {
         .any(|prefix| line.starts_with(prefix))
 }
 
-fn tick(state: &Value) -> u64 {
+pub(super) fn tick(state: &Value) -> u64 {
     number(state, "tick")
 }
 
-fn number(object: &Value, field: &str) -> u64 {
+pub(super) fn number(object: &Value, field: &str) -> u64 {
     object[field]
         .as_u64()
         .unwrap_or_else(|| panic!("expected numeric {field}: {object}"))
 }
 
-fn player(state: &Value) -> [f32; 2] {
+pub(super) fn player(state: &Value) -> [f32; 2] {
     serde_json::from_value(state["player"].clone()).expect("observed explorer position")
 }
 
-fn assert_progress(state: &Value, level: LevelKey, score: u64, markers: &[u64]) {
+pub(super) fn assert_progress(state: &Value, level: LevelKey, score: u64, markers: &[u64]) {
     assert_eq!(state["initialized"], true, "{state}");
     assert_eq!(state["phase"], "Running", "{state}");
     assert_eq!(state["restoring"], false, "{state}");
@@ -641,7 +698,7 @@ fn assert_progress(state: &Value, level: LevelKey, score: u64, markers: &[u64]) 
     assert_eq!(state["markers"], json!(markers), "{state}");
 }
 
-fn request(name: &str) -> Value {
+pub(super) fn request(name: &str) -> Value {
     json!({"request": name})
 }
 
@@ -649,10 +706,10 @@ fn command(body: Value) -> Value {
     json!({"request": "command", "command": body})
 }
 
-fn action(operation: &str) -> Value {
+pub(super) fn action(operation: &str) -> Value {
     command(json!({"operation": operation}))
 }
 
-fn movement(pressed: bool) -> Value {
+pub(super) fn movement(pressed: bool) -> Value {
     command(json!({"operation": "move", "direction": 1, "pressed": pressed}))
 }

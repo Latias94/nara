@@ -19,6 +19,7 @@ use crate::{
     },
 };
 
+mod continuation;
 mod graph;
 mod package;
 mod service;
@@ -106,6 +107,20 @@ pub(super) fn accept(cooker: &Path) {
     package.assert_unchanged(&relocated);
     let mismatched = fixture.directory("wrong-server-content");
     package.install_mismatched(&relocated, &mismatched);
+
+    let mut candidate = Custody::new(Fixture::new());
+    let candidate_project = candidate.fixture().project.clone();
+    let candidate_cache = candidate
+        .fixture()
+        .root
+        .join("cook-output/two-level-cook-cache");
+    let candidate_installation = candidate.fixture().directory("relocated-installation");
+    for name in [executable_name.as_str(), "content.pack", "package.json"] {
+        fs::copy(relocated.join(name), candidate_installation.join(name)).unwrap();
+    }
+    package.assert_unchanged(&candidate_installation);
+    remove_owned_tree(candidate.fixture(), &candidate_project, &target);
+    assert_sources_gone(&candidate_project, &candidate_cache);
 
     let project = fixture.project.clone();
     let cache = output_parent
@@ -197,8 +212,16 @@ pub(super) fn accept(cooker: &Path) {
     assert!(refused.stderr.contains(&message), "{}", refused.stderr);
 
     service::accept(&mut custody, &server);
+    continuation::accept(
+        &mut custody,
+        &server,
+        &mut candidate,
+        &candidate_installation.join(&executable_name),
+    );
     package.assert_unchanged(&relocated);
+    package.assert_unchanged(&candidate_installation);
     assert_sources_gone(&project, &cache);
+    assert_sources_gone(&candidate_project, &candidate_cache);
     println!(concat!(
         "TWO_LEVEL_SERVER_DELIVERY travel=complete regions=complete save=complete ",
         "fresh_restore=complete wrong_content=open_pack_refused native_cleanup=normal"

@@ -976,6 +976,165 @@ mod atlas_content {
         assert_source_free_cooked_content(SELECTED_SCHEMA);
     }
 
+    #[test]
+    fn processed_continuation_refuses_the_wrong_scene_and_an_unrelated_recipe() {
+        use nara::{
+            ProductRecipe,
+            app::FixedTime,
+            asset::{AssetPathScope, ProjectAssetDatabase},
+            project::RuntimeConfiguration,
+            project_workflow::cooked_content::{
+                CookedContentBuilder, CookedContentLimits, CookedContentRequest,
+            },
+            runtime_content::RuntimeContentTarget,
+            scene::{SceneDocument, SourceDocumentKey},
+        };
+        use two_level_game::{GameResumeError, capture_processed_resume, restore_processed_resume};
+
+        let cache = Cache::new();
+        let project = cache.project();
+        let store = cache.path.join("store");
+        fs::create_dir(&store).unwrap();
+        let triple = "x86_64-pc-windows-msvc";
+        let prepare = || {
+            content::prepare(
+                &host_fs::readable_directory(&project).unwrap(),
+                &host_fs::writable_directory(&store).unwrap(),
+                triple,
+                keyboard(RuntimeKind::Server),
+            )
+            .unwrap()
+            .into_parts()
+            .0
+            .into_base()
+        };
+        let baseline = prepare();
+        let state = with_paused_content(baseline, |session| {
+            capture_processed_resume(session).unwrap()
+        });
+
+        let manifest_path = project.join("nara.toml");
+        let mut manifest = ProjectManifest::parse_toml_bytes(&fs::read(&manifest_path).unwrap())
+            .manifest
+            .unwrap();
+        manifest.startup.default_scene = Some(LevelId::Cavern.scene_path().as_str().into());
+        manifest.content.scenes = vec![LevelId::Meadow.scene_path().as_str().into()];
+        fs::write(manifest_path, manifest.to_canonical_toml_bytes().unwrap()).unwrap();
+        let swapped_startup = prepare();
+
+        let recipe = ProductRecipe::default();
+        let configuration = RuntimeConfiguration::default();
+        let plan =
+            super::resolve_runtime_configuration(&configuration.resolve().unwrap(), recipe.clone())
+                .unwrap();
+        let product = LevelId::Meadow.scene_product();
+        let database = ProjectAssetDatabase::default();
+        let resolver = database.resolver(&AssetPathScope::ROOT);
+        let scene = plan
+            .schema_validation()
+            .bindings()
+            .try_compile_scene_with_loader(
+                &SceneDocument::from_ordered_roots([]),
+                Default::default(),
+                Some(resolver),
+                |_, _| Ok::<_, std::convert::Infallible>(None),
+            )
+            .unwrap()
+            .candidate
+            .unwrap()
+            .bind_source(SourceDocumentKey::stable_asset(
+                product.source(),
+                SourceDocumentKind::Scene,
+            ));
+        let mut unrelated = CookedContentBuilder::new(
+            CookedContentRequest {
+                target: RuntimeContentTarget::new(triple, "continuation-other-product").unwrap(),
+                configuration,
+                startup_scene: product,
+                scenes: vec![product],
+                addressable_roots: Vec::new(),
+            },
+            recipe,
+            CookedContentLimits::default(),
+        )
+        .unwrap();
+        unrelated.add_scene(product, &scene, resolver).unwrap();
+
+        for (base, product, reason) in [
+            (
+                swapped_startup,
+                LevelId::Cavern.scene_product(),
+                "Scene Product differs",
+            ),
+            (
+                unrelated.finish().unwrap().into_base(),
+                product,
+                "requires the dedicated Server recipe",
+            ),
+        ] {
+            let catalog = base.catalog_digest();
+            with_paused_content(base, |session| {
+                let before = session
+                    .capture(|world| {
+                        let current = CurrentScene::get(world).unwrap();
+                        assert_eq!(
+                            current.source_view().hosted_runtime_scene_identity(),
+                            Some((product, catalog))
+                        );
+                        assert_eq!(world.resource::<FixedTime>().tick(), 0);
+                        current.receipt().instance_id()
+                    })
+                    .unwrap();
+                let mut requested = state.clone();
+                requested.catalog = catalog.into();
+                for result in [
+                    capture_processed_resume(session).map(|_| ()),
+                    restore_processed_resume(
+                        session,
+                        &requested,
+                        Instant::now() + Duration::from_secs(10),
+                    ),
+                ] {
+                    assert!(
+                        matches!(result, Err(GameResumeError::Ineligible(refusal)) if refusal.contains(reason))
+                    );
+                }
+                session
+                    .capture(|world| {
+                        assert_eq!(world.resource::<FixedTime>().tick(), 0);
+                        assert_eq!(
+                            CurrentScene::get(world).unwrap().receipt().instance_id(),
+                            before
+                        );
+                    })
+                    .unwrap();
+            });
+        }
+    }
+
+    fn with_paused_content<R>(
+        base: nara::runtime_content::RuntimeContentBase,
+        action: impl FnOnce(&mut HeadlessSession) -> R,
+    ) -> R {
+        let mut session = HeadlessSession::from_runtime_content(base);
+        session.start().unwrap();
+        assert_eq!(session.frame(Duration::ZERO).unwrap(), None);
+        assert_eq!(session.pause().unwrap(), None);
+        let result = action(&mut session);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match session.close() {
+                HeadlessSessionClose::Pending if Instant::now() < deadline => {
+                    std::thread::yield_now()
+                }
+                outcome => {
+                    assert_eq!(outcome, HeadlessSessionClose::Complete);
+                    return result;
+                }
+            }
+        }
+    }
+
     fn assert_source_free_cooked_content(schema: &str) {
         let cache = Cache::new();
         let project = cache.project();
