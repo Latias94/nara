@@ -188,6 +188,54 @@ from 1.6479 to 1.8460 ms, with P95 from 1.8996 to 2.0270 ms. The timers cover th
 prepare-and-commit workload. Candidate reads fall outside those timers. Both runs use the same
 fixed case order under ordinary machine load, so their variation provides a scale reference.
 
+## November 22 Keyed Collection Workload
+
+The independent `prepared_authoring` target edits a scalar beside a keyed collection in an
+open, non-active Scene or Prefab bound to JSON. Each edit replaces an equal-length note in
+the same component as the collection. The 257- and 32,768-row cases use the same shape and
+retain an unknown component. The Direct diagnostics use `EditorApplication`. The Panel
+diagnostics use a registered `EditorPanelHost` and its actual typed submission. Both paths
+measure a last-row point read on the live source and on the exact candidate, then consume
+the candidate through the normal history owner. The Panel records enqueue separately.
+
+The diagnostic excludes fixture construction, query-basis and request construction, assertion
+work, Save, Reopen, and native presentation from the timed calls. It takes eight warmups and
+64 samples per case. Percentiles use nearest rank. The raw samples retain their acquisition
+order to help distinguish drift within a case from differences between cases. The source
+file is 113,898–113,899 bytes at 257 rows and 14,495,295–14,495,296 bytes at 32,768 rows.
+Each timed last-row read visits five scan entries and charges 73 logical bytes on both sources
+and both candidate sizes. Other selectors and enumeration have separate costs.
+[Diagnostic source](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/property_pages/baseline.rs)
+
+From the repository root, use the shared `target` and one build job.
+
+```powershell
+$env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
+$env:CARGO_BUILD_JOBS = '1'
+cargo +1.95.0 nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --offline --release -p nara-editor-panel-module-consumer --test prepared_authoring -E 'test(property_pages::baseline::)' --run-ignored only --test-threads=1 --no-tests fail --success-output immediate
+```
+
+Windows x64 release run `f87e0c1f-f693-456b-98b2-514483a8cf2d` passes all 38 tests in the
+target, including the eight keyed diagnostics. The engine code is `0a38771`. P50 / P95 are
+milliseconds for the real prepare and commit/drive calls.
+
+| Source / rows | Direct prepare | Panel prepare | Direct commit/drive | Panel submit/drive |
+| --- | ---: | ---: | ---: | ---: |
+| Scene / 257 | 0.412 / 0.490 | 0.415 / 0.431 | 0.020 / 0.050 | 0.020 / 0.024 |
+| Prefab / 257 | 0.404 / 0.453 | 0.443 / 0.529 | 0.019 / 0.035 | 0.024 / 0.077 |
+| Scene / 32,768 | 193.305 / 216.456 | 182.684 / 202.950 | 14.484 / 18.103 | 14.218 / 17.774 |
+| Prefab / 32,768 | 180.858 / 206.857 | 188.067 / 209.387 | 14.043 / 16.721 | 14.453 / 17.179 |
+
+At 32,768 rows, live last-row reads take 4.7–5.0 µs at P50 and 5.5–6.4 µs at P95. Candidate
+reads take 9.2–9.4 µs at P50 and 11.0–11.8 µs at P95. Panel enqueue takes 1.1–1.6 µs at P50
+and 1.5–2.2 µs at P95. A separate eight-diagnostic pass in run
+`90f5ac2f-2b9c-4927-8fb4-a91ba57cef22` places the four large preparation medians at
+186.067–191.888 ms. In both subsequent chronological captures, the large cases shift from
+roughly 80–95 ms to sustained higher occupancy around the thirtieth preparation, including
+warmups. The shift's cause remains unisolated. The results give a scale for repeated editing
+of this workload with its growing history, including source copying, file admission and
+classification. They establish neither individual phase costs nor a native gesture frame budget.
+
 ## Caller Responsibilities
 
 The direct Application and registered-panel interfaces share the source-owned candidate,

@@ -305,7 +305,7 @@ fn round_trip_ron(kind: EditorDocumentKind, source: &str) {
     let (mut host, panel) = register_panel(&mut app);
     assert_ron_values(&app, document, INITIAL_AMOUNT, AUDIT_ROWS);
 
-    review_and_commit_keyed_edit(&mut app, &mut host, panel, document, |context, captured| {
+    let token = review_keyed_edit(&mut app, &mut host, panel, document, |context, captured| {
         prepare_numeric_edit(
             context,
             inventory_read(captured, None),
@@ -313,13 +313,14 @@ fn round_trip_ron(kind: EditorDocumentKind, source: &str) {
             EDITED_AMOUNT,
         )
     });
+    commit_reviewed_keyed_edit(&mut app, &mut host, &token, document);
     assert_disk(&path, &original);
     assert_ron_values(&app, document, EDITED_AMOUNT, AUDIT_ROWS);
     let scalar_only = ron_source(kind, EDITED_AMOUNT, AUDIT_ROWS);
     assert_eq!(scalar_only.len(), original.len());
     save(&mut app, document, &path, &scalar_only);
 
-    review_and_commit_keyed_edit(&mut app, &mut host, panel, document, |context, captured| {
+    let token = review_keyed_edit(&mut app, &mut host, panel, document, |context, captured| {
         prepare_numeric_edit(
             context,
             inventory_read(captured, Some(AUDIT_ROWS)),
@@ -327,6 +328,7 @@ fn round_trip_ron(kind: EditorDocumentKind, source: &str) {
             AUDIT_ROWS + 1,
         )
     });
+    commit_reviewed_keyed_edit(&mut app, &mut host, &token, document);
     assert_disk(&path, &scalar_only);
     drop(scalar_only);
     assert_ron_values(&app, document, EDITED_AMOUNT, AUDIT_ROWS + 1);
@@ -350,7 +352,7 @@ fn round_trip_ron(kind: EditorDocumentKind, source: &str) {
     reopen(&mut app, document, digest);
     assert_ron_values(&app, document, EDITED_AMOUNT, AUDIT_ROWS + 1);
     assert_disk(&path, &edited);
-    review_and_commit_keyed_edit(&mut app, &mut host, panel, document, |context, captured| {
+    let token = review_keyed_edit(&mut app, &mut host, panel, document, |context, captured| {
         prepare_numeric_edit(
             context,
             inventory_read(captured, Some(AUDIT_ROWS)),
@@ -358,6 +360,7 @@ fn round_trip_ron(kind: EditorDocumentKind, source: &str) {
             AUDIT_ROWS + 2,
         )
     });
+    commit_reviewed_keyed_edit(&mut app, &mut host, &token, document);
     assert_ron_values(&app, document, EDITED_AMOUNT, AUDIT_ROWS + 2);
     assert_disk(&path, &edited);
     drop(edited);
@@ -387,7 +390,7 @@ fn round_trip_omitted_default(kind: EditorDocumentKind, source: &str) {
         assert_eq!(&observed.value, expected);
     };
 
-    review_and_commit_keyed_edit(&mut app, &mut host, panel, document, |context, captured| {
+    let token = review_keyed_edit(&mut app, &mut host, panel, document, |context, captured| {
         prepare_numeric_edit(
             context,
             inventory_read(captured, Some(DEFAULT_ROWS)),
@@ -395,6 +398,7 @@ fn round_trip_omitted_default(kind: EditorDocumentKind, source: &str) {
             replacement,
         )
     });
+    commit_reviewed_keyed_edit(&mut app, &mut host, &token, document);
     assert_value(&app, &present);
     assert_disk(&path, &original);
     let edited = json_source(kind, Some(inventory_rows(DEFAULT_ROWS, replacement)));
@@ -415,7 +419,7 @@ fn round_trip_omitted_default(kind: EditorDocumentKind, source: &str) {
     assert_value(&app, &defaulted);
     assert_disk(&path, &original);
 
-    review_and_commit_keyed_edit(&mut app, &mut host, panel, document, |context, captured| {
+    let token = review_keyed_edit(&mut app, &mut host, panel, document, |context, captured| {
         prepare_numeric_edit(
             context,
             inventory_read(captured, Some(DEFAULT_ROWS)),
@@ -423,6 +427,7 @@ fn round_trip_omitted_default(kind: EditorDocumentKind, source: &str) {
             replacement,
         )
     });
+    commit_reviewed_keyed_edit(&mut app, &mut host, &token, document);
     assert_eq!(save(&mut app, document, &path, &edited), digest);
     reopen(&mut app, document, digest);
     assert_value(&app, &present);

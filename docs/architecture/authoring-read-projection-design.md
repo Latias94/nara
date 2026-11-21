@@ -835,6 +835,35 @@ its structure, history and persistence run on Windows/DX12 in
 with 0.27 GiB free on the build drive. The same command passed after moving the partial PDB
 off the drive. The large-list acceptance ran through the registered-panel interface.
 
+### Ordinary Prepared Edit Interactions
+
+A registered source tool can capture one query basis for an interaction that emits several
+proposals. Each new proposal prepares an immutable candidate with that basis. The tool reads
+the exact candidate it shows and replaces its previous candidate. The panel instance owns the
+retained proposal. Cancellation before enqueue drops it, and closing the instance retires it
+with that instance. Confirmation moves the candidate into the existing typed submission, where
+the document owner checks the basis and records one history entry on success.
+
+Godot's light gizmo separates drag feedback, cancellation and release-time Undo. Bevy's editor
+gizmo routes continuous edits through live component values. The Nara fixture exercises
+isolated source proposals. It reads the live working source and the candidate at
+the same address and checks that preview and cancellation preserve navigation and history.
+[Godot light gizmo](https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/editor/scene/3d/gizmos/light_3d_gizmo_plugin.cpp#L105-L240) ·
+[Bevy transform gizmo](https://github.com/bevyengine/bevy/blob/85503941e488152711a4695bbe248e9ed9f453fc/crates/bevy_gizmos/src/transform_gizmo.rs#L408-L659)
+
+The separately presented Canvas continues to own its gesture and preview contract. The
+[keyed collection diagnostic](../benchmarks/2026-10-25-prepared-panel.md#november-22-keyed-collection-workload)
+captures preparation and publication cost for ordinary source tools.
+
+The independent Windows x64 release run `f87e0c1f-f693-456b-98b2-514483a8cf2d` passes 38/38
+with Rust 1.95.0. Its two ordinary interaction cases use 32,768-row non-active sources.
+They cancel two successive proposals before enqueue, close another retained proposal with its
+original panel, and reopen the panel with empty state. They then submit the last reviewed value
+and make a separate keyed-row edit. Undo and Redo of both edits check exact values and history
+depths. Each saved checkpoint compares the complete source, including its unknown record.
+Reopen checks its new source incarnation, exact content and unchanged active document.
+[Registered panel consumer](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/property_pages.rs)
+
 ## Acceptance And Experiment Stops
 
 - Source Scene/Prefab tests distinguish actual versus catalog-only components, all retained

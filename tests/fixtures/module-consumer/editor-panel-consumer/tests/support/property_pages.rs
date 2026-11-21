@@ -12,7 +12,7 @@ use nara::{
     scene::{AuthoringReadError, AuthoringRecordReadiness},
 };
 use nara_editor::{
-    EditorPanel, EditorPanelContext, EditorPanelHost,
+    EditorPanel, EditorPanelContext, EditorPanelHost, EditorPanelInstanceToken,
     workspace::{EditorPanelInstanceId, EditorPanelTarget},
 };
 use nara_tooling::{
@@ -22,6 +22,8 @@ use nara_tooling::{
     MAX_EDITOR_PROPERTY_READ_VALUE_NODES,
 };
 
+#[path = "property_pages/baseline.rs"]
+mod baseline;
 #[path = "property_pages/round_eight.rs"]
 mod round_eight;
 
@@ -1004,14 +1006,14 @@ fn keyed_rows_schema() -> AuthoringSchemaBundle {
     ])
 }
 
-fn keyed_rows_entity() -> SceneEntityRecord {
+fn keyed_rows_entity(row_count: usize) -> SceneEntityRecord {
     let row = |key, score| {
         ComponentValue::map([
             ("wire_key", ComponentValue::String(key)),
             ("wire_score", ComponentValue::U64(score)),
         ])
     };
-    let rows = (0..KEYED_ROW_COUNT - 1)
+    let rows = (0..row_count - 1)
         .map(|index| row(format!("row-{index}"), index as u64))
         .chain([row(OLD_ROW_KEY.into(), ORIGINAL_SCORE)])
         .collect();
@@ -1250,6 +1252,7 @@ fn prepare_keyed_edit(
 fn prepare_note_edit(
     context: &EditorPanelContext<'_, '_>,
     captured: &EditorDocumentQueryBasis,
+    updated_note: &str,
 ) -> PreparedEditorDocumentEdit {
     assert_keyed_rows(
         captured,
@@ -1259,7 +1262,7 @@ fn prepare_note_edit(
     );
     let note = note_read(captured);
     let original = ComponentValue::String(ORIGINAL_NOTE.into());
-    let updated = ComponentValue::String(UPDATED_NOTE.into());
+    let updated = ComponentValue::String(updated_note.into());
     let edit = property_edit(&note, updated.clone());
     let prepared = context
         .prepare_authoring_property_edit(captured, &[edit])
@@ -1330,7 +1333,13 @@ fn assert_keyed_rows(
     );
 }
 
-fn assert_keyed_state(app: &EditorApplication, document: EditorDocumentId, key: &str, score: u64) {
+fn assert_keyed_state(
+    app: &EditorApplication,
+    document: EditorDocumentId,
+    key: &str,
+    score: u64,
+    note: &str,
+) {
     let captured = basis(app, document);
     assert_keyed_rows(
         &captured,
@@ -1342,7 +1351,7 @@ fn assert_keyed_state(app: &EditorApplication, document: EditorDocumentId, key: 
     assert_selected_scalar(
         &app.read_document_property(request.clone()).unwrap(),
         &request,
-        ComponentValue::String(UPDATED_NOTE.into()),
+        ComponentValue::String(note.into()),
     );
 }
 
@@ -1356,7 +1365,7 @@ fn a_registered_panel_round_trips_large_keyed_list_edits_on_a_nonactive_prefab()
     round_trip_keyed_edit(EditorDocumentKind::Prefab, "prefabs/keyed-rows.prefab.json");
 }
 
-fn review_and_commit_keyed_edit(
+fn review_keyed_edit(
     app: &mut EditorApplication,
     host: &mut EditorPanelHost<PropertyPagesPanel>,
     instance: EditorPanelInstanceId,
@@ -1365,7 +1374,7 @@ fn review_and_commit_keyed_edit(
         &EditorPanelContext<'_, '_>,
         &EditorDocumentQueryBasis,
     ) -> PreparedEditorDocumentEdit,
-) {
+) -> EditorPanelInstanceToken {
     let initial = frame(app);
     let active = initial.workspace().active_document.unwrap();
     let initial_tab = initial.workspace().document(document).unwrap();
@@ -1382,7 +1391,7 @@ fn review_and_commit_keyed_edit(
             assert_eq!(prepared.document(), document);
             assert_eq!(prepared.document_kind(), initial_tab.kind);
             assert_eq!(prepared.base_revision(), captured.revision);
-            assert!(panel.retained.replace(prepared).is_none());
+            panel.retained = Some(prepared);
             assert!(token.replace(context.instance_token()).is_none());
             panel.completion = None;
         })
@@ -1396,10 +1405,21 @@ fn review_and_commit_keyed_edit(
         initial.workspace().documents
     );
     assert_navigation(app, &initial, document);
+    token
+}
 
+fn commit_reviewed_keyed_edit(
+    app: &mut EditorApplication,
+    host: &mut EditorPanelHost<PropertyPagesPanel>,
+    token: &EditorPanelInstanceToken,
+    document: EditorDocumentId,
+) {
+    let initial = frame(app);
+    let active = initial.workspace().active_document.unwrap();
+    let initial_tab = initial.workspace().document(document).unwrap();
     let commit = host
         .prepare(app, |panel, context| {
-            assert!(context.matches_instance(&token));
+            assert!(context.matches_instance(token));
             assert!(panel.completion.is_none());
             context
                 .commit_authoring_edit(panel.retained.take().unwrap())
@@ -1408,7 +1428,7 @@ fn review_and_commit_keyed_edit(
         .unwrap();
     assert_eq!(commit.submissions().len(), 1);
     let (origin, submitted) = commit.submissions().next().unwrap();
-    assert_eq!(origin, instance);
+    assert_eq!(origin, token.instance());
     assert_eq!(
         frame(app).workspace().documents,
         initial.workspace().documents
@@ -1416,7 +1436,7 @@ fn review_and_commit_keyed_edit(
     host.submit_and_drive(app, commit, Duration::ZERO);
     let edited = frame(app);
     let tab = edited.workspace().document(document).unwrap();
-    host.inspect(app, &token, |panel, _| {
+    host.inspect(app, token, |panel, _| {
         let report = panel.completed(submitted);
         assert!(report.applied, "{:?}", report.diagnostics);
         assert_eq!(report.document, Some(document));
@@ -1442,7 +1462,7 @@ fn round_trip_keyed_edit(kind: EditorDocumentKind, source: &str) {
         kind,
         source,
         keyed_rows_schema(),
-        [keyed_rows_entity()],
+        [keyed_rows_entity(KEYED_ROW_COUNT)],
     );
     let source_path = project.root.join(source);
     let initial = frame(&app);
@@ -1454,13 +1474,106 @@ fn round_trip_keyed_edit(kind: EditorDocumentKind, source: &str) {
             "the original source bytes must persist until Save"
         );
     };
-    review_and_commit_keyed_edit(&mut app, &mut host, instance, document, prepare_note_edit);
+    let gesture_basis = basis(&app, document);
+    let mut preview_note = |app: &mut EditorApplication, note: &str| {
+        let token = review_keyed_edit(app, &mut host, instance, document, |context, captured| {
+            assert_eq!(captured, &gesture_basis);
+            prepare_note_edit(context, &gesture_basis, note)
+        });
+        assert_eq!(
+            frame(app).workspace().documents,
+            initial.workspace().documents
+        );
+        assert_unsaved();
+        token
+    };
+    preview_note(&mut app, "initial preview");
+    let token = preview_note(&mut app, "changed preview");
+    let cancel = host
+        .prepare(&app, |panel, context| {
+            assert!(context.matches_instance(&token));
+            drop(
+                panel
+                    .retained
+                    .take()
+                    .expect("the current candidate is cancelled"),
+            );
+        })
+        .unwrap();
+    assert_eq!(cancel.submissions().len(), 0);
+    host.submit_and_drive(&mut app, cancel, Duration::ZERO);
+    host.inspect(&app, &token, |panel, _| assert!(panel.retained.is_none()))
+        .unwrap();
+    assert_eq!(
+        frame(&app).workspace().documents,
+        initial.workspace().documents
+    );
+    assert_unsaved();
+
+    let token = review_keyed_edit(
+        &mut app,
+        &mut host,
+        instance,
+        document,
+        |context, captured| prepare_note_edit(context, captured, "cancel on close"),
+    );
+    assert!(app.panel_workspace_mut().layout_mut().close(instance));
+    if let Some(closed) = host.prepare(&app, |_, _| panic!("the closed panel received work")) {
+        assert_eq!(closed.submissions().len(), 0);
+        host.submit_and_drive(&mut app, closed, Duration::ZERO);
+    }
+    assert!(host.inspect(&app, &token, |_, _| ()).is_none());
+    assert_eq!(
+        frame(&app).workspace().documents,
+        initial.workspace().documents
+    );
+    assert_unsaved();
+    let instance = app
+        .panel_workspace_mut()
+        .open(PANEL, EditorPanelTarget::Workspace)
+        .unwrap();
+    let reopened = host
+        .prepare(&app, |panel, context| {
+            assert!(!context.matches_instance(&token));
+            assert!(panel.retained.is_none());
+        })
+        .unwrap();
+    assert_eq!(reopened.submissions().len(), 0);
+    host.submit_and_drive(&mut app, reopened, Duration::ZERO);
+
+    let next_gesture = basis(&app, document);
+    review_keyed_edit(
+        &mut app,
+        &mut host,
+        instance,
+        document,
+        |context, captured| {
+            assert_eq!(captured, &next_gesture);
+            prepare_note_edit(context, &next_gesture, "next interaction")
+        },
+    );
+    let token = review_keyed_edit(
+        &mut app,
+        &mut host,
+        instance,
+        document,
+        |context, captured| {
+            assert_eq!(captured, &next_gesture);
+            prepare_note_edit(context, &next_gesture, UPDATED_NOTE)
+        },
+    );
+    assert_eq!(
+        frame(&app).workspace().documents,
+        initial.workspace().documents
+    );
+    assert_unsaved();
+    commit_reviewed_keyed_edit(&mut app, &mut host, &token, document);
     assert_navigation(&app, &initial, document);
     assert_unsaved();
-    assert_keyed_state(&app, document, OLD_ROW_KEY, ORIGINAL_SCORE);
+    assert_keyed_state(&app, document, OLD_ROW_KEY, ORIGINAL_SCORE, UPDATED_NOTE);
 
     let mut continuation = None;
-    review_and_commit_keyed_edit(
+    let token = review_keyed_edit(
         &mut app,
         &mut host,
         instance,
@@ -1472,11 +1585,12 @@ fn round_trip_keyed_edit(kind: EditorDocumentKind, source: &str) {
             prepared
         },
     );
+    commit_reviewed_keyed_edit(&mut app, &mut host, &token, document);
     assert_eq!(
         app.read_document_property_page(continuation.unwrap()),
         Err(EditorDocumentQueryRejection::StaleRevision)
     );
-    assert_keyed_state(&app, document, NEW_ROW_KEY, UPDATED_SCORE);
+    assert_keyed_state(&app, document, NEW_ROW_KEY, UPDATED_SCORE, UPDATED_NOTE);
     assert_navigation(&app, &initial, document);
     assert_unsaved();
 
@@ -1487,9 +1601,9 @@ fn round_trip_keyed_edit(kind: EditorDocumentKind, source: &str) {
     assert_eq!(last["wire_key"]["value"], OLD_ROW_KEY);
     assert_eq!(last["wire_score"]["value"], ORIGINAL_SCORE);
     assert_eq!(values["wire_note"]["value"], ORIGINAL_NOTE);
-    values["wire_note"]["value"] = UPDATED_NOTE.into();
-    let set_expected_row = |expected: &mut serde_json::Value, key: &str, score: u64| {
+    let set_expected = |expected: &mut serde_json::Value, key: &str, score: u64, note: &str| {
         let component = &mut expected["payload"]["entities"][0]["components"][COMPONENT]["value"];
+        component["value"]["wire_note"]["value"] = note.into();
         let rows = component["value"]["wire_rows"]["value"]
             .as_array_mut()
             .unwrap();
@@ -1498,13 +1612,15 @@ fn round_trip_keyed_edit(kind: EditorDocumentKind, source: &str) {
         last["wire_key"]["value"] = key.into();
         last["wire_score"]["value"] = score.into();
     };
-    set_expected_row(&mut expected, NEW_ROW_KEY, UPDATED_SCORE);
+    set_expected(&mut expected, NEW_ROW_KEY, UPDATED_SCORE, UPDATED_NOTE);
 
     let mut saved = save_exact_source(&mut app, document, &source_path, &expected);
     assert_navigation(&app, &initial, document);
-    for (redo, key, score) in [
-        (false, OLD_ROW_KEY, ORIGINAL_SCORE),
-        (true, NEW_ROW_KEY, UPDATED_SCORE),
+    for (redo, undo_depth, key, score, note) in [
+        (false, 1, OLD_ROW_KEY, ORIGINAL_SCORE, UPDATED_NOTE),
+        (false, 0, OLD_ROW_KEY, ORIGINAL_SCORE, ORIGINAL_NOTE),
+        (true, 1, OLD_ROW_KEY, ORIGINAL_SCORE, UPDATED_NOTE),
+        (true, 2, NEW_ROW_KEY, UPDATED_SCORE, UPDATED_NOTE),
     ] {
         let (checkpoint, _, disk_bytes) = &saved;
         let base_revision = checkpoint.revision;
@@ -1530,20 +1646,20 @@ fn round_trip_keyed_edit(kind: EditorDocumentKind, source: &str) {
             ),
             "{result:?}"
         );
-        assert_keyed_state(&app, document, key, score);
+        assert_keyed_state(&app, document, key, score, note);
         let current = frame(&app);
         let tab = current.workspace().document(document).unwrap();
         assert!(tab.dirty);
         assert_eq!(
             (tab.history.undo_depth, tab.history.redo_depth),
-            (1 + usize::from(redo), usize::from(!redo))
+            (undo_depth, 2 - undo_depth)
         );
         assert_navigation(&app, &initial, document);
         assert!(
             &fs::read(&source_path).unwrap() == disk_bytes,
             "history replay must leave the prior checkpoint on disk until Save"
         );
-        set_expected_row(&mut expected, key, score);
+        set_expected(&mut expected, key, score, note);
         saved = save_exact_source(&mut app, document, &source_path, &expected);
         assert_navigation(&app, &initial, document);
     }
@@ -1576,7 +1692,7 @@ fn round_trip_keyed_edit(kind: EditorDocumentKind, source: &str) {
         app.read_document_property(keyed_read(&saving, NEW_ROW_KEY, "score")),
         Err(EditorDocumentQueryRejection::StaleIncarnation)
     );
-    assert_keyed_state(&app, document, NEW_ROW_KEY, UPDATED_SCORE);
+    assert_keyed_state(&app, document, NEW_ROW_KEY, UPDATED_SCORE, UPDATED_NOTE);
     assert_navigation(&app, &initial, document);
     assert!(
         fs::read(source_path).unwrap() == saved_bytes,

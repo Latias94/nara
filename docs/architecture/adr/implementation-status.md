@@ -4388,8 +4388,7 @@ source owner retains the claim and exact inverse. The inspection reuses one cand
 recursive composition, review and commit. The operation preserves the original file and
 working-copy dependency contract. The [qualification](../authoring-read-projection-design.md#november-22-scalar-set-qualification)
 records 63/63 selected owner and Windows/DX12 tests and 30/30 independent release and
-embedded Host tests. Authored absence, reference rebinding, cross-source Apply and
-large-workload preparation cost remain separate.
+embedded Host tests. Authored absence, reference rebinding and cross-source Apply remain separate.
 
 The [selective collection edit](../authoring-read-projection-design.md#selective-edits-in-authored-collections)
 keeps the selected replacement and previous value in the original Scene and Prefab history.
@@ -4397,7 +4396,11 @@ The inverse follows a changed key. Exact final file validation and nominal Schem
 apply to the retained transaction. The independently locked Windows consumer originally verified
 4,097 records in each document kind. The [indexed read and encoding follow-up](../authoring-read-projection-design.md#indexed-reads-in-admitted-keyed-collections)
 retains positions from source classification and uses compact canonical RON under the same file
-limits. Complete R2 and larger workload measurements remain open.
+limits. The [ordinary prepared interaction](../authoring-read-projection-design.md#ordinary-prepared-edit-interactions)
+qualifies repeated previews, cancellation and panel retirement before commit, then Undo/Redo and
+exact Save/Reopen for large non-active Scene and Prefab documents. The independent release target
+passes 38/38 with the [keyed preparation diagnostic](../../benchmarks/2026-10-25-prepared-panel.md#november-22-keyed-collection-workload).
+Complete R2 and preparation locality remain open.
 
 The [observation-bound preparation successor](../../knowledge/engineering/verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md)
 replaces revision-only Workspace/Session/Application preparation with complete retained query

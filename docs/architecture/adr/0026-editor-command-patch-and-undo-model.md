@@ -319,6 +319,12 @@ Begin -> bounded Preview* -> Commit(one patch + inverse) | Cancel
   partial preview.
 - First-party and third-party tools use the same command/validation path.
 
+For an ordinary source tool, the tool owns its interaction state and retains the latest
+immutable prepared edit. Each preview uses the basis observed at the beginning of that
+interaction. Cancel drops the candidate. Acceptance consumes the reviewed candidate through
+the normal panel submission and document owner. The separately presented Canvas gesture
+continues to use its specialized interaction and presentation contract.
+
 This decision does not select a public gesture trait, toolkit event model, preview storage format,
 or edit-while-playing merge policy.
 

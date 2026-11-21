@@ -594,10 +594,18 @@ the original publication limits. The [bound encoding and omitted-default regress
 also verify prepared non-active edits, exact history and persistence through the independent
 registered panel.
 
+The [ordinary prepared interaction](../architecture/authoring-read-projection-design.md#ordinary-prepared-edit-interactions)
+closes preview replacement, pre-enqueue cancel, panel retirement, exact submission and history
+through the registered panel in both document kinds. The independent release target passes
+38/38. Its [keyed collection comparison](../benchmarks/2026-10-25-prepared-panel.md#november-22-keyed-collection-workload)
+keeps last-row reads at five scan entries in both sizes. Repeated preparation in the 32,768-row
+case takes 181–193 ms at P50 and 203–216 ms at P95 across the measured routes. Full candidate
+preparation locality remains an owner-level cost, with its own workload and verification.
+
 The external push-box game uses the same public query and prepared candidate with a project-defined
 Schema. The camera remains selected through pressure-plate editing and Save. A new source process
-observes the saved rule change after Reopen. Complete field query coverage, preparation locality
-and larger-workload comparisons stay open.
+observes the saved rule change after Reopen. Complete field query coverage and preparation locality
+remain open.
 [External push-box workflow](2026-10-16-0940-feat-first-2d-author-workflow-plan.md#desktop-2d-starter-with-editable-actions)
 
 The [prepared-source discovery successor](../architecture/authoring-read-projection-design.md#discovery-in-a-prepared-source)

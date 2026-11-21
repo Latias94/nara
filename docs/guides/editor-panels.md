@@ -1003,6 +1003,11 @@ Preparing, inspecting or retaining a candidate changes no document, selection or
 Drop it to cancel before submission; changing tool inputs should replace the candidate rather
 than edit it as a second document.
 
+For a continuous control, capture the query basis when the interaction starts. Prepare and
+render each accepted proposal against that basis, retaining the latest candidate. Drop it on
+Escape or input cancellation before enqueue. On confirmation, submit the candidate the user
+reviewed. An intervening document edit or Reopen invalidates its basis.
+
 When the user accepts, consume that same candidate into the current Host/frontend submission:
 
 ```rust,ignore
