@@ -2,8 +2,8 @@ use nara::{
     advanced_prelude::CurrentScene,
     asset::{AssetProductRef, AssetRef, ImportedProductId},
     ecs::World,
-    identity::{EntityLookup, SceneEntityId, SpawnedSceneInstance},
-    prelude::Resource,
+    identity::{EntityLookup, SceneEntityId, SpawnedSceneInstance, WorldIdentityDomain},
+    prelude::{Resource, Transform2d},
     project_host::{
         ProjectSceneRequestId, ProjectSceneRequestState, ProjectScenes,
         activate_prepared_project_scene, unload_project_scene_addition,
@@ -12,8 +12,11 @@ use nara::{
     transform::fixed_spatial_snapshot,
 };
 
-use crate::side_room::{
-    LOOKOUT_RELIC, LookoutPortal, RELIC, SideRoomPortal, lookout_scene_product, scene_product,
+use crate::{
+    resume::processed::{ProcessedRoomState, ProcessedRooms},
+    side_room::{
+        LOOKOUT_RELIC, LookoutPortal, RELIC, SideRoomPortal, lookout_scene_product, scene_product,
+    },
 };
 
 use super::{
@@ -56,7 +59,10 @@ pub(super) struct Rooms([RoomState; 2]);
 enum RoomState {
     #[default]
     Closed,
-    Preparing(ProjectSceneRequestId),
+    Preparing {
+        request: ProjectSceneRequestId,
+        restored_found: Option<bool>,
+    },
     Open {
         receipt: SpawnedSceneInstance,
         relic: SceneEntityId,
@@ -68,7 +74,7 @@ impl Rooms {
     pub(super) fn phase(&self, room: Room) -> SideRoomPhase {
         match self.0[room as usize] {
             RoomState::Closed => SideRoomPhase::Closed,
-            RoomState::Preparing(_) => SideRoomPhase::Preparing,
+            RoomState::Preparing { .. } => SideRoomPhase::Preparing,
             RoomState::Open { found: false, .. } => SideRoomPhase::Open,
             RoomState::Open { found: true, .. } => SideRoomPhase::RelicFound,
         }
@@ -79,12 +85,65 @@ impl Rooms {
         for room in Room::ALL {
             if rooms.phase(room) != SideRoomPhase::Closed {
                 return Err(format!(
-                    "close the {} before retry or exact capture",
+                    "close the {} before retry or source reconstruction",
                     room.name()
                 ));
             }
         }
         Ok(())
+    }
+
+    pub(super) fn capture_processed(world: &World) -> Result<ProcessedRooms, String> {
+        let rooms = world.resource::<Self>();
+        let domain = world.resource::<WorldIdentityDomain>();
+        let captured = ProcessedRooms {
+            side_room: rooms.capture_room(world, domain, Room::SideRoom)?,
+            lookout: rooms.capture_room(world, domain, Room::Lookout)?,
+        };
+        let expected_instances = 1
+            + world.resource::<Session>().markers.len()
+            + usize::from(captured.side_room != ProcessedRoomState::Closed)
+            + usize::from(captured.lookout != ProcessedRoomState::Closed);
+        if domain.stats().active_scene_instances != expected_instances {
+            return Err(
+                "live Scene instances differ from the Server's continuation inventory".into(),
+            );
+        }
+        Ok(captured)
+    }
+
+    fn capture_room(
+        &self,
+        world: &World,
+        domain: &WorldIdentityDomain,
+        room: Room,
+    ) -> Result<ProcessedRoomState, String> {
+        match &self.0[room as usize] {
+            RoomState::Closed => Ok(ProcessedRoomState::Closed),
+            RoomState::Preparing { .. } => Err(format!("the {} is still preparing", room.name())),
+            RoomState::Open {
+                receipt,
+                relic,
+                found,
+            } => {
+                if !domain
+                    .active_scene_instance(world, receipt.instance_id())
+                    .is_ok_and(|live| live == *receipt)
+                    || !matches!(receipt.resolve(world, relic), EntityLookup::Resolved(entity)
+                        if world.get::<Transform2d>(entity).is_some())
+                {
+                    return Err(format!(
+                        "the {} lost its original Scene membership or relic",
+                        room.name()
+                    ));
+                }
+                Ok(if *found {
+                    ProcessedRoomState::RelicFound
+                } else {
+                    ProcessedRoomState::Open
+                })
+            }
+        }
     }
 
     pub(super) fn live_members(&self) -> usize {
@@ -101,13 +160,8 @@ impl Rooms {
 pub(super) fn toggle(world: &mut World, room: Room) -> Result<(), String> {
     let index = room as usize;
     match &world.resource::<Rooms>().0[index] {
-        RoomState::Closed => {
-            let product = portal_product(world, room)?;
-            let request = ProjectScenes::scope(world, |scenes| scenes.request_additive(product))
-                .map_err(|error| error.to_string())?;
-            world.resource_mut::<Rooms>().0[index] = RoomState::Preparing(request);
-        }
-        RoomState::Preparing(request) => {
+        RoomState::Closed => request_open(world, room, None)?,
+        RoomState::Preparing { request, .. } => {
             let request = *request;
             ProjectScenes::scope(world, |scenes| scenes.cancel(request));
         }
@@ -119,6 +173,48 @@ pub(super) fn toggle(world: &mut World, room: Room) -> Result<(), String> {
             world.resource_mut::<Rooms>().0[index] = RoomState::Closed;
         }
     }
+    Ok(())
+}
+
+pub(super) fn restore_processed(
+    world: &mut World,
+    expected: ProcessedRooms,
+) -> Result<bool, String> {
+    use ProcessedRoomState as Captured;
+    use SideRoomPhase as Live;
+
+    for (room, expected) in [
+        (Room::SideRoom, expected.side_room),
+        (Room::Lookout, expected.lookout),
+    ] {
+        match (world.resource::<Rooms>().phase(room), expected) {
+            (Live::Closed, Captured::Closed)
+            | (Live::Open, Captured::Open)
+            | (Live::RelicFound, Captured::RelicFound) => {}
+            (Live::Closed, Captured::Open | Captured::RelicFound) => {
+                request_open(world, room, Some(expected == Captured::RelicFound))?;
+                return Ok(false);
+            }
+            (Live::Preparing, Captured::Open | Captured::RelicFound) => return Ok(false),
+            _ => {
+                return Err(format!(
+                    "the reconstructed {} differs from its captured state",
+                    room.name()
+                ));
+            }
+        }
+    }
+    Ok(true)
+}
+
+fn request_open(world: &mut World, room: Room, restored_found: Option<bool>) -> Result<(), String> {
+    let product = portal_product(world, room)?;
+    let request = ProjectScenes::scope(world, |scenes| scenes.request_additive(product))
+        .map_err(|error| error.to_string())?;
+    world.resource_mut::<Rooms>().0[room as usize] = RoomState::Preparing {
+        request,
+        restored_found,
+    };
     Ok(())
 }
 
@@ -156,9 +252,13 @@ fn portal_product(world: &World, room: Room) -> Result<AssetProductRef, String> 
 
 pub(super) fn advance(world: &mut World) {
     let rooms = world.resource::<Rooms>();
-    let Some((room, request)) = Room::ALL.into_iter().find_map(|room| {
-        if let RoomState::Preparing(request) = rooms.0[room as usize] {
-            Some((room, request))
+    let Some((room, request, restored_found)) = Room::ALL.into_iter().find_map(|room| {
+        if let RoomState::Preparing {
+            request,
+            restored_found,
+        } = rooms.0[room as usize]
+        {
+            Some((room, request, restored_found))
         } else {
             None
         }
@@ -194,7 +294,7 @@ pub(super) fn advance(world: &mut World) {
                 .map(|_| true)
                 .ok_or_else(|| format!("the {name} requires its authored relic")),
         ),
-        Some(ProjectSceneRequestState::Cancelled) => Some(Ok(false)),
+        Some(ProjectSceneRequestState::Cancelled) if restored_found.is_none() => Some(Ok(false)),
         state => Some(Err(format!(
             "{name} preparation rejected: {state:?}; {:?}",
             scenes.diagnostics(request)
@@ -213,7 +313,7 @@ pub(super) fn advance(world: &mut World) {
         Ok(RoomState::Open {
             receipt,
             relic,
-            found: false,
+            found: restored_found.unwrap_or_default(),
         })
     });
     ProjectScenes::scope(world, |scenes| {
@@ -225,7 +325,11 @@ pub(super) fn advance(world: &mut World) {
     let state = match result {
         Ok(state) => state,
         Err(error) => {
-            world.resource_mut::<Session>().error = Some(error);
+            if restored_found.is_some() {
+                super::fail(world, error);
+            } else {
+                world.resource_mut::<Session>().error = Some(error);
+            }
             RoomState::Closed
         }
     };

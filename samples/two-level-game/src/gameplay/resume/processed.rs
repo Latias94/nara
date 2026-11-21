@@ -20,6 +20,7 @@ use super::{
 use crate::{
     GameSnapshot,
     command::{SERVER_COMMAND_SOURCE, ServerCommand},
+    gameplay::side_room::Rooms,
     resume::{
         RuntimeCatchUpPolicy, RuntimeTimeState,
         processed::{
@@ -29,17 +30,18 @@ use crate::{
     },
 };
 
-/// Captures the game and pending external intent from a completed paused processed Server frame.
+/// Captures the game, live rooms and pending external intent from a completed paused Server frame.
 ///
 /// The one supported producer is the game's local Server command stream. Commands retain their
 /// relative fixed tick and canonical order. Historical queue keys and service handles do not
-/// cross the process boundary. A live SaveSlot, active region, or unknown producer refuses capture.
+/// cross the process boundary. A live SaveSlot, unsettled room, or unknown producer refuses capture.
 pub fn capture_processed_resume(
     session: &HeadlessSession,
 ) -> Result<ProcessedResumeState, GameResumeError> {
     let time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;
     session.capture(|world| {
         let catalog = capture::hosted_catalog(world)?.into();
+        let rooms = Rooms::capture_processed(world).map_err(refuse)?;
         capture::quiescent(world, true)?;
         if time.catch_up_policy != RuntimeCatchUpPolicy::PreserveDebt {
             return Err(refuse("processed continuation requires the Server debt policy"));
@@ -63,7 +65,7 @@ pub fn capture_processed_resume(
             });
         }
         let game = capture::game(world, time, capture::compatibility(world)?)?;
-        let state = ProcessedResumeState { game, catalog, pending };
+        let state = ProcessedResumeState { game, catalog, rooms, pending };
         state.validate()?;
         Ok(state)
     })?
@@ -89,6 +91,7 @@ pub fn restore_processed_resume(
         }
         fresh_runtime(world)?;
         capture::quiescent(world, false)?;
+        Rooms::require_closed(world).map_err(refuse)?;
         if capture::compatibility(world)? != state.game.compatibility {
             return Err(refuse(
                 "resume Schema or App configuration differs from the candidate",

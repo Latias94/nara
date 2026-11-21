@@ -25,13 +25,13 @@ use nara::{
     project_host::{HeadlessSession, HeadlessSessionError},
 };
 
-use super::{GamePhase, Progress, Session, fail, player, travel};
+use super::{GamePhase, Progress, Session, fail, player, side_room, travel};
 use crate::{
     levels::LevelId,
     resume::{
         LevelContentStamp, ResumeCompatibility, ResumeError, ResumeState, RuntimeTimeState,
         decode_resume, encode_resume,
-        processed::{ProcessedResumeError, decode_processed_resume},
+        processed::{ProcessedResumeError, ProcessedRooms, decode_processed_resume},
     },
 };
 
@@ -74,7 +74,12 @@ struct ResumeControl {
 
 struct ResumeActivation {
     game: ResumeState<()>,
-    source: Option<ResumeCompatibility>,
+    content: ResumeContent,
+}
+
+enum ResumeContent {
+    Source(ResumeCompatibility),
+    Processed(ProcessedRooms),
 }
 
 pub(super) fn install(app: &mut App) -> Result<(), PluginError> {
@@ -197,8 +202,12 @@ pub(super) fn required_levels(world: &World) -> Vec<LevelId> {
         .resource::<ResumeControl>()
         .pending
         .as_ref()
-        .and_then(|state| state.source.as_ref())
-        .map(|source| source.levels.iter().map(|record| record.level).collect())
+        .and_then(|state| match &state.content {
+            ResumeContent::Source(source) => {
+                Some(source.levels.iter().map(|record| record.level).collect())
+            }
+            ResumeContent::Processed(_) => None,
+        })
         .unwrap_or_default()
 }
 
@@ -208,8 +217,8 @@ pub(super) fn validate_content(
 ) -> Result<Option<LevelContentStamp>, String> {
     let control = world.resource::<ResumeControl>();
     if let Some(state) = &control.pending {
-        match (&state.source, source) {
-            (Some(expected), Some((record, schema))) => {
+        match (&state.content, source) {
+            (ResumeContent::Source(expected), Some((record, schema))) => {
                 if schema != expected.schema || !expected.levels.contains(&record) {
                     return Err(format!(
                         "resume content compatibility rejected {:?}",
@@ -217,13 +226,13 @@ pub(super) fn validate_content(
                     ));
                 }
             }
-            (Some(_), None) => {
+            (ResumeContent::Source(_), None) => {
                 return Err("exact reconstruction requires admitted source content facts".into());
             }
-            (None, Some(_)) => {
+            (ResumeContent::Processed(_), Some(_)) => {
                 return Err("processed reconstruction received source content".into());
             }
-            (None, None) => {}
+            (ResumeContent::Processed(_), None) => {}
         }
     }
     Ok(source.map(|(record, _)| record))
@@ -443,7 +452,7 @@ pub(super) fn begin_from_command(
         (
             ResumeActivation {
                 game: state.with_compatibility(()),
-                source: Some(source),
+                content: ResumeContent::Source(source),
             },
             facts,
         )
@@ -466,7 +475,7 @@ pub(super) fn begin_from_command(
         (
             ResumeActivation {
                 game: state.game.with_compatibility(()),
-                source: None,
+                content: ResumeContent::Processed(state.rooms),
             },
             facts,
         )
@@ -513,7 +522,10 @@ pub(super) fn begin_from_command(
 }
 
 pub(super) fn finish(world: &mut World) {
-    if !is_pending(world) || !world.resource::<travel::Travel>().is_idle() {
+    let Some(activation) = world.resource::<ResumeControl>().pending.as_ref() else {
+        return;
+    };
+    if !world.resource::<travel::Travel>().is_idle() {
         return;
     }
     if world.resource::<Session>().error.is_some()
@@ -521,24 +533,35 @@ pub(super) fn finish(world: &mut World) {
     {
         return;
     }
-    let Some(activation) = world.resource_mut::<ResumeControl>().pending.take() else {
-        return;
+    let ready = match &activation.content {
+        ResumeContent::Source(source) => {
+            if world
+                .resource::<ResumeControl>()
+                .levels
+                .values()
+                .eq(&source.levels)
+            {
+                Ok(true)
+            } else {
+                Err("not every captured level has matching admitted content".into())
+            }
+        }
+        ResumeContent::Processed(rooms) => side_room::restore_processed(world, *rooms),
     };
-    if let Some(source) = activation.source
-        && world
-            .resource::<ResumeControl>()
-            .levels
-            .values()
-            .ne(&source.levels)
-    {
-        reject(world);
-        fail(
-            world,
-            "not every captured level has matching admitted content".into(),
-        );
-        return;
+    match ready {
+        Ok(false) => return,
+        Ok(true) => {}
+        Err(error) => {
+            fail(world, error);
+            return;
+        }
     }
-    let state = activation.game;
+    let state = world
+        .resource_mut::<ResumeControl>()
+        .pending
+        .take()
+        .expect("pending game reconstruction")
+        .game;
     let Some(player) = player(world) else {
         reject(world);
         fail(world, "reconstructed player identity is unavailable".into());

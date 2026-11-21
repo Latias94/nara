@@ -12,7 +12,7 @@ use super::{GAME_COMPATIBILITY, Header, MAX_RESUME_BYTES, ResumeError, ResumeSta
 use crate::command::ServerCommand;
 
 const KIND: &str = "two_level_processed_resume";
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 const MAX_TICK_OFFSET: u64 = 600;
 
 /// Maximum encoded size of a processed continuation, including any JSON whitespace.
@@ -21,7 +21,7 @@ pub const MAX_PROCESSED_RESUME_BYTES: usize = MAX_RESUME_BYTES;
 /// Maximum number of pending commands retained in one processed continuation.
 pub const MAX_PENDING_SERVER_COMMANDS: usize = 128;
 
-/// The game state, catalog identity, and ordered pending intent of a paused Server.
+/// The game state, room states, catalog identity, and ordered pending intent of a paused Server.
 ///
 /// Use [`decode_processed_resume`] to admit external bytes. The receiving game must check
 /// compatibility and admit the commands against its own freshly constructed queue.
@@ -31,8 +31,37 @@ pub struct ProcessedResumeState {
     #[serde(deserialize_with = "deserialize_object")]
     pub game: ResumeState<ProcessedResumeCompatibility>,
     #[serde(deserialize_with = "deserialize_object")]
+    pub rooms: ProcessedRooms,
+    #[serde(deserialize_with = "deserialize_object")]
     pub catalog: ProcessedCatalogStamp,
     pub pending: Vec<PendingServerCommand>,
+}
+
+/// Room states recorded at the completed frame boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessedRooms {
+    #[serde(deserialize_with = "deserialize_room_state")]
+    pub side_room: ProcessedRoomState,
+    #[serde(deserialize_with = "deserialize_room_state")]
+    pub lookout: ProcessedRoomState,
+}
+
+/// The room states supported by a processed continuation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessedRoomState {
+    #[default]
+    Closed,
+    Open,
+    RelicFound,
+}
+
+fn deserialize_room_state<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<ProcessedRoomState, D::Error> {
+    let state = String::deserialize(deserializer)?;
+    ProcessedRoomState::deserialize(serde::de::value::StrDeserializer::new(&state))
 }
 
 /// The committed Server's Schema and App configuration fingerprints.
@@ -179,7 +208,7 @@ pub enum ProcessedResumeError {
     InvalidCommand { index: usize, reason: String },
 }
 
-/// Produces bounded, canonical version-one bytes, preserving the order of pending commands.
+/// Produces bounded, canonical version-two bytes, preserving the order of pending commands.
 pub fn encode_processed_resume(
     state: &ProcessedResumeState,
 ) -> Result<Vec<u8>, ProcessedResumeError> {
@@ -198,6 +227,7 @@ pub fn encode_processed_resume(
 }
 
 /// Checks the shared byte and shape limits before admitting and canonicalizing the payload.
+/// The compatible-package handoff accepts only the current format version.
 pub fn decode_processed_resume(bytes: &[u8]) -> Result<ProcessedResumeState, ProcessedResumeError> {
     preflight(bytes)?;
     let header: Header = serde_json::from_slice(bytes).map_err(ResumeError::Json)?;

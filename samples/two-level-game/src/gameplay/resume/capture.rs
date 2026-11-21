@@ -20,7 +20,9 @@ use super::{GameResumeError, ResumeControl};
 #[cfg(feature = "local-player")]
 use crate::gameplay::ActiveLevel;
 use crate::{
-    gameplay::{GamePhase, Progress, Session, player, travel, verification::Verification},
+    gameplay::{
+        GamePhase, Progress, Session, player, side_room::Rooms, travel, verification::Verification,
+    },
     resume::{
         PlayerState, ResumeCompatibility, ResumeState, RuntimeTimeState, SessionCounters,
         processed::ProcessedResumeCompatibility,
@@ -36,6 +38,7 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
         ));
     }
     quiescent(world, false)?;
+    Rooms::require_closed(world).map_err(GameResumeError::Ineligible)?;
     #[cfg(feature = "local-player")]
     {
         super::input_capture_eligible(world)?;
@@ -80,7 +83,10 @@ pub(super) fn hosted_catalog(world: &World) -> Result<ContentDigest, GameResumeE
     Ok(catalog)
 }
 
-pub(super) fn quiescent(world: &World, allow_pending: bool) -> Result<(), GameResumeError> {
+pub(super) fn quiescent(
+    world: &World,
+    allow_pending_commands: bool,
+) -> Result<(), GameResumeError> {
     let reject = |reason: &str| GameResumeError::Ineligible(reason.into());
     let session = world.resource::<Session>();
     if !session.initialized
@@ -96,8 +102,6 @@ pub(super) fn quiescent(world: &World, allow_pending: bool) -> Result<(), GameRe
             "scripted verification is not an interactive resume state",
         ));
     }
-    crate::gameplay::side_room::Rooms::require_closed(world)
-        .map_err(GameResumeError::Ineligible)?;
     if !world
         .resource::<crate::gameplay::storage::Storage>()
         .permits_resume()
@@ -124,7 +128,7 @@ pub(super) fn quiescent(world: &World, allow_pending: bool) -> Result<(), GameRe
         || stats.acknowledged_through_tick != time.tick()
         || stats.active_commands != 0
         || stats.quarantined_commands != 0
-        || (!allow_pending && stats.retained_commands != 0)
+        || (!allow_pending_commands && stats.retained_commands != 0)
         || !world.resource::<GameplayCommandBatch>().is_empty()
         || !world.resource::<LocalGameplayCommands>().is_empty()
     {

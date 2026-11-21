@@ -14,12 +14,21 @@ use crate::{
 
 #[test]
 fn processed_round_trip_canonicalizes_game_records_and_keeps_equal_tick_order() {
-    let canonical = example();
+    let mut canonical = example();
+    canonical.rooms = ProcessedRooms {
+        side_room: ProcessedRoomState::Open,
+        lookout: ProcessedRoomState::RelicFound,
+    };
     let mut reversed = canonical.clone();
     reversed.game.progress.collected.reverse();
     reversed.game.progress.markers.reverse();
 
     let bytes = encode_processed_resume(&canonical).unwrap();
+    let wire: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        wire["payload"]["rooms"],
+        json!({ "side_room": "open", "lookout": "relic_found" })
+    );
     assert_eq!(encode_processed_resume(&reversed).unwrap(), bytes);
     let restored = decode_processed_resume(&wire_bytes(&reversed)).unwrap();
     assert_eq!(restored, canonical);
@@ -145,18 +154,32 @@ fn wrong_format_versions_and_non_schema_fields_are_refused() {
     let bytes = encode_processed_resume(&example()).unwrap();
     let wire: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(wire["kind"], "two_level_processed_resume");
-    assert_eq!(wire["format_version"], 1);
+    assert_eq!(wire["format_version"], 2);
+    assert_eq!(
+        wire["payload"]["rooms"],
+        json!({ "side_room": "closed", "lookout": "closed" })
+    );
+    assert_eq!(decode_processed_resume(&bytes).unwrap(), example());
     assert!(matches!(
         super::super::decode_resume(&bytes),
         Err(ResumeError::WrongKind)
     ));
 
+    let mut v1 = wire.clone();
+    v1["format_version"] = json!(1);
+    v1["payload"].as_object_mut().unwrap().remove("rooms");
+    assert!(matches!(
+        decode_processed_resume(&serde_json::to_vec(&v1).unwrap()),
+        Err(ProcessedResumeError::Resume(
+            ResumeError::UnsupportedVersion(1)
+        ))
+    ));
     let mut invalid = wire.clone();
-    invalid["format_version"] = json!(2);
+    invalid["format_version"] = json!(3);
     assert!(matches!(
         decode_processed_resume(&serde_json::to_vec(&invalid).unwrap()),
         Err(ProcessedResumeError::Resume(
-            ResumeError::UnsupportedVersion(2)
+            ResumeError::UnsupportedVersion(3)
         ))
     ));
     let mut invalid = wire.clone();
@@ -188,6 +211,28 @@ fn wrong_format_versions_and_non_schema_fields_are_refused() {
     let mut invalid = wire.clone();
     invalid["payload"]["pending"][0] = json!([1, wire["payload"]["pending"][0]["command"]]);
     assert_invalid_json(&invalid);
+}
+
+#[test]
+fn processed_rooms_require_a_complete_named_object() {
+    let mut wire: Value =
+        serde_json::from_slice(&encode_processed_resume(&example()).unwrap()).unwrap();
+    wire["payload"].as_object_mut().unwrap().remove("rooms");
+    assert_invalid_json(&wire);
+
+    for rooms in [
+        json!(null),
+        json!(["open", "relic_found"]),
+        json!({ "side_room": "open" }),
+        json!({ "lookout": "relic_found" }),
+        json!({ "side_room": "open", "lookout": "closed", "unknown": "closed" }),
+        json!({ "side_room": "preparing", "lookout": "closed" }),
+        json!({ "side_room": "open", "lookout": 1 }),
+        json!({ "side_room": "open", "lookout": { "relic_found": null } }),
+    ] {
+        wire["payload"]["rooms"] = rooms;
+        assert_invalid_json(&wire);
+    }
 }
 
 #[test]
@@ -307,6 +352,7 @@ fn example() -> ProcessedResumeState {
                 configuration: [10; 32],
             },
         },
+        rooms: ProcessedRooms::default(),
         catalog: ContentDigest::from_parts(u64::MAX, [255; 32]).into(),
         pending: vec![
             pending(
