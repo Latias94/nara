@@ -290,3 +290,16 @@ the working-tree retest above.
 The root and sample formatting checks, the independent panel package formatting check, and
 Clippy correctness for the affected engine libraries and sample targets passed. These results
 cover the selected Windows x64 workflows on Rust 1.95.0.
+
+### November 21 authoring requalification
+
+The two authoring findings are repaired by `42608ba`. At `41da110`, the selected
+`nara_tooling` query, property child and library cohort passes 223/223 with one existing skip
+(`995b8304-b592-4791-b1a4-d341f680edde`). The independent public Host passes 10/10
+(`b82f6fd8-7ee1-4d42-8cb4-b67e57e6c3ff`). The independently locked registered panel then
+passes 24/24 under the release profile with one existing skip
+(`3121ce9e-5e72-4129-9625-160db5026f89`). Its four original cases verify the 39,500-row RON
+Scene and Prefab, and the 86-row omitted default in both source kinds. The workflow retains
+the actual bound encoding, refuses oversized explicit JSON publication, and distinguishes
+omitted from explicit state after Undo, Redo, Save and Reopen.
+[Registered panel regressions](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/property_pages/round_eight.rs)
