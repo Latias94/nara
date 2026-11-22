@@ -2182,6 +2182,19 @@ pub struct ScenePatchReport {
     pub diagnostics: DiagnosticReport,
 }
 
+impl ScenePatchReport {
+    /// Whether the authoring request was accepted without changing stored content.
+    #[must_use]
+    pub fn is_unchanged(&self) -> bool {
+        !self.applied
+            && self
+                .inverse
+                .as_ref()
+                .is_some_and(ScenePatchDocument::is_empty)
+            && !self.diagnostics.has_errors()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScenePatchApplyLimits {
     validation_work: ItemLimit,

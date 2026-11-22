@@ -180,7 +180,7 @@ impl EditorProjectSession {
         Ok(prepared)
     }
 
-    /// A successful receipt is returned only after source publication; rejection retains its outcome.
+    /// Returns the receipt for an accepted source transaction, including unchanged proposals.
     pub fn commit_authoring_construction(
         &mut self,
         prepared: PreparedEditorDocumentConstruction,
@@ -442,13 +442,7 @@ fn editor_edit_commit_outcome(
         }
     }
     match &report.patch_report {
-        Some(patch)
-            if patch.inverse.is_some()
-                && !patch.diagnostics.has_errors()
-                && !report.diagnostics.has_errors() =>
-        {
-            "unchanged"
-        }
+        Some(patch) if patch.is_unchanged() && !report.diagnostics.has_errors() => "unchanged",
         Some(_) => "domain_rejected",
         None => "rejected",
     }

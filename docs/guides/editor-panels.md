@@ -858,10 +858,16 @@ workspace and a candidate, or between candidates prepared from the same basis, r
 `WrongPreparedEdit`. The candidate keeps its original basis and remains readable after the
 working copy changes. Commit checks the current source before publication.
 
+When a field edit returns to the exact stored state, the prepared forward and inverse patches
+are empty. A successful dispatch reports `applied = false` and
+`report.patch_report.as_ref().is_some_and(ScenePatchReport::is_unchanged)`. The document
+revision, dirty flag and Undo/Redo remain current. Writing a default explicitly still changes
+the source.
+
 Mixed construction admits one bounded ordered patch: create empty direct entities, add admitted
 component templates and edit their fields/references. Final classification and forward/inverse
-history admission precede publication. One accepted patch is one Undo/Redo entry. A valid forward
-value is insufficient if its inverse cannot be replayed under the same field limits.
+history admission precede publication. One committed source change is one Undo/Redo entry.
+A valid forward value is insufficient if its inverse cannot be replayed under the same field limits.
 `MAX_AUTHORING_EDIT_OPERATIONS` bounds mixed operations; `MAX_AUTHORING_FIELD_WRITES` and the
 existing field-value limits remain separate. This is not cross-document atomicity or atomic
 multi-file Save.

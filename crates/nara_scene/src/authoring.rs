@@ -407,6 +407,9 @@ impl AuthoringHistory {
         cost: SceneAuthoringHistoryCost,
         scope: AuthoringHistoryScope,
     ) -> ScenePatchReport {
+        if report.is_unchanged() {
+            return report;
+        }
         if !Self::entry_is_admissible(self.limits, cost) {
             return reject_history_publication(
                 report,

@@ -1,21 +1,23 @@
 #![cfg(feature = "serde")]
 
 use nara_asset::AssetRef;
-use nara_core::ByteLimit;
+use nara_core::{ByteLimit, ItemLimit};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentFloat, ComponentPropertyKey,
-    ComponentPropertyPath, ComponentPropertyStep, ComponentRegistryBuilder, ComponentSchema,
-    ComponentSchemaCatalog, ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId,
-    ComponentValue, ComponentValueKind, ComponentValueShape, PersistentComponentSchemaOwnerId,
+    ComponentPropertyPath, ComponentPropertyReadBudget, ComponentPropertyStep,
+    ComponentRegistryBuilder, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
+    ComponentShapeMember, ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
+    PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringPropertyEdit,
-    AuthoringSchemaBasis, PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
-    SceneAuthoringHistoryLimits, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneFileLimits, SceneFormatError,
-    ScenePatchDocumentCandidate, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
-    SchemaReclassificationKind, SchemaReclassificationWork,
+    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringEntityView,
+    AuthoringPropertyEdit, AuthoringPropertyValue, AuthoringSchemaBasis, PrefabAuthoringSession,
+    PrefabDocument, PrefabDocumentCandidate, SceneAuthoringHistoryLimits, SceneAuthoringSession,
+    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
+    SceneFileLimits, SceneFormatError, ScenePatchDocument, ScenePatchDocumentCandidate,
+    ScenePatchOperation, ScenePlacement, ScenePlacementParent, SchemaReclassificationKind,
+    SchemaReclassificationWork,
 };
 
 fn entity() -> SceneEntityId {
@@ -302,9 +304,9 @@ fn copied_default_property_history_refuses_raw_native_and_wire_replay() {
     assert!(ScenePatchDocumentCandidate::decode_json_str(&wire.to_string()).is_err());
 }
 
-fn keyed_bundle(zero: f64) -> AuthoringSchemaBundle {
+fn keyed_bundle(zero: f64, row_count: u64) -> AuthoringSchemaBundle {
     let rows = ComponentValue::List(
-        (1..=86)
+        (1..=row_count)
             .map(|row| {
                 ComponentValue::map([
                     ("wire_key", ComponentValue::String(format!("row-{row}"))),
@@ -363,9 +365,236 @@ fn keyed_edit(key: &str, member: &str, value: ComponentValue) -> AuthoringProper
 }
 
 #[test]
+fn exact_stored_property_batches_preserve_revision_and_history() {
+    let (mut scene, mut prefab) = sessions_with(
+        keyed_bundle(0.0, 2),
+        document(),
+        SceneAuthoringHistoryLimits::default(),
+    );
+    let set_score = |score| keyed_edit("row-1", "score", ComponentValue::U64(score));
+    let same_leaf = [set_score(10)];
+    let restore_through_renamed_key = [
+        keyed_edit("row-1", "id", ComponentValue::String("renamed".into())),
+        keyed_edit("renamed", "score", ComponentValue::U64(20)),
+        keyed_edit("renamed", "score", ComponentValue::U64(10)),
+        keyed_edit("renamed", "id", ComponentValue::String("row-1".into())),
+    ];
+
+    macro_rules! check {
+        ($session:ident) => {{
+            for score in [10, 11] {
+                let prepared = $session
+                    .prepare_authoring_property_edit($session.revision(), &[set_score(score)])
+                    .unwrap();
+                assert!($session.commit_authoring_edit(prepared).applied);
+            }
+            let redo_document = $session.document().clone();
+            assert!($session.undo_authoring().applied);
+            let before = $session.document().clone();
+            let revision = $session.revision();
+            let history = $session.history_status();
+            let usage = $session.history_usage();
+            let retained = $session.shared_document();
+            assert_eq!((history.undo_depth, history.redo_depth), (1, 1));
+            let same_root = [AuthoringPropertyEdit {
+                property: ComponentPropertyPath::new(field("rows")),
+                value: before.entities[0].components[&component()]
+                    .value()
+                    .get("rows")
+                    .unwrap()
+                    .clone(),
+                ..same_leaf[0].clone()
+            }];
+            for edits in [
+                same_root.as_slice(),
+                same_leaf.as_slice(),
+                restore_through_renamed_key.as_slice(),
+            ] {
+                let prepared = $session
+                    .prepare_authoring_property_edit(revision, edits)
+                    .unwrap();
+                assert_eq!(prepared.document(), &before);
+                assert!(prepared.patch().is_empty(), "{:?}", prepared.patch());
+                assert!(prepared.inverse().is_empty(), "{:?}", prepared.inverse());
+
+                let report = $session.commit_authoring_edit(prepared);
+                assert!(report.is_unchanged());
+                assert_eq!(report.inverse, Some(ScenePatchDocument::default()));
+                assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+                assert_eq!($session.document(), &before);
+                assert_eq!($session.revision(), revision);
+                assert_eq!($session.history_status(), history);
+                assert_eq!($session.history_usage(), usage);
+                assert!(std::sync::Arc::ptr_eq(
+                    &retained,
+                    &$session.shared_document()
+                ));
+            }
+            let mut draft = $session.begin_authoring_construction(revision).unwrap();
+            draft
+                .set_property(
+                    entity(),
+                    component(),
+                    same_leaf[0].property.clone(),
+                    same_leaf[0].value.clone(),
+                )
+                .unwrap();
+            let prepared = $session.prepare_authoring_construction(&draft).unwrap();
+            assert!(prepared.patch().is_empty());
+            let committed = $session.commit_authoring_construction(prepared).unwrap();
+            assert!(committed.report().is_unchanged());
+            assert_eq!($session.revision(), revision);
+            assert_eq!($session.history_status(), history);
+            let stale = $session
+                .prepare_authoring_property_edit(revision, &same_leaf)
+                .unwrap();
+            assert!($session.redo_authoring().applied);
+            assert_eq!($session.document(), &redo_document);
+            assert!($session.undo_authoring().applied);
+            let restored_revision = $session.revision();
+            assert_ne!(restored_revision, revision);
+            assert_eq!($session.document(), &before);
+            let rejected = $session.commit_authoring_edit(stale);
+            assert!(!rejected.applied);
+            assert!(!rejected.is_unchanged());
+            assert!(rejected.diagnostics.has_errors());
+            assert_eq!($session.revision(), restored_revision);
+            assert_eq!($session.history_status(), history);
+            assert!($session.redo_authoring().applied);
+            assert_eq!($session.document(), &redo_document);
+        }};
+    }
+    check!(scene);
+    check!(prefab);
+}
+
+#[test]
+fn same_effective_default_property_write_materializes_storage_and_replays() {
+    let (mut scene, mut prefab) = sessions();
+    let edits = [edit("score", ComponentValue::U64(13))];
+    let assert_score = |view: AuthoringEntityView<'_>, expected: AuthoringPropertyValue<'_>| {
+        let mut budget = ComponentPropertyReadBudget::new(
+            ItemLimit::new(16).unwrap(),
+            ByteLimit::new(1024).unwrap(),
+        );
+        assert_eq!(
+            view.component(&component())
+                .unwrap()
+                .property_value(&edits[0].property, &mut budget)
+                .unwrap(),
+            expected,
+        );
+    };
+    let stored_default = ComponentValue::map([
+        ("wire_score", ComponentValue::U64(13)),
+        ("wire_tag", ComponentValue::String("retained".into())),
+    ]);
+
+    macro_rules! check {
+        ($session:ident) => {{
+            let before = $session.document().clone();
+            let revision = $session.revision();
+            let stored = before.entities[0].components[&component()].value();
+            assert!(stored.get("defaults").is_none());
+            assert_score(
+                $session.authoring_entity_view(&entity()).unwrap(),
+                AuthoringPropertyValue::Defaulted(&edits[0].value),
+            );
+
+            let prepared = $session
+                .prepare_authoring_property_edit(revision, &edits)
+                .unwrap();
+            assert!(!prepared.patch().is_empty());
+            assert!(!prepared.inverse().is_empty());
+            assert_score(
+                prepared.authoring_entity_view(&entity()).unwrap(),
+                AuthoringPropertyValue::Present(&edits[0].value),
+            );
+            let materialized = prepared.document().clone();
+            let stored = materialized.entities[0].components[&component()].value();
+            assert_eq!(stored.get("defaults"), Some(&stored_default));
+
+            assert!($session.commit_authoring_edit(prepared).applied);
+            assert_eq!($session.document(), &materialized);
+            assert_ne!($session.revision(), revision);
+            assert_eq!($session.history_status().undo_depth, 1);
+            assert!($session.undo_authoring().applied);
+            assert_eq!($session.document(), &before);
+            assert!($session.redo_authoring().applied);
+            assert_eq!($session.document(), &materialized);
+        }};
+    }
+    check!(scene);
+    check!(prefab);
+}
+
+#[test]
+fn changing_stored_zero_sign_creates_a_revision_and_replays_exact_bits() {
+    let (mut scene, mut prefab) = sessions_with(
+        keyed_bundle(0.0, 2),
+        document(),
+        SceneAuthoringHistoryLimits::default(),
+    );
+    let seed = [keyed_edit("row-1", "score", ComponentValue::U64(10))];
+    let negative_zero = [keyed_edit(
+        "row-1",
+        "zero",
+        ComponentValue::F64(ComponentFloat::new(-0.0).unwrap()),
+    )];
+    let zero_bits = |entities: &[SceneEntityRecord]| {
+        let stored = entities[0].components[&component()].value();
+        let Some(ComponentValue::List(rows)) = stored.get("rows") else {
+            panic!("stored rows must be present");
+        };
+        let Some(ComponentValue::F64(zero)) = rows[0].get("wire_zero") else {
+            panic!("the first row must contain a stored zero");
+        };
+        zero.get().to_bits()
+    };
+
+    macro_rules! check {
+        ($session:ident) => {{
+            let prepared = $session
+                .prepare_authoring_property_edit($session.revision(), &seed)
+                .unwrap();
+            assert!($session.commit_authoring_edit(prepared).applied);
+            assert_eq!(zero_bits(&$session.document().entities), 0.0_f64.to_bits());
+
+            let revision = $session.revision();
+            let prepared = $session
+                .prepare_authoring_property_edit(revision, &negative_zero)
+                .unwrap();
+            assert!(!prepared.patch().is_empty());
+            assert!(!prepared.inverse().is_empty());
+            assert_eq!(
+                zero_bits(&prepared.document().entities),
+                (-0.0_f64).to_bits()
+            );
+
+            assert!($session.commit_authoring_edit(prepared).applied);
+            assert_eq!(
+                zero_bits(&$session.document().entities),
+                (-0.0_f64).to_bits()
+            );
+            assert_ne!($session.revision(), revision);
+            assert_eq!($session.history_status().undo_depth, 2);
+            assert!($session.undo_authoring().applied);
+            assert_eq!(zero_bits(&$session.document().entities), 0.0_f64.to_bits());
+            assert!($session.redo_authoring().applied);
+            assert_eq!(
+                zero_bits(&$session.document().entities),
+                (-0.0_f64).to_bits()
+            );
+        }};
+    }
+    check!(scene);
+    check!(prefab);
+}
+
+#[test]
 fn large_keyed_default_replays_compactly_across_exact_schema_readmission() {
-    let bundle = keyed_bundle(-0.0);
-    let signed_zero_drift = keyed_bundle(0.0);
+    let bundle = keyed_bundle(-0.0, 86);
+    let signed_zero_drift = keyed_bundle(0.0, 86);
     assert_eq!(
         bundle.owners()[0].current().fingerprint(),
         signed_zero_drift.owners()[0].current().fingerprint(),
@@ -472,7 +701,7 @@ fn large_keyed_default_replays_compactly_across_exact_schema_readmission() {
 #[test]
 fn construction_materializes_omitted_defaults_alongside_staged_component_edits() {
     let (mut scene, mut prefab) = sessions_with(
-        keyed_bundle(-0.0),
+        keyed_bundle(-0.0, 86),
         document(),
         SceneAuthoringHistoryLimits::default(),
     );

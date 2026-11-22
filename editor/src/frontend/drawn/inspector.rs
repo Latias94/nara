@@ -369,8 +369,7 @@ impl InspectorControls {
                     "Reviewed source-tool proposal committed. Use ordinary Undo to revert it."
                         .to_owned()
                 } else {
-                    "The source owner did not apply the reviewed proposal. Check Diagnostics."
-                        .to_owned()
+                    "The reviewed proposal left the source unchanged.".to_owned()
                 });
                 return;
             }

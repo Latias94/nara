@@ -4404,6 +4404,12 @@ alone and mismatched declarations refuse before history publication. Independent
 11/11 and native conversion 1/1 pass. The broader Windows owner run passes 106/107,
 with one prior conversion budget assertion reproduced separately.
 
+[Unchanged field transactions](../authoring-read-projection-design.md#confirming-an-unchanged-property-edit)
+retain the source revision, saved state and both history stacks when every touched stored
+root returns to its original value. The existing Scene/Prefab owners compare stored presence
+and exact value bits. Registered panels and field-only Source Tool proposals receive the
+accepted unchanged receipt.
+
 The [selective collection edit](../authoring-read-projection-design.md#selective-edits-in-authored-collections)
 keeps the selected replacement and previous value in the original Scene and Prefab history.
 The inverse follows a changed key. Exact final file validation and nominal Schema readmission

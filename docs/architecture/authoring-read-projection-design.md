@@ -745,6 +745,43 @@ basis. The live workspace and another candidate refuse those continuations. A ca
 still be reviewed after its base changes. Preview borrows the candidate for inspection.
 Publication requires successful commit against the current source.
 
+#### Confirming an unchanged property edit
+
+A prepared field transaction whose final stored values equal its live basis keeps a readable
+preview and exposes empty forward and inverse patches. Scene compares only the stored roots
+touched by the ordered edit, including missing values and exact floating-point bits. First
+writing a contextual or Schema default explicitly changes storage, even when the resulting
+effective value is identical.
+
+Commit still checks the original document, revision and Schema. An unchanged commit reports
+`ScenePatchReport::is_unchanged()` through the ordinary panel completion. The existing document,
+saved state, dirty flag, Undo and Redo remain current. A stale candidate remains a refusal.
+Field-only Source Tool proposals use the same accepted unchanged result and retain the
+existing history when confirmed.
+
+On Windows x64 with Rust 1.95.0, the actual Source Tool process trajectory passes 1/1
+in `6d40631d-0e7e-44dc-88d4-ee8951d2fa1f`. It applies a new value, repeats the exact
+proposal, receives an accepted unchanged receipt and keeps the original Undo entry.
+The existing Windows/DX12 field edit, reset, remove and persistence trajectory also
+passes on the rebuilt Editor test binary.
+[Source Tool process case](../../editor/src/app/persistence_tests.rs) ·
+[Independent panel cases](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/property_pages/unchanged.rs)
+
+Independently locked release nextest `20d45d59-e2c1-49d4-b03c-3ee903730eaa` passes 13/13
+selected cases. The new panel cases create a Redo entry, review a changed value and then the
+original value in distinct update cycles, and receive the unchanged receipt through one normal
+submission. Their inactive Scene and Prefab keep the complete tab and saved state. Redo then
+restores the earlier change. The remaining cases cover stored and effective Prefab Revert.
+
+Windows Scene integration run `73aea0ff-a64f-414a-9db9-664d59fa6caa` passes 41/41
+with two cost diagnostics skipped. It verifies ordered keyed writes that return to their
+original storage, stale confirmation after Undo returns to equal values, identical effective
+defaults becoming explicitly stored, exact signed-zero replay, and unchanged field-only
+construction in both source kinds.
+Correctness Clippy passes for Scene, Tooling, Nara and Editor. Root and independent fixture
+formatting and changed local documentation links pass.
+[Scene integration cases](../../crates/nara_scene/tests/default_property_writes.rs)
+
 Acceptance uses an independently registered panel in non-active Scene and Prefab documents.
 It compares live and proposed values, crosses a value page boundary, and checks cursor ownership.
 The panel consumes the reviewed candidate through normal submission, Undo, Redo, Save and Reopen.

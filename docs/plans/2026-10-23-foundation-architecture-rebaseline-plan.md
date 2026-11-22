@@ -638,6 +638,12 @@ Whole-component Revert also checks the observed declaration. The source owner co
 the actual stored intent before preparing a change, including when a candidate exposes
 a different declaration at numerically equal coordinates.
 
+The [unchanged field transaction](../architecture/authoring-read-projection-design.md#confirming-an-unchanged-property-edit)
+compares the final stored roots of a validated candidate. Commit returns an accepted unchanged
+receipt while retaining the document basis, saved state and Undo/Redo. A real change in
+stored presence still publishes one ordinary transaction. The same receipt reaches the
+registered panel and the Source Tool.
+
 ## R3: Behavior Representation And Immutable Module Publications
 
 **Design:** D02, D03, D06. **State:** the closed native/data Scene family is adopted under ADR 0006

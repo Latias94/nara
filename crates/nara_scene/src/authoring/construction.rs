@@ -410,7 +410,7 @@ macro_rules! construction_session {
                 prepared: $prepared,
             ) -> Result<CommittedAuthoringConstruction, ScenePatchReport> {
                 let report = self.commit_authoring_edit(prepared.edit);
-                if report.applied {
+                if report.applied || report.is_unchanged() {
                     Ok(CommittedAuthoringConstruction {
                         entities: prepared.entities,
                         report,

@@ -27,6 +27,11 @@ nara authoring tools will use **validated patch transactions** for scene/prefab 
 
 Rules:
 
+- A validated field transaction that returns every touched stored root to its original value
+  leaves the document and history intact. Its prepared result has empty forward and inverse
+  patches. The normal commit still verifies the exact basis and reports an accepted unchanged
+  result. Writing an omitted default into source counts as a stored change.
+
 - Editor and AI tools do not mutate private ECS storage directly.
 - Scene/prefab edits are represented as `ScenePatch` operations over stable document IDs.
 - Runtime world edits are represented as `WorldCommand` operations applied at explicit schedule boundaries.

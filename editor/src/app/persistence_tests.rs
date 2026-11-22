@@ -315,6 +315,44 @@ fn application_source_tool_reviews_commits_and_revokes_old_requests() {
             .into_result(),
         Err(EditorSourceToolError::Busy),
     ));
+    let edited_basis = application.document_query_basis(document).unwrap();
+    let edited_frame = application.current_frame().unwrap();
+    let unchanged_request = application
+        .request_source_tool(
+            &activation,
+            &edited_basis,
+            EditorSourceToolIntent::Edit {
+                entity: SceneEntityId::new("signal-node").unwrap(),
+            },
+            BTreeMap::new(),
+        )
+        .unwrap();
+    settle_tool(&mut application);
+    let review = application.source_tool_review().unwrap().unwrap();
+    assert_eq!(review.request(), &unchanged_request);
+    assert!(review.patch().is_empty());
+    let unchanged = application
+        .accept_source_tool_review(&unchanged_request, Duration::ZERO)
+        .into_result()
+        .unwrap();
+    assert!(unchanged.created_entity.is_none());
+    assert!(!unchanged.report.applied);
+    assert!(
+        unchanged
+            .report
+            .patch_report
+            .as_ref()
+            .unwrap()
+            .is_unchanged()
+    );
+    assert_eq!(
+        application.document_query_basis(document).unwrap(),
+        edited_basis
+    );
+    assert_eq!(
+        application.current_frame().unwrap().workspace().documents,
+        edited_frame.workspace().documents
+    );
     let frame = application.current_frame().unwrap();
     application.submit_and_drive(
         EditorActionBatch::new(

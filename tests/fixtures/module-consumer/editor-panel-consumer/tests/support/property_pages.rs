@@ -26,6 +26,8 @@ use nara_tooling::{
 mod baseline;
 #[path = "property_pages/round_eight.rs"]
 mod round_eight;
+#[path = "property_pages/unchanged.rs"]
+mod unchanged;
 
 const PANEL: &str = "consumer.property-pages";
 const COMPONENT: &str = "consumer.pages.PanelSettings";

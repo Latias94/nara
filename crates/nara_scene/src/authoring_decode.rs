@@ -2860,16 +2860,13 @@ fn prepare_scene_authoring_patch_impl(
             "Authoring field edit changed the unavailable-record manifest",
         ));
     }
-    let (candidate, inverse) = candidate.into_parts();
+    let (candidate, patch, report) =
+        candidate.into_patch(&document.entities, &edits, patch, history);
     Ok(PreparedSceneAuthoringPatch {
         document: candidate,
         state: candidate_state,
-        patch: patch.clone(),
-        report: ScenePatchReport {
-            applied: true,
-            inverse: Some(inverse),
-            diagnostics: DiagnosticReport::default(),
-        },
+        patch,
+        report,
     })
 }
 
@@ -3136,7 +3133,8 @@ fn prepare_prefab_authoring_patch_impl(
             "Authoring field edit changed the unavailable-record manifest",
         ));
     }
-    let (candidate, inverse) = candidate.into_parts();
+    let (candidate, patch, report) =
+        candidate.into_patch(&document.entities, &edits, patch, history);
     if let Some(admit) = admit.as_deref_mut() {
         admit(
             "prefab-inputs",
@@ -3150,12 +3148,8 @@ fn prepare_prefab_authoring_patch_impl(
             entities: candidate.entities,
         },
         state: candidate_state,
-        patch: patch.clone(),
-        report: ScenePatchReport {
-            applied: true,
-            inverse: Some(inverse),
-            diagnostics: DiagnosticReport::default(),
-        },
+        patch,
+        report,
     })
 }
 

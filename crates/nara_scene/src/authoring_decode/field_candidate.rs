@@ -87,6 +87,72 @@ impl PreparedFieldCandidate<'_> {
         (self.document, self.inverse)
     }
 
+    pub(super) fn into_patch(
+        self,
+        original: &[SceneEntityRecord],
+        edits: &[AuthoringFieldChange],
+        patch: &ScenePatchDocument,
+        history: bool,
+    ) -> (SceneDocument, ScenePatchDocument, ScenePatchReport) {
+        if !history && self.matches_stored_roots(original, edits) {
+            return (
+                self.document,
+                ScenePatchDocument::default(),
+                ScenePatchReport {
+                    applied: false,
+                    inverse: Some(ScenePatchDocument::default()),
+                    diagnostics: DiagnosticReport::default(),
+                },
+            );
+        }
+        let (document, inverse) = self.into_parts();
+        (
+            document,
+            patch.clone(),
+            ScenePatchReport {
+                applied: true,
+                inverse: Some(inverse),
+                diagnostics: DiagnosticReport::default(),
+            },
+        )
+    }
+
+    fn matches_stored_roots(
+        &self,
+        original: &[SceneEntityRecord],
+        edits: &[AuthoringFieldChange],
+    ) -> bool {
+        let mut checked = BTreeSet::new();
+        edits.iter().all(|edit| {
+            if !checked.insert((&edit.entity, &edit.component, &edit.property.root)) {
+                return true;
+            }
+            let Some(field) = self
+                .state
+                .available_component_schema(&edit.entity, &edit.component)
+                .and_then(|schema| {
+                    schema
+                        .fields()
+                        .iter()
+                        .find(|field| field.id() == &edit.property.root)
+                })
+            else {
+                return false;
+            };
+            let (Some(before), Some(after)) = (
+                stored_component(original, edit),
+                stored_component(&self.document.entities, edit),
+            ) else {
+                return false;
+            };
+            match (before.get_path(field.path()), after.get_path(field.path())) {
+                (Ok(before), Ok(after)) => component_values_exactly_match(before, after),
+                (Err(before), Err(after)) => before == after,
+                _ => false,
+            }
+        })
+    }
+
     pub(super) fn classify(
         &self,
     ) -> Result<AuthoringDocumentState, AuthoringDocumentPublicationError> {
@@ -225,6 +291,19 @@ impl PreparedFieldCandidate<'_> {
         // source/basis and direct schema index are consequently the same admitted facts.
         Ok(Some(next))
     }
+}
+
+fn stored_component<'a>(
+    entities: &'a [SceneEntityRecord],
+    edit: &AuthoringFieldChange,
+) -> Option<&'a ComponentValue> {
+    let index = entities
+        .binary_search_by(|record| record.id.cmp(&edit.entity))
+        .ok()?;
+    entities[index]
+        .components
+        .get(&edit.component)
+        .map(SceneComponentRecord::value)
 }
 
 #[cfg(test)]
