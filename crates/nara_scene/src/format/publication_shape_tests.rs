@@ -26,6 +26,9 @@ fn equivalent<T: SceneFilePayload>(payload: &T, limits: SceneFileLimits) {
     assert_eq!(actual, expected, "limits: {limits:?}");
     let mut ordered = payload.clone();
     ordered.canonicalize_payload();
+    let borrowed = validate_ordered_publication_shape(&ordered, limits, None, None)
+        .map_err(|error| error.to_string());
+    assert_eq!(borrowed, expected, "ordinary ordered limits: {limits:?}");
     let borrowed = validate_publication_shape_with_admission(&ordered, limits, None, |_| {
         Ok::<_, std::convert::Infallible>(())
     })
@@ -40,7 +43,8 @@ fn equivalent<T: SceneFilePayload>(payload: &T, limits: SceneFileLimits) {
 fn explicit_source_encoding_admits_only_the_selected_wire_shape() {
     macro_rules! check {
         ($document:expr, $candidate:ty) => {{
-            let document = $document;
+            let mut document = $document;
+            document.canonicalize();
             let json = document.to_json_string().unwrap();
             let ron = document.to_ron_string().unwrap();
             let base = SceneFileLimits::default();
@@ -72,6 +76,22 @@ fn explicit_source_encoding_admits_only_the_selected_wire_shape() {
             );
             assert_eq!(document.to_json_string_with_limits(limits).unwrap(), json);
             rejected(document.to_ron_string_with_limits(limits).unwrap_err());
+            validate_ordered_publication_shape(
+                &document,
+                limits,
+                Some(SceneFileEncoding::Json),
+                None,
+            )
+            .unwrap();
+            rejected(
+                validate_ordered_publication_shape(
+                    &document,
+                    limits,
+                    Some(SceneFileEncoding::Ron),
+                    None,
+                )
+                .unwrap_err(),
+            );
         }};
     }
     let scene = document(ComponentValue::U64(7), true);

@@ -4400,7 +4400,10 @@ limits. The [ordinary prepared interaction](../authoring-read-projection-design.
 qualifies repeated previews, cancellation and panel retirement before commit, then Undo/Redo and
 exact Save/Reopen for large non-active Scene and Prefab documents. The independent release target
 passes 38/38 with the [keyed preparation diagnostic](../../benchmarks/2026-10-25-prepared-panel.md#november-22-keyed-collection-workload).
-Complete R2 and preparation locality remain open.
+The [borrowed candidate comparison](../../benchmarks/2026-10-25-prepared-panel.md#borrowed-candidate-comparison)
+removes a full document copy from ordinary field preparation and checks the existing format
+oracle. Matched release panel preparation drops from roughly 184–186 ms to 147–156 ms P50 for
+32,768 rows. Complete R2 and full preparation locality remain open.
 
 The [observation-bound preparation successor](../../knowledge/engineering/verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md)
 replaces revision-only Workspace/Session/Application preparation with complete retained query

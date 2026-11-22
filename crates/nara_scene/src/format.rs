@@ -1105,6 +1105,22 @@ pub(crate) fn validate_prefab_publication_shape(
     validate_publication_shape(document, limits, encoding)
 }
 
+pub(crate) fn validate_ordered_scene_publication_shape(
+    document: &SceneDocument,
+    limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
+) -> Result<(), SceneFormatError> {
+    validate_ordered_publication_shape(document, limits, encoding, None)
+}
+
+pub(crate) fn validate_ordered_prefab_publication_shape(
+    document: &PrefabDocument,
+    limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
+) -> Result<(), SceneFormatError> {
+    validate_ordered_publication_shape(document, limits, encoding, None)
+}
+
 #[derive(Debug)]
 pub(crate) enum PublicationShapeAdmissionError<E> {
     Format(SceneFormatError),
@@ -1540,6 +1556,20 @@ fn validate_publication_shape<T: SceneFilePayload>(
     validate_publication_encodings(&envelope, limits, encoding, certified, None)
 }
 
+/// Validates a candidate in the canonical order established by its source owner.
+fn validate_ordered_publication_shape<T: SceneFilePayload>(
+    payload: &T,
+    limits: SceneFileLimits,
+    encoding: Option<SceneFileEncoding>,
+    admission: Option<&mut dyn FnMut(usize) -> io::Result<()>>,
+) -> Result<(), SceneFormatError> {
+    payload.validate_contract()?;
+    payload.validate_budget(limits)?;
+    let envelope = publication_envelope(payload, T::KIND)?;
+    let certified = certifies_publication_shape(&envelope, payload, limits);
+    validate_publication_encodings(&envelope, limits, encoding, certified, admission)
+}
+
 fn validate_publication_shape_with_admission<T: SceneFilePayload, E>(
     payload: &T,
     limits: SceneFileLimits,
@@ -1547,14 +1577,6 @@ fn validate_publication_shape_with_admission<T: SceneFilePayload, E>(
     mut admission: impl FnMut(usize) -> Result<(), E>,
 ) -> Result<(), PublicationShapeAdmissionError<E>> {
     use PublicationShapeAdmissionError::{Admission, Format};
-    payload.validate_contract().map_err(Format)?;
-    payload
-        .validate_budget(limits)
-        .map_err(|error| Format(error.into()))?;
-    // The owning caller has already ordered its candidate. Shape checks borrow it;
-    // serializing an envelope does not require a second canonical document copy.
-    let envelope = publication_envelope(payload, T::KIND).map_err(Format)?;
-    let certified = certifies_publication_shape(&envelope, payload, limits);
     let mut refusal = None;
     let mut admit = |bytes| {
         admission(bytes).map_err(|error| {
@@ -1562,8 +1584,7 @@ fn validate_publication_shape_with_admission<T: SceneFilePayload, E>(
             io::Error::other("publication buffer admission refused")
         })
     };
-    let result =
-        validate_publication_encodings(&envelope, limits, encoding, certified, Some(&mut admit));
+    let result = validate_ordered_publication_shape(payload, limits, encoding, Some(&mut admit));
     match refusal {
         Some(error) => Err(Admission(error)),
         None => result.map_err(Format),

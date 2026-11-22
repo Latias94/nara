@@ -236,6 +236,44 @@ warmups. The shift's cause remains unisolated. The results give a scale for repe
 of this workload with its growing history, including source copying, file admission and
 classification. They establish neither individual phase costs nor a native gesture frame budget.
 
+### Borrowed Candidate Comparison
+
+The field-candidate owner already orders Scene entities before publication admission. Its
+Prefab projection moves those same entities and placements back under their original inputs.
+The format owner now borrows that ordered payload for ordinary field edits and their history
+replay, using the same path as budgeted candidate admission. This removes a complete document
+copy and a second entity sort. It still checks the domain budget, canonical encoding and exact
+byte limit, and uses the original parser preflight when the shape certificate declines the input.
+
+The matched release comparison uses the same Windows x64 Core i9-13900KF, Rust 1.95.0 and
+32,768-row registered-panel workload from the baseline. Two fresh test processes for each
+source and variant run serially, reversing variant order on the repeat. Each run has eight
+warmups and 64 samples. The table gives the range across the two processes in milliseconds.
+
+| Source | Baseline P50 | Borrowed P50 | Baseline P95 | Borrowed P95 |
+| --- | ---: | ---: | ---: | ---: |
+| Scene | 185.0–185.5 | 150.4–152.6 | 201.7–205.4 | 172.9–185.6 |
+| Prefab | 183.6–185.6 | 147.4–156.3 | 201.1–209.3 | 169.0–171.6 |
+
+The early sample window, 1–16 after warmup, has medians of 83.9–90.0 ms on the baseline and
+69.3–72.5 ms on the borrowed path. The late window, 33–64, has medians of 191.1–194.1 ms and
+155.7–169.4 ms, respectively. The repeated-workload shift remains visible. Each diagnostic
+still spends time creating the owned candidate, writing the admitted format and classifying
+the touched component. This comparison measures repeated source preparation; the absolute
+time remains material for a continuous interaction.
+
+Release nextest `91f4db7b-c007-4b51-b9eb-8eaa6ec165be` also passes 38/38 on the changed
+independent target. The four large Direct and Panel cases take 145.0–151.3 ms at P50.
+The 257-row cases take 0.366–0.422 ms at P50. The format and field-candidate cohort passes
+32/32 in `8f34a00d-632c-4c32-b031-02266bf39af3`. Its cases compare the borrowed check to
+the complete format oracle, including precise byte limits and parser fallback, and exercise
+atomic rejection and exact history through the actual field-candidate owner.
+
+Nextest `770a9b79-96e5-4eae-9d4f-ab72dc746a46` passes the explicit JSON/RON selection control
+and the native Windows/DX12 Drawn workspace trajectory. The latter includes actual Inspector
+draft cancellation, submission and history, along with the workspace's source persistence checks.
+Scene correctness Clippy and workspace formatting checks pass.
+
 ## Caller Responsibilities
 
 The direct Application and registered-panel interfaces share the source-owned candidate,

@@ -47,7 +47,7 @@ impl PreparedFieldCandidate<'_> {
             placements: self.document.placements,
             entities: self.document.entities,
         };
-        crate::format::validate_prefab_publication_shape(
+        crate::format::validate_ordered_prefab_publication_shape(
             &prefab,
             self.state.limits,
             self.state.encoding,

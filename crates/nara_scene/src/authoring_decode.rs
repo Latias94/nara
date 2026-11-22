@@ -2832,7 +2832,7 @@ fn prepare_scene_authoring_patch_impl(
             ),
         })
     } else {
-        crate::format::validate_scene_publication_shape(
+        crate::format::validate_ordered_scene_publication_shape(
             candidate.document(),
             state.limits,
             state.encoding,

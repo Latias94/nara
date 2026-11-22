@@ -599,8 +599,11 @@ closes preview replacement, pre-enqueue cancel, panel retirement, exact submissi
 through the registered panel in both document kinds. The independent release target passes
 38/38. Its [keyed collection comparison](../benchmarks/2026-10-25-prepared-panel.md#november-22-keyed-collection-workload)
 keeps last-row reads at five scan entries in both sizes. Repeated preparation in the 32,768-row
-case takes 181–193 ms at P50 and 203–216 ms at P95 across the measured routes. Full candidate
-preparation locality remains an owner-level cost, with its own workload and verification.
+case initially takes 181–193 ms at P50 and 203–216 ms at P95 across the measured routes. The
+[borrowed candidate comparison](../benchmarks/2026-10-25-prepared-panel.md#borrowed-candidate-comparison)
+removes a full copy from ordinary field preparation. The matched registered-panel medians fall
+from 184–186 ms to 147–156 ms. Full candidate preparation locality remains an owner-level cost,
+with its own workload and verification.
 
 The external push-box game uses the same public query and prepared candidate with a project-defined
 Schema. The camera remains selected through pressure-plate editing and Save. A new source process
