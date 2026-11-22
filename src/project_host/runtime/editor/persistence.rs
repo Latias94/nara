@@ -52,6 +52,20 @@ impl PersistenceState {
         matches!(self, Self::Pending { .. })
     }
 
+    pub(super) fn has_pending_document(&self, document: EditorDocumentId) -> bool {
+        match self {
+            Self::Pending {
+                operation:
+                    EditorPersistenceOperation::Saving {
+                        document: pending, ..
+                    }
+                    | EditorPersistenceOperation::Opening { document: pending },
+                ..
+            } => *pending == document,
+            _ => false,
+        }
+    }
+
     pub(super) const fn view(&self) -> EditorPersistenceView {
         match *self {
             Self::Idle => EditorPersistenceView::Idle,

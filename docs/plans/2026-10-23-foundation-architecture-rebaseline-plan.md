@@ -640,6 +640,13 @@ extends the same selected instance write to Schema-declared reference leaves. Th
 preserves the original lexical route as authored intent. The candidate must resolve that route and
 Commit checks the original and newly selected dependencies before publication.
 
+The [selected source Apply successor](../architecture/authoring-read-projection-design.md#apply-an-instance-property-to-its-source)
+extends the effective property workflow across the containing instance and its explicitly named
+owning Prefab. Review borrows both candidates. A confirmed destination checkpoint precedes
+consuming the containing Revert. The [qualification](../architecture/authoring-read-projection-design.md#november-23-selected-property-apply-qualification)
+covers separate document histories, sibling inheritance, exact source selection, and a retry
+from the saved destination with the pin still present.
+
 The [stored declaration Revert contract](../architecture/authoring-read-projection-design.md#stored-prefab-property-claims)
 requires a live property handle or the complete observed declaration at the live slot.
 Whole-component Revert also checks the observed declaration. The source owner compares

@@ -429,6 +429,16 @@ Rules:
 - Authoring revision remains monotonic for conflict detection. Dirty state compares the current
   opaque content-state identity with the receipt-backed saved content-state identity, with
   source-upgrade-required as an additional dirty condition.
+- Selected Prefab property Apply retains the exact destination edit and containing Revert for
+  review. Commit publishes a destination edit and its own history when the planned edit changes
+  the working copy. The original pin remains in the saved containing source. Pending persistence
+  fences its participating document through Workspace confirmation. Before `FinishApply` consumes
+  the containing Revert, the Host requires confirmation of any needed Save at the exact destination
+  revision or reuse of the original confirmed checkpoint. It authenticates the file in the same
+  source slot and revalidates the other participating inputs. Save refusal leaves the
+  pin in place. After Finish the containing document owns its Revert, history and ordinary Save.
+  A fresh inspection can resume from the saved destination and still-present pin. This workflow
+  has the ordinary per-file Save and document-history guarantees.
 - A successful save is proven by a non-cloneable, workspace-bound persistence checkpoint plus a
   consumed filesystem replacement receipt bound to the prior/candidate identity, captured
   revision, content-state identity, exact Scene snapshot, canonical content digest,

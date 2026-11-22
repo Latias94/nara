@@ -8,7 +8,7 @@ use nara::{
     tooling::{
         EditorAction, EditorAuthoringPage, EditorAuthoringQuery, EditorDocumentId,
         EditorDocumentOpenId, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
-        EditorEntityPage, EditorEntityQuery, EditorPrefabInspectionId,
+        EditorEntityPage, EditorEntityQuery, EditorPrefabApplyReview, EditorPrefabInspectionId,
         EditorPrefabInspectionRejection, EditorPrefabPropertyClaimTarget,
         EditorPropertyObservation, EditorPropertyPage, EditorPropertyPageRead, EditorPropertyRead,
         EditorPropertyReadLimits, EditorSourceToolAction, EditorSourceToolError,
@@ -141,6 +141,14 @@ impl EditorPanelContext<'_, '_> {
         inspection: EditorPrefabInspectionId,
     ) -> Result<&PreparedEditorDocumentEdit, EditorPrefabInspectionRejection> {
         self.application.prefab_inspection_review(inspection)
+    }
+
+    /// Borrows the two document candidates for the reviewed source promotion.
+    pub fn prefab_apply_review(
+        &self,
+        inspection: EditorPrefabInspectionId,
+    ) -> Result<EditorPrefabApplyReview<'_>, EditorPrefabInspectionRejection> {
+        self.application.prefab_apply_review(inspection)
     }
 
     /// Prepares Revert of a discovered claim without rebinding its source slot.

@@ -62,17 +62,26 @@ impl AuthoringPrefabCaptureRequest {
         &mut self,
         document: Arc<nara_scene::PrefabDocument>,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-        let mismatch = || AuthoringProjectSourceAdmissionError::DocumentSourceMismatch;
-        let mut matching = self.open_prefabs.iter_mut().filter(|candidate| {
-            &candidate.source_key == self.source.source_key()
-                && candidate.project_path.as_ref() == self.source.relative_path()
-        });
-        let root = matching.next().ok_or_else(mismatch)?;
-        if matching.next().is_some() {
-            return Err(mismatch());
-        }
-        root.document = document;
-        Ok(())
+        replace_working_prefab(
+            &mut self.open_prefabs,
+            self.source.source_key(),
+            self.source.relative_path(),
+            document,
+        )
+    }
+
+    /// Compiles a reviewed destination candidate under its incumbent working-copy evidence.
+    pub(crate) fn use_prefab_destination_candidate(
+        &mut self,
+        source: &AuthoringDocumentSourceFact,
+        document: Arc<nara_scene::PrefabDocument>,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        replace_working_prefab(
+            &mut self.open_prefabs,
+            source.source_key(),
+            source.relative_path(),
+            document,
+        )
     }
 
     /// Registers additional root/request retention not already admitted in `inputs`.
@@ -112,6 +121,24 @@ impl AuthoringPrefabCaptureRequest {
         acquisition.requests = Some(HashMap::new());
         Ok(acquisition)
     }
+}
+
+fn replace_working_prefab(
+    prefabs: &mut [AuthoringPrefabSessionSnapshot],
+    key: &nara_scene::SourceDocumentKey,
+    path: &str,
+    document: Arc<nara_scene::PrefabDocument>,
+) -> Result<(), AuthoringProjectSourceAdmissionError> {
+    let mismatch = || AuthoringProjectSourceAdmissionError::DocumentSourceMismatch;
+    let mut matching = prefabs.iter_mut().filter(|candidate| {
+        &candidate.source_key == key && candidate.project_path.as_ref() == path
+    });
+    let root = matching.next().ok_or_else(mismatch)?;
+    if matching.next().is_some() {
+        return Err(mismatch());
+    }
+    root.document = document;
+    Ok(())
 }
 
 pub(crate) struct AuthoringPrefabSourceCapture {

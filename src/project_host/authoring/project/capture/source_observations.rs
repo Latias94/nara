@@ -278,6 +278,65 @@ impl SourceObservations {
             .map(drop)
     }
 
+    pub(super) fn validate_saved_prefab(
+        &self,
+        schema: &AuthoringSchemaReceipt,
+        source: &AuthoringSourceFact,
+        save: &PrefabApplySave<'_>,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        let mismatch = || AuthoringProjectSourceAdmissionError::DocumentSourceMismatch;
+        let Some(SourceObservation::Original {
+            source: held,
+            observation: original_observation,
+            native,
+        }) = self.entries.get(save.original.relative_path())
+        else {
+            return Err(mismatch());
+        };
+        if source.kind() != AuthoringSourceKind::Prefab
+            || !held.same_file_observation(source)
+            || native.key() != save.original.source_key()
+            || !matching_metadata(
+                native.metadata_source(),
+                save.original.native_source().metadata_source(),
+            )
+        {
+            return Err(mismatch());
+        }
+        check_document_observation(save.original, original_observation)?;
+        let (identity, parent, digest) = save.observation.observation();
+        if parent != save.original.parent_identity()
+            || !save
+                .saved
+                .matches_persistence_observation(save.original, identity, parent, digest)
+        {
+            return Err(mismatch());
+        }
+
+        budget.charge_source_bytes(0, 0, 0, source_fact_retained_bytes(source)?)?;
+        let saved_source = AuthoringSourceFact {
+            identity,
+            digest,
+            encoded_bytes: save.saved.encoded_bytes(),
+            ..source.clone()
+        };
+        let current = revalidate_source(
+            &schema.project_root,
+            &saved_source,
+            SourceCaptureMode::Physical(save.observation),
+            budget,
+        )?;
+        NativeDocumentSourcePolicy::new(schema.settings()).revalidate_read_content(
+            &schema.project_root,
+            source.project_path().as_str(),
+            &current,
+            save.saved.native_source(),
+            source.dependency_depth(),
+            budget,
+        )
+    }
+
     fn read_current(
         &self,
         schema: &AuthoringSchemaReceipt,

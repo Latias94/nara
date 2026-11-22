@@ -15,6 +15,7 @@ and exact containing-source instance-declaration transactions, plus source-owned
 **Amended**: 2026-11-02 by lower pure source-key representation under ADR0058 and the selected
 CP2 root/placement/inline-reference replacement, with separate implementation evidence
 **Amended**: 2026-11-23 by effective instance reference writes and dependency revalidation
+**Amended**: 2026-11-23 by selected property promotion to its explicit owning source
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -115,6 +116,12 @@ root, placement and inline-reference replacement; value relocation alone does no
   layer. The selected compiler must resolve its endpoint and confirm the exact controlling claim
   in the prepared source. Commit revalidates the original dependency observations and any inputs
   introduced by the new reference before it publishes the source edit.
+- Apply selects an exact containing override and the explicitly named Prefab owning its source
+  record. Each source prepares its own candidate. The selected compiler verifies that removing
+  the containing claim makes the instance inherit the same effective value from the destination.
+  The compiler identifies the contributing record across root-bound aliases. A relocated reference
+  must follow declarations owned by the destination subtree and preserve the selected endpoint.
+  The destination's confirmed checkpoint precedes consuming the containing Revert.
 - Projection ancestry is a sequence of typed instance-entry steps. `SourceEntity` binds the
   admitted canonical Prefab source and its local entity, retaining lookup spelling as evidence.
   `InstanceAddition` enters the preceding anchor's overlay-local namespace without claiming the

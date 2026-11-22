@@ -4407,7 +4407,17 @@ the selected candidate. Review carries the ordinary document patch. Commit reval
 and newly demanded Prefab files and working copies. The
 [qualification](../authoring-read-projection-design.md#november-23-reference-write-qualification)
 records 65/65 selected owner tests, 13/13 independent panel tests and the 1/1 Windows/DX12
-conversion regression. Cross-source Apply remains a separate workflow.
+conversion regression.
+
+The [selected Prefab property Apply](../authoring-read-projection-design.md#apply-an-instance-property-to-its-source)
+incorporates a destination source edit and the exact containing Revert in one selected review.
+The compiler retains the component's actual declaration across root-bound aliases and checks
+reference route ownership. The Host consumes the Revert after the destination's confirmed
+checkpoint and a fresh check of the remaining source inputs. Separate histories and ordinary
+Save persist both steps. The [qualification](../authoring-read-projection-design.md#november-23-selected-property-apply-qualification)
+records registered Scene and Prefab consumers, file-conflict and checkpoint timing controls, and
+the shared native conversion path. Linked Undo and recovery of a pending review across processes
+remain separate work.
 
 [Exact declaration Revert](../authoring-read-projection-design.md#november-22-exact-declaration-revert)
 requires the observed live property or component intent at its original slot and basis. The

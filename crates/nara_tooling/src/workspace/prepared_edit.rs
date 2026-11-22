@@ -10,7 +10,7 @@ use super::{
 };
 use crate::{EditorDocumentQueryBasis, document_query::EditorDocumentQueryOwner};
 use nara_scene::{
-    __private::{ObservedPrefabPropertyWrite, SourceDocumentInput},
+    __private::{ObservedPrefabPropertyApply, ObservedPrefabPropertyWrite, SourceDocumentInput},
     AuthoringPrefabPropertyClaimKind, AuthoringPropertyEdit, PrefabDeclarationLimits,
     PrefabDocument, PrefabInstancePath, PrefabRevert, PreparedPrefabAuthoringEdit,
     PreparedSceneAuthoringEdit, SceneAuthoringRevision, ScenePatchDocument,
@@ -192,6 +192,35 @@ impl EditorWorkspace {
         limits: PrefabDeclarationLimits,
     ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
         self.prepare_edit(basis, EditRequest::PrefabPropertyWrite { edit, limits })
+    }
+
+    #[doc(hidden)]
+    pub fn prepare_prefab_property_apply(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+        apply: &ObservedPrefabPropertyApply,
+    ) -> Result<Option<PreparedEditorDocumentEdit>, EditorWorkspaceCommandReport> {
+        self.validate_document_query_basis(basis)
+            .map_err(|error| rejected_basis_report(self, basis, error))?;
+        let slot = self.resolve_authoring_preparation_slot(basis.document, basis.revision)?;
+        let EditorDocumentSlot::Prefab(prefab) = slot else {
+            return Err(authoring_command_error_report(
+                self.active_document,
+                basis.document,
+            ));
+        };
+        prefab
+            .session
+            .prepare_prefab_property_apply(basis.revision, apply)
+            .map(|edit| {
+                edit.map(|edit| PreparedEditorDocumentEdit {
+                    basis: basis.clone(),
+                    edit: PreparedDocumentEdit::Prefab(edit),
+                    origin: PreparedEditOrigin::Authoring,
+                    query_owner: EditorDocumentQueryOwner::prepared(),
+                })
+            })
+            .map_err(|report| self.authoring_preparation_error(basis.document, slot, report))
     }
 
     fn prepare_edit(

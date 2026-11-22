@@ -1103,6 +1103,19 @@ impl EditorApplication {
             .prefab_inspection_review(inspection)
     }
 
+    /// Borrows the exact edits for a selected cross-source Prefab Apply.
+    pub fn prefab_apply_review(
+        &self,
+        inspection: nara::tooling::EditorPrefabInspectionId,
+    ) -> Result<
+        nara::tooling::EditorPrefabApplyReview<'_>,
+        nara::tooling::EditorPrefabInspectionRejection,
+    > {
+        self.authoring_query_session()
+            .map_err(prefab_inspection_query_rejection)?
+            .prefab_apply_review(inspection)
+    }
+
     /// Prepares Revert of the selected claim at its original document basis and instance path.
     pub fn prepare_prefab_property_revert(
         &self,

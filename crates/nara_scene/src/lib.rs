@@ -230,7 +230,8 @@ pub mod __private {
         PrefabExtractionEnvironment,
     };
     pub use crate::prefab::inspection::{
-        AuthoringPrefabInspectionError, AuthoringPrefabPropertyWriteError,
+        AuthoringPrefabInspectionError, AuthoringPrefabPropertyApplyError,
+        AuthoringPrefabPropertyWriteError, ObservedPrefabPropertyApply,
         ObservedPrefabPropertyWrite, try_inspect_authoring_prefab_instance_with_loader,
     };
     pub use crate::prefab::{

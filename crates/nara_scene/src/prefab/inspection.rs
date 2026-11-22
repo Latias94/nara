@@ -1,6 +1,11 @@
 //! Read-only observations from the selected authoring compiler.
 
-use std::{collections::BTreeMap, fmt, mem::size_of, ops::Bound};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    mem::size_of,
+    ops::Bound,
+};
 
 use nara_asset::AssetRef;
 use nara_diagnostic::DiagnosticReport;
@@ -28,8 +33,10 @@ use crate::{
     draft::SceneDraft,
 };
 
+mod property_apply;
 mod property_write;
 
+pub use property_apply::{AuthoringPrefabPropertyApplyError, ObservedPrefabPropertyApply};
 pub use property_write::{AuthoringPrefabPropertyWriteError, ObservedPrefabPropertyWrite};
 
 /// Compiles an actual source's selected directly owned Prefab instance for authoring reads.
@@ -574,6 +581,14 @@ pub(crate) struct InspectedComponent {
     pub(crate) payload: Option<ExpandedSceneComponent>,
     pub(crate) selected_overlay_intent: Option<usize>,
     pub(crate) accepts_selected_overlay_properties: bool,
+    pub(crate) property_apply: Option<Box<InspectedPrefabPropertyApply>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct InspectedPrefabPropertyApply {
+    pub(crate) record_target: PrefabEntityTarget,
+    pub(crate) claim_target: Option<PrefabEntityTarget>,
+    pub(crate) portable_reference_claims: BTreeSet<PrefabOverlaySlot>,
 }
 
 impl CapturedPrefabInspection {

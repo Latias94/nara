@@ -1,6 +1,7 @@
 //! Actual-demand source acquisition shared by independent authoring documents.
 
 use super::*;
+use crate::project_host::authoring::document::AuthoringDocumentSourceFact;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 use crate::project_host::authoring::tests::independent_capture::{
     CaptureBoundScene, bound_source_observation,
@@ -716,6 +717,13 @@ struct OpenedSourceObservation {
     observation: FileSourceObservation,
 }
 
+struct PrefabApplySave<'a> {
+    source_index: usize,
+    original: &'a AuthoringDocumentSourceFact,
+    saved: &'a AuthoringDocumentSourceFact,
+    observation: &'a FileSourceObservation,
+}
+
 impl AuthoringSourceValidation {
     /// Returns whether the candidate needs an additional receipt, or None on input conflict.
     pub(crate) fn candidate_adds_inputs(&self, candidate: &Self) -> Option<bool> {
@@ -879,7 +887,7 @@ impl AuthoringSourceValidation {
     }
 
     pub(crate) fn validate(self) -> Result<(), AuthoringProjectSourceAdmissionError> {
-        self.validate_captures(None)
+        self.validate_captures(None, None)
     }
 
     /// Validates the original and newly demanded inputs of a compatible Prefab inspection pair.
@@ -887,12 +895,46 @@ impl AuthoringSourceValidation {
         &self,
         candidate: &Self,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-        self.validate_captures(Some(candidate))
+        self.validate_captures(Some(candidate), None)
+    }
+
+    /// Revalidates the review after the original working Prefab's exact checkpoint was saved.
+    /// The Session qualifies that checkpoint against the reviewed revision before calling here.
+    pub(crate) fn validate_after_prefab_apply(
+        &self,
+        candidate: Option<&Self>,
+        original: &AuthoringDocumentSourceFact,
+        saved: &AuthoringDocumentSourceFact,
+        observation: &FileSourceObservation,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        let mismatch = || AuthoringProjectSourceAdmissionError::DocumentSourceMismatch;
+        if candidate.is_some_and(|candidate| self.candidate_adds_inputs(candidate).is_none()) {
+            return Err(mismatch());
+        }
+        let mut matches = self
+            .sources
+            .iter()
+            .enumerate()
+            .filter(|(_, source)| source.project_path().as_str() == original.relative_path());
+        let (source_index, _) = matches.next().ok_or_else(mismatch)?;
+        if matches.next().is_some() {
+            return Err(mismatch());
+        }
+        self.validate_captures(
+            candidate,
+            Some(PrefabApplySave {
+                source_index,
+                original,
+                saved,
+                observation,
+            }),
+        )
     }
 
     fn validate_captures(
         &self,
         candidate: Option<&Self>,
+        saved_prefab: Option<PrefabApplySave<'_>>,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
         let mut budget = self.schema.budget;
         for capture in std::iter::once(self).chain(candidate) {
@@ -904,7 +946,10 @@ impl AuthoringSourceValidation {
                 FileSourceObservation::retained_handle_capacity(),
             )?)?;
         }
-        self.validate_captures_with_budget(candidate, &mut budget)
+        if saved_prefab.is_some() {
+            budget.retain_open_handles(FileSourceObservation::retained_handle_capacity())?;
+        }
+        self.validate_captures_with_budget(candidate, saved_prefab, &mut budget)
     }
 
     /// Admits additional Host observations against this validation's complete retained capture.
@@ -939,12 +984,13 @@ impl AuthoringSourceValidation {
         &self,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-        self.validate_captures_with_budget(None, budget)
+        self.validate_captures_with_budget(None, None, budget)
     }
 
     fn validate_captures_with_budget(
         &self,
         candidate: Option<&Self>,
+        saved_prefab: Option<PrefabApplySave<'_>>,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
         let retained_before = budget.retained_candidate_bytes;
@@ -966,6 +1012,20 @@ impl AuthoringSourceValidation {
                 retained
                     .max(capture_bytes.saturating_sub(budget.usage().retained_candidate_bytes())),
             )?;
+            if let Some(saved) = &saved_prefab {
+                let receipt_bytes = checked_sum([
+                    saved
+                        .original
+                        .checked_retained_bytes()
+                        .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+                    saved
+                        .saved
+                        .checked_retained_bytes()
+                        .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+                    FileSourceObservation::retained_bytes(),
+                ])?;
+                budget.charge_source_bytes(0, 0, 0, receipt_bytes)?;
+            }
             let additional_sources = candidate.into_iter().flat_map(|capture| {
                 capture
                     .sources
@@ -984,7 +1044,18 @@ impl AuthoringSourceValidation {
                 .enumerate()
                 .map(|(index, source)| (self, index, source))
                 .chain(additional_sources);
-            for (capture, index, source) in sources.clone() {
+            for (position, (capture, index, source)) in sources.clone().enumerate() {
+                if let Some(saved) = &saved_prefab
+                    && position == saved.source_index
+                {
+                    self.source_observations.validate_saved_prefab(
+                        &self.schema,
+                        source,
+                        saved,
+                        budget,
+                    )?;
+                    continue;
+                }
                 capture.source_observations.validate(
                     &self.schema,
                     source,

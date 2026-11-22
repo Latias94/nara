@@ -46,6 +46,7 @@ use crate::project_host::{
     composition::built_in_schema_providers,
 };
 
+mod apply;
 mod effective_absent_reference;
 mod effective_reference_write;
 

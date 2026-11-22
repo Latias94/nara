@@ -25,12 +25,13 @@ use nara_tasks::{
 };
 use nara_tooling::{
     EditorActionOutcome, EditorDocumentId, EditorDocumentKind, EditorDocumentQueryBasis,
-    EditorPrefabInspectionAction as Action, EditorPrefabInspectionId,
-    EditorPrefabInspectionOutcome as Outcome, EditorPrefabInspectionPhase as Phase,
-    EditorPrefabInspectionRejection as Rejection, EditorPrefabInspectionResult as Terminal,
-    EditorPrefabInspectionView, EditorPrefabPropertyAddress,
-    MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES, MAX_EDITOR_PROPERTY_READ_SCAN_BYTES,
-    MAX_EDITOR_PROPERTY_READ_SCAN_ENTRIES, PreparedEditorDocumentEdit,
+    EditorPrefabApplyDestination, EditorPrefabApplyReview, EditorPrefabInspectionAction as Action,
+    EditorPrefabInspectionId, EditorPrefabInspectionOutcome as Outcome,
+    EditorPrefabInspectionPhase as Phase, EditorPrefabInspectionRejection as Rejection,
+    EditorPrefabInspectionResult as Terminal, EditorPrefabInspectionView,
+    EditorPrefabPropertyAddress, MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES,
+    MAX_EDITOR_PROPERTY_READ_SCAN_BYTES, MAX_EDITOR_PROPERTY_READ_SCAN_ENTRIES,
+    PreparedEditorDocumentEdit,
 };
 
 use crate::project_host::authoring::{
@@ -46,6 +47,9 @@ use super::{
     },
     prepared_edit::EditorEditPreparationError,
 };
+
+mod apply;
+use apply::{ApplyRequest, PreparedApply, StartedApply};
 
 const INSPECTION_DOMAIN: TaskDomainKey = TaskDomainKey::new(0x7072_6662_696e_7370);
 
@@ -89,17 +93,17 @@ struct InspectWork {
     task: TaskHandle<Result<Inspected, Failure>>,
 }
 
-struct VerifiedWrite {
-    edit: PreparedEditorDocumentEdit,
+struct VerifiedEdit {
+    edit: InspectionReview,
     selection: SelectedPrefabBasis,
     additional_sources: Option<AuthoringSourceValidation>,
 }
 
 enum InspectionWork {
     Read(InspectWork),
-    Write {
+    Verify {
         basis: InspectionBasis,
-        task: TaskHandle<Result<VerifiedWrite, Failure>>,
+        task: TaskHandle<Result<VerifiedEdit, Failure>>,
     },
 }
 
@@ -107,14 +111,14 @@ impl InspectionWork {
     fn cancel(&self) {
         match self {
             Self::Read(work) => work.task.cancel(),
-            Self::Write { task, .. } => task.cancel(),
+            Self::Verify { task, .. } => task.cancel(),
         };
     }
 
     fn return_state(&self) -> TaskReturnState {
         match self {
             Self::Read(work) => work.task.return_observer(),
-            Self::Write { task, .. } => task.return_observer(),
+            Self::Verify { task, .. } => task.return_observer(),
         }
         .state()
     }
@@ -123,6 +127,12 @@ impl InspectionWork {
 enum InspectionEdit {
     Revert(InspectionRevert),
     Write(ObservedPrefabPropertyWrite),
+    Apply(Box<ApplyRequest>),
+}
+
+enum InspectionReview {
+    Edit(PreparedEditorDocumentEdit),
+    Apply(Box<PreparedApply>),
 }
 
 struct InspectionRevert {
@@ -147,12 +157,14 @@ enum State {
     },
     Review {
         basis: InspectionBasis,
-        edit: PreparedEditorDocumentEdit,
+        edit: InspectionReview,
     },
     Validating {
         basis: InspectionBasis,
-        edit: PreparedEditorDocumentEdit,
+        edit: InspectionReview,
     },
+    AwaitingDestinationSave(Box<StartedApply>),
+    FinishingApply(Box<StartedApply>),
     Cancelling(InspectionWork),
     Terminal(Terminal),
 }
@@ -162,12 +174,13 @@ impl State {
         match self {
             Self::Idle => Phase::Idle,
             Self::Working(InspectionWork::Read(_)) => Phase::Inspecting,
-            Self::Working(InspectionWork::Write { .. }) | Self::PreparingEdit { .. } => {
+            Self::Working(InspectionWork::Verify { .. }) | Self::PreparingEdit { .. } => {
                 Phase::PreparingEdit
             }
             Self::Ready { .. } => Phase::Ready,
             Self::Review { .. } => Phase::Review,
-            Self::Validating { .. } => Phase::Validating,
+            Self::AwaitingDestinationSave(_) => Phase::AwaitingDestinationSave,
+            Self::Validating { .. } | Self::FinishingApply(_) => Phase::Validating,
             Self::Cancelling(_) => Phase::Cancelling,
             Self::Terminal(_) => Phase::Terminal,
         }
@@ -192,6 +205,12 @@ impl EditorPrefabInspectionHost {
                 State::Terminal(result) => Some(result.clone()),
                 _ => None,
             },
+            apply_destination: match &self.state {
+                State::AwaitingDestinationSave(apply) | State::FinishingApply(apply) => {
+                    Some(apply.destination())
+                }
+                _ => None,
+            },
         }
     }
 
@@ -213,6 +232,9 @@ impl EditorPrefabInspectionHost {
             | State::PreparingEdit { .. }
             | State::Review { .. }
             | State::Validating { .. } => self.cancelled(),
+            State::AwaitingDestinationSave(apply) | State::FinishingApply(apply) => {
+                self.apply_stopped(apply.destination(), None)
+            }
             state => state,
         };
     }
@@ -220,6 +242,23 @@ impl EditorPrefabInspectionHost {
     fn cancelled(&self) -> State {
         State::Terminal(Terminal::Cancelled {
             inspection: self.id(),
+        })
+    }
+
+    fn apply_stopped(
+        &self,
+        destination: EditorPrefabApplyDestination,
+        failure: Option<Failure>,
+    ) -> State {
+        let (failure, diagnostics) = failure
+            .map_or((None, DiagnosticReport::default()), |failure| {
+                (Some(failure.reason), failure.diagnostics)
+            });
+        State::Terminal(Terminal::ApplyStopped {
+            inspection: self.id(),
+            destination,
+            failure,
+            diagnostics,
         })
     }
 
@@ -250,11 +289,32 @@ impl EditorProjectSession {
         inspection: EditorPrefabInspectionId,
     ) -> Result<&PreparedEditorDocumentEdit, Rejection> {
         self.check_prefab_inspection_id(inspection)?;
-        let State::Review { basis, edit } = &self.prefab_inspection.state else {
+        let State::Review {
+            basis,
+            edit: InspectionReview::Edit(edit),
+        } = &self.prefab_inspection.state
+        else {
             return Err(Rejection::WrongPhase);
         };
         self.check_prefab_inspection_basis(basis)?;
         Ok(edit)
+    }
+
+    /// Borrows both source candidates and the explicit destination of the reviewed Apply.
+    pub fn prefab_apply_review(
+        &self,
+        inspection: EditorPrefabInspectionId,
+    ) -> Result<EditorPrefabApplyReview<'_>, Rejection> {
+        self.check_prefab_inspection_id(inspection)?;
+        let State::Review {
+            basis,
+            edit: InspectionReview::Apply(edit),
+        } = &self.prefab_inspection.state
+        else {
+            return Err(Rejection::WrongPhase);
+        };
+        self.check_prefab_inspection_basis(basis)?;
+        Ok(edit.review())
     }
 
     fn check_prefab_inspection_id(
@@ -297,7 +357,9 @@ impl EditorProjectSession {
             }
             Action::PrepareRevert { inspection, .. }
             | Action::PreparePropertyWrite { inspection, .. }
+            | Action::PrepareApply { inspection, .. }
             | Action::Commit { inspection }
+            | Action::FinishApply { inspection }
             | Action::Cancel { inspection }
             | Action::Acknowledge { inspection } => inspection,
         };
@@ -313,7 +375,14 @@ impl EditorProjectSession {
                     limits,
                     ..
                 } => self.start_prefab_inspection_write(&address, intent, limits),
+                Action::PrepareApply {
+                    address,
+                    destination,
+                    limits,
+                    ..
+                } => self.start_prefab_inspection_apply(&address, destination, limits),
                 Action::Commit { .. } => self.start_prefab_inspection_commit(),
+                Action::FinishApply { .. } => self.start_finish_prefab_apply(),
                 Action::Cancel { .. } => {
                     if matches!(
                         self.prefab_inspection.state,
@@ -524,10 +593,13 @@ impl EditorProjectSession {
     }
 
     fn start_prefab_inspection_commit(&mut self) -> Result<(), Rejection> {
-        let State::Review { basis, .. } = &self.prefab_inspection.state else {
+        let State::Review { basis, edit } = &self.prefab_inspection.state else {
             return Err(Rejection::WrongPhase);
         };
         self.check_prefab_inspection_basis(basis)?;
+        if let InspectionReview::Apply(apply) = edit {
+            apply.require_confirmed_inputs(self, basis)?;
+        }
         let State::Review { basis, edit } = mem::take(&mut self.prefab_inspection.state) else {
             unreachable!();
         };
@@ -584,14 +656,37 @@ impl EditorProjectSession {
                                 limits,
                             )
                             .map_err(preparation_failure)?;
-                        Ok(State::Review { basis, edit })
+                        Ok(State::Review {
+                            basis,
+                            edit: InspectionReview::Edit(edit),
+                        })
                     }
                     InspectionEdit::Write(edit) => self
                         .start_prefab_write_verification(basis, edit, limits)
                         .map(State::Working),
+                    InspectionEdit::Apply(request) => self
+                        .start_prefab_apply_verification(basis, *request, limits)
+                        .map(State::Working),
                 }
             }
-            State::Validating { basis, edit } => {
+            State::Validating {
+                basis,
+                edit: InspectionReview::Apply(edit),
+            } => {
+                self.revalidate_prefab_inspection_sources(&basis)?;
+                self.publish_prefab_apply_destination(basis, *edit)
+            }
+            State::FinishingApply(apply) => {
+                let destination = apply.destination();
+                Ok(self.finish_prefab_apply(*apply).unwrap_or_else(|failure| {
+                    self.prefab_inspection
+                        .apply_stopped(destination, Some(failure))
+                }))
+            }
+            State::Validating {
+                basis,
+                edit: InspectionReview::Edit(edit),
+            } => {
                 self.revalidate_prefab_inspection_sources(&basis)?;
                 let document = edit.document();
                 let write_kind = edit.prefab_property_write_kind();
@@ -693,7 +788,7 @@ impl EditorProjectSession {
                 self.check_prefab_inspection_basis(&basis)?;
                 Ok(State::Ready { basis, snapshot })
             }
-            InspectionWork::Write {
+            InspectionWork::Verify {
                 mut basis,
                 mut task,
             } => {
@@ -701,7 +796,7 @@ impl EditorProjectSession {
                 let Some(TaskTerminal::Completed(result)) = task.try_take() else {
                     return Err(Rejection::PreparationFailed.into());
                 };
-                let VerifiedWrite {
+                let VerifiedEdit {
                     edit,
                     selection,
                     additional_sources,
@@ -727,6 +822,9 @@ impl EditorProjectSession {
                         selection,
                         sources: additional_sources,
                     }));
+                }
+                if let InspectionReview::Apply(apply) = &edit {
+                    apply.require_confirmed_inputs(self, &basis)?;
                 }
                 Ok(State::Review { basis, edit })
             }
@@ -775,44 +873,30 @@ impl EditorProjectSession {
                 TaskSpawnRequest::new(self.prefab_inspection.sequence, INSPECTION_DOMAIN),
                 move |_| {
                     let source = edit.source_input();
-                    let Inspected { snapshot, capture } =
-                        inspect_prefab(source, write.anchor(), &schema, context, 0)?;
-                    let candidate_sources = capture.source_validation();
-                    let adds_inputs = sources
-                        .candidate_adds_inputs(&candidate_sources)
-                        .ok_or(Rejection::StaleSource)?;
-                    let selection = selection.complete(&capture).ok_or(Rejection::StaleSource)?;
-                    if !snapshot
+                    let inspected = inspect_prefab(source, write.anchor(), &schema, context, 0)?;
+                    if !inspected
+                        .snapshot
                         .verifies_property_write(source, &write, &mut prefab_property_read_budget())
                         .map_err(property_write_rejection)?
                     {
                         return Err(Rejection::InvalidProperty.into());
                     }
-                    let additional_sources =
-                        if adds_inputs {
-                            let retained = selection
-                                .checked_retained_bytes()
-                                .ok_or(Rejection::BudgetExceeded)?;
-                            Some(capture.inspection_source_validation(retained).map_err(
-                                |error| source_failure(error, Rejection::ValidationFailed),
-                            )?)
-                        } else {
-                            None
-                        };
+                    let verified = verified_edit(
+                        InspectionReview::Edit(edit),
+                        selection,
+                        &sources,
+                        &inspected.capture,
+                    )?;
                     #[cfg(test)]
                     if let Some(gate) = gate {
                         gate();
                     }
-                    Ok(VerifiedWrite {
-                        edit,
-                        selection,
-                        additional_sources,
-                    })
+                    Ok(verified)
                 },
             )
             .into_handle()
             .map_err(task_rejection)?;
-        Ok(InspectionWork::Write { basis, task })
+        Ok(InspectionWork::Verify { basis, task })
     }
 
     fn revalidate_prefab_inspection_sources(&self, basis: &InspectionBasis) -> Result<(), Failure> {
@@ -828,6 +912,35 @@ impl EditorProjectSession {
         };
         validation.map_err(|error| source_failure(error, Rejection::ValidationFailed))
     }
+}
+
+fn verified_edit(
+    edit: InspectionReview,
+    selection: SelectedPrefabSources,
+    sources: &AuthoringSourceValidation,
+    capture: &AuthoringPrefabSourceCapture,
+) -> Result<VerifiedEdit, Failure> {
+    let adds_inputs = sources
+        .candidate_adds_inputs(&capture.source_validation())
+        .ok_or(Rejection::StaleSource)?;
+    let selection = selection.complete(capture).ok_or(Rejection::StaleSource)?;
+    let additional_sources = if adds_inputs {
+        let retained = selection
+            .checked_retained_bytes()
+            .ok_or(Rejection::BudgetExceeded)?;
+        Some(
+            capture
+                .inspection_source_validation(retained)
+                .map_err(|error| source_failure(error, Rejection::ValidationFailed))?,
+        )
+    } else {
+        None
+    };
+    Ok(VerifiedEdit {
+        edit,
+        selection,
+        additional_sources,
+    })
 }
 
 enum InspectionDocument {

@@ -508,6 +508,50 @@ reference and its instance-specific resolution.
 [Godot NodePath picker](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/inspector/editor_properties.cpp#L3036-L3066) ·
 [Bevy entity mapping](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_ecs/src/entity/map_entities.rs#L19-L55)
 
+##### Apply an instance property to its source
+
+Apply identifies an exact controlling claim in the containing instance and the explicitly named
+open Prefab that owns the contributing source record. The source owners prepare a property edit
+for the destination and a Revert of the containing declaration. One selected compilation uses
+both candidates. It verifies that the selected occurrence inherits its previous effective value
+from the edited record after removing the claim. Review exposes both source candidates. The
+destination change can affect other occurrences that inherit the same record.
+
+Root-bound aliases can select the same component. The compiler identifies the record that
+supplies it and retains the exact stored claim for Revert. An authored entity reference can
+move into the destination only if the traversed instance declarations and endpoint belong to
+its source subtree. The candidate must resolve to the same endpoint in the selected occurrence.
+
+Use the exact saved containing source for promotion. Any working copies supplying other selected
+inputs must also match their confirmed checkpoints. Pending persistence blocks its own
+participating document. The destination may have changes of its own. Ordinary Save publishes the
+whole destination working revision after Commit. While Save is pending or refused, the containing
+source retains the selected override. `FinishApply` verifies a Save of the exact revision for
+modified content and the original confirmed checkpoint when it reuses saved content. It
+verifies the file in the same source slot and revalidates the other original and candidate inputs
+before consuming the containing Revert. The containing source then has its own ordinary Save.
+Each document owns its own Undo and Redo entry.
+
+`DestinationSaveRequired` reports the destination checkpoint. The final source check uses the
+retained file observations when it consumes Finish. An independent destination Save can succeed
+if another file changed on disk in the meantime. In that case Finish stops and preserves the
+containing override.
+
+The recoverable intermediate state is the destination publication with the containing pin still
+in place. If this state survives process exit, a new inspection can promote the same claim when
+the saved destination already carries the intended value. The existing file-publishing Hosts own
+refusals and retries. A restart begins a fresh review. Multi-file recovery of the original review,
+coupled Undo and promotion into an intermediate overlay layer retain separate design scope.
+
+Unity's property Apply supplies an explicit source destination. Godot associates Undo with the
+edited scene and marks its saved history only after writing the scene. Bevy's scene patch applies
+an asset to a particular ECS instance. These references motivate explicit source identity and
+document-scoped editing and persistence.
+[Prefab workflow study](../research/2026-10-26-unity-godot-prefab-editor-ownership.md) ·
+[Godot scene Undo](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/editor_undo_redo_manager.cpp#L63-L127) ·
+[Godot scene Save](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/editor_node.cpp#L2540-L2610) ·
+[Bevy scene application](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_scene/src/scene_patch.rs#L69-L110)
+
 ##### Effective field verification
 
 The implementation and independent consumer land together at `d175fa3`.
@@ -630,6 +674,38 @@ The Windows/DX12 complete Prefab conversion regression passes 1/1 in
 path. Reference editing itself is qualified through the registered semantic panel. Correctness
 Clippy for the affected libraries, Scene without default features, workspace and independent
 panel formatting, and changed-document links pass.
+
+##### November 23 selected property Apply qualification
+
+On Windows x64 with Rust 1.95.0, owner nextest `f722ec2f-885a-4097-9695-952c3711b8a8` passes
+112 of 113 selected cases. All new Apply cases pass. The Scene controls cover alias selection,
+reference route ownership and endpoint equality, scalar and optional storage, signed zero and
+logical limits. The Host drives real Save workers through both publication fences. It refuses
+mixed working and disk checkpoints, confirms reuse after the earlier Save completes, and permits
+an unrelated Save to continue. It also reports a stale working revision before prompting for a
+destination Save and checks the destination's ordinary domain policy before Review. Physical
+source controls replace the exact destination file and retain the original and newly demanded
+dependency, sidecar and stable lookup checks. The existing conversion copy-stage assertion fails
+at `classification-snapshot`, matching the earlier pre-Revert control.
+[Scene tests](../../crates/nara_scene/src/prefab/inspection/property_apply/tests.rs) ·
+[Host timing tests](../../src/project_host/runtime/editor/prefab_conversion/tests/apply.rs) ·
+[Physical source control](../../src/project_host/authoring/project/capture/tests/host_retention.rs)
+
+Independently locked release nextest `27c4664a-57e2-41e3-959b-2ebd41e0d6ff` passes 17/17
+effective inspection and stored-claim cases. Four Apply cases exercise both non-active source
+kinds, the exact destination and Revert patches, sibling inheritance, separate Undo/Redo and
+Save/Reopen, and reuse after cancellation beyond the destination Save. The file-conflict case
+refuses an external write before Save and stops Finish after a second same-length external
+write. Both refusals preserve the containing pin and its history.
+[Registered Apply workflows](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/apply.rs)
+
+Windows/DX12 release nextest `8b2be38c-3f46-4bea-b11d-a7903dbde876` passes the shared native
+Prefab conversion trajectory. Apply itself runs through the independent registered panel above.
+Recovery covers a fresh inspection using the saved destination and the surviving override.
+Continuation of the original Review in another process remains open.
+
+Correctness Clippy passes for the affected libraries. Scene checks without default features.
+Root and independent panel formatting and changed-document links pass.
 
 ## Workspace Contract
 

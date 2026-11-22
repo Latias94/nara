@@ -103,9 +103,10 @@ pub use prefab_conversion::{
     EditorPrefabConversionResult, EditorPrefabConversionReview, EditorPrefabConversionView,
 };
 pub use prefab_inspection::{
-    EditorPrefabInspectionAction, EditorPrefabInspectionId, EditorPrefabInspectionOutcome,
-    EditorPrefabInspectionPhase, EditorPrefabInspectionRejection, EditorPrefabInspectionResult,
-    EditorPrefabInspectionView, EditorPrefabPropertyAddress,
+    EditorPrefabApplyDestination, EditorPrefabApplyReview, EditorPrefabInspectionAction,
+    EditorPrefabInspectionId, EditorPrefabInspectionOutcome, EditorPrefabInspectionPhase,
+    EditorPrefabInspectionRejection, EditorPrefabInspectionResult, EditorPrefabInspectionView,
+    EditorPrefabPropertyAddress,
 };
 pub use project_browser::{
     EditorDocumentOpenId, EditorDocumentOpenPhase, EditorDocumentOpenResult,

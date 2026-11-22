@@ -7,7 +7,9 @@ use nara_scene::{
     PrefabPropertyIntent, SceneAuthoringRevision, SceneEntityId,
 };
 
-use crate::{EditorDocumentId, EditorDocumentQueryBasis, EditorFrameRevision};
+use crate::{
+    EditorDocumentId, EditorDocumentQueryBasis, EditorFrameRevision, PreparedEditorDocumentEdit,
+};
 
 /// Session-provenanced identity of one retained effective Prefab inspection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +43,7 @@ pub enum EditorPrefabInspectionPhase {
     Ready,
     PreparingEdit,
     Review,
+    AwaitingDestinationSave,
     Validating,
     Cancelling,
     Terminal,
@@ -77,6 +80,29 @@ pub enum EditorPrefabInspectionRejection {
     ConflictingClaim,
     AlreadyWritten,
     NoCurrentClaim,
+    InvalidDestination,
+    ApplySourceSaveRequired,
+    DestinationSaveRequired,
+}
+
+/// The destination working revision used by the first step of Apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditorPrefabApplyDestination {
+    pub document: EditorDocumentId,
+    pub revision: SceneAuthoringRevision,
+    /// Whether this Apply published an edit to the destination working copy.
+    pub changed: bool,
+}
+
+/// The two source-owned candidates retained by one inspected Apply.
+///
+/// The destination tab shows the source change inherited by other occurrences. It can be
+/// unchanged when an earlier attempt already wrote the same value.
+#[derive(Debug, Clone, Copy)]
+pub struct EditorPrefabApplyReview<'a> {
+    pub containing: &'a PreparedEditorDocumentEdit,
+    pub destination: &'a EditorDocumentQueryBasis,
+    pub destination_edit: Option<&'a PreparedEditorDocumentEdit>,
 }
 
 /// Terminal result retained by the Host for acknowledgment.
@@ -96,6 +122,19 @@ pub enum EditorPrefabInspectionResult {
         revision: SceneAuthoringRevision,
         kind: AuthoringPrefabPropertyClaimKind,
     },
+    Applied {
+        inspection: EditorPrefabInspectionId,
+        document: EditorDocumentId,
+        revision: SceneAuthoringRevision,
+        destination: EditorPrefabApplyDestination,
+    },
+    /// Apply reached the destination stage and left the containing override in place.
+    ApplyStopped {
+        inspection: EditorPrefabInspectionId,
+        destination: EditorPrefabApplyDestination,
+        failure: Option<EditorPrefabInspectionRejection>,
+        diagnostics: DiagnosticReport,
+    },
     Failed {
         inspection: EditorPrefabInspectionId,
         reason: EditorPrefabInspectionRejection,
@@ -108,6 +147,7 @@ pub struct EditorPrefabInspectionView {
     pub inspection: Option<EditorPrefabInspectionId>,
     pub phase: EditorPrefabInspectionPhase,
     pub result: Option<EditorPrefabInspectionResult>,
+    pub apply_destination: Option<EditorPrefabApplyDestination>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -133,7 +173,19 @@ pub enum EditorPrefabInspectionAction {
         intent: PrefabPropertyIntent,
         limits: PrefabDeclarationLimits,
     },
+    /// Promotes the selected exact override to the explicitly named open Prefab source.
+    PrepareApply {
+        inspection: EditorPrefabInspectionId,
+        address: EditorPrefabPropertyAddress,
+        destination: EditorDocumentQueryBasis,
+        limits: PrefabDeclarationLimits,
+    },
+    /// Applies the reviewed edit. For Apply this first edits the destination working copy.
     Commit {
+        inspection: EditorPrefabInspectionId,
+    },
+    /// Removes the reviewed override after ordinary Save has made the destination current on disk.
+    FinishApply {
         inspection: EditorPrefabInspectionId,
     },
     Cancel {

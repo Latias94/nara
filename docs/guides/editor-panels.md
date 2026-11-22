@@ -1366,3 +1366,28 @@ another inspection.
 An inspection reads one selected occurrence. Per-frame reads use that retained observation.
 The stored claim query remains available when composition fails or when a tool needs to repair
 a dormant declaration. [Effective instance contract](../architecture/authoring-read-projection-design.md#effective-instance-fields)
+
+## Apply A Prefab Property To Its Source
+
+Open the Prefab that owns the selected effective property and obtain its current query basis.
+Keep the containing document and the selected dependencies saved. Inspect the occurrence and
+submit `PrepareApply` with the exact property address and destination query basis. Use
+`prefab_apply_review` to inspect the destination edit and containing Revert. Other instances
+that inherit the edited source can observe the new value after Apply.
+
+1. Submit `Commit` and wait for `AwaitingDestinationSave`. Its `apply_destination` names the
+   destination working revision. `changed` indicates whether Commit edited that working copy.
+   The containing override is still present.
+2. Save that destination through ordinary persistence. Save includes its existing working edits.
+   Wait for confirmation of the stated revision. If the destination already contains the value
+   at its confirmed saved checkpoint, proceed to Finish.
+3. Submit `FinishApply` for the same inspection. The Host verifies the accepted destination and
+   the retained source observations. `Applied` reports the containing and destination revisions.
+4. Save the containing document when ready to persist the removal, and acknowledge the inspection
+   result. Each document uses ordinary Undo and Redo.
+
+A refused destination Save leaves the operation waiting and the containing pin in place.
+`ApplyStopped` reports the destination step on cancellation or a stale source and leaves the pin
+in place. Start a fresh inspection after reconciling the affected sources. If the destination is
+already saved with the promoted value, a fresh Apply can reuse it without another history entry.
+[Apply contract](../architecture/authoring-read-projection-design.md#apply-an-instance-property-to-its-source)

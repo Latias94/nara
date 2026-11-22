@@ -1,8 +1,180 @@
 //! Host observation custody across worker completion, accepted output and validation.
 
+use nara_scene::{
+    PrefabAuthoringSession, SceneCompilationOptions, ScenePatchDocument, ScenePatchOperation,
+    SourceDocumentKind,
+};
+
 use super::prefab_acquisition::open_prefab;
-use super::scene_dependencies::{fixture, open_scene};
+use super::scene_dependencies::{fixture, id, metadata, open_scene};
 use super::*;
+
+#[test]
+fn prefab_apply_revalidates_only_the_saved_working_source_under_its_new_binding() {
+    const TARGET: &str = "prefabs/outer.prefab.json";
+    const ORIGINAL_DEPENDENCY: &str = "prefabs/leaf.prefab.json";
+    const ADDED_DEPENDENCY: &str = "prefabs/alternate.prefab.json";
+    let project = independent_project();
+    let manifest_path = project.root.join("nara.toml");
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    fs::write(
+        manifest_path,
+        manifest.replace("'project_location'", "'stable_metadata'"),
+    )
+    .unwrap();
+    for (path, index, kind) in [
+        ("scenes/startup.scene.json", 1, AssetSourceKind::Scene),
+        (SECOND_SCENE, 2, AssetSourceKind::Scene),
+        (TARGET, 3, AssetSourceKind::Prefab),
+        (ORIGINAL_DEPENDENCY, 4, AssetSourceKind::Prefab),
+        (ADDED_DEPENDENCY, 5, AssetSourceKind::Prefab),
+        ("assets/unused.png", 6, AssetSourceKind::Image),
+    ] {
+        metadata(&project, path, index, kind);
+    }
+
+    let (snapshot, containing_source, containing) = open_second_scene(&project);
+    let (original, mut target) = open_prefab(&snapshot, TARGET);
+    let (added, added_copy) = open_prefab(&snapshot, ADDED_DEPENDENCY);
+    let capture = |target: &PrefabAuthoringSession| {
+        let selections = Box::new([
+            AuthoringPrefabSessionSnapshot::capture(
+                &original,
+                bound_source_observation(&snapshot, &original),
+                target,
+            ),
+            AuthoringPrefabSessionSnapshot::capture(
+                &added,
+                bound_source_observation(&snapshot, &added),
+                &added_copy,
+            ),
+        ]);
+        let retained = prefabs::open_prefab_inputs_retained_bytes(&selections[..]).unwrap();
+        let mut context = snapshot
+            .capture_bound_prefab_request(
+                &containing_source,
+                &containing.authoring_schema_basis().unwrap(),
+                SourceDocumentKind::Scene,
+                snapshot.admit_source_capture_inputs(0, retained).unwrap(),
+                selections,
+            )
+            .unwrap();
+        context.retain_root_input(containing.document().retained_bytes().unwrap());
+        let mut acquisition = context.acquire().unwrap();
+        let mut request = containing
+            .request_complete_prefab_conversion(
+                containing.revision(),
+                &SceneEntityId::new("anchor").unwrap(),
+                SceneCompilationOptions::default(),
+            )
+            .unwrap();
+        request.restrict_working_bytes(acquisition.initial_compiler_limit());
+        let _prepared = request
+            .prepare_with_loader(None, |reference, working| {
+                acquisition.load(reference, working)
+            })
+            .unwrap();
+        acquisition
+            .finish_source_capture(0)
+            .unwrap()
+            .inspection_source_validation(0)
+            .unwrap()
+    };
+    let validation = capture(&target);
+    let expected = PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
+        arguments: None,
+        source: AssetRef::path("leaf.prefab.json").unwrap(),
+        overrides: None,
+    };
+    let report = target.apply_authoring_patch(&ScenePatchDocument::new([
+        ScenePatchOperation::SetPrefabInstance {
+            entity: SceneEntityId::new("nested").unwrap(),
+            expected: Some(expected.clone()),
+            value: Some(PrefabInstance {
+                source: AssetRef::StableId(id(5)),
+                ..expected
+            }),
+        },
+    ]));
+    assert!(report.applied, "{:?}", report.diagnostics);
+    let candidate = capture(&target);
+    assert_eq!(validation.candidate_adds_inputs(&candidate), Some(true));
+    let added_observation = bound_source_observation(&snapshot, &added);
+    assert!(matches!(
+        validation.validate_after_prefab_apply(
+            Some(&candidate),
+            &added,
+            &added,
+            &added_observation
+        ),
+        Err(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)
+    ));
+
+    let saved_bytes = target.document().to_json_string().unwrap();
+    fs::rename(
+        project.root.join(TARGET),
+        project.root.join("retired-prefab.json"),
+    )
+    .unwrap();
+    fs::write(project.root.join(TARGET), &saved_bytes).unwrap();
+    let current = snapshot
+        .project_root()
+        .open_file_exact(&RelativePath::new(TARGET).unwrap())
+        .unwrap();
+    let saved = original
+        .with_persistence_observation(
+            current.identity(),
+            current.parent_identity(),
+            ContentDigest::of_bytes(saved_bytes.as_bytes()),
+        )
+        .unwrap();
+    assert_ne!(original.identity(), saved.identity());
+    let observation = bound_source_observation(&snapshot, &saved);
+    let validate = || {
+        validation.validate_after_prefab_apply(Some(&candidate), &original, &saved, &observation)
+    };
+    assert!(matches!(
+        validation.clone().validate(),
+        Err(AuthoringProjectSourceAdmissionError::SourceChanged { path, .. })
+            if path.as_str() == TARGET
+    ));
+    validate().unwrap();
+
+    for path in [TARGET, ORIGINAL_DEPENDENCY, ADDED_DEPENDENCY] {
+        let file = project.root.join(path);
+        let original_bytes = fs::read(&file).unwrap();
+        let mut changed_bytes = original_bytes.clone();
+        changed_bytes[0] ^= 1;
+        fs::write(&file, changed_bytes).unwrap();
+        assert!(matches!(
+            validate(),
+            Err(AuthoringProjectSourceAdmissionError::SourceChanged { path: changed, .. })
+                if changed.as_str() == path
+        ));
+        fs::write(&file, original_bytes).unwrap();
+        validate().unwrap();
+    }
+    let sidecar = project.root.join(format!("{TARGET}.meta"));
+    let metadata_bytes = fs::read_to_string(&sidecar).unwrap();
+    fs::write(&sidecar, format!("{metadata_bytes} ")).unwrap();
+    assert!(matches!(
+        validate(),
+        Err(AuthoringProjectSourceAdmissionError::NativeSource(
+            crate::project_host::authoring::AuthoringDocumentAdmissionError::SourceIdentityChanged,
+        ))
+    ));
+    fs::write(&sidecar, metadata_bytes).unwrap();
+
+    metadata(&project, "assets/ambiguous.png", 5, AssetSourceKind::Image);
+    assert!(matches!(
+        validate(),
+        Err(AuthoringProjectSourceAdmissionError::AssetIdentity {
+            source: AssetDatabaseError::DuplicateStableId { .. },
+            ..
+        })
+    ));
+}
 
 #[test]
 fn scene_capture_transfers_host_retention_and_releases_only_finished_worker_inputs() {

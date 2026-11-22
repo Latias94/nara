@@ -29,7 +29,7 @@ use crate::{
 pub(super) struct ScopedReference {
     scope: ScopeId,
     target: AuthoredEntityReference,
-    declaration: Option<(ScopeId, PrefabOverlaySlot)>,
+    pub(super) declaration: Option<(ScopeId, PrefabOverlaySlot)>,
     pub(super) resolved: Option<ResolvedReference>,
 }
 

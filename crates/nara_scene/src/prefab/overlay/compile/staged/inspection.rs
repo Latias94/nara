@@ -1,16 +1,17 @@
 //! Observes the surviving programs and canonical routes before compiler state is released.
 
 use super::inputs::ResolvedReference;
-use super::reference_program::ReferencePrograms;
+use super::reference_program::{ReferenceProgram, ReferencePrograms};
 use super::*;
 use crate::prefab::inspection::{
     AuthoringPrefabComponentFact, AuthoringPrefabPropertyClaim, AuthoringPrefabPropertyClaimKind,
     AuthoringPrefabRecordOrigin, CapturedPrefabInspection, InspectedComponent,
+    InspectedPrefabPropertyApply,
 };
 use crate::{
     AuthoringRecordOwnerClaim, AuthoringRecordReadiness, PrefabPropertyClaim, PrefabPropertyIntent,
 };
-use nara_identity::EntityReference;
+use nara_identity::{AuthoredReferenceTarget, EntityReference};
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPathSegment, ComponentFieldSchema, ComponentPropertyStep,
     ComponentValue, ComponentValueRef,
@@ -79,8 +80,13 @@ where
             )?;
             let mut components = BTreeMap::new();
             for (component, references) in programs {
-                let observation =
-                    self.capture_inspected_component(&mut result, selected_scope, node, component)?;
+                let observation = self.capture_inspected_component(
+                    &mut result,
+                    selected_scope,
+                    node,
+                    component,
+                    &references.value,
+                )?;
                 components.insert(component.clone(), observation);
                 for origin in references.value.origins.values() {
                     if let Some(ResolvedReference::Local(target)) = &origin.resolved {
@@ -136,6 +142,7 @@ where
         selected_scope: ScopeId,
         node: NodeId,
         component: &ComponentTypeId,
+        references: &ReferenceProgram,
     ) -> Result<InspectedComponent, SceneCompilationFailure> {
         let program = &self.nodes[node].programs[component];
         let original = self.component(program.record, component);
@@ -182,7 +189,7 @@ where
             .try_fold(0usize, |bytes, &(scope, index)| {
                 let site = self.scopes[scope].site.as_ref()?;
                 let site_bytes = self.site_bytes(site)?;
-                let claims = self.inspection_claims(scope, index)?;
+                let (_, claims) = self.inspection_properties(scope, index)?;
                 claim_count = claim_count.checked_add(claims.len())?;
                 claims.iter().try_fold(bytes, |bytes, claim| {
                     let steps = claim.path.steps.len();
@@ -212,8 +219,8 @@ where
                 .site
                 .as_ref()
                 .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
-            let applied = self
-                .inspection_claims(scope, component_index)
+            let (_, applied) = self
+                .inspection_properties(scope, component_index)
                 .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
             for (claim_index, claim) in applied.iter().enumerate() {
                 claims.push(AuthoringPrefabPropertyClaim {
@@ -230,7 +237,12 @@ where
                 });
             }
         }
-        Ok(InspectedComponent {
+        let selected_overlay_intent = program
+            .properties
+            .iter()
+            .find_map(|&(scope, index)| (scope == selected_scope).then_some(index));
+        let record = program.record;
+        let mut observation = InspectedComponent {
             fact: AuthoringPrefabComponentFact {
                 component: component.clone(),
                 owner: original.owner().cloned().map_or(
@@ -239,27 +251,148 @@ where
                 ),
                 version: original.version,
                 readiness,
-                record: self.record_origin(program.record)?,
+                record: self.record_origin(record)?,
             },
             claims,
             defaulted_roots,
             payload: None,
-            selected_overlay_intent: program
-                .properties
-                .iter()
-                .find_map(|&(scope, index)| (scope == selected_scope).then_some(index)),
-            accepts_selected_overlay_properties: match program.record {
+            selected_overlay_intent,
+            accepts_selected_overlay_properties: match record {
                 Record::Source { scope, .. } => scope != 0,
                 Record::Addition { scope, .. } | Record::Set { scope, .. } => {
                     scope != selected_scope
                 }
             },
-        })
+            property_apply: None,
+        };
+        if readiness.is_available() {
+            observation.property_apply = self.capture_property_apply(
+                result,
+                selected_scope,
+                record,
+                selected_overlay_intent,
+                references,
+            )?;
+        }
+        Ok(observation)
     }
 
-    fn inspection_claims(&self, scope: ScopeId, index: usize) -> Option<&[PrefabPropertyClaim]> {
+    /// Uses the concrete component declaration even when root binding merges several facets.
+    fn capture_property_apply(
+        &mut self,
+        result: &mut CapturedPrefabInspection,
+        selected_scope: ScopeId,
+        record: Record,
+        selected_intent: Option<usize>,
+        references: &ReferenceProgram,
+    ) -> Result<Option<Box<InspectedPrefabPropertyApply>>, SceneCompilationFailure> {
+        let Record::Source { scope, entity } = record else {
+            return Ok(None);
+        };
+        if scope == 0 {
+            return Ok(None);
+        }
+        let facet = *self.scopes[scope]
+            .nodes
+            .source_entity(&self.source_entities(scope)[entity].id)
+            .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+        let claim_bytes = selected_intent.map_or(Some(0), |index| {
+            let (target, _) = self.inspection_properties(selected_scope, index)?;
+            target_clone_bytes(target)
+        });
+        self.retain_inspection(
+            result,
+            self.relative_bytes(0, facet).and_then(|bytes| {
+                bytes
+                    .checked_add(claim_bytes?)?
+                    .checked_add(size_of::<InspectedPrefabPropertyApply>())
+            }),
+        )?;
+        let record_target = self
+            .relative(0, facet)
+            .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+        let claim_target = selected_intent
+            .and_then(|index| self.inspection_properties(selected_scope, index))
+            .map(|(target, _)| target.clone());
+        let mut portable_reference_claims = BTreeSet::new();
+        if let Some(index) = selected_intent {
+            for origin in references.origins.values() {
+                let Some((
+                    layer,
+                    slot @ PrefabOverlaySlot::Property {
+                        component_index,
+                        claim_index,
+                    },
+                )) = origin.declaration
+                else {
+                    continue;
+                };
+                if layer != selected_scope || component_index != index {
+                    continue;
+                }
+                let Some(ResolvedReference::Local(target)) = &origin.resolved else {
+                    continue;
+                };
+                let claim = self
+                    .inspection_properties(selected_scope, index)
+                    .and_then(|(_, claims)| claims.get(claim_index))
+                    .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+                if matches!(
+                    &claim.intent,
+                    PrefabPropertyIntent::Set(ComponentValue::EntityReference(
+                        EntityReference::Authored { reference },
+                    )) if matches!(reference.target, AuthoredReferenceTarget::Entity(_))
+                ) && self.reference_route_is_local(scope, *target)?
+                {
+                    self.retain_inspection(
+                        result,
+                        Some(TREE_ENTRY_BYTES + size_of::<PrefabOverlaySlot>()),
+                    )?;
+                    portable_reference_claims.insert(slot);
+                }
+            }
+        }
+        Ok(Some(Box::new(InspectedPrefabPropertyApply {
+            record_target,
+            claim_target,
+            portable_reference_claims,
+        })))
+    }
+
+    /// Checks the actual endpoint route, including declarations supplied by outer replacements.
+    fn reference_route_is_local(
+        &mut self,
+        destination: ScopeId,
+        target: NodeId,
+    ) -> Result<bool, SceneCompilationFailure> {
+        let depth = self.scopes[destination].depth;
+        let owner = self.record_reference_scope(self.nodes[target].record)?;
+        if self.scopes[owner].depth < depth {
+            return Ok(false);
+        }
+        let mut current = self.nodes[target].scope;
+        while current != destination {
+            self.admit(Some(size_of::<ScopeId>() + size_of::<NodeId>()))?;
+            if self.scopes[current].depth <= depth
+                || self.scopes[self.overlay_reference_scope(current)?].depth < depth
+            {
+                return Ok(false);
+            }
+            let anchor = self.scopes[current]
+                .anchor
+                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+            current = self.nodes[anchor].scope;
+        }
+        Ok(true)
+    }
+
+    fn inspection_properties(
+        &self,
+        scope: ScopeId,
+        index: usize,
+    ) -> Option<(&PrefabEntityTarget, &[PrefabPropertyClaim])> {
         match self.overlay(scope)?.components.get(index)? {
-            PrefabComponentIntent::Properties { claims, .. } => Some(claims),
+            PrefabComponentIntent::Properties { target, claims, .. } => Some((target, claims)),
             _ => None,
         }
     }

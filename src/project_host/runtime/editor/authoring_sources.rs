@@ -13,7 +13,7 @@ use crate::project_host::authoring::{
     AuthoringSourceCaptureInputs, PreparedAuthoringSchemaOwner,
     document::AuthoringDocumentSourceFact,
 };
-use crate::project_host::persistence::FileSourceObservation;
+use crate::project_host::persistence::{FileSourceObservation, editor_digest};
 
 use super::EditorProjectSession;
 
@@ -40,6 +40,26 @@ impl AuthoringSourceSelection {
                     .as_ref()
                     .map_or(Some(0), |source| source.checked_retained_bytes())?,
             )
+    }
+
+    pub(super) fn has_confirmed_checkpoint(&self, editor: &EditorProjectSession) -> bool {
+        if editor.persistence.has_pending_document(self.document) {
+            return false;
+        }
+        let Some(receipt) = self.receipt.as_ref() else {
+            return false;
+        };
+        let saved = editor
+            .workspace
+            .scene(self.document)
+            .and_then(|slot| slot.saved_digest())
+            .or_else(|| {
+                editor
+                    .workspace
+                    .prefab(self.document)
+                    .and_then(|slot| slot.saved_digest())
+            });
+        saved == Some(editor_digest(receipt.digest()))
     }
 }
 
@@ -142,13 +162,55 @@ impl SelectedPrefabBasis {
     }
 
     pub(super) fn matches(&self, editor: &EditorProjectSession) -> bool {
+        self.matches_with_replacement(editor, None)
+    }
+
+    pub(super) fn used_working_copy(&self, expected: &AuthoringSourceSelection) -> bool {
+        self.participants
+            .iter()
+            .any(|participant| participant.selected.as_ref() == Some(expected))
+    }
+
+    pub(super) fn apply_inputs_are_saved(
+        &self,
+        editor: &EditorProjectSession,
+        destination: EditorDocumentId,
+    ) -> bool {
+        std::iter::once(&self.root)
+            .chain(
+                self.participants
+                    .iter()
+                    .filter_map(|participant| participant.selected.as_ref()),
+            )
+            .filter(|source| source.document != destination)
+            .all(|source| {
+                editor.workspace.document_is_dirty(source.document) == Some(false)
+                    && source.has_confirmed_checkpoint(editor)
+            })
+    }
+
+    pub(super) fn matches_after_prefab_apply(
+        &self,
+        editor: &EditorProjectSession,
+        original: &AuthoringSourceSelection,
+    ) -> bool {
+        self.matches_with_replacement(editor, Some(original))
+    }
+
+    fn matches_with_replacement(
+        &self,
+        editor: &EditorProjectSession,
+        replaced: Option<&AuthoringSourceSelection>,
+    ) -> bool {
         editor.authoring_source_selection_is_current(&self.root)
             && self.participants.iter().all(|participant| {
-                editor.authoring_dependency_selection_is_current(
-                    &participant.key,
-                    &participant.project_path,
-                    participant.selected.as_ref(),
-                )
+                let selected = participant.selected.as_ref();
+                replaced.is_some_and(|original| selected == Some(original))
+                    || editor.authoring_dependency_selection_is_current(
+                        &participant.key,
+                        &participant.project_path,
+                        selected,
+                    )
             })
     }
 }
