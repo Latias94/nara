@@ -21,10 +21,10 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    PrefabDocument, PrefabDocumentCandidate, PrefabInstance, SceneAuthoringContentState,
-    SceneAuthoringHistoryStatus, SceneAuthoringHistoryUsage, SceneAuthoringRevision,
-    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityRecord, ScenePlacement,
-    ScenePlacementParent,
+    AuthoringPrefabPropertyClaimKind, PrefabDocument, PrefabDocumentCandidate, PrefabInstance,
+    PrefabPropertyIntent, SceneAuthoringContentState, SceneAuthoringHistoryStatus,
+    SceneAuthoringHistoryUsage, SceneAuthoringRevision, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
 };
 use nara_tasks::TaskReturnObserver;
 use nara_tooling::{
@@ -45,6 +45,8 @@ use crate::project_host::{
     EditorProjectCloseProgress, EditorProjectOpenHost, EditorProjectOpenProgress,
     composition::built_in_schema_providers,
 };
+
+mod effective_absent_reference;
 
 const SCENE: &str = "scenes/startup.scene.json";
 const CONTAINER: &str = "prefabs/container.prefab.json";
@@ -84,6 +86,14 @@ struct Project {
 
 impl Project {
     fn new(leaves: usize, stable: bool) -> Self {
+        Self::with_additional_schema(leaves, stable, None)
+    }
+
+    fn with_additional_schema(
+        leaves: usize,
+        stable: bool,
+        additional_schema: Option<ComponentSchema>,
+    ) -> Self {
         let root = std::env::temp_dir().join(format!(
             "nara_host_prefab_conversion_{}_{}",
             std::process::id(),
@@ -116,13 +126,30 @@ impl Project {
             ComponentSchemaVersion::ONE,
         )
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-        .with_fields([ComponentFieldSchema::required(
-            ComponentFieldId::new("amount"),
-            "Amount",
-            ComponentFieldPath::from_fields(["amount"]),
-            ComponentValueKind::U64,
-        )
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
+        .with_fields([
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("amount"),
+                "Amount",
+                ComponentFieldPath::from_fields(["amount"]),
+                ComponentValueKind::U64,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+            ComponentFieldSchema::optional(
+                ComponentFieldId::new("annotation"),
+                "Annotation",
+                ComponentFieldPath::from_fields(["annotation"]),
+                ComponentValueKind::String,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+            ComponentFieldSchema::optional(
+                ComponentFieldId::new("target"),
+                "Target",
+                ComponentFieldPath::from_fields(["target"]),
+                ComponentValueKind::EntityRef,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_capability(ComponentCapability::EntityRef),
+        ]);
         let bundle = AuthoringSchemaBundle::new(
             builtins
                 .owners()
@@ -131,7 +158,7 @@ impl Project {
                 .chain([AuthoringSchemaBundleOwner::new(
                     payload_owner(),
                     ComponentSchemaCatalog {
-                        components: vec![schema],
+                        components: std::iter::once(schema).chain(additional_schema).collect(),
                         ..Default::default()
                     },
                     None,
@@ -725,12 +752,16 @@ impl Gate {
 
 #[test]
 fn shared_selected_source_capture_keeps_inspection_worker_custody_during_close() {
-    for prepare_set in [false, true] {
-        close_while_inspection_worker_holds_source(prepare_set);
+    for write in [
+        None,
+        Some(PrefabPropertyIntent::Set(ComponentValue::U64(42))),
+        Some(PrefabPropertyIntent::Absent),
+    ] {
+        close_while_inspection_worker_holds_source(write);
     }
 }
 
-fn close_while_inspection_worker_holds_source(prepare_set: bool) {
+fn close_while_inspection_worker_holds_source(write: Option<PrefabPropertyIntent>) {
     use nara_reflect::ComponentPropertyPath;
 
     let project = Project::new(2, false);
@@ -740,7 +771,7 @@ fn close_while_inspection_worker_holds_source(prepare_set: bool) {
     let basis = editor.document_query_basis(document).unwrap();
     let (mut gate, worker_gate) = Gate::worker_gate();
     let mut worker_gate = Some(worker_gate);
-    if !prepare_set {
+    if write.is_none() {
         editor.prefab_inspection.next_inspect_gate = worker_gate.take();
     }
     let admitted = inspection(
@@ -757,7 +788,7 @@ fn close_while_inspection_worker_holds_source(prepare_set: bool) {
     else {
         panic!("effective inspection was not admitted: {admitted:?}");
     };
-    if prepare_set {
+    if let Some(intent) = write {
         wait(&mut editor, |editor| {
             editor.prefab_inspection.view().phase == InspectPhase::Ready
         });
@@ -769,17 +800,21 @@ fn close_while_inspection_worker_holds_source(prepare_set: bool) {
             .unwrap()
             .clone();
         editor.prefab_inspection.next_inspect_gate = worker_gate.take();
+        let field = match &intent {
+            PrefabPropertyIntent::Set(_) => "amount",
+            PrefabPropertyIntent::Absent => "annotation",
+        };
         assert_eq!(
             inspection(
                 &mut editor,
-                InspectAction::PrepareSet {
+                InspectAction::PreparePropertyWrite {
                     inspection: id,
                     address: EditorPrefabPropertyAddress {
                         entity: target,
                         component: payload_type(),
-                        property: ComponentPropertyPath::new(ComponentFieldId::new("amount")),
+                        property: ComponentPropertyPath::new(ComponentFieldId::new(field)),
                     },
-                    value: ComponentValue::U64(42),
+                    intent,
                     limits: Default::default(),
                 },
             ),
@@ -825,7 +860,7 @@ fn effective_revert_revalidates_disk_after_dispatch_before_the_owner_consumes_it
     use nara_reflect::ComponentPropertyPath;
     use nara_scene::{
         PrefabComponentIntent, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop,
-        PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent, SourceDocumentKey,
+        PrefabOverlay, PrefabPropertyClaim, SourceDocumentKey,
     };
 
     let key = SourceDocumentKey::project_location(
@@ -976,14 +1011,14 @@ fn effective_set_accepts_identical_replacements_for_content_only_dependencies_at
     assert_eq!(
         inspection(
             &mut editor,
-            InspectAction::PrepareSet {
+            InspectAction::PreparePropertyWrite {
                 inspection: operation,
                 address: EditorPrefabPropertyAddress {
                     entity: target,
                     component: payload_type(),
                     property: ComponentPropertyPath::new(ComponentFieldId::new("amount")),
                 },
-                value: ComponentValue::U64(42),
+                intent: PrefabPropertyIntent::Set(ComponentValue::U64(42)),
                 limits: Default::default(),
             },
         ),
@@ -1018,10 +1053,11 @@ fn effective_set_accepts_identical_replacements_for_content_only_dependencies_at
     assert_ne!(committed, basis.revision);
     assert_eq!(
         editor.prefab_inspection.view().result,
-        Some(InspectResult::Set {
+        Some(InspectResult::Written {
             inspection: operation,
             document,
-            revision: committed
+            revision: committed,
+            kind: AuthoringPrefabPropertyClaimKind::Set,
         })
     );
     assert_eq!(fs::read(file).unwrap(), bytes);

@@ -4388,7 +4388,14 @@ source owner retains the claim and exact inverse. The inspection reuses one cand
 recursive composition, review and commit. The operation preserves the original file and
 working-copy dependency contract. The [qualification](../authoring-read-projection-design.md#november-22-scalar-set-qualification)
 records 63/63 selected owner and Windows/DX12 tests and 30/30 independent release and
-embedded Host tests. Authored absence, reference rebinding and cross-source Apply remain separate.
+embedded Host tests. The [authored root absence successor](../authoring-read-projection-design.md#authored-root-absence)
+writes an exact Absent claim through the same preparation, recompilation and commit.
+The [qualification](../authoring-read-projection-design.md#november-22-root-absence-qualification)
+records 125/125 non-native cases, including removed and introduced source demands and an
+unsaved containing Prefab first used through a finite self-reference. The shared Windows/DX12
+conversion passes on rerun. The independent release panel suite passes 31/31, including
+non-active Scene and Prefab.
+Reference rebinding and cross-source Apply remain separate.
 
 The [selective collection edit](../authoring-read-projection-design.md#selective-edits-in-authored-collections)
 keeps the selected replacement and previous value in the original Scene and Prefab history.

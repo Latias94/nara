@@ -27,9 +27,9 @@ use crate::{
     draft::SceneDraft,
 };
 
-mod property_set;
+mod property_write;
 
-pub use property_set::{AuthoringPrefabPropertySetError, ObservedPrefabPropertySet};
+pub use property_write::{AuthoringPrefabPropertyWriteError, ObservedPrefabPropertyWrite};
 
 /// Compiles an actual source's selected directly owned Prefab instance for authoring reads.
 /// The loader receives only requests made by structural and surviving effective-value demand.

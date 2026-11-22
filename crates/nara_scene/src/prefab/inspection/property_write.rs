@@ -1,15 +1,17 @@
 use nara_reflect::{
-    __private::component_values_exactly_match, ComponentCapability, ComponentPropertyStep,
+    __private::component_values_exactly_match, ComponentCapability, ComponentFieldPathSegment,
+    ComponentPropertyStep,
 };
 
 use super::*;
 use crate::{
-    PrefabDeclarationLimits, PrefabEntityOrigin, PrefabInstanceHop, SourceDocumentKey,
-    authoring_decode::retained_prefab_target_bytes, provenance::provenance_string_bytes,
+    PrefabDeclarationLimits, PrefabEntityOrigin, PrefabInstanceHop, PrefabPropertyIntent,
+    SourceDocumentKey, authoring_decode::retained_prefab_target_bytes,
+    provenance::provenance_string_bytes,
 };
 
 #[derive(Debug)]
-pub struct ObservedPrefabPropertySet {
+pub struct ObservedPrefabPropertyWrite {
     pub(crate) anchor: SceneEntityId,
     pub(crate) base: SourceDocumentKey,
     pub(crate) target: PrefabEntityTarget,
@@ -18,18 +20,25 @@ pub struct ObservedPrefabPropertySet {
     pub(crate) version: ComponentSchemaVersion,
     pub(crate) existing_intent: Option<usize>,
     pub(crate) property: ComponentPropertyPath,
-    pub(crate) value: ComponentValue,
+    pub(crate) intent: PrefabPropertyIntent,
     pub(crate) basis: AuthoringSchemaBasis,
 }
 
-impl ObservedPrefabPropertySet {
+impl ObservedPrefabPropertyWrite {
     pub const fn anchor(&self) -> &SceneEntityId {
         &self.anchor
     }
 
+    pub const fn kind(&self) -> AuthoringPrefabPropertyClaimKind {
+        match &self.intent {
+            PrefabPropertyIntent::Set(_) => AuthoringPrefabPropertyClaimKind::Set,
+            PrefabPropertyIntent::Absent => AuthoringPrefabPropertyClaimKind::Absent,
+        }
+    }
+
     pub fn checked_retained_bytes(&self) -> Option<usize> {
-        let value_bytes = match &self.value {
-            ComponentValue::String(value) => value.capacity(),
+        let value_bytes = match &self.intent {
+            PrefabPropertyIntent::Set(ComponentValue::String(value)) => value.capacity(),
             _ => 0,
         };
         let target = retained_prefab_target_bytes(&self.target)?;
@@ -62,38 +71,38 @@ impl ObservedPrefabPropertySet {
 }
 
 #[derive(Debug)]
-pub enum AuthoringPrefabPropertySetError {
+pub enum AuthoringPrefabPropertyWriteError {
     Read(AuthoringReadError),
     InvalidProperty,
     BudgetExceeded,
 }
 
-impl From<AuthoringReadError> for AuthoringPrefabPropertySetError {
+impl From<AuthoringReadError> for AuthoringPrefabPropertyWriteError {
     fn from(error: AuthoringReadError) -> Self {
         Self::Read(error)
     }
 }
 
 impl AuthoringPrefabInstanceSnapshot {
-    /// Resolves a visible scalar to its writable instance layer and original declaration group.
+    /// Resolves a property write to its writable instance layer and original declaration group.
     #[doc(hidden)]
-    pub fn plan_property_set(
+    pub fn plan_property_write(
         &self,
         entity: &PrefabEntityTarget,
         component: &ComponentTypeId,
         property: &ComponentPropertyPath,
-        value: ComponentValue,
+        intent: PrefabPropertyIntent,
         limits: PrefabDeclarationLimits,
         read: &mut ComponentPropertyReadBudget,
-    ) -> Result<ObservedPrefabPropertySet, AuthoringPrefabPropertySetError> {
-        use AuthoringPrefabPropertySetError as Error;
+    ) -> Result<ObservedPrefabPropertyWrite, AuthoringPrefabPropertyWriteError> {
+        use AuthoringPrefabPropertyWriteError as Error;
 
         let max_bytes = limits.max_logical_bytes();
         let target_bytes = entity
             .logical_bytes_up_to(max_bytes)
             .ok_or(Error::BudgetExceeded)?;
         let property_bytes = property.logical_bytes().map_err(AuthoringReadError::from)?;
-        let value_room = max_bytes
+        let remaining_bytes = max_bytes
             .checked_sub(target_bytes)
             .and_then(|room| room.checked_sub(property_bytes))
             .and_then(|room| room.checked_sub(component.as_str().len()))
@@ -101,10 +110,10 @@ impl AuthoringPrefabInstanceSnapshot {
         if entity.through.len() > limits.max_depth() || property.steps.len() > limits.max_depth() {
             return Err(Error::BudgetExceeded);
         }
-        let value_nodes = limits
+        let remaining_nodes = limits
             .max_nodes()
             .checked_sub(2 + 2 * entity.through.len() + property.steps.len())
-            .filter(|remaining| *remaining > 0)
+            .filter(|remaining| *remaining > 0 || matches!(&intent, PrefabPropertyIntent::Absent))
             .ok_or(Error::BudgetExceeded)?;
 
         let (hop, through) = entity.through.split_first().ok_or(Error::InvalidProperty)?;
@@ -128,23 +137,41 @@ impl AuthoringPrefabInstanceSnapshot {
         {
             return Err(Error::InvalidProperty);
         }
-        let current = selected
-            .resolve_value(field, property, read)?
-            .ok_or(Error::InvalidProperty)?;
-        let mut leaf = current.shape;
-        while let ComponentValueShape::Optional { value } = leaf {
-            leaf = value;
-        }
-        if !matches!(leaf, ComponentValueShape::Scalar { .. })
-            || matches!(
-                value,
-                ComponentValue::List(_)
-                    | ComponentValue::Map(_)
-                    | ComponentValue::EntityReference(_)
-            )
-        {
-            return Err(Error::InvalidProperty);
-        }
+        let replacement = match &intent {
+            PrefabPropertyIntent::Set(value) => {
+                let shape = selected
+                    .resolve_value(field, property, read)?
+                    .ok_or(Error::InvalidProperty)?
+                    .shape;
+                let mut leaf = shape;
+                while let ComponentValueShape::Optional { value } = leaf {
+                    leaf = value;
+                }
+                if !matches!(leaf, ComponentValueShape::Scalar { .. })
+                    || matches!(
+                        value,
+                        ComponentValue::List(_)
+                            | ComponentValue::Map(_)
+                            | ComponentValue::EntityReference(_)
+                    )
+                {
+                    return Err(Error::InvalidProperty);
+                }
+                Some((shape, value))
+            }
+            PrefabPropertyIntent::Absent => {
+                if !property.steps.is_empty()
+                    || (field.is_required() && field.default_value().is_none())
+                    || !matches!(
+                        field.path().segments().last(),
+                        Some(ComponentFieldPathSegment::Field(_))
+                    )
+                {
+                    return Err(Error::InvalidProperty);
+                }
+                None
+            }
+        };
         let write_target = if through.is_empty()
             && matches!(entity.entity, PrefabEntityOrigin::InstanceAddition(_))
             && selected.component.selected_overlay_intent.is_none()
@@ -162,53 +189,55 @@ impl AuthoringPrefabInstanceSnapshot {
             entity
         };
         let through = &write_target.through[1..];
-        let (value_room, value_nodes) = if write_target != entity {
+        let via_alias = write_target != entity;
+        let (remaining_bytes, remaining_nodes) = if via_alias {
             let bytes = write_target
-                .logical_bytes_up_to(value_room)
+                .logical_bytes_up_to(remaining_bytes)
                 .ok_or(Error::BudgetExceeded)?;
-            let nodes = value_nodes
+            let nodes = remaining_nodes
                 .checked_sub(1 + 2 * write_target.through.len())
                 .ok_or(Error::BudgetExceeded)?;
-            (value_room - bytes, nodes)
+            (remaining_bytes - bytes, nodes)
         } else {
-            (value_room, value_nodes)
+            (remaining_bytes, remaining_nodes)
         };
         if write_target.through.len() > limits.max_depth() {
             return Err(Error::BudgetExceeded);
         }
-        value
-            .cost_up_to(value_nodes, value_room)
-            .ok_or(Error::BudgetExceeded)?;
-        current
-            .shape
-            .validate_value(&value)
-            .map_err(|_| Error::InvalidProperty)?;
+        if let Some((shape, value)) = replacement {
+            value
+                .cost_up_to(remaining_nodes, remaining_bytes)
+                .ok_or(Error::BudgetExceeded)?;
+            shape
+                .validate_value(value)
+                .map_err(|_| Error::InvalidProperty)?;
+        }
 
-        Ok(ObservedPrefabPropertySet {
+        Ok(ObservedPrefabPropertyWrite {
             anchor: anchor.clone(),
             base: hop.expected_base.clone(),
             target: PrefabEntityTarget {
                 through: through.to_vec(),
                 entity: write_target.entity.clone(),
             },
-            observed_target: (write_target != entity).then(|| entity.clone()),
+            observed_target: via_alias.then(|| entity.clone()),
             component: component.clone(),
             version: selected.fact().version(),
             existing_intent: selected.component.selected_overlay_intent,
             property: property.clone(),
-            value,
+            intent,
             basis: self.basis.clone(),
         })
     }
 
-    /// Confirms that the prepared source composes the exact Set at the original address.
+    /// Confirms that the prepared source composes the exact write at the original address.
     #[doc(hidden)]
-    pub fn verifies_property_set(
+    pub fn verifies_property_write(
         &self,
-        edit: &ObservedPrefabPropertySet,
+        edit: &ObservedPrefabPropertyWrite,
         read: &mut ComponentPropertyReadBudget,
-    ) -> Result<bool, AuthoringPrefabPropertySetError> {
-        use AuthoringPrefabPropertySetError as Error;
+    ) -> Result<bool, AuthoringPrefabPropertyWriteError> {
+        use AuthoringPrefabPropertyWriteError as Error;
 
         let route;
         let target = if let Some(target) = &edit.observed_target {
@@ -231,18 +260,24 @@ impl AuthoringPrefabInstanceSnapshot {
             .ok_or(Error::InvalidProperty)?
             .component(&edit.component)?
             .property_value(&edit.property, read)?;
-        let AuthoringPrefabPropertyValue::Present(value) = property.value else {
+        if !property.revert_claim().is_some_and(|claim| {
+            in_selected_layer(claim, &edit.anchor) && claim.kind == edit.kind()
+        }) {
             return Ok(false);
-        };
-        let same_value = value
-            .value
-            .as_value()
-            .is_some_and(|actual| component_values_exactly_match(actual, &edit.value));
-        Ok(same_value
-            && property.revert_claim().is_some_and(|claim| {
-                in_selected_layer(claim, &edit.anchor)
-                    && claim.kind == AuthoringPrefabPropertyClaimKind::Set
-            }))
+        }
+        Ok(match (&edit.intent, property.value) {
+            (PrefabPropertyIntent::Set(expected), AuthoringPrefabPropertyValue::Present(value)) => {
+                value
+                    .value
+                    .as_value()
+                    .is_some_and(|actual| component_values_exactly_match(actual, expected))
+            }
+            (
+                PrefabPropertyIntent::Absent,
+                AuthoringPrefabPropertyValue::Missing | AuthoringPrefabPropertyValue::Defaulted(_),
+            ) => true,
+            _ => false,
+        })
     }
 }
 

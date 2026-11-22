@@ -133,10 +133,10 @@ fn a_registered_panel_rejects_a_set_that_breaks_a_finite_self_reference() {
     });
 
     assert_eq!(
-        panel.dispatch(&mut app, |_| Action::PrepareSet {
+        panel.dispatch(&mut app, |_| Action::PreparePropertyWrite {
             inspection,
             address,
-            value: ComponentValue::U64(CHANGED_SCORE),
+            intent: PrefabPropertyIntent::Set(ComponentValue::U64(CHANGED_SCORE)),
             limits: PrefabDeclarationLimits::default(),
         }),
         Outcome::Accepted {

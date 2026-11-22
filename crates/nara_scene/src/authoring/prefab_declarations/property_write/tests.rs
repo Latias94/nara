@@ -24,8 +24,8 @@ fn base(value: &str) -> SourceDocumentKey {
     .unwrap()
 }
 
-fn observed() -> ObservedPrefabPropertySet {
-    ObservedPrefabPropertySet {
+fn observed() -> ObservedPrefabPropertyWrite {
+    ObservedPrefabPropertyWrite {
         anchor: id("anchor"),
         base: base("canonical"),
         target: PrefabEntityTarget::source(id("target")),
@@ -34,13 +34,13 @@ fn observed() -> ObservedPrefabPropertySet {
         version: ComponentSchemaVersion::ONE,
         existing_intent: None,
         property: ComponentPropertyPath::new(ComponentFieldId::new("data")),
-        value: ComponentValue::String("new value".into()),
+        intent: PrefabPropertyIntent::Set(ComponentValue::String("new value".into())),
         basis: AuthoringSchemaBasis::admit(&AuthoringSchemaBundle::new([]).unwrap(), &[]).unwrap(),
     }
 }
 
 fn source(
-    edit: &ObservedPrefabPropertySet,
+    edit: &ObservedPrefabPropertyWrite,
     overlay: Option<PrefabOverlay>,
 ) -> [SceneEntityRecord; 1] {
     let mut entity = SceneEntityRecord::new(edit.anchor.clone());
@@ -98,7 +98,7 @@ fn first_pin_admits_both_roots_and_the_new_overlay_at_exact_limits() {
     ]);
     let source = source(&edit, None);
     let original = source[0].prefab.as_ref().unwrap();
-    let patch = lower_set(&source, &edit, PrefabDeclarationLimits::default()).unwrap();
+    let patch = lower_write(&source, &edit, PrefabDeclarationLimits::default()).unwrap();
     let updated = candidate(&patch);
     assert_eq!(updated.source, original.source);
     assert_eq!(updated.overrides.as_ref().unwrap().base, edit.base);
@@ -108,7 +108,7 @@ fn first_pin_admits_both_roots_and_the_new_overlay_at_exact_limits() {
             if entity == &edit.anchor && expected == &source[0].prefab
     ));
     let exact = limits_for_growth(&source[0], updated);
-    assert_eq!(lower_set(&source, &edit, exact), Ok(patch));
+    assert_eq!(lower_write(&source, &edit, exact), Ok(patch));
     let nodes = exact.max_nodes();
     let bytes = exact.max_logical_bytes();
     let depth = exact.max_depth();
@@ -119,7 +119,7 @@ fn first_pin_admits_both_roots_and_the_new_overlay_at_exact_limits() {
     ] {
         let below = PrefabDeclarationLimits::new(nodes, bytes, depth).unwrap();
         assert_eq!(
-            lower_set(&source, &edit, below),
+            lower_write(&source, &edit, below),
             Err(PrefabDeclarationError::BudgetExceeded),
         );
     }
@@ -143,16 +143,10 @@ fn observed_alias_group_uses_its_original_target_and_exact_claim_slot() {
         intent,
     };
     for (original, expected) in [
-        (
-            vec![],
-            vec![claim(PrefabPropertyIntent::Set(edit.value.clone()))],
-        ),
+        (vec![], vec![claim(edit.intent.clone())]),
         (
             vec![claim(PrefabPropertyIntent::Absent), sibling_claim.clone()],
-            vec![
-                claim(PrefabPropertyIntent::Set(edit.value.clone())),
-                sibling_claim.clone(),
-            ],
+            vec![claim(edit.intent.clone()), sibling_claim.clone()],
         ),
     ] {
         let mut overlay = PrefabOverlay::new(edit.base.clone());
@@ -164,7 +158,7 @@ fn observed_alias_group_uses_its_original_target_and_exact_claim_slot() {
             claims: original,
         });
         let source = source(&edit, Some(overlay));
-        let patch = lower_set(&source, &edit, PrefabDeclarationLimits::default()).unwrap();
+        let patch = lower_write(&source, &edit, PrefabDeclarationLimits::default()).unwrap();
         let mut expected_overlay = source[0]
             .prefab
             .as_ref()
@@ -180,7 +174,7 @@ fn observed_alias_group_uses_its_original_target_and_exact_claim_slot() {
         let updated = candidate(&patch);
         assert_eq!(updated.overrides.as_ref(), Some(&expected_overlay));
         let exact = limits_for_growth(&source[0], updated);
-        assert_eq!(lower_set(&source, &edit, exact), Ok(patch));
+        assert_eq!(lower_write(&source, &edit, exact), Ok(patch));
     }
 }
 
@@ -208,32 +202,73 @@ fn contradictory_group_and_strict_overlaps_are_refused() {
 
         edit.existing_intent = None;
         assert_eq!(
-            lower_set(&source, &edit, limits),
+            lower_write(&source, &edit, limits),
             Err(PrefabDeclarationError::StaleObservedIntent),
         );
         edit.existing_intent = Some(0);
         assert_eq!(
-            lower_set(&source, &edit, limits),
+            lower_write(&source, &edit, limits),
             Err(PrefabDeclarationError::ConflictingClaim),
         );
     }
 }
 
 #[test]
+fn first_absent_fits_exact_declaration_limits_and_a_repeat_is_already_written() {
+    let mut edit = observed();
+    edit.intent = PrefabPropertyIntent::Absent;
+    let original = source(&edit, None);
+    let patch = lower_write(&original, &edit, PrefabDeclarationLimits::default()).unwrap();
+    let updated = candidate(&patch);
+    let exact = limits_for_growth(&original[0], updated);
+    let overlay = updated.overrides.clone().unwrap();
+    assert_eq!(
+        overlay.components,
+        [PrefabComponentIntent::Properties {
+            target: edit.target.clone(),
+            component: edit.component.clone(),
+            version: edit.version,
+            claims: vec![PrefabPropertyClaim {
+                path: edit.property.clone(),
+                intent: PrefabPropertyIntent::Absent,
+            }],
+        }]
+    );
+    assert_eq!(lower_write(&original, &edit, exact), Ok(patch));
+    let below = PrefabDeclarationLimits::new(
+        exact.max_nodes() - 1,
+        exact.max_logical_bytes(),
+        exact.max_depth(),
+    )
+    .unwrap();
+    assert_eq!(
+        lower_write(&original, &edit, below),
+        Err(PrefabDeclarationError::BudgetExceeded),
+    );
+
+    edit.existing_intent = Some(0);
+    let pinned = source(&edit, Some(overlay));
+    assert_eq!(
+        lower_write(&pinned, &edit, PrefabDeclarationLimits::default()),
+        Err(PrefabDeclarationError::AlreadyWritten),
+    );
+}
+
+#[test]
 fn bit_identical_existing_set_is_a_noop_and_signed_zero_changes_still_pin() {
     let mut edit = observed();
-    edit.value = ComponentValue::f64(-0.0).unwrap();
+    edit.intent = PrefabPropertyIntent::Set(ComponentValue::f64(-0.0).unwrap());
     let limits = PrefabDeclarationLimits::default();
-    let first = lower_set(&source(&edit, None), &edit, limits).unwrap();
+    let first = lower_write(&source(&edit, None), &edit, limits).unwrap();
     let pinned = source(&edit, candidate(&first).overrides.clone());
     edit.existing_intent = Some(0);
     assert_eq!(
-        lower_set(&pinned, &edit, limits),
-        Err(PrefabDeclarationError::AlreadySet),
+        lower_write(&pinned, &edit, limits),
+        Err(PrefabDeclarationError::AlreadyWritten),
     );
 
-    edit.value = ComponentValue::f64(0.0).unwrap();
-    let patch = lower_set(&pinned, &edit, limits).unwrap();
+    edit.intent = PrefabPropertyIntent::Set(ComponentValue::f64(0.0).unwrap());
+    let patch = lower_write(&pinned, &edit, limits).unwrap();
     let overlay = candidate(&patch).overrides.as_ref().unwrap();
     let [PrefabComponentIntent::Properties { claims, .. }] = overlay.components.as_slice() else {
         panic!("expected one property group");

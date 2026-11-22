@@ -338,15 +338,16 @@ and creates one normal history entry. Read a new observation to see the value re
 
 ##### Explicit scalar overrides
 
-`PrepareSet` writes a scalar selected from the effective inspection into the direct instance
-overlay of the containing Scene or Prefab. The compiler supplies the canonical base and the
-selected layer's existing component group even when the read used another root-binding alias.
+`PreparePropertyWrite` with `Set(value)` writes a scalar selected from the effective inspection
+into the direct instance overlay of the containing Scene or Prefab. The compiler supplies the
+canonical base and the selected layer's existing component group even when the read used
+another root-binding alias.
 The source owner writes one `Set` claim and preserves the existing target spelling of that group.
 An explicit Set equal to an inherited value pins it. The remaining fields keep their existing
 inheritance. The selected component and field must admit editing. A complete component owned
 by the containing anchor or selected overlay has its own authoring location. Strict ancestor or
 descendant overlap within one property group refuses the write. Repeating an identical stored Set
-returns `AlreadySet` and creates no history entry. Specialized UI Prefab fields retain their own
+returns `AlreadyWritten` and creates no history entry. Specialized UI Prefab fields retain their own
 domain admission, and unrelated UI records can coexist with a scalar Set in the same source.
 
 The original declaration and its proposed replacement enter the same prepared edit and history
@@ -355,17 +356,17 @@ candidate with its original files and working-copy selections. It checks that th
 address now observes the requested scalar under an exact Set from the selected containing layer.
 This also refuses writes that remove the selector's meaning, such as changing the key used by a
 selected keyed item. The recompilation runs on the existing inspection task lane. A read-only
-inspection releases decoded dependency inputs once Ready. The Set path reacquires the demanded
+inspection releases decoded dependency inputs once Ready. The write path reacquires the demanded
 inputs only for the unpublished candidate and compares their file, lookup and working-copy facts
 with the original observation. The verification uses the candidate at every actual demand for
 the containing Prefab itself. Files read as content keep their canonical source and exact digest.
 Open working copies also keep their original file object and live revision. Commit revalidates
 those original facts and consumes the exact reviewed edit. `prefab_inspection_review` borrows the
-same prepared candidate view, patch and inverse for Set and Revert. Cancel and Close retain
+same prepared candidate view, patch and inverse for writes and Revert. Cancel and Close retain
 pending work until physical task return.
 
-This operation covers scalar leaves available through their current selector. Separate workflows
-own reference rebinding, authored absence, collection identity changes, writes to an owning
+The Set operation covers scalar leaves available through their current selector. Separate workflows
+own reference rebinding, collection identity changes, writes to an owning
 complete record and applying an override back into a different source.
 
 Godot retains a pinned property even when the current value equals the inherited default and
@@ -385,6 +386,30 @@ snapshot performs no disk access. Revert's explicit validation may read the admi
 stable lookup scope on the owner thread. File observations provide bounded revalidation under the
 existing filesystem contract. The operation composes source records without resource hydration
 or Native preview admission.
+
+##### Authored root absence
+
+`PreparePropertyWrite` with `Absent` uses the same selected instance layer and exact prepared
+transaction. It accepts a declared editable root whose schema makes the field optional or
+supplies a default, and whose storage path ends in a map field. The root can already read as
+Missing. The candidate must report the exact Absent claim in the selected layer and an effective
+value of Missing or Defaulted. No replacement value is retained in the claim. The same compiler
+resolves defaults in their original occurrence scope.
+
+Clearing the last retained reference can remove a source demand. Revealing a reference default
+can introduce one. The Host compares file facts, lookups and working copies shared by the
+original and candidate captures. It retains every original observation and admits the
+candidate's additional inputs through the same source budget. A finite self-reference can add
+the containing Prefab as a working-copy participant while using an existing file observation.
+Commit revalidates the original inspection, including its removed demands, together with the
+newly demanded sources. A changed file, lookup or working copy refuses the exact candidate
+before publication.
+
+`Set(Null)` pins a value where the declared shape permits Null. An Absent claim clears inherited
+storage and can expose a default. An exact Revert removes either claim and reveals the next
+inherited state. Repeating a directly stored Absent returns `AlreadyWritten`. An inherited
+absence can still be pinned in the current layer. These operations share the existing document
+history, unavailable-record preservation, publication format and Save/Reopen owner.
 
 ##### Effective field verification
 
@@ -451,6 +476,36 @@ The independent panel cases exercise the semantic API. Native qualification cove
 source transaction and selected acquisition used by existing authoring controls.
 Correctness Clippy passes for the affected libraries, Scene checks without default features,
 and the affected packages pass formatting and local documentation link checks.
+
+##### November 22 root absence qualification
+
+Windows x64 nextest `d94cfb13-47fe-4dd7-bdc6-089ee1574c9a` passes all 125 non-native
+cases with Rust 1.95.0. They cover exact declaration limits, duplicate Absent, a claim on an
+already Missing field, pinning an inherited Absent in an outer instance, and worker custody
+through Cancel and Close. The Host cases remove a file demand, introduce one through a default,
+and first demand the current unsaved containing Prefab through a finite self-reference. The
+file cases reject a source change after Review with the document and history intact, then
+commit exactly once after a fresh inspection. The containing Prefab case resolves the new
+default to an entity available only in the working copy.
+[Source-demand regressions](../../src/project_host/runtime/editor/prefab_conversion/tests/effective_absent_reference.rs)
+
+The Windows/DX12 Prefab conversion trajectory reports a missing painted mapping row in that
+combined run. The same trajectory passes in isolation in nextest
+`df333067-3c61-4251-928e-02f48e7e78bd`, including review, commit, history and persistence
+through the shared selected-source owner.
+
+Independently locked release nextest `f8971938-da43-4eaf-8c32-dedea6bab327` passes 31/31
+ordinary prepared-authoring cases. The new registered panel cases pin an already Missing
+field and replace a stored Null on a required default-bearing field with Absent. They check
+budget and address refusal, the exact prepared claim and inverse, cancellation, repeat
+refusal, history replay, and the complete saved document after Reopen. After a change to the
+shared base, the sibling inherits both changes.
+The selected instance keeps both Absent claims until the panel Reverts the exact default-bearing
+claim. The active document, selection and unrelated source files stay outside the edit.
+[Registered panel cases](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/absent.rs)
+
+Correctness Clippy passes for the affected libraries. Scene checks without default features.
+Root and independent panel package formatting checks and local documentation links pass.
 
 ## Workspace Contract
 

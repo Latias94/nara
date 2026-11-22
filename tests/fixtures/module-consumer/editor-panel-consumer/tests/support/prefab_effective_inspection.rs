@@ -21,6 +21,8 @@ use nara_tooling::{
     EditorPrefabPropertyAddress,
 };
 
+#[path = "prefab_effective_inspection/absent.rs"]
+mod absent;
 #[path = "prefab_effective_inspection/recursive.rs"]
 mod recursive;
 #[path = "prefab_effective_inspection/set.rs"]

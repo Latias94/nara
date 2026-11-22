@@ -1,6 +1,7 @@
 //! Bounded read-only metadata lookups and Deferred target bindings.
 
 use std::{
+    cmp::Ordering,
     collections::VecDeque,
     io::{ErrorKind, Read},
 };
@@ -111,6 +112,28 @@ fn probe_target_readability(
 }
 
 impl ReferenceObservation {
+    pub(super) fn binding_order(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::StableLookup(left), Self::StableLookup(right)) => {
+                left.stable_id.cmp(&right.stable_id)
+            }
+            (Self::ResolvedTarget(left), Self::ResolvedTarget(right)) => {
+                left.project_path.as_str().cmp(right.project_path.as_str())
+            }
+            (Self::StableLookup(_), Self::ResolvedTarget(_)) => Ordering::Less,
+            (Self::ResolvedTarget(_), Self::StableLookup(_)) => Ordering::Greater,
+        }
+    }
+
+    pub(super) fn matches_binding(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::ResolvedTarget(left), Self::ResolvedTarget(right)) => {
+                left.kind == right.kind && left.project_path == right.project_path
+            }
+            _ => self == other,
+        }
+    }
+
     pub(super) fn retained_bytes(&self) -> Result<usize, AuthoringProjectSourceAdmissionError> {
         match self {
             Self::StableLookup(observation) => checked_sum([
@@ -780,7 +803,16 @@ impl ReferenceCatalogue {
         observations: &[ReferenceObservation],
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-        if observations.is_empty() {
+        Self::revalidate_observation_stream(root, bindings, observations.iter(), budget)
+    }
+
+    pub(super) fn revalidate_observation_stream<'a>(
+        root: &DirectoryCapability,
+        bindings: Vec<SourceDirectoryBinding>,
+        observations: impl Iterator<Item = &'a ReferenceObservation> + Clone,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        if observations.clone().next().is_none() {
             return Ok(());
         }
         budget.charge_source_bytes(
@@ -797,7 +829,7 @@ impl ReferenceCatalogue {
         )?;
         let mut current = Self::new(root.share(), bindings, budget)?;
         if observations
-            .iter()
+            .clone()
             .any(|observation| matches!(observation, ReferenceObservation::StableLookup(_)))
         {
             current.ensure_indexed(budget)?;

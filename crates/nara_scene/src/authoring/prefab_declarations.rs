@@ -16,7 +16,7 @@ use crate::{
     prefab::{PrefabOverlayCostLimits, prefab_instance_cost},
 };
 
-mod property_set;
+mod property_write;
 
 /// Inclusive logical limits for source declaration observation and edit lowering.
 ///
@@ -93,7 +93,7 @@ pub enum PrefabDeclarationError {
     SlotNotFound,
     ConflictingClaim,
     StaleObservedIntent,
-    AlreadySet,
+    AlreadyWritten,
     BudgetExceeded,
 }
 
@@ -116,9 +116,9 @@ impl PrefabDeclarationError {
             Self::SlotNotFound => "the selected overlay intent was not found",
             Self::ConflictingClaim => "a same-layer property claim is an ancestor or descendant",
             Self::StaleObservedIntent => {
-                "the observed property Set disagrees with current source intent"
+                "the observed property write disagrees with current source intent"
             }
-            Self::AlreadySet => "the selected property already has this exact Set claim",
+            Self::AlreadyWritten => "the selected property already has this exact claim",
             Self::BudgetExceeded => "source declaration work exceeds its logical limits",
         }
     }
@@ -135,7 +135,7 @@ impl PrefabDeclarationError {
             Self::SlotNotFound => "scene.authoring-prefab-slot-not-found",
             Self::ConflictingClaim => "scene.authoring-prefab-conflicting-claim",
             Self::StaleObservedIntent => "scene.authoring-prefab-stale-observed-intent",
-            Self::AlreadySet => "scene.authoring-prefab-already-set",
+            Self::AlreadyWritten => "scene.authoring-prefab-already-written",
             Self::BudgetExceeded => "scene.authoring-prefab-budget-exceeded",
         }
     }

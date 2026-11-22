@@ -6,15 +6,15 @@ use crate::{
     PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent, PreparedPrefabAuthoringEdit,
     PreparedSceneAuthoringEdit, SceneAuthoringRevision, SceneAuthoringSession, SceneEntityRecord,
     ScenePatchDocument, ScenePatchOperation, ScenePatchReport, SourceDocumentKind,
-    authoring::prepared::stale_basis, prefab::inspection::ObservedPrefabPropertySet,
+    authoring::prepared::stale_basis, prefab::inspection::ObservedPrefabPropertyWrite,
 };
 
 impl SceneAuthoringSession {
     #[doc(hidden)]
-    pub fn prepare_prefab_property_set(
+    pub fn prepare_prefab_property_write(
         &self,
         base_revision: SceneAuthoringRevision,
-        edit: &ObservedPrefabPropertySet,
+        edit: &ObservedPrefabPropertyWrite,
         limits: PrefabDeclarationLimits,
     ) -> Result<PreparedSceneAuthoringEdit, ScenePatchReport> {
         let patch = prepare_patch(
@@ -31,10 +31,10 @@ impl SceneAuthoringSession {
 
 impl PrefabAuthoringSession {
     #[doc(hidden)]
-    pub fn prepare_prefab_property_set(
+    pub fn prepare_prefab_property_write(
         &self,
         base_revision: SceneAuthoringRevision,
-        edit: &ObservedPrefabPropertySet,
+        edit: &ObservedPrefabPropertyWrite,
         limits: PrefabDeclarationLimits,
     ) -> Result<PreparedPrefabAuthoringEdit, ScenePatchReport> {
         let patch = prepare_patch(
@@ -54,7 +54,7 @@ fn prepare_patch(
     revision: SceneAuthoringRevision,
     base_revision: SceneAuthoringRevision,
     basis: Option<AuthoringSchemaBasis>,
-    edit: &ObservedPrefabPropertySet,
+    edit: &ObservedPrefabPropertyWrite,
     limits: PrefabDeclarationLimits,
 ) -> Result<ScenePatchDocument, ScenePatchReport> {
     if revision != base_revision {
@@ -67,12 +67,12 @@ fn prepare_patch(
     if basis.schema(&edit.component).map(|schema| schema.version()) != Some(edit.version) {
         return Err(PrefabDeclarationError::StaleObservedIntent.report());
     }
-    lower_set(entities, edit, limits).map_err(PrefabDeclarationError::report)
+    lower_write(entities, edit, limits).map_err(PrefabDeclarationError::report)
 }
 
-fn lower_set(
+fn lower_write(
     entities: &[SceneEntityRecord],
-    edit: &ObservedPrefabPropertySet,
+    edit: &ObservedPrefabPropertyWrite,
     limits: PrefabDeclarationLimits,
 ) -> Result<ScenePatchDocument, PrefabDeclarationError> {
     use PrefabDeclarationError as Error;
@@ -93,8 +93,12 @@ fn lower_set(
             .as_ref()
             .is_some_and(|args| args.base != edit.base)
         || matches!(
-            &edit.value,
-            ComponentValue::List(_) | ComponentValue::Map(_) | ComponentValue::EntityReference(_)
+            &edit.intent,
+            PrefabPropertyIntent::Set(
+                ComponentValue::List(_)
+                    | ComponentValue::Map(_)
+                    | ComponentValue::EntityReference(_)
+            )
         )
     {
         return Err(Error::StaleObservedIntent);
@@ -105,13 +109,13 @@ fn lower_set(
     let exact_claim = selected_claim_index(intents, edit)?;
     let cost = budget
         .remaining_cost_limits(1)
-        .property_set_delta_cost(
+        .property_write_delta_cost(
             overlay.is_none().then_some(&edit.base),
             edit.existing_intent
                 .is_none()
                 .then_some((&edit.target, &edit.component)),
             exact_claim.is_none().then_some(&edit.property),
-            &edit.value,
+            &edit.intent,
         )
         .map_err(|_| Error::BudgetExceeded)?;
     budget.charge(cost.nodes, cost.logical_bytes())?;
@@ -120,7 +124,7 @@ fn lower_set(
     let overlay = value
         .overrides
         .get_or_insert_with(|| PrefabOverlay::new(edit.base.clone()));
-    let intent = PrefabPropertyIntent::Set(edit.value.clone());
+    let intent = edit.intent.clone();
     let new_claim = |intent| PrefabPropertyClaim {
         path: edit.property.clone(),
         intent,
@@ -158,7 +162,7 @@ fn lower_set(
 
 fn selected_claim_index(
     intents: &[PrefabComponentIntent],
-    edit: &ObservedPrefabPropertySet,
+    edit: &ObservedPrefabPropertyWrite,
 ) -> Result<Option<usize>, PrefabDeclarationError> {
     use PrefabDeclarationError as Error;
 
@@ -209,10 +213,14 @@ fn selected_claim_index(
             return Err(Error::ConflictingClaim);
         }
     }
-    if let Some((_, PrefabPropertyIntent::Set(previous))) = exact
-        && component_values_exactly_match(previous, &edit.value)
-    {
-        return Err(Error::AlreadySet);
+    if exact.is_some_and(|(_, previous)| match (previous, &edit.intent) {
+        (PrefabPropertyIntent::Set(previous), PrefabPropertyIntent::Set(requested)) => {
+            component_values_exactly_match(previous, requested)
+        }
+        (PrefabPropertyIntent::Absent, PrefabPropertyIntent::Absent) => true,
+        _ => false,
+    }) {
+        return Err(Error::AlreadyWritten);
     }
     Ok(exact.map(|(index, _)| index))
 }

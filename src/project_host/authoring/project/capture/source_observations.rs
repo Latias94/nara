@@ -37,6 +37,25 @@ impl SourceObservation {
             Self::ReadContent { native, .. } => native.as_ref(),
         }
     }
+
+    fn matches_input(&self, other: &Self) -> bool {
+        if self.native().map(AdmittedNativeDocumentSource::key)
+            != other.native().map(AdmittedNativeDocumentSource::key)
+        {
+            return false;
+        }
+        match (self, other) {
+            (Self::Original { source, .. }, Self::Original { source: other, .. }) => {
+                source.same_file_observation(other)
+            }
+            (Self::ReadContent { source, .. }, Self::ReadContent { source: other, .. }) => {
+                source.kind() == other.kind()
+                    && source.digest() == other.digest()
+                    && source.encoded_bytes() == other.encoded_bytes()
+            }
+            _ => false,
+        }
+    }
 }
 
 impl SourceObservations {
@@ -46,29 +65,26 @@ impl SourceObservations {
         self.entries.len() == other.entries.len()
             && self.entries.iter().zip(&other.entries).all(
                 |((path, expected), (actual_path, actual))| {
-                    if path != actual_path
-                        || expected.native().map(AdmittedNativeDocumentSource::key)
-                            != actual.native().map(AdmittedNativeDocumentSource::key)
-                    {
-                        return false;
-                    }
-                    match (expected, actual) {
-                        (
-                            SourceObservation::Original { source, .. },
-                            SourceObservation::Original { source: actual, .. },
-                        ) => source.same_file_observation(actual),
-                        (
-                            SourceObservation::ReadContent { source, .. },
-                            SourceObservation::ReadContent { source: actual, .. },
-                        ) => {
-                            source.kind() == actual.kind()
-                                && source.digest() == actual.digest()
-                                && source.encoded_bytes() == actual.encoded_bytes()
-                        }
-                        _ => false,
-                    }
+                    path == actual_path && expected.matches_input(actual)
                 },
             )
+    }
+
+    /// Returns whether the candidate adds an input, or None if a shared input changed.
+    pub(super) fn candidate_adds_inputs(&self, candidate: &Self) -> Option<bool> {
+        let mut adds_inputs = false;
+        for (path, observed) in &candidate.entries {
+            match self.entries.get(path) {
+                Some(original) if !original.matches_input(observed) => return None,
+                Some(_) => {}
+                None => adds_inputs = true,
+            }
+        }
+        Some(adds_inputs)
+    }
+
+    pub(super) fn observes_path(&self, path: &str) -> bool {
+        self.entries.contains_key(path)
     }
 
     pub(super) fn new(

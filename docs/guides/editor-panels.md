@@ -1314,19 +1314,29 @@ only that value under a separate allowance and gives local references their orig
 routes. The property exposes its contributing record and the claim controlling the selector.
 An explicit Set equal to its inherited value still appears as a claim.
 
-To set an editable scalar at that address, submit `PrepareSet` with the same inspection ID,
-the target, component and property path, the new `ComponentValue`, and `PrefabDeclarationLimits`.
-An equal-value Set deliberately pins the inherited value. For a property with `revert_claim()`,
-use `PrepareRevert` with the same address and limits to remove exactly that claim. Use the default
-limits for ordinary declarations. A tool handling large declarations can select a bounded
-allowance with `PrefabDeclarationLimits::new`. An identical Set already stored at the address
-returns `AlreadySet` with the current revision and history untouched. Specialized UI Prefab
-field edits use their own authoring route.
+Submit `PreparePropertyWrite` with the inspection ID, the target, component and property path,
+a `PrefabPropertyIntent`, and `PrefabDeclarationLimits`.
+
+- `Set(value)` pins an editable scalar. An equal-value Set deliberately pins the inherited value.
+  `Set(Null)` stores Null where the declared shape admits it.
+- `Absent` clears inherited storage for an editable optional or default-bearing root whose
+  storage path ends in a map field. A new inspection reports Defaulted or Missing and still
+  exposes the Absent claim. You can pin a root that is already Missing.
+- For a property with `revert_claim()`, use `PrepareRevert` with the same address and limits.
+  It removes that exact claim and restores inheritance.
+
+Use the default limits for ordinary declarations. A tool handling large declarations can select
+a bounded allowance with `PrefabDeclarationLimits::new`. Repeating an identical stored claim
+within those limits returns `AlreadyWritten` with the current revision and history untouched.
+Specialized UI Prefab field edits use their own authoring route.
 
 When the frame reports `Review`, borrow `prefab_inspection_review`. Use `preview()` to discover
 candidate claims or `patch()` and `inverse()` to review the source changes, then submit `Commit`
 or `Cancel` for the same inspection. Preparation and Commit verify the files and open Prefab working
-copies used by the inspection. The terminal `Set` or `Reverted` carries the new revision.
+copies used by the inspection. An Absent write can change which Prefabs are needed to resolve
+references. Commit checks the original sources and any sources newly needed by the reviewed
+candidate. The terminal `Written` carries the new revision and claim kind.
+`Reverted` carries the new revision after removing a claim.
 Acknowledge it and inspect again to read the resulting effective value. Undo, Redo and Save
 remain ordinary Workspace operations.
 When inspection alone is enough, submit `Cancel` and acknowledge its result before starting

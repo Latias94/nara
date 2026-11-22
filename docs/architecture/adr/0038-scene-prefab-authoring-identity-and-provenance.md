@@ -189,6 +189,11 @@ root, placement and inline-reference replacement; value relocation alone does no
   prior normalization order does not select another counter. Selector/Schema admission and
   complete final value/reference validation remain mandatory under ADR 0011. Reflection's
   standalone defaults do not impose a second hidden payload ceiling on an admitted program.
+- A selected instance property write retains an exact Set or Absent claim in its containing
+  source. Absent applies to an editable declared root that is optional or carries a Schema
+  default and whose storage path ends in a map field. It removes inherited storage at that
+  layer. An admitted root can be pinned absent before its base first stores a value. A default
+  may still apply. Set with a Null payload stores that value.
 - Reverting one claim removes its authored intent rather than writing the current effective value.
   Removing the final property claim removes its empty property-intent container, but preserves an
   explicit empty overlay and its base pin. Explicit overlay removal sets `overrides` to `None`

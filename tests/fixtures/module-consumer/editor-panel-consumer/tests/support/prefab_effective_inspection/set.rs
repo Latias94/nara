@@ -8,9 +8,10 @@ use nara_tooling::EditorDocumentSourceBinding;
 
 const SCORE_INCREMENT: u64 = 7;
 const INITIAL_NOTE: &str = "base note";
-const CHANGED_NOTE: &str = "next note";
+pub(super) const CHANGED_NOTE: &str = "next note";
 const INITIAL_RANK: u64 = 10;
-const CHANGED_RANK: u64 = 11;
+pub(super) const CHANGED_RANK: u64 = 11;
+pub(super) const DEFAULT_BONUS: u64 = 8;
 const UI_TEXT: &str = "nara.ui.UiText";
 
 fn set_schema() -> AuthoringSchemaBundle {
@@ -30,7 +31,7 @@ fn set_schema() -> AuthoringSchemaBundle {
             ComponentValueKind::U64,
         )
         .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect]),
-        ComponentFieldSchema::required(
+        ComponentFieldSchema::optional(
             ComponentFieldId::new("profile"),
             "Profile",
             ComponentFieldPath::from_fields(["wire_profile"]),
@@ -48,6 +49,17 @@ fn set_schema() -> AuthoringSchemaBundle {
             ComponentValueKind::U64,
         )
         .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+        ComponentFieldSchema {
+            required: true,
+            ..ComponentFieldSchema::optional_with_default(
+                ComponentFieldId::new("bonus"),
+                "Bonus",
+                ComponentFieldPath::from_fields(["wire_bonus"]),
+                ComponentValueKind::U64,
+                ComponentValue::U64(DEFAULT_BONUS),
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        },
     ]);
     AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
         owner.owner_id().clone(),
@@ -62,18 +74,29 @@ fn profile(level: u64) -> ComponentValue {
 }
 
 fn base_source(score: u64, note: &str, rank: u64) -> String {
+    base_source_with_optional(score, note, rank, None)
+}
+
+pub(super) fn base_source_with_optional(
+    score: u64,
+    note: &str,
+    rank: u64,
+    optional: Option<u64>,
+) -> String {
+    let mut fields = vec![
+        ("wire_score", ComponentValue::U64(score)),
+        ("wire_note", ComponentValue::String(note.into())),
+        ("wire_rank", ComponentValue::U64(rank)),
+        ("wire_profile", profile(1)),
+        ("wire_bonus", ComponentValue::U64(score)),
+    ];
+    if let Some(optional) = optional {
+        fields.push(("wire_optional", ComponentValue::U64(optional)));
+    }
     PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("base-root")).with_component(
         ComponentTypeId::new(COMPONENT),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion::ONE,
-            ComponentValue::map([
-                ("wire_score", ComponentValue::U64(score)),
-                ("wire_note", ComponentValue::String(note.into())),
-                ("wire_rank", ComponentValue::U64(rank)),
-                ("wire_profile", profile(1)),
-            ]),
-        )
-        .with_owner(PersistentComponentSchemaOwnerId::try_new(OWNER).unwrap()),
+        SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::map(fields))
+            .with_owner(PersistentComponentSchemaOwnerId::try_new(OWNER).unwrap()),
     )])
     .to_json_string()
     .unwrap()
@@ -83,6 +106,18 @@ fn with_claims(
     instance: &PrefabInstance,
     claims: impl IntoIterator<Item = (&'static str, ComponentValue)>,
 ) -> PrefabInstance {
+    with_claim_intents(
+        instance,
+        claims
+            .into_iter()
+            .map(|(field, value)| (field, PrefabPropertyIntent::Set(value))),
+    )
+}
+
+pub(super) fn with_claim_intents(
+    instance: &PrefabInstance,
+    claims: impl IntoIterator<Item = (&'static str, PrefabPropertyIntent)>,
+) -> PrefabInstance {
     let mut instance = instance.clone();
     let mut overlay = PrefabOverlay::new(base_key());
     overlay.components.push(PrefabComponentIntent::Properties {
@@ -91,9 +126,9 @@ fn with_claims(
         version: ComponentSchemaVersion::ONE,
         claims: claims
             .into_iter()
-            .map(|(field, value)| PrefabPropertyClaim {
+            .map(|(field, intent)| PrefabPropertyClaim {
                 path: property(field),
-                intent: PrefabPropertyIntent::Set(value),
+                intent,
             })
             .collect(),
     });
@@ -101,7 +136,7 @@ fn with_claims(
     instance
 }
 
-fn set_source(
+pub(super) fn fixture_source(
     kind: EditorDocumentKind,
     left: &PrefabInstance,
     right: &PrefabInstance,
@@ -138,22 +173,29 @@ fn workspace_action(app: &mut EditorApplication, action: EditorAction) {
     );
 }
 
-struct Fixture {
-    panel: PanelDriver,
-    app: Application,
-    project: text_project::TextProject,
-    document: EditorDocumentId,
+#[derive(Debug, PartialEq)]
+pub(super) enum EffectiveValue {
+    Present(ComponentValue),
+    Defaulted(ComponentValue),
+    Missing,
+}
+
+pub(super) struct Fixture {
+    pub(super) panel: PanelDriver,
+    pub(super) app: Application,
+    pub(super) project: text_project::TextProject,
+    pub(super) document: EditorDocumentId,
     active: EditorDocumentId,
     source: &'static str,
     source_binding: EditorDocumentSourceBinding,
     original: String,
     initial_base: String,
-    left: PrefabInstance,
-    right: PrefabInstance,
+    pub(super) left: PrefabInstance,
+    pub(super) right: PrefabInstance,
 }
 
 impl Fixture {
-    fn new(kind: EditorDocumentKind, source: &'static str) -> Self {
+    pub(super) fn new(kind: EditorDocumentKind, source: &'static str) -> Self {
         let left = PrefabInstance::root(
             AssetRef::path("inspection-base.prefab.json").unwrap(),
             base_key(),
@@ -172,7 +214,7 @@ impl Fixture {
             &PrefabInstance::forest(left.source.clone()),
             [("profile", profile(3))],
         );
-        let original = set_source(kind, &left, &right);
+        let original = fixture_source(kind, &left, &right);
         let original = match kind {
             EditorDocumentKind::Scene => original.to_json_string(),
             EditorDocumentKind::Prefab => {
@@ -251,6 +293,32 @@ impl Fixture {
         EditorPrefabInspectionId,
         [(EditorPrefabPropertyAddress, ComponentValue); N],
     ) {
+        let (inspection, properties) = self.inspect_properties(
+            anchor,
+            fields.map(|(field, claimed)| {
+                (
+                    field,
+                    claimed.then_some(AuthoringPrefabPropertyClaimKind::Set),
+                )
+            }),
+        );
+        let properties = properties.map(|(address, value)| {
+            let EffectiveValue::Present(value) = value else {
+                panic!("the selected field must be present: {address:?}: {value:?}");
+            };
+            (address, value)
+        });
+        (inspection, properties)
+    }
+
+    pub(super) fn inspect_properties<const N: usize>(
+        &mut self,
+        anchor: &str,
+        fields: [(&str, Option<AuthoringPrefabPropertyClaimKind>); N],
+    ) -> (
+        EditorPrefabInspectionId,
+        [(EditorPrefabPropertyAddress, EffectiveValue); N],
+    ) {
         let inspection = start(&mut self.panel, &mut self.app, self.document, anchor);
         expect_phase(&mut self.app, inspection, Phase::Ready);
         let selected = self.panel.observe(&mut self.app, |context| {
@@ -273,7 +341,7 @@ impl Fixture {
                 }
             );
             let roots = component.root_fields().unwrap();
-            fields.map(|(field, claimed)| {
+            fields.map(|(field, expected_claim)| {
                 let root = roots
                     .iter()
                     .find(|root| root.id().as_str() == field)
@@ -290,12 +358,12 @@ impl Fixture {
                 let property = component
                     .property_value(&address.property, &mut budget)
                     .unwrap();
-                if claimed {
+                if let Some(expected_claim) = expected_claim {
                     let claim = property
                         .revert_claim()
-                        .expect("an explicit Set must be revertible");
+                        .expect("the explicit claim must be revertible");
                     assert_eq!(claim.path, address.property);
-                    assert_eq!(claim.kind, AuthoringPrefabPropertyClaimKind::Set);
+                    assert_eq!(claim.kind, expected_claim);
                     assert_eq!(claim.location.path(), &PrefabInstancePath::new(id(anchor)));
                     assert_eq!(
                         claim.location.source(),
@@ -304,22 +372,35 @@ impl Fixture {
                     assert_eq!(property.controlling_claim(), Some(claim));
                 } else {
                     assert!(property.controlling_claim().is_none());
+                    assert!(property.revert_claim().is_none());
                 }
-                let AuthoringPrefabPropertyValue::Present(value) = property.value else {
-                    panic!("the selected field must be present: {property:?}");
-                };
                 let limits = ComponentValueMaterializationLimits::new(
                     ItemLimit::ONE,
                     ByteLimit::new(128).unwrap(),
                     DepthLimit::ONE,
                 );
-                (address, value.copy_value(limits).unwrap())
+                let value = match property.value {
+                    AuthoringPrefabPropertyValue::Present(value) => {
+                        EffectiveValue::Present(value.copy_value(limits).unwrap())
+                    }
+                    AuthoringPrefabPropertyValue::Defaulted(value) => {
+                        EffectiveValue::Defaulted(value.copy_value(limits).unwrap())
+                    }
+                    AuthoringPrefabPropertyValue::Missing => EffectiveValue::Missing,
+                };
+                (address, value)
             })
         });
         (inspection, selected)
     }
 
-    fn assert_live(&mut self, left: &PrefabInstance, dirty: bool, undo: usize, redo: usize) {
+    pub(super) fn assert_live(
+        &mut self,
+        left: &PrefabInstance,
+        dirty: bool,
+        undo: usize,
+        redo: usize,
+    ) {
         let current = frame(&self.app);
         let workspace = current.workspace();
         assert_eq!(workspace.active_document, Some(self.active));
@@ -349,7 +430,7 @@ impl Fixture {
         });
     }
 
-    fn assert_unwritten(&self) {
+    pub(super) fn assert_unwritten(&self) {
         assert_eq!(
             fs::read(self.project.root.join(self.source)).unwrap(),
             self.original.as_bytes()
@@ -367,12 +448,28 @@ impl Fixture {
         value: ComponentValue,
         limits: PrefabDeclarationLimits,
     ) -> Outcome {
-        self.panel.dispatch(&mut self.app, |_| Action::PrepareSet {
+        self.prepare_write(
             inspection,
             address,
-            value,
+            PrefabPropertyIntent::Set(value),
             limits,
-        })
+        )
+    }
+
+    pub(super) fn prepare_write(
+        &mut self,
+        inspection: EditorPrefabInspectionId,
+        address: EditorPrefabPropertyAddress,
+        intent: PrefabPropertyIntent,
+        limits: PrefabDeclarationLimits,
+    ) -> Outcome {
+        self.panel
+            .dispatch(&mut self.app, |_| Action::PreparePropertyWrite {
+                inspection,
+                address,
+                intent,
+                limits,
+            })
     }
 
     fn review_set(
@@ -383,10 +480,27 @@ impl Fixture {
         before: &PrefabInstance,
         after: &PrefabInstance,
     ) {
+        self.review_write(
+            inspection,
+            address,
+            PrefabPropertyIntent::Set(value),
+            before,
+            after,
+        );
+    }
+
+    pub(super) fn review_write(
+        &mut self,
+        inspection: EditorPrefabInspectionId,
+        address: EditorPrefabPropertyAddress,
+        intent: PrefabPropertyIntent,
+        before: &PrefabInstance,
+        after: &PrefabInstance,
+    ) {
         let property = address.property.clone();
-        let expected = PrefabPropertyIntent::Set(value.clone());
+        let expected_has_value = matches!(&intent, PrefabPropertyIntent::Set(_));
         assert_eq!(
-            self.prepare_set(inspection, address, value, Default::default()),
+            self.prepare_write(inspection, address, intent.clone(), Default::default()),
             Outcome::Accepted {
                 inspection,
                 phase: Phase::PreparingEdit,
@@ -394,6 +508,7 @@ impl Fixture {
         );
         expect_phase(&mut self.app, inspection, Phase::Review);
         let patch = instance_patch(before, after);
+        let inverse = instance_patch(after, before);
         assert_eq!(
             self.app
                 .prefab_inspection_review(inspection)
@@ -405,6 +520,7 @@ impl Fixture {
         self.panel.observe(&mut self.app, |context| {
             let edit = context.prefab_inspection_review(inspection).unwrap();
             assert_eq!(edit.patch(), &patch);
+            assert_eq!(edit.inverse(), &inverse);
             let preview = edit.preview();
             assert_eq!(
                 preview.basis(),
@@ -430,12 +546,15 @@ impl Fixture {
                     EditorAuthoringRow::PrefabPropertyClaim {
                         claim,
                         property: actual,
-                        has_value: true,
+                        has_value,
                         ..
-                    } if actual == &property => Some(claim),
+                    } if actual == &property => {
+                        assert_eq!(*has_value, expected_has_value);
+                        Some(claim)
+                    }
                     _ => None,
                 })
-                .expect("the prepared source query must expose the new Set");
+                .expect("the prepared source query must expose the exact written claim");
             assert_eq!(
                 preview
                     .read_prefab_property_claim(
@@ -443,12 +562,12 @@ impl Fixture {
                         EditorPropertyReadLimits::new(1024, 1, 128).unwrap(),
                     )
                     .unwrap(),
-                expected,
+                intent,
             );
         });
     }
 
-    fn commit(&mut self, inspection: EditorPrefabInspectionId) {
+    pub(super) fn commit(&mut self, inspection: EditorPrefabInspectionId) {
         assert_eq!(
             self.panel
                 .dispatch(&mut self.app, |_| Action::Commit { inspection }),
@@ -461,23 +580,55 @@ impl Fixture {
     }
 
     fn commit_set(&mut self, inspection: EditorPrefabInspectionId) {
+        self.commit_write(inspection, AuthoringPrefabPropertyClaimKind::Set);
+    }
+
+    pub(super) fn commit_write(
+        &mut self,
+        inspection: EditorPrefabInspectionId,
+        kind: AuthoringPrefabPropertyClaimKind,
+    ) {
         let before = basis(&self.app, self.document).revision;
         self.commit(inspection);
         let revision = basis(&self.app, self.document).revision;
         assert_ne!(revision, before);
         assert_eq!(
             frame(&self.app).prefab_inspection().result,
-            Some(EditorPrefabInspectionResult::Set {
+            Some(EditorPrefabInspectionResult::Written {
                 inspection,
                 document: self.document,
                 revision,
+                kind,
             }),
         );
         acknowledge(&mut self.panel, &mut self.app, inspection);
     }
+
+    pub(super) fn reopen(&mut self) {
+        let before = basis(&self.app, self.document).revision;
+        let reopened = persist(
+            &mut self.app,
+            EditorPersistenceAction::Reopen {
+                target: EditorReopenTarget::OpenDocument {
+                    document: self.document,
+                    base_revision: before,
+                },
+            },
+        );
+        let after = basis(&self.app, self.document).revision;
+        assert!(
+            matches!(reopened, EditorPersistenceResult::Opened { document, revision, .. }
+                if document == self.document && revision == after),
+            "{reopened:?}"
+        );
+        assert_ne!(before.source_id(), after.source_id());
+    }
 }
 
-fn instance_patch(before: &PrefabInstance, after: &PrefabInstance) -> ScenePatchDocument {
+pub(super) fn instance_patch(
+    before: &PrefabInstance,
+    after: &PrefabInstance,
+) -> ScenePatchDocument {
     ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
         entity: id("left"),
         expected: Some(before.clone()),
@@ -599,25 +750,9 @@ fn set_round_trip(kind: EditorDocumentKind, source: &'static str) {
 
     save(&mut fixture.app, fixture.document);
     let saved = fs::read(fixture.project.root.join(source)).unwrap();
-    assert_saved_source(kind, &saved, &set_source(kind, &pinned, &fixture.right));
+    assert_saved_source(kind, &saved, &fixture_source(kind, &pinned, &fixture.right));
     fixture.assert_live(&pinned, false, 2, 0);
-    let before = basis(&fixture.app, fixture.document).revision;
-    let reopened = persist(
-        &mut fixture.app,
-        EditorPersistenceAction::Reopen {
-            target: EditorReopenTarget::OpenDocument {
-                document: fixture.document,
-                base_revision: before,
-            },
-        },
-    );
-    let after = basis(&fixture.app, fixture.document).revision;
-    assert!(
-        matches!(reopened, EditorPersistenceResult::Opened { document, revision, .. }
-            if document == fixture.document && revision == after),
-        "{reopened:?}"
-    );
-    assert_ne!(before.source_id(), after.source_id());
+    fixture.reopen();
     fixture.assert_live(&pinned, false, 0, 0);
 
     let changed_base = base_source(CHANGED_SCORE, CHANGED_NOTE, CHANGED_RANK);
@@ -823,8 +958,8 @@ fn a_registered_panel_creates_and_updates_the_nested_set_through_an_addition_ali
     assert_failure(
         &mut fixture.app,
         verifying,
-        Rejection::AlreadySet,
-        "scene.authoring-prefab-already-set",
+        Rejection::AlreadyWritten,
+        "scene.authoring-prefab-already-written",
     );
     acknowledge(&mut fixture.panel, &mut fixture.app, verifying);
     assert_eq!(basis(&fixture.app, fixture.document), before_repeat);

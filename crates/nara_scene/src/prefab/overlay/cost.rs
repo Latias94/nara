@@ -96,12 +96,12 @@ impl PrefabOverlayCostLimits {
     }
 
     #[cfg(feature = "serde")]
-    pub(crate) fn property_set_delta_cost(
+    pub(crate) fn property_write_delta_cost(
         self,
         new_overlay_base: Option<&SourceDocumentKey>,
         new_group: Option<(&PrefabEntityTarget, &ComponentTypeId)>,
         new_claim: Option<&ComponentPropertyPath>,
-        value: &ComponentValue,
+        intent: &PrefabPropertyIntent,
     ) -> Result<PrefabOverlayCost, PrefabOverlayCostError> {
         let mut walker = CostWalker::new(self, None);
         let overlay_depth = ROOT_DEPTH + 1;
@@ -120,7 +120,9 @@ impl PrefabOverlayCostLimits {
             walker.declarations(1)?;
             walker.property_claim_header(property, claim_depth)?;
         }
-        walker.value(value, claim_depth + 1)?;
+        if let PrefabPropertyIntent::Set(value) = intent {
+            walker.value(value, claim_depth + 1)?;
+        }
         Ok(walker.cost)
     }
 }

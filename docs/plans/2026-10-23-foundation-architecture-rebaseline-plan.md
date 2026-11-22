@@ -622,6 +622,16 @@ Prefab. The original source owner lowers the claim, and the same Host validates 
 meaning and participating sources before exposing the ordinary prepared edit for review. Complete
 component editing, reference rebinding and cross-source Apply retain their own contracts.
 
+The [authored root absence successor](../architecture/authoring-read-projection-design.md#authored-root-absence)
+uses the same verified property write for optional and default-bearing roots. The registered
+panel distinguishes Null, a stored Absent and exact Revert through history, Save/Reopen and a
+later shared-base edit in both containing source kinds. A changed demand set preserves the
+original freshness evidence and adds only the candidate's newly needed inputs to revalidation.
+The selected non-native Windows cohort passes 125/125, with the shared DX12 conversion
+trajectory passing on an isolated rerun. The
+[qualification](../architecture/authoring-read-projection-design.md#november-22-root-absence-qualification)
+records the source-demand, independent panel and native results.
+
 ## R3: Behavior Representation And Immutable Module Publications
 
 **Design:** D02, D03, D06. **State:** the closed native/data Scene family is adopted under ADR 0006

@@ -726,6 +726,35 @@ impl AuthoringSourceValidation {
             && self.stable_lookups == other.stable_lookups
     }
 
+    /// Returns whether the candidate needs an additional receipt, or None on input conflict.
+    pub(crate) fn candidate_adds_inputs(&self, candidate: &Self) -> Option<bool> {
+        if !Arc::ptr_eq(&self.schema, &candidate.schema) {
+            return None;
+        }
+        let mut adds_inputs = self
+            .source_observations
+            .candidate_adds_inputs(&candidate.source_observations)?;
+        for observation in candidate.stable_lookups.iter() {
+            match self.lookup_observation(observation) {
+                Some(original) if !original.matches_binding(observation) => return None,
+                Some(_) => {}
+                None => adds_inputs = true,
+            }
+        }
+        Some(adds_inputs)
+    }
+
+    fn lookup_observation(
+        &self,
+        observed: &catalogue::ReferenceObservation,
+    ) -> Option<&catalogue::ReferenceObservation> {
+        let index = self
+            .stable_lookups
+            .binary_search_by(|original| original.binding_order(observed))
+            .ok()?;
+        self.stable_lookups.get(index)
+    }
+
     /// Checks retained schema handles; historical sources are collected separately.
     pub(crate) fn source_object_in_use(&self, candidate: &FileCapability) -> Result<bool, FsError> {
         if self.schema.source_object_in_use(candidate)? {
@@ -859,17 +888,32 @@ impl AuthoringSourceValidation {
     }
 
     pub(crate) fn validate(self) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        self.validate_captures(None)
+    }
+
+    /// Validates the original and newly demanded inputs of a compatible Prefab inspection pair.
+    pub(crate) fn validate_with_additional_inspection(
+        &self,
+        candidate: &Self,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        self.validate_captures(Some(candidate))
+    }
+
+    fn validate_captures(
+        &self,
+        candidate: Option<&Self>,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
         let mut budget = self.schema.budget;
-        if let Some(custody) = &self.source_observation_custody {
-            custody.admit_shared(&mut budget)?;
+        for capture in std::iter::once(self).chain(candidate) {
+            if let Some(custody) = &capture.source_observation_custody {
+                custody.admit_shared(&mut budget)?;
+            }
+            budget.retain_open_handles(checked_product(
+                capture.physical_count()?,
+                FileSourceObservation::retained_handle_capacity(),
+            )?)?;
         }
-        // This escaped invocation owns a fresh scope in addition to the Schema baseline.
-        // Its unrelated retained objects cannot stand in for the capture's leaf/parent scope.
-        budget.retain_open_handles(checked_product(
-            self.physical_count()?,
-            FileSourceObservation::retained_handle_capacity(),
-        )?)?;
-        self.validate_with_budget(&mut budget)
+        self.validate_captures_with_budget(candidate, &mut budget)
     }
 
     /// Admits additional Host observations against this validation's complete retained capture.
@@ -904,32 +948,65 @@ impl AuthoringSourceValidation {
         &self,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        self.validate_captures_with_budget(None, budget)
+    }
+
+    fn validate_captures_with_budget(
+        &self,
+        candidate: Option<&Self>,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
         let retained_before = budget.retained_candidate_bytes;
         let result = (|| {
-            let retained = self.retained_fact_bytes()?;
+            let mut retained = self.retained_fact_bytes()?;
+            let mut capture_bytes = self.retained_capture_bytes;
+            if let Some(candidate) = candidate {
+                retained = checked_sum([retained, candidate.retained_fact_bytes()?])?;
+                let additional = candidate
+                    .retained_capture_bytes
+                    .checked_sub(self.schema.budget.retained_candidate_bytes)
+                    .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+                capture_bytes = checked_sum([capture_bytes, additional])?;
+            }
             budget.charge_source_bytes(
                 0,
                 0,
                 0,
-                retained.max(
-                    self.retained_capture_bytes
-                        .saturating_sub(budget.usage().retained_candidate_bytes()),
-                ),
+                retained
+                    .max(capture_bytes.saturating_sub(budget.usage().retained_candidate_bytes())),
             )?;
-            for (index, source) in self.sources.iter().enumerate() {
-                self.source_observations.validate(
+            let additional_sources = candidate.into_iter().flat_map(|capture| {
+                capture
+                    .sources
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(index, source)| {
+                        (!self
+                            .source_observations
+                            .observes_path(source.project_path().as_str()))
+                        .then_some((capture, index, source))
+                    })
+            });
+            let sources = self
+                .sources
+                .iter()
+                .enumerate()
+                .map(|(index, source)| (self, index, source))
+                .chain(additional_sources);
+            for (capture, index, source) in sources.clone() {
+                capture.source_observations.validate(
                     &self.schema,
                     source,
-                    self.opened_source_observation(index),
+                    capture.opened_source_observation(index),
                     budget,
                 )?;
                 // Transaction custody applies only when explicitly installed on the old
                 // startup observation, never as a blanket for newly read dependencies.
-                if self.source_observation_custody.is_some() {
+                if capture.source_observation_custody.is_some() {
                     revalidate_source_fact_with_custody(
                         &self.schema.project_root,
                         source,
-                        self.source_observation_custody.as_ref(),
+                        capture.source_observation_custody.as_ref(),
                         budget,
                     )?;
                 }
@@ -937,7 +1014,7 @@ impl AuthoringSourceValidation {
             #[cfg(feature = "runtime-input")]
             input::revalidate_metadata_absence(
                 &self.schema.project_root,
-                self.sources.iter().map(Arc::as_ref),
+                sources.map(|(_, _, source)| source.as_ref()),
                 budget,
             )?;
             for source in schema_source_facts(&self.schema) {
@@ -948,12 +1025,26 @@ impl AuthoringSourceValidation {
                     budget,
                 )?;
             }
-            ReferenceCatalogue::revalidate_observations(
-                &self.schema.project_root,
-                ReferenceCatalogue::project_bindings(&self.schema.settings),
-                &self.stable_lookups,
-                budget,
-            )?;
+            let bindings = ReferenceCatalogue::project_bindings(&self.schema.settings);
+            if let Some(candidate) = candidate {
+                let additional = candidate
+                    .stable_lookups
+                    .iter()
+                    .filter(|lookup| self.lookup_observation(lookup).is_none());
+                ReferenceCatalogue::revalidate_observation_stream(
+                    &self.schema.project_root,
+                    bindings,
+                    self.stable_lookups.iter().chain(additional),
+                    budget,
+                )?;
+            } else {
+                ReferenceCatalogue::revalidate_observations(
+                    &self.schema.project_root,
+                    bindings,
+                    &self.stable_lookups,
+                    budget,
+                )?;
+            }
             Ok(())
         })();
         // Validation borrows the existing facts and creates no surviving candidate. It may

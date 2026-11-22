@@ -1207,6 +1207,142 @@ fn final_surviving_shells_and_root_bindings_share_the_entity_cap_without_copying
 }
 
 #[test]
+fn absent_write_requires_an_exact_claim_even_when_the_effective_root_is_already_absent() {
+    use crate::{
+        __private::try_inspect_authoring_prefab_instance_with_loader, AuthoringDocumentSource,
+        AuthoringPrefabPropertyClaimKind, AuthoringPrefabPropertyValue, PrefabDeclarationLimits,
+        SceneAuthoringSession, SceneDocumentCandidate,
+    };
+    use nara_reflect::ComponentPropertyReadBudget;
+
+    let capabilities = ComponentCapability::SCENE_AUTHORING;
+    let basis = basis_with_schema(
+        ComponentSchema::new(component(), "Notes", ComponentSchemaVersion::ONE)
+            .with_capabilities(capabilities)
+            .with_fields([
+                ComponentFieldSchema::optional(
+                    ComponentFieldId::new("note"),
+                    "Note",
+                    ComponentFieldPath::from_fields(["details", "wire_note"]),
+                    ComponentValueKind::String,
+                )
+                .with_capabilities(capabilities),
+                ComponentFieldSchema::optional_with_default(
+                    ComponentFieldId::new("score"),
+                    "Score",
+                    ComponentFieldPath::from_fields(["wire_score"]),
+                    ComponentValueKind::U64,
+                    ComponentValue::U64(7),
+                )
+                .with_capabilities(capabilities),
+            ]),
+    );
+    let inner = Arc::new(PrefabDocument::from_ordered_roots([
+        SceneEntityRecord::new(id("root")).with_component(
+            component(),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, empty()).with_owner(owner()),
+        ),
+    ]));
+    let mut inherited = PrefabOverlay::new(key("inner"));
+    inherited
+        .components
+        .push(PrefabComponentIntent::Properties {
+            target: PrefabEntityTarget::source(id("root")),
+            component: component(),
+            version: ComponentSchemaVersion::ONE,
+            claims: vec![PrefabPropertyClaim {
+                path: ComponentPropertyPath::new(ComponentFieldId::new("note")),
+                intent: PrefabPropertyIntent::Absent,
+            }],
+        });
+    let base = Arc::new(PrefabDocument::from_ordered_roots([anchor(
+        "inner",
+        "inner",
+        Some(inherited),
+    )]));
+    let scene = SceneDocument::from_ordered_roots([anchor("A", "alias", None)]);
+    let inspect = |scene: &SceneDocument| {
+        try_inspect_authoring_prefab_instance_with_loader(
+            SourceDocumentInput::Scene(scene),
+            &id("A"),
+            &basis,
+            Default::default(),
+            |reference, _| {
+                let (source, source_key) = if reference == &request("alias") {
+                    (&base, key("base"))
+                } else {
+                    assert_eq!(reference, &request("inner"));
+                    (&inner, key("inner"))
+                };
+                Ok::<_, Infallible>(Some(ResolvedPrefabSource::bound_authoring_source(
+                    Arc::clone(source),
+                    basis.clone(),
+                    source_key,
+                )))
+            },
+        )
+        .unwrap()
+    };
+    let published =
+        SceneDocumentCandidate::decode_json_bytes(scene.to_json_string().unwrap().as_bytes())
+            .unwrap()
+            .admit_authoring_with_basis(
+                AuthoringDocumentSource::new(AssetRef::path("scenes/main.scene.json").unwrap()),
+                &basis,
+            )
+            .unwrap()
+            .publish();
+    let session = SceneAuthoringSession::from_published_authoring_document(published);
+    let original = inspect(session.document());
+    let target = original
+        .targets()
+        .find(|target| target.entity == PrefabEntityOrigin::SourceEntity(id("root")))
+        .unwrap();
+    let selected = original
+        .target(target)
+        .unwrap()
+        .component(&component())
+        .unwrap();
+    let limits = PrefabDeclarationLimits::default();
+    for (root, expect_default) in [("note", false), ("score", true)] {
+        let property = ComponentPropertyPath::new(ComponentFieldId::new(root));
+        let mut read = ComponentPropertyReadBudget::new(
+            ItemLimit::new(10).unwrap(),
+            ByteLimit::new(4096).unwrap(),
+        );
+        let observed = selected.property_value(&property, &mut read).unwrap();
+        assert!(observed.revert_claim().is_none());
+        assert_eq!(
+            observed.controlling_claim().map(|claim| claim.kind),
+            (!expect_default).then_some(AuthoringPrefabPropertyClaimKind::Absent)
+        );
+        assert!(matches!(
+            (expect_default, observed.value),
+            (false, AuthoringPrefabPropertyValue::Missing)
+                | (true, AuthoringPrefabPropertyValue::Defaulted(_))
+        ));
+        let edit = original
+            .plan_property_write(
+                target,
+                &component(),
+                &property,
+                PrefabPropertyIntent::Absent,
+                limits,
+                &mut read,
+            )
+            .unwrap();
+        assert_eq!(edit.kind(), AuthoringPrefabPropertyClaimKind::Absent);
+        assert!(!original.verifies_property_write(&edit, &mut read).unwrap());
+
+        let prepared = session
+            .prepare_prefab_property_write(session.revision(), &edit, limits)
+            .unwrap();
+        let candidate = inspect(prepared.document());
+        assert!(candidate.verifies_property_write(&edit, &mut read).unwrap());
+    }
+}
+
+#[test]
 fn inspection_preserves_root_aliases_ordered_claims_and_typed_reference_reads() {
     use crate::{
         __private::try_inspect_authoring_prefab_instance_with_loader,

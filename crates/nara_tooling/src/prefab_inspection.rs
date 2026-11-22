@@ -1,9 +1,10 @@
 //! UI-neutral actions and observations for one Host-owned effective Prefab inspection.
 
 use nara_diagnostic::DiagnosticReport;
-use nara_reflect::{ComponentPropertyPath, ComponentTypeId, ComponentValue};
+use nara_reflect::{ComponentPropertyPath, ComponentTypeId};
 use nara_scene::{
-    PrefabDeclarationLimits, PrefabEntityTarget, SceneAuthoringRevision, SceneEntityId,
+    AuthoringPrefabPropertyClaimKind, PrefabDeclarationLimits, PrefabEntityTarget,
+    PrefabPropertyIntent, SceneAuthoringRevision, SceneEntityId,
 };
 
 use crate::{EditorDocumentId, EditorDocumentQueryBasis, EditorFrameRevision};
@@ -74,7 +75,7 @@ pub enum EditorPrefabInspectionRejection {
     IdExhausted,
     InvalidProperty,
     ConflictingClaim,
-    AlreadySet,
+    AlreadyWritten,
     NoCurrentClaim,
 }
 
@@ -89,10 +90,11 @@ pub enum EditorPrefabInspectionResult {
         document: EditorDocumentId,
         revision: SceneAuthoringRevision,
     },
-    Set {
+    Written {
         inspection: EditorPrefabInspectionId,
         document: EditorDocumentId,
         revision: SceneAuthoringRevision,
+        kind: AuthoringPrefabPropertyClaimKind,
     },
     Failed {
         inspection: EditorPrefabInspectionId,
@@ -120,12 +122,14 @@ pub enum EditorPrefabInspectionAction {
         /// Logical limits for preparing the source declaration patch.
         limits: PrefabDeclarationLimits,
     },
-    /// Pins a visible editable scalar in the selected instance layer of the containing source.
-    /// An inherited value explicitly set to itself becomes a stored claim.
-    PrepareSet {
+    /// Writes an explicit claim in the selected instance layer of the containing source.
+    ///
+    /// Set pins an editable scalar, including an inherited value equal to the requested value.
+    /// Absent clears inherited storage at an editable optional or default-bearing root.
+    PreparePropertyWrite {
         inspection: EditorPrefabInspectionId,
         address: EditorPrefabPropertyAddress,
-        value: ComponentValue,
+        intent: PrefabPropertyIntent,
         limits: PrefabDeclarationLimits,
     },
     Commit {

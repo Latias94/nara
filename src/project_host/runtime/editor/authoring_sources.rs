@@ -103,6 +103,25 @@ impl SelectedPrefabSources {
 }
 
 impl SelectedPrefabBasis {
+    /// Reports new selection facts after matching the root and every shared participant.
+    pub(super) fn candidate_adds_participants(&self, candidate: &Self) -> Option<bool> {
+        if self.root != candidate.root {
+            return None;
+        }
+        let mut adds_participants = false;
+        for observed in &candidate.participants {
+            match self
+                .participants
+                .binary_search_by(|original| original.project_path.cmp(&observed.project_path))
+            {
+                Ok(index) if &self.participants[index] != observed => return None,
+                Ok(_) => {}
+                Err(_) => adds_participants = true,
+            }
+        }
+        Some(adds_participants)
+    }
+
     pub(super) fn checked_retained_bytes(&self) -> Option<usize> {
         let root = size_of::<Self>().checked_add(self.root.checked_retained_bytes()?)?;
         self.participants
