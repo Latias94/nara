@@ -322,6 +322,51 @@ Correctness Clippy and workspace formatting pass.
 [Round eleven reproduction](../audits/2026-11-22-starter-input-authoring-and-runtime-review.md#p2--desktop-check-accepts-keyboard-bindings-the-stock-runner-cannot-deliver) ·
 [Input guide](../guides/input-actions.md#desktop-keyboard-bindings)
 
+### Starter Cargo package identity
+
+The same creation owner derives `nara-project-<source-universe-uuid>` for the Cargo package in
+both starter versions. `nara.toml` carries that source universe alongside the requested project
+name and window title. An author can create a local project named `nara`, and two projects with
+the same slug receive distinct Cargo names. Check and Export select the built workspace
+package from Cargo metadata. The generated Cook and Desktop entry points use the package facts
+provided by Cargo.
+
+Godot's project dialog stores the author-supplied name in project settings. Bevy's example
+metadata supplies display names within its `bevy` package.
+[Godot project dialog](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/project_manager/project_dialog.cpp) ·
+[Bevy example metadata](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/Cargo.toml)
+
+The pre-fix Windows binary created `nara` at version `0.1.0` beside the path dependency with
+the same package identity. Its first `nara check` reproduced Cargo's lockfile collision.
+The new name is assigned before publication.
+[Round eleven reproduction](../audits/2026-11-22-starter-input-authoring-and-runtime-review.md#p3--project-creation-can-publish-a-local-game-that-cargo-cannot-resolve)
+
+On Windows x64 and Rust 1.95.0, the affected creation and CLI cohort passed 17/17
+(`32c0f81e-e4ba-44bb-b956-acb92ca9c11d`). The v1 project named `nara` completes its first
+ordinary Check from a fresh directory. The lockfile records the engine and generated game
+as separate packages with their actual dependency edge. The regression confirms the project
+name, stable label and desktop title alongside locked Cargo metadata and all-target,
+all-feature compilation. Preparation tests cover independent same-slug identities in both
+starter versions with an immutable Git coordinate.
+
+Four selected release workflows passed on the same Windows toolchain
+(`20f80a2d-9a49-4ac3-984d-d56bb8242cbb`). The v1 regression exercised two independently
+created games with the same project name through Check, Export, Cook and relocated Player
+execution. The two v2 projects named `nara` exercised the push-box authoring and binding
+workflow, relocated Player execution, DX12 first presentations and both source Export
+startup observations. The independent v1 Cook workflow also built and relocated its
+custom game and checked the generated Cargo package in the delivery manifest. These builds
+used the local checkout dependency.
+[Generated author workflow](../../tests/project_author_workflow.rs) ·
+[Independent Cook workflow](../../tests/project_cook.rs)
+
+The clean-room Editor workflow passed 1/1 (`5f9fbbe9-c667-46c3-b475-134d5a70aded`).
+It loaded the generated project, completed Save/Reopen and Prefab extraction, then built
+the project in supervised Play, reached Ready, stopped the game and closed the Editor.
+Correctness Clippy for the selected workflow targets, compilation of the independent
+project-workflow consumer, workspace formatting and changed-document links passed.
+[Supervised Play workflow](../../editor/tests/supervised_play_clean_room.rs)
+
 ### Run the independent v2 workflow
 
 The public fixture creates and builds a new project beside the engine checkout. The first test

@@ -951,15 +951,24 @@ fn generated_project_is_an_independent_cargo_product() {
         "../nara-project-workflow-cli-cargo-{}-{sequence}",
         std::process::id()
     )));
+    let command = |program: &str| {
+        let mut command = Command::new(program);
+        command
+            .current_dir(&checkout)
+            .env("CARGO_BUILD_JOBS", "1")
+            .env("CARGO_NET_OFFLINE", "true")
+            .env("CARGO_TARGET_DIR", checkout.join("target"));
+        command
+    };
 
-    let output = Command::new(env!("CARGO_BIN_EXE_nara"))
-        .args(["new", "desktop-2d/v1", "cargo-product", "--parent"])
+    let output = command(env!("CARGO_BIN_EXE_nara"))
+        .args(["new", "desktop-2d/v1", "nara", "--parent"])
         .arg(parent.path())
         .arg("--local-checkout")
         .arg(&checkout)
         .output()
         .unwrap();
-    let project = parent.path().join("cargo-product");
+    let project = parent.path().join("nara");
     assert!(
         output.status.success(),
         "stdout={}\nstderr={}",
@@ -967,10 +976,53 @@ fn generated_project_is_an_independent_cargo_product() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let metadata = Command::new(env!("CARGO"))
-        .current_dir(&checkout)
+    let manifest_bytes = fs::read(project.join("nara.toml")).unwrap();
+    let manifest = nara::project::ProjectManifest::parse_toml_bytes(&manifest_bytes)
+        .manifest
+        .unwrap();
+    assert_eq!(manifest.project.name, "nara");
+    assert_eq!(manifest.project.stable_id.as_deref(), Some("nara"));
+    let desktop = manifest.resolve_profile(Some("desktop")).unwrap();
+    assert_eq!(desktop.window.title, "nara");
+    let package_name = format!("nara-project-{}", manifest.project.source_universe);
+
+    let lock_path = project.join("Cargo.lock");
+    assert!(!lock_path.exists());
+    let checked = command(env!("CARGO_BIN_EXE_nara"))
+        .arg("check")
+        .arg(&project)
+        .output()
+        .unwrap();
+    assert!(
+        checked.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&checked.stdout),
+        String::from_utf8_lossy(&checked.stderr)
+    );
+
+    let lock: toml::Value = toml::from_str(&fs::read_to_string(lock_path).unwrap()).unwrap();
+    let packages = lock["package"].as_array().unwrap();
+    let engine = packages
+        .iter()
+        .find(|package| package["name"].as_str() == Some("nara"))
+        .expect("Cargo.lock must contain the Nara engine");
+    assert!(engine.get("source").is_none());
+    let game = packages
+        .iter()
+        .find(|package| package["name"].as_str() == Some(package_name.as_str()))
+        .expect("Cargo.lock must contain the generated game");
+    assert!(
+        game["dependencies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|dependency| dependency.as_str() == Some("nara"))
+    );
+
+    let metadata = command(env!("CARGO"))
         .args([
             "metadata",
+            "--locked",
             "--no-deps",
             "--format-version",
             "1",
@@ -987,7 +1039,7 @@ fn generated_project_is_an_independent_cargo_product() {
     );
     let metadata: serde_json::Value = serde_json::from_slice(&metadata.stdout).unwrap();
     assert_eq!(metadata["packages"].as_array().unwrap().len(), 1);
-    assert_eq!(metadata["packages"][0]["name"], "cargo-product");
+    assert_eq!(metadata["packages"][0]["name"], package_name.as_str());
     assert_eq!(
         fs::canonicalize(metadata["workspace_root"].as_str().unwrap()).unwrap(),
         fs::canonicalize(&project).unwrap()
@@ -1010,13 +1062,10 @@ fn generated_project_is_an_independent_cargo_product() {
         ]
     );
 
-    let check = Command::new(env!("CARGO"))
-        .current_dir(&checkout)
-        .env("CARGO_BUILD_JOBS", "1")
-        .env("CARGO_TARGET_DIR", checkout.join("target"))
+    let check = command(env!("CARGO"))
         .args([
             "check",
-            "--offline",
+            "--locked",
             "--all-targets",
             "--all-features",
             "--manifest-path",

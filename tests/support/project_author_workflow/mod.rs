@@ -23,7 +23,7 @@ pub(super) mod puzzle;
 mod workspace;
 
 use process::{Custody, Output, install, remove_owned_tree};
-use workspace::{PACKAGE, Project};
+use workspace::Project;
 
 pub fn accept() {
     let checkout = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -49,6 +49,7 @@ pub fn accept() {
         first.manifest.project.source_universe,
         second.manifest.project.source_universe
     );
+    assert_ne!(first.cargo_package_name(), second.cargo_package_name());
     assert_ne!(first.startup, second.startup);
     assert_ne!(first.prefab, second.prefab);
     let tools = CargoBuildTools::discover_in(&first.root).unwrap();
@@ -471,8 +472,15 @@ fn build(
     let request = CargoBuildRequest::new(
         &project.root,
         RelativePath::new("Cargo.toml").unwrap(),
-        CargoBuildSelection::new(PACKAGE, bin, "dev", host, std::iter::empty::<&str>(), false)
-            .unwrap(),
+        CargoBuildSelection::new(
+            project.cargo_package_name(),
+            bin,
+            "dev",
+            host,
+            std::iter::empty::<&str>(),
+            false,
+        )
+        .unwrap(),
         tools.clone(),
         inputs,
         CargoBuildLimits::default(),

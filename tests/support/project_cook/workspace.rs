@@ -23,11 +23,12 @@ use nara::{
 use super::game::{self, AuthoredScore};
 use crate::content_fixture::{identity_transform_record, image_meta, scene_id, sprite_value};
 
-pub const PACKAGE: &str = "independent-cooked-game";
+const PROJECT_SLUG: &str = "independent-cooked-game";
 pub const SELECTED_SCHEMA: &str = "schema/selected.bundle.json";
 
 pub struct Project {
     pub root: PathBuf,
+    pub cargo_package_name: String,
     original_manifest: ProjectManifest,
     startup_metadata: Vec<u8>,
 }
@@ -48,7 +49,7 @@ impl Project {
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
             ProjectStarter::Desktop2dV1,
             parent,
-            ProjectSlug::new(PACKAGE).unwrap(),
+            ProjectSlug::new(PROJECT_SLUG).unwrap(),
             NaraDependencySource::local(LocalDependencyRelation::new(
                 ancestor,
                 None,
@@ -60,7 +61,7 @@ impl Project {
         let ProjectCreationOutcome::Created(receipt) = outcome else {
             panic!("the real starter must publish and admit the independent project: {outcome:?}");
         };
-        let root = games.join(PACKAGE).canonicalize().unwrap();
+        let root = games.join(PROJECT_SLUG).canonicalize().unwrap();
         assert!(
             receipt
                 .project_root()
@@ -68,6 +69,9 @@ impl Project {
                 .unwrap()
         );
         drop(receipt);
+        let cargo: toml::Value =
+            toml::from_str(&fs::read_to_string(root.join("Cargo.toml")).unwrap()).unwrap();
+        let cargo_package_name = cargo["package"]["name"].as_str().unwrap().to_owned();
         let original_manifest = load_manifest(&root);
         assert_eq!(
             original_manifest.project.native_document_identity,
@@ -91,6 +95,7 @@ impl Project {
         }
         Self {
             root,
+            cargo_package_name,
             original_manifest,
             startup_metadata,
         }

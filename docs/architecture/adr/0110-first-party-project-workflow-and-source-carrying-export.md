@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-14
+**Amended**: 2026-11-23 by project-owned Cargo names for generated starters
 **Amended**: 2026-08-14 by the FPER implementation-readiness review for profile-bound runtime
 lineages, capability-derived local dependency relations, parent-owned cross-process evidence,
 creation terminality, build-input freshness and startup-closure ownership
@@ -247,6 +248,11 @@ actual consumer qualification; selecting this contract alone does not mark it co
   schema and initial content. The workflow Module embeds the starter source. The generated Cargo
   manifest declares its own `[workspace]` with resolver `3`, preventing accidental membership in
   an ancestor checkout workspace. The starter CLI exposes no per-layer override surface.
+- Creation uses the requested slug for the directory, project name, project label and desktop
+  title. The generated private Cargo package uses `nara-project-<source-universe-uuid>`, derived
+  from the same new source universe written into `nara.toml`. The creation plan checks both
+  manifests before publication. Cargo metadata and the compiled package facts drive later
+  target selection and execution.
 - The creation request names the version explicitly. `desktop-2d/v1` generates the camera tutorial.
   `desktop-2d/v2` also generates `input/starter.actions.json` and `src/gameplay.rs`. Creation mints
   the action map's intrinsic primary Product identity once. Both profiles select that file, and

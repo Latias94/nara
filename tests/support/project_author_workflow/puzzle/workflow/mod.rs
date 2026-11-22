@@ -18,17 +18,22 @@ use nara::{
 use super::super::{
     command,
     process::{Custody, Output, install, remove_owned_tree},
+    workspace::read_toml,
 };
 
 pub(super) mod editor;
 pub(super) mod source;
 
-const PACKAGE: &str = "push-box";
+const PROJECT_SLUG: &str = "nara";
+const COOKED_DELIVERY_NAME: &str = "push-box";
+#[cfg(target_os = "windows")]
+const EXPORT_DESTINATION: &str = "push-box-candidate";
 const BUILD_TIMEOUT: Duration = Duration::from_secs(900);
 const RUN_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(super) struct Project {
     pub(super) root: PathBuf,
+    cargo_package_name: String,
     custody: Custody,
     tools: CargoBuildTools,
     host: String,
@@ -63,7 +68,7 @@ impl Project {
                 &tools,
                 &target,
             )
-            .arguments(["new", "desktop-2d/v2", PACKAGE, "--parent"])
+            .arguments(["new", "desktop-2d/v2", PROJECT_SLUG, "--parent"])
             .argument(&parent)
             .argument("--local-checkout")
             .argument(&checkout),
@@ -72,10 +77,12 @@ impl Project {
         created.assert_success();
         assert_eq!(
             created.stdout.trim(),
-            format!("Created {PACKAGE} from desktop-2d/v2.")
+            format!("Created {PROJECT_SLUG} from desktop-2d/v2.")
         );
-        let root = parent.join(PACKAGE).canonicalize().unwrap();
+        let root = parent.join(PROJECT_SLUG).canonicalize().unwrap();
         assert!(root.starts_with(&custody.root) && !root.starts_with(&checkout));
+        let cargo = read_toml(&root.join("Cargo.toml"));
+        let cargo_package_name = cargo["package"]["name"].as_str().unwrap().to_owned();
         let compiler = custody.tool(
             command(tools.rustc_path(), &root, &tools, &target).argument("-vV"),
             RUN_TIMEOUT,
@@ -97,6 +104,7 @@ impl Project {
         let cwd = custody.directory("unrelated empty cwd");
         Self {
             root,
+            cargo_package_name,
             custody,
             tools,
             host,
@@ -104,23 +112,6 @@ impl Project {
             binaries,
             cwd,
         }
-    }
-
-    pub(super) fn generate_lockfile(&mut self) {
-        self.custody
-            .tool(
-                command(
-                    self.tools.cargo_path(),
-                    &self.root,
-                    &self.tools,
-                    &self.target,
-                )
-                .arguments(["generate-lockfile", "--offline", "--manifest-path"])
-                .argument(self.root.join("Cargo.toml")),
-                BUILD_TIMEOUT,
-            )
-            .assert_success();
-        assert!(self.root.join("Cargo.lock").is_file());
     }
 
     pub(super) fn cli(&mut self, operation: &str, flags: &[&str]) -> Output {
@@ -149,7 +140,7 @@ impl Project {
             &self.root,
             RelativePath::new("Cargo.toml").unwrap(),
             CargoBuildSelection::new(
-                PACKAGE,
+                self.cargo_package_name.as_str(),
                 bin,
                 "dev",
                 self.host.as_str(),
@@ -189,7 +180,7 @@ impl Project {
                 OsStr::new("--output-parent"),
                 output.as_os_str(),
                 OsStr::new("--name"),
-                OsStr::new(PACKAGE),
+                OsStr::new(COOKED_DELIVERY_NAME),
                 OsStr::new("--target-dir"),
                 self.target.as_os_str(),
                 OsStr::new("--target"),
@@ -216,7 +207,7 @@ impl Project {
         );
 
         let relocated = self.custody.root.join("relocated player");
-        fs::rename(output.join(PACKAGE), &relocated).unwrap();
+        fs::rename(output.join(COOKED_DELIVERY_NAME), &relocated).unwrap();
         let executable_name = format!("player{}", std::env::consts::EXE_SUFFIX);
         let mut installed = fs::read_dir(&relocated)
             .unwrap()
@@ -251,7 +242,7 @@ impl Project {
                 "--parent",
                 parent.to_str().unwrap(),
                 "--destination",
-                "push-box-candidate",
+                EXPORT_DESTINATION,
             ],
             Duration::from_secs(30 * 60),
         );
@@ -261,6 +252,6 @@ impl Project {
                 .stdout
                 .contains("through 2 exact product observations.")
         );
-        parent.join("push-box-candidate")
+        parent.join(EXPORT_DESTINATION)
     }
 }

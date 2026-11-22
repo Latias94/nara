@@ -42,6 +42,11 @@ from a shared directory capability. Both locations must have a usable common
 filesystem ancestor; cross-volume and inaccessible-ancestor cases fail explicitly.
 An immutable HTTPS Git coordinate is the portable dependency alternative.
 
+The project uses the requested name in its directory, `nara.toml` and window title. Its private
+Cargo package is `nara-project-<source-universe-uuid>`. To select the package explicitly, use
+`[package].name` from the generated `Cargo.toml`. The `--manifest-path` and `--bin` commands
+below select it through the project workspace.
+
 Use `nara new --help`, `nara check --help`, `nara schema --help`, `nara export --help` or
 `nara repair startup-scene --help` for scoped syntax and examples. These requests do not open
 or build a project. Help is terminal: supplied options still need values and valid preceding

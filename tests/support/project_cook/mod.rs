@@ -23,8 +23,9 @@ mod process;
 mod workspace;
 
 use process::{Custody, Output, install, remove_owned_tree};
-use workspace::{PACKAGE, Project, SELECTED_SCHEMA};
+use workspace::{Project, SELECTED_SCHEMA};
 
+const COOKED_DELIVERY_NAME: &str = "IndependentGame";
 const WORKER_ROOT: &str = "NARA_PROJECT_COOK_ACCEPTANCE_ROOT";
 const TEST: &str = "generated_project_cooks_custom_game_and_runs_after_relocation";
 
@@ -113,7 +114,7 @@ fn worker(checkout: &Path, target: &Path, root: PathBuf) {
     let installed_tools = custody.directory("captured-tools");
     let headless = build(
         &mut custody,
-        &project.root,
+        &project,
         target,
         &tools,
         host,
@@ -122,7 +123,7 @@ fn worker(checkout: &Path, target: &Path, root: PathBuf) {
     );
     let cooker = build(
         &mut custody,
-        &project.root,
+        &project,
         target,
         &tools,
         host,
@@ -267,7 +268,7 @@ fn worker(checkout: &Path, target: &Path, root: PathBuf) {
         target,
         &tools,
         host,
-        "IndependentGame",
+        COOKED_DELIVERY_NAME,
     );
     cooked.assert_success();
     assert!(
@@ -283,7 +284,7 @@ fn worker(checkout: &Path, target: &Path, root: PathBuf) {
         1
     );
     let published = output_parent
-        .join("IndependentGame")
+        .join(COOKED_DELIVERY_NAME)
         .canonicalize()
         .unwrap();
     let original = payload(&published);
@@ -298,7 +299,10 @@ fn worker(checkout: &Path, target: &Path, root: PathBuf) {
         package["payload"]["content_target"]["profile"],
         "game-shipping"
     );
-    assert_eq!(package["payload"]["build"]["selection"]["package"], PACKAGE);
+    assert_eq!(
+        package["payload"]["build"]["selection"]["package"],
+        project.cargo_package_name.as_str()
+    );
     assert_eq!(package["payload"]["build"]["selection"]["bin"], "player");
     assert_eq!(
         package["payload"]["build"]["selection"]["cargo_profile"],
@@ -346,22 +350,28 @@ fn tool_command(
 
 fn build(
     custody: &mut Custody,
-    project: &Path,
+    project: &Project,
     target: &Path,
     tools: &CargoBuildTools,
     host: &str,
     bin: &str,
     installed: &Path,
 ) -> PathBuf {
-    let selection =
-        CargoBuildSelection::new(PACKAGE, bin, "dev", host, std::iter::empty::<&str>(), false)
-            .unwrap();
+    let selection = CargoBuildSelection::new(
+        project.cargo_package_name.as_str(),
+        bin,
+        "dev",
+        host,
+        std::iter::empty::<&str>(),
+        false,
+    )
+    .unwrap();
     let request = CargoBuildRequest::new(
-        project,
+        &project.root,
         RelativePath::new("Cargo.toml").unwrap(),
         selection,
         tools.clone(),
-        project_rust_input_inventory(project).unwrap(),
+        project_rust_input_inventory(&project.root).unwrap(),
         CargoBuildLimits::default(),
     )
     .unwrap()

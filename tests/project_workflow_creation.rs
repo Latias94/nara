@@ -26,9 +26,9 @@ static NEXT_TEMP_ROOT: AtomicU64 = AtomicU64::new(1);
 #[test]
 fn independent_project_preparations_do_not_share_source_identities() {
     let root = TestRoot::new("independent-identities");
-    let prepare = || {
-        prepare_desktop_2d_project(ProjectCreationRequest::new(
-            ProjectStarter::Desktop2dV1,
+    let prepare_identities = |starter| {
+        let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            starter,
             root.writable_capability(),
             ProjectSlug::new("same-slug").unwrap(),
             NaraDependencySource::immutable_git(
@@ -37,38 +37,33 @@ fn independent_project_preparations_do_not_share_source_identities() {
             )
             .unwrap(),
         ))
-        .unwrap()
-    };
-    let first = prepare();
-    let second = prepare();
-    let manifest = |prepared: &nara::project_workflow::PreparedProjectCreation| {
-        nara::project::ProjectManifest::parse_toml_bytes(
-            prepared
-                .plan()
-                .member(ProjectMember::ProjectManifest)
-                .unwrap()
-                .bytes(),
+        .unwrap();
+        let plan = prepared.plan();
+        let manifest = nara::project::ProjectManifest::parse_toml_bytes(
+            plan.member(ProjectMember::ProjectManifest).unwrap().bytes(),
         )
         .manifest
-        .unwrap()
+        .unwrap();
+        let source_universe = manifest.project.source_universe;
+        let cargo_manifest = plan.member(ProjectMember::CargoManifest).unwrap();
+        let cargo = std::str::from_utf8(cargo_manifest.bytes()).unwrap();
+        let cargo: toml::Value = toml::from_str(cargo).unwrap();
+        let package_name = cargo["package"]["name"].as_str().unwrap();
+        assert_eq!(package_name, format!("nara-project-{source_universe}"));
+        let metadata = plan.member(ProjectMember::StartupSceneMetadata).unwrap();
+        let scene_id = nara::asset::AssetMetaIdentityCandidate::decode_json_bytes(metadata.bytes())
+            .unwrap()
+            .identity()
+            .stable_id();
+        (source_universe, package_name.to_owned(), scene_id)
     };
-    assert_ne!(
-        manifest(&first).project.source_universe,
-        manifest(&second).project.source_universe
-    );
-    let scene_id = |prepared: &nara::project_workflow::PreparedProjectCreation| {
-        nara::asset::AssetMetaIdentityCandidate::decode_json_bytes(
-            prepared
-                .plan()
-                .member(ProjectMember::StartupSceneMetadata)
-                .unwrap()
-                .bytes(),
-        )
-        .unwrap()
-        .identity()
-        .stable_id()
-    };
-    assert_ne!(scene_id(&first), scene_id(&second));
+    for starter in [ProjectStarter::Desktop2dV1, ProjectStarter::Desktop2dV2] {
+        let (first_universe, first_package, first_scene) = prepare_identities(starter);
+        let (second_universe, second_package, second_scene) = prepare_identities(starter);
+        assert_ne!(first_universe, second_universe);
+        assert_ne!(first_package, second_package);
+        assert_ne!(first_scene, second_scene);
+    }
     assert!(!root.path().join("same-slug").exists());
 }
 

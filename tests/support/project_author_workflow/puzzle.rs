@@ -30,7 +30,10 @@ const PUZZLE_FILES: [&str; 6] = [
 
 pub fn accept() {
     let mut project = Project::create();
-    project.generate_lockfile();
+    let lockfile = project.root.join("Cargo.lock");
+    assert!(!lockfile.exists());
+    project.cli("check", &[]).assert_success();
+    assert!(lockfile.is_file());
     let starter_headless = project.build("headless", "starter-headless", &[]);
     let starter = project.run(&starter_headless, |command| command);
     assert_line(&starter, "starter_headless: ok fixed_ticks=1");
@@ -169,7 +172,6 @@ pub fn accept() {
 #[cfg(target_os = "windows")]
 pub fn accept_native() {
     let mut project = Project::create();
-    project.generate_lockfile();
     assert_desktop_keyboard_check(&mut project);
     let headless = project.build("headless", "headless-with-desktop-feature", &["desktop"]);
     let started = project.run(&headless, |command| command);

@@ -5791,6 +5791,11 @@ uses the selected desktop adapter's physical mapping to qualify the startup Acti
 Check, desktop Cook and processed delivery share that capability rule. Generic and Headless
 consumers retain their own input vocabulary.
 
+The [Starter Cargo package identity](2026-10-16-0940-feat-first-2d-author-workflow-plan.md#starter-cargo-package-identity)
+binds the generated package to its new source universe. The project slug supplies the directory,
+project name and window title. An ordinary local project named `nara` creates its first lockfile
+and resolves the game package and engine dependency separately.
+
 The starter evidence records recipe registration, command conversions, edit-to-result time and
 the engine changes needed to ship the template. Use the next resource with a concrete native
 consumer to measure integration work across registration, Cook and residency. When Editor work

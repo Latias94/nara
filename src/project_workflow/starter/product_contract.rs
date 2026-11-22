@@ -37,10 +37,11 @@ pub(super) struct ProductContractSources<'a> {
 
 pub(super) fn render_cargo_manifest(
     starter: ProjectStarter,
-    slug: &ProjectSlug,
+    source_universe: SourceUniverseId,
     dependency: &str,
     receipt: &NaraDependencyReceipt,
 ) -> String {
+    let package_name = cargo_package_name(source_universe);
     let desktop = desktop_features(starter)
         .iter()
         .map(|feature| format!("\"{feature}\""))
@@ -59,7 +60,7 @@ pub(super) fn render_cargo_manifest(
     };
     format!(
         r#"[package]
-name = "{}"
+name = "{package_name}"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
@@ -100,12 +101,12 @@ path = "src/bin/cook.rs"
 name = "player"
 path = "src/bin/player.rs"
 {gamepad_dependency}"#,
-        slug.as_str(),
-        dependency,
-        HEADLESS_NARA_FEATURES[0],
-        HEADLESS_NARA_FEATURES[1],
-        HEADLESS_NARA_FEATURES[2]
+        dependency, HEADLESS_NARA_FEATURES[0], HEADLESS_NARA_FEATURES[1], HEADLESS_NARA_FEATURES[2]
     )
+}
+
+fn cargo_package_name(source_universe: SourceUniverseId) -> String {
+    format!("nara-project-{source_universe}")
 }
 
 pub(super) fn render_project_manifest(
@@ -197,7 +198,12 @@ pub(super) fn validate(
     dependency: &NaraDependencyReceipt,
     sources: ProductContractSources<'_>,
 ) -> Result<(), &'static str> {
-    validate_cargo_manifest(starter, slug, dependency, sources.cargo_manifest)?;
+    validate_cargo_manifest(
+        starter,
+        sources.source_universe,
+        dependency,
+        sources.cargo_manifest,
+    )?;
     let load = ProjectManifest::parse_toml_bytes(sources.project_manifest);
     if load.has_errors() {
         return Err("generated project manifest is invalid");
@@ -282,7 +288,7 @@ fn validate_authoring_schema_bundle(
 
 fn validate_cargo_manifest(
     starter: ProjectStarter,
-    slug: &ProjectSlug,
+    source_universe: SourceUniverseId,
     dependency: &NaraDependencyReceipt,
     cargo_manifest: &[u8],
 ) -> Result<(), &'static str> {
@@ -300,7 +306,8 @@ fn validate_cargo_manifest(
         .get("package")
         .and_then(Value::as_table)
         .ok_or("generated Cargo package table is absent")?;
-    if package.get("name").and_then(Value::as_str) != Some(slug.as_str())
+    let package_name = cargo_package_name(source_universe);
+    if package.get("name").and_then(Value::as_str) != Some(package_name.as_str())
         || package.get("version").and_then(Value::as_str) != Some("0.1.0")
         || package.get("edition").and_then(Value::as_str) != Some("2024")
         || package.get("rust-version").and_then(Value::as_str) != Some("1.95")

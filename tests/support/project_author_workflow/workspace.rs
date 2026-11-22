@@ -14,7 +14,7 @@ use nara::{
     },
 };
 
-pub const PACKAGE: &str = "collect-game";
+const PROJECT_SLUG: &str = "collect-game";
 const TEMPLATE_README: &str = include_str!("../../../starters/desktop-2d/v1/README.md");
 const GUIDE: &str = include_str!("../../../docs/guides/first-2d-game.md");
 
@@ -30,7 +30,7 @@ pub struct Project {
 
 impl Project {
     pub fn create(checkout: &Path, parent: &Path) -> Self {
-        let project_root = parent.join(PACKAGE);
+        let project_root = parent.join(PROJECT_SLUG);
         let ancestor = checkout.parent().unwrap();
         let relative = RelativePath::new(
             parent
@@ -46,7 +46,7 @@ impl Project {
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
             ProjectStarter::Desktop2dV1,
             parent,
-            ProjectSlug::new(PACKAGE).unwrap(),
+            ProjectSlug::new(PROJECT_SLUG).unwrap(),
             NaraDependencySource::local(LocalDependencyRelation::new(
                 shared,
                 Some(RelativePath::new(checkout.file_name().unwrap()).unwrap()),
@@ -86,6 +86,10 @@ impl Project {
             generated_entries,
             prefab: StableAssetId::try_random().unwrap(),
         }
+    }
+
+    pub fn cargo_package_name(&self) -> &str {
+        self.generated_cargo["package"]["name"].as_str().unwrap()
     }
 
     pub fn add_first_system(&self) {
@@ -277,7 +281,7 @@ impl Project {
     }
 }
 
-fn read_toml(path: &Path) -> toml::Value {
+pub(super) fn read_toml(path: &Path) -> toml::Value {
     read_toml_bytes(&fs::read(path).unwrap())
 }
 

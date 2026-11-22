@@ -408,7 +408,7 @@ pub(super) fn build_creation_plan(
 ) -> Result<ProjectCreationPlan, &'static str> {
     let cargo_manifest = render_cargo_manifest(
         starter,
-        &slug,
+        identities.universe,
         dependency_manifest_fragment,
         &dependency_receipt,
     );
