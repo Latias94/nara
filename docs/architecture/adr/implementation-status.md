@@ -4397,6 +4397,13 @@ conversion passes on rerun. The independent release panel suite passes 31/31, in
 non-active Scene and Prefab.
 Reference rebinding and cross-source Apply remain separate.
 
+[Exact declaration Revert](../authoring-read-projection-design.md#november-22-exact-declaration-revert)
+requires the observed live property or component intent at its original slot and basis. The
+registered panel and built-in Inspector use the same source transaction. Candidate coordinates
+alone and mismatched declarations refuse before history publication. Independent panel
+11/11 and native conversion 1/1 pass. The broader Windows owner run passes 106/107,
+with one prior conversion budget assertion reproduced separately.
+
 The [selective collection edit](../authoring-read-projection-design.md#selective-edits-in-authored-collections)
 keeps the selected replacement and previous value in the original Scene and Prefab history.
 The inverse follows a changed key. Exact final file validation and nominal Schema readmission

@@ -139,12 +139,15 @@ Rules:
   Hosts may admit that immutable source-owned repair candidate for a UI Prefab without admitting
   arbitrary raw structural patches. The dedicated preparation origin is not caller-set metadata,
   and commit still checks the source owner, revision and Schema admission.
-  Property-claim discovery retains the original instance path and slot together. Preparing Revert
-  from that address delegates to the same source operation and preserves its exact inverse.
-  Effective inspection can supply the same path and slot when the selected field has an exact
-  controlling claim in the containing source. The Host retains the prepared edit and verifies
-  the original composition sources before consuming it. Undo and Redo use the resulting ordinary
-  history entry.
+  Property-claim discovery retains the original read-source identity, instance path and slot
+  together. A property Revert requires that live claim handle or the complete observed
+  declaration. The source owner checks its target, component version, field path and exact
+  stored intent before cloning the selected overlay. A whole-component Revert requires its
+  complete observed declaration at the same slot, including every property in a property group.
+  Effective inspection resolves the compiler's controlling claim to the live declaration under
+  the original source basis.
+  The Host retains the prepared edit and verifies the original composition sources before
+  consuming it. Undo and Redo use the resulting ordinary history entry.
 - Setting a selected effective scalar writes one stable property claim at the directly owned
   instance layer. The selected compiler supplies its base, target route and any existing
   component group. Source-owned lowering preserves existing claims and prepares the exact

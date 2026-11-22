@@ -1145,7 +1145,7 @@ impl EditorApplication {
         &self,
         basis: &nara::tooling::EditorDocumentQueryBasis,
         path: &nara::scene::PrefabInstancePath,
-        action: nara::scene::PrefabRevert,
+        action: nara::scene::PrefabRevert<'_>,
         limits: nara::scene::PrefabDeclarationLimits,
     ) -> Result<
         nara::tooling::PreparedEditorDocumentEdit,

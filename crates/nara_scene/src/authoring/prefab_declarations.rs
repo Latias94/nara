@@ -11,8 +11,8 @@ use super::{
 use crate::{
     AuthoringSchemaBasis, PrefabComponentIntent, PrefabEntityTarget, PrefabInstance,
     PrefabInstancePath, PrefabInstancePathSegment, PrefabOverlay, PrefabOverlaySlot,
-    PrefabPropertyClaim, PrefabPropertyIntent, PrefabRevert, SceneEntityId, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
+    PrefabPropertyClaim, PrefabPropertyClaimRef, PrefabPropertyIntent, PrefabRevert, SceneEntityId,
+    SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
     prefab::{PrefabOverlayCostLimits, prefab_instance_cost},
 };
 
@@ -91,6 +91,8 @@ pub enum PrefabDeclarationError {
     InstanceAbsent,
     OverlayAbsent,
     SlotNotFound,
+    ComponentClaimRequired,
+    PropertyClaimRequired,
     ConflictingClaim,
     StaleObservedIntent,
     AlreadyWritten,
@@ -114,9 +116,11 @@ impl PrefabDeclarationError {
             Self::InstanceAbsent => "the selected optional instance declaration is absent",
             Self::OverlayAbsent => "the selected instance has no overlay",
             Self::SlotNotFound => "the selected overlay intent was not found",
+            Self::ComponentClaimRequired => "component Revert requires the observed declaration",
+            Self::PropertyClaimRequired => "property Revert requires the observed declaration",
             Self::ConflictingClaim => "a same-layer property claim is an ancestor or descendant",
             Self::StaleObservedIntent => {
-                "the observed property write disagrees with current source intent"
+                "the observed declaration disagrees with current source intent"
             }
             Self::AlreadyWritten => "the selected property already has this exact claim",
             Self::BudgetExceeded => "source declaration work exceeds its logical limits",
@@ -133,6 +137,8 @@ impl PrefabDeclarationError {
             Self::InstanceAbsent => "scene.authoring-prefab-instance-absent",
             Self::OverlayAbsent => "scene.authoring-prefab-overlay-absent",
             Self::SlotNotFound => "scene.authoring-prefab-slot-not-found",
+            Self::ComponentClaimRequired => "scene.authoring-prefab-component-claim-required",
+            Self::PropertyClaimRequired => "scene.authoring-prefab-property-claim-required",
             Self::ConflictingClaim => "scene.authoring-prefab-conflicting-claim",
             Self::StaleObservedIntent => "scene.authoring-prefab-stale-observed-intent",
             Self::AlreadyWritten => "scene.authoring-prefab-already-written",
@@ -201,21 +207,41 @@ impl<'a> PrefabPropertyClaims<'a> {
         })
     }
 
-    pub fn intent(
-        self,
-        slot: PrefabOverlaySlot,
-    ) -> Result<&'a PrefabPropertyIntent, PrefabDeclarationError> {
+    /// Borrows the complete observed declaration for one property coordinate.
+    #[must_use]
+    pub fn claim_at(self, slot: PrefabOverlaySlot) -> Option<PrefabPropertyClaimRef<'a>> {
         let PrefabOverlaySlot::Property {
             component_index,
             claim_index,
         } = slot
         else {
-            return Err(PrefabDeclarationError::SlotNotFound);
+            return None;
         };
-        self.component(component_index)
-            .and_then(|component| component.claims.get(claim_index))
-            .map(|claim| &claim.intent)
+        let component = self.component(component_index)?;
+        Some(PrefabPropertyClaimRef {
+            slot,
+            target: component.target,
+            component: component.component,
+            version: component.version,
+            claim: component.claims.get(claim_index)?,
+        })
+    }
+
+    pub fn intent(
+        self,
+        slot: PrefabOverlaySlot,
+    ) -> Result<&'a PrefabPropertyIntent, PrefabDeclarationError> {
+        self.claim_at(slot)
+            .map(|declaration| &declaration.claim().intent)
             .ok_or(PrefabDeclarationError::SlotNotFound)
+    }
+}
+
+impl PrefabOverlay {
+    /// Borrows a property declaration from this overlay observation.
+    #[must_use]
+    pub fn property_claim_at(&self, slot: PrefabOverlaySlot) -> Option<PrefabPropertyClaimRef<'_>> {
+        PrefabPropertyClaims(&self.components).claim_at(slot)
     }
 }
 
@@ -259,7 +285,7 @@ impl SceneAuthoringSession {
         &self,
         base_revision: SceneAuthoringRevision,
         path: &PrefabInstancePath,
-        action: PrefabRevert,
+        action: PrefabRevert<'_>,
         limits: PrefabDeclarationLimits,
     ) -> Result<PreparedSceneAuthoringEdit, ScenePatchReport> {
         if base_revision != self.revision() {
@@ -313,7 +339,7 @@ impl PrefabAuthoringSession {
         &self,
         base_revision: SceneAuthoringRevision,
         path: &PrefabInstancePath,
-        action: PrefabRevert,
+        action: PrefabRevert<'_>,
         limits: PrefabDeclarationLimits,
     ) -> Result<PreparedPrefabAuthoringEdit, ScenePatchReport> {
         if base_revision != self.revision() {
@@ -410,7 +436,7 @@ fn observe(
 fn lower_revert(
     entities: &[SceneEntityRecord],
     path: &PrefabInstancePath,
-    action: PrefabRevert,
+    action: PrefabRevert<'_>,
     limits: PrefabDeclarationLimits,
 ) -> Result<ScenePatchDocument, PrefabDeclarationError> {
     let mut budget = DeclarationBudget::new(limits);
@@ -429,14 +455,14 @@ fn lower_revert(
         .overrides
         .as_ref()
         .ok_or(PrefabDeclarationError::OverlayAbsent)?;
-    validate_revert(overlay, action)?;
+    let slot = validate_revert(overlay, action)?;
     let mut value = root.clone();
     let selected = instance_at_mut(&mut value, &path.steps)?
         .as_mut()
         .ok_or(PrefabDeclarationError::InstanceAbsent)?;
-    match action {
-        PrefabRevert::Overlay => selected.overrides = None,
-        PrefabRevert::Intent(slot) => revert_intent(
+    match slot {
+        None => selected.overrides = None,
+        Some(slot) => revert_intent(
             selected
                 .overrides
                 .as_mut()
@@ -544,28 +570,39 @@ fn visit_nested(
 
 fn validate_revert(
     overlay: &PrefabOverlay,
-    action: PrefabRevert,
-) -> Result<(), PrefabDeclarationError> {
-    let found = match action {
-        PrefabRevert::Overlay => true,
-        PrefabRevert::Intent(slot) => match slot {
-            PrefabOverlaySlot::Addition { index } => index < overlay.additions.len(),
-            PrefabOverlaySlot::InstanceClaim { index } => index < overlay.instances.len(),
-            PrefabOverlaySlot::Component { index } => index < overlay.components.len(),
-            PrefabOverlaySlot::Property {
-                component_index,
-                claim_index,
-            } => {
-                matches!(overlay.components.get(component_index),
-                    Some(PrefabComponentIntent::Properties { claims, .. })
-                    if claim_index < claims.len())
-            }
-            PrefabOverlaySlot::Placement { index } => index < overlay.placements.len(),
-            PrefabOverlaySlot::Suppression { index } => index < overlay.suppressions.len(),
-        },
+    action: PrefabRevert<'_>,
+) -> Result<Option<PrefabOverlaySlot>, PrefabDeclarationError> {
+    let slot = match action {
+        PrefabRevert::Overlay => return Ok(None),
+        PrefabRevert::Component { index, observed } => {
+            return overlay
+                .components
+                .get(index)
+                .filter(|current| current.exactly_matches(observed))
+                .map(|_| Some(PrefabOverlaySlot::Component { index }))
+                .ok_or(PrefabDeclarationError::StaleObservedIntent);
+        }
+        PrefabRevert::Property(expected) => {
+            return (overlay.property_claim_at(expected.slot()) == Some(expected))
+                .then_some(Some(expected.slot()))
+                .ok_or(PrefabDeclarationError::StaleObservedIntent);
+        }
+        PrefabRevert::Intent(slot) => slot,
+    };
+    let found = match slot {
+        PrefabOverlaySlot::Addition { index } => index < overlay.additions.len(),
+        PrefabOverlaySlot::InstanceClaim { index } => index < overlay.instances.len(),
+        PrefabOverlaySlot::Component { .. } => {
+            return Err(PrefabDeclarationError::ComponentClaimRequired);
+        }
+        PrefabOverlaySlot::Property { .. } => {
+            return Err(PrefabDeclarationError::PropertyClaimRequired);
+        }
+        PrefabOverlaySlot::Placement { index } => index < overlay.placements.len(),
+        PrefabOverlaySlot::Suppression { index } => index < overlay.suppressions.len(),
     };
     found
-        .then_some(())
+        .then_some(Some(slot))
         .ok_or(PrefabDeclarationError::SlotNotFound)
 }
 

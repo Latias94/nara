@@ -632,6 +632,12 @@ trajectory passing on an isolated rerun. The
 [qualification](../architecture/authoring-read-projection-design.md#november-22-root-absence-qualification)
 records the source-demand, independent panel and native results.
 
+The [stored declaration Revert contract](../architecture/authoring-read-projection-design.md#stored-prefab-property-claims)
+requires a live property handle or the complete observed declaration at the live slot.
+Whole-component Revert also checks the observed declaration. The source owner compares
+the actual stored intent before preparing a change, including when a candidate exposes
+a different declaration at numerically equal coordinates.
+
 ## R3: Behavior Representation And Immutable Module Publications
 
 **Design:** D02, D03, D06. **State:** the closed native/data Scene family is adopted under ADR 0006

@@ -46,7 +46,8 @@ pub(crate) use overlay::validate_claim_paths;
 
 pub use declaration::{
     PrefabDeclarationSource, PrefabInstanceLocation, PrefabInstancePath, PrefabInstancePathSegment,
-    PrefabOverlaySlot, PrefabRevert, SceneCompilationFailure, SceneCompilationFailureKind,
+    PrefabOverlaySlot, PrefabPropertyClaimRef, PrefabRevert, SceneCompilationFailure,
+    SceneCompilationFailureKind,
 };
 #[cfg(feature = "serde")]
 pub(crate) use overlay::cost::{PrefabOverlayCost, PrefabOverlayCostError, PrefabOverlayCostKind};

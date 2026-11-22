@@ -370,12 +370,18 @@ fn public_extraction_adopts_real_outputs_preserves_selective_history_and_reopens
                 _ => Vec::new(),
             },
         );
-        let pin = pins
+        let pin_slot = pins
             .next()
             .expect("extraction preserves the original property pin");
         assert!(pins.next().is_none());
+        let pin = overlay.property_claim_at(pin_slot).unwrap();
         let prepared = editor
-            .prepare_prefab_revert(&basis, &path, PrefabRevert::Intent(pin), Default::default())
+            .prepare_prefab_revert(
+                &basis,
+                &path,
+                PrefabRevert::Property(pin),
+                Default::default(),
+            )
             .unwrap();
         applied(editor.commit_authoring_edit(prepared));
         editor.drive_editor_frame(Duration::ZERO);

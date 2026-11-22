@@ -6,8 +6,9 @@ use nara::{
     reflect::ComponentValueShape,
     scene::{
         PrefabComponentIntent, PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance,
-        PrefabInstancePath, PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent,
-        SceneDocumentCandidate, SourceDocumentKey, SourceDocumentKind,
+        PrefabInstancePath, PrefabOverlay, PrefabOverlaySlot, PrefabPropertyClaim,
+        PrefabPropertyIntent, PrefabRevert, SceneDocumentCandidate, SourceDocumentKey,
+        SourceDocumentKind,
     },
 };
 use nara_editor::{EditorPanel, EditorPanelContext, EditorPanelHost, workspace::EditorPanelTarget};
@@ -431,6 +432,94 @@ impl ClaimPanel {
         );
         assert_eq!(read(&selected), score(LEFT_SCORE));
 
+        let [
+            ScenePatchOperation::SetPrefabInstance {
+                value: Some(candidate_instance),
+                ..
+            },
+        ] = retained.patch().operations.as_slice()
+        else {
+            panic!("the retained Revert must replace one instance");
+        };
+        let preview_overlay = candidate_instance.overrides.as_ref().unwrap();
+        let preview_declaration = preview_overlay
+            .property_claim_at(preview_claim.slot())
+            .unwrap();
+        let PrefabOverlaySlot::Property {
+            component_index, ..
+        } = preview_claim.slot()
+        else {
+            panic!("the candidate claim must identify a property");
+        };
+        let live_instance = context
+            .observe_prefab_instance(&basis, selected.path(), Default::default())
+            .unwrap()
+            .instance
+            .unwrap();
+        let live_declaration = live_instance
+            .overrides
+            .as_ref()
+            .unwrap()
+            .property_claim_at(selected.slot())
+            .unwrap();
+        assert_ne!(preview_declaration, live_declaration);
+        for (action, expected_code) in [
+            (
+                PrefabRevert::Intent(preview_claim.slot()),
+                "scene.authoring-prefab-property-claim-required",
+            ),
+            (
+                PrefabRevert::Property(preview_declaration),
+                "scene.authoring-prefab-stale-observed-intent",
+            ),
+            (
+                PrefabRevert::Intent(PrefabOverlaySlot::Component {
+                    index: component_index,
+                }),
+                "scene.authoring-prefab-component-claim-required",
+            ),
+            (
+                PrefabRevert::Component {
+                    index: component_index,
+                    observed: &preview_overlay.components[component_index],
+                },
+                "scene.authoring-prefab-stale-observed-intent",
+            ),
+        ] {
+            let error = context
+                .prepare_prefab_revert(&basis, selected.path(), action, Default::default())
+                .unwrap_err();
+            let EditorEditPreparationError::Document(rejected) = error else {
+                panic!("the source owner must reject Revert with {expected_code}: {error:?}");
+            };
+            assert!(!rejected.applied);
+            assert_eq!(rejected.document, Some(self.document));
+            assert_eq!(rejected.revision, Some(basis.revision));
+            let patch_report = rejected.patch_report.as_ref().unwrap();
+            assert!(patch_report.inverse.is_none());
+            assert!(
+                patch_report
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str() == expected_code),
+                "{rejected:?}"
+            );
+            assert_eq!(context.document_query_basis(self.document).unwrap(), basis);
+            assert_eq!(read(&selected), score(LEFT_SCORE));
+            assert_eq!(read(&competing), score(RIGHT_SCORE));
+            assert_eq!(read(&absent), PrefabPropertyIntent::Absent);
+        }
+        let observed_edit = context
+            .prepare_prefab_revert(
+                &basis,
+                selected.path(),
+                PrefabRevert::Property(live_declaration),
+                Default::default(),
+            )
+            .unwrap();
+        assert_eq!(observed_edit.patch(), selected_edit.patch());
+        assert_eq!(observed_edit.inverse(), selected_edit.inverse());
+
         self.evidence.borrow_mut().review = Some(Review {
             selected,
             competing,
@@ -674,7 +763,8 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
         assert_eq!(frame(&app).workspace(), initial.workspace());
         assert!(evidence.borrow().outcomes.is_empty());
         assert_eq!(fs::read_to_string(&source_file).unwrap(), original);
-        if let Some([selected, competing]) = evidence.borrow().submissions {
+        let submissions = evidence.borrow().submissions;
+        if let Some([selected, competing]) = submissions {
             assert_eq!(
                 candidate.submissions().collect::<Vec<_>>(),
                 [(panel, selected), (panel, competing)]
@@ -683,6 +773,9 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
             assert_eq!(candidate.submissions().len(), 0);
         }
         host.submit_and_drive(&mut app, candidate, Duration::ZERO);
+        if submissions.is_none() {
+            assert_eq!(frame(&app).workspace(), initial.workspace());
+        }
         assert_navigation(&app);
     }
     drop(host);

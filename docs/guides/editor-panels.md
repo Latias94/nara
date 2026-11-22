@@ -884,10 +884,14 @@ let basis = application.document_query_basis(document)?;
 let path = PrefabInstancePath::new(anchor);
 let limits = PrefabDeclarationLimits::default();
 let observation = application.observe_prefab_instance(&basis, &path, limits)?;
+let observed = observation.instance.as_ref()
+    .and_then(|instance| instance.overrides.as_ref())
+    .and_then(|overlay| overlay.components.get(index))
+    .ok_or("The observed component declaration is unavailable")?;
 let prepared = application.prepare_prefab_revert(
     &basis,
     &observation.path,
-    PrefabRevert::Intent(PrefabOverlaySlot::Component { index }),
+    PrefabRevert::Component { index, observed },
     limits,
 )?;
 preview_changes(prepared.patch(), prepared.inverse());
@@ -917,6 +921,14 @@ address's original instance path, revision and Schema. The tool can inspect the 
 forward and inverse edits before committing. A copy refusal for a
 large value leaves its header available for review. These operations observe the saved or dirty
 working declaration in the containing source and do not resolve inherited values.
+
+For a property selected from a complete live overlay observation, borrow the declaration with
+`overlay.property_claim_at(slot)` and use `PrefabRevert::Property(declaration)` with the
+observation's path and basis. The source owner checks that declaration against the current slot.
+For a whole component declaration, pass `PrefabRevert::Component { index, observed }` with
+the component intent from the observation. Use `PrefabRevert::Intent(slot)` for additions,
+instance claims, placements and entity suppressions. A property slot supplied on its own
+returns `scene.authoring-prefab-property-claim-required`.
 
 Revert removes only the selected intent and preserves unknown siblings. Removing the last property
 claim removes its empty Properties container but retains the overlay's base pin.

@@ -137,10 +137,10 @@ pub use prefab::{
     PrefabInstance, PrefabInstanceBinding, PrefabInstanceClaim, PrefabInstanceHop,
     PrefabInstanceLocation, PrefabInstancePath, PrefabInstancePathSegment,
     PrefabInstantiationReport, PrefabOverlay, PrefabOverlaySlot, PrefabPropertyClaim,
-    PrefabPropertyIntent, PrefabReferenceArguments, PrefabRevert, PrefabSourceResolver,
-    ResolvedPrefabSource, SceneCompilationBudgetKind, SceneCompilationFailure,
-    SceneCompilationFailureKind, SceneCompilationLimits, SceneCompilationOptions,
-    SceneCompilationReport, SceneCompilationWorkingSet,
+    PrefabPropertyClaimRef, PrefabPropertyIntent, PrefabReferenceArguments, PrefabRevert,
+    PrefabSourceResolver, ResolvedPrefabSource, SceneCompilationBudgetKind,
+    SceneCompilationFailure, SceneCompilationFailureKind, SceneCompilationLimits,
+    SceneCompilationOptions, SceneCompilationReport, SceneCompilationWorkingSet,
 };
 #[cfg(feature = "serde")]
 pub use prefab_copy::{

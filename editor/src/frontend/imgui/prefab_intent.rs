@@ -180,10 +180,10 @@ impl ImguiPrefabIntent {
             can_prepare && !self.rows.is_empty(),
         ) && let Some((slot, _)) = self.rows.get(self.selected)
         {
-            self.prepare(context, PrefabRevert::Intent(*slot));
+            self.prepare(context, Some(*slot));
         }
         if button(ui, "Review entire overlay Revert", can_prepare) {
-            self.prepare(context, PrefabRevert::Overlay);
+            self.prepare(context, None);
         }
         ui.text_wrapped("Revert removes stored intent. Entire overlay Revert keeps the source link. No implicit reference or hierarchy cleanup is performed.");
         ui.separator();
@@ -480,9 +480,41 @@ impl ImguiPrefabIntent {
         }
     }
 
-    fn prepare(&mut self, context: &ImguiEditorPanelContext<'_, '_>, action: PrefabRevert) {
+    fn prepare(
+        &mut self,
+        context: &ImguiEditorPanelContext<'_, '_>,
+        slot: Option<PrefabOverlaySlot>,
+    ) {
         let Some((basis, path)) = self.basis.as_ref().zip(self.selected_path()) else {
             return;
+        };
+        let overlay = self
+            .selected_instance()
+            .and_then(|instance| instance.overrides.as_ref());
+        let action = match slot {
+            Some(PrefabOverlaySlot::Component { index }) => {
+                let Some(observed) = overlay.and_then(|overlay| overlay.components.get(index))
+                else {
+                    self.notice = Some(
+                        "The selected component intent is unavailable. Refresh declarations."
+                            .into(),
+                    );
+                    return;
+                };
+                PrefabRevert::Component { index, observed }
+            }
+            Some(slot @ PrefabOverlaySlot::Property { .. }) => {
+                let Some(claim) = overlay.and_then(|overlay| overlay.property_claim_at(slot))
+                else {
+                    self.notice = Some(
+                        "The selected property claim is unavailable. Refresh declarations.".into(),
+                    );
+                    return;
+                };
+                PrefabRevert::Property(claim)
+            }
+            Some(slot) => PrefabRevert::Intent(slot),
+            None => PrefabRevert::Overlay,
         };
         match context.prepare_prefab_revert(basis, path, action, PrefabDeclarationLimits::default())
         {

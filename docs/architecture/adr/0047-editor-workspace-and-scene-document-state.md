@@ -174,8 +174,9 @@ Rules:
   path and revision. Full headers retain the authored target, component version and property
   selector. An oversized header retains its claim address for reading and Revert. Point reads
   preserve the stored Set or Absent intent independently of its effective value or Schema
-  availability. Source-owned Revert consumes the original basis and slot through the existing
-  transaction, including for an unresolved base. See the
+  availability. Source-owned property Revert uses a live claim handle or a complete borrowed
+  declaration with the original document basis. An indexed slot alone cannot authorize it,
+  including for an unresolved base. See the
   [stored Prefab claim contract](../authoring-read-projection-design.md#stored-prefab-property-claims).
 - The effective instance observation retains one selected anchor in an explicitly named Scene
   or Prefab and the file or working copy selected for each actual compiler demand. Reads borrow

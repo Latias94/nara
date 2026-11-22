@@ -118,7 +118,7 @@ impl EditorProjectSession {
         &self,
         basis: &EditorDocumentQueryBasis,
         path: &PrefabInstancePath,
-        action: PrefabRevert,
+        action: PrefabRevert<'_>,
         limits: PrefabDeclarationLimits,
     ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
         self.validate_authoring_query_basis(basis)?;

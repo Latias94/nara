@@ -82,6 +82,11 @@ fn properties() -> PrefabComponentIntent {
     }
 }
 
+const FIRST_PROPERTY: PrefabOverlaySlot = PrefabOverlaySlot::Property {
+    component_index: 0,
+    claim_index: 0,
+};
+
 fn document(declaration: Option<PrefabInstance>) -> SceneDocument {
     let mut anchor = SceneEntityRecord::new(id("anchor")).with_component(
         ComponentTypeId::new("missing.Direct"),
@@ -163,14 +168,17 @@ fn property_revert_preserves_unknown_siblings_and_one_exact_history_entry() {
     assert_eq!(observation.revision, session.revision());
     assert_eq!(Some(observation.schema), session.authoring_schema_basis());
     assert_eq!(observation.instance, document.entities[0].prefab);
+    let declaration = observation
+        .instance
+        .as_ref()
+        .and_then(|instance| instance.overrides.as_ref())
+        .and_then(|overlay| overlay.property_claim_at(FIRST_PROPERTY))
+        .unwrap();
     let prepared = session
         .prepare_prefab_revert(
             session.revision(),
             &root_path(),
-            PrefabRevert::Intent(PrefabOverlaySlot::Property {
-                component_index: 0,
-                claim_index: 0,
-            }),
+            PrefabRevert::Property(declaration),
             limits(),
         )
         .unwrap();
@@ -211,10 +219,7 @@ fn final_property_revert_keeps_empty_base_pin_and_overlay_revert_keeps_source() 
         .prepare_prefab_revert(
             session.revision(),
             &root_path(),
-            PrefabRevert::Intent(PrefabOverlaySlot::Property {
-                component_index: 0,
-                claim_index: 0,
-            }),
+            PrefabRevert::Property(original.property_claim_at(FIRST_PROPERTY).unwrap()),
             limits(),
         )
         .unwrap();
@@ -383,13 +388,15 @@ fn intent_slots_remove_only_the_selected_array_entry_without_cascades() {
             PrefabOverlaySlot::Suppression { .. } => expected.suppressions.clear(),
             PrefabOverlaySlot::Property { .. } => unreachable!(),
         }
+        let action = match slot {
+            PrefabOverlaySlot::Component { index } => PrefabRevert::Component {
+                index,
+                observed: &original.components[index],
+            },
+            _ => PrefabRevert::Intent(slot),
+        };
         let prepared = session
-            .prepare_prefab_revert(
-                session.revision(),
-                &root_path(),
-                PrefabRevert::Intent(slot),
-                limits(),
-            )
+            .prepare_prefab_revert(session.revision(), &root_path(), action, limits())
             .unwrap();
         assert_eq!(
             prepared.document().entities[0]
@@ -682,6 +689,105 @@ fn unadmitted_sources_and_excessive_path_depth_are_explicit_refusals() {
 }
 
 #[test]
+fn property_revert_refuses_a_coordinate_or_a_changed_stored_declaration() {
+    let mut original = overlay();
+    let mut component = properties();
+    let PrefabComponentIntent::Properties { claims, .. } = &mut component else {
+        unreachable!();
+    };
+    claims[0].intent = PrefabPropertyIntent::Set(ComponentValue::f64(-0.0).unwrap());
+    original.components.push(component);
+    let document = document(Some(instance(original.clone())));
+    let session = scene(&document);
+    let revision = session.revision();
+    let history = session.history_status();
+    let retained = session.shared_document();
+    let mut changed_value = original.clone();
+    let observed = original.components[0].clone();
+    let PrefabComponentIntent::Properties { claims, .. } = &mut changed_value.components[0] else {
+        unreachable!();
+    };
+    claims[0].intent = PrefabPropertyIntent::Set(ComponentValue::f64(0.0).unwrap());
+    let mut changed_field = original;
+    let PrefabComponentIntent::Properties { claims, .. } = &mut changed_field.components[0] else {
+        unreachable!();
+    };
+    claims[0].path = ComponentPropertyPath::new(ComponentFieldId::new("another-field"));
+    claims[0].intent = PrefabPropertyIntent::Absent;
+
+    for (action, expected) in [
+        (
+            PrefabRevert::Intent(FIRST_PROPERTY),
+            PrefabDeclarationError::PropertyClaimRequired,
+        ),
+        (
+            PrefabRevert::Intent(PrefabOverlaySlot::Component { index: 0 }),
+            PrefabDeclarationError::ComponentClaimRequired,
+        ),
+        (
+            PrefabRevert::Property(changed_value.property_claim_at(FIRST_PROPERTY).unwrap()),
+            PrefabDeclarationError::StaleObservedIntent,
+        ),
+        (
+            PrefabRevert::Property(changed_field.property_claim_at(FIRST_PROPERTY).unwrap()),
+            PrefabDeclarationError::StaleObservedIntent,
+        ),
+        (
+            PrefabRevert::Component {
+                index: 0,
+                observed: &changed_value.components[0],
+            },
+            PrefabDeclarationError::StaleObservedIntent,
+        ),
+        (
+            PrefabRevert::Component {
+                index: 0,
+                observed: &changed_field.components[0],
+            },
+            PrefabDeclarationError::StaleObservedIntent,
+        ),
+    ] {
+        let report = session
+            .prepare_prefab_revert(revision, &root_path(), action, limits())
+            .err()
+            .expect("Revert must refuse a stale or incomplete declaration");
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code().as_str() == expected.diagnostic_code()),
+            "{:?}",
+            report.diagnostics,
+        );
+    }
+    assert_eq!(session.revision(), revision);
+    assert_eq!(session.history_status(), history);
+    assert!(Arc::ptr_eq(&retained, &session.shared_document()));
+    let prepared = session
+        .prepare_prefab_revert(
+            revision,
+            &root_path(),
+            PrefabRevert::Component {
+                index: 0,
+                observed: &observed,
+            },
+            limits(),
+        )
+        .unwrap();
+    assert!(
+        prepared.document().entities[0]
+            .prefab
+            .as_ref()
+            .unwrap()
+            .overrides
+            .as_ref()
+            .unwrap()
+            .components
+            .is_empty()
+    );
+}
+
+#[test]
 fn reverted_source_round_trips_keep_unknown_intent_and_reject_pre_reopen_tokens() {
     let mut original = overlay();
     original.components.push(properties());
@@ -692,11 +798,8 @@ fn reverted_source_round_trips_keep_unknown_intent_and_reject_pre_reopen_tokens(
         target: PrefabEntityTarget::source(id("detached")),
         value: None,
     });
-    let document = document(Some(instance(original)));
-    let action = PrefabRevert::Intent(PrefabOverlaySlot::Property {
-        component_index: 0,
-        claim_index: 0,
-    });
+    let document = document(Some(instance(original.clone())));
+    let action = PrefabRevert::Property(original.property_claim_at(FIRST_PROPERTY).unwrap());
     let mut expected = document.clone();
     expected.entities[0]
         .prefab

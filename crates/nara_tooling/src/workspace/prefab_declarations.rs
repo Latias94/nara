@@ -212,13 +212,19 @@ impl EditorWorkspace {
         claim: &EditorPrefabPropertyClaimTarget,
         limits: PrefabDeclarationLimits,
     ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
-        self.document_query_owner
-            .require(&claim.owner)
+        let declaration = AuthoringReadScope::Live(self)
+            .resolve_prefab_property_claim(claim)
+            .and_then(|source| {
+                source
+                    .prefab_property_claims(claim.path())?
+                    .claim_at(claim.slot())
+                    .ok_or_else(|| PrefabDeclarationError::SlotNotFound.into())
+            })
             .map_err(|error| rejected_basis_report(self, claim.basis(), error))?;
         self.prepare_prefab_revert(
             claim.basis(),
             claim.path(),
-            PrefabRevert::Intent(claim.slot()),
+            PrefabRevert::Property(declaration),
             limits,
         )
     }

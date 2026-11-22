@@ -4,24 +4,27 @@ use std::{mem, sync::Arc};
 
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
-use nara_reflect::{ComponentPropertyError, ComponentPropertyReadBudget};
+use nara_reflect::{
+    ComponentPropertyError, ComponentPropertyReadBudget, ComponentSchemaVersion, ComponentTypeId,
+};
 use nara_scene::{
     __private::{
         AuthoringPrefabInspectionError, AuthoringPrefabPropertyWriteError,
         ObservedPrefabPropertyWrite, SourceDocumentInput,
         try_inspect_authoring_prefab_instance_with_loader,
     },
-    AuthoringPrefabInstanceSnapshot, AuthoringPrefabPropertyClaimKind, AuthoringReadError,
-    PrefabDeclarationError, PrefabDeclarationLimits, PrefabDocument, PrefabInstancePath,
-    PrefabOverlaySlot, PrefabPropertyIntent, PrefabRevert, SceneCompilationFailureKind,
-    SceneCompilationOptions, SceneDocument, SceneEntityId,
+    AuthoringPrefabInstanceSnapshot, AuthoringPrefabPropertyClaim,
+    AuthoringPrefabPropertyClaimKind, AuthoringReadError, PrefabDeclarationError,
+    PrefabDeclarationLimits, PrefabDocument, PrefabPropertyClaimRef, PrefabPropertyIntent,
+    PrefabRevert, SceneCompilationFailureKind, SceneCompilationOptions, SceneDocument,
+    SceneEntityId,
 };
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskRejection, TaskReturnState, TaskSpawnRequest,
     TaskTerminal,
 };
 use nara_tooling::{
-    EditorActionOutcome, EditorDocumentKind, EditorDocumentQueryBasis,
+    EditorActionOutcome, EditorDocumentId, EditorDocumentKind, EditorDocumentQueryBasis,
     EditorPrefabInspectionAction as Action, EditorPrefabInspectionId,
     EditorPrefabInspectionOutcome as Outcome, EditorPrefabInspectionPhase as Phase,
     EditorPrefabInspectionRejection as Rejection, EditorPrefabInspectionResult as Terminal,
@@ -118,11 +121,14 @@ impl InspectionWork {
 }
 
 enum InspectionEdit {
-    Revert {
-        path: PrefabInstancePath,
-        slot: PrefabOverlaySlot,
-    },
+    Revert(InspectionRevert),
     Write(ObservedPrefabPropertyWrite),
+}
+
+struct InspectionRevert {
+    claim: AuthoringPrefabPropertyClaim,
+    component: ComponentTypeId,
+    version: ComponentSchemaVersion,
 }
 
 #[derive(Default)]
@@ -467,8 +473,8 @@ impl EditorProjectSession {
             return Err(Rejection::WrongPhase);
         };
         self.check_prefab_inspection_basis(basis)?;
-        let (path, slot) = exact_containing_claim(snapshot, address)?;
-        self.queue_prefab_inspection_edit(InspectionEdit::Revert { path, slot }, limits);
+        let observed = exact_containing_claim(snapshot, address)?;
+        self.queue_prefab_inspection_edit(InspectionEdit::Revert(observed), limits);
         Ok(())
     }
 
@@ -567,12 +573,14 @@ impl EditorProjectSession {
             } => {
                 self.revalidate_prefab_inspection_sources(&basis)?;
                 match change {
-                    InspectionEdit::Revert { path, slot } => {
+                    InspectionEdit::Revert(observed) => {
+                        let declaration = self
+                            .current_inspected_property_claim(basis.document.document, &observed)?;
                         let edit = self
                             .prepare_prefab_revert(
                                 &basis.document,
-                                &path,
-                                PrefabRevert::Intent(slot),
+                                observed.claim.location.path(),
+                                PrefabRevert::Property(declaration),
                                 limits,
                             )
                             .map_err(preparation_failure)?;
@@ -620,6 +628,43 @@ impl EditorProjectSession {
             }
             state => Ok(state),
         }
+    }
+
+    fn current_inspected_property_claim(
+        &self,
+        document: EditorDocumentId,
+        observed: &InspectionRevert,
+    ) -> Result<PrefabPropertyClaimRef<'_>, Failure> {
+        let path = observed.claim.location.path();
+        let declarations = if let Some(slot) = self.workspace.scene(document) {
+            slot.session()
+                .prefab_property_claims(&path.anchor, &path.steps)
+        } else if let Some(slot) = self.workspace.prefab(document) {
+            slot.session()
+                .prefab_property_claims(&path.anchor, &path.steps)
+        } else {
+            return Err(Rejection::StaleSource.into());
+        }
+        .map_err(|_| Rejection::StaleSource)?;
+        declarations
+            .claim_at(observed.claim.slot)
+            .filter(|declaration| {
+                let claim = declaration.claim();
+                declaration.component() == &observed.component
+                    && declaration.version() == observed.version
+                    && claim.path == observed.claim.path
+                    && matches!(
+                        (&claim.intent, observed.claim.kind),
+                        (
+                            PrefabPropertyIntent::Set(_),
+                            AuthoringPrefabPropertyClaimKind::Set
+                        ) | (
+                            PrefabPropertyIntent::Absent,
+                            AuthoringPrefabPropertyClaimKind::Absent
+                        )
+                    )
+            })
+            .ok_or_else(|| Rejection::StaleSource.into())
     }
 
     fn finish_prefab_inspection_work(&self, work: InspectionWork) -> Result<State, Failure> {
@@ -912,7 +957,7 @@ fn inspect_prefab(
 fn exact_containing_claim(
     snapshot: &AuthoringPrefabInstanceSnapshot,
     address: &EditorPrefabPropertyAddress,
-) -> Result<(PrefabInstancePath, PrefabOverlaySlot), Rejection> {
+) -> Result<InspectionRevert, Rejection> {
     admit_prefab_property_address(address)?;
     let component = snapshot
         .target(&address.entity)
@@ -923,7 +968,11 @@ fn exact_containing_claim(
         .property_value(&address.property, &mut prefab_property_read_budget())
         .map_err(property_read_rejection)?;
     let claim = property.revert_claim().ok_or(Rejection::NoCurrentClaim)?;
-    Ok((claim.location.path().clone(), claim.slot))
+    Ok(InspectionRevert {
+        claim: claim.clone(),
+        component: address.component.clone(),
+        version: component.fact().version(),
+    })
 }
 
 fn admit_prefab_property_address(address: &EditorPrefabPropertyAddress) -> Result<(), Rejection> {

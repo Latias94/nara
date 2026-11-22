@@ -44,7 +44,7 @@ enum EditRequest<'a> {
     Properties(&'a [AuthoringPropertyEdit]),
     PrefabRevert {
         path: &'a PrefabInstancePath,
-        action: PrefabRevert,
+        action: PrefabRevert<'a>,
         limits: PrefabDeclarationLimits,
     },
     PrefabPropertyWrite {
@@ -164,13 +164,14 @@ impl EditorWorkspace {
     /// Prepares one source-owned Revert without activating its document or changing selection.
     ///
     /// Snapshot selectors require the exact incarnation, revision and Schema admission.
+    /// Property and component Revert also require the complete observed declaration.
     /// The source owner lowers the Revert and retains the candidate and inverse consumed by
     /// [`Self::commit_authoring_edit`]; this method adds no publication or history authority.
     pub fn prepare_prefab_revert(
         &self,
         basis: &EditorDocumentQueryBasis,
         path: &PrefabInstancePath,
-        action: PrefabRevert,
+        action: PrefabRevert<'_>,
         limits: PrefabDeclarationLimits,
     ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
         self.prepare_edit(

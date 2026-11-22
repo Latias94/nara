@@ -177,7 +177,7 @@ impl EditorPanelContext<'_, '_> {
         &self,
         basis: &EditorDocumentQueryBasis,
         path: &PrefabInstancePath,
-        action: PrefabRevert,
+        action: PrefabRevert<'_>,
         limits: PrefabDeclarationLimits,
     ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
         self.application

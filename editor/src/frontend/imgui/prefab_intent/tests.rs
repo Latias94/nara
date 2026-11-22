@@ -2,12 +2,16 @@ use std::{fs, time::Duration};
 
 use nara::{
     asset::{AssetRef, AssetSourcePath},
-    reflect::{ComponentRegistryBuilder, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
+    reflect::{
+        ComponentFieldId, ComponentPropertyPath, ComponentRegistryBuilder, ComponentSchemaVersion,
+        ComponentTypeId, ComponentValue,
+    },
     scene::{
         InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentSetMode, PrefabDocument,
-        PrefabEntityTarget, PrefabInstanceClaim, SceneCompilationFailureKind, SceneComponentRecord,
-        SceneDocument, SceneEntityId, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
-        SourceDocumentKey, SourceDocumentKind,
+        PrefabEntityTarget, PrefabInstanceClaim, PrefabPropertyClaim, PrefabPropertyIntent,
+        SceneCompilationFailureKind, SceneComponentRecord, SceneDocument, SceneEntityId,
+        SceneEntityRecord, ScenePlacement, ScenePlacementParent, SourceDocumentKey,
+        SourceDocumentKind,
     },
     tooling::{EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentMutation},
 };
@@ -35,11 +39,15 @@ fn instance(overlay: Option<PrefabOverlay>) -> PrefabInstance {
 }
 
 fn project(extra_entities: usize) -> InteractionProject {
-    let project = InteractionProject::new();
     let mut overlay = PrefabOverlay::new(key());
     overlay
         .suppressions
         .push(PrefabEntityTarget::source(id("missing")));
+    project_with_overlay(extra_entities, overlay)
+}
+
+fn project_with_overlay(extra_entities: usize, overlay: PrefabOverlay) -> InteractionProject {
+    let project = InteractionProject::new();
     let mut anchor = SceneEntityRecord::new(id("intent-anchor"));
     anchor.prefab = Some(instance(Some(overlay)));
     let mut entities = vec![anchor];
@@ -80,10 +88,7 @@ fn prepare(harness: &mut Harness) {
         let basis = context.document_query_basis(document).unwrap();
         let mut state = ImguiPrefabIntent::default();
         state.refresh(context, basis);
-        state.prepare(
-            context,
-            PrefabRevert::Intent(PrefabOverlaySlot::Suppression { index: 0 }),
-        );
+        state.prepare(context, Some(PrefabOverlaySlot::Suppression { index: 0 }));
         assert!(state.review.is_some(), "{:?}", state.notice);
         context.widgets.prefab_intent = state;
     }));
@@ -366,11 +371,9 @@ fn source_observation_retains_nested_paths_and_every_intent_kind_including_detac
         target: PrefabEntityTarget::source(id("unknown")),
         component: ComponentTypeId::new("missing.Properties"),
         version: ComponentSchemaVersion::ONE,
-        claims: vec![nara::scene::PrefabPropertyClaim {
-            path: nara::reflect::ComponentPropertyPath::new(nara::reflect::ComponentFieldId::new(
-                "value",
-            )),
-            intent: nara::scene::PrefabPropertyIntent::Absent,
+        claims: vec![PrefabPropertyClaim {
+            path: ComponentPropertyPath::new(ComponentFieldId::new("value")),
+            intent: PrefabPropertyIntent::Absent,
         }],
     });
     overlay
@@ -604,7 +607,46 @@ fn inspector_prefab_tab_paints_without_selection_and_retains_its_bounded_observa
 
 #[test]
 fn real_inspector_controls_retain_the_same_review_across_tabs_then_cancel_or_commit() {
-    let mut harness = Harness::with_project(project(0), 0);
+    assert_inspector_revert(
+        project(0),
+        PrefabOverlaySlot::Suppression { index: 0 },
+        PrefabOverlay::new(key()),
+    );
+
+    let property_overlay = |claims| {
+        let mut overlay = PrefabOverlay::new(key());
+        overlay.components.push(PrefabComponentIntent::Properties {
+            target: PrefabEntityTarget::source(id("preserved")),
+            component: ComponentTypeId::new("studio.unavailable.Payload"),
+            version: ComponentSchemaVersion::ONE,
+            claims,
+        });
+        overlay
+    };
+    let retained = PrefabPropertyClaim {
+        path: ComponentPropertyPath::new(ComponentFieldId::new("keep")),
+        intent: PrefabPropertyIntent::Absent,
+    };
+    let selected = PrefabPropertyClaim {
+        path: ComponentPropertyPath::new(ComponentFieldId::new("payload")),
+        intent: PrefabPropertyIntent::Set(ComponentValue::Null),
+    };
+    assert_inspector_revert(
+        project_with_overlay(0, property_overlay(vec![retained.clone(), selected])),
+        PrefabOverlaySlot::Property {
+            component_index: 0,
+            claim_index: 1,
+        },
+        property_overlay(vec![retained]),
+    );
+}
+
+fn assert_inspector_revert(
+    project: InteractionProject,
+    slot: PrefabOverlaySlot,
+    reverted_overlay: PrefabOverlay,
+) {
+    let mut harness = Harness::with_project(project, 0);
     let before = harness.application.current_frame().unwrap();
     let basis = basis(&harness);
     let inspector = harness
@@ -664,12 +706,44 @@ fn real_inspector_controls_retain_the_same_review_across_tabs_then_cancel_or_com
     };
     let original = before.workspace().document(basis.document).unwrap().clone();
     harness.click_control("Inspector tab: Prefab Intent");
+    let state = &mut harness
+        .frontend
+        .presentation
+        .widgets
+        .get_mut(&inspector)
+        .unwrap()
+        .prefab_intent;
+    state.selected = state.rows.iter().position(|(row, _)| *row == slot).unwrap();
+    state.rebuild_detail();
+    let anchor = state.selected_path().unwrap().anchor.clone();
+    let original_instance = state.selected_instance().unwrap().clone();
+    let reverted_instance = PrefabInstance {
+        overrides: Some(reverted_overlay),
+        ..original_instance.clone()
+    };
     harness.click_control("Prefab Intent: Review selected Revert");
     let state = &harness.frontend.presentation.widgets[&inspector].prefab_intent;
-    let candidate = state.review.as_ref().unwrap();
+    let candidate = state
+        .review
+        .as_ref()
+        .unwrap_or_else(|| panic!("Revert preparation for {slot:?} failed: {:?}", state.notice));
     assert_eq!(candidate.prepared.base_revision(), basis.revision);
-    assert!(candidate.expected.contains("missing"));
-    assert!(!candidate.value.contains("missing"));
+    assert_eq!(
+        candidate.prepared.patch().operations.as_slice(),
+        &[ScenePatchOperation::SetPrefabInstance {
+            entity: anchor.clone(),
+            expected: Some(original_instance.clone()),
+            value: Some(reverted_instance.clone()),
+        }],
+    );
+    assert_eq!(
+        candidate.prepared.inverse().operations.as_slice(),
+        &[ScenePatchOperation::SetPrefabInstance {
+            entity: anchor,
+            expected: Some(reverted_instance.clone()),
+            value: Some(original_instance.clone()),
+        }],
+    );
     navigate_tabs(&mut harness);
     assert_eq!(
         harness
@@ -706,6 +780,15 @@ fn real_inspector_controls_retain_the_same_review_across_tabs_then_cancel_or_com
         state.result.as_ref(),
         Some((_, PanelActionDispatch::Dispatched(EditorActionOutcome::Workspace(report)))) if report.applied
     ));
+    let refresh_instance = |harness: &mut Harness| {
+        harness.click_control("Prefab Intent: Refresh declarations");
+        harness.frontend.presentation.widgets[&inspector]
+            .prefab_intent
+            .selected_instance()
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(refresh_instance(&mut harness), reverted_instance);
     let frame = harness.application.current_frame().unwrap();
     let after = frame.workspace().document(basis.document).unwrap();
     assert_eq!(after.history.undo_depth, original.history.undo_depth + 1);
@@ -732,4 +815,6 @@ fn real_inspector_controls_retain_the_same_review_across_tabs_then_cancel_or_com
             .undo_depth,
         original.history.undo_depth,
     );
+    drop(harness.draw());
+    assert_eq!(refresh_instance(&mut harness), original_instance);
 }

@@ -29,12 +29,11 @@ use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
     PrefabDeclarationLimits, PrefabDocument, PrefabDocumentCandidate, PrefabEntityOrigin,
     PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabInstancePath, PrefabOverlay,
-    PrefabOverlaySlot, PrefabPropertyClaim, PrefabPropertyIntent, PrefabRevert,
-    PrefabSourceResolver, SceneAuthoringRevision, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
-    SourceDocumentKey, SourceDocumentKind, UnavailableRecordManifest,
-    UnavailableRecordManifestEntry,
+    PrefabPropertyClaim, PrefabPropertyIntent, PrefabRevert, PrefabSourceResolver,
+    SceneAuthoringRevision, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, ScenePlacement, ScenePlacementParent, SourceDocumentKey,
+    SourceDocumentKind, UnavailableRecordManifest, UnavailableRecordManifestEntry,
 };
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId, EditorDocumentKind,
@@ -1645,8 +1644,12 @@ fn observed_prefab_intent_revert_preserves_unknown_siblings_and_round_trips_both
         let original = observed.instance.as_ref().unwrap();
         assert_eq!(observed.revision, basis.revision);
         assert_eq!(Some(&observed.schema), basis.schema.as_ref());
-        assert_eq!(original.overrides.as_ref().unwrap().components.len(), 2);
-        let action = PrefabRevert::Intent(PrefabOverlaySlot::Component { index: 0 });
+        let components = &original.overrides.as_ref().unwrap().components;
+        assert_eq!(components.len(), 2);
+        let action = PrefabRevert::Component {
+            index: 0,
+            observed: &components[0],
+        };
         let cancelled = editor
             .prepare_prefab_revert(&basis, &observed.path, action, limits)
             .unwrap();

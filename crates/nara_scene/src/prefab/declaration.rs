@@ -1,6 +1,13 @@
 //! Source declaration selectors and disposable compilation observations.
 
-use crate::{SceneEntityId, SourceDocumentKey};
+use nara_reflect::{
+    __private::component_values_exactly_match, ComponentSchemaVersion, ComponentTypeId,
+};
+
+use crate::{
+    PrefabComponentIntent, PrefabEntityTarget, PrefabPropertyClaim, PrefabPropertyIntent,
+    SceneEntityId, SourceDocumentKey,
+};
 
 /// Why composition refused publication.
 ///
@@ -69,11 +76,142 @@ pub enum PrefabOverlaySlot {
     },
 }
 
+/// A borrowed property declaration, including the authored route and the exact stored intent.
+#[derive(Debug, Clone, Copy)]
+pub struct PrefabPropertyClaimRef<'a> {
+    pub(crate) slot: PrefabOverlaySlot,
+    pub(crate) target: &'a PrefabEntityTarget,
+    pub(crate) component: &'a ComponentTypeId,
+    pub(crate) version: ComponentSchemaVersion,
+    pub(crate) claim: &'a PrefabPropertyClaim,
+}
+
+impl<'a> PrefabPropertyClaimRef<'a> {
+    #[must_use]
+    pub const fn slot(self) -> PrefabOverlaySlot {
+        self.slot
+    }
+
+    #[must_use]
+    pub const fn component(self) -> &'a ComponentTypeId {
+        self.component
+    }
+
+    #[must_use]
+    pub const fn version(self) -> ComponentSchemaVersion {
+        self.version
+    }
+
+    #[must_use]
+    pub const fn claim(self) -> &'a PrefabPropertyClaim {
+        self.claim
+    }
+}
+
+impl PartialEq for PrefabPropertyClaimRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.slot == other.slot
+            && self.target == other.target
+            && self.component == other.component
+            && self.version == other.version
+            && property_claims_exactly_match(self.claim, other.claim)
+    }
+}
+
+impl Eq for PrefabPropertyClaimRef<'_> {}
+
+fn property_claims_exactly_match(left: &PrefabPropertyClaim, right: &PrefabPropertyClaim) -> bool {
+    std::ptr::eq(left, right)
+        || (left.path == right.path
+            && match (&left.intent, &right.intent) {
+                (PrefabPropertyIntent::Absent, PrefabPropertyIntent::Absent) => true,
+                (PrefabPropertyIntent::Set(left), PrefabPropertyIntent::Set(right)) => {
+                    component_values_exactly_match(left, right)
+                }
+                _ => false,
+            })
+}
+
+impl PrefabComponentIntent {
+    pub(crate) fn exactly_matches(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Set {
+                    mode,
+                    target,
+                    component,
+                    record,
+                },
+                Self::Set {
+                    mode: other_mode,
+                    target: other_target,
+                    component: other_component,
+                    record: other_record,
+                },
+            ) => {
+                mode == other_mode
+                    && target == other_target
+                    && component == other_component
+                    && record.owner == other_record.owner
+                    && record.version == other_record.version
+                    && component_values_exactly_match(record.value(), other_record.value())
+                    && record.contextual_defaults.len() == other_record.contextual_defaults.len()
+                    && record
+                        .contextual_defaults
+                        .iter()
+                        .zip(&other_record.contextual_defaults)
+                        .all(|((field, value), (other_field, other_value))| {
+                            field == other_field
+                                && component_values_exactly_match(value, other_value)
+                        })
+            }
+            (
+                Self::Suppress { target, component },
+                Self::Suppress {
+                    target: other_target,
+                    component: other_component,
+                },
+            ) => target == other_target && component == other_component,
+            (
+                Self::Properties {
+                    target,
+                    component,
+                    version,
+                    claims,
+                },
+                Self::Properties {
+                    target: other_target,
+                    component: other_component,
+                    version: other_version,
+                    claims: other_claims,
+                },
+            ) => {
+                target == other_target
+                    && component == other_component
+                    && version == other_version
+                    && claims.len() == other_claims.len()
+                    && claims
+                        .iter()
+                        .zip(other_claims)
+                        .all(|(left, right)| property_claims_exactly_match(left, right))
+            }
+            _ => false,
+        }
+    }
+}
+
 /// Explicit source changes, distinct from detaching or converting an instance.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrefabRevert {
-    /// Removes exactly this authored intent; unrelated intent and the base pin remain.
+#[derive(Debug, Clone, Copy)]
+pub enum PrefabRevert<'a> {
+    /// Removes an addition, instance claim, placement or entity suppression at this slot.
     Intent(PrefabOverlaySlot),
+    /// Removes a whole component declaration when it matches the observed declaration.
+    Component {
+        index: usize,
+        observed: &'a PrefabComponentIntent,
+    },
+    /// Removes a property declaration only when it agrees with the current source.
+    Property(PrefabPropertyClaimRef<'a>),
     /// Removes the complete overlay, including its base pin, while preserving the source link.
     Overlay,
 }

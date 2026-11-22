@@ -252,8 +252,14 @@ header gives its typed target route, component, version, and durable property se
 Discovery visits headers only. Reading a selected slot copies its admitted raw
 intent and distinguishes explicit absence from `Set(Null)`. This includes unavailable source
 claims. Interpretation of inheritance, defaults, and effective targets stays with Scene
-composition. Source repair can prepare Revert using the retained claim address. Repeated
-instances with equal declaration indices cannot redirect that address.
+composition. Source repair can prepare Revert using the retained live claim address. A
+candidate claim handle remains attached to its candidate. Repeated instances with equal
+declaration indices cannot redirect that address. A consumer with a full stored observation
+can instead supply the borrowed property declaration and current document basis. Scene checks
+the complete declaration in its original slot, including its target route, component and
+version, selector and original Set or Absent intent, before preparing the ordinary transaction.
+The declaration browser uses the same rule when reverting a whole component intent, retaining
+every claim in a property group as part of the observed declaration.
 
 Charge each examined component or property claim, then admit aggregate row metadata, the
 page target and the shared claim/continuation path before copying. Stop measuring a header at
@@ -304,6 +310,30 @@ The same build's hidden-window Windows/DX12 embedded Host passes 1/1 in
 claim workflow itself runs without a native window. The tests use Rust 1.95.0. Scoped library
 correctness Clippy, root and independent formatting, and changed documentation links pass.
 The earlier broad Scene unit-test build was superseded before test execution.
+
+#### November 22 exact declaration Revert
+
+The Windows x64 / Rust 1.95.0 owner run `fd1250a9-e00f-40c7-b02c-7c97f05ad33e`
+passes 106 of 107 selected tests. The Scene tests refuse property coordinates and component
+coordinates without their declarations, and also refuse same-slot candidate declarations with
+a different field or floating-point zero sign. The built-in Inspector tests select a property
+row, retain its exact candidate across tab navigation, then cancel or commit it and replay one
+Undo. The fixture drives one fresh paint before clicking Refresh after externally dispatched
+Undo. A separate conversion work-budget test fails at `classification-snapshot`; the same
+failure reproduced in the older Scene test binary from before the Revert change.
+
+Independently locked release run `45f9f2c1-4e0e-497f-9854-59df4b2bfec2` passes 11/11 selected
+panel tests. The non-active Scene and Prefab workflows reject both the opaque candidate handle
+and the candidate's different observed declaration in a live Revert. They check the equivalent
+live declaration's exact forward and reverse patches, successful history replay and persistence.
+The separate Windows/DX12 conversion trajectory passes 1/1 in
+`6787a34e-ed1a-4aeb-94bd-087b769a7df5`, covering the common selected-source and document
+publication paths. Independently locked release run `3263284d-a39f-4d14-a880-49c917ae0ac9`
+also passes the public extraction and inheritance trajectory after its Revert migration.
+After review migrated the independent component-intent consumer, release run
+`7a4a3095-50f1-4233-9836-73822e925429` passes its 1/1 case. Both source kinds check Cancel,
+outdated preparation, preservation of an unavailable sibling, Undo/Redo and Save/Reopen.
+[Independent panel regressions](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_property_claims.rs)
 
 #### Effective instance fields
 
