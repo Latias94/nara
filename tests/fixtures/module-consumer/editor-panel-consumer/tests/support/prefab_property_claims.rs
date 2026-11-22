@@ -188,7 +188,7 @@ fn discover(
     let continuation = page.next.clone().expect("one row cannot fit all claims");
     let mut rows = Vec::new();
     for _ in 0..8 {
-        assert_eq!(page.target, target);
+        assert_eq!(page.target.as_ref(), &target);
         assert!(page.rows.len() <= limits.max_rows());
         assert!(page.scanned_entries <= limits.max_scan_entries());
         assert!(page.metadata_bytes <= limits.max_metadata_bytes());

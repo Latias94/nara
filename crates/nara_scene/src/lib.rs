@@ -71,7 +71,7 @@ pub use authoring_decode::{
     AuthoringDocumentReadiness, AuthoringDocumentReadmission, AuthoringDocumentSource,
     AuthoringEntityView, AuthoringFieldEdit, AuthoringFieldEditError, AuthoringFieldWrite,
     AuthoringOverlayPathSegment, AuthoringOverlayRecordSlot, AuthoringOverlayTargetKind,
-    AuthoringPropertyChild, AuthoringPropertyChildrenContinuation, AuthoringPropertyChildrenPage,
+    AuthoringPropertyChild, AuthoringPropertyChildrenLimits, AuthoringPropertyChildrenPage,
     AuthoringPropertyChildrenPosition, AuthoringPropertyValue, AuthoringReadError,
     AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordOwnerClaim,
     AuthoringRecordReadiness, AuthoringSchemaBasis, AuthoringSessionReopenError,

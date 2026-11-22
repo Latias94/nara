@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-16
+**Last Revised**: 2026-11-23
+**Amended**: 2026-11-23 for shared recursive selectors and metadata-limited page prefixes
 **Amended**: 2026-11-16 for source-owned recursive property discovery with borrowed child pages
 **Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
 receipt-backed content state
@@ -123,10 +124,14 @@ Rules:
   Returned `Available` rows assert declaration/identity availability, not source value presence.
   Optional absent/Null Records can expose declarations; collection entries require actual
   explicit/defaulted identities. Unkeyed list positions refuse instead of inventing stable IDs.
-  Borrow child facts and continuation anchors until complete target/row/cursor metadata passes
-  admission. Lookup and child scans share finite entry/logical-byte limits; an exhausted page
-  may retain a successor only after child-stream progress. Exact basis and workspace fencing
-  remain unchanged. This adds no source, selection, mutation or history authority.
+  Borrow child facts until retained metadata passes admission. A direct page shares its target
+  with the continuation. Recursive child selectors share the parent path and hold only the
+  child step. A Map continuation shares the last returned step. The metadata allowance charges
+  each shared identity once, and a full child path is copied when a caller selects it.
+  Lookup and child scans share finite entry and logical-byte limits. Metadata exhaustion after
+  returning a row retains a cursor before the excluded child. A first child that cannot fit
+  returns a typed refusal. Examined children consume scan work, including an excluded child.
+  Source, exact basis and Workspace fencing apply to the continuation.
 - Actual component inventory is distinct from catalog creation capabilities and from semantic
   readability. Scene/Prefab own classification, root declaration/default interpretation and
   source-relative lookup. Available/current records may expose borrowed roots; unavailable records

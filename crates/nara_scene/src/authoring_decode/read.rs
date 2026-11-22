@@ -30,6 +30,8 @@ pub enum AuthoringReadError {
     FieldNotFound,
     /// A non-missing source path is incompatible with the admitted Schema.
     InvalidFieldPath,
+    /// The first addressable child exceeds the page's child metadata allowance.
+    ChildMetadataBudgetExceeded,
     /// Exact selector/lookup-work refusal from the shared Schema owner.
     Property(ComponentPropertyError),
 }
@@ -45,6 +47,7 @@ impl fmt::Display for AuthoringReadError {
             }
             Self::FieldNotFound => "declared root field was not found",
             Self::InvalidFieldPath => "source value is incompatible with its admitted field path",
+            Self::ChildMetadataBudgetExceeded => "first property child exceeds the metadata budget",
             Self::Property(error) => return error.fmt(formatter),
         })
     }
@@ -163,8 +166,8 @@ pub struct AuthoringDirectMembers<'a> {
 }
 
 /// Position for the source-owned direct-child property stream.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AuthoringPropertyChildrenPosition {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthoringPropertyChildrenPosition<'a> {
     Initial,
     Empty,
     Record {
@@ -172,11 +175,21 @@ pub enum AuthoringPropertyChildrenPosition {
         next_tombstone: usize,
     },
     Map {
-        after: Option<String>,
+        after: Option<&'a str>,
     },
     KeyedList {
         next_item: usize,
     },
+}
+
+/// Scan and output allowances for a borrowed direct-child page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthoringPropertyChildrenLimits {
+    pub max_scan_entries: usize,
+    pub max_rows: usize,
+    pub max_scan_logical_bytes: usize,
+    /// Logical bytes of the admitted child steps.
+    pub max_child_metadata_bytes: usize,
 }
 
 /// One source-owned durable child selector. The parent path is supplied by the caller and the
@@ -230,58 +243,11 @@ impl AuthoringPropertyChild<'_> {
     }
 }
 
-/// Borrowed successor position; copying a map anchor is deferred until page admission.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AuthoringPropertyChildrenContinuation<'a>(PropertyChildrenNext<'a>);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PropertyChildrenNext<'a> {
-    Record {
-        next_member: usize,
-        next_tombstone: usize,
-    },
-    Map {
-        after: &'a str,
-    },
-    KeyedList {
-        next_item: usize,
-    },
-}
-
-impl AuthoringPropertyChildrenContinuation<'_> {
-    #[must_use]
-    pub const fn metadata_bytes(&self) -> usize {
-        match self.0 {
-            PropertyChildrenNext::Map { after } => after.len(),
-            _ => 0,
-        }
-    }
-
-    #[must_use]
-    pub fn to_position(&self) -> AuthoringPropertyChildrenPosition {
-        match self.0 {
-            PropertyChildrenNext::Record {
-                next_member,
-                next_tombstone,
-            } => AuthoringPropertyChildrenPosition::Record {
-                next_member,
-                next_tombstone,
-            },
-            PropertyChildrenNext::Map { after } => AuthoringPropertyChildrenPosition::Map {
-                after: Some(after.to_owned()),
-            },
-            PropertyChildrenNext::KeyedList { next_item } => {
-                AuthoringPropertyChildrenPosition::KeyedList { next_item }
-            }
-        }
-    }
-}
-
 /// Bounded borrowed direct-child page. It copies no identities, values or mutation authority.
 #[derive(Debug, PartialEq)]
 pub struct AuthoringPropertyChildrenPage<'a> {
     pub children: Vec<AuthoringPropertyChild<'a>>,
-    pub next: Option<AuthoringPropertyChildrenContinuation<'a>>,
+    pub next: Option<AuthoringPropertyChildrenPosition<'a>>,
     pub scanned_entries: usize,
     pub scanned_logical_bytes: usize,
 }
@@ -310,6 +276,22 @@ fn admit_child_scan(
             Ok(false)
         }
         Err(error) => Err(error.into()),
+    }
+}
+
+fn admit_child<'a>(
+    children: &mut Vec<AuthoringPropertyChild<'a>>,
+    remaining_metadata_bytes: &mut usize,
+    child: AuthoringPropertyChild<'a>,
+) -> Result<bool, AuthoringReadError> {
+    if let Some(remaining) = remaining_metadata_bytes.checked_sub(child.metadata_bytes()) {
+        *remaining_metadata_bytes = remaining;
+        children.push(child);
+        Ok(true)
+    } else if children.is_empty() {
+        Err(AuthoringReadError::ChildMetadataBudgetExceeded)
+    } else {
+        Ok(false)
     }
 }
 
@@ -588,21 +570,18 @@ impl<'a> AuthoringComponentView<'a> {
     /// availability does not assert value presence. Collection identities require the actual
     /// selected explicit/default value. Lookup and child scans share the supplied allowance.
     /// An exhausted scan returns a continuation only after actual child-stream progress.
+    /// A metadata-limited page resumes at the first excluded child and counts its scan work.
     pub fn property_children(
         &self,
         property: &ComponentPropertyPath,
-        position: AuthoringPropertyChildrenPosition,
-        max_scan_entries: usize,
-        max_rows: usize,
-        max_logical_bytes: usize,
+        position: AuthoringPropertyChildrenPosition<'_>,
+        limits: AuthoringPropertyChildrenLimits,
     ) -> Result<AuthoringPropertyChildrenPage<'a>, AuthoringReadError> {
         property_children_in_schema(
             || self.schema().map(|entry| &entry.schema),
             property,
             position,
-            max_scan_entries,
-            max_rows,
-            max_logical_bytes,
+            limits,
             |_, budget| {
                 self.property_value(property, budget)
                     .map(authoring_property_value)
@@ -650,22 +629,26 @@ fn property_root_field<'a>(
 pub(crate) fn property_children_in_schema<'a>(
     schema: impl FnOnce() -> Result<&'a ComponentSchema, AuthoringReadError>,
     property: &ComponentPropertyPath,
-    position: AuthoringPropertyChildrenPosition,
-    max_scan_entries: usize,
-    max_rows: usize,
-    max_logical_bytes: usize,
+    position: AuthoringPropertyChildrenPosition<'_>,
+    limits: AuthoringPropertyChildrenLimits,
     value: impl FnOnce(
         &'a ComponentFieldSchema,
         &mut ComponentPropertyReadBudget,
     ) -> Result<Option<&'a ComponentValue>, AuthoringReadError>,
 ) -> Result<AuthoringPropertyChildrenPage<'a>, AuthoringReadError> {
-    if max_scan_entries == 0 || max_rows == 0 || max_logical_bytes == 0 {
+    let AuthoringPropertyChildrenLimits {
+        max_scan_entries,
+        max_rows,
+        max_scan_logical_bytes,
+        max_child_metadata_bytes,
+    } = limits;
+    if max_scan_entries == 0 || max_rows == 0 || max_scan_logical_bytes == 0 {
         return Err(ComponentPropertyError::ReadBudgetExceeded.into());
     }
     let mut budget = ComponentPropertyReadBudget::new(
         nara_core::ItemLimit::new(max_scan_entries)
             .expect("property child scan entries are positive"),
-        nara_core::ByteLimit::new(max_logical_bytes)
+        nara_core::ByteLimit::new(max_scan_logical_bytes)
             .expect("property child logical bytes are positive"),
     );
     let field = property_root(schema()?, property)?;
@@ -716,6 +699,8 @@ pub(crate) fn property_children_in_schema<'a>(
         (position, _) => position,
     };
     let initial_entries = budget.scanned_entries();
+    let edit_capability = claim.field.has_capability(ComponentCapability::Edit);
+    let mut remaining_metadata_bytes = max_child_metadata_bytes;
     let mut children = Vec::new();
     let next = match (position, shape) {
         (
@@ -729,7 +714,7 @@ pub(crate) fn property_children_in_schema<'a>(
                 return Err(AuthoringReadError::InvalidFieldPath);
             }
             while children.len() < max_rows {
-                if let Some(member) = members.get(next_member) {
+                let (child, next_index) = if let Some(member) = members.get(next_member) {
                     if !admit_child_scan(
                         &mut budget,
                         initial_entries,
@@ -740,16 +725,15 @@ pub(crate) fn property_children_in_schema<'a>(
                     )? {
                         break;
                     }
-                    next_member += 1;
-                    let Some(id) = member.id.as_ref() else {
-                        continue;
-                    };
-                    children.push(AuthoringPropertyChild {
-                        step: PropertyChildStep::Member(id),
-                        kind: Some(member.shape.value_kind()),
-                        edit_capability: claim.field.has_capability(ComponentCapability::Edit),
-                        retired: false,
-                    });
+                    (
+                        member.id.as_ref().map(|id| AuthoringPropertyChild {
+                            step: PropertyChildStep::Member(id),
+                            kind: Some(member.shape.value_kind()),
+                            edit_capability,
+                            retired: false,
+                        }),
+                        &mut next_member,
+                    )
                 } else if let Some(tombstone) = claim.field.member_tombstones.get(next_tombstone) {
                     if !admit_child_scan(
                         &mut budget,
@@ -758,34 +742,42 @@ pub(crate) fn property_children_in_schema<'a>(
                     )? {
                         break;
                     }
-                    next_tombstone += 1;
-                    let direct = tombstone_direct_child(tombstone, property);
-                    if let Some(id) = direct {
-                        children.push(AuthoringPropertyChild {
-                            step: PropertyChildStep::Member(id),
-                            kind: None,
-                            edit_capability: false,
-                            retired: true,
-                        });
-                    }
+                    (
+                        tombstone_direct_child(tombstone, property).map(|id| {
+                            AuthoringPropertyChild {
+                                step: PropertyChildStep::Member(id),
+                                kind: None,
+                                edit_capability: false,
+                                retired: true,
+                            }
+                        }),
+                        &mut next_tombstone,
+                    )
                 } else {
                     break;
+                };
+                if let Some(child) = child
+                    && !admit_child(&mut children, &mut remaining_metadata_bytes, child)?
+                {
+                    break;
                 }
+                *next_index += 1;
             }
             let has_more =
                 next_member < members.len() || next_tombstone < claim.field.member_tombstones.len();
-            has_more.then_some(AuthoringPropertyChildrenContinuation(
-                PropertyChildrenNext::Record {
-                    next_member,
-                    next_tombstone,
-                },
-            ))
+            has_more.then_some(AuthoringPropertyChildrenPosition::Record {
+                next_member,
+                next_tombstone,
+            })
         }
         (
             AuthoringPropertyChildrenPosition::Map { after },
             ComponentValueShape::Map { value: value_shape },
         ) => {
             let Some(ComponentValue::Map(values)) = value else {
+                if after.is_some() {
+                    return Err(AuthoringReadError::InvalidFieldPath);
+                }
                 return Ok(AuthoringPropertyChildrenPage {
                     children,
                     next: None,
@@ -793,48 +785,33 @@ pub(crate) fn property_children_in_schema<'a>(
                     scanned_logical_bytes: budget.scanned_logical_bytes(),
                 });
             };
-            let mut last = match after.as_deref() {
-                Some(after) => Some(
-                    values
-                        .get_key_value(after)
-                        .ok_or(AuthoringReadError::InvalidFieldPath)?
-                        .0
-                        .as_str(),
-                ),
-                None => None,
-            };
-            let mut entries = match last {
-                Some(after) => values.range::<str, _>((
-                    std::ops::Bound::Excluded(after),
-                    std::ops::Bound::Unbounded,
-                )),
-                None => {
-                    values.range::<str, _>((std::ops::Bound::Unbounded, std::ops::Bound::Unbounded))
-                }
-            };
-            let mut pending = false;
+            if after.is_some_and(|after| !values.contains_key(after)) {
+                return Err(AuthoringReadError::InvalidFieldPath);
+            }
+            let lower = after.map_or(Bound::Unbounded, Bound::Excluded);
+            let mut entries = values.range::<str, _>((lower, Bound::Unbounded)).peekable();
+            let mut last = None;
             while children.len() < max_rows {
-                let Some((key, _)) = entries.next() else {
+                let Some(&(key, _)) = entries.peek() else {
                     break;
                 };
                 if !admit_child_scan(&mut budget, initial_entries, key.len())? {
-                    pending = true;
                     break;
                 }
-                last = Some(key.as_str());
-                children.push(AuthoringPropertyChild {
+                let child = AuthoringPropertyChild {
                     step: PropertyChildStep::MapEntry(key),
                     kind: Some(value_shape.value_kind()),
-                    edit_capability: claim.field.has_capability(ComponentCapability::Edit),
+                    edit_capability,
                     retired: false,
-                });
+                };
+                if !admit_child(&mut children, &mut remaining_metadata_bytes, child)? {
+                    break;
+                }
+                let _ = entries.next();
+                last = Some(key.as_str());
             }
-            let has_more = pending || entries.next().is_some();
-            has_more.then(|| {
-                AuthoringPropertyChildrenContinuation(PropertyChildrenNext::Map {
-                    after: last.expect("a continuation advances"),
-                })
-            })
+            last.filter(|_| entries.peek().is_some())
+                .map(|after| AuthoringPropertyChildrenPosition::Map { after: Some(after) })
         }
         (
             AuthoringPropertyChildrenPosition::KeyedList { mut next_item },
@@ -889,20 +866,22 @@ pub(crate) fn property_children_in_schema<'a>(
                         },
                     ));
                 }
-                next_item += 1;
-                children.push(AuthoringPropertyChild {
+                let child = AuthoringPropertyChild {
                     step: PropertyChildStep::ListItem {
                         by: key,
                         key: key_source,
                     },
                     kind: Some(item.value_kind()),
-                    edit_capability: claim.field.has_capability(ComponentCapability::Edit),
+                    edit_capability,
                     retired: false,
-                });
+                };
+                if !admit_child(&mut children, &mut remaining_metadata_bytes, child)? {
+                    break;
+                }
+                next_item += 1;
             }
-            (next_item < values.len()).then_some(AuthoringPropertyChildrenContinuation(
-                PropertyChildrenNext::KeyedList { next_item },
-            ))
+            (next_item < values.len())
+                .then_some(AuthoringPropertyChildrenPosition::KeyedList { next_item })
         }
         (AuthoringPropertyChildrenPosition::Empty, shape)
             if !matches!(

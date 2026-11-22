@@ -17,6 +17,13 @@ pub const MAP_KEY: &str = "z.target/group[2]";
 pub const ITEM_KEY: &str = "chosen/stable[1]";
 pub const ORIGINAL: u64 = 41;
 pub const PADDING_BYTES: usize = 48 * 1024;
+pub const PARENT_KEY_BYTES: usize = 16 * 1024;
+pub const LARGE_KEY_BYTES: usize = 32 * 1024;
+
+pub fn large_keys() -> [String; 2] {
+    let prefix = format!("a{}", "é".repeat((LARGE_KEY_BYTES - 2) / 2));
+    [format!("{prefix}a"), format!("{prefix}b")]
+}
 
 fn member(wire: &str, stable: &str, shape: impl Into<ComponentValueShape>) -> ComponentShapeMember {
     ComponentShapeMember::new(wire, shape).with_id(ComponentFieldId::new(stable))
@@ -41,6 +48,11 @@ pub fn schema() -> AuthoringSchemaBundle {
                     ComponentFieldId::new("entry_id"),
                 )),
             )]),
+        ),
+        member(
+            "wire_scores",
+            "scores",
+            ComponentValueShape::map(ComponentValueShape::map(ComponentValueKind::U64.into())),
         ),
     ]);
     AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
@@ -79,7 +91,8 @@ fn item(key: &str, score: u64) -> ComponentValue {
     ])
 }
 
-pub fn source(score: u64) -> SceneDocument {
+pub fn source(score: u64, large_score: u64) -> SceneDocument {
+    let [first, second] = large_keys();
     let value = ComponentValue::map([(
         "wire_settings",
         ComponentValue::map([
@@ -103,6 +116,17 @@ pub fn source(score: u64) -> SceneDocument {
                                 item(ITEM_KEY, score),
                             ]),
                         ),
+                    ]),
+                )]),
+            ),
+            (
+                "wire_scores",
+                ComponentValue::map([(
+                    "p".repeat(PARENT_KEY_BYTES),
+                    ComponentValue::map([
+                        (second, ComponentValue::U64(77)),
+                        ("z".into(), ComponentValue::U64(99)),
+                        (first, ComponentValue::U64(large_score)),
                     ]),
                 )]),
             ),

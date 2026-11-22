@@ -4333,6 +4333,11 @@ qualification retains run IDs, actual review corrections and final focused/stati
 Production and independent consumer revisions are `7f45d87` and `0737909`.
 Full R2 and locality/performance comparisons remain open.
 
+The [metadata-limited discovery successor](../authoring-read-projection-design.md#metadata-limited-property-discovery)
+returns a fitting prefix and retains one shared copy of the query target, parent selector and
+last returned Map key. Scene/Prefab owns continuation progress and scan charging. The direct
+and prepared Tooling views materialize a complete child path for a selected operation.
+
 The November 20 [stored Prefab claim successor](../authoring-read-projection-design.md#november-20-stored-claim-qualification)
 at `c44a398` pages stored property claims in a named Scene or Prefab. A row binds its original workspace,
 document basis, instance path and source slot through bounded raw reads and existing prepared

@@ -562,7 +562,10 @@ metadata admission before copies, explicit read presence and refusal of scans th
 advance. Shared owners pass 1839/1839, the independent semantic Host passes 8/8 through the
 complete non-active nested-leaf edit/history/Save/Reopen workflow, and the retained independent
 prepared-authoring target passes 10/10. The linked qualification records exact runs, review
-corrections and limits. The [stored Prefab claim successor](../architecture/authoring-read-projection-design.md#stored-prefab-property-claims)
+corrections and limits. The [metadata-limited discovery successor](../architecture/authoring-read-projection-design.md#metadata-limited-property-discovery)
+retains one shared parent and Map continuation identity and returns a fitting prefix under
+the requested allowance in both live and prepared views. The
+[stored Prefab claim successor](../architecture/authoring-read-projection-design.md#stored-prefab-property-claims)
 provides bounded access to authored override declarations from the same query interface. Selected
 claims retain their exact containing-source address through raw reads and prepared Revert.
 The [effective instance field successor](../architecture/authoring-read-projection-design.md#effective-instance-fields)

@@ -26,7 +26,7 @@ use complete_value::validate_complete_value;
 pub(crate) use copy_admission::CopyAdmissionError;
 pub use read::{
     AuthoringComponentView, AuthoringDirectMembers, AuthoringEntityView, AuthoringPropertyChild,
-    AuthoringPropertyChildrenContinuation, AuthoringPropertyChildrenPage,
+    AuthoringPropertyChildrenLimits, AuthoringPropertyChildrenPage,
     AuthoringPropertyChildrenPosition, AuthoringPropertyValue, AuthoringReadError,
 };
 pub(crate) use read::{property_children_in_schema, property_root};

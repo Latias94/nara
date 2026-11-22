@@ -146,13 +146,13 @@ impl<'a> AuthoringReadScope<'a> {
             })
             .collect();
         Ok(EditorAuthoringPage {
-            target: EditorAuthoringQueryTarget {
+            target: Arc::new(EditorAuthoringQueryTarget {
                 basis: source.basis.clone(),
                 entity: source.path.anchor.clone(),
                 projection: EditorAuthoringProjection::PrefabPropertyClaims {
                     steps: source.path.steps.clone(),
                 },
-            },
+            }),
             rows,
             scanned_entries,
             scanned_logical_bytes,

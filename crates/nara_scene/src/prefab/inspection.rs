@@ -18,10 +18,11 @@ use super::{
     try_compile_selected_authoring_instance_with_loader,
 };
 use crate::{
-    AuthoringPropertyChildrenPage, AuthoringPropertyChildrenPosition, AuthoringReadError,
-    AuthoringRecordOwnerClaim, AuthoringRecordReadiness, AuthoringSchemaBasis,
-    ExpandedSceneComponent, PrefabDeclarationSource, PrefabEntityTarget, PrefabInstanceLocation,
-    PrefabOverlaySlot, ResolvedPrefabSource, SceneCompilationFailure, SceneCompilationFailureKind,
+    AuthoringPropertyChildrenLimits, AuthoringPropertyChildrenPage,
+    AuthoringPropertyChildrenPosition, AuthoringReadError, AuthoringRecordOwnerClaim,
+    AuthoringRecordReadiness, AuthoringSchemaBasis, ExpandedSceneComponent,
+    PrefabDeclarationSource, PrefabEntityTarget, PrefabInstanceLocation, PrefabOverlaySlot,
+    ResolvedPrefabSource, SceneCompilationFailure, SceneCompilationFailureKind,
     SceneCompilationOptions, SceneCompilationWorkingSet, SceneEntityId,
     authoring_decode::{property_children_in_schema, property_root},
     draft::SceneDraft,
@@ -338,18 +339,14 @@ impl<'a> AuthoringPrefabComponentView<'a> {
     pub fn property_children(
         &self,
         property: &ComponentPropertyPath,
-        position: AuthoringPropertyChildrenPosition,
-        max_scan_entries: usize,
-        max_rows: usize,
-        max_logical_bytes: usize,
+        position: AuthoringPropertyChildrenPosition<'_>,
+        limits: AuthoringPropertyChildrenLimits,
     ) -> Result<AuthoringPropertyChildrenPage<'a>, AuthoringReadError> {
         property_children_in_schema(
             || self.schema(),
             property,
             position,
-            max_scan_entries,
-            max_rows,
-            max_logical_bytes,
+            limits,
             |field, budget| match self.resolve_value(field, property, budget)? {
                 Some(selected) => selected
                     .value

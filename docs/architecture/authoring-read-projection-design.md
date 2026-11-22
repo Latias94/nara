@@ -102,9 +102,10 @@ can return a continuation only after advancing the child stream, even when anony
 or nonmatching tombstones produce no row. Refuse an allowance that cannot make progress. A parent
 at the selector-depth limit must never emit an over-depth child.
 
-Preflight caller selector metadata before Source work. Admit the aggregate target, full child
-paths, repeated parent IDs and successor target/anchor before cloning any returned identity.
-Use saturating length accounting so oversized untrusted selectors refuse rather than overflow.
+Preflight caller selector metadata before Source work. Admit the retained target, child identities
+and any separate successor identity before cloning output. Recursive rows share the immutable
+parent selector with the target. A Map cursor reuses the last emitted key.
+Use saturating length accounting so oversized untrusted selectors refuse before copies.
 Keep the existing direct-member consumer as a regression. Qualify the successor through a
 separate independently compiled panel workflow: discover a non-active nested Record/Map/KeyedList
 leaf, read its bounded scalar, prepare/cancel/retain competing edits, dispatch exact results,
@@ -167,6 +168,48 @@ This is Windows 11/Rust 1.95 source-semantic qualification. It does not measure 
 elapsed-time bounds, populated-index maintenance or preparation locality. Schema/value lookup
 can revisit the selected path, but every visit shares the actual scan allowance. Expanded/overlay
 property discovery, value pagination, unopened-source discovery and full R2 remain open.
+
+### Metadata-Limited Property Discovery
+
+Scene/Prefab receives the remaining child identity allowance after Tooling admits the target.
+It returns the fitting prefix and a borrowed successor position. Metadata exhaustion with zero
+returned rows refuses the page. When a later child would exceed the allowance, the next page
+starts with that child. Examination charges scan work before output admission. Empty pages
+can still advance through anonymous Record declarations and unrelated tombstones.
+
+`EditorAuthoringPage::target` is shared with its direct cursor. `Properties` takes a shared
+parent path, and its row selector exposes `child_step()` and materializes the complete durable
+path with `to_path()` for a selected read or edit. A detached row retains only its parent path
+and step. A Map cursor retains that step and resumes through the original ordered range in the
+exact live or prepared source.
+
+Bevy's `Map::iter` borrows keys and values from the reflected map. Godot's Inspector constructs
+dictionary rows for the selected page and retrieves the keys by index within that dictionary.
+Nara also borrows keys for discovery, with a private replayable continuation to keep the page
+bound to its source revision and preparation. [Bevy `Map`](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/crates/bevy_reflect/src/map.rs) ·
+[Godot dictionary Inspector](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/inspector/editor_properties_array_dict.cpp) ·
+[Audit reproduction](../audits/2026-11-22-starter-input-authoring-and-runtime-review.md#p2--a-legal-large-map-key-can-make-the-property-catalog-unpageable)
+
+On Windows x64 and Rust 1.95.0, the scoped Tooling query targets passed 38/38
+(`5f95dc99-2017-4cc4-8615-59028617a7e1`). The first run passed 37/38 and exposed a Root query
+test still expecting a duplicated target charge. The corrected exact-budget and one-byte-short
+controls use the shared target cost. Selected Scene tests passed 83/83
+(`2cd20b9c-48d4-43b5-ba4c-0e2597278354`), including borrowed Prefab inspection, the examined
+but unreturned row charge, and an invalid Map anchor.
+
+The independent semantic Host passed 10/10 (`ba56e311-26ce-4de3-a50c-e2bb5dfe7d9f`). Its live
+and prepared views page two 32,768-byte keys with a common UTF-8 prefix and a short tail under a
+16 KiB parent. The maximum 256-row request fits the first key in 64 KiB, and a continuation can
+choose an exact smaller allowance. Both non-active document kinds reject stale and sibling
+candidate cursors. The selected long key supports Prepare, Commit, Undo/Redo and byte-exact
+Save/Reopen while the active tab and its selection stay intact.
+
+The independently locked prepared-authoring consumer passed 33/33 with nine existing skips
+(`55cd0c9c-7ebd-4763-bece-03cf04b7b902`). Scene and Tooling all-target/all-feature correctness
+Clippy passed. Workspace, semantic Host and registered panel package formatting passed. The
+first aggregate module-consumer formatting invocation reached the Windows command-length limit,
+and the affected panel package passed its own check. Independent review checked cursor progress,
+shared ownership and metadata accounting. These results cover the Windows semantic workflow.
 
 ### Bounded direct-member discovery
 

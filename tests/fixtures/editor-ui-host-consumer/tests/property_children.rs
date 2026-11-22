@@ -10,32 +10,35 @@ use std::{fs, rc::Rc, time::Duration};
 use nara::{
     project_host::EditorEditPreparationError,
     reflect::{
-        ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep,
-        ComponentSchemaVersion, ComponentValue, ComponentValueKind,
+        ComponentFieldId, ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath,
+        ComponentPropertyStep, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+        ComponentValueKind,
     },
     scene::{
-        AuthoringPropertyEdit, AuthoringReadError, AuthoringRecordReadiness, SceneDocumentCandidate,
+        AuthoringPropertyEdit, AuthoringReadError, AuthoringRecordReadiness, PrefabDocument,
+        PrefabDocumentCandidate, SceneDocumentCandidate,
     },
     tooling::{
-        EditorAction, EditorActionOutcome, EditorAuthoringCursor, EditorAuthoringPage,
-        EditorAuthoringProjection, EditorAuthoringPropertyStatus, EditorAuthoringQuery,
-        EditorAuthoringQueryLimits, EditorAuthoringQueryPosition, EditorAuthoringQueryTarget,
-        EditorAuthoringRow, EditorDocumentId, EditorDocumentKind, EditorDocumentMutation,
-        EditorDocumentQueryRejection, EditorEntityQuery, EditorEntityQueryLimits,
-        EditorEntityQueryPosition, EditorFrameModel, EditorNavigationAction,
-        EditorPersistenceAction, EditorPersistenceRequestResult, EditorPersistenceResult,
-        EditorPersistenceView, EditorPropertyRead, EditorPropertyReadLimits, EditorPropertyTarget,
-        EditorPropertyValue, EditorReopenTarget,
+        EditorAction, EditorActionOutcome, EditorAuthoringPage, EditorAuthoringProjection,
+        EditorAuthoringPropertyStatus, EditorAuthoringQuery, EditorAuthoringQueryLimits,
+        EditorAuthoringQueryPosition, EditorAuthoringQueryTarget, EditorAuthoringRow,
+        EditorDocumentId, EditorDocumentKind, EditorDocumentMutation, EditorDocumentOpenResult,
+        EditorDocumentQueryBasis, EditorDocumentQueryRejection, EditorEntityQuery,
+        EditorEntityQueryLimits, EditorEntityQueryPosition, EditorFrameModel,
+        EditorNavigationAction, EditorPersistenceAction, EditorPersistenceRequestResult,
+        EditorPersistenceResult, EditorPersistenceView, EditorProjectBrowserAction,
+        EditorProjectBrowserActionOutcome, EditorPropertyRead, EditorPropertyReadLimits,
+        EditorPropertyTarget, EditorPropertyValue, EditorReopenTarget,
     },
 };
 use nara_editor::{
-    EditorApplication, EditorPanelHost, PanelActionDispatch, panels::EditorPanelContext,
+    EditorApplication, EditorApplicationActionDispatch, EditorPanelHost, PanelActionDispatch,
+    panels::EditorPanelContext,
 };
 use nara_editor_ui_host_consumer::{
     DraftPanel, Evidence,
     project::{
-        Application, Project, SOURCE, current, dispatch, entity, open_secondary, persistence,
-        register,
+        Application, Project, SOURCE, current, dispatch, entity, persistence, register, wait,
     },
 };
 use nara_text::bundled_font_face;
@@ -44,6 +47,8 @@ use nara_ui_kernel::{UiCompiler, UiEnvironment, UiSemanticRole, UiSurfaceId, UiT
 const SCAN_ENTRIES: usize = 128;
 const METADATA_BYTES: usize = 2048;
 const SCAN_BYTES: usize = 4096;
+const LARGE_SCAN_BYTES: usize = 256 * 1024;
+const PREFAB_SOURCE: &str = "prefabs/property-children.prefab.json";
 
 fn limits(metadata: usize) -> EditorAuthoringQueryLimits {
     EditorAuthoringQueryLimits::new(SCAN_ENTRIES, 1, metadata)
@@ -65,7 +70,7 @@ fn discover(
                 limits: limits(METADATA_BYTES),
             })
             .unwrap();
-        assert_eq!(page.target, target);
+        assert_eq!(page.target.as_ref(), &target);
         assert!(page.rows.len() <= 1);
         assert!(page.scanned_entries <= SCAN_ENTRIES);
         assert!(page.metadata_bytes <= METADATA_BYTES);
@@ -86,7 +91,7 @@ fn rows(pages: &[EditorAuthoringPage]) -> impl Iterator<Item = &EditorAuthoringR
 fn select_property(
     pages: &[EditorAuthoringPage],
     kind: ComponentValueKind,
-    select: impl Fn(&ComponentPropertyPath) -> bool,
+    select: impl Fn(&ComponentPropertyStep) -> bool,
 ) -> ComponentPropertyPath {
     let mut found = rows(pages).filter_map(|row| match row {
         EditorAuthoringRow::Property {
@@ -94,12 +99,12 @@ fn select_property(
             kind: Some(actual),
             edit_capability: true,
             status: EditorAuthoringPropertyStatus::Available,
-        } if *actual == kind && select(property) => Some(property.clone()),
+        } if *actual == kind && select(property.child_step()) => Some(property),
         _ => None,
     });
     let property = found.next().expect("an editable child must be discovered");
     assert!(found.next().is_none(), "the child selection must be unique");
-    property
+    property.to_path()
 }
 
 fn assert_child(parent: &ComponentPropertyPath, child: &ComponentPropertyPath) {
@@ -112,22 +117,135 @@ fn selected_read(target: EditorPropertyTarget) -> EditorPropertyRead {
     let metadata = target.entity.as_str().len()
         + target.component.as_str().len()
         + target.property.logical_bytes().unwrap();
+    let scan_bytes = if metadata > METADATA_BYTES {
+        LARGE_SCAN_BYTES
+    } else {
+        SCAN_BYTES
+    };
     EditorPropertyRead {
         target,
         limits: EditorPropertyReadLimits::new(metadata, 1, 8)
             .unwrap()
-            .with_scan_limits(SCAN_ENTRIES, SCAN_BYTES)
+            .with_scan_limits(SCAN_ENTRIES, scan_bytes)
             .unwrap(),
     }
+}
+
+fn discover_large_map(
+    basis: &EditorDocumentQueryBasis,
+    query: impl Fn(EditorAuthoringQuery) -> Result<EditorAuthoringPage, EditorDocumentQueryRejection>,
+) -> (EditorPropertyRead, EditorAuthoringQuery) {
+    let [first_key, second_key] = fixture::large_keys();
+    assert_eq!(first_key.len(), fixture::LARGE_KEY_BYTES);
+    assert_eq!(second_key.len(), fixture::LARGE_KEY_BYTES);
+    let limits = |rows, metadata| {
+        EditorAuthoringQueryLimits::new(256, rows, metadata)
+            .unwrap()
+            .with_scan_logical_bytes(LARGE_SCAN_BYTES)
+            .unwrap()
+    };
+    let wide = limits(256, 64 * 1024);
+    let entity = entity("anchor");
+    let component = ComponentTypeId::new(fixture::COMPONENT);
+    let start = |property: ComponentPropertyPath| EditorAuthoringQueryTarget {
+        basis: basis.clone(),
+        entity: entity.clone(),
+        projection: EditorAuthoringProjection::Properties {
+            component: component.clone(),
+            property: property.into(),
+        },
+    };
+    let parent = query(EditorAuthoringQuery {
+        position: EditorAuthoringQueryPosition::Start(start(
+            ComponentPropertyPath::new(ComponentFieldId::new("settings")).with_steps([
+                ComponentPropertyStep::Member(ComponentFieldId::new("scores")),
+            ]),
+        )),
+        limits: wide,
+    })
+    .unwrap();
+    assert_eq!(parent.rows.len(), 1);
+    assert!(parent.next.is_none());
+    let map = select_property(
+        &[parent],
+        ComponentValueKind::Map,
+        |step| matches!(step, ComponentPropertyStep::MapEntry(key) if key.len() == fixture::PARENT_KEY_BYTES),
+    );
+    let target_bytes =
+        entity.as_str().len() + component.as_str().len() + map.logical_bytes().unwrap();
+    let target = start(map.clone());
+    let assert_page = |page: &EditorAuthoringPage,
+                       limits: EditorAuthoringQueryLimits,
+                       keys: &[&str]| {
+        assert_eq!(page.target.as_ref(), &target);
+        assert!(page.scanned_entries <= limits.max_scan_entries());
+        assert!(page.scanned_logical_bytes <= limits.max_scan_logical_bytes());
+        assert!(page.metadata_bytes <= limits.max_metadata_bytes());
+        assert_eq!(
+            page.metadata_bytes,
+            target_bytes + keys.iter().map(|key| key.len()).sum::<usize>()
+        );
+        assert_eq!(page.rows.len(), keys.len());
+        for (row, expected) in page.rows.iter().zip(keys) {
+            let EditorAuthoringRow::Property {
+                property,
+                kind: Some(ComponentValueKind::U64),
+                edit_capability: true,
+                status: EditorAuthoringPropertyStatus::Available,
+            } = row
+            else {
+                panic!("expected an editable Map scalar");
+            };
+            assert!(
+                matches!(property.child_step(), ComponentPropertyStep::MapEntry(key) if key == *expected),
+                "Map pagination must preserve key order and bytes"
+            );
+        }
+    };
+    let first = query(EditorAuthoringQuery {
+        position: EditorAuthoringQueryPosition::Start(target.clone()),
+        limits: wide,
+    })
+    .unwrap();
+    assert_page(&first, wide, &[&first_key]);
+    let resume = |page: &EditorAuthoringPage, limits| EditorAuthoringQuery {
+        position: EditorAuthoringQueryPosition::Continue(page.next.clone().unwrap()),
+        limits,
+    };
+    let continuation = resume(&first, limits(2, target_bytes + second_key.len() + 1));
+    let rest = query(continuation.clone()).unwrap();
+    assert_page(&rest, continuation.limits, &[&second_key, "z"]);
+    assert!(rest.next.is_none());
+    let single = target_bytes + second_key.len();
+    assert_eq!(
+        query(resume(&first, limits(256, single - 1))),
+        Err(EditorDocumentQueryRejection::MetadataBudgetExceeded)
+    );
+    let second = query(resume(&first, limits(256, single))).unwrap();
+    assert_page(&second, limits(256, single), &[&second_key]);
+    let tail = query(resume(&second, limits(256, target_bytes + 1))).unwrap();
+    assert_page(&tail, limits(256, target_bytes + 1), &["z"]);
+    assert!(tail.next.is_none());
+
+    let property = select_property(&[first], ComponentValueKind::U64, |_| true);
+    assert_child(&map, &property);
+    let read = selected_read(EditorPropertyTarget {
+        basis: basis.clone(),
+        entity,
+        component,
+        property,
+    });
+    (read, continuation)
 }
 
 fn discover_leaf(
     context: &EditorPanelContext<'_, '_>,
     document: EditorDocumentId,
+    large_map: bool,
 ) -> (
     EditorPropertyRead,
     ComponentSchemaVersion,
-    EditorAuthoringCursor,
+    EditorAuthoringQuery,
 ) {
     assert!(context.model().document().is_none());
     let basis = context.document_query_basis(document).unwrap();
@@ -189,6 +307,11 @@ fn discover_leaf(
     assert_eq!(component.as_str(), fixture::COMPONENT);
     assert_eq!(unknown.as_str(), fixture::UNKNOWN);
     assert_eq!(*unknown_version, ComponentSchemaVersion(7));
+    if large_map {
+        let (read, continuation) =
+            discover_large_map(&basis, |query| context.query_document_authoring(query));
+        return (read, version, continuation);
+    }
     let roots = discover(
         context,
         start(EditorAuthoringProjection::Roots {
@@ -214,12 +337,12 @@ fn discover_leaf(
             context,
             start(EditorAuthoringProjection::Properties {
                 component: component.clone(),
-                property: property.clone(),
+                property: property.clone().into(),
             }),
         )
     };
     let root_children = children(&root);
-    assert_eq!(root_children.len(), 3);
+    assert_eq!(root_children.len(), 4);
     assert!(rows(&root_children).any(|row| matches!(
         row,
         EditorAuthoringRow::Property {
@@ -227,9 +350,13 @@ fn discover_leaf(
             kind: None,
             edit_capability: false,
             status: EditorAuthoringPropertyStatus::Retired,
-        } if matches!(property.steps.last(), Some(ComponentPropertyStep::Member(id)) if id.as_str() == "retired")
+        } if matches!(property.child_step(), ComponentPropertyStep::Member(id) if id.as_str() == "retired")
     )));
-    let sections = select_property(&root_children, ComponentValueKind::Map, |_| true);
+    let sections = select_property(
+        &root_children,
+        ComponentValueKind::Map,
+        |step| matches!(step, ComponentPropertyStep::Member(id) if id.as_str() == "sections"),
+    );
     assert_child(&root, &sections);
     assert!(matches!(
         sections.steps.last(),
@@ -247,15 +374,15 @@ fn discover_leaf(
     let collection = select_property(
         &map_children,
         ComponentValueKind::List,
-        |property| matches!(property.steps.last(), Some(ComponentPropertyStep::MapEntry(key)) if key == fixture::MAP_KEY),
+        |step| matches!(step, ComponentPropertyStep::MapEntry(key) if key == fixture::MAP_KEY),
     );
     assert_child(&groups, &collection);
     let list_children = children(&collection);
     assert_eq!(list_children.len(), 2);
-    let item = select_property(&list_children, ComponentValueKind::Map, |property| {
-        matches!(property.steps.last(), Some(ComponentPropertyStep::ListItem {
+    let item = select_property(&list_children, ComponentValueKind::Map, |step| {
+        matches!(step, ComponentPropertyStep::ListItem {
             by, key: ComponentPropertyKey::String(key),
-        }) if by.as_str() == "entry_id" && key == fixture::ITEM_KEY)
+        } if by.as_str() == "entry_id" && key == fixture::ITEM_KEY)
     });
     assert_child(&collection, &item);
     let item_children = children(&item);
@@ -269,7 +396,7 @@ fn discover_leaf(
 
     let first = &map_children[0];
     let request = |metadata| EditorAuthoringQuery {
-        position: EditorAuthoringQueryPosition::Start(first.target.clone()),
+        position: EditorAuthoringQueryPosition::Start(first.target.as_ref().clone()),
         limits: limits(metadata),
     };
     assert_eq!(
@@ -295,7 +422,7 @@ fn discover_leaf(
             position: EditorAuthoringQueryPosition::Start(start(
                 EditorAuthoringProjection::Properties {
                     component: unknown,
-                    property: root.clone(),
+                    property: root.clone().into(),
                 },
             )),
             limits: limits(METADATA_BYTES),
@@ -340,7 +467,11 @@ fn discover_leaf(
             AuthoringReadError::Property(ComponentPropertyError::ReadBudgetExceeded),
         ))
     );
-    (read, version, first.next.clone().unwrap())
+    let continuation = EditorAuthoringQuery {
+        position: EditorAuthoringQueryPosition::Continue(first.next.clone().unwrap()),
+        limits: limits(METADATA_BYTES),
+    };
+    (read, version, continuation)
 }
 
 fn panel_action(
@@ -375,6 +506,50 @@ fn panel_action(
         1
     );
     finished[count].2.clone()
+}
+
+fn open_nonactive_source(application: &mut EditorApplication, source: &str) -> EditorDocumentId {
+    let active = current(application).workspace().active_document.unwrap();
+    let opening = dispatch(
+        application,
+        EditorAction::ProjectBrowser(EditorProjectBrowserAction::Open {
+            relative_path: source.into(),
+        }),
+    );
+    let [
+        EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::ProjectBrowser(
+            EditorProjectBrowserActionOutcome::Preparing { request },
+        )),
+    ] = opening.actions()
+    else {
+        panic!("Browser did not accept the source: {opening:?}");
+    };
+    wait(application, |frame| {
+        frame.document_open().result().is_some()
+    });
+    let Some(EditorDocumentOpenResult::Opened {
+        request: completed,
+        document,
+    }) = current(application).document_open().result()
+    else {
+        panic!("Browser did not open {source}");
+    };
+    assert_eq!(*request, completed);
+    dispatch(
+        application,
+        EditorAction::ProjectBrowser(EditorProjectBrowserAction::AcknowledgeOpen {
+            request: completed,
+        }),
+    );
+    dispatch(
+        application,
+        EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document: active }),
+    );
+    assert_eq!(
+        current(application).workspace().active_document,
+        Some(active)
+    );
+    document
 }
 
 fn applied(result: PanelActionDispatch, document: EditorDocumentId) {
@@ -458,7 +633,7 @@ fn assert_leaf(
                 request.limits.max_metadata_bytes()
             );
             assert!(observation.scanned_entries <= SCAN_ENTRIES);
-            assert!(observation.scanned_logical_bytes <= SCAN_BYTES);
+            assert!(observation.scanned_logical_bytes <= request.limits.max_scan_logical_bytes());
         })
         .unwrap(),
     );
@@ -480,22 +655,49 @@ fn assert_history(
 
 #[test]
 fn a_public_panel_discovers_nested_collection_children_and_restores_its_saved_source() {
+    round_trip(EditorDocumentKind::Scene, false);
+}
+
+#[test]
+fn a_public_panel_pages_large_map_keys_in_a_nonactive_scene() {
+    round_trip(EditorDocumentKind::Scene, true);
+}
+
+#[test]
+fn a_public_panel_pages_large_map_keys_in_a_nonactive_prefab() {
+    round_trip(EditorDocumentKind::Prefab, true);
+}
+
+fn round_trip(kind: EditorDocumentKind, large_map: bool) {
     let project = Project::new();
+    let source = |score| {
+        if large_map {
+            fixture::source(fixture::ORIGINAL, score)
+        } else {
+            fixture::source(score, fixture::ORIGINAL)
+        }
+    };
     fs::write(
         project.root().join("schema/authoring.bundle.json"),
         fixture::schema().to_json_string().unwrap(),
     )
     .unwrap();
-    fs::write(
-        project.root().join(SOURCE),
-        fixture::source(fixture::ORIGINAL).to_json_string().unwrap(),
-    )
-    .unwrap();
+    let original = source(fixture::ORIGINAL);
+    let (relative_path, original) = match kind {
+        EditorDocumentKind::Scene => (SOURCE, original.to_json_string()),
+        EditorDocumentKind::Prefab => (
+            PREFAB_SOURCE,
+            PrefabDocument::new(original.placements, original.entities).to_json_string(),
+        ),
+        EditorDocumentKind::Extension(_) => unreachable!(),
+    };
+    let source_path = project.root().join(relative_path);
+    let original_bytes = original.unwrap().into_bytes();
+    fs::write(&source_path, &original_bytes).unwrap();
     let startup_path = project.root().join("scenes/startup.scene.json");
     let startup_bytes = fs::read(&startup_path).unwrap();
-    let original_bytes = fs::read(project.root().join(SOURCE)).unwrap();
     let mut application = Application::open(&project);
-    let document = open_secondary(&mut application);
+    let document = open_nonactive_source(&mut application, relative_path);
     let active = current(&application).workspace().active_document.unwrap();
     assert_ne!(active, document);
     let selection = dispatch(
@@ -506,11 +708,11 @@ fn a_public_panel_discovers_nested_collection_children_and_restores_its_saved_so
         }),
     );
     assert!(matches!(selection.actions(), [
-        nara_editor::EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))
+        EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))
     ] if report.applied));
     let initial = current(&application);
     let initial_tab = initial.workspace().document(document).unwrap();
-    assert_eq!(initial_tab.kind, EditorDocumentKind::Scene);
+    assert_eq!(initial_tab.kind, kind);
     assert!(initial_tab.source_binding.is_some());
     assert_history(&initial, document, false, 0, 0);
     let assert_navigation = |application: &EditorApplication| {
@@ -554,7 +756,7 @@ fn a_public_panel_discovers_nested_collection_children_and_restores_its_saved_so
     let mut compiler = UiCompiler::new(bundled_font_face().unwrap(), Default::default()).unwrap();
     drop(
         host.prepare(&application, |panel, context| {
-            let (read, version, cursor) = discover_leaf(context, document);
+            let (read, version, continuation) = discover_leaf(context, document, large_map);
             let observation = context.read_document_property(read.clone()).unwrap();
             let EditorPropertyValue::Present(ComponentValue::U64(original)) = observation.value
             else {
@@ -568,7 +770,7 @@ fn a_public_panel_discovers_nested_collection_children_and_restores_its_saved_so
             );
             assert_eq!(observation.metadata_bytes, read.limits.max_metadata_bytes());
             assert!(observation.scanned_entries <= SCAN_ENTRIES);
-            assert!(observation.scanned_logical_bytes <= SCAN_BYTES);
+            assert!(observation.scanned_logical_bytes <= read.limits.max_scan_logical_bytes());
             let edited = original.checked_add(2).unwrap();
             let edit = AuthoringPropertyEdit {
                 entity: observation.target.entity.clone(),
@@ -582,43 +784,53 @@ fn a_public_panel_discovers_nested_collection_children_and_restores_its_saved_so
                 .prepare_authoring_property_edit(basis, std::slice::from_ref(&edit))
                 .unwrap();
             assert_eq!(cancelled.document(), document);
-            assert_eq!(cancelled.document_kind(), EditorDocumentKind::Scene);
+            assert_eq!(cancelled.document_kind(), kind);
             assert_eq!(cancelled.base_revision(), basis.revision);
             assert_eq!(cancelled.patch().operations.len(), 1);
             assert_eq!(cancelled.inverse().operations.len(), 1);
             drop(cancelled);
-            prepared = Some(
-                context
-                    .prepare_authoring_property_edit(basis, std::slice::from_ref(&edit))
-                    .unwrap(),
-            );
-            stale = Some(
-                context
-                    .prepare_authoring_property_edit(basis, std::slice::from_ref(&edit))
-                    .unwrap(),
-            );
-            assert_eq!(
-                prepared.as_ref().unwrap().patch(),
-                stale.as_ref().unwrap().patch()
-            );
-            assert_eq!(
-                prepared.as_ref().unwrap().inverse(),
-                stale.as_ref().unwrap().inverse()
-            );
+            let candidate = context
+                .prepare_authoring_property_edit(basis, std::slice::from_ref(&edit))
+                .unwrap();
+            let sibling = context
+                .prepare_authoring_property_edit(basis, std::slice::from_ref(&edit))
+                .unwrap();
+            assert_eq!(candidate.patch(), sibling.patch());
+            assert_eq!(candidate.inverse(), sibling.inverse());
+            if large_map {
+                let preview = candidate.preview();
+                let (candidate_read, candidate_next) =
+                    discover_large_map(preview.basis(), |query| preview.query_authoring(query));
+                assert_eq!(candidate_read, read);
+                assert_eq!(
+                    preview.read_property(candidate_read).unwrap().value,
+                    EditorPropertyValue::Present(ComponentValue::U64(edited))
+                );
+                assert_eq!(
+                    preview.query_authoring(continuation.clone()),
+                    Err(EditorDocumentQueryRejection::WrongPreparedEdit)
+                );
+                assert_eq!(
+                    context.query_document_authoring(candidate_next.clone()),
+                    Err(EditorDocumentQueryRejection::WrongPreparedEdit)
+                );
+                assert_eq!(
+                    sibling.preview().query_authoring(candidate_next),
+                    Err(EditorDocumentQueryRejection::WrongPreparedEdit)
+                );
+            }
+            prepared = Some(candidate);
+            stale = Some(sibling);
             panel.replace_for_cpu(&edited.to_string()).unwrap();
             token = Some(context.instance_token());
             snapshot = Some(panel.compose(1).unwrap());
-            discovered = Some((read, cursor, edit, edited));
+            discovered = Some((read, continuation, edit, edited));
         })
         .unwrap(),
     );
-    let (old_read, cursor, edit, edited) = discovered.unwrap();
+    let (old_read, continuation, edit, edited) = discovered.unwrap();
     let draft = edited.to_string();
     let original_basis = old_read.target.basis.clone();
-    let continuation = EditorAuthoringQuery {
-        position: EditorAuthoringQueryPosition::Continue(cursor),
-        limits: limits(METADATA_BYTES),
-    };
     assert_leaf(&mut host, &application, &old_read.target, fixture::ORIGINAL);
     for revision in [2, 3] {
         drop(
@@ -670,10 +882,7 @@ fn a_public_panel_discovers_nested_collection_children_and_restores_its_saved_so
         );
         assert_eq!(current(&application).workspace(), initial.workspace());
         assert!(evidence.finished.borrow().is_empty());
-        assert_eq!(
-            fs::read(project.root().join(SOURCE)).unwrap(),
-            original_bytes
-        );
+        assert_eq!(fs::read(&source_path).unwrap(), original_bytes);
         assert_navigation(&application);
     }
     let mut ids = Vec::new();
@@ -827,10 +1036,7 @@ fn a_public_panel_discovers_nested_collection_children_and_restores_its_saved_so
             );
             assert_eq!(current(&application).workspace(), frame.workspace());
         }
-        assert_eq!(
-            fs::read(project.root().join(SOURCE)).unwrap(),
-            original_bytes
-        );
+        assert_eq!(fs::read(&source_path).unwrap(), original_bytes);
         assert_navigation(&application);
     }
     let saving = current(&application)
@@ -865,17 +1071,26 @@ fn a_public_panel_discovers_nested_collection_children_and_restores_its_saved_so
             .saved_revision,
         saving
     );
-    let saved_bytes = fs::read(project.root().join(SOURCE)).unwrap();
+    let saved_bytes = fs::read(&source_path).unwrap();
     assert_ne!(saved_bytes, original_bytes);
-    let saved_source = SceneDocumentCandidate::decode_json_bytes(&saved_bytes)
-        .unwrap()
-        .into_composition_source()
-        .unwrap();
-    assert_eq!(
-        saved_source,
-        fixture::source(edited),
-        "the complete source, huge sibling, unknown component and other rows must survive"
-    );
+    let expected = source(edited);
+    match kind {
+        EditorDocumentKind::Scene => assert_eq!(
+            SceneDocumentCandidate::decode_json_bytes(&saved_bytes)
+                .unwrap()
+                .into_composition_source()
+                .unwrap(),
+            expected,
+        ),
+        EditorDocumentKind::Prefab => assert_eq!(
+            PrefabDocumentCandidate::decode_json_bytes(&saved_bytes)
+                .unwrap()
+                .into_composition_source()
+                .unwrap(),
+            PrefabDocument::new(expected.placements, expected.entities),
+        ),
+        EditorDocumentKind::Extension(_) => unreachable!(),
+    }
     assert_navigation(&application);
 
     applied(
@@ -892,7 +1107,7 @@ fn a_public_panel_discovers_nested_collection_children_and_restores_its_saved_so
     );
     assert_leaf(&mut host, &application, &old_read.target, fixture::ORIGINAL);
     assert_history(&current(&application), document, true, 0, 1);
-    assert_eq!(fs::read(project.root().join(SOURCE)).unwrap(), saved_bytes);
+    assert_eq!(fs::read(&source_path).unwrap(), saved_bytes);
     let mut reopening_basis = None;
     drop(
         host.prepare(&application, |_, context| {
@@ -962,7 +1177,7 @@ fn a_public_panel_discovers_nested_collection_children_and_restores_its_saved_so
                     ))
                 ));
             }
-            let (read, _, _) = discover_leaf(context, document);
+            let (read, _, _) = discover_leaf(context, document, large_map);
             assert_eq!(read.target.property, old_read.target.property);
             assert_eq!(read.target.basis.revision, revision);
             assert_eq!(
@@ -976,15 +1191,7 @@ fn a_public_panel_discovers_nested_collection_children_and_restores_its_saved_so
         current(&application).workspace(),
         reopened_frame.workspace()
     );
-    let reopened_bytes = fs::read(project.root().join(SOURCE)).unwrap();
-    assert_eq!(reopened_bytes, saved_bytes);
-    assert_eq!(
-        SceneDocumentCandidate::decode_json_bytes(&reopened_bytes)
-            .unwrap()
-            .into_composition_source()
-            .unwrap(),
-        saved_source
-    );
+    assert_eq!(fs::read(&source_path).unwrap(), saved_bytes);
     assert_navigation(&application);
     assert_eq!(evidence.created.get(), 1);
     assert_eq!(evidence.finished.borrow().len(), 9);

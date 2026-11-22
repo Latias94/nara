@@ -28,7 +28,7 @@ pub const MAX_EDITOR_PROPERTY_READ_SCAN_ENTRIES: usize = 65_536;
 pub const MAX_EDITOR_PROPERTY_READ_SCAN_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_EDITOR_AUTHORING_QUERY_SCAN_BYTES: usize = 4 * 1024 * 1024;
 
-/// Operation-local discovery limits. Metadata counts all returned and cursor identity bytes.
+/// Operation-local discovery limits. Metadata counts retained result and cursor identities.
 /// This is a logical content allowance, not an allocator bound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EditorAuthoringQueryLimits {
@@ -107,7 +107,7 @@ pub enum EditorAuthoringProjection {
     /// positions are intentionally not exposed because they have no stable source identity.
     Properties {
         component: ComponentTypeId,
-        property: ComponentPropertyPath,
+        property: Arc<ComponentPropertyPath>,
     },
     /// Enumerates stored property claims of the instance at the target's direct anchor.
     /// Steps enter nested declarations owned by that same source. No base is loaded.
@@ -209,7 +209,7 @@ pub struct EditorAuthoringCursor {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AuthoringCursorPosition {
     Direct {
-        target: EditorAuthoringQueryTarget,
+        target: Arc<EditorAuthoringQueryTarget>,
         next: AuthoringPagePosition,
     },
     PrefabClaims {
@@ -240,13 +240,12 @@ pub(crate) enum AuthoringPagePosition {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PropertyPagePosition {
     Initial,
-    Empty,
     Record {
         next_member: usize,
         next_tombstone: usize,
     },
     Map {
-        after: Option<String>,
+        after: Arc<ComponentPropertyStep>,
     },
     KeyedList {
         next_item: usize,
@@ -268,6 +267,29 @@ pub enum EditorAuthoringMemberStatus {
 pub enum EditorAuthoringPropertyStatus {
     Available,
     Retired,
+}
+
+/// A durable child selector that shares its parent query path with the rest of the page.
+/// Materialize the complete schema-relative path when issuing a selected read or edit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorAuthoringPropertySelector {
+    pub(crate) parent: Arc<ComponentPropertyPath>,
+    pub(crate) step: Arc<ComponentPropertyStep>,
+}
+
+impl EditorAuthoringPropertySelector {
+    #[must_use]
+    pub fn child_step(&self) -> &ComponentPropertyStep {
+        self.step.as_ref()
+    }
+
+    #[must_use]
+    pub fn to_path(&self) -> ComponentPropertyPath {
+        self.parent
+            .as_ref()
+            .clone()
+            .with_steps([self.child_step().clone()])
+    }
 }
 
 /// Exact stored claim selected by a query. Cloning preserves its original workspace, basis,
@@ -329,7 +351,7 @@ pub enum EditorAuthoringRow {
     },
     Property {
         /// A durable selector with one additional child step relative to the query target.
-        property: ComponentPropertyPath,
+        property: EditorAuthoringPropertySelector,
         /// Retired declarations have no current shape and therefore report `None`.
         kind: Option<ComponentValueKind>,
         /// The root field's declared Edit capability; final candidate admission still decides.
@@ -357,14 +379,14 @@ pub enum EditorAuthoringRow {
 /// Owned historical observation. A current page is not mutation authority after its basis changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorAuthoringPage {
-    pub target: EditorAuthoringQueryTarget,
+    pub target: Arc<EditorAuthoringQueryTarget>,
     pub rows: Vec<EditorAuthoringRow>,
     pub scanned_entries: usize,
     /// Logical identity work for property selectors, child identities and Prefab claim headers.
     /// A claim header that exceeds a limit charges the allowance examined before refusal.
     pub scanned_logical_bytes: usize,
-    /// Aggregate returned and continuation logical identity bytes. Claim addresses and their
-    /// continuation share one immutable path allocation, charged once for this page.
+    /// Aggregate retained logical identity bytes. Direct discovery shares its target, and Map
+    /// continuations share the last returned key. Each shared identity is counted once.
     pub metadata_bytes: usize,
     pub next: Option<EditorAuthoringCursor>,
 }

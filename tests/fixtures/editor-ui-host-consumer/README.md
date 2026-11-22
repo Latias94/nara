@@ -20,8 +20,10 @@ Host. The panel discovers durable Record, Map and KeyedList selectors from bound
 one-node/eight-byte leaf beside a 48 KiB untouched sibling, computes a replacement, cancels one
 candidate and retains two competing candidates. It checks exact dispatch IDs, stale refusal,
 Undo/Redo and Save, then changes memory before Reopen and verifies the complete saved source and
-old query-basis refusal. Wire names differ from durable IDs. No Dear context, native window or
-GPU is required for this workflow.
+old query-basis refusal. The long-key cases page two 32 KiB UTF-8 Map keys under a 16 KiB parent
+using non-active Scene and Prefab documents and exact prepared candidates. The discovered
+selector goes through the same edit, history and persistence workflow. Wire names differ from
+durable IDs. These workflows use the semantic CPU Host.
 
 ```text
 cargo +1.95.0 nextest run --manifest-path tests/fixtures/editor-ui-host-consumer/Cargo.toml --locked --offline --release --test property_children --test public_host --test-threads=1 --no-fail-fast --no-tests fail

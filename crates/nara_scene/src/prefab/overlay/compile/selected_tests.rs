@@ -1347,8 +1347,9 @@ fn inspection_preserves_root_aliases_ordered_claims_and_typed_reference_reads() 
     use crate::{
         __private::try_inspect_authoring_prefab_instance_with_loader,
         AuthoringPrefabPropertyClaimKind, AuthoringPrefabPropertyValue,
-        AuthoringPrefabRecordOrigin, AuthoringPrefabValueError, AuthoringPropertyChildrenPosition,
-        AuthoringReadError, PrefabDeclarationSource, PrefabInstancePath, PrefabOverlaySlot,
+        AuthoringPrefabRecordOrigin, AuthoringPrefabValueError, AuthoringPropertyChildrenLimits,
+        AuthoringPropertyChildrenPosition, AuthoringReadError, PrefabDeclarationSource,
+        PrefabInstancePath, PrefabOverlaySlot,
     };
     use nara_reflect::{
         ComponentPropertyReadBudget, ComponentPropertyStep, ComponentValueMaterializationLimits,
@@ -1435,7 +1436,7 @@ fn inspection_preserves_root_aliases_ordered_claims_and_typed_reference_reads() 
     let host = nested("host");
     let socket = nested("socket");
     let typed_ref = authored(socket.clone().into());
-    let links = ComponentValue::map([("main", typed_ref.clone())]);
+    let links = ComponentValue::map([("main", typed_ref.clone()), ("spare", typed_ref.clone())]);
     let mut outer = PrefabOverlay::new(key("base"));
     outer.components.push(properties(
         "bridge",
@@ -1593,17 +1594,77 @@ fn inspection_preserves_root_aliases_ordered_claims_and_typed_reference_reads() 
             .copy_value(ComponentValueMaterializationLimits::default().with_nodes(ItemLimit::ONE)),
         Err(AuthoringPrefabValueError::BudgetExceeded),
     );
-    let page = root
-        .property_children(
-            &property("links"),
-            AuthoringPropertyChildrenPosition::Initial,
-            32,
-            8,
-            4096,
-        )
-        .unwrap();
+    let children = |position, limits| root.property_children(&property("links"), position, limits);
+    let limits = AuthoringPropertyChildrenLimits {
+        max_scan_entries: 32,
+        max_rows: 8,
+        max_scan_logical_bytes: 4096,
+        max_child_metadata_bytes: "main".len(),
+    };
+    let page = children(AuthoringPropertyChildrenPosition::Initial, limits).unwrap();
+    let row_capped = children(
+        AuthoringPropertyChildrenPosition::Initial,
+        AuthoringPropertyChildrenLimits {
+            max_rows: 1,
+            ..limits
+        },
+    )
+    .unwrap();
     let entry = ComponentPropertyStep::MapEntry("main".into());
+    assert_eq!(page.children.len(), 1);
     assert_eq!(page.children[0].to_step(), entry);
+    assert_eq!(page.scanned_entries, row_capped.scanned_entries + 1);
+    assert_eq!(
+        page.scanned_logical_bytes,
+        row_capped.scanned_logical_bytes + "spare".len()
+    );
+    let next = page.next.unwrap();
+    assert_eq!(
+        next,
+        AuthoringPropertyChildrenPosition::Map {
+            after: Some("main")
+        }
+    );
+    assert_eq!(
+        children(next, limits),
+        Err(AuthoringReadError::ChildMetadataBudgetExceeded)
+    );
+    let tail = children(
+        next,
+        AuthoringPropertyChildrenLimits {
+            max_child_metadata_bytes: "spare".len(),
+            ..limits
+        },
+    )
+    .unwrap();
+    assert_eq!(tail.children.len(), 1);
+    assert_eq!(
+        tail.children[0].to_step(),
+        ComponentPropertyStep::MapEntry("spare".into())
+    );
+    assert!(tail.next.is_none());
+    let no_metadata = AuthoringPropertyChildrenLimits {
+        max_child_metadata_bytes: 0,
+        ..limits
+    };
+    let empty = children(
+        AuthoringPropertyChildrenPosition::Map {
+            after: Some("spare"),
+        },
+        no_metadata,
+    )
+    .unwrap();
+    assert!(empty.children.is_empty());
+    assert!(empty.next.is_none());
+    assert_eq!(
+        children(
+            AuthoringPropertyChildrenPosition::Map {
+                after: Some("missing"),
+            },
+            no_metadata,
+        ),
+        Err(AuthoringReadError::InvalidFieldPath)
+    );
     let member = root
         .property_value(&property("links").with_steps([entry]), &mut scan)
         .unwrap();

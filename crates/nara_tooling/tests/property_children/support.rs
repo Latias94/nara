@@ -358,7 +358,7 @@ pub fn query(
             entity: entity(),
             projection: EditorAuthoringProjection::Properties {
                 component: component(),
-                property,
+                property: property.into(),
             },
         }),
         limits,

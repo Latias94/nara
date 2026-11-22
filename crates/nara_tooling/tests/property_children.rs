@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPath, ComponentMemberPath, ComponentMemberPathSegment,
     ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep,
@@ -24,12 +26,20 @@ use support::{
     fresh_schema_basis, keyed_item, limits, member, path, query, read, read_request,
 };
 
+#[derive(Debug, PartialEq, Eq)]
+struct DiscoveredProperty {
+    property: ComponentPropertyPath,
+    kind: Option<ComponentValueKind>,
+    edit_capability: bool,
+    status: EditorAuthoringPropertyStatus,
+}
+
 fn available(
     property: ComponentPropertyPath,
     kind: ComponentValueKind,
     edit_capability: bool,
-) -> EditorAuthoringRow {
-    EditorAuthoringRow::Property {
+) -> DiscoveredProperty {
+    DiscoveredProperty {
         property,
         kind: Some(kind),
         edit_capability,
@@ -37,8 +47,8 @@ fn available(
     }
 }
 
-fn retired(property: ComponentPropertyPath) -> EditorAuthoringRow {
-    EditorAuthoringRow::Property {
+fn retired(property: ComponentPropertyPath) -> DiscoveredProperty {
+    DiscoveredProperty {
         property,
         kind: None,
         edit_capability: false,
@@ -46,18 +56,29 @@ fn retired(property: ComponentPropertyPath) -> EditorAuthoringRow {
     }
 }
 
-fn property(row: &EditorAuthoringRow) -> &ComponentPropertyPath {
-    let EditorAuthoringRow::Property { property, .. } = row else {
+fn discovered(row: &EditorAuthoringRow) -> DiscoveredProperty {
+    let EditorAuthoringRow::Property {
+        property,
+        kind,
+        edit_capability,
+        status,
+    } = row
+    else {
         panic!("Properties must only return property rows: {row:?}");
     };
-    property
+    DiscoveredProperty {
+        property: property.to_path(),
+        kind: *kind,
+        edit_capability: *edit_capability,
+        status: *status,
+    }
 }
 
 fn collect(
     fixture: &support::Fixture,
     parent: &ComponentPropertyPath,
     rows: usize,
-) -> Vec<EditorAuthoringRow> {
+) -> Vec<DiscoveredProperty> {
     let request = query(
         &fixture.workspace,
         fixture.document,
@@ -70,20 +91,21 @@ fn collect(
         .unwrap();
     let target = page.target.clone();
     let mut cursors = Vec::new();
-    let mut collected = Vec::new();
+    let mut collected: Vec<DiscoveredProperty> = Vec::new();
     for _ in 0..64 {
         assert_eq!(page.target, target);
         assert!(page.rows.len() <= rows);
         assert!(page.scanned_entries <= request.limits.max_scan_entries());
         assert!(page.scanned_logical_bytes <= request.limits.max_scan_logical_bytes());
         for row in &page.rows {
-            let child = property(row);
+            let row = discovered(row);
+            let child = &row.property;
             assert_eq!(child.root, parent.root);
             assert_eq!(child.steps.len(), parent.steps.len() + 1);
             assert!(child.steps.starts_with(&parent.steps));
-            assert!(!collected.iter().any(|prior| property(prior) == child));
+            assert!(!collected.iter().any(|prior| &prior.property == child));
+            collected.push(row);
         }
-        collected.extend(page.rows.iter().cloned());
         let Some(cursor) = page.next.as_ref() else {
             return collected;
         };
@@ -251,7 +273,7 @@ fn map_pages_keep_literal_key_order_and_readable_selectors_across_page_sizes() {
         }
         for (row, value) in expected.iter().zip([1, 2, 3, 4, 5]) {
             assert_eq!(
-                read(&fixture.workspace, fixture.document, property(row).clone()),
+                read(&fixture.workspace, fixture.document, row.property.clone()),
                 EditorPropertyValue::Present(ComponentValue::U64(value))
             );
         }
@@ -706,17 +728,17 @@ fn ordinary_list_children_refuse_without_exposing_positional_identity() {
 }
 
 #[test]
-fn complete_property_metadata_including_utf8_and_cursor_anchor_has_an_exact_boundary() {
+fn property_pages_charge_shared_identity_once_and_continue_after_the_last_fitting_row() {
     for prefab in [false, true] {
         let fixture = fixture(prefab);
         let before = fixture.workspace.authoring_model();
         let target_bytes = ENTITY.len() + COMPONENT.len() + "map".len();
         let all_row_bytes = ["", "a", "a/b", "z", "é"]
             .iter()
-            .map(|key| "map".len() + key.len())
+            .map(|key| key.len())
             .sum::<usize>();
         for (rows, expected_bytes) in [
-            (2, 2 * target_bytes + 2 * "map".len() + 2 * "a".len()),
+            (2, target_bytes + "a".len()),
             (5, target_bytes + all_row_bytes),
         ] {
             let mut request = query(
@@ -741,16 +763,23 @@ fn complete_property_metadata_including_utf8_and_cursor_anchor_has_an_exact_boun
             );
             request.limits =
                 EditorAuthoringQueryLimits::new(256, rows, expected_bytes - 1).unwrap();
-            assert_eq!(
-                fixture.workspace.query_document_authoring(request.clone()),
-                Err(EditorDocumentQueryRejection::MetadataBudgetExceeded)
-            );
-            request.limits = limits(rows);
-            assert_eq!(
-                fixture.workspace.query_document_authoring(request).unwrap(),
-                page
-            );
+            let prefix = fixture.workspace.query_document_authoring(request).unwrap();
+            assert_eq!(prefix.rows, page.rows[..rows - 1]);
+            assert!(prefix.metadata_bytes < expected_bytes);
+            assert!(prefix.scanned_entries > prefix.rows.len());
+            let continued = continue_page(&fixture.workspace, &prefix, limits(rows));
+            assert_eq!(&continued.rows[0], &page.rows[rows - 1]);
         }
+        let too_small = query(
+            &fixture.workspace,
+            fixture.document,
+            path("map"),
+            EditorAuthoringQueryLimits::new(256, 1, target_bytes - 1).unwrap(),
+        );
+        assert_eq!(
+            fixture.workspace.query_document_authoring(too_small),
+            Err(EditorDocumentQueryRejection::MetadataBudgetExceeded)
+        );
         assert_eq!(fixture.workspace.authoring_model(), before);
     }
 }
@@ -793,7 +822,7 @@ fn anonymous_declarations_advance_empty_pages_without_inventing_a_durable_select
             assert_eq!(page.scanned_entries, 1);
             assert!(page.scanned_logical_bytes > 0);
             assert!(page.rows.len() <= 1);
-            collected.extend(page.rows.iter().cloned());
+            collected.extend(page.rows.iter().map(discovered));
             let Some(cursor) = page.next.as_ref() else {
                 complete = true;
                 break;
@@ -1001,10 +1030,11 @@ fn property_pages_ignore_active_selection_and_owned_target_changes_cannot_retarg
             first
         );
         let mut displayed = first;
-        displayed.target.entity = SceneEntityId::new("other").unwrap();
-        displayed.target.projection = EditorAuthoringProjection::Properties {
+        let target = Arc::make_mut(&mut displayed.target);
+        target.entity = SceneEntityId::new("other").unwrap();
+        target.projection = EditorAuthoringProjection::Properties {
             component: component(),
-            property: path("locked"),
+            property: path("locked").into(),
         };
         assert_eq!(
             continue_page(&fixture.workspace, &displayed, limits(1)),

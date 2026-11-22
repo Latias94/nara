@@ -338,7 +338,7 @@ fn members() -> EditorAuthoringProjection {
 fn properties(path: ComponentPropertyPath) -> EditorAuthoringProjection {
     EditorAuthoringProjection::Properties {
         component: ComponentTypeId::new("game.Data"),
-        property: path,
+        property: path.into(),
     }
 }
 fn read(
@@ -425,8 +425,8 @@ fn discovery_pages_actual_components_and_roots_without_reading_values_or_changin
             .unwrap();
         assert_eq!(first.scanned_entries, 1);
         assert_eq!(
-            first.metadata_bytes, 26,
-            "page item + Data row + cursor item + Data anchor"
+            first.metadata_bytes, 22,
+            "shared item target + Data row + Data anchor"
         );
         let mut scan_bound = query(&workspace, document, EditorAuthoringProjection::Components);
         scan_bound.limits = EditorAuthoringQueryLimits::new(1, 2, 1024).unwrap();
@@ -668,8 +668,8 @@ fn recursive_property_discovery_preserves_durable_paths_and_selection_independen
                     status: EditorAuthoringPropertyStatus::Available,
                     ..
                 }
-            ] if property == &record.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("first"))])
-                && nested == &record.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("nested"))])
+            ] if property.to_path() == record.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("first"))])
+                && nested.to_path() == record.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("nested"))])
         ));
         assert!(page.next.is_some());
         page = workspace
@@ -692,8 +692,8 @@ fn recursive_property_discovery_preserves_durable_paths_and_selection_independen
                     status: EditorAuthoringPropertyStatus::Retired,
                     ..
                 }
-            ] if property == &record.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("second"))])
-                && retired == &record.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("retired"))])
+            ] if property.to_path() == record.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("second"))])
+                && retired.to_path() == record.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("retired"))])
         ));
         assert!(page.next.is_none());
 
@@ -725,8 +725,8 @@ fn recursive_property_discovery_preserves_durable_paths_and_selection_independen
                     status: EditorAuthoringPropertyStatus::Retired,
                     ..
                 }
-            ] if property == &nested.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("leaf"))])
-                && retired == &nested.with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("retired_leaf"))])
+            ] if property.to_path() == nested.clone().with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("leaf"))])
+                && retired.to_path() == nested.with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("retired_leaf"))])
         ));
         assert_eq!(workspace.authoring_model(), before);
     }
@@ -854,23 +854,24 @@ fn continuations_bind_workspace_target_and_basis_and_charge_the_complete_observa
             )
         );
         assert_eq!(
-            first.metadata_bytes, 32,
-            "two copies of item + game.Data, plus amount"
+            first.metadata_bytes, 19,
+            "one shared copy of item + game.Data, plus amount"
         );
         let mut exact = request.clone();
-        exact.limits = EditorAuthoringQueryLimits::new(2, 1, 32).unwrap();
+        exact.limits = EditorAuthoringQueryLimits::new(2, 1, 19).unwrap();
         assert_eq!(
             workspace.query_document_authoring(exact.clone()).unwrap(),
             first
         );
-        exact.limits = EditorAuthoringQueryLimits::new(2, 1, 31).unwrap();
+        exact.limits = EditorAuthoringQueryLimits::new(2, 1, 18).unwrap();
         assert_eq!(
             workspace.query_document_authoring(exact),
             Err(EditorDocumentQueryRejection::MetadataBudgetExceeded)
         );
         let mut changed_page = first.clone();
-        changed_page.target.entity = id("empty");
-        changed_page.target.projection = EditorAuthoringProjection::Components;
+        let displayed_target = std::sync::Arc::make_mut(&mut changed_page.target);
+        displayed_target.entity = id("empty");
+        displayed_target.projection = EditorAuthoringProjection::Components;
         let second = next(&workspace, changed_page);
         assert_eq!(second.target.entity, id("item"));
         assert_eq!(second.target.projection, roots());
@@ -1129,7 +1130,7 @@ fn multi_row_discovery_charges_aggregate_metadata_before_copying() {
                 ["game.Data", "game.Unknown"],
                 None,
             ),
-            (roots(), 36, ["amount", "blob"], Some("defaulted")),
+            (roots(), 23, ["amount", "blob"], Some("defaulted")),
         ] {
             let mut request = query(&workspace, document, projection.clone());
             request.limits = EditorAuthoringQueryLimits::new(2, 2, metadata_bytes).unwrap();
