@@ -5806,6 +5806,11 @@ until the incumbent retires and the candidate explicitly revalidates the baselin
 marker lock. Windows NTFS and Linux ext4 production cases pass, while cross-machine coordination
 and arbitrary service or World migration remain open.
 
+The [local Server Resume control](2026-10-31-cooked-player-delivery-plan.md#server-resume-and-the-live-control-loop)
+uses the existing zero-elapsed Session frame before returning to ordinary pacing. The relocated
+20-second installation retains work across immediate re-pause and closes on EOF at tick 0
+when its queue is empty.
+
 The [Two-Level Game side room](2026-10-20-persistent-two-level-game-plan.md#deferred-additive-region-execution-evidence)
 extends the existing source and cooked Players through the same Deferred Scene and Image owners.
 Its catalog distinguishes optional room data from startup and travel roots. Its execution record owns

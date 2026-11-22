@@ -109,6 +109,7 @@ pub(crate) fn accept(cooker: &Path) {
     remove_owned_tree(fixture, &cache, &target);
     assert_sources_gone(project, &cache);
 
+    service::assert_long_tick_resume_control(&mut custody, &long_tick);
     let uninterrupted = assert_half_speed_partitions(&mut custody, &half);
     assert_half_speed_continuation(&mut custody, &half, &target, &uninterrupted);
 

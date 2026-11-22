@@ -429,6 +429,25 @@ Correctness Clippy passes for the sample library, ordinary Server and public del
 and for the isolated Server binary with a Cook-generated bootstrap. Root and sample formatting
 and changed document links pass.
 
+### Server Resume And The Live Control Loop
+
+The `resume` reply describes the original Session's completed Resume frame at zero new elapsed
+time. The service resets its wall-clock pacing baseline there and returns to its existing input
+and frame-deadline loop. Retained fixed debt still belongs to the Session. A fresh paused Server
+with a 20-second timestep can receive Resume followed by Pause before any fixed tick. The
+original tick-1 command remains admitted and explicit Advance can execute it once. Resume
+followed by EOF with no queued work can retire at tick 0.
+[Round eleven reproduction](../audits/2026-11-22-starter-input-authoring-and-runtime-review.md#p2--resuming-a-server-with-a-long-timestep-blocks-the-next-control-request)
+
+The Windows x64 Release delivery run passed 2/2 on Rust 1.95.0
+(`712368c0-b17d-461f-aee4-8b1c994829a3`). In the relocated 20-second installation, the Resume
+and Pause replies arrived within the control fixture's 15-second response deadlines. Pause
+reported tick 0, no marker and one pending command. An explicit Advance executed and
+acknowledged the original command once at tick 1. The separate empty-queue Resume and EOF
+process closed at tick 0 with zero admitted work. Both cases returned complete native cleanup.
+The same delivery run covers the existing scaled drain, stall, gameplay and checkpoint
+continuation controls. Sample formatting and the changed links pass.
+
 ### Packaged Server Continuation
 
 Implementation: `c488d72`. Process acceptance: `196f003`.

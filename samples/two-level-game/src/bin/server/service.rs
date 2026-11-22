@@ -437,19 +437,13 @@ impl Service<'_> {
                     reject(self.output, "Server resume requires a paused session")?;
                     return Ok(None);
                 }
-                self.clock.reset(Instant::now());
-                loop {
-                    let now = Instant::now();
-                    if let Some(delta) = self.clock.take_due(now)? {
-                        let exit = self.drive_live_frame(delta)?;
-                        self.paused = false;
-                        if exit {
-                            return Ok(Some(Stop::AppExit));
-                        }
-                        break;
-                    }
-                    thread::sleep(self.clock.remaining(now));
+                let exit = self.session.resume()?;
+                self.paused = false;
+                if exit.is_some() {
+                    return Ok(Some(Stop::AppExit));
                 }
+                self.clock.reset(Instant::now());
+                self.record_visit()?;
                 self.send_observation("resumed")?;
             }
             Request::Advance { elapsed_nanos } => {

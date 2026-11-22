@@ -26,6 +26,7 @@ const READY: &str = "TWO_LEVEL_SERVER_READY ";
 const REPLY: &str = "TWO_LEVEL_SERVER_REPLY ";
 const SOURCE: &str = "two-level-game.server";
 pub(super) const TIMESTEP_NANOS: u64 = 20_000_000;
+const LONG_TIMESTEP_NANOS: u64 = 20_000_000_000;
 const POLL: Duration = Duration::from_millis(10);
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(15);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(65);
@@ -309,10 +310,59 @@ pub(super) fn assert_zero_scale_checkpoint(custody: &mut Custody, executable: &P
     print_scaled_service_evidence(name, &result);
 }
 
+pub(super) fn assert_long_tick_resume_control(custody: &mut Custody, executable: &Path) {
+    let name = "server-long-tick-resume-pause";
+    let mut server = Service::spawn(custody, executable, Launch::Paused(None), name);
+    server.timestep_nanos = LONG_TIMESTEP_NANOS;
+    let ready = server.ready(true, false);
+    assert_eq!(tick(&ready["state"]), 0, "{ready}");
+    assert_eq!(server.admit(&action("marker")), 1);
+    server.write(&format!("{}\n{}\n", request("resume"), request("pause")));
+
+    let resumed = server.reply("resumed");
+    server.check_observation(&resumed["state"], &resumed);
+    assert_eq!(resumed["paused"], false, "{resumed}");
+    assert_eq!(resumed["time"]["elapsed_nanos"], 0, "{resumed}");
+    let paused = server.reply("paused");
+    server.check_observation(&paused["state"], &paused);
+    assert_eq!(paused["paused"], true, "{paused}");
+    assert_eq!(tick(&paused["state"]), 0, "{paused}");
+    assert_eq!(paused["state"]["markers"], json!([]), "{paused}");
+    assert_eq!(paused["commands"]["pending"], 1, "{paused}");
+
+    let advanced = server.advance(LONG_TIMESTEP_NANOS);
+    assert_eq!(tick(&advanced["state"]), 1, "{advanced}");
+    assert_eq!(advanced["state"]["markers"], json!([1]), "{advanced}");
+    assert_eq!(advanced["commands"]["pending"], 0, "{advanced}");
+    server.send(&request("shutdown"));
+    let result = server.finish("shutdown", None);
+    assert_eq!(result["state"], advanced["state"], "{result}");
+    print_scaled_service_evidence(name, &result);
+
+    let name = "server-long-tick-resume-eof";
+    let mut server = Service::spawn(custody, executable, Launch::Paused(None), name);
+    server.timestep_nanos = LONG_TIMESTEP_NANOS;
+    let ready = server.ready(true, false);
+    assert_eq!(tick(&ready["state"]), 0, "{ready}");
+    server.send(&request("resume"));
+    server.close_input();
+
+    let resumed = server.reply("resumed");
+    server.check_observation(&resumed["state"], &resumed);
+    assert_eq!(resumed["paused"], false, "{resumed}");
+    let result = server.finish("stdin_eof", None);
+    assert_eq!(tick(&result["state"]), 0, "{result}");
+    assert_eq!(
+        result["server_evidence"]["commands"]["accepted"], 0,
+        "{result}"
+    );
+    print_scaled_service_evidence(name, &result);
+}
+
 pub(super) fn assert_long_tick_drain(custody: &mut Custody, executable: &Path) {
     let name = "server-long-tick-shutdown";
     let mut server = Service::spawn(custody, executable, Launch::Paced(None), name);
-    server.timestep_nanos = 20_000_000_000;
+    server.timestep_nanos = LONG_TIMESTEP_NANOS;
     let ready = server.ready(false, false);
     assert_eq!(tick(&ready["state"]), 0, "{ready}");
     assert_eq!(server.admit(&action("travel")), 1);

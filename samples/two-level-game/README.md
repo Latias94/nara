@@ -573,10 +573,12 @@ Scaled simulation continues toward accepted fixed ticks. Ten seconds without pro
 in an error and the final receipt reports the remaining work. The result lists the distinct
 levels whose Scenes were committed from this process's Ready boundary onward.
 The live loop shortens its wake interval at faster time scales and passes measured elapsed time
-to Runtime. The authored fixed-step and debt limits still apply. With `--paused` or an
-initially paused profile, the server configures a requested checkpoint in an exact startup
-tick and remains paused at Ready. The finite `--verify-*` commands drive exact ticks and
-Scene maintenance under any admitted time scale.
+to Runtime. `resume` acknowledges the completed control frame with zero new elapsed time.
+The live loop then waits for the next request or frame deadline, so an immediate `pause` can
+leave an accepted future command pending. The authored fixed-step and debt limits still apply.
+With `--paused` or an initially paused profile, the server configures a requested checkpoint in
+an exact startup tick and remains paused at Ready. The finite `--verify-*` commands drive exact
+ticks and Scene maintenance under any admitted time scale.
 A malformed complete line receives a rejection. A line that exceeds the byte limit, a truncated
 line at EOF or an unsupported elapsed interval closes the session with an error. The server also
 closes with an error if the bounded reply queue fills. The parent must drain stdout to receive the
