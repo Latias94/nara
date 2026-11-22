@@ -8,9 +8,10 @@ use nara_gameplay::{
 };
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
-    ActionMaps, ActionPhase, ButtonInput, InputEventKind, InputEventOrigin,
-    InputGeometryGeneration, InputInvalidationReason, InputPlugin, InputPresentationEpoch,
-    InputPresentedRoute, InputRouteGeneration, InputSlotGeneration, InputSurfaceId, PointerState,
+    ActionMaps, ActionPhase, AxisDeadZone, AxisDirection, ButtonInput, GamepadButton,
+    InputEventKind, InputEventOrigin, InputGeometryGeneration, InputInvalidationReason,
+    InputPlugin, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration,
+    InputSlotGeneration, InputSurfaceId, PointerState,
 };
 use nara_window::{WindowEvents, WindowPlugin};
 
@@ -98,7 +99,96 @@ fn converts_common_keyboard_codes_and_physical_keys() {
         assert_eq!(convert_key_code(code), Some(key));
         assert_eq!(convert_physical_key(PhysicalKey::Code(code)), Some(key));
     }
-    assert_eq!(convert_key_code(WinitKeyCode::F1), None);
+    for code in [
+        WinitKeyCode::F1,
+        WinitKeyCode::IntlBackslash,
+        WinitKeyCode::IntlRo,
+        WinitKeyCode::IntlYen,
+        WinitKeyCode::NumpadSubtract,
+        WinitKeyCode::NumpadEqual,
+        WinitKeyCode::NumpadComma,
+        WinitKeyCode::NumpadDecimal,
+        WinitKeyCode::NumpadDivide,
+    ] {
+        assert_eq!(convert_physical_key(PhysicalKey::Code(code)), None);
+    }
+}
+
+#[test]
+fn punctuation_dispatch_and_action_map_validation_agree() {
+    let action = ActionId::new("test.punctuation").unwrap();
+    let mut bindings = ActionMapBuilder::new(ActionMapLimits::default());
+    bindings
+        .declare_context(ActionContext::gameplay(), true)
+        .unwrap();
+    for (code, character) in [
+        (WinitKeyCode::Backquote, '`'),
+        (WinitKeyCode::Minus, '-'),
+        (WinitKeyCode::Equal, '='),
+        (WinitKeyCode::BracketLeft, '['),
+        (WinitKeyCode::BracketRight, ']'),
+        (WinitKeyCode::Backslash, '\\'),
+        (WinitKeyCode::Semicolon, ';'),
+        (WinitKeyCode::Quote, '\''),
+        (WinitKeyCode::Comma, ','),
+        (WinitKeyCode::Period, '.'),
+        (WinitKeyCode::Slash, '/'),
+    ] {
+        let key = KeyCode::Character(character);
+        assert_eq!(convert_key_code(code), Some(key));
+        assert_eq!(convert_physical_key(PhysicalKey::Code(code)), Some(key));
+        bindings
+            .bind(ActionBinding::key(action.clone(), key))
+            .unwrap();
+    }
+    let definition = bindings.compile().unwrap();
+    assert_eq!(validate_action_map_keyboard(&definition), Ok(()));
+}
+
+#[test]
+fn keyboard_validation_accepts_non_keyboard_bindings() {
+    let confirm = ActionId::new("test.confirm").unwrap();
+    let movement = ActionId::new("test.move").unwrap();
+    let mut bindings = ActionMapBuilder::new(ActionMapLimits::default());
+    bindings
+        .declare_context(ActionContext::gameplay(), true)
+        .unwrap();
+    for binding in [
+        ActionBinding::mouse(confirm.clone(), MouseButton::Left),
+        ActionBinding::gamepad_button(confirm, GamepadButton::DPadRight.code()),
+        ActionBinding::gamepad_axis(movement, 0, AxisDeadZone::default(), false),
+    ] {
+        bindings.bind(binding).unwrap();
+    }
+    let definition = bindings.compile().unwrap();
+    assert_eq!(validate_action_map_keyboard(&definition), Ok(()));
+}
+
+#[test]
+fn keyboard_validation_reports_the_first_unsupported_binding_index() {
+    let confirm = ActionId::new("test.confirm").unwrap();
+    let movement = ActionId::new("test.move").unwrap();
+    let first_unsupported = KeyCode::Character('~');
+    let mut bindings = ActionMapBuilder::new(ActionMapLimits::default());
+    bindings
+        .declare_context(ActionContext::gameplay(), true)
+        .unwrap();
+    for binding in [
+        ActionBinding::mouse(confirm.clone(), MouseButton::Left),
+        ActionBinding::key(confirm.clone(), KeyCode::Character('a')),
+        ActionBinding::key_axis(movement, first_unsupported, AxisDirection::Positive),
+        ActionBinding::key(confirm, KeyCode::Character('A')),
+    ] {
+        bindings.bind(binding).unwrap();
+    }
+    let definition = bindings.compile().unwrap();
+    assert_eq!(
+        validate_action_map_keyboard(&definition),
+        Err(UnsupportedKeyboardBinding {
+            index: 2,
+            key: first_unsupported,
+        })
+    );
 }
 
 #[test]

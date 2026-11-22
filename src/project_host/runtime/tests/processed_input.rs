@@ -70,6 +70,14 @@ impl InputFixture {
     }
 
     fn new_with_input(recipe: ProductRecipe, input_override: Option<&[u8]>) -> Self {
+        Self::new_for_capabilities(recipe, input_override, &[])
+    }
+
+    fn new_for_capabilities(
+        recipe: ProductRecipe,
+        input_override: Option<&[u8]>,
+        additional_capabilities: &[ProductCapability],
+    ) -> Self {
         let root = std::env::temp_dir().join(format!(
             "nara_processed_input_host_{}_{}",
             std::process::id(),
@@ -79,6 +87,10 @@ impl InputFixture {
         let mut configuration = RuntimeConfiguration::default();
         configuration.runtime.preset = RuntimePreset::LocalHeadless;
         configuration.capabilities.requested = vec![ProductCapability::Runtime2d];
+        configuration
+            .capabilities
+            .requested
+            .extend_from_slice(additional_capabilities);
         configuration.input.action_map = Some(input_product());
         configuration.tasks.io.workers = 1;
         configuration.tasks.compute.workers = 1;
@@ -180,6 +192,111 @@ impl InputFixture {
         )
         .unwrap()
     }
+}
+
+#[cfg(feature = "desktop-winit")]
+#[test]
+fn processed_startup_and_deep_validation_share_the_selected_stock_keyboard() {
+    use nara_input::KeyCode;
+
+    let encode_binding = |key| {
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder
+            .bind(ActionBinding::key(ActionId::new("file.jump").unwrap(), key))
+            .unwrap();
+        ActionMapRuntimeCodec::encode_runtime(
+            &ActionMapAsset::new(input_product(), builder.compile().unwrap()).unwrap(),
+        )
+        .unwrap()
+    };
+    let desktop = [ProductCapability::DesktopWinit];
+    for key in [KeyCode::Character(';'), KeyCode::Character(']')] {
+        let encoded = encode_binding(key);
+        let fixture = InputFixture::new_for_capabilities(recipe(), Some(&encoded), &desktop);
+        let base = fixture.open();
+        assert_eq!(base.validate_deep().unwrap().members(), 2);
+        assert_eq!(
+            base.acquire_startup_input()
+                .unwrap()
+                .unwrap()
+                .definition()
+                .bindings()[0]
+                .input,
+            InputBinding::Key(key)
+        );
+    }
+
+    let unsupported = KeyCode::Character('é');
+    let encoded = encode_binding(unsupported);
+    let desktop_fixture = InputFixture::new_for_capabilities(recipe(), Some(&encoded), &desktop);
+    let desktop_base = desktop_fixture.open();
+    let retained = retained_charge(&desktop_base);
+    for error in [
+        desktop_base.validate_deep().unwrap_err(),
+        desktop_base.acquire_startup_input().unwrap_err(),
+    ] {
+        assert!(matches!(
+            error,
+            RuntimeContentError::UnsupportedKeyboardBinding { product, binding }
+                if product == input_product() && binding.index == 0 && binding.key == unsupported
+        ));
+        assert_eq!(retained_charge(&desktop_base), retained);
+    }
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let error = host
+        .begin_processed_start(desktop_base.clone(), vec![])
+        .err()
+        .unwrap();
+    let diagnostic = error.diagnostics.iter().next().unwrap();
+    assert_eq!(
+        diagnostic.code().as_str(),
+        "project.run.runtime-content-rejected"
+    );
+    assert_eq!(
+        diagnostic_field(diagnostic, "reason"),
+        Some(DiagnosticValueRef::Identifier(
+            "unsupported-keyboard-binding"
+        ))
+    );
+    assert_eq!(
+        diagnostic_field(diagnostic, "input-product"),
+        Some(DiagnosticValueRef::Identifier(&input_product().to_string()))
+    );
+    assert_eq!(
+        diagnostic_field(diagnostic, "binding-index"),
+        Some(DiagnosticValueRef::Unsigned(0))
+    );
+    assert_eq!(
+        diagnostic_field(diagnostic, "character-code-point"),
+        Some(DiagnosticValueRef::Unsigned(u64::from('é')))
+    );
+    assert!(!host.has_runtime_custody());
+    assert_eq!(retained_charge(&desktop_base), retained);
+
+    let asset = desktop_base
+        .acquire_asset::<ActionMapDomain, ActionMapRuntimeCodec>(input_product())
+        .unwrap();
+    assert_eq!(
+        asset.product().definition().bindings()[0].input,
+        InputBinding::Key(unsupported)
+    );
+
+    let headless_fixture = InputFixture::new_with_input(recipe(), Some(&encoded));
+    let headless = headless_fixture.open();
+    assert_eq!(headless.validate_deep().unwrap().members(), 2);
+    assert_eq!(
+        headless
+            .acquire_startup_input()
+            .unwrap()
+            .unwrap()
+            .definition()
+            .bindings()[0]
+            .input,
+        InputBinding::Key(unsupported)
+    );
 }
 
 impl Drop for InputFixture {

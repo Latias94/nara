@@ -53,6 +53,75 @@ fn assert_source_work_released(host: &ProjectContentBudgetHost) {
     assert_eq!(budget.active(ProjectContentBudgetKind::OpenHandles), 0);
 }
 
+#[cfg(feature = "desktop-winit")]
+#[test]
+fn desktop_cook_checks_startup_keyboard_before_build_contributions() {
+    use crate::input::{
+        ActionBinding, ActionContext, ActionId, ActionMapBuilder, ActionMapDomain,
+        ActionMapFileCandidate, ActionMapLimits, ActionMapRuntimeCodec, InputBinding, KeyCode,
+    };
+
+    let mut fixture = Fixture::<0>::empty_scenes();
+    let manifest = fs::read_to_string(fixture.path.join("nara.toml")).unwrap();
+    fixture.write(
+        "nara.toml",
+        format!(
+            "{manifest}\n[input]\naction_map = 'game.actions.json'\n\
+             [profiles.desktop.capabilities]\nrequested = ['runtime-2d', 'desktop-winit']\n"
+        )
+        .as_bytes(),
+    );
+    fixture.candidate = {
+        let file = fixture
+            .root
+            .open_file_exact(&RelativePath::new("nara.toml").unwrap())
+            .unwrap();
+        ingest_project_manifest(&file, Some("desktop")).unwrap()
+    };
+    fixture.recipe = fixture
+        .recipe
+        .clone()
+        .add_runtime_asset_codec::<ActionMapDomain, ActionMapRuntimeCodec>(
+            crate::runtime_content::RuntimeCodecDefinitionId::new("test.cook.input", 1),
+        )
+        .unwrap();
+    let write_binding = |key| {
+        let mut map = ActionMapBuilder::new(ActionMapLimits::default());
+        map.declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        map.bind(ActionBinding::key(ActionId::new("jump").unwrap(), key))
+            .unwrap();
+        let file = ActionMapFileCandidate::new(product(4), map.compile().unwrap()).unwrap();
+        fixture.write(
+            "game.actions.json",
+            file.to_json_string().unwrap().as_bytes(),
+        );
+    };
+    write_binding(KeyCode::Character('é'));
+    let rejected = prepare_project_cooked_content(fixture.request(), |_| {
+        panic!("invalid stock keyboard bindings must refuse before build contributions")
+    });
+    assert!(matches!(
+        rejected,
+        Err(ProjectCookError::Source(error)) if error.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "project.content.input-unsupported-keyboard-binding"
+        })
+    ));
+    assert_source_work_released(&take_loader_budget());
+
+    let key = KeyCode::Character(']');
+    write_binding(key);
+    let cooked = prepare_project_cooked_content(fixture.request(), |_| Ok(())).unwrap();
+    let base = cooked.content().base();
+    assert_eq!(base.validate_deep().unwrap().members(), 3);
+    let input = base.acquire_startup_input().unwrap().unwrap();
+    assert_eq!(input.product(), product(4));
+    assert_eq!(
+        input.definition().bindings()[0].input,
+        InputBinding::Key(key)
+    );
+}
+
 #[test]
 fn server_cook_uses_target_definitions_and_keeps_omitted_source_inputs_fenced() {
     use crate::input::{

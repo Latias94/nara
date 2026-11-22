@@ -91,10 +91,11 @@ use nara_app::{
     RuntimeTimeContinuationRejection,
 };
 use nara_input::{
-    ButtonDriverInput, ButtonInputDriverError, InputIngressError, InputPointerId, InputSeatId,
-    InputTimeline, InputWindowEvent, InputWindowId, KeyCode, MouseButton, PointerDriverInput,
-    apply_keyboard_driver_input_at, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
-    apply_window_input_driver_event, connect_input_endpoint, connect_input_pointer,
+    ActionMapDefinition, ButtonDriverInput, ButtonInputDriverError, InputBinding,
+    InputIngressError, InputPointerId, InputSeatId, InputTimeline, InputWindowEvent, InputWindowId,
+    KeyCode, MouseButton, PointerDriverInput, apply_keyboard_driver_input_at,
+    apply_mouse_driver_input_at, apply_pointer_driver_input_at, apply_window_input_driver_event,
+    connect_input_endpoint, connect_input_pointer,
 };
 use nara_window::{
     Window, WindowEvent, WindowId, WindowResolution,
@@ -2483,57 +2484,114 @@ pub fn convert_physical_key(key: PhysicalKey) -> Option<KeyCode> {
     }
 }
 
-#[must_use]
-pub fn convert_key_code(code: WinitKeyCode) -> Option<KeyCode> {
-    let key = match code {
-        WinitKeyCode::Escape => KeyCode::Escape,
-        WinitKeyCode::Space => KeyCode::Space,
-        WinitKeyCode::Enter => KeyCode::Enter,
-        WinitKeyCode::Tab => KeyCode::Character('\t'),
-        WinitKeyCode::ArrowUp => KeyCode::ArrowUp,
-        WinitKeyCode::ArrowDown => KeyCode::ArrowDown,
-        WinitKeyCode::ArrowLeft => KeyCode::ArrowLeft,
-        WinitKeyCode::ArrowRight => KeyCode::ArrowRight,
-        WinitKeyCode::KeyA => KeyCode::Character('a'),
-        WinitKeyCode::KeyB => KeyCode::Character('b'),
-        WinitKeyCode::KeyC => KeyCode::Character('c'),
-        WinitKeyCode::KeyD => KeyCode::Character('d'),
-        WinitKeyCode::KeyE => KeyCode::Character('e'),
-        WinitKeyCode::KeyF => KeyCode::Character('f'),
-        WinitKeyCode::KeyG => KeyCode::Character('g'),
-        WinitKeyCode::KeyH => KeyCode::Character('h'),
-        WinitKeyCode::KeyI => KeyCode::Character('i'),
-        WinitKeyCode::KeyJ => KeyCode::Character('j'),
-        WinitKeyCode::KeyK => KeyCode::Character('k'),
-        WinitKeyCode::KeyL => KeyCode::Character('l'),
-        WinitKeyCode::KeyM => KeyCode::Character('m'),
-        WinitKeyCode::KeyN => KeyCode::Character('n'),
-        WinitKeyCode::KeyO => KeyCode::Character('o'),
-        WinitKeyCode::KeyP => KeyCode::Character('p'),
-        WinitKeyCode::KeyQ => KeyCode::Character('q'),
-        WinitKeyCode::KeyR => KeyCode::Character('r'),
-        WinitKeyCode::KeyS => KeyCode::Character('s'),
-        WinitKeyCode::KeyT => KeyCode::Character('t'),
-        WinitKeyCode::KeyU => KeyCode::Character('u'),
-        WinitKeyCode::KeyV => KeyCode::Character('v'),
-        WinitKeyCode::KeyW => KeyCode::Character('w'),
-        WinitKeyCode::KeyX => KeyCode::Character('x'),
-        WinitKeyCode::KeyY => KeyCode::Character('y'),
-        WinitKeyCode::KeyZ => KeyCode::Character('z'),
-        WinitKeyCode::Digit0 => KeyCode::Character('0'),
-        WinitKeyCode::Digit1 => KeyCode::Character('1'),
-        WinitKeyCode::Digit2 => KeyCode::Character('2'),
-        WinitKeyCode::Digit3 => KeyCode::Character('3'),
-        WinitKeyCode::Digit4 => KeyCode::Character('4'),
-        WinitKeyCode::Digit5 => KeyCode::Character('5'),
-        WinitKeyCode::Digit6 => KeyCode::Character('6'),
-        WinitKeyCode::Digit7 => KeyCode::Character('7'),
-        WinitKeyCode::Digit8 => KeyCode::Character('8'),
-        WinitKeyCode::Digit9 => KeyCode::Character('9'),
-        _ => return None,
-    };
+macro_rules! physical_key_map {
+    ($($native:ident => $normalized:ident $(($character:literal))?,)+) => {
+        #[must_use]
+        pub fn convert_key_code(code: WinitKeyCode) -> Option<KeyCode> {
+            match code {
+                $(WinitKeyCode::$native => Some(KeyCode::$normalized $(($character))?),)+
+                _ => None,
+            }
+        }
 
-    Some(key)
+        fn supports_keyboard_key(key: KeyCode) -> bool {
+            matches!(key, $(KeyCode::$normalized $(($character))?)|+)
+        }
+    };
+}
+
+physical_key_map! {
+    Escape => Escape,
+    Space => Space,
+    Enter => Enter,
+    Tab => Character('\t'),
+    ArrowUp => ArrowUp,
+    ArrowDown => ArrowDown,
+    ArrowLeft => ArrowLeft,
+    ArrowRight => ArrowRight,
+    KeyA => Character('a'),
+    KeyB => Character('b'),
+    KeyC => Character('c'),
+    KeyD => Character('d'),
+    KeyE => Character('e'),
+    KeyF => Character('f'),
+    KeyG => Character('g'),
+    KeyH => Character('h'),
+    KeyI => Character('i'),
+    KeyJ => Character('j'),
+    KeyK => Character('k'),
+    KeyL => Character('l'),
+    KeyM => Character('m'),
+    KeyN => Character('n'),
+    KeyO => Character('o'),
+    KeyP => Character('p'),
+    KeyQ => Character('q'),
+    KeyR => Character('r'),
+    KeyS => Character('s'),
+    KeyT => Character('t'),
+    KeyU => Character('u'),
+    KeyV => Character('v'),
+    KeyW => Character('w'),
+    KeyX => Character('x'),
+    KeyY => Character('y'),
+    KeyZ => Character('z'),
+    Digit0 => Character('0'),
+    Digit1 => Character('1'),
+    Digit2 => Character('2'),
+    Digit3 => Character('3'),
+    Digit4 => Character('4'),
+    Digit5 => Character('5'),
+    Digit6 => Character('6'),
+    Digit7 => Character('7'),
+    Digit8 => Character('8'),
+    Digit9 => Character('9'),
+    Backquote => Character('`'),
+    Minus => Character('-'),
+    Equal => Character('='),
+    BracketLeft => Character('['),
+    BracketRight => Character(']'),
+    Backslash => Character('\\'),
+    Semicolon => Character(';'),
+    Quote => Character('\''),
+    Comma => Character(','),
+    Period => Character('.'),
+    Slash => Character('/'),
+}
+
+/// A keyboard binding outside the stock Winit dispatch map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnsupportedKeyboardBinding {
+    /// Zero-based index in [`ActionMapDefinition::bindings`].
+    pub index: usize,
+    pub key: KeyCode,
+}
+
+impl std::fmt::Display for UnsupportedKeyboardBinding {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "unsupported Winit key {:?} at binding index {}",
+            self.key, self.index
+        )
+    }
+}
+
+impl std::error::Error for UnsupportedKeyboardBinding {}
+
+/// Checks keyboard bindings against the stock Winit physical dispatch map.
+///
+/// Returns the first unsupported keyboard binding in definition order.
+pub fn validate_action_map_keyboard(
+    definition: &ActionMapDefinition,
+) -> Result<(), UnsupportedKeyboardBinding> {
+    for (index, binding) in definition.bindings().iter().enumerate() {
+        if let InputBinding::Key(key) = binding.input
+            && !supports_keyboard_key(key)
+        {
+            return Err(UnsupportedKeyboardBinding { index, key });
+        }
+    }
+    Ok(())
 }
 
 #[must_use]

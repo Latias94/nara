@@ -133,7 +133,7 @@ pub(super) struct DecodedAsset {
     _work: DecodeLease,
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(any(feature = "runtime-2d", feature = "desktop-winit"))]
 impl DecodedAsset {
     pub(super) fn typed<D: AssetDomain>(&self) -> Option<&RuntimeContentAsset<D::Product>> {
         if self.family != TypeId::of::<D>() {

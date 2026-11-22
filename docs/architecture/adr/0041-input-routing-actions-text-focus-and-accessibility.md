@@ -340,6 +340,16 @@ The original source workflow supports key/mouse bindings. The successor adds typ
 axis transforms through the same version-one source/runtime compiler, with omitted transforms
 defaulting to Button for existing digital files. Chords and an action-map editor remain separate.
 
+When the resolved product selects `DesktopWinit`, the startup Input owner verifies every
+keyboard binding against the stock Winit physical mapping during source admission. Check,
+source startup and desktop-profile Cook share that source obligation. Processed startup
+admission and deep delivery verification apply the same rule to the selected startup Product
+through its original typed decoder. They reuse the adapter's mapping and never probe a native
+device. A rejected binding has a source location or Product and its original binding index.
+Generic ActionMap compilation, CPU acquisition, and plans without `DesktopWinit` keep their
+backend-independent key vocabulary. Runtime keyboard ingress uses physical positions, including
+unshifted punctuation on the standard US layout. Text and IME input keep logical text semantics.
+
 A manifest-selected default map is installed for PRIMARY once through `RuntimeCandidateScope`,
 before Scene materialization and Startup. The actual Input owner verifies that seat's pristine
 resource identity and rejects a competing explicit PRIMARY configuration, including an explicit

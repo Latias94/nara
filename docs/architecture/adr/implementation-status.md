@@ -4866,6 +4866,11 @@ and a relocated Cooked Player with the original source removed. Physical control
 other native platforms and the remaining Foundation R2/R12 work retain their own acceptance scope.
 [Desktop 2D v2 qualification](../../plans/2026-10-16-0940-feat-first-2d-author-workflow-plan.md#authoring-and-delivery-evidence)
 
+ADR 0041's stock desktop profile uses the Winit adapter's own physical key map to admit the
+selected startup Action Map. Source validation names the project member. Processed startup
+names the Input Product and uses the same definition decoded by the selected codec.
+[Stock keyboard admission](../../plans/2026-10-16-0940-feat-first-2d-author-workflow-plan.md#desktop-keyboard-admission)
+
 Rows retain their own last-qualified source and scope. Some older broad decisions remain partial
 or proposed while narrower Accepted ADRs implement particular workflows. Read the relevant Accepted
 refinement before treating an older gap as the current product's behavior. Links are selected

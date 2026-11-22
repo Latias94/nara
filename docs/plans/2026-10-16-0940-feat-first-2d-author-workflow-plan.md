@@ -293,6 +293,35 @@ The input map changes device bindings. The game source decides how those actions
 [Godot Input Map](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/core/input/input_map.cpp) ·
 [Bevy keyboard example](https://github.com/bevyengine/bevy/blob/03ed5a27c92715c8fa2188f31f04e454ec39942f/examples/input/keyboard_input.rs)
 
+### Desktop keyboard admission
+
+The stock Winit adapter owns one table for physical conversion and for validating authored
+keyboard bindings. It covers the unshifted ASCII punctuation positions, including Semicolon and
+BracketRight. The source loader selects validation using the admitted `DesktopWinit` capability.
+The same compiled rule checks the global Input Product on processed startup and in deep delivery
+validation. The generic codec retains its existing keyboard vocabulary for headless and alternate
+input adapters. The project-tool protocol publishes the input file path and diagnostic code;
+direct reports also give the original binding index and its character code point. Processed
+startup gives the Input Product identity with that binding information.
+
+On Windows x64 with Rust 1.95.0, the affected adapter, source Check, desktop Cook and processed
+startup cohort passed 144/144 (`8d5336cb-a3a5-47ae-9ff2-b619ba9d5041`). Two native cases passed
+(`a1ae686a-d28d-4a7f-89a6-3a8cdfd7a1e6`). Injected Win32 key messages traversed the Winit
+loop to the action owner, including pressed and released edges. The independent generated v2
+scenarios passed 2/2 (`5fa16f56-09df-4fcb-a5d6-f4de54163568`). The desktop project accepts
+Semicolon and BracketRight in Check, rejects `é` with the authored map's path, and completes
+first presentation and source Export. The normalized `é` input produces the same fixed-step
+trace in the Headless source project and the relocated Cooked Player.
+
+Independent review corrected the reduced `desktop-winit,serde` feature build and retained the
+Input Product in the Host diagnostic. That exact feature combination passes a library check.
+The processed Host refusal regression passed 1/1 (`f9bcaaf1-97a4-496b-8a55-216728d957c1`),
+including the Product, binding index, code point and release of the failed acquisition.
+Correctness Clippy and workspace formatting pass.
+
+[Round eleven reproduction](../audits/2026-11-22-starter-input-authoring-and-runtime-review.md#p2--desktop-check-accepts-keyboard-bindings-the-stock-runner-cannot-deliver) ·
+[Input guide](../guides/input-actions.md#desktop-keyboard-bindings)
+
 ### Run the independent v2 workflow
 
 The public fixture creates and builds a new project beside the engine checkout. The first test

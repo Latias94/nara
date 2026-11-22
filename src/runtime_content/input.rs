@@ -114,6 +114,10 @@ impl RuntimeContentBase {
             .plan()
             .runtime_codecs()
             .acquire_selected::<ActionMapDomain>(self, product)?;
+        #[cfg(feature = "desktop-winit")]
+        if self.uses_stock_keyboard() {
+            validate_startup_keyboard(asset.product())?;
+        }
         Ok(Some(RuntimeInputContent {
             inner: Arc::new(RuntimeInputOwner {
                 asset,
@@ -121,6 +125,23 @@ impl RuntimeContentBase {
             }),
         }))
     }
+
+    #[cfg(feature = "desktop-winit")]
+    pub(super) fn uses_stock_keyboard(&self) -> bool {
+        self.plan()
+            .normalized_capabilities()
+            .contains(nara_project::ProductCapability::DesktopWinit)
+    }
+}
+
+#[cfg(feature = "desktop-winit")]
+pub(super) fn validate_startup_keyboard(input: &ActionMapAsset) -> Result<(), RuntimeContentError> {
+    nara_winit::validate_action_map_keyboard(input.definition()).map_err(|binding| {
+        RuntimeContentError::UnsupportedKeyboardBinding {
+            product: input.product(),
+            binding,
+        }
+    })
 }
 
 #[cfg(test)]

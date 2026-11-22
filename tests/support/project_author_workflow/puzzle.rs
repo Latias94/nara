@@ -7,6 +7,7 @@ use super::process::Output;
 use workflow::{Project, editor, source};
 
 const SCENE: &str = "scenes/startup.scene.json";
+const DESKTOP_UNSUPPORTED_KEY: char = 'é';
 const RETAINED_STARTER_FILES: [&str; 9] = [
     "nara.toml",
     "Cargo.toml",
@@ -123,6 +124,17 @@ pub fn accept() {
         starter_files
     );
 
+    fs::write(
+        &input_path,
+        source::rebind_keyboard_right(&initial_input, DESKTOP_UNSUPPORTED_KEY),
+    )
+    .unwrap();
+    let unicode_keyboard = run_source(&mut project, &puzzle_headless, "unicode-keyboard");
+    assert_eq!(
+        source::observed_snapshots(&unicode_keyboard.stdout),
+        source::observed_snapshots(&rebound.stdout)
+    );
+
     let player = project.cook_and_relocate();
     let pack = player.parent().unwrap().join("content.pack");
     let packed_bytes = fs::read(&pack).unwrap();
@@ -133,6 +145,11 @@ pub fn accept() {
     );
     let cooked_unbound = run_player(&mut project, &player, "keyboard");
     source::assert_snapshots(&cooked_unbound.stdout, None, 0);
+    let cooked_unicode = run_player(&mut project, &player, "unicode-keyboard");
+    assert_eq!(
+        source::observed_snapshots(&cooked_unicode.stdout),
+        source::observed_snapshots(&unicode_keyboard.stdout)
+    );
 
     let exact = project.run_exact_player(&player);
     assert_line(
@@ -142,7 +159,7 @@ pub fn accept() {
     assert!(source::observed_snapshots(&exact.stdout).is_empty());
     assert_eq!(fs::read(pack).unwrap(), packed_bytes);
     println!(
-        "PUSH_BOX_WORKFLOW_OK provider=push-box.components plugin=push-box.gameplay action=move.right command_transcodes=0 gameplay_edit_to_result_ms={} scene_edit_to_result_ms={} input_edit_to_result_ms={} source_gate_open_tick=2->6 closed_gate_blocks=true double_tap_fixed_ticks=10,11 multibinding_order=true keyboard_unbound=true cooked_matches_source=true cooked_keyboard_unbound=true exact_source_free=true",
+        "PUSH_BOX_WORKFLOW_OK provider=push-box.components plugin=push-box.gameplay action=move.right command_transcodes=0 gameplay_edit_to_result_ms={} scene_edit_to_result_ms={} input_edit_to_result_ms={} source_gate_open_tick=2->6 closed_gate_blocks=true double_tap_fixed_ticks=10,11 multibinding_order=true keyboard_unbound=true cooked_matches_source=true cooked_keyboard_unbound=true exact_source_free=true unicode_keyboard_matches_source=true",
         game_edit_to_result.as_millis(),
         scene_edit_to_result.as_millis(),
         input_edit_to_result.as_millis(),
@@ -153,6 +170,7 @@ pub fn accept() {
 pub fn accept_native() {
     let mut project = Project::create();
     project.generate_lockfile();
+    assert_desktop_keyboard_check(&mut project);
     let headless = project.build("headless", "headless-with-desktop-feature", &["desktop"]);
     let started = project.run(&headless, |command| command);
     assert_line(&started, "starter_headless: ok fixed_ticks=1");
@@ -187,6 +205,52 @@ pub fn accept_native() {
     println!(
         "DESKTOP_2D_V2_NATIVE_OK starter_first_present=true puzzle_first_present=true source_export_observations=2 physical_input_tested=false"
     );
+}
+
+#[cfg(target_os = "windows")]
+fn assert_desktop_keyboard_check(project: &mut Project) {
+    let input_path = project.root.join(source::INPUT_MAP);
+    let initial_input = fs::read(&input_path).unwrap();
+    for key in [';', ']'] {
+        fs::write(
+            &input_path,
+            source::rebind_keyboard_right(&initial_input, key),
+        )
+        .unwrap();
+        project
+            .cli("check", &["--profile", "desktop"])
+            .assert_success();
+    }
+
+    fs::write(
+        &input_path,
+        source::rebind_keyboard_right(&initial_input, DESKTOP_UNSUPPORTED_KEY),
+    )
+    .unwrap();
+    let rejected = project.cli("check", &["--profile", "desktop"]);
+    assert_eq!(
+        rejected.receipt.exit().code(),
+        Some(1),
+        "stdout={}\nstderr={}",
+        rejected.stdout,
+        rejected.stderr
+    );
+    let location = rejected
+        .stderr
+        .lines()
+        .skip_while(|line| {
+            !line.starts_with("project.content.input-unsupported-keyboard-binding: ")
+        })
+        .nth(1);
+    let expected_location = format!("  at {}", source::INPUT_MAP);
+    assert_eq!(
+        location,
+        Some(expected_location.as_str()),
+        "{}",
+        rejected.stderr
+    );
+    project.cli("check", &[]).assert_success();
+    fs::write(input_path, initial_input).unwrap();
 }
 
 fn snapshot<const N: usize>(root: &Path, files: [&str; N]) -> [Vec<u8>; N] {

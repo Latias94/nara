@@ -240,6 +240,14 @@ impl LoadContext<'_> {
         drop(bytes);
         self.subtract_budget(ProjectContentBudgetKind::EncodedBytes, encoded);
         let (product, definition) = file.into_parts();
+        #[cfg(feature = "desktop-winit")]
+        if candidate
+            .normalized_capabilities()
+            .contains(nara_project::ProductCapability::DesktopWinit)
+        {
+            nara_winit::validate_action_map_keyboard(&definition)
+                .map_err(|error| unsupported_keyboard_binding(selected.as_str(), error))?;
+        }
         let path = AssetSourcePath::new(selected.as_str()).map_err(|_| invalid_input())?;
         let metadata_digest = self.admit_input_identity(product, &path)?;
         self.record_project_member(
@@ -424,6 +432,36 @@ fn invalid_input() -> ProjectContentError {
         ProjectContentErrorKind::InputDefinition,
         "project.content.input-definition-invalid",
         "Selected Input source is not an admitted finite action map",
+    )
+}
+
+#[cfg(feature = "desktop-winit")]
+fn unsupported_keyboard_binding(
+    source: &str,
+    error: nara_winit::UnsupportedKeyboardBinding,
+) -> ProjectContentError {
+    let mut diagnostic = attach_field(
+        diagnostic(
+            "project.content.input-unsupported-keyboard-binding",
+            "The selected action map contains a key that the stock desktop keyboard cannot deliver",
+        ),
+        DiagnosticField::public_u64(
+            field_key("binding-index"),
+            u64::try_from(error.index).unwrap_or(u64::MAX),
+        ),
+    );
+    if let nara_input::KeyCode::Character(character) = error.key {
+        diagnostic = attach_field(
+            diagnostic,
+            DiagnosticField::public_u64(field_key("character-code-point"), u64::from(character)),
+        );
+    }
+    if let Ok(path) = DiagnosticField::project_relative(field_key("project-path"), source) {
+        diagnostic = attach_field(diagnostic, path);
+    }
+    ProjectContentError::with_report(
+        ProjectContentErrorKind::InputDefinition,
+        single_report(diagnostic),
     )
 }
 

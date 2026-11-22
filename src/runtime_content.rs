@@ -238,6 +238,11 @@ pub enum RuntimeContentError {
     CodecPanicked,
     ProductIdentityMismatch,
     NativeResourceUnavailable,
+    #[cfg(feature = "desktop-winit")]
+    UnsupportedKeyboardBinding {
+        product: AssetProductRef,
+        binding: nara_winit::UnsupportedKeyboardBinding,
+    },
     #[cfg(feature = "runtime-2d")]
     TileSet(nara_tilemap::TileSetDescriptorError),
     #[cfg(feature = "runtime-2d")]
@@ -265,6 +270,12 @@ impl fmt::Display for RuntimeContentError {
             } => write!(
                 formatter,
                 "Runtime Material Product {material} texture slot {slot:?} targets Product {target}; expected Image kind with a selected Image codec",
+            ),
+            #[cfg(feature = "desktop-winit")]
+            Self::UnsupportedKeyboardBinding { product, binding } => write!(
+                formatter,
+                "Runtime startup Input {product} has an unsupported stock desktop key {:?} at binding {}",
+                binding.key, binding.index,
             ),
             _ => formatter.write_str(self.summary()),
         }
@@ -309,6 +320,10 @@ impl RuntimeContentError {
             Self::NativeResourceUnavailable => {
                 "Runtime resource requires an unavailable native product family"
             }
+            #[cfg(feature = "desktop-winit")]
+            Self::UnsupportedKeyboardBinding { .. } => {
+                "Runtime startup Input has an unsupported stock desktop keyboard binding"
+            }
             #[cfg(feature = "runtime-2d")]
             Self::TileSet(_) => "Runtime TileSet descriptor does not match its actual Image",
             #[cfg(feature = "runtime-2d")]
@@ -329,6 +344,8 @@ impl Error for RuntimeContentError {
             Self::Catalog(error) => Some(error),
             Self::Configuration(error) => Some(error),
             Self::Composition(error) => Some(error),
+            #[cfg(feature = "desktop-winit")]
+            Self::UnsupportedKeyboardBinding { binding, .. } => Some(binding),
             Self::Scene(error) => Some(error),
             Self::SceneReference(error) => Some(error),
             Self::Asset(error) => Some(error),

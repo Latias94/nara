@@ -24,6 +24,22 @@ PRIMARY map was selected. Later map or context edits do not rewrite it. Games ca
 checking capture/restore eligibility; the observation grants neither installation nor held-input
 authority and adds no per-tick validation.
 
+## Desktop Keyboard Bindings
+
+For a profile that selects `DesktopWinit`, Check validates the project's startup map against
+the same physical-key mapping used at runtime. The Desktop 2D starter uses
+`nara check --profile desktop` for this check. The stock keyboard reports lowercase `a`–`z`,
+the top-row digits, Escape, Space, Enter, Tab, the four arrows, and physical punctuation positions
+represented by the unshifted US key names. For example, use `Character(';')` for Semicolon or
+`Character(']')` for BracketRight. These bindings name physical positions even on a different
+keyboard layout. A shifted punctuation character or Unicode text belongs to logical text input.
+
+Unsupported keys produce `project.content.input-unsupported-keyboard-binding` at the map's
+project-relative path. The direct Check report also includes the zero-based binding index.
+Desktop-profile Cook validates the same source bindings. Processed desktop startup validates
+its selected Input Product and reports `input-product` and `binding-index` on refusal.
+Headless profiles, replay and other backends can use the broader normalized key vocabulary.
+
 ## Code-First Definitions
 
 Build a complete finite definition, declare its contexts and install independent World state:

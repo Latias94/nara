@@ -12,11 +12,10 @@ use nara::{
 use super::{PLUGIN_ID, Puzzle, SEAT, simulate};
 
 const WINDOW: InputWindowId = InputWindowId::new(7);
-const RIGHT_KEY: KeyCode = KeyCode::Character('d');
 
 #[derive(Resource)]
 enum Device {
-    Keyboard,
+    Keyboard(KeyCode),
     Gamepad(Option<GamepadConnection>),
 }
 
@@ -25,12 +24,14 @@ pub(super) fn install(app: &mut App) -> Result<(), PluginError> {
         return Ok(());
     };
     let device = match mode.to_str() {
-        Some("keyboard") => Device::Keyboard,
+        Some("keyboard") => Device::Keyboard(KeyCode::Character('d')),
+        Some("unicode-keyboard") => Device::Keyboard(KeyCode::Character('é')),
         Some("gamepad") => Device::Gamepad(None),
         _ => {
             return Err(PluginError::SetupFailed {
                 plugin: PLUGIN_ID,
-                message: "NARA_PUSH_PROOF_INPUT must be keyboard or gamepad".into(),
+                message: "NARA_PUSH_PROOF_INPUT must be keyboard, unicode-keyboard or gamepad"
+                    .into(),
             });
         }
     };
@@ -73,10 +74,10 @@ fn observe_and_feed(
     };
     for &phase in phases {
         let admission = match &*device {
-            Device::Keyboard => {
+            Device::Keyboard(key) => {
                 let input = match phase {
-                    ButtonTransitionPhase::Pressed => ButtonDriverInput::Press(RIGHT_KEY),
-                    ButtonTransitionPhase::Released => ButtonDriverInput::Release(RIGHT_KEY),
+                    ButtonTransitionPhase::Pressed => ButtonDriverInput::Press(*key),
+                    ButtonTransitionPhase::Released => ButtonDriverInput::Release(*key),
                 };
                 timeline.admit_keyboard(WINDOW, SEAT, input)?
             }

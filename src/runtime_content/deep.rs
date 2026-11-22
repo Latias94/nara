@@ -63,7 +63,7 @@ use super::{
 /// Reference target uses its selected production decoder and complete dependency admission.
 /// The compiled first-party validators check Scene Sprite, UI Image and material bindings,
 /// Material texture kinds and Image/TileSet/Tilemap CPU constraints against decoded facts and
-/// selected codec roles.
+/// selected codec roles. A selected stock desktop startup map also checks physical keyboard bindings.
 /// Soft metadata alone triggers no work. Opening a base does not perform this operation.
 ///
 /// This report retains no decoded products or publication authority. It proves neither native
@@ -450,9 +450,18 @@ impl RuntimeContentBase {
         {
             pending.enqueue(self, self.member_index(*product)?)?;
         }
-        if let Some(product) = self.plan().settings().input().action_map {
-            pending.enqueue(self, self.member_index(product)?)?;
+        let startup_input_member = self
+            .plan()
+            .settings()
+            .input()
+            .action_map
+            .map(|product| self.member_index(product))
+            .transpose()?;
+        if let Some(index) = startup_input_member {
+            pending.enqueue(self, index)?;
         }
+        #[cfg(feature = "desktop-winit")]
+        let desktop_input_member = startup_input_member.filter(|_| self.uses_stock_keyboard());
         #[cfg(feature = "runtime-2d")]
         let mut facts = NativeFacts::new(self)?;
         #[cfg(feature = "runtime-2d")]
@@ -474,6 +483,13 @@ impl RuntimeContentBase {
                 }
                 RuntimeContentMemberKind::Asset { .. } => {
                     let asset = self.plan().runtime_codecs().acquire_member(self, index)?;
+                    #[cfg(feature = "desktop-winit")]
+                    if desktop_input_member == Some(index) {
+                        let input = asset
+                            .typed::<nara_input::ActionMapDomain>()
+                            .ok_or(RuntimeContentError::CodecMismatch)?;
+                        super::input::validate_startup_keyboard(input.product())?;
+                    }
                     #[cfg(feature = "runtime-2d")]
                     match self.plan().runtime_codecs().role(member) {
                         Some(RuntimeCodecRole::Image) => {

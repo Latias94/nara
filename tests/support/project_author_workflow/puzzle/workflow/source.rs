@@ -1,7 +1,9 @@
 use std::{fs, path::Path, time::Instant};
 
 use nara::{
-    input::{ActionBinding, ActionId, ActionMapFileCandidate, GamepadButton, KeyCode},
+    input::{
+        ActionBinding, ActionId, ActionMapFileCandidate, GamepadButton, InputBinding, KeyCode,
+    },
     reflect::AuthoringSchemaBundle,
 };
 use serde_json::Value;
@@ -94,6 +96,28 @@ pub fn assert_default_directions(bytes: &[u8]) {
         assert!(bindings.contains(&ActionBinding::key(id.clone(), KeyCode::Character(key))));
         assert!(bindings.contains(&ActionBinding::gamepad_button(id, button.code())));
     }
+}
+
+pub fn rebind_keyboard_right(default_input: &[u8], key: char) -> Vec<u8> {
+    let original = serde_json::to_value(ActionBinding::key(
+        ActionId::new("move.right").unwrap(),
+        KeyCode::Character('d'),
+    ))
+    .unwrap();
+    let mut document: Value = serde_json::from_slice(default_input).unwrap();
+    let mut matching_bindings = document["payload"]["bindings"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .filter(|binding| **binding == original);
+    let binding = matching_bindings
+        .next()
+        .expect("the generated move.right action must have a D binding");
+    assert!(matching_bindings.next().is_none());
+    binding["input"] = serde_json::to_value(InputBinding::Key(KeyCode::Character(key))).unwrap();
+    let bytes = serde_json::to_vec_pretty(&document).unwrap();
+    ActionMapFileCandidate::decode_json_bytes(&bytes).unwrap();
+    bytes
 }
 
 pub fn remove_keyboard_right(root: &Path) -> Instant {

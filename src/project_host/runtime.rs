@@ -2202,6 +2202,8 @@ fn processed_content_fault(error: &RuntimeContentError) -> HostFault {
         RuntimeContentError::CodecPanicked => "codec-panicked",
         RuntimeContentError::ProductIdentityMismatch => "product-identity-mismatch",
         RuntimeContentError::NativeResourceUnavailable => "native-resource-unavailable",
+        #[cfg(feature = "desktop-winit")]
+        RuntimeContentError::UnsupportedKeyboardBinding { .. } => "unsupported-keyboard-binding",
         #[cfg(feature = "runtime-2d")]
         RuntimeContentError::TileSet(_) => "tileset-rejected",
         #[cfg(feature = "runtime-2d")]
@@ -2234,6 +2236,18 @@ fn processed_content_fault(error: &RuntimeContentError) -> HostFault {
     {
         diagnostic = attach_u64(diagnostic, "required", *required);
         diagnostic = attach_u64(diagnostic, "limit", *limit);
+    }
+    #[cfg(feature = "desktop-winit")]
+    if let RuntimeContentError::UnsupportedKeyboardBinding { product, binding } = error {
+        diagnostic = attach_identifier(diagnostic, "input-product", &product.to_string());
+        diagnostic = attach_u64(diagnostic, "binding-index", binding.index);
+        if let nara_input::KeyCode::Character(character) = binding.key {
+            diagnostic = attach_u64(
+                diagnostic,
+                "character-code-point",
+                u32::from(character) as usize,
+            );
+        }
     }
     let mut diagnostics = single_diagnostic(diagnostic);
     if let RuntimeContentError::Asset(error) = error {

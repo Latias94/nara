@@ -5783,6 +5783,11 @@ open pending repeated needs from command-using games.
 [Desktop 2D v2 workflow](2026-10-16-0940-feat-first-2d-author-workflow-plan.md#desktop-2d-starter-with-editable-actions) ·
 [Collect Game](../../samples/collect-game/README.md) · [Input guide](../guides/input-actions.md)
 
+The [stock keyboard admission](2026-10-16-0940-feat-first-2d-author-workflow-plan.md#desktop-keyboard-admission)
+uses the selected desktop adapter's physical mapping to qualify the startup Action Map. Source
+Check, desktop Cook and processed delivery share that capability rule. Generic and Headless
+consumers retain their own input vocabulary.
+
 The starter evidence records recipe registration, command conversions, edit-to-result time and
 the engine changes needed to ship the template. Use the next resource with a concrete native
 consumer to measure integration work across registration, Cook and residency. When Editor work

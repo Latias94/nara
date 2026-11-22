@@ -147,6 +147,74 @@ fn assert_active_charges_eq(
     }
 }
 
+#[cfg(all(feature = "project-workflow", feature = "desktop-winit"))]
+#[test]
+fn desktop_check_checks_the_selected_stock_keyboard_and_headless_keeps_generic_keys() {
+    use nara::project_workflow::{ProjectCheckRequest, check_project};
+
+    let project = TestProject::with_prefab_startup();
+    select_input(&project, INPUT_PATH);
+    let manifest = project.path().join("nara.toml");
+    let original = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        format!(
+            "{original}\n[profiles.desktop.capabilities]\nrequested = ['runtime-2d', 'desktop-winit']\n"
+        ),
+    )
+    .unwrap();
+
+    let request =
+        || ProjectCheckRequest::new(project.root_capability(), nara::ProductRecipe::new());
+    for character in [';', ']'] {
+        write_project_file(
+            &project,
+            INPUT_PATH,
+            action_map_json(primary_product(INPUT_ID), KeyCode::Character(character)).as_bytes(),
+        );
+        let checked = check_project(request().with_profile("desktop")).unwrap();
+        assert!(checked.startup_content().members().iter().any(|member| {
+            member.kind() == ProjectContentMemberKind::InputActionMap
+                && member.path().as_str() == INPUT_PATH
+        }));
+    }
+
+    for character in ['é', '?'] {
+        write_project_file(
+            &project,
+            INPUT_PATH,
+            action_map_json(primary_product(INPUT_ID), KeyCode::Character(character)).as_bytes(),
+        );
+        let error = check_project(request().with_profile("desktop")).unwrap_err();
+        let error = error.content_error().unwrap();
+        assert_diagnostic(
+            error,
+            ProjectContentErrorKind::InputDefinition,
+            "project.content.input-unsupported-keyboard-binding",
+        );
+        let diagnostic = error.diagnostics().iter().next().unwrap();
+        for (name, value) in [
+            ("binding-index", DiagnosticValueRef::Unsigned(0)),
+            (
+                "character-code-point",
+                DiagnosticValueRef::Unsigned(u64::from(character)),
+            ),
+            (
+                "project-path",
+                DiagnosticValueRef::ProjectRelative(INPUT_PATH),
+            ),
+        ] {
+            assert!(
+                diagnostic
+                    .fields()
+                    .iter()
+                    .any(|field| { field.key().as_str() == name && field.value() == value })
+            );
+        }
+        assert!(check_project(request()).is_ok());
+    }
+}
+
 #[test]
 fn selected_input_captures_real_project_relative_bytes_without_a_sidecar() {
     for path in [

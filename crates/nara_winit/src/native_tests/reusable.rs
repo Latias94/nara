@@ -12,7 +12,7 @@ use windows_sys::{
     Win32::{
         Foundation::HWND,
         UI::{
-            Input::KeyboardAndMouse::{VK_RETURN, VK_TAB, VK_W},
+            Input::KeyboardAndMouse::{VK_OEM_1, VK_OEM_6, VK_RETURN, VK_TAB, VK_W},
             WindowsAndMessaging::{
                 CreateWindowExW, DestroyWindow, HWND_MESSAGE, IsWindowVisible, MSG, PM_NOREMOVE,
                 PeekMessageW, PostMessageW, WM_KEYDOWN, WM_KEYFIRST, WM_KEYLAST, WM_KEYUP,
@@ -669,13 +669,40 @@ struct PostedKeyTransitions(Vec<nara_input::InputTimelineEntry>);
 
 #[test]
 #[ignore = "requires a Windows message pump with a hidden HWND; run in its own nextest process"]
-fn native_posted_tab_and_return_publish_balanced_key_edges() {
+fn native_posted_tab_enter_and_punctuation_publish_balanced_key_edges() {
     use nara_app::CoreStage;
     use nara_ecs::{Res, ResMut};
     use nara_input::{
+        ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
+        ActionMaps,
         ButtonTransitionPhase::{Pressed, Released},
-        InputEventKind, InputEventOrigin, InputFrameObservations, InputPlugin,
+        InputEventKind, InputEventOrigin, InputFrameObservations, InputPlugin, SemanticActions,
     };
+
+    let context = ActionContext::gameplay();
+    let mut map = ActionMapBuilder::new(ActionMapLimits::default());
+    map.declare_context(context.clone(), true).unwrap();
+    let keys = [
+        (VK_TAB, 0x0f, KeyCode::Character('\t'), "test.posted-tab"),
+        (VK_RETURN, 0x1c, KeyCode::Enter, "test.posted-enter"),
+        (
+            VK_OEM_1,
+            0x27,
+            KeyCode::Character(';'),
+            "test.posted-semicolon",
+        ),
+        (
+            VK_OEM_6,
+            0x1b,
+            KeyCode::Character(']'),
+            "test.posted-right-bracket",
+        ),
+    ]
+    .map(|(virtual_key, scan_code, key, name)| {
+        let action = ActionId::new(name).unwrap();
+        map.bind(ActionBinding::key(action.clone(), key)).unwrap();
+        (virtual_key, scan_code, key, action)
+    });
 
     let mut builder = EventLoop::<WinitUserEvent>::with_user_event();
     builder.with_any_thread(true);
@@ -683,10 +710,18 @@ fn native_posted_tab_and_return_publish_balanced_key_edges() {
     let mut app = App::new();
     app.add_plugin(WindowPlugin {
         primary_window: Some(Window::new(
-            "nara posted Tab and Return",
+            "nara posted keyboard edges",
             WindowResolution::new(320, 180),
         )),
     })
+    .unwrap();
+    app.insert_resource(ActionMaps::new(
+        ActionMap::new(
+            map.compile().unwrap().into_bindings(),
+            nara_core::ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+        )
+        .unwrap(),
+    ))
     .unwrap();
     app.add_plugin(InputPlugin).unwrap();
     app.init_resource::<PostedKeyTransitions>().unwrap();
@@ -727,13 +762,16 @@ fn native_posted_tab_and_return_publish_balanced_key_edges() {
         assert!(!window.has_focus());
         assert!(!app.input_gate.focused);
         let hwnd = keyboard_hwnd(window);
-        let post_key = |key: u16, scan_code: u32| {
-            let down = (scan_code << 16) | 1;
-            let up = (down | 0xc000_0000) as i32 as isize;
-            post_test_window_message(hwnd, WM_KEYDOWN, usize::from(key), down as isize);
-            post_test_window_message(hwnd, WM_KEYUP, usize::from(key), up);
+        let post_key = |virtual_key: u16, scan_code: u32, phase| {
+            let (message, flags) = match phase {
+                Pressed => (WM_KEYDOWN, 0),
+                Released => (WM_KEYUP, 0xc000_0000),
+            };
+            let lparam = ((scan_code << 16) | 1 | flags) as i32 as isize;
+            post_test_window_message(hwnd, message, usize::from(virtual_key), lparam);
         };
-        post_key(VK_TAB, 0x0f);
+        post_key(VK_TAB, 0x0f, Pressed);
+        post_key(VK_TAB, 0x0f, Released);
         post_test_window_message(hwnd, WM_NCACTIVATE, 1, -1);
         post_test_window_message(hwnd, WM_SETFOCUS, 0, 0);
         poll_native_keyboard_until(&mut session, |session| {
@@ -741,25 +779,33 @@ fn native_posted_tab_and_return_publish_balanced_key_edges() {
             app.platform_windows[&WindowId::PRIMARY].has_focus() && app.input_gate.focused
         });
 
-        post_key(VK_TAB, 0x0f);
-        post_key(VK_RETURN, 0x1c);
-
-        let expected = [
-            (KeyCode::Character('\t'), Pressed),
-            (KeyCode::Character('\t'), Released),
-            (KeyCode::Enter, Pressed),
-            (KeyCode::Enter, Released),
-        ]
-        .map(|(key, phase)| InputEventKind::Key { key, phase });
-        poll_native_keyboard_until(&mut session, |session| {
-            session
-                .runtime()
-                .world()
-                .resource::<PostedKeyTransitions>()
-                .0
-                .iter()
-                .any(|entry| entry.kind() == expected[3])
-        });
+        let mut expected = Vec::with_capacity(keys.len() * 2);
+        for (virtual_key, scan_code, key, action) in &keys {
+            for phase in [Pressed, Released] {
+                let kind = InputEventKind::Key { key: *key, phase };
+                expected.push(kind);
+                post_key(*virtual_key, *scan_code, phase);
+                poll_native_keyboard_until(&mut session, |session| {
+                    session
+                        .runtime()
+                        .world()
+                        .resource::<PostedKeyTransitions>()
+                        .0
+                        .len()
+                        >= expected.len()
+                });
+                let world = session.runtime().world();
+                assert_eq!(
+                    world.resource::<SemanticActions>().pressed(
+                        InputSeatId::PRIMARY,
+                        action,
+                        &context
+                    ),
+                    phase == Pressed,
+                    "unexpected semantic state for {kind:?}"
+                );
+            }
+        }
         let entries = &session
             .runtime()
             .world()
