@@ -717,15 +717,6 @@ struct OpenedSourceObservation {
 }
 
 impl AuthoringSourceValidation {
-    /// A candidate composed from the same physical file facts and reference lookups.
-    pub(crate) fn has_same_source_inputs(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.schema, &other.schema)
-            && self
-                .source_observations
-                .has_same_inputs(&other.source_observations)
-            && self.stable_lookups == other.stable_lookups
-    }
-
     /// Returns whether the candidate needs an additional receipt, or None on input conflict.
     pub(crate) fn candidate_adds_inputs(&self, candidate: &Self) -> Option<bool> {
         if !Arc::ptr_eq(&self.schema, &candidate.schema) {

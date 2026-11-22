@@ -1336,6 +1336,10 @@ a `PrefabPropertyIntent`, and `PrefabDeclarationLimits`.
 
 - `Set(value)` pins an editable scalar. An equal-value Set deliberately pins the inherited value.
   `Set(Null)` stores Null where the declared shape admits it.
+- For an editable entity-reference leaf, pass `Set(ComponentValue::EntityReference(reference))`.
+  A local target belongs to the containing document. Use an authored route with canonical base
+  keys for targets inside a Prefab occurrence. The same edit can fill a Missing optional reference
+  root. Review is available after the candidate resolves the selected reference.
 - `Absent` clears inherited storage for an editable optional or default-bearing root whose
   storage path ends in a map field. A new inspection reports Defaulted or Missing and still
   exposes the Absent claim. You can pin a root that is already Missing.
@@ -1350,8 +1354,8 @@ Specialized UI Prefab field edits use their own authoring route.
 When the frame reports `Review`, borrow `prefab_inspection_review`. Use `preview()` to discover
 candidate claims or `patch()` and `inverse()` to review the source changes, then submit `Commit`
 or `Cancel` for the same inspection. Preparation and Commit verify the files and open Prefab working
-copies used by the inspection. An Absent write can change which Prefabs are needed to resolve
-references. Commit checks the original sources and any sources newly needed by the reviewed
+copies used by the inspection. Changing or clearing a reference can change which Prefabs are
+needed. Commit checks the original sources and any sources newly needed by the reviewed
 candidate. The terminal `Written` carries the new revision and claim kind.
 `Reverted` carries the new revision after removing a claim.
 Acknowledge it and inspect again to read the resulting effective value. Undo, Redo and Save

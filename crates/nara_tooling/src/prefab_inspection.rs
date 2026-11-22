@@ -124,8 +124,9 @@ pub enum EditorPrefabInspectionAction {
     },
     /// Writes an explicit claim in the selected instance layer of the containing source.
     ///
-    /// Set pins an editable scalar, including an inherited value equal to the requested value.
-    /// Absent clears inherited storage at an editable optional or default-bearing root.
+    /// Set pins an editable scalar or a declared entity-reference leaf. References are
+    /// authored in the containing source's scope. The prepared candidate must resolve the
+    /// reference before review. Absent clears an editable optional or default-bearing root.
     PreparePropertyWrite {
         inspection: EditorPrefabInspectionId,
         address: EditorPrefabPropertyAddress,

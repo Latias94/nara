@@ -706,14 +706,10 @@ impl EditorProjectSession {
                     selection,
                     additional_sources,
                 } = result?;
-                let adds_participants = match edit.prefab_property_write_kind() {
-                    Some(AuthoringPrefabPropertyClaimKind::Absent) => basis
-                        .selection
-                        .candidate_adds_participants(&selection)
-                        .ok_or(Rejection::StaleSource)?,
-                    _ if selection == basis.selection => false,
-                    _ => return Err(Rejection::StaleSource.into()),
-                };
+                let adds_participants = basis
+                    .selection
+                    .candidate_adds_participants(&selection)
+                    .ok_or(Rejection::StaleSource)?;
                 if adds_participants || additional_sources.is_some() {
                     if !selection.matches(self) {
                         return Err(Rejection::StaleSource.into());
@@ -778,23 +774,16 @@ impl EditorProjectSession {
                 TaskPoolKind::Io,
                 TaskSpawnRequest::new(self.prefab_inspection.sequence, INSPECTION_DOMAIN),
                 move |_| {
+                    let source = edit.source_input();
                     let Inspected { snapshot, capture } =
-                        inspect_prefab(edit.source_input(), write.anchor(), &schema, context, 0)?;
+                        inspect_prefab(source, write.anchor(), &schema, context, 0)?;
                     let candidate_sources = capture.source_validation();
-                    let adds_inputs = match write.kind() {
-                        AuthoringPrefabPropertyClaimKind::Set => {
-                            if !sources.has_same_source_inputs(&candidate_sources) {
-                                return Err(Rejection::StaleSource.into());
-                            }
-                            false
-                        }
-                        AuthoringPrefabPropertyClaimKind::Absent => sources
-                            .candidate_adds_inputs(&candidate_sources)
-                            .ok_or(Rejection::StaleSource)?,
-                    };
+                    let adds_inputs = sources
+                        .candidate_adds_inputs(&candidate_sources)
+                        .ok_or(Rejection::StaleSource)?;
                     let selection = selection.complete(&capture).ok_or(Rejection::StaleSource)?;
                     if !snapshot
-                        .verifies_property_write(&write, &mut prefab_property_read_budget())
+                        .verifies_property_write(source, &write, &mut prefab_property_read_budget())
                         .map_err(property_write_rejection)?
                     {
                         return Err(Rejection::InvalidProperty.into());

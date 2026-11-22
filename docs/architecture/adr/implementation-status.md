@@ -4400,7 +4400,14 @@ records 125/125 non-native cases, including removed and introduced source demand
 unsaved containing Prefab first used through a finite self-reference. The shared Windows/DX12
 conversion passes on rerun. The independent release panel suite passes 31/31, including
 non-active Scene and Prefab.
-Reference rebinding and cross-source Apply remain separate.
+
+The [effective entity-reference write](../authoring-read-projection-design.md#effective-entity-reference-writes)
+stores the exact authored operand in the containing instance layer and verifies its resolution in
+the selected candidate. Review carries the ordinary document patch. Commit revalidates original
+and newly demanded Prefab files and working copies. The
+[qualification](../authoring-read-projection-design.md#november-23-reference-write-qualification)
+records 65/65 selected owner tests, 13/13 independent panel tests and the 1/1 Windows/DX12
+conversion regression. Cross-source Apply remains a separate workflow.
 
 [Exact declaration Revert](../authoring-read-projection-design.md#november-22-exact-declaration-revert)
 requires the observed live property or component intent at its original slot and basis. The

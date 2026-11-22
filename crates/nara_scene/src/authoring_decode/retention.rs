@@ -335,7 +335,7 @@ pub(super) fn property_dynamic_bytes_impl(
     Some(bytes)
 }
 
-pub(super) fn entity_reference_dynamic_bytes(reference: &EntityReference) -> Option<usize> {
+pub(crate) fn entity_reference_dynamic_bytes(reference: &EntityReference) -> Option<usize> {
     match reference {
         EntityReference::SceneLocal { entity } => provenance_string_bytes(entity.as_str()),
         EntityReference::Persistent { entity } => {

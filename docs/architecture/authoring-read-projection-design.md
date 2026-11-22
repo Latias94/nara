@@ -438,9 +438,9 @@ those original facts and consumes the exact reviewed edit. `prefab_inspection_re
 same prepared candidate view, patch and inverse for writes and Revert. Cancel and Close retain
 pending work until physical task return.
 
-The Set operation covers scalar leaves available through their current selector. Separate workflows
-own reference rebinding, collection identity changes, writes to an owning
-complete record and applying an override back into a different source.
+The Set operation covers editable scalar leaves available through their current selector.
+Collection identity changes, writes to an owning complete record and applying an override into a
+different source have separate contracts.
 
 Godot retains a pinned property even when the current value equals the inherited default and
 stores pinning in its normal Inspector Undo. Bevy copies a cached component template on the
@@ -483,6 +483,30 @@ storage and can expose a default. An exact Revert removes either claim and revea
 inherited state. Repeating a directly stored Absent returns `AlreadyWritten`. An inherited
 absence can still be pinned in the current layer. These operations share the existing document
 history, unavailable-record preservation, publication format and Save/Reopen owner.
+
+##### Effective entity-reference writes
+
+The selected property write accepts an `EntityReference` at a declared editable reference leaf.
+A missing optional reference root can acquire its first Set when its storage parent exists.
+A nullable reference can pin explicit Null. The containing instance layer stores the exact authored
+reference. An inline route starts in the lexical scope of the containing occurrence and can target
+an ordinary local record, another instance or a root-bound alias. The existing reference compiler
+checks the stated base at each hop and resolves the route before Review. Persistent references retain
+their durable identity and follow the existing runtime lookup contract.
+
+The candidate must compose the selected exact Set. The inspection uses the controlling claim's
+slot to check the authored operand in the prepared source and takes the effective endpoint from
+the original compiler. Root-binding aliases and declared input arguments can resolve to another
+spelling of the same target. The Host applies one freshness rule to property writes. It compares
+the shared observations, retains the complete original capture and adds the candidate's new file,
+lookup and working-copy evidence under the existing allowance. Final Commit revalidates both
+sets, including a dependency the original value used and the candidate dropped.
+
+Godot's NodePath picker derives the stored path in the edited node's context. Bevy's entity mapping
+gives a clone its own entity destination map. These inform the separation between a written
+reference and its instance-specific resolution.
+[Godot NodePath picker](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/inspector/editor_properties.cpp#L3036-L3066) ·
+[Bevy entity mapping](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_ecs/src/entity/map_entities.rs#L19-L55)
 
 ##### Effective field verification
 
@@ -579,6 +603,33 @@ claim. The active document, selection and unrelated source files stay outside th
 
 Correctness Clippy passes for the affected libraries. Scene checks without default features.
 Root and independent panel package formatting checks and local documentation links pass.
+
+##### November 23 reference write qualification
+
+With Rust 1.95.0 on Windows x64, release nextest run `b1f34e61-044e-4c81-aac3-2d4846bd4c22`
+passes 65/65 selected Scene, Tooling and Host cases. The compiler control compares two valid
+reference claims of the same shape and verifies only the requested stored operand. The Host
+changes the reference between two sibling Prefabs. It refuses changes to either dependency after
+Review in separate disk and working-copy runs. A clean retry composes the new endpoint and
+preserves unrelated edits.
+[Compiler control](../../crates/nara_scene/src/prefab/overlay/compile/selected_tests.rs) ·
+[Host source regressions](../../src/project_host/runtime/editor/prefab_conversion/tests/effective_reference_write.rs)
+
+Independently locked release nextest `444ee6cb-2563-402e-a251-3d0c6fe8b088` passes 13/13.
+The first run declared a required nullable field in the fixture, so its initial Absent claim
+was correctly rejected. The final fixture registers the same explicit optional storage Schema
+with its authoring bundle and native codec. The registered panel writes a missing reference to
+a sibling's root-bound alias and then to a containing local record in both source kinds. It checks
+the suppressed endpoint refusal, exact review and inverse, repeat refusal, Undo/Redo and Save/Reopen.
+A fresh compile of the saved files verifies the materialized Scene-local endpoints in both
+instances.
+[Registered reference workflows](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/reference.rs)
+
+The Windows/DX12 complete Prefab conversion regression passes 1/1 in
+`9c68d646-e487-4a0a-88bf-6539da4ca288` through the shared source acquisition and presentation
+path. Reference editing itself is qualified through the registered semantic panel. Correctness
+Clippy for the affected libraries, Scene without default features, workspace and independent
+panel formatting, and changed-document links pass.
 
 ## Workspace Contract
 

@@ -479,7 +479,7 @@ fn lower_revert(
     ]))
 }
 
-fn anchor_instance<'a>(
+pub(crate) fn anchor_instance<'a>(
     entities: &'a [SceneEntityRecord],
     anchor: &SceneEntityId,
 ) -> Result<&'a Option<PrefabInstance>, PrefabDeclarationError> {

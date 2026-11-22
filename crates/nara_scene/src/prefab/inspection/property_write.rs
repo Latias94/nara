@@ -6,7 +6,9 @@ use nara_reflect::{
 use super::*;
 use crate::{
     PrefabDeclarationLimits, PrefabEntityOrigin, PrefabInstanceHop, PrefabPropertyIntent,
-    SourceDocumentKey, authoring_decode::retained_prefab_target_bytes,
+    SourceDocumentKey,
+    authoring::prefab_anchor_instance,
+    authoring_decode::{retained_entity_reference_bytes, retained_prefab_target_bytes},
     provenance::provenance_string_bytes,
 };
 
@@ -39,6 +41,9 @@ impl ObservedPrefabPropertyWrite {
     pub fn checked_retained_bytes(&self) -> Option<usize> {
         let value_bytes = match &self.intent {
             PrefabPropertyIntent::Set(ComponentValue::String(value)) => value.capacity(),
+            PrefabPropertyIntent::Set(ComponentValue::EntityReference(reference)) => {
+                retained_entity_reference_bytes(reference)?
+            }
             _ => 0,
         };
         let target = retained_prefab_target_bytes(&self.target)?;
@@ -139,22 +144,22 @@ impl AuthoringPrefabInstanceSnapshot {
         }
         let replacement = match &intent {
             PrefabPropertyIntent::Set(value) => {
-                let shape = selected
-                    .resolve_value(field, property, read)?
-                    .ok_or(Error::InvalidProperty)?
-                    .shape;
+                let resolved = selected.resolve_value(field, property, read)?;
+                let shape = resolved.as_ref().map_or(field.shape(), |value| value.shape);
                 let mut leaf = shape;
                 while let ComponentValueShape::Optional { value } = leaf {
                     leaf = value;
                 }
-                if !matches!(leaf, ComponentValueShape::Scalar { .. })
-                    || matches!(
-                        value,
-                        ComponentValue::List(_)
-                            | ComponentValue::Map(_)
-                            | ComponentValue::EntityReference(_)
-                    )
-                {
+                let writable = match leaf {
+                    ComponentValueShape::Scalar { .. } => resolved.is_some(),
+                    ComponentValueShape::EntityRef => {
+                        resolved.is_some()
+                            || !field.is_required()
+                            || field.default_value().is_some()
+                    }
+                    _ => false,
+                };
+                if !writable {
                     return Err(Error::InvalidProperty);
                 }
                 Some((shape, value))
@@ -230,10 +235,13 @@ impl AuthoringPrefabInstanceSnapshot {
         })
     }
 
-    /// Confirms that the prepared source composes the exact write at the original address.
+    /// Confirms the write at the original address using the same canonical prepared source that
+    /// produced this snapshot. References preserve their authored spelling in that source and
+    /// use the compiler's resolved endpoint in the effective record.
     #[doc(hidden)]
     pub fn verifies_property_write(
         &self,
+        source: SourceDocumentInput<'_>,
         edit: &ObservedPrefabPropertyWrite,
         read: &mut ComponentPropertyReadBudget,
     ) -> Result<bool, AuthoringPrefabPropertyWriteError> {
@@ -260,12 +268,23 @@ impl AuthoringPrefabInstanceSnapshot {
             .ok_or(Error::InvalidProperty)?
             .component(&edit.component)?
             .property_value(&edit.property, read)?;
-        if !property.revert_claim().is_some_and(|claim| {
-            in_selected_layer(claim, &edit.anchor) && claim.kind == edit.kind()
-        }) {
+        let Some(claim) = property
+            .revert_claim()
+            .filter(|claim| in_selected_layer(claim, &edit.anchor) && claim.kind == edit.kind())
+        else {
             return Ok(false);
-        }
+        };
         Ok(match (&edit.intent, property.value) {
+            (
+                PrefabPropertyIntent::Set(ComponentValue::EntityReference(expected)),
+                AuthoringPrefabPropertyValue::Present(value),
+            ) => {
+                let composed = value
+                    .value
+                    .as_entity_reference()
+                    .is_some_and(|reference| value.authored_reference(reference).is_ok());
+                composed && stored_reference_claim(source, &edit.anchor, claim) == Some(expected)
+            }
             (PrefabPropertyIntent::Set(expected), AuthoringPrefabPropertyValue::Present(value)) => {
                 value
                     .value
@@ -279,6 +298,31 @@ impl AuthoringPrefabInstanceSnapshot {
             _ => false,
         })
     }
+}
+
+fn stored_reference_claim<'a>(
+    source: SourceDocumentInput<'a>,
+    anchor: &SceneEntityId,
+    claim: &AuthoringPrefabPropertyClaim,
+) -> Option<&'a EntityReference> {
+    let entities = match source {
+        SourceDocumentInput::Scene(document) => &document.entities,
+        SourceDocumentInput::Prefab(document) => &document.entities,
+    };
+    let overlay = prefab_anchor_instance(entities, anchor)
+        .ok()?
+        .as_ref()?
+        .overrides
+        .as_ref()?;
+    let stored = overlay.property_claim_at(claim.slot)?.claim();
+    if stored.path != claim.path {
+        return None;
+    }
+    let PrefabPropertyIntent::Set(ComponentValue::EntityReference(reference)) = &stored.intent
+    else {
+        return None;
+    };
+    Some(reference)
 }
 
 fn in_selected_layer(claim: &AuthoringPrefabPropertyClaim, anchor: &SceneEntityId) -> bool {

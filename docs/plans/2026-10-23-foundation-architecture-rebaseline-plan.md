@@ -623,7 +623,7 @@ The [explicit scalar override successor](../architecture/authoring-read-projecti
 completes Set and Revert of an effective scalar on a selected instance in a non-active Scene or
 Prefab. The original source owner lowers the claim, and the same Host validates its effective
 meaning and participating sources before exposing the ordinary prepared edit for review. Complete
-component editing, reference rebinding and cross-source Apply retain their own contracts.
+component editing and cross-source Apply retain their own contracts.
 
 The [authored root absence successor](../architecture/authoring-read-projection-design.md#authored-root-absence)
 uses the same verified property write for optional and default-bearing roots. The registered
@@ -634,6 +634,11 @@ The selected non-native Windows cohort passes 125/125, with the shared DX12 conv
 trajectory passing on an isolated rerun. The
 [qualification](../architecture/authoring-read-projection-design.md#november-22-root-absence-qualification)
 records the source-demand, independent panel and native results.
+
+The [effective entity-reference successor](../architecture/authoring-read-projection-design.md#effective-entity-reference-writes)
+extends the same selected instance write to Schema-declared reference leaves. The prepared edit
+preserves the original lexical route as authored intent. The candidate must resolve that route and
+Commit checks the original and newly selected dependencies before publication.
 
 The [stored declaration Revert contract](../architecture/authoring-read-projection-design.md#stored-prefab-property-claims)
 requires a live property handle or the complete observed declaration at the live slot.

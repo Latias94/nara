@@ -41,13 +41,15 @@ pub use prefab_conversion::{
 #[cfg(feature = "serde")]
 mod prefab_declarations;
 #[cfg(feature = "serde")]
-pub(crate) use prefab_declarations::instance_at as prefab_instance_slot_at;
-#[cfg(feature = "serde")]
 #[doc(hidden)]
 pub use prefab_declarations::{PrefabComponentPropertyClaims, PrefabPropertyClaims};
 #[cfg(feature = "serde")]
 pub use prefab_declarations::{
     PrefabDeclarationError, PrefabDeclarationLimits, PrefabInstanceObservation,
+};
+#[cfg(feature = "serde")]
+pub(crate) use prefab_declarations::{
+    anchor_instance as prefab_anchor_instance, instance_at as prefab_instance_slot_at,
 };
 #[cfg(feature = "serde")]
 mod prepared;

@@ -94,11 +94,7 @@ fn lower_write(
             .is_some_and(|args| args.base != edit.base)
         || matches!(
             &edit.intent,
-            PrefabPropertyIntent::Set(
-                ComponentValue::List(_)
-                    | ComponentValue::Map(_)
-                    | ComponentValue::EntityReference(_)
-            )
+            PrefabPropertyIntent::Set(ComponentValue::List(_) | ComponentValue::Map(_))
         )
     {
         return Err(Error::StaleObservedIntent);

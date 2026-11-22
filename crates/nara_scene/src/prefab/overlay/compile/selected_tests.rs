@@ -1332,14 +1332,128 @@ fn absent_write_requires_an_exact_claim_even_when_the_effective_root_is_already_
             )
             .unwrap();
         assert_eq!(edit.kind(), AuthoringPrefabPropertyClaimKind::Absent);
-        assert!(!original.verifies_property_write(&edit, &mut read).unwrap());
+        assert!(
+            !original
+                .verifies_property_write(
+                    SourceDocumentInput::Scene(session.document()),
+                    &edit,
+                    &mut read
+                )
+                .unwrap()
+        );
 
         let prepared = session
             .prepare_prefab_property_write(session.revision(), &edit, limits)
             .unwrap();
         let candidate = inspect(prepared.document());
-        assert!(candidate.verifies_property_write(&edit, &mut read).unwrap());
+        assert!(
+            candidate
+                .verifies_property_write(
+                    SourceDocumentInput::Scene(prepared.document()),
+                    &edit,
+                    &mut read
+                )
+                .unwrap()
+        );
     }
+}
+
+#[test]
+fn property_write_verification_checks_the_exact_authored_reference() {
+    use crate::{
+        __private::try_inspect_authoring_prefab_instance_with_loader, AuthoringPrefabPropertyValue,
+        PrefabDeclarationLimits,
+    };
+    use nara_reflect::{ComponentPropertyReadBudget, ComponentValueMaterializationLimits};
+
+    let basis = basis();
+    let property = ComponentPropertyPath::new(ComponentFieldId::new("target"));
+    let base = Arc::new(PrefabDocument::from_ordered_roots([
+        data("host"),
+        SceneEntityRecord::new(id("socket")),
+    ]));
+    let source = |target| {
+        let mut overlay = PrefabOverlay::new(key("base"));
+        overlay.components.push(PrefabComponentIntent::Properties {
+            target: PrefabEntityTarget::source(id("host")),
+            component: component(),
+            version: ComponentSchemaVersion::ONE,
+            claims: vec![PrefabPropertyClaim {
+                path: property.clone(),
+                intent: PrefabPropertyIntent::Set(local(target)),
+            }],
+        });
+        SceneDocument::from_ordered_roots([
+            anchor("mount", "base", Some(overlay)),
+            SceneEntityRecord::new(id("old")),
+            SceneEntityRecord::new(id("next")),
+        ])
+    };
+    let observe = |source| {
+        try_inspect_authoring_prefab_instance_with_loader(
+            source,
+            &id("mount"),
+            &basis,
+            Default::default(),
+            |reference, _| {
+                assert_eq!(reference, &request("base"));
+                Ok::<_, Infallible>(Some(ResolvedPrefabSource::bound_authoring_source(
+                    Arc::clone(&base),
+                    basis.clone(),
+                    key("base"),
+                )))
+            },
+        )
+        .unwrap()
+    };
+    let old = source("old");
+    let next = source("next");
+    let original = observe(SourceDocumentInput::Scene(&old));
+    let candidate = observe(SourceDocumentInput::Scene(&next));
+    let target = original
+        .targets()
+        .find(|target| target.entity == PrefabEntityOrigin::SourceEntity(id("host")))
+        .unwrap();
+    let mut read = ComponentPropertyReadBudget::new(
+        ItemLimit::new(16).unwrap(),
+        ByteLimit::new(4096).unwrap(),
+    );
+    let edit = original
+        .plan_property_write(
+            target,
+            &component(),
+            &property,
+            PrefabPropertyIntent::Set(local("next")),
+            PrefabDeclarationLimits::default(),
+            &mut read,
+        )
+        .unwrap();
+    assert!(
+        !original
+            .verifies_property_write(SourceDocumentInput::Scene(&old), &edit, &mut read)
+            .unwrap()
+    );
+    assert!(
+        candidate
+            .verifies_property_write(SourceDocumentInput::Scene(&next), &edit, &mut read)
+            .unwrap()
+    );
+    let field = candidate
+        .target(target)
+        .unwrap()
+        .component(&component())
+        .unwrap()
+        .property_value(&property, &mut read)
+        .unwrap();
+    let AuthoringPrefabPropertyValue::Present(value) = field.value else {
+        panic!("the exact Set must materialize a present endpoint");
+    };
+    assert_eq!(
+        value
+            .copy_value(ComponentValueMaterializationLimits::default())
+            .unwrap(),
+        authored(AuthoredEntityReference::source(id("next"))),
+    );
 }
 
 #[test]

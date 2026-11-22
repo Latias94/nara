@@ -47,6 +47,7 @@ use crate::project_host::{
 };
 
 mod effective_absent_reference;
+mod effective_reference_write;
 
 const SCENE: &str = "scenes/startup.scene.json";
 const CONTAINER: &str = "prefabs/container.prefab.json";

@@ -61,15 +61,6 @@ impl SourceObservation {
 impl SourceObservations {
     const STORAGE_BYTES: usize = size_of::<Self>() + 2 * size_of::<usize>();
 
-    pub(super) fn has_same_inputs(&self, other: &Self) -> bool {
-        self.entries.len() == other.entries.len()
-            && self.entries.iter().zip(&other.entries).all(
-                |((path, expected), (actual_path, actual))| {
-                    path == actual_path && expected.matches_input(actual)
-                },
-            )
-    }
-
     /// Returns whether the candidate adds an input, or None if a shared input changed.
     pub(super) fn candidate_adds_inputs(&self, candidate: &Self) -> Option<bool> {
         let mut adds_inputs = false;

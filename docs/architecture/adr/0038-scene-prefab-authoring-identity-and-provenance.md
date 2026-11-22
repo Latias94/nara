@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-03
+**Last Revised**: 2026-11-23
 **Amended**: 2026-10-24 by production source admission, required Prefab/containing-source binding
 and Scene-owned logical occurrence
 **Amended**: 2026-10-25 by owned unbound ordinary Scene preparation
@@ -14,6 +14,7 @@ and exact containing-source instance-declaration transactions, plus source-owned
 **Amended**: 2026-10-29 by complete typed provenance in derived Runtime Scenes
 **Amended**: 2026-11-02 by lower pure source-key representation under ADR0058 and the selected
 CP2 root/placement/inline-reference replacement, with separate implementation evidence
+**Amended**: 2026-11-23 by effective instance reference writes and dependency revalidation
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -110,6 +111,10 @@ root, placement and inline-reference replacement; value relocation alone does no
   separately from value presence. References copied from that observation use typed authored
   endpoints relative to the containing source. The exact containing claim may feed the
   source-owned Revert. Its interpretation is bound to the captured composition and Schema.
+  Editing a declared reference leaf stores the authored operand in that containing instance
+  layer. The selected compiler must resolve its endpoint and confirm the exact controlling claim
+  in the prepared source. Commit revalidates the original dependency observations and any inputs
+  introduced by the new reference before it publishes the source edit.
 - Projection ancestry is a sequence of typed instance-entry steps. `SourceEntity` binds the
   admitted canonical Prefab source and its local entity, retaining lookup spelling as evidence.
   `InstanceAddition` enters the preceding anchor's overlay-local namespace without claiming the
