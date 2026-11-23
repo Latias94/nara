@@ -128,3 +128,37 @@ Dragging the X Location field in Object Properties writes to the same `loc` arra
 A workspace groups screen layouts, and each screen contains areas. Each area keeps its active editor first in `spacedata` and its active regions in `regionbase`. Two 3D areas showing the same object can use different shading because each has its own `View3D` space. In one area's Quad View, four window regions share that space's shading and each holds its own orientation and view distance in `RegionView3D`. [Workspace, screen, area and shading](https://github.com/blender/blender/blob/20a0565aa86c7ba6ab1e9537675a0cd8529337ef/source/blender/blenloader/intern/versioning_defaults.cc#L350-L359) · [Active space and regions](https://github.com/blender/blender/blob/20a0565aa86c7ba6ab1e9537675a0cd8529337ef/source/blender/makesdna/DNA_screen_types.h#L683-L693) · [Region view state](https://github.com/blender/blender/blob/20a0565aa86c7ba6ab1e9537675a0cd8529337ef/source/blender/editors/space_view3d/space_view3d.cc#L253-L265) · [Quad View split](https://github.com/blender/blender/blob/20a0565aa86c7ba6ab1e9537675a0cd8529337ef/source/blender/editors/screen/screen_ops.cc#L5970-L6008)
 
 The object-transform notification from a Location edit tags each receiving 3D window region for redraw. The same region subscribes broadly to `Object` changes and subscribes to `RenderSettings.use_border` only in camera view. The area's draw loop skips hidden or untagged regions. These paths suggest that one undoable move can update two views while each keeps its own framing and redraw subscriptions. [RNA notification](https://github.com/blender/blender/blob/20a0565aa86c7ba6ab1e9537675a0cd8529337ef/source/blender/makesrna/intern/rna_access.cc#L2635-L2646) · [Transform listener](https://github.com/blender/blender/blob/20a0565aa86c7ba6ab1e9537675a0cd8529337ef/source/blender/editors/space_view3d/space_view3d.cc#L712-L729) · [Region subscriptions](https://github.com/blender/blender/blob/20a0565aa86c7ba6ab1e9537675a0cd8529337ef/source/blender/editors/space_view3d/space_view3d.cc#L940-L993) · [Region draw loop](https://github.com/blender/blender/blob/20a0565aa86c7ba6ab1e9537675a0cd8529337ef/source/blender/windowmanager/intern/wm_draw.cc#L1055-L1059)
+
+## coss ui as a component reference
+
+coss ui is Cal.com's React component library, built on Base UI and styled with Tailwind CSS.
+Use it as a reference for desktop control behavior and composition. Its theme assigns distinct
+roles to input borders, focus rings and error text. Nara's Design Kit supplies the graphite
+surfaces, teal emphasis and regular/compact minimum control heights of 28/24 logical units.
+[coss ui](https://coss.com/ui) · [Styling](https://coss.com/ui/docs/styling) · [Nara design guidance](../design/editor-reference/README.md#decisions-to-carry-forward)
+
+The best first comparison is the Transform X field. coss combines typed input, step buttons
+and an optional draggable label. Its `Field` associates the control with a label, description
+and error. Nara's selection and history rules supply the meaning of the gesture. For two objects
+at X = 10 and 20, typing 15 sets both to 15. Dragging by +1 from their original positions previews
+11 and 21. Releasing records one edit and Undo restores 10 and 20. The existing `UiPropertyRow`
+already handles the label, editor, action and status layout at wide and narrow widths.
+[Number Field](https://coss.com/ui/docs/components/number-field) · [Field](https://coss.com/ui/docs/components/field) · [Nara numeric and vector rules](../design/editor-reference/nara-editor-design-spec-v0.4.md#L1242-L1249) · [Row layout](../../crates/nara_ui_widgets/src/property_row.rs#L6-L15)
+
+At the Open-GPUI revision selected by Nara's fixture, `NumberInput` already handles keyboard
+stepping with Up/Down and range endpoints with Home/End. It paints a text value beside two step
+buttons. A native Inspector can build on that behavior and use a text editor and drag target for
+direct entry and scrubbing. [Fixture revision](../../tests/fixtures/gpui-engine-consumer/README.md#L3-L9) · [Keyboard behavior](https://github.com/Latias94/open-gpui/blob/f75c10b2a9bf7b4dcb2c8c2aa446203997601369/crates/ui_components/src/number_input.rs#L238-L270) · [Rendered control](https://github.com/Latias94/open-gpui/blob/f75c10b2a9bf7b4dcb2c8c2aa446203997601369/crates/ui_components/src/number_input.rs#L485-L565)
+
+Two other patterns transfer well. A searchable picker can reuse the Combobox's grouped results
+and empty state. An empty search only describes the query. A missing assigned asset still needs
+its identity and a repair action. A segmented control can share its appearance across tabs,
+settings and filters. Switching between Assets and Console changes the visible panel. Choosing
+a light's shadow mode edits a document property and belongs in Undo.
+[Combobox](https://coss.com/ui/docs/components/combobox) · [Segmented Control](https://coss.com/ui/docs/components/segmented-control) · [Nara reference states](../design/editor-reference/nara-editor-design-spec-v0.4.md#L1225-L1236)
+
+For in-game UI, settings menus can reuse labels, value controls and visible focus cues. The HUD's
+appearance and input behavior come from the game. In Nara's reference game the terminal overlay
+puts focus on Retry, keeps the HUD visible and makes its controls inert. The runtime owns that
+transition and prevents a second activation while the first retry is pending.
+[Reference-game UI states](../architecture/reference-game-ui-product-slice.md#state-matrix) · [Shared mechanisms](../architecture/adr/0107-shared-ui-foundation-and-independent-product-layers.md#L141-L155)
