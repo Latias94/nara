@@ -211,6 +211,14 @@ pub mod native {
     const CLEANUP: &str = "TWO_LEVEL_NATIVE_CLEANUP ";
     const PUBLISHED: &str = "TWO_LEVEL_PACKAGE_PUBLISHED ";
     const RESULT: &str = "TWO_LEVEL_PLAYER_RESULT ";
+    const TRAVEL_SCENES: [LevelId; 6] = [
+        LevelId::Meadow,
+        LevelId::Cavern,
+        LevelId::Cavern,
+        LevelId::Cavern,
+        LevelId::Cavern,
+        LevelId::Meadow,
+    ];
 
     #[derive(Deserialize)]
     struct Publication {
@@ -578,8 +586,6 @@ pub mod native {
                 fixture.project.as_os_str().to_owned(),
                 OsString::from("--output-parent"),
                 output_parent.as_os_str().to_owned(),
-                OsString::from("--name"),
-                OsString::from("TwoLevel"),
                 OsString::from("--target-dir"),
                 target.as_os_str().to_owned(),
                 OsString::from("--target"),
@@ -599,6 +605,7 @@ pub mod native {
             .environment("CARGO", tools.cargo_path())
             .environment("RUSTC", tools.rustc_path())
             .bounded_stdout(NonZeroUsize::new(OUTPUT_BYTES).unwrap());
+        let original_cook = command.clone().arguments(["--name", "TwoLevel"]);
         let mut custody = Custody::new(fixture);
         let generated = custody
             .fixture()
@@ -608,7 +615,7 @@ pub mod native {
             .exists()
             .then(|| read_bounded(&generated, 32 * 1024));
         fs::write(&selected_bundle, b"not an authoring Schema bundle").unwrap();
-        let rejected = custody.tool(&command, COOK_TIMEOUT);
+        let rejected = custody.tool(&original_cook, COOK_TIMEOUT);
         assert!(!rejected.receipt.exit().success());
         assert!(
             rejected
@@ -624,7 +631,7 @@ pub mod native {
             original_generated,
         );
         fs::write(&selected_bundle, &bundle).unwrap();
-        let cooked = custody.tool(&command, COOK_TIMEOUT);
+        let cooked = custody.tool(&original_cook, COOK_TIMEOUT);
         assert!(
             cooked.receipt.exit().success(),
             "stdout={} stderr={}",
@@ -973,6 +980,43 @@ pub mod native {
             .unwrap();
         assert!(cache.is_dir());
         assert_no_input_player(&mut custody, &cache, &target, &triple, tools, payload);
+        let edited_ids = BTreeMap::from([
+            (
+                LevelId::Meadow,
+                add_authored_walls(
+                    custody.fixture(),
+                    LevelId::Meadow,
+                    ["wall-alcove-post".into()],
+                ),
+            ),
+            (
+                LevelId::Cavern,
+                add_authored_walls(
+                    custody.fixture(),
+                    LevelId::Cavern,
+                    (0..9).map(|index| format!("alcove-post-{index}")),
+                ),
+            ),
+        ]);
+        let cooked = custody.tool(
+            &command.arguments(["--name", "TwoLevelEdited"]),
+            COOK_TIMEOUT,
+        );
+        assert!(
+            cooked.receipt.exit().success(),
+            "edited levels Cook failed: stdout={} stderr={}",
+            cooked.stdout,
+            cooked.stderr,
+        );
+        let publication: Publication = record(&cooked.stdout, PUBLISHED).unwrap();
+        assert!(publication.postpublication_error.is_none());
+        assert_eq!(publication.executable, executable_name);
+        let edited = output_parent.join("TwoLevelEdited");
+        assert_eq!(publication.directory.canonicalize().unwrap(), edited);
+        assert_payload(&edited, &executable_name);
+        let edited_installation = installation.join("TwoLevelEdited");
+        fs::rename(edited, &edited_installation).unwrap();
+        let edited_executable = edited_installation.join(&executable_name);
         remove_owned_tree(custody.fixture(), &project, &target);
         remove_owned_tree(custody.fixture(), &cache, &target);
         assert_sources_gone(&project, &cache);
@@ -987,25 +1031,49 @@ pub mod native {
         assert_eq!(startup["markers"], json!([]));
         assert_eq!(startup["state"]["travel_count"], 0);
 
+        let edited_startup = custody.player(&edited_executable, vec![], "edited-startup");
+        let edited_startup = assert_player_result(&edited_startup, "interactive", true);
+        assert_scene_sequence(&edited_startup, &[LevelId::Meadow]);
+        assert_eq!(
+            edited_startup["level"],
+            json!(LevelKey::main(LevelId::Meadow))
+        );
+        assert_eq!(edited_startup["score"], 0);
+        assert_edited_members(&edited_startup, &edited_ids);
+
+        let edited_travel = custody.player(
+            &edited_executable,
+            vec!["--verify-travel".into()],
+            "edited-travel",
+        );
+        let edited_travel = assert_player_result(&edited_travel, "travel", true);
+        assert_progress(&edited_travel, LevelId::Meadow, &[1]);
+        assert_scene_sequence(&edited_travel, &TRAVEL_SCENES);
+        assert_edited_members(&edited_travel, &edited_ids);
+        assert_eq!(edited_travel["state"]["travel_count"], 4);
+        assert_eq!(edited_travel["state"]["restarts"], 1);
+
         let travel = custody.player(&executable, vec!["--verify-travel".into()], "travel");
         let travel = assert_player(&travel, "travel", true);
         assert_progress(&travel, LevelId::Meadow, &[1]);
         assert_eq!(travel["animation_frames"], json!([0, 1, 2, 3]));
         assert_images(&travel, &LevelId::ALL, &expected_images);
-        assert_scene_sequence(
-            &travel,
-            &[
-                LevelId::Meadow,
-                LevelId::Cavern,
-                LevelId::Cavern,
-                LevelId::Cavern,
-                LevelId::Cavern,
-                LevelId::Meadow,
-            ],
-        );
+        assert_scene_sequence(&travel, &TRAVEL_SCENES);
         assert_eq!(travel["state"]["travel_count"], 4);
         assert_eq!(travel["state"]["restarts"], 1);
         let save_parent = custody.fixture().directory("application-save");
+        let edited_save = save_parent.join("edited-checkpoint.json");
+        let edited_saved = custody.player(
+            &edited_executable,
+            vec!["--verify-save".into(), edited_save.as_os_str().to_owned()],
+            "edited-save",
+        );
+        let edited_saved = assert_player_result(&edited_saved, "save", true);
+        assert_progress(&edited_saved, LevelId::Cavern, &[2]);
+        assert_edited_members(&edited_saved, &edited_ids);
+        assert_eq!(edited_saved["state"]["saves"], 1);
+        assert_eq!(edited_saved["save"]["load_verified"], true);
+
         let save = save_parent.join("checkpoint.json");
         let saved = custody.player(
             &executable,
@@ -1196,6 +1264,50 @@ pub mod native {
         assert!(target.is_dir());
     }
 
+    fn add_authored_walls(
+        fixture: &Fixture,
+        level: LevelId,
+        ids: impl IntoIterator<Item = String>,
+    ) -> Vec<String> {
+        let path = format!("scenes/{}", level.scene_path());
+        let mut scene: Value = serde_json::from_str(&fixture.read(&path)).unwrap();
+        let template = scene["payload"]["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entity| entity["id"] == "wall-inner")
+            .unwrap()
+            .clone();
+        for (index, id) in ids.into_iter().enumerate() {
+            let mut wall = template.clone();
+            wall["id"] = json!(id);
+            let transform = &mut wall["components"]["nara.transform.Transform2d"];
+            let translation = &mut transform["value"]["value"]["translation"]["value"];
+            translation["x"]["value"] = json!(110 + index * 18);
+            translation["y"]["value"] = json!(90);
+            scene["payload"]["entities"]
+                .as_array_mut()
+                .unwrap()
+                .push(wall);
+            scene["payload"]["placements"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({
+                    "target": {"through": [], "entity": {"kind": "source_entity", "entity": id}},
+                    "placement": {"parent": {"kind": "root"}, "slot": {"kind": "last"}},
+                }));
+        }
+        fixture.write(&path, &serde_json::to_string(&scene).unwrap());
+        let mut ids = scene["payload"]["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entity| entity["id"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids
+    }
+
     fn assert_no_input_player(
         custody: &mut Custody,
         cache: &Path,
@@ -1364,6 +1476,15 @@ pub mod native {
     }
 
     fn assert_player(output: &Output, scenario: &str, success: bool) -> Value {
+        let result = assert_player_result(output, scenario, success);
+        assert_eq!(result["state"]["scene_members"], AUTHORED_LEVEL_MEMBERS);
+        for observed in result["scene_receipts"].as_array().unwrap() {
+            walls::scene(observed);
+        }
+        result
+    }
+
+    fn assert_player_result(output: &Output, scenario: &str, success: bool) -> Value {
         output.assert_player_exit(success);
         let result: Value = record(&output.stdout, RESULT).unwrap();
         assert_eq!(result["success"], success, "{result}");
@@ -1551,7 +1672,7 @@ pub mod native {
         assert_eq!(receipts.first().unwrap()["receipt"], *startup);
         assert_eq!(receipts.last().unwrap()["receipt"], *current);
         assert_eq!(result["state"]["current_instance"], current["instance_id"]);
-        assert_eq!(result["state"]["scene_members"], AUTHORED_LEVEL_MEMBERS);
+        assert_eq!(result["state"]["scene_members"], current["entity_count"]);
         assert!(startup["domain_id"].as_u64().unwrap() > 0);
         let mut instances = BTreeSet::new();
         for observed in receipts {
@@ -1570,8 +1691,18 @@ pub mod native {
             assert_eq!(receipt["domain_id"], startup["domain_id"]);
             let instance = receipt["instance_id"].as_u64().unwrap();
             assert!(instance > 0 && instances.insert(instance));
-            walls::scene(observed);
             assert_eq!(observed["animation_proof"], default_animation_proof());
+        }
+    }
+
+    fn assert_edited_members(result: &Value, expected: &BTreeMap<LevelId, Vec<String>>) {
+        for observed in result["scene_receipts"].as_array().unwrap() {
+            let level: LevelId = serde_json::from_value(observed["level"].clone()).unwrap();
+            let ids = &expected[&level];
+            let receipt = &observed["receipt"];
+            assert_eq!(receipt["entity_count"], ids.len(), "{level:?}");
+            assert_eq!(receipt["entity_ids"], json!(ids), "{level:?}");
+            assert_eq!(receipt["truncated"], false, "{level:?}");
         }
     }
 

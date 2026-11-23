@@ -6,7 +6,7 @@ use std::{
 use nara::{
     advanced_prelude::CurrentScene,
     asset::{AssetProductRef, AssetRef, Assets},
-    ecs::World,
+    ecs::{Entity, World},
     fs::ContentDigest,
     hierarchy::Parent,
     identity::{EntityLookup, SpawnedSceneInstance},
@@ -25,13 +25,16 @@ use two_level_game::{
     CollisionBox, GamePhase, GameSnapshot, Scenario,
     animation::{CLIPS_PATH, ExplorerAnimation, atlas_product, clips_product},
     input::{INPUT_PATH, input_product},
-    levels::{AUTHORED_LEVEL_MEMBERS, LevelId, WALL_ENTITY_IDS},
+    levels::{LevelId, WALL_ENTITY_IDS},
     markers::marker_image_product,
 };
 
 use super::output;
 
 const SOURCE_UNIVERSE: &str = "be3dea0c-93ef-5607-ab84-af715a1f98b3";
+const MAX_SCENE_RECEIPTS: usize = 16;
+const MAX_REPORTED_ENTITY_IDS: usize = 32;
+const MAX_REPORTED_ENTITY_ID_BYTES: usize = 256;
 /// BLAKE3 of the complete RGBA8 pixels independently decoded from each source PNG.
 const RGBA_HASH: [u8; 32] = [
     61, 120, 191, 178, 229, 162, 52, 78, 30, 139, 104, 91, 1, 216, 130, 90, 82, 239, 180, 84, 73,
@@ -82,14 +85,21 @@ impl Evidence {
     }
 
     pub(super) fn observe_world_sampled(&mut self, world: &World) -> Result<bool, String> {
-        let changed = CurrentScene::get(world)
-            .is_some_and(|current| self.current.as_ref() != Some(current.receipt()));
-        let sampled = changed && self.receipts.len() >= 16;
+        let changed =
+            CurrentScene::get(world).is_some_and(|current| self.scene_changed(current.receipt()));
+        let sampled = changed && self.receipts.len() >= MAX_SCENE_RECEIPTS;
         if sampled {
             self.receipts.remove(1);
         }
         self.observe_world(world)?;
         Ok(sampled)
+    }
+
+    fn scene_changed(&self, instance: &SpawnedSceneInstance) -> bool {
+        self.current.as_ref().is_none_or(|previous| {
+            previous.domain_id() != instance.domain_id()
+                || previous.instance_id() != instance.instance_id()
+        })
     }
 
     pub fn observe(&mut self, session: &HeadlessSession) -> Result<(), String> {
@@ -129,20 +139,25 @@ impl Evidence {
             .flat_map(|assets| assets.iter())
             .filter_map(|(_, image)| image.product())
             .collect();
+        let had_error = self
+            .snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.error.is_some());
         self.snapshot = world.get_resource::<GameSnapshot>().cloned();
         let current = CurrentScene::get(world).ok_or("current Scene is unavailable")?;
-        let changed = self.current.as_ref() != Some(current.receipt());
-        self.current = Some(current.receipt().clone());
-        let startup = self
-            .startup
-            .get_or_insert_with(|| current.receipt().clone());
-        if startup.domain_id() != current.receipt().domain_id() {
+        let instance = current.receipt();
+        let changed = self.scene_changed(instance);
+        if changed {
+            self.current = Some(instance.clone());
+        }
+        let startup = self.startup.get_or_insert_with(|| instance.clone());
+        if startup.domain_id() != instance.domain_id() {
             return Err("current Scene changed the original World identity domain".into());
         }
         if let Some(snapshot) = &self.snapshot
             && snapshot.initialized
-            && (snapshot.current_instance != Some(current.receipt().instance_id())
-                || snapshot.scene_members != current.receipt().len())
+            && (snapshot.current_instance != Some(instance.instance_id())
+                || snapshot.scene_members != instance.len())
         {
             return Err("gameplay snapshot disagrees with the actual current Scene receipt".into());
         }
@@ -152,16 +167,7 @@ impl Evidence {
             && !snapshot.restoring
             && snapshot.error.is_none()
         {
-            let id = current
-                .receipt()
-                .entity_ids()
-                .iter()
-                .take(AUTHORED_LEVEL_MEMBERS)
-                .find(|id| id.as_str() == "explorer")
-                .ok_or("current Scene receipt has no bounded explorer identity")?;
-            let EntityLookup::Resolved(entity) = current.receipt().resolve(world, id) else {
-                return Err("current Scene receipt does not resolve its live explorer".into());
-            };
+            let entity = resolve_scene_member(world, instance, "explorer")?;
             let sprite = world
                 .get::<Sprite>(entity)
                 .ok_or("current receipt-resolved explorer has no Sprite")?;
@@ -201,26 +207,28 @@ impl Evidence {
             self.animation_frames
                 .insert((sample.region.min.x * 4.0) as u8);
         }
-        if !changed
+        let new_error = !had_error
             && self
                 .snapshot
                 .as_ref()
-                .is_none_or(|snapshot| snapshot.error.is_none())
-        {
+                .is_some_and(|snapshot| snapshot.error.is_some());
+        if !changed && !new_error {
             return Ok(());
         }
-        if (changed && self.receipts.len() >= 16)
-            || current.receipt().len() != AUTHORED_LEVEL_MEMBERS
-            || current.receipt().entity_ids().iter().any(|id| {
-                id.as_str().len() > 256
-                    || !matches!(
-                        current.receipt().resolve(world, id),
-                        EntityLookup::Resolved(_)
-                    )
+        if changed && self.receipts.len() >= MAX_SCENE_RECEIPTS {
+            return Err("Player exceeded its Scene receipt history limit".into());
+        }
+        let entities = current.source().entities();
+        if instance.len() != entities.len()
+            || entities.iter().any(|entity| {
+                !matches!(
+                    instance.resolve(world, entity.id()),
+                    EntityLookup::Resolved(_)
+                )
             })
         {
             return Err(
-                "current Scene receipt is not the bounded live eleven-entity game level".into(),
+                "current Scene receipt does not resolve the admitted level's members".into(),
             );
         }
         if !changed {
@@ -260,8 +268,8 @@ impl Evidence {
         if self.receipts.is_empty() && level != LevelId::STARTUP {
             return Err("Player did not activate the actual Meadow startup Scene".into());
         }
-        let walls = wall_proofs(world, current.receipt(), level)?;
-        let animation = animation_proof(world, current.receipt())?;
+        let walls = wall_proofs(world, instance, level)?;
+        let animation = animation_proof(world, instance)?;
         let product = level.image_product();
         let assets = world
             .get_resource::<Assets<ImageAsset>>()
@@ -367,7 +375,7 @@ impl Evidence {
             "scene_product": level.scene_product().to_string(),
             "source_key": source_key,
             "representation": "runtime_scene",
-            "receipt": receipt(current.receipt()),
+            "receipt": receipt(instance),
             "wall_proofs": walls,
             "animation_proof": animation,
         }));
@@ -504,14 +512,7 @@ fn selected_clips<'a>(
 }
 
 fn animation_proof(world: &World, receipt: &SpawnedSceneInstance) -> Result<Value, String> {
-    let id = receipt
-        .entity_ids()
-        .iter()
-        .find(|id| id.as_str() == "explorer")
-        .ok_or("current Scene receipt has no explorer identity")?;
-    let EntityLookup::Resolved(entity) = receipt.resolve(world, id) else {
-        return Err("current Scene receipt does not resolve its live explorer animation".into());
-    };
+    let entity = resolve_scene_member(world, receipt, "explorer")?;
     let animation = world
         .get::<ExplorerAnimation>(entity)
         .ok_or("current receipt-resolved explorer has no authored animation reference")?;
@@ -549,15 +550,42 @@ fn animation_proof(world: &World, receipt: &SpawnedSceneInstance) -> Result<Valu
 }
 
 fn receipt(receipt: &SpawnedSceneInstance) -> Value {
+    let reported = &receipt.entity_ids()[..receipt.len().min(MAX_REPORTED_ENTITY_IDS)];
+    let truncated = receipt.len() > reported.len()
+        || reported
+            .iter()
+            .any(|id| id.as_str().len() > MAX_REPORTED_ENTITY_ID_BYTES);
+    let entity_ids = reported
+        .iter()
+        .map(|id| {
+            let id = id.as_str();
+            &id[..id.floor_char_boundary(MAX_REPORTED_ENTITY_ID_BYTES)]
+        })
+        .collect::<Vec<_>>();
     json!({
         "domain_id": receipt.domain_id().get(),
         "instance_id": receipt.instance_id().get(),
         "entity_count": receipt.len(),
-        "entity_ids": receipt.entity_ids().iter().take(AUTHORED_LEVEL_MEMBERS)
-            .map(|id| id.as_str().chars().take(256).collect::<String>()).collect::<Vec<_>>(),
-        "truncated": receipt.len() > AUTHORED_LEVEL_MEMBERS
-            || receipt.entity_ids().iter().take(AUTHORED_LEVEL_MEMBERS).any(|id| id.as_str().len() > 256),
+        "entity_ids": entity_ids,
+        "truncated": truncated,
     })
+}
+
+fn resolve_scene_member(
+    world: &World,
+    receipt: &SpawnedSceneInstance,
+    name: &str,
+) -> Result<Entity, String> {
+    let ids = receipt.entity_ids();
+    let index = ids
+        .binary_search_by(|id| id.as_str().cmp(name))
+        .map_err(|_| format!("current Scene receipt has no {name} identity"))?;
+    match receipt.resolve(world, &ids[index]) {
+        EntityLookup::Resolved(entity) => Ok(entity),
+        _ => Err(format!(
+            "current Scene receipt does not resolve its live {name}"
+        )),
+    }
 }
 
 fn wall_proofs(
@@ -565,20 +593,7 @@ fn wall_proofs(
     receipt: &SpawnedSceneInstance,
     level: LevelId,
 ) -> Result<Vec<Value>, String> {
-    let resolve = |name: &str| {
-        let id = receipt
-            .entity_ids()
-            .iter()
-            .find(|id| id.as_str() == name)
-            .ok_or_else(|| format!("current Scene receipt has no {name} identity"))?;
-        match receipt.resolve(world, id) {
-            EntityLookup::Resolved(entity) => Ok(entity),
-            _ => Err(format!(
-                "current Scene receipt does not resolve its live {name}"
-            )),
-        }
-    };
-    let explorer = resolve("explorer")?;
+    let explorer = resolve_scene_member(world, receipt, "explorer")?;
     if world.get::<CollisionBox>(explorer)
         != Some(&CollisionBox {
             center: Vec2::ZERO,
@@ -588,15 +603,6 @@ fn wall_proofs(
         || world.get::<Parent>(explorer).is_some()
     {
         return Err("receipt-resolved explorer lost its authored root collision box".into());
-    }
-    if receipt
-        .entity_ids()
-        .iter()
-        .filter(|id| id.as_str().starts_with("wall-"))
-        .count()
-        != WALL_ENTITY_IDS.len()
-    {
-        return Err("current Scene must contain exactly five authored walls".into());
     }
     let inner_x = match level {
         LevelId::Meadow => 0.0,
@@ -612,7 +618,7 @@ fn wall_proofs(
             ([inner_x, -12.0], [6.0, 36.0]),
         ])
         .map(|(id, (translation, half))| {
-            let entity = resolve(id)?;
+            let entity = resolve_scene_member(world, receipt, id)?;
             let transform = world
                 .get::<Transform2d>(entity)
                 .ok_or_else(|| format!("receipt-resolved {id} has no Transform2d"))?;

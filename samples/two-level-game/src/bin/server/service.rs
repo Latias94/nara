@@ -57,7 +57,6 @@ pub(super) fn run(
         )
     })?;
     let paused = options.paused || time.paused();
-    let mut clock = FrameClock::new(Instant::now(), fixed, time);
     let restore_paths = if let Some(path) = options.resume_state {
         Some((path, options.save_path))
     } else {
@@ -69,15 +68,18 @@ pub(super) fn run(
             two_level_game::player_launch(launch_options).map_err(Failure::Rejected)?
         {
             session.submit(launch)?;
-            if paused {
-                if session.pause()?.is_some() || session.step()?.is_some() {
-                    return Err("Server exited before its checkpoint launch was applied".into());
-                }
-                launch_result(session)?
-                    .ok_or("Server did not apply its first-tick checkpoint launch")?
-                    .map_err(Failure::Rejected)?;
-            } else {
-                apply_launch(session, &mut clock, startup_deadline)?;
+            if session.pause()?.is_some() || session.step()?.is_some() {
+                return Err("Server exited before its checkpoint launch was applied".into());
+            }
+            session
+                .observe(|world| {
+                    two_level_game::player_launch_result(world)
+                        .map(|result| result.map_err(str::to_owned))
+                })?
+                .ok_or("Server did not apply its first-tick checkpoint launch")?
+                .map_err(Failure::Rejected)?;
+            if !paused && session.resume()?.is_some() {
+                return Err("Server exited before starting its live clock".into());
             }
         }
         None
@@ -101,22 +103,19 @@ pub(super) fn run(
         None => (0, false),
     };
     let initial = Observation::read(session)?;
-    let (input, reader) = control::spawn()
-        .map_err(|error| Failure::Error(format!("start Server input reader: {error}")))?;
     let now = Instant::now();
     if now >= startup_deadline {
         return Err("Server startup finished after its readiness deadline".into());
     }
-    if !paused {
-        clock.elapsed(now)?;
-    }
+    let (input, reader) = control::spawn()
+        .map_err(|error| Failure::Error(format!("start Server input reader: {error}")))?;
     report.ready = true;
     report.stage = "service";
     report.state = Some(state(&initial.game));
     let mut service = Service {
         session,
         output,
-        clock,
+        clock: FrameClock::new(now, fixed, time),
         checkpoint_configured,
         checkpoint_pending,
         paused,
@@ -223,40 +222,6 @@ fn read_resume_state(path: &Path) -> Result<ProcessedResumeState, Failure> {
     }
     decode_processed_resume(&bytes)
         .map_err(|error| Failure::Rejected(format!("decode Server resume state: {error}")))
-}
-
-fn apply_launch(
-    session: &mut HeadlessSession,
-    clock: &mut FrameClock,
-    deadline: Instant,
-) -> Result<(), Failure> {
-    loop {
-        let now = Instant::now();
-        if now >= deadline {
-            return Err(
-                "Server did not apply its checkpoint launch before the startup deadline".into(),
-            );
-        }
-        let Some(delta) = clock.take_due(now)? else {
-            thread::sleep(clock.remaining(now).min(deadline - now));
-            continue;
-        };
-        if session.frame(delta)?.is_some() {
-            return Err("Server exited before its checkpoint launch was applied".into());
-        }
-        if Instant::now() >= deadline {
-            return Err("Server checkpoint launch finished after the startup deadline".into());
-        }
-        if let Some(result) = launch_result(session)? {
-            return result.map_err(Failure::Rejected);
-        }
-    }
-}
-
-fn launch_result(session: &HeadlessSession) -> Result<Option<Result<(), String>>, Failure> {
-    Ok(session.observe(|world| {
-        two_level_game::player_launch_result(world).map(|result| result.map_err(str::to_owned))
-    })?)
 }
 
 struct Service<'a> {

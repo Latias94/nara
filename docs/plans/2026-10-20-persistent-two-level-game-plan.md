@@ -1341,6 +1341,23 @@ No dependency/lock version, engine source, runtime format or accepted owner chan
 processed presentation, server stripping, processed exact resume, foreign platforms and full
 R7/R10/R12/Foundation remain open. Paused Editor/Dialogue work is preserved.
 
+### Authored Scene Membership In The Cooked Player
+
+The Headless Player observes the admitted Scene and its actual instance receipt. It verifies
+the members on a new receipt or the first observation of a gameplay error. Ordinary frames
+compare the receipt identity and count, and resolve the explorer by its stable ID. The
+report keeps the full count and a bounded sample of member IDs. The shared travel verifier
+compares membership with the admitted source and receipt at transitions. The supplied Scene
+fixtures continue to assert their original eleven members.
+
+Windows x64 release nextest `c9f5104a-42b7-4c72-8372-4f577fa58496` passes the source-free
+Player trajectory. The second actual Cook adds a wall to Meadow and nine walls to Cavern.
+After relocation and removal of the copied source and cache, the ordinary launch, travel,
+and save invocations verify all twelve and twenty member IDs, their instance transitions,
+and the checkpoint result. The original pack and failure controls run in the same test.
+[Round 12 reproduction](../audits/2026-11-23-prefab-authoring-player-and-input-review.md#p1--a-valid-twelfth-entity-stops-the-ordinary-headless-player)
+· [Cooked consumer](../../tests/support/cooked_delivery.rs)
+
 ## Source-Free Desktop Player Successor
 
 Status: implemented at `4267672`, with native-cleanup corrections `1fa730d`/`b92fd2e`, and locally

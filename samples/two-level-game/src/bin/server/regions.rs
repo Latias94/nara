@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use nara::{
     advanced_prelude::CurrentScene,
@@ -24,20 +24,26 @@ use super::runtime::{Failure, MAX_FRAMES, submit_external, verification_step};
 const WEST_WALL: &str = "wall-west";
 const CONTACT_MARGIN: f32 = 0.01;
 const CONTACT_TOLERANCE: f32 = 0.001;
-const MAX_MOVEMENT_TICKS: usize = 192;
+const MOVEMENT_TIMEOUT: Duration = Duration::from_secs(4);
 
 pub(super) fn verify(
     session: &mut HeadlessSession,
     startup: GameSnapshot,
     deadline: Instant,
 ) -> Result<(GameSnapshot, Value), Failure> {
-    let (meadow, instances) = session.observe(|world| {
+    let (meadow, instances, movement_ticks) = session.observe(|world| {
+        let timestep = world.resource::<FixedTime>().timestep();
+        let movement_ticks = MOVEMENT_TIMEOUT
+            .as_nanos()
+            .div_ceil(timestep.as_nanos())
+            .min(MAX_FRAMES as u128) as usize;
         (
             CurrentScene::get(world).map(|scene| scene.receipt().clone()),
             world
                 .resource::<WorldIdentityDomain>()
                 .stats()
                 .active_scene_instances,
+            movement_ticks,
         )
     })?;
     let meadow = meadow.ok_or("Server has no original Meadow Scene receipt")?;
@@ -45,6 +51,7 @@ pub(super) fn verify(
         session,
         deadline,
         sequence: 0,
+        movement_ticks,
     };
     let queue = driver.queue()?;
     if queue.accepted != 0
@@ -113,7 +120,7 @@ pub(super) fn verify(
     }
     driver.movement(0, true)?;
     let contact = driver.until(
-        MAX_MOVEMENT_TICKS,
+        driver.movement_ticks,
         "contact with the west wall",
         |snapshot| snapshot.held[0] && (snapshot.player.x - target_x).abs() <= CONTACT_TOLERANCE,
     )?;
@@ -182,6 +189,7 @@ struct Driver<'a> {
     session: &'a mut HeadlessSession,
     deadline: Instant,
     sequence: u64,
+    movement_ticks: usize,
 }
 
 impl Driver<'_> {
@@ -299,7 +307,7 @@ impl Driver<'_> {
         phase: impl Fn(&GameSnapshot) -> SideRoomPhase,
     ) -> Result<SideRoomPhase, Failure> {
         self.movement(direction, true)?;
-        self.until(MAX_MOVEMENT_TICKS, "the region relic", |snapshot| {
+        self.until(self.movement_ticks, "the region relic", |snapshot| {
             phase(snapshot) == SideRoomPhase::RelicFound
         })?;
         let release = self.movement(direction, false)?;

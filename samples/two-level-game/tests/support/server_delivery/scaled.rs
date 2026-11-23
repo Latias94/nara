@@ -32,7 +32,18 @@ pub(crate) fn accept(cooker: &Path) {
     let command = cook_command(cooker, fixture, &tools, &target, &triple, &output_parent);
     let executable = format!("{BIN}{}", std::env::consts::EXE_SUFFIX);
 
-    let [half, double, zero, long_tick, fast, paused, fast_edited] = [
+    let [
+        half,
+        double,
+        zero,
+        long_tick,
+        slow_checkpoint,
+        fast,
+        paused,
+        fast_edited,
+        hz240,
+        hz480,
+    ] = [
         (0.5, "TwoLevelServerHalf", ""),
         (2.0, "TwoLevelServerDouble", ""),
         (0.0, "TwoLevelServerZero", ""),
@@ -41,14 +52,29 @@ pub(crate) fn accept(cooker: &Path) {
             "TwoLevelServerLongTick",
             "fixed_timestep_seconds = 20.0\nmax_delta_seconds = 60.0\n",
         ),
+        (
+            0.25,
+            "TwoLevelServerSlowCheckpoint",
+            "fixed_timestep_seconds = 20.0\nmax_delta_seconds = 60.0\n",
+        ),
         (8.0, "TwoLevelServerFast", ""),
         (1.0, "TwoLevelServerPaused", "paused = true\n"),
         (8.0, "TwoLevelServerFastEdited", "paused = true\n"),
+        (
+            1.0,
+            "TwoLevelServer240Hz",
+            "fixed_timestep_seconds = 0.004166666666666667\n",
+        ),
+        (
+            1.0,
+            "TwoLevelServer480Hz",
+            "fixed_timestep_seconds = 0.002083333333333333\n",
+        ),
     ]
     .map(|(scale, name, timing)| {
         custody.fixture().write(
             "nara.toml",
-            &format!("{manifest}\n[profiles.server.runtime]\ntime_scale = {scale:.1}\n{timing}"),
+            &format!("{manifest}\n[profiles.server.runtime]\ntime_scale = {scale:.2}\n{timing}"),
         );
         if name == "TwoLevelServerFastEdited" {
             add_valid_wall(custody.fixture());
@@ -83,10 +109,17 @@ pub(crate) fn accept(cooker: &Path) {
             Some(scale),
             "{catalog}"
         );
-        if name == "TwoLevelServerLongTick" {
+        let fixed_timestep = match name {
+            "TwoLevelServerLongTick" | "TwoLevelServerSlowCheckpoint" => {
+                Some(json!({"secs": 20, "nanos": 0}))
+            }
+            "TwoLevelServer240Hz" => Some(json!({"secs": 0, "nanos": 4_166_667})),
+            "TwoLevelServer480Hz" => Some(json!({"secs": 0, "nanos": 2_083_333})),
+            _ => None,
+        };
+        if let Some(timestep) = fixed_timestep {
             assert_eq!(
-                catalog["payload"]["configuration"]["runtime"]["fixed_timestep"],
-                json!({"secs": 20, "nanos": 0}),
+                catalog["payload"]["configuration"]["runtime"]["fixed_timestep"], timestep,
                 "{catalog}"
             );
         }
@@ -110,6 +143,7 @@ pub(crate) fn accept(cooker: &Path) {
     assert_sources_gone(project, &cache);
 
     service::assert_long_tick_resume_control(&mut custody, &long_tick);
+    service::assert_running_slow_checkpoint(&mut custody, &slow_checkpoint);
     let uninterrupted = assert_half_speed_partitions(&mut custody, &half);
     assert_half_speed_continuation(&mut custody, &half, &target, &uninterrupted);
 
@@ -118,6 +152,8 @@ pub(crate) fn accept(cooker: &Path) {
         (&double, "server-regions-double"),
         (&fast, "server-regions-fast"),
         (&paused, "server-regions-paused"),
+        (&hz240, "server-regions-240hz"),
+        (&hz480, "server-regions-480hz"),
     ] {
         let regions = custody.player(server, vec!["--verify-regions".into()], name);
         let regions = assert_success(&regions, "regions", LevelId::Cavern, 0, &[]);

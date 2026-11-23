@@ -310,6 +310,26 @@ pub(super) fn assert_zero_scale_checkpoint(custody: &mut Custody, executable: &P
     print_scaled_service_evidence(name, &result);
 }
 
+pub(super) fn assert_running_slow_checkpoint(custody: &mut Custody, executable: &Path) {
+    let name = "server-quarter-speed-checkpoint";
+    let checkpoint = custody
+        .fixture()
+        .directory("server-quarter-speed-save")
+        .join("checkpoint.json");
+    let mut server =
+        Service::spawn_scaled(custody, executable, Launch::Paced(Some(&checkpoint)), name);
+    server.timestep_nanos = LONG_TIMESTEP_NANOS;
+    let ready = server.ready(false, true);
+    assert_eq!(tick(&ready["state"]), 1, "{ready}");
+    assert_eq!(ready["commands"]["acknowledged"], 1, "{ready}");
+    assert_eq!(ready["commands"]["pending"], 0, "{ready}");
+    server.send(&request("shutdown"));
+    let result = server.finish("shutdown", None);
+    assert_eq!(tick(&result["state"]), 1, "{result}");
+    assert!(!checkpoint.exists());
+    print_scaled_service_evidence(name, &result);
+}
+
 pub(super) fn assert_long_tick_resume_control(custody: &mut Custody, executable: &Path) {
     let name = "server-long-tick-resume-pause";
     let mut server = Service::spawn(custody, executable, Launch::Paused(None), name);
@@ -642,7 +662,7 @@ impl<'a> Service<'a> {
             unit_time_scale: true,
             timestep_nanos: TIMESTEP_NANOS,
             startup_commands: u64::from(resume.is_some() || save.is_some()),
-            exact_startup_ticks: u64::from(paused && resume.is_none() && save.is_some()),
+            exact_startup_ticks: u64::from(resume.is_none() && save.is_some()),
             last_tick: 0,
             admitted_ticks: Vec::new(),
         }

@@ -99,7 +99,9 @@ wall mutations are outside that format and make exact capture ineligible. The wi
 accept finite zero scale while collision admission refuses it. Placement checks happen at
 admission. Movement queries reuse the same prepared wall index and actor shape.
 
-Each level has eleven authored members. The Immediate marker Scene places a two-entity
+The supplied levels each have eleven authored members. The Headless Player reports the
+membership of the Scene that actually loaded, so an edited level can have a different count.
+The Immediate marker Scene places a two-entity
 [Prefab](prefabs/marker.prefab.json) with a pink root, a child with an amber
 [sRGB badge texture](assets/textures/marker.png), and an occurrence-local reference. Every
 placement creates its own entities, and all occurrences share the level's resident badge Image.
@@ -529,7 +531,9 @@ server --verify-restore ABSOLUTE_CHECKPOINT_PATH
 ```
 
 The finite runners report `TWO_LEVEL_SERVER_RESULT`. `--verify-regions` sends external semantic
-commands through the same queue used by the game. Save and Restore use separate invocations.
+commands through the same queue used by the game. Each movement check allows four seconds of
+simulation at the selected fixed timestep. The west-wall check observes one more exact tick
+after contact. Save and Restore use separate invocations.
 [Dedicated Cook workflow](../../docs/guides/cooked-player-delivery.md#cook-a-dedicated-server)
 
 ### Operate The Server
@@ -576,9 +580,10 @@ The live loop shortens its wake interval at faster time scales and passes measur
 to Runtime. `resume` acknowledges the completed control frame with zero new elapsed time.
 The live loop then waits for the next request or frame deadline, so an immediate `pause` can
 leave an accepted future command pending. The authored fixed-step and debt limits still apply.
-With `--paused` or an initially paused profile, the server configures a requested checkpoint in
-an exact startup tick and remains paused at Ready. The finite `--verify-*` commands drive exact
-ticks and Scene maintenance under any admitted time scale.
+A requested checkpoint slot is configured in an exact startup tick. A running Server starts its
+live clock after initialization. `--paused` or an initially paused profile keeps it paused at
+Ready. The finite `--verify-*` commands drive exact ticks and Scene maintenance under any admitted
+time scale.
 A malformed complete line receives a rejection. A line that exceeds the byte limit, a truncated
 line at EOF or an unsupported elapsed interval closes the session with an error. The server also
 closes with an error if the bounded reply queue fills. The parent must drain stdout to receive the

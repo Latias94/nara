@@ -4,7 +4,7 @@ use nara::{
 };
 use serde::{Deserialize, Deserializer, Serialize};
 
-/// Number of authored Scene members in each level, including the explorer and static walls.
+/// Number of members in each supplied Scene fixture, including the explorer and static walls.
 pub const AUTHORED_LEVEL_MEMBERS: usize = 11;
 
 /// Stable authored entity IDs for the four room boundaries and the interior wall.

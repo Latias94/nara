@@ -448,6 +448,25 @@ process closed at tick 0 with zero admitted work. Both cases returned complete n
 The same delivery run covers the existing scaled drain, stall, gameplay and checkpoint
 continuation controls. Sample formatting and the changed links pass.
 
+### Checkpoint Readiness And Region Verification At The Authored Timestep
+
+A packaged Server with a requested checkpoint slot applies the launch command in one exact
+startup tick. A running launch resumes at zero elapsed time, then establishes its live clock
+after initialization. A paused launch retains its paused control boundary. Both return Ready
+with the original command acknowledged.
+
+The region verifier converts four simulated seconds to a movement tick allowance using the
+admitted fixed timestep. It rounds up to the next whole tick and keeps its existing wall-clock
+and frame guards. The contact check still tests the next exact tick with movement held.
+
+Windows x64 release run `c9f5104a-42b7-4c72-8372-4f577fa58496` passes both selected actual
+delivery targets. The relocated quarter-speed Server with a 20-second timestep configures
+its checkpoint at tick 1, with zero measured wall-clock elapsed time, and closes cleanly.
+Relocated 240 Hz and 480 Hz installations complete the region scenario. The same Server test
+retains the previous scaled command drain, stall, Resume, Restore and shutdown controls.
+[Round 12 observations](../audits/2026-11-23-prefab-authoring-player-and-input-review.md#p2--a-running-server-can-exhaust-its-startup-deadline-waiting-to-configure-a-checkpoint)
+· [Scaled delivery tests](../../samples/two-level-game/tests/support/server_delivery/scaled.rs)
+
 ### Packaged Server Continuation
 
 Implementation: `c488d72`. Process acceptance: `196f003`.

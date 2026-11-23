@@ -3,12 +3,13 @@
 use std::time::{Duration, Instant};
 
 use nara::{
+    advanced_prelude::CurrentScene,
     gameplay::LocalGameplayCommands,
     prelude::{Res, ResMut, Resource},
 };
 
 use super::{GamePhase, GameSnapshot, Scenario, commands::*};
-use crate::levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey};
+use crate::levels::{LevelId, LevelKey};
 
 #[derive(Debug)]
 enum Step {
@@ -98,6 +99,7 @@ impl Verification {
 pub(super) fn drive(
     mut verifier: ResMut<Verification>,
     snapshot: Res<GameSnapshot>,
+    current: Option<CurrentScene>,
     mut commands: ResMut<LocalGameplayCommands>,
 ) {
     verifier.driver_calls = verifier.driver_calls.saturating_add(1);
@@ -168,8 +170,19 @@ pub(super) fn drive(
             }) > verifier.prior
                 && snapshot.phase == GamePhase::Running =>
             {
-                if snapshot.current_instance == verifier.previous_instance
-                    || snapshot.scene_members != AUTHORED_LEVEL_MEMBERS
+                let receipt_matches = current.is_some_and(|current| {
+                    let receipt = current.receipt();
+                    snapshot.current_instance == Some(receipt.instance_id())
+                        && snapshot.scene_members == receipt.len()
+                        && current
+                            .source()
+                            .entities()
+                            .iter()
+                            .map(|entity| entity.id())
+                            .eq(receipt.entity_ids())
+                });
+                if !receipt_matches
+                    || snapshot.current_instance == verifier.previous_instance
                     || snapshot.level != Some(*key)
                     || snapshot.score != *score
                     || snapshot.visible_pickups != *visible
