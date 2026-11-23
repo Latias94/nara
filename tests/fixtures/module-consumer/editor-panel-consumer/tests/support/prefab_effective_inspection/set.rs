@@ -1061,8 +1061,14 @@ fn a_registered_panel_rejects_inadmissible_and_stale_effective_field_sets() {
         (address("right", "score"), ComponentValue::U64(27)),
         (score.clone(), ComponentValue::String("wrong kind".into())),
         (address("left", "rank"), ComponentValue::U64(12)),
-        (address("left", "optional"), ComponentValue::U64(12)),
-        (address("left", "profile"), profile(3)),
+        (
+            address("left", "optional"),
+            ComponentValue::List(Vec::new()),
+        ),
+        (
+            address("left", "profile"),
+            ComponentValue::map([("wire_level", ComponentValue::Bool(true))]),
+        ),
         (local, ComponentValue::String("source record".into())),
     ] {
         assert_eq!(

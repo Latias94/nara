@@ -1332,12 +1332,14 @@ An explicit Set equal to its inherited value still appears as a claim.
 Submit `PreparePropertyWrite` with the inspection ID, the target, component and property path,
 a `PrefabPropertyIntent`, and `PrefabDeclarationLimits`.
 
-- `Set(value)` pins an editable scalar. An equal-value Set deliberately pins the inherited value.
-  `Set(Null)` stores Null where the declared shape admits it.
+- `Set(value)` pins a complete value at the selected editable property, including a Record, Map,
+  list or keyed-list item. An equal-value Set deliberately pins the inherited value. A keyed-list
+  item replacement preserves its selected key. `Set(Null)` stores Null where the shape admits it.
 - For an editable entity-reference leaf, pass `Set(ComponentValue::EntityReference(reference))`.
   A local target belongs to the containing document. Use an authored route with canonical base
   keys for targets inside a Prefab occurrence. The same edit can fill a Missing optional reference
-  root. Review is available after the candidate resolves the selected reference.
+  root. The enclosing value can also carry references at its declared nested reference fields.
+  Review is available after the candidate resolves those references.
 - `Absent` clears inherited storage for an editable optional or default-bearing root whose
   storage path ends in a map field. A new inspection reports Defaulted or Missing and still
   exposes the Absent claim. You can pin a root that is already Missing.
@@ -1350,8 +1352,10 @@ within those limits returns `AlreadyWritten` with the current revision and histo
 Specialized UI Prefab field edits use their own authoring route.
 
 When the frame reports `Review`, borrow `prefab_inspection_review`. Use `preview()` to discover
-candidate claims or `patch()` and `inverse()` to review the source changes, then submit `Commit`
-or `Cancel` for the same inspection. Preparation and Commit verify the files and open Prefab working
+candidate claims or `patch()` and `inverse()` to review the source changes. During review of a
+verified write, `prefab_effective_observation` also gives you the compiled candidate, including
+the resolved references of a structured value. Submit `Commit` or `Cancel` for the same
+inspection. Preparation and Commit verify the files and open Prefab working
 copies used by the inspection. Changing or clearing a reference can change which Prefabs are
 needed. Commit checks the original sources and any sources newly needed by the reviewed
 candidate. The terminal `Written` carries the new revision and claim kind.

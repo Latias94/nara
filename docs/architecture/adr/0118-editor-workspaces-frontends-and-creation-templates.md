@@ -582,11 +582,12 @@ bounded raw payload and review a Revert under the original query basis. The stor
 projection works before effective composition and stays tied to the authored container.
 
 Registered semantic panels can also submit a selected effective instance inspection, borrow
-the admitted observation, and set an editable scalar in the selected instance or Revert an exact
+the admitted observation, and set an editable value in the selected instance or Revert an exact
 containing-source claim. The Host owns the operation and reviewed candidate. The panel uses the
-original operation identity to query the candidate, submit Commit or Cancel, and observe the
-retained result. The containing working copy can stay in a non-active tab throughout the
-operation.
+original operation identity to borrow the stored candidate and, for a verified write, the compiled
+effective value. That read includes resolved references within a structured value. The same
+identity routes Commit, Cancel and the retained result. The containing working copy can stay in
+a non-active tab throughout the operation.
 
 The effective observation also exposes complete component declarations in the selected instance
 layer, including a suppression whose effective record is absent. A registered panel uses the

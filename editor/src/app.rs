@@ -1077,6 +1077,7 @@ impl EditorApplication {
     }
 
     /// Borrows the completed observation of one selected Prefab occurrence.
+    /// During review of a verified write this is the composed candidate.
     /// Source edits recheck the original file and working-copy evidence.
     pub fn prefab_effective_observation(
         &self,

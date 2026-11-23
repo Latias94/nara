@@ -52,7 +52,7 @@ pub enum PrefabInspectionInput<'a> {
 }
 
 #[derive(Debug, Clone)]
-enum WorkingSourceObservation {
+pub(crate) enum WorkingSourceObservation {
     Scene(Weak<crate::SceneDocument>, SceneAuthoringRevision),
     Prefab(Weak<crate::PrefabDocument>, SceneAuthoringRevision),
 }

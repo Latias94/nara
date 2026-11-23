@@ -128,6 +128,7 @@ impl InspectionWork {
 enum InspectionEdit {
     Revert(InspectionRevert),
     Write(InspectionWrite),
+    RefusedDeclaration(DiagnosticReport),
     Apply(Box<ApplyRequest>),
 }
 
@@ -137,7 +138,10 @@ enum InspectionWrite {
 }
 
 enum InspectionReview {
-    Edit(PreparedEditorDocumentEdit),
+    Edit {
+        edit: PreparedEditorDocumentEdit,
+        effective: Option<AuthoringPrefabInstanceSnapshot>,
+    },
     Apply(Box<PreparedApply>),
 }
 
@@ -276,14 +280,24 @@ impl EditorPrefabInspectionHost {
 
 impl EditorProjectSession {
     /// Borrows the completed read-only observation while its original working-copy basis matches.
-    /// Unobserved disk edits are checked at edit preparation and publication.
+    /// During review of a verified write this borrows the composed candidate instead of the
+    /// working document. Unobserved disk edits are checked at preparation and publication.
     pub fn prefab_effective_observation(
         &self,
         inspection: EditorPrefabInspectionId,
     ) -> Result<&AuthoringPrefabInstanceSnapshot, Rejection> {
         self.check_prefab_inspection_id(inspection)?;
-        let State::Ready { basis, snapshot } = &self.prefab_inspection.state else {
-            return Err(Rejection::WrongPhase);
+        let (basis, snapshot) = match &self.prefab_inspection.state {
+            State::Ready { basis, snapshot }
+            | State::Review {
+                basis,
+                edit:
+                    InspectionReview::Edit {
+                        effective: Some(snapshot),
+                        ..
+                    },
+            } => (basis, snapshot),
+            _ => return Err(Rejection::WrongPhase),
         };
         self.check_prefab_inspection_basis(basis)?;
         Ok(snapshot)
@@ -297,7 +311,7 @@ impl EditorProjectSession {
         self.check_prefab_inspection_id(inspection)?;
         let State::Review {
             basis,
-            edit: InspectionReview::Edit(edit),
+            edit: InspectionReview::Edit { edit, .. },
         } = &self.prefab_inspection.state
         else {
             return Err(Rejection::WrongPhase);
@@ -578,20 +592,22 @@ impl EditorProjectSession {
         {
             return Err(Rejection::InvalidProperty);
         }
-        let edit = snapshot
-            .plan_property_write(
-                &address.entity,
-                &address.component,
-                &address.property,
-                intent,
-                limits,
-                &mut prefab_property_read_budget(),
-            )
-            .map_err(property_write_rejection)?;
-        self.queue_prefab_inspection_edit(
-            InspectionEdit::Write(InspectionWrite::Property(edit)),
+        let change = match snapshot.plan_property_write(
+            self.inspection_working_source(basis.document.document)?,
+            &address.entity,
+            &address.component,
+            &address.property,
+            intent,
             limits,
-        );
+            &mut prefab_property_read_budget(),
+        ) {
+            Ok(edit) => InspectionEdit::Write(InspectionWrite::Property(edit)),
+            Err(AuthoringPrefabPropertyWriteError::Declaration(report)) => {
+                InspectionEdit::RefusedDeclaration(report.diagnostics)
+            }
+            Err(error) => return Err(property_write_rejection(error)),
+        };
+        self.queue_prefab_inspection_edit(change, limits);
         Ok(())
     }
 
@@ -611,24 +627,33 @@ impl EditorProjectSession {
         {
             return Err(Rejection::InvalidComponent);
         }
-        let document = basis.document.document;
-        let source = if let Some(slot) = self.workspace.scene(document) {
-            SourceDocumentInput::Scene(slot.session().document())
-        } else {
-            let slot = self
-                .workspace
-                .prefab(document)
-                .ok_or(Rejection::StaleSource)?;
-            SourceDocumentInput::Prefab(slot.session().document())
-        };
         let edit = snapshot
-            .plan_component_edit(source, &address.entity, &address.component, edit, limits)
+            .plan_component_edit(
+                self.inspection_working_source(basis.document.document)?,
+                &address.entity,
+                &address.component,
+                edit,
+                limits,
+            )
             .map_err(component_edit_rejection)?;
         self.queue_prefab_inspection_edit(
             InspectionEdit::Write(InspectionWrite::Component(edit)),
             limits,
         );
         Ok(())
+    }
+
+    fn inspection_working_source(
+        &self,
+        document: EditorDocumentId,
+    ) -> Result<SourceDocumentInput<'_>, Rejection> {
+        if let Some(slot) = self.workspace.scene(document) {
+            return Ok(SourceDocumentInput::Scene(slot.session().document()));
+        }
+        self.workspace
+            .prefab(document)
+            .map(|slot| SourceDocumentInput::Prefab(slot.session().document()))
+            .ok_or(Rejection::StaleSource)
     }
 
     fn queue_prefab_inspection_edit(
@@ -704,12 +729,18 @@ impl EditorProjectSession {
                             self.prepare_inspected_property_revert(&basis, &observed, limits)?;
                         Ok(State::Review {
                             basis,
-                            edit: InspectionReview::Edit(edit),
+                            edit: InspectionReview::Edit {
+                                edit,
+                                effective: None,
+                            },
                         })
                     }
                     InspectionEdit::Write(edit) => self
                         .start_prefab_write_verification(basis, edit, limits)
                         .map(State::Working),
+                    InspectionEdit::RefusedDeclaration(diagnostics) => {
+                        Err(source_patch_failure(diagnostics))
+                    }
                     InspectionEdit::Apply(request) => self
                         .start_prefab_apply_verification(basis, *request, limits)
                         .map(State::Working),
@@ -731,7 +762,7 @@ impl EditorProjectSession {
             }
             State::Validating {
                 basis,
-                edit: InspectionReview::Edit(edit),
+                edit: InspectionReview::Edit { edit, .. },
             } => {
                 self.revalidate_prefab_inspection_sources(&basis)?;
                 let document = edit.document();
@@ -909,10 +940,9 @@ impl EditorProjectSession {
         limits: PrefabDeclarationLimits,
     ) -> Result<InspectionWork, Failure> {
         let prepared = match &write {
-            InspectionWrite::Property(write) => {
-                self.workspace
-                    .prepare_prefab_property_write(&basis.document, write, limits)
-            }
+            InspectionWrite::Property(write) => self
+                .workspace
+                .prepare_prefab_property_write(&basis.document, write),
             InspectionWrite::Component(edit) => {
                 self.workspace
                     .prepare_prefab_component_edit(&basis.document, edit, limits)
@@ -988,7 +1018,10 @@ impl EditorProjectSession {
                         }
                     }
                     let verified = verified_edit(
-                        InspectionReview::Edit(edit),
+                        InspectionReview::Edit {
+                            edit,
+                            effective: Some(inspected.snapshot),
+                        },
                         selection,
                         &sources,
                         &inspected.capture,
@@ -1231,8 +1264,12 @@ fn property_read_rejection(error: AuthoringReadError) -> Rejection {
 fn property_write_rejection(error: AuthoringPrefabPropertyWriteError) -> Rejection {
     match error {
         AuthoringPrefabPropertyWriteError::Read(error) => property_read_rejection(error),
+        AuthoringPrefabPropertyWriteError::Declaration(report) => {
+            source_patch_failure(report.diagnostics).reason
+        }
         AuthoringPrefabPropertyWriteError::InvalidProperty => Rejection::InvalidProperty,
         AuthoringPrefabPropertyWriteError::BudgetExceeded => Rejection::BudgetExceeded,
+        AuthoringPrefabPropertyWriteError::StaleObservedIntent => Rejection::StaleSource,
     }
 }
 
@@ -1262,34 +1299,34 @@ fn source_failure(error: AuthoringProjectSourceAdmissionError, stage: Rejection)
 
 fn preparation_failure(error: EditorEditPreparationError) -> Failure {
     match error {
-        EditorEditPreparationError::Document(report) => {
-            let reason = report
-                .diagnostics
-                .iter()
-                .find_map(|diagnostic| {
-                    let code = diagnostic.code().as_str();
-                    if code == PrefabDeclarationError::BudgetExceeded.diagnostic_code() {
-                        Some(Rejection::BudgetExceeded)
-                    } else if code == PrefabDeclarationError::ConflictingClaim.diagnostic_code() {
-                        Some(Rejection::ConflictingClaim)
-                    } else if code == PrefabDeclarationError::StaleObservedIntent.diagnostic_code()
-                    {
-                        Some(Rejection::StaleSource)
-                    } else if code == PrefabDeclarationError::AlreadyWritten.diagnostic_code() {
-                        Some(Rejection::AlreadyWritten)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(Rejection::SourceRejected);
-            Failure {
-                reason,
-                diagnostics: report.diagnostics,
-            }
-        }
+        EditorEditPreparationError::Document(report) => source_patch_failure(report.diagnostics),
         EditorEditPreparationError::QueryBasis(_) => Rejection::StaleSource.into(),
         EditorEditPreparationError::Closing => Rejection::Closing.into(),
         EditorEditPreparationError::Busy => Rejection::Busy.into(),
         _ => Rejection::PreparationFailed.into(),
+    }
+}
+
+fn source_patch_failure(diagnostics: DiagnosticReport) -> Failure {
+    let reason = diagnostics
+        .iter()
+        .find_map(|diagnostic| {
+            let code = diagnostic.code().as_str();
+            if code == PrefabDeclarationError::BudgetExceeded.diagnostic_code() {
+                Some(Rejection::BudgetExceeded)
+            } else if code == PrefabDeclarationError::ConflictingClaim.diagnostic_code() {
+                Some(Rejection::ConflictingClaim)
+            } else if code == PrefabDeclarationError::StaleObservedIntent.diagnostic_code() {
+                Some(Rejection::StaleSource)
+            } else if code == PrefabDeclarationError::AlreadyWritten.diagnostic_code() {
+                Some(Rejection::AlreadyWritten)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(Rejection::SourceRejected);
+    Failure {
+        reason,
+        diagnostics,
     }
 }

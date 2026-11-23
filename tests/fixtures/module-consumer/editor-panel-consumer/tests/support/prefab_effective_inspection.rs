@@ -33,6 +33,8 @@ mod recursive;
 mod reference;
 #[path = "prefab_effective_inspection/set.rs"]
 mod set;
+#[path = "prefab_effective_inspection/structured.rs"]
+mod structured;
 
 const PANEL: &str = "consumer.prefab-effective-inspection";
 const COMPONENT: &str = "consumer.prefab.EffectiveSettings";

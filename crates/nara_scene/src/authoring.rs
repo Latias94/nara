@@ -49,7 +49,8 @@ pub use prefab_declarations::{
 };
 #[cfg(feature = "serde")]
 pub(crate) use prefab_declarations::{
-    anchor_instance as prefab_anchor_instance, instance_at as prefab_instance_slot_at,
+    admit_property_write, anchor_instance as prefab_anchor_instance,
+    instance_at as prefab_instance_slot_at,
 };
 #[cfg(feature = "serde")]
 mod prepared;

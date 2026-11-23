@@ -646,6 +646,13 @@ extends the same selected instance write to Schema-declared reference leaves. Th
 preserves the original lexical route as authored intent. The candidate must resolve that route and
 Commit checks the original and newly selected dependencies before publication.
 
+The [structured property successor](../architecture/authoring-read-projection-design.md#structured-property-overrides)
+uses the same non-active Scene and Prefab workflow for a complete collection value. The source
+owner admits the original declaration and the change before retaining the proposal. Review
+borrows the raw claim and the composed candidate, including the resolved endpoints of its nested
+references. Structured Apply to another source still requires destination ownership proof for
+every nested reference.
+
 The [selected source Apply successor](../architecture/authoring-read-projection-design.md#apply-an-instance-property-to-its-source)
 extends the effective property workflow across the containing instance and its explicitly named
 owning Prefab. Review borrows both candidates. A confirmed destination checkpoint precedes

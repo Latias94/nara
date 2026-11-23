@@ -532,6 +532,38 @@ reference and its instance-specific resolution.
 [Godot NodePath picker](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/inspector/editor_properties.cpp#L3036-L3066) ·
 [Bevy entity mapping](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_ecs/src/entity/map_entities.rs#L19-L55)
 
+##### Structured property overrides
+
+`PreparePropertyWrite` sets a complete Record, Map, list or keyed-list item in an inherited
+component. Scene resolves the shape through the admitted Schema. The selected compiler validates
+the component, the enclosing keyed item's identity and nested references. Omitted fields,
+explicit Null, collection keys and authored reference operands keep their source semantics.
+The selected property keeps one exact Revert and the containing document's ordinary history.
+
+The declaration owner checks the complete instance patch cost, including the original and
+replacement declarations and the new value's depth, before the request waits for a drive.
+The pending request holds a compact copy of the admitted payload. Repeated writes and same-layer
+ancestor or descendant conflicts keep their original diagnostics and carry no proposed value.
+Lowering uses that admission against the original working allocation, revision and Schema.
+An existing declaration group keeps its stored target spelling even when an equivalent alias
+selected it. Candidate verification compares the exact stored payload and target at the
+compiler's controlling claim. The compiled value can resolve its own endpoints without changing
+the authored operands.
+
+During `Review`, `prefab_inspection_review` borrows the candidate patch and inverse and
+`prefab_effective_observation` borrows the already admitted compilation of the same candidate.
+Commit retains the original and newly demanded source observations. The registered panel can
+compare stored values with resolved endpoints before changing either the document or its history.
+Cross-source promotion of a structured claim still needs a portability check for each nested
+reference and its binding chain.
+
+Godot's dictionary control sends the complete edited Dictionary to the property owner. Bevy's
+`MapEntities` visits nested ordered maps and vectors in the instance's mapping context. Nara
+similarly edits the selected complete value and lets the compiler resolve its reference leaves
+for the occurrence shown in Review.
+[Godot dictionary edits](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/inspector/editor_properties_array_dict.cpp#L1066-L1077) ·
+[Bevy collection entity remapping](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_ecs/src/entity/map_entities.rs#L139-L178)
+
 ##### Whole-component overrides
 
 The same inspection can edit a complete component in the directly owned instance layer of a
@@ -790,6 +822,35 @@ The Windows/DX12 complete Prefab conversion regression passes 1/1 in
 path. Reference editing itself is qualified through the registered semantic panel. Correctness
 Clippy for the affected libraries, Scene without default features, workspace and independent
 panel formatting, and changed-document links pass.
+
+##### November 23 structured property qualification
+
+The Windows x64 release Scene run `f4fcc570-9b3f-4800-ae5b-12f7014ee04d` passes 49/49
+selected cases with Rust 1.95.0. The compact structured-value copy preserves the original
+admission order and exact declaration, including authored reference operands. The selected
+compiler compares the retained claim and its effective endpoints. The cohort also includes
+the existing complete conversion budget and selected dependency controls.
+
+Host and Tooling release nextest `dd630d0b-314e-4bb7-adc6-52513094a0be` passes 30/30.
+The group covers the prepared source and history routes, rejected file and working-copy changes,
+and the complete component edit that first requires another Prefab source during preparation.
+It also covers the closing and cancellation behavior of the original inspection workers.
+
+The independently locked Windows x64 release run `e69b0953-9503-449e-8b60-43eb30dc37a7`
+passes 30/30 selected cases with Rust 1.95.0. The new Scene and Prefab workflows replace a
+keyed record containing a map of nullable references. Review exposes the authored alias and
+the compiled endpoints from the same candidate. The workflows exercise the exact 6/7 depth
+boundary, preserve the original document on invalid shape, key change and unresolved route, and
+leave the active preview and sibling occurrence alone. They verify the exact inverse, one
+history entry, Undo/Redo, Save/Reopen, and Revert to the later inherited value.
+[Independent registered panel](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/structured.rs)
+
+The shared Windows/DX12 complete Prefab conversion trajectory passes 1/1 in release run
+`74adce32-71f7-4632-aaf2-52781bf6ee12`. It exercises original native review, history,
+persistence and preview integration. Structured editing is exercised through the registered
+panel above. The affected Scene, Tooling, Host and Editor libraries pass correctness Clippy.
+Scene builds without default features. Workspace and independent panel package formatting and
+added local links pass.
 
 ##### November 23 selected property Apply qualification
 

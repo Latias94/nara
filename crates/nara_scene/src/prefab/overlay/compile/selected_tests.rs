@@ -1265,9 +1265,9 @@ fn absent_write_requires_an_exact_claim_even_when_the_effective_root_is_already_
         Some(inherited),
     )]));
     let scene = SceneDocument::from_ordered_roots([anchor("A", "alias", None)]);
-    let inspect = |scene: &SceneDocument| {
+    let inspect = |source: PrefabInspectionInput<'_>| {
         try_inspect_authoring_prefab_instance_with_loader(
-            PrefabInspectionInput::Borrowed(SourceDocumentInput::Scene(scene)),
+            source,
             &id("A"),
             &basis,
             Default::default(),
@@ -1296,8 +1296,17 @@ fn absent_write_requires_an_exact_claim_even_when_the_effective_root_is_already_
             )
             .unwrap()
             .publish();
+    let foreign = SceneAuthoringSession::from_published_authoring_document(
+        crate::__private::fork_published_authoring_scene_document(&published),
+    );
     let session = SceneAuthoringSession::from_published_authoring_document(published);
-    let original = inspect(session.document());
+    let working = session.shared_document();
+    assert!(Arc::ptr_eq(&working, &foreign.shared_document()));
+    assert_ne!(session.revision(), foreign.revision());
+    let original = inspect(PrefabInspectionInput::WorkingScene(
+        &working,
+        session.revision(),
+    ));
     let target = original
         .targets()
         .find(|target| target.entity == PrefabEntityOrigin::SourceEntity(id("root")))
@@ -1327,6 +1336,7 @@ fn absent_write_requires_an_exact_claim_even_when_the_effective_root_is_already_
         ));
         let edit = original
             .plan_property_write(
+                SourceDocumentInput::Scene(session.document()),
                 target,
                 &component(),
                 &property,
@@ -1347,9 +1357,16 @@ fn absent_write_requires_an_exact_claim_even_when_the_effective_root_is_already_
         );
 
         let prepared = session
-            .prepare_prefab_property_write(session.revision(), &edit, limits)
+            .prepare_prefab_property_write(session.revision(), &edit)
             .unwrap();
-        let candidate = inspect(prepared.document());
+        assert!(
+            foreign
+                .prepare_prefab_property_write(foreign.revision(), &edit)
+                .is_err()
+        );
+        let candidate = inspect(PrefabInspectionInput::Borrowed(SourceDocumentInput::Scene(
+            prepared.document(),
+        )));
         assert!(
             candidate
                 .verifies_property_write(
@@ -1366,7 +1383,7 @@ fn absent_write_requires_an_exact_claim_even_when_the_effective_root_is_already_
 fn property_write_verification_checks_the_exact_authored_reference() {
     use crate::{
         __private::try_inspect_authoring_prefab_instance_with_loader, AuthoringPrefabPropertyValue,
-        PrefabDeclarationLimits,
+        PrefabDeclarationLimits, SceneAuthoringSession,
     };
     use nara_reflect::{ComponentPropertyReadBudget, ComponentValueMaterializationLimits};
 
@@ -1393,9 +1410,9 @@ fn property_write_verification_checks_the_exact_authored_reference() {
             SceneEntityRecord::new(id("next")),
         ])
     };
-    let observe = |source| {
+    let observe = |source: PrefabInspectionInput<'_>| {
         try_inspect_authoring_prefab_instance_with_loader(
-            PrefabInspectionInput::Borrowed(source),
+            source,
             &id("mount"),
             &basis,
             Default::default(),
@@ -1410,10 +1427,33 @@ fn property_write_verification_checks_the_exact_authored_reference() {
         )
         .unwrap()
     };
-    let old = source("old");
+    let session = SceneAuthoringSession::new(source("old"));
+    let old = session.shared_document();
     let next = source("next");
-    let original = observe(SourceDocumentInput::Scene(&old));
-    let candidate = observe(SourceDocumentInput::Scene(&next));
+    let mut equivalent = source("next");
+    let PrefabComponentIntent::Properties { claims, .. } = &mut equivalent.entities[0]
+        .prefab
+        .as_mut()
+        .unwrap()
+        .overrides
+        .as_mut()
+        .unwrap()
+        .components[0]
+    else {
+        unreachable!();
+    };
+    claims[0].intent =
+        PrefabPropertyIntent::Set(authored(AuthoredEntityReference::source(id("next"))));
+    let original = observe(PrefabInspectionInput::WorkingScene(
+        &old,
+        session.revision(),
+    ));
+    let candidate = observe(PrefabInspectionInput::Borrowed(SourceDocumentInput::Scene(
+        &next,
+    )));
+    let equivalent_candidate = observe(PrefabInspectionInput::Borrowed(
+        SourceDocumentInput::Scene(&equivalent),
+    ));
     let target = original
         .targets()
         .find(|target| target.entity == PrefabEntityOrigin::SourceEntity(id("host")))
@@ -1424,6 +1464,7 @@ fn property_write_verification_checks_the_exact_authored_reference() {
     );
     let edit = original
         .plan_property_write(
+            SourceDocumentInput::Scene(&old),
             target,
             &component(),
             &property,
@@ -1440,6 +1481,11 @@ fn property_write_verification_checks_the_exact_authored_reference() {
     assert!(
         candidate
             .verifies_property_write(SourceDocumentInput::Scene(&next), &edit, &mut read)
+            .unwrap()
+    );
+    assert!(
+        !equivalent_candidate
+            .verifies_property_write(SourceDocumentInput::Scene(&equivalent), &edit, &mut read)
             .unwrap()
     );
     let field = candidate
@@ -1466,8 +1512,8 @@ fn inspection_preserves_root_aliases_ordered_claims_and_typed_reference_reads() 
         __private::try_inspect_authoring_prefab_instance_with_loader,
         AuthoringPrefabPropertyClaimKind, AuthoringPrefabPropertyValue,
         AuthoringPrefabRecordOrigin, AuthoringPrefabValueError, AuthoringPropertyChildrenLimits,
-        AuthoringPropertyChildrenPosition, AuthoringReadError, PrefabDeclarationSource,
-        PrefabInstancePath, PrefabOverlaySlot,
+        AuthoringPropertyChildrenPosition, AuthoringReadError, PrefabAuthoringSession,
+        PrefabDeclarationLimits, PrefabDeclarationSource, PrefabInstancePath, PrefabOverlaySlot,
     };
     use nara_reflect::{
         ComponentPropertyReadBudget, ComponentPropertyStep, ComponentValueMaterializationLimits,
@@ -1499,6 +1545,13 @@ fn inspection_preserves_root_aliases_ordered_claims_and_typed_reference_reads() 
                 "Annotation",
                 ComponentFieldPath::from_fields(["annotation"]),
                 ComponentValueKind::String,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+            ComponentFieldSchema::optional(
+                ComponentFieldId::new("notes"),
+                "Notes",
+                ComponentFieldPath::from_fields(["notes"]),
+                ComponentValueShape::list(ComponentValueKind::String.into()),
             )
             .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ]),
@@ -1584,35 +1637,44 @@ fn inspection_preserves_root_aliases_ordered_claims_and_typed_reference_reads() 
             PrefabEntityTarget::source(id("bridge")),
         )
     });
-    let source =
-        PrefabDocument::from_ordered_roots([containing, anchor("sibling", "missing", None)]);
+    let session = PrefabAuthoringSession::new(PrefabDocument::from_ordered_roots([
+        containing,
+        anchor("sibling", "missing", None),
+    ]));
+    let source = session.shared_document();
     let sources = [
         (request("alias"), (key("base"), Arc::new(base))),
         (request("branch"), (key("branch"), Arc::new(branch))),
     ];
+    let observe = |input: PrefabInspectionInput<'_>, reads: &mut Vec<_>| {
+        try_inspect_authoring_prefab_instance_with_loader(
+            input,
+            &id("A"),
+            &basis,
+            Default::default(),
+            |reference, _| {
+                reads.push(reference.clone());
+                Ok::<_, Infallible>(
+                    sources
+                        .iter()
+                        .find(|(request, _)| request == reference)
+                        .map(|(_, (key, source))| {
+                            ResolvedPrefabSource::bound_authoring_source(
+                                Arc::clone(source),
+                                basis.clone(),
+                                key.clone(),
+                            )
+                        }),
+                )
+            },
+        )
+        .unwrap()
+    };
     let mut reads = Vec::new();
-    let snapshot = try_inspect_authoring_prefab_instance_with_loader(
-        PrefabInspectionInput::Borrowed(SourceDocumentInput::Prefab(&source)),
-        &id("A"),
-        &basis,
-        Default::default(),
-        |reference, _| {
-            reads.push(reference.clone());
-            Ok::<_, Infallible>(
-                sources
-                    .iter()
-                    .find(|(request, _)| request == reference)
-                    .map(|(_, (key, source))| {
-                        ResolvedPrefabSource::bound_authoring_source(
-                            Arc::clone(source),
-                            basis.clone(),
-                            key.clone(),
-                        )
-                    }),
-            )
-        },
-    )
-    .unwrap();
+    let snapshot = observe(
+        PrefabInspectionInput::WorkingPrefab(&source, session.revision()),
+        &mut reads,
+    );
     assert_eq!(reads, [request("alias"), request("branch")]);
     assert_eq!(snapshot.schema_basis(), &basis);
     assert!(
@@ -1624,6 +1686,75 @@ fn inspection_preserves_root_aliases_ordered_claims_and_typed_reference_reads() 
         snapshot.targets().collect::<Vec<_>>(),
         [&root, &host, &socket]
     );
+    let mut scan = ComponentPropertyReadBudget::new(
+        ItemLimit::new(100).unwrap(),
+        ByteLimit::new(4096).unwrap(),
+    );
+    let mut text = String::with_capacity(32_768);
+    text.push_str("note");
+    let mut notes = Vec::with_capacity(1_024);
+    notes.push(ComponentValue::String(text));
+    let compact = snapshot
+        .plan_property_write(
+            SourceDocumentInput::Prefab(&source),
+            &host,
+            &component(),
+            &property("notes"),
+            PrefabPropertyIntent::Set(ComponentValue::List(notes)),
+            PrefabDeclarationLimits::default(),
+            &mut scan,
+        )
+        .unwrap();
+    let PrefabPropertyIntent::Set(ComponentValue::List(notes)) = compact.intent else {
+        panic!("the plan must retain the bounded list");
+    };
+    let [ComponentValue::String(text)] = notes.as_slice() else {
+        panic!("the plan must retain the original list data");
+    };
+    assert_eq!(text, "note");
+    assert_eq!(text.capacity(), text.len());
+    assert_eq!(notes.capacity(), notes.len());
+    let replacement = pin("links", ComponentValue::map([("main", typed_ref.clone())]));
+    let edit = snapshot
+        .plan_property_write(
+            SourceDocumentInput::Prefab(&source),
+            &host,
+            &component(),
+            &replacement.path,
+            replacement.intent.clone(),
+            PrefabDeclarationLimits::default(),
+            &mut scan,
+        )
+        .unwrap();
+    for rewrite_alias in [false, true] {
+        let mut candidate = source.as_ref().clone();
+        let PrefabComponentIntent::Properties { target, claims, .. } = &mut candidate.entities[0]
+            .prefab
+            .as_mut()
+            .unwrap()
+            .overrides
+            .as_mut()
+            .unwrap()
+            .components[0]
+        else {
+            panic!("the selected occurrence must own its original group");
+        };
+        claims[3] = replacement.clone();
+        if rewrite_alias {
+            *target = PrefabEntityTarget {
+                through: vec![inner_hop.clone()],
+                entity: PrefabEntityOrigin::SourceEntity(id("host")),
+            };
+        }
+        let input = SourceDocumentInput::Prefab(&candidate);
+        let effective = observe(PrefabInspectionInput::Borrowed(input), &mut Vec::new());
+        assert_eq!(
+            effective
+                .verifies_property_write(input, &edit, &mut scan)
+                .unwrap(),
+            !rewrite_alias,
+        );
+    }
     let root = snapshot.target(&root).unwrap();
     let alias = snapshot.target(&host).unwrap();
     assert_eq!(root.component_count(), 2);

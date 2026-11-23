@@ -4441,6 +4441,13 @@ and newly demanded Prefab files and working copies. The
 records 65/65 selected owner tests, 13/13 independent panel tests and the 1/1 Windows/DX12
 conversion regression.
 
+The [structured property write](../authoring-read-projection-design.md#structured-property-overrides)
+admits the original instance declarations and the new value before retaining a compact request.
+Review borrows the exact stored edit and its compiled reference endpoints. The
+[independent qualification](../authoring-read-projection-design.md#november-23-structured-property-qualification)
+covers non-active Scene and Prefab, history and persistence. Promotion of a structured claim
+to another source still requires complete reference-ownership evidence.
+
 The [selected Prefab property Apply](../authoring-read-projection-design.md#apply-an-instance-property-to-its-source)
 incorporates a destination source edit and the exact containing Revert in one selected review.
 The compiler retains the component's actual declaration across root-bound aliases and checks

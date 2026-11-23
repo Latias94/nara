@@ -19,6 +19,7 @@ use crate::{
 
 mod component_write;
 mod property_write;
+pub(crate) use property_write::admit_property_write;
 
 /// Inclusive logical limits for source declaration observation and edit lowering.
 ///
@@ -148,7 +149,7 @@ impl PrefabDeclarationError {
         }
     }
 
-    fn report(self) -> ScenePatchReport {
+    pub(crate) fn report(self) -> ScenePatchReport {
         history_error_report(self.diagnostic_code(), self.summary())
     }
 }

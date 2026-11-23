@@ -1,12 +1,14 @@
-use nara_reflect::{__private::component_values_exactly_match, ComponentValue};
+use nara_reflect::{__private::component_values_exactly_match, ComponentValueCost};
 
 use super::{DeclarationBudget, PrefabDeclarationError, PrefabDeclarationLimits, anchor_instance};
 use crate::{
-    AuthoringSchemaBasis, PrefabAuthoringSession, PrefabComponentIntent, PrefabInstanceBinding,
-    PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent, PreparedPrefabAuthoringEdit,
-    PreparedSceneAuthoringEdit, SceneAuthoringRevision, SceneAuthoringSession, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, ScenePatchReport, SourceDocumentKind,
-    authoring::prepared::stale_basis, prefab::inspection::ObservedPrefabPropertyWrite,
+    AuthoringSchemaBasis, PrefabAuthoringSession, PrefabComponentIntent, PrefabEntityTarget,
+    PrefabInstanceBinding, PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent,
+    PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit, SceneAuthoringRevision,
+    SceneAuthoringSession, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    ScenePatchReport, SourceDocumentKind,
+    authoring::prepared::stale_basis,
+    prefab::{SourceDocumentInput, inspection::ObservedPrefabPropertyWrite},
 };
 
 impl SceneAuthoringSession {
@@ -15,15 +17,13 @@ impl SceneAuthoringSession {
         &self,
         base_revision: SceneAuthoringRevision,
         edit: &ObservedPrefabPropertyWrite,
-        limits: PrefabDeclarationLimits,
     ) -> Result<PreparedSceneAuthoringEdit, ScenePatchReport> {
         let patch = prepare_patch(
-            &self.document.entities,
+            SourceDocumentInput::Scene(self.document()),
             self.revision(),
             base_revision,
             self.authoring_schema_basis(),
             edit,
-            limits,
         )?;
         self.prepare_authoring_edit(base_revision, &patch)
     }
@@ -35,29 +35,26 @@ impl PrefabAuthoringSession {
         &self,
         base_revision: SceneAuthoringRevision,
         edit: &ObservedPrefabPropertyWrite,
-        limits: PrefabDeclarationLimits,
     ) -> Result<PreparedPrefabAuthoringEdit, ScenePatchReport> {
         let patch = prepare_patch(
-            &self.document.entities,
+            SourceDocumentInput::Prefab(self.document()),
             self.revision(),
             base_revision,
             self.authoring_schema_basis(),
             edit,
-            limits,
         )?;
         self.prepare_authoring_edit(base_revision, &patch)
     }
 }
 
 fn prepare_patch(
-    entities: &[SceneEntityRecord],
+    source: SourceDocumentInput<'_>,
     revision: SceneAuthoringRevision,
     base_revision: SceneAuthoringRevision,
     basis: Option<AuthoringSchemaBasis>,
     edit: &ObservedPrefabPropertyWrite,
-    limits: PrefabDeclarationLimits,
 ) -> Result<ScenePatchDocument, ScenePatchReport> {
-    if revision != base_revision {
+    if revision != base_revision || !edit.matches_working_source(source, revision) {
         return Err(stale_basis());
     }
     let basis = basis.ok_or_else(|| PrefabDeclarationError::NotAdmitted.report())?;
@@ -67,14 +64,26 @@ fn prepare_patch(
     if basis.schema(&edit.component).map(|schema| schema.version()) != Some(edit.version) {
         return Err(PrefabDeclarationError::StaleObservedIntent.report());
     }
-    lower_write(entities, edit, limits).map_err(PrefabDeclarationError::report)
+    let entities = match source {
+        SourceDocumentInput::Scene(document) => &document.entities,
+        SourceDocumentInput::Prefab(document) => &document.entities,
+    };
+    lower_write(entities, edit, edit.existing_claim).map_err(PrefabDeclarationError::report)
 }
 
-fn lower_write(
-    entities: &[SceneEntityRecord],
+/// Admits both source roots and the change before keeping the request across a drive.
+pub(crate) fn admit_property_write<'a>(
+    entities: &'a [SceneEntityRecord],
     edit: &ObservedPrefabPropertyWrite,
     limits: PrefabDeclarationLimits,
-) -> Result<ScenePatchDocument, PrefabDeclarationError> {
+) -> Result<
+    (
+        Option<&'a PrefabEntityTarget>,
+        Option<usize>,
+        ComponentValueCost,
+    ),
+    PrefabDeclarationError,
+> {
     use PrefabDeclarationError as Error;
 
     let mut budget = DeclarationBudget::new(limits);
@@ -92,17 +101,14 @@ fn lower_write(
             .arguments
             .as_ref()
             .is_some_and(|args| args.base != edit.base)
-        || matches!(
-            &edit.intent,
-            PrefabPropertyIntent::Set(ComponentValue::List(_) | ComponentValue::Map(_))
-        )
     {
         return Err(Error::StaleObservedIntent);
     }
 
     budget.instance(original, 2)?;
     let intents = overlay.map_or(&[][..], |overlay| overlay.components.as_slice());
-    let exact_claim = selected_claim_index(intents, edit)?;
+    let group = observed_group(intents, edit)?;
+    let exact_claim = selected_claim_index(intents, group.map(|(_, claims)| claims), edit)?;
     let cost = budget
         .remaining_cost_limits(1)
         .property_write_delta_cost(
@@ -114,8 +120,22 @@ fn lower_write(
             &edit.intent,
         )
         .map_err(|_| Error::BudgetExceeded)?;
-    budget.charge(cost.nodes, cost.logical_bytes())?;
+    Ok((
+        group.map(|(target, _)| target),
+        exact_claim,
+        cost.value_cost,
+    ))
+}
 
+fn lower_write(
+    entities: &[SceneEntityRecord],
+    edit: &ObservedPrefabPropertyWrite,
+    exact_claim: Option<usize>,
+) -> Result<ScenePatchDocument, PrefabDeclarationError> {
+    use PrefabDeclarationError as Error;
+
+    let root = anchor_instance(entities, &edit.anchor)?;
+    let original = root.as_ref().ok_or(Error::InstanceAbsent)?;
     let mut value = original.clone();
     let overlay = value
         .overrides
@@ -156,8 +176,29 @@ fn lower_write(
     ]))
 }
 
+fn observed_group<'a>(
+    intents: &'a [PrefabComponentIntent],
+    edit: &ObservedPrefabPropertyWrite,
+) -> Result<Option<(&'a PrefabEntityTarget, &'a [PrefabPropertyClaim])>, PrefabDeclarationError> {
+    let Some(index) = edit.existing_intent else {
+        return Ok(None);
+    };
+    match intents.get(index) {
+        Some(PrefabComponentIntent::Properties {
+            target,
+            component,
+            version,
+            claims,
+        }) if component == &edit.component && *version == edit.version => {
+            Ok(Some((target, claims)))
+        }
+        _ => Err(PrefabDeclarationError::StaleObservedIntent),
+    }
+}
+
 fn selected_claim_index(
     intents: &[PrefabComponentIntent],
+    group: Option<&[PrefabPropertyClaim]>,
     edit: &ObservedPrefabPropertyWrite,
 ) -> Result<Option<usize>, PrefabDeclarationError> {
     use PrefabDeclarationError as Error;
@@ -178,21 +219,9 @@ fn selected_claim_index(
     }) {
         return Err(Error::StaleObservedIntent);
     }
-    let Some(index) = edit.existing_intent else {
+    let Some(claims) = group else {
         return Ok(None);
     };
-    let Some(PrefabComponentIntent::Properties {
-        component,
-        version,
-        claims,
-        ..
-    }) = intents.get(index)
-    else {
-        return Err(Error::StaleObservedIntent);
-    };
-    if component != &edit.component || *version != edit.version {
-        return Err(Error::StaleObservedIntent);
-    }
 
     let mut exact = None;
     for (index, claim) in claims.iter().enumerate() {

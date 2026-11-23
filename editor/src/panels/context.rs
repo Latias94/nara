@@ -128,6 +128,7 @@ impl EditorPanelContext<'_, '_> {
     }
 
     /// Borrows the completed observation of one selected Prefab occurrence.
+    /// During review of a verified write this is the composed candidate.
     pub fn prefab_effective_observation(
         &self,
         inspection: EditorPrefabInspectionId,

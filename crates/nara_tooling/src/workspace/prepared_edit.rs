@@ -55,10 +55,7 @@ enum EditRequest<'a> {
         action: PrefabRevert<'a>,
         limits: PrefabDeclarationLimits,
     },
-    PrefabPropertyWrite {
-        edit: &'a ObservedPrefabPropertyWrite,
-        limits: PrefabDeclarationLimits,
-    },
+    PrefabPropertyWrite(&'a ObservedPrefabPropertyWrite),
     PrefabComponentEdit {
         edit: &'a ObservedPrefabComponentEdit,
         limits: PrefabDeclarationLimits,
@@ -209,9 +206,8 @@ impl EditorWorkspace {
         &self,
         basis: &EditorDocumentQueryBasis,
         edit: &ObservedPrefabPropertyWrite,
-        limits: PrefabDeclarationLimits,
     ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
-        self.prepare_edit(basis, EditRequest::PrefabPropertyWrite { edit, limits })
+        self.prepare_edit(basis, EditRequest::PrefabPropertyWrite(edit))
     }
 
     #[doc(hidden)]
@@ -265,7 +261,7 @@ impl EditorWorkspace {
         let slot = self.resolve_authoring_preparation_slot(document, base_revision)?;
         let origin = match &request {
             EditRequest::PrefabRevert { .. } => PreparedEditOrigin::PrefabRevert,
-            EditRequest::PrefabPropertyWrite { edit, .. } => {
+            EditRequest::PrefabPropertyWrite(edit) => {
                 PreparedEditOrigin::PrefabPropertyWrite(edit.kind())
             }
             EditRequest::PrefabComponentEdit { edit, .. } => {
@@ -299,9 +295,9 @@ impl EditorWorkspace {
                 } => slot
                     .session
                     .prepare_prefab_revert(base_revision, path, action, limits),
-                EditRequest::PrefabPropertyWrite { edit, limits } => slot
+                EditRequest::PrefabPropertyWrite(edit) => slot
                     .session
-                    .prepare_prefab_property_write(base_revision, edit, limits),
+                    .prepare_prefab_property_write(base_revision, edit),
                 EditRequest::PrefabComponentEdit { edit, limits } => slot
                     .session
                     .prepare_prefab_component_edit(base_revision, edit, limits),
@@ -321,9 +317,9 @@ impl EditorWorkspace {
                 } => slot
                     .session
                     .prepare_prefab_revert(base_revision, path, action, limits),
-                EditRequest::PrefabPropertyWrite { edit, limits } => slot
+                EditRequest::PrefabPropertyWrite(edit) => slot
                     .session
-                    .prepare_prefab_property_write(base_revision, edit, limits),
+                    .prepare_prefab_property_write(base_revision, edit),
                 EditRequest::PrefabComponentEdit { edit, limits } => slot
                     .session
                     .prepare_prefab_component_edit(base_revision, edit, limits),

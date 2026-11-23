@@ -155,12 +155,15 @@ Rules:
   the original source basis.
   The Host retains the prepared edit and verifies the original composition sources before
   consuming it. Undo and Redo use the resulting ordinary history entry.
-- Setting a selected effective scalar writes one stable property claim at the directly owned
+- Setting a selected effective value writes one stable property claim at the directly owned
   instance layer. The selected compiler supplies its base, target route and any existing
-  component group. Source-owned lowering preserves existing claims and prepares the exact
-  transaction and inverse. A same-value inherited write is still an explicit claim. The Host
-  checks the resulting selected composition under the original source observation before review
-  and revalidates that observation before commit. Raw Revert continues to serve unresolved intent.
+  component group. Admission charges the working and replacement declarations under the same
+  limits. Lowering consumes this observation against the same working allocation, revision and
+  Schema, and preserves the original target and other claims. A same-value inherited write is
+  still an explicit claim. The Host checks the exact stored value and the controlling compiled
+  claim. Review exposes the source transaction and the composed value, including the resolved
+  endpoints of nested references. Commit revalidates the original and newly demanded sources.
+  Raw Revert continues to serve unresolved intent.
 - An effective whole-component edit changes the complete declaration for a component in the
   selected containing layer. The source owner distinguishes Add, Replace, Suppress and exact
   Revert, checks the current declaration, and prepares the same instance patch and inverse.

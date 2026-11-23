@@ -5,10 +5,10 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    PrefabDeclarationLimits, PrefabEntityOrigin, PrefabInstanceHop, PrefabPropertyIntent,
-    SourceDocumentKey,
-    authoring::prefab_anchor_instance,
-    authoring_decode::{retained_entity_reference_bytes, retained_prefab_target_bytes},
+    PrefabDeclarationError, PrefabDeclarationLimits, PrefabEntityOrigin, PrefabPropertyClaimRef,
+    PrefabPropertyIntent, SourceDocumentKey,
+    authoring::{admit_property_write, prefab_anchor_instance},
+    authoring_decode::retained_prefab_target_bytes,
     provenance::provenance_string_bytes,
 };
 
@@ -17,13 +17,16 @@ pub struct ObservedPrefabPropertyWrite {
     pub(crate) anchor: SceneEntityId,
     pub(crate) base: SourceDocumentKey,
     pub(crate) target: PrefabEntityTarget,
-    pub(crate) observed_target: Option<PrefabEntityTarget>,
+    pub(crate) selected: PrefabEntityTarget,
     pub(crate) component: ComponentTypeId,
     pub(crate) version: ComponentSchemaVersion,
     pub(crate) existing_intent: Option<usize>,
+    pub(crate) existing_claim: Option<usize>,
     pub(crate) property: ComponentPropertyPath,
     pub(crate) intent: PrefabPropertyIntent,
     pub(crate) basis: AuthoringSchemaBasis,
+    pub(crate) source: WorkingSourceObservation,
+    pub(crate) value_bytes: usize,
 }
 
 impl ObservedPrefabPropertyWrite {
@@ -38,31 +41,20 @@ impl ObservedPrefabPropertyWrite {
         }
     }
 
+    pub(crate) fn matches_working_source(
+        &self,
+        input: SourceDocumentInput<'_>,
+        revision: SceneAuthoringRevision,
+    ) -> bool {
+        self.source.revision_for(input) == Some(revision)
+    }
+
     pub fn checked_retained_bytes(&self) -> Option<usize> {
-        let value_bytes = match &self.intent {
-            PrefabPropertyIntent::Set(ComponentValue::String(value)) => value.capacity(),
-            PrefabPropertyIntent::Set(ComponentValue::EntityReference(reference)) => {
-                retained_entity_reference_bytes(reference)?
-            }
-            _ => 0,
-        };
-        let target = retained_prefab_target_bytes(&self.target)?;
-        let observed_and_scratch = self.observed_target.as_ref().map_or_else(
-            || {
-                Some(
-                    target
-                        .checked_add(size_of::<PrefabInstanceHop>())?
-                        .checked_add(provenance_string_bytes(self.anchor.as_str())?)?
-                        .checked_add(self.base.checked_retained_bytes()?)?,
-                )
-            },
-            retained_prefab_target_bytes,
-        )?;
         size_of::<Self>()
             .checked_add(provenance_string_bytes(self.anchor.as_str())?)?
             .checked_add(self.base.checked_retained_bytes()?)?
-            .checked_add(target)?
-            .checked_add(observed_and_scratch)?
+            .checked_add(retained_prefab_target_bytes(&self.target)?)?
+            .checked_add(retained_prefab_target_bytes(&self.selected)?)?
             .checked_add(provenance_string_bytes(self.component.as_str())?)?
             .checked_add(self.property.logical_bytes().ok()?)?
             .checked_add(
@@ -71,15 +63,17 @@ impl ObservedPrefabPropertyWrite {
                     .len()
                     .checked_mul(size_of::<ComponentPropertyStep>())?,
             )?
-            .checked_add(value_bytes)
+            .checked_add(self.value_bytes)
     }
 }
 
 #[derive(Debug)]
 pub enum AuthoringPrefabPropertyWriteError {
     Read(AuthoringReadError),
+    Declaration(Box<crate::ScenePatchReport>),
     InvalidProperty,
     BudgetExceeded,
+    StaleObservedIntent,
 }
 
 impl From<AuthoringReadError> for AuthoringPrefabPropertyWriteError {
@@ -93,6 +87,7 @@ impl AuthoringPrefabInstanceSnapshot {
     #[doc(hidden)]
     pub fn plan_property_write(
         &self,
+        input: SourceDocumentInput<'_>,
         entity: &PrefabEntityTarget,
         component: &ComponentTypeId,
         property: &ComponentPropertyPath,
@@ -102,12 +97,17 @@ impl AuthoringPrefabInstanceSnapshot {
     ) -> Result<ObservedPrefabPropertyWrite, AuthoringPrefabPropertyWriteError> {
         use AuthoringPrefabPropertyWriteError as Error;
 
+        let source = self
+            .working_source
+            .as_ref()
+            .filter(|source| source.revision_for(input).is_some())
+            .ok_or(Error::StaleObservedIntent)?;
         let max_bytes = limits.max_logical_bytes();
         let target_bytes = entity
             .logical_bytes_up_to(max_bytes)
             .ok_or(Error::BudgetExceeded)?;
         let property_bytes = property.logical_bytes().map_err(AuthoringReadError::from)?;
-        let remaining_bytes = max_bytes
+        max_bytes
             .checked_sub(target_bytes)
             .and_then(|room| room.checked_sub(property_bytes))
             .and_then(|room| room.checked_sub(component.as_str().len()))
@@ -115,12 +115,6 @@ impl AuthoringPrefabInstanceSnapshot {
         if entity.through.len() > limits.max_depth() || property.steps.len() > limits.max_depth() {
             return Err(Error::BudgetExceeded);
         }
-        let remaining_nodes = limits
-            .max_nodes()
-            .checked_sub(2 + 2 * entity.through.len() + property.steps.len())
-            .filter(|remaining| *remaining > 0 || matches!(&intent, PrefabPropertyIntent::Absent))
-            .ok_or(Error::BudgetExceeded)?;
-
         let (hop, through) = entity.through.split_first().ok_or(Error::InvalidProperty)?;
         let PrefabEntityOrigin::SourceEntity(anchor) = &hop.anchor else {
             return Err(Error::InvalidProperty);
@@ -143,26 +137,21 @@ impl AuthoringPrefabInstanceSnapshot {
             return Err(Error::InvalidProperty);
         }
         let replacement = match &intent {
-            PrefabPropertyIntent::Set(value) => {
+            PrefabPropertyIntent::Set(_) => {
                 let resolved = selected.resolve_value(field, property, read)?;
-                let shape = resolved.as_ref().map_or(field.shape(), |value| value.shape);
+                let shape = resolved.map_or(field.shape(), |selected| selected.shape);
                 let mut leaf = shape;
                 while let ComponentValueShape::Optional { value } = leaf {
                     leaf = value;
                 }
-                let writable = match leaf {
-                    ComponentValueShape::Scalar { .. } => resolved.is_some(),
-                    ComponentValueShape::EntityRef => {
-                        resolved.is_some()
-                            || !field.is_required()
-                            || field.default_value().is_some()
-                    }
-                    _ => false,
-                };
-                if !writable {
+                if matches!(leaf, ComponentValueShape::Opaque { .. })
+                    || (resolved.is_none()
+                        && field.is_required()
+                        && field.default_value().is_none())
+                {
                     return Err(Error::InvalidProperty);
                 }
-                Some((shape, value))
+                Some(shape)
             }
             PrefabPropertyIntent::Absent => {
                 if !property.steps.is_empty()
@@ -193,46 +182,57 @@ impl AuthoringPrefabInstanceSnapshot {
         } else {
             entity
         };
-        let through = &write_target.through[1..];
-        let via_alias = write_target != entity;
-        let (remaining_bytes, remaining_nodes) = if via_alias {
-            let bytes = write_target
-                .logical_bytes_up_to(remaining_bytes)
-                .ok_or(Error::BudgetExceeded)?;
-            let nodes = remaining_nodes
-                .checked_sub(1 + 2 * write_target.through.len())
-                .ok_or(Error::BudgetExceeded)?;
-            (remaining_bytes - bytes, nodes)
-        } else {
-            (remaining_bytes, remaining_nodes)
-        };
         if write_target.through.len() > limits.max_depth() {
             return Err(Error::BudgetExceeded);
         }
-        if let Some((shape, value)) = replacement {
-            value
-                .cost_up_to(remaining_nodes, remaining_bytes)
-                .ok_or(Error::BudgetExceeded)?;
+        write_target
+            .logical_bytes_up_to(max_bytes)
+            .ok_or(Error::BudgetExceeded)?;
+        let mut observed = ObservedPrefabPropertyWrite {
+            anchor: anchor.clone(),
+            base: hop.expected_base.clone(),
+            target: PrefabEntityTarget {
+                through: write_target.through[1..].to_vec(),
+                entity: write_target.entity.clone(),
+            },
+            selected: entity.clone(),
+            component: component.clone(),
+            version: selected.fact().version(),
+            existing_intent: selected.component.selected_overlay_intent,
+            existing_claim: None,
+            property: property.clone(),
+            intent,
+            basis: self.basis.clone(),
+            source: source.clone(),
+            value_bytes: 0,
+        };
+        let (group_target, exact_claim, cost) =
+            admit_property_write(source_entities(input), &observed, limits).map_err(|error| {
+                match error {
+                    PrefabDeclarationError::BudgetExceeded => Error::BudgetExceeded,
+                    PrefabDeclarationError::AlreadyWritten
+                    | PrefabDeclarationError::ConflictingClaim => {
+                        Error::Declaration(Box::new(error.report()))
+                    }
+                    _ => Error::StaleObservedIntent,
+                }
+            })?;
+        if let (Some(shape), PrefabPropertyIntent::Set(value)) = (replacement, &observed.intent) {
             shape
                 .validate_value(value)
                 .map_err(|_| Error::InvalidProperty)?;
         }
-
-        Ok(ObservedPrefabPropertyWrite {
-            anchor: anchor.clone(),
-            base: hop.expected_base.clone(),
-            target: PrefabEntityTarget {
-                through: through.to_vec(),
-                entity: write_target.entity.clone(),
-            },
-            observed_target: via_alias.then(|| entity.clone()),
-            component: component.clone(),
-            version: selected.fact().version(),
-            existing_intent: selected.component.selected_overlay_intent,
-            property: property.clone(),
-            intent,
-            basis: self.basis.clone(),
-        })
+        if let Some(target) = group_target {
+            observed.target = target.clone();
+        }
+        observed.existing_claim = exact_claim;
+        observed.intent = observed.intent.clone();
+        observed.value_bytes = cost
+            .nodes()
+            .checked_mul(96)
+            .and_then(|nodes| nodes.checked_add(cost.logical_bytes()))
+            .ok_or(Error::BudgetExceeded)?;
+        Ok(observed)
     }
 
     /// Confirms the write at the original address using the same canonical prepared source that
@@ -247,24 +247,11 @@ impl AuthoringPrefabInstanceSnapshot {
     ) -> Result<bool, AuthoringPrefabPropertyWriteError> {
         use AuthoringPrefabPropertyWriteError as Error;
 
-        let route;
-        let target = if let Some(target) = &edit.observed_target {
-            target
-        } else {
-            let mut through = Vec::with_capacity(edit.target.through.len() + 1);
-            through.push(PrefabInstanceHop {
-                anchor: PrefabEntityOrigin::SourceEntity(edit.anchor.clone()),
-                expected_base: edit.base.clone(),
-            });
-            through.extend(edit.target.through.iter().cloned());
-            route = PrefabEntityTarget {
-                through,
-                entity: edit.target.entity.clone(),
-            };
-            &route
-        };
+        if self.basis != edit.basis {
+            return Ok(false);
+        }
         let property = self
-            .target(target)
+            .target(&edit.selected)
             .ok_or(Error::InvalidProperty)?
             .component(&edit.component)?
             .property_value(&edit.property, read)?;
@@ -274,55 +261,66 @@ impl AuthoringPrefabInstanceSnapshot {
         else {
             return Ok(false);
         };
-        Ok(match (&edit.intent, property.value) {
-            (
-                PrefabPropertyIntent::Set(ComponentValue::EntityReference(expected)),
-                AuthoringPrefabPropertyValue::Present(value),
-            ) => {
-                let composed = value
-                    .value
-                    .as_entity_reference()
-                    .is_some_and(|reference| value.authored_reference(reference).is_ok());
-                composed && stored_reference_claim(source, &edit.anchor, claim) == Some(expected)
-            }
-            (PrefabPropertyIntent::Set(expected), AuthoringPrefabPropertyValue::Present(value)) => {
-                value
-                    .value
-                    .as_value()
-                    .is_some_and(|actual| component_values_exactly_match(actual, expected))
-            }
-            (
-                PrefabPropertyIntent::Absent,
-                AuthoringPrefabPropertyValue::Missing | AuthoringPrefabPropertyValue::Defaulted(_),
-            ) => true,
-            _ => false,
-        })
+        let Some(stored) = stored_property_claim(source, &edit.anchor, claim.slot) else {
+            return Ok(false);
+        };
+        let PrefabOverlaySlot::Property {
+            component_index,
+            claim_index,
+        } = claim.slot
+        else {
+            return Ok(false);
+        };
+        if edit
+            .existing_intent
+            .is_some_and(|index| index != component_index)
+            || edit
+                .existing_claim
+                .is_some_and(|index| index != claim_index)
+            || stored.target != &edit.target
+            || stored.component() != &edit.component
+            || stored.version() != edit.version
+            || stored.claim().path != edit.property
+        {
+            return Ok(false);
+        }
+        Ok(
+            match (&edit.intent, &stored.claim().intent, property.value) {
+                (
+                    PrefabPropertyIntent::Set(expected),
+                    PrefabPropertyIntent::Set(actual),
+                    AuthoringPrefabPropertyValue::Present(_),
+                ) => component_values_exactly_match(actual, expected),
+                (
+                    PrefabPropertyIntent::Absent,
+                    PrefabPropertyIntent::Absent,
+                    AuthoringPrefabPropertyValue::Missing
+                    | AuthoringPrefabPropertyValue::Defaulted(_),
+                ) => true,
+                _ => false,
+            },
+        )
     }
 }
 
-fn stored_reference_claim<'a>(
+fn stored_property_claim<'a>(
     source: SourceDocumentInput<'a>,
     anchor: &SceneEntityId,
-    claim: &AuthoringPrefabPropertyClaim,
-) -> Option<&'a EntityReference> {
-    let entities = match source {
-        SourceDocumentInput::Scene(document) => &document.entities,
-        SourceDocumentInput::Prefab(document) => &document.entities,
-    };
-    let overlay = prefab_anchor_instance(entities, anchor)
+    slot: PrefabOverlaySlot,
+) -> Option<PrefabPropertyClaimRef<'a>> {
+    let overlay = prefab_anchor_instance(source_entities(source), anchor)
         .ok()?
         .as_ref()?
         .overrides
         .as_ref()?;
-    let stored = overlay.property_claim_at(claim.slot)?.claim();
-    if stored.path != claim.path {
-        return None;
+    overlay.property_claim_at(slot)
+}
+
+fn source_entities(source: SourceDocumentInput<'_>) -> &[crate::SceneEntityRecord] {
+    match source {
+        SourceDocumentInput::Scene(document) => &document.entities,
+        SourceDocumentInput::Prefab(document) => &document.entities,
     }
-    let PrefabPropertyIntent::Set(ComponentValue::EntityReference(reference)) = &stored.intent
-    else {
-        return None;
-    };
-    Some(reference)
 }
 
 fn in_selected_layer(claim: &AuthoringPrefabPropertyClaim, anchor: &SceneEntityId) -> bool {
