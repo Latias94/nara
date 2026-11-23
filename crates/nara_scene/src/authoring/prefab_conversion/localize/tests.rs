@@ -1194,6 +1194,16 @@ fn last_loader_restriction_governs_complete_root_and_classification_copies() {
             SceneComponentRecord::new(ComponentSchemaVersion::ONE, payload),
         );
     let session = open_scene(&document, &basis, Default::default());
+    let unbound = SceneAuthoringSession::from_published_authoring_document(
+        SceneDocumentCandidate::from_source_document(document.clone(), Default::default())
+            .unwrap()
+            .admit_authoring_with_basis(
+                AuthoringDocumentSource::new(AssetRef::path("scenes/unbound.scene.json").unwrap()),
+                &basis,
+            )
+            .unwrap()
+            .publish(),
+    );
     let prefab = PrefabAuthoringSession::from_published_authoring_document(
         PrefabDocumentCandidate::decode_json_str(
             &PrefabDocument::new(document.placements.clone(), document.entities.clone())
@@ -1213,14 +1223,22 @@ fn last_loader_restriction_governs_complete_root_and_classification_copies() {
         basis,
         key("base"),
     );
-    for (limit, stage, copies) in [
-        (256 * 1024, "complete-document", Vec::new()),
+    for (working_session, limit, stage, copies) in [
+        (&session, 256 * 1024, "complete-document", Vec::new()),
         (
+            &session,
             3 * 1024 * 1024,
             "publication-buffer",
             vec!["complete-document"],
         ),
         (
+            &session,
+            7 * 1024 * 1024,
+            "classification-snapshot",
+            vec!["complete-document"],
+        ),
+        (
+            &unbound,
             7 * 1024 * 1024,
             "publication-buffer",
             vec!["complete-document"],
@@ -1228,12 +1246,9 @@ fn last_loader_restriction_governs_complete_root_and_classification_copies() {
     ] {
         super::super::work::take_copies();
         let mut reads = 0;
-        let error = session
-            .request_complete_prefab_conversion(
-                session.revision(),
-                &id("anchor"),
-                Default::default(),
-            )
+        let revision = working_session.revision();
+        let error = working_session
+            .request_complete_prefab_conversion(revision, &id("anchor"), Default::default())
             .unwrap()
             .prepare_with_loader(None, |_, working| {
                 reads += 1;
@@ -1242,15 +1257,20 @@ fn last_loader_restriction_governs_complete_root_and_classification_copies() {
             })
             .unwrap_err();
         let PrefabConversionError::Source(report) = error;
-        assert!(copy_stage(&report, stage), "{:?}", report.diagnostics);
+        assert!(
+            copy_stage(&report, stage),
+            "expected {stage} at {limit} bytes, got {:?}",
+            report.diagnostics
+        );
         assert_eq!(reads, 1);
         assert_eq!(
             super::super::work::take_copies(),
             copies,
             "no copy after its owning guard refuses"
         );
-        assert_eq!(session.document(), &document);
-        assert_eq!(session.history_usage().records, 0);
+        assert_eq!(working_session.document(), &document);
+        assert_eq!(working_session.revision(), revision);
+        assert_eq!(working_session.history_usage().records, 0);
     }
     for (limit, stage, copies) in [
         (256 * 1024, "complete-document", Vec::new()),
@@ -1284,11 +1304,8 @@ fn last_loader_restriction_governs_complete_root_and_classification_copies() {
         assert_eq!(prefab.history_usage().records, 0);
     }
 
-    // Full target capacities are admitted before each buffer allocation. The deeply nested
-    // source above now exhausts both Scene publication controls before classification.
-    // Isolate the classification guard with the same 2 MiB payload in a certified shallow
-    // value: its publication check needs no retained output, while root + classification
-    // copies still exceed the loader's 3 MiB ceiling.
+    // The certificate skips the publication buffer for shallow values. The same 2 MiB
+    // payload still exceeds the loader's 3 MiB ceiling at the classification guard.
     let mut shallow = document.clone();
     shallow
         .entities
