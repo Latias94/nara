@@ -70,7 +70,7 @@ fn startup_cleanup_poll_retains_incomplete_budget_until_explicit_execute() {
     host.slot = ProjectHostSlot::Cleaning {
         epoch: 1,
         owner: Box::new(owner),
-        task_report_required: false,
+        task_close: None,
     };
     let mut desktop = DesktopRun {
         state: DesktopRunState::Cleaning {

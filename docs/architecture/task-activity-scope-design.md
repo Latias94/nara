@@ -112,6 +112,50 @@ does not manufacture scope completion. Normal Host shutdown retires scopes befor
 
 ## Verification And Remaining Decisions
 
+### File-Backed Runtime Activity Selection
+
+`ProductRecipe::with_shared_task_facilities` selects the repeatable shared definition in the
+existing Tasks slot. The caller owns the facilities. Each Runtime installation creates an
+independent activity, and the plugin keeps the facility alive while the installation needs it.
+The composition key includes scoped placement, the selected pool bounds and the shutdown policy.
+A processed catalog requires agreement with that selection. A different physical facility with
+the same configuration satisfies the same definition.
+
+`ProjectHost` checks the installed Tasks placement at both immediate Stop and retained cleanup.
+Scoped placement requires a complete `TaskScopeCloseReport`. Private placement continues to use
+`TaskShutdownReport`. For failed construction the Host takes its requirement from the participant
+actually acquired by the original ledger. Headless Pending keeps the original owner, and a
+terminal Runtime or task failure remains visible after physical return. The caller joins the
+facility after its activities have returned.
+
+The pinned Bevy `779770720e6ad916c1de38cf66a67d0e079ed1e3` reference uses lexical `TaskPool::scope`
+and joins threads in `TaskPool::drop`. Godot `b070e63b161aa816afac71dcfc9d60859d38f220` provides
+group completion and a separate `WorkerThreadPool::finish`. The Nara file-project change reuses
+its existing cross-frame scope so a Host can keep driving a sibling while original task captures
+and late results return.
+
+The locked public consumer creates two independent Worlds on one facility. While work in the
+first keeps its close pending, the second executes a fixed step and new work in the same task
+domain. Releasing the first returns its original work, and the sibling can continue before its
+own close. The facility owner then joins the shared workers. The same workflow runs with two
+source projects and with one source project and a reopened pack. The latter also checks recipe
+agreement with private Tasks, different pool bounds, and a new facility with matching settings.
+[Public consumer](../../tests/fixtures/module-consumer/tests/project_task_activity.rs)
+
+On Windows x64 with Rust 1.95, the Tasks library passed 110/110 in
+`cabd0d10-b5e0-4146-967f-ce5801970dbb`. The Host and public startup selection passed 50/50 in
+`98b22632-fd7f-4d3b-8ae6-445db7f843bd`. The independently locked source/pack consumer passed
+2/2 in `595d4236-3ea3-42aa-acdf-75c1600b6bda`.
+
+Two standalone Windows DX12 runs use the public `DesktopRun` with a real project and request
+first-presentation verification. The normal run returns `Completed(Success)`. An additional
+participant removes the scope report after work has returned in the second run. That run returns
+`Failed` with `project.run.task-shutdown-report-invalid`. Both present a frame, return the original
+event loop, leave the outer facility's workers alive, and then join one worker per pool explicitly.
+The selected Host/Scene/Tooling release run passes 54/54 in
+`fb1b6419-6379-40e9-877a-5056bdca4e60`. It includes the desktop terminal result and the
+accepted Editor Play activation waiting for its own scope after private authoring workers return.
+
 ### Concrete Product Admission And Retirement Work
 
 Read-only tracing at `c62ff32` identifies the trusted Editor authoring/preview plus same-process

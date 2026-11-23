@@ -216,6 +216,18 @@ eligibility checks and native/service owners. The reference game's capture refus
 returns and cleanup failure; its finite child waits within the original operation deadline,
 and original Close still records failure separately from physical completion.
 
+For several file-backed Headless sessions in one process, create the `TaskFacilities` in the
+caller and pass an `Arc` to each recipe with `ProductRecipe::with_shared_task_facilities`.
+Each session acquires an independent activity. Drive `HeadlessSession::close()` until it reports
+`Complete` or `Failed`. While it reports `Pending`, keep the session and drive close again after
+the original work returns. Use `TaskFacilities::shutdown_blocking()` once all sessions retire,
+and inspect its separate physical worker report. Sessions on one facility share queue and
+worker capacity.
+
+For processed content, supply the scoped recipe when preparing the catalog and when opening it.
+Use matching pool bounds and shutdown policy at both entry points. The caller can supply a new
+facility with the same configuration on a later run.
+
 For a finite headless or one-shot loop, `finish` consumes the runtime and performs one finite close
 attempt. Success returns `RuntimeCloseEvidence`. An incomplete attempt or terminal shutdown failure
 returns `RuntimeRetirement`; retain it and poll `drive_retirement`, inspecting both its state and

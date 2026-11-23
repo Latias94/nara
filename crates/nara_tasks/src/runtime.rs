@@ -4195,11 +4195,17 @@ enum TaskPluginFacilities {
 pub const TASK_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.tasks");
 const TASK_PLUGIN_DEFINITION_ID: nara_app::PluginDefinitionId =
     nara_app::PluginDefinitionId::new("nara.tasks.configured", 1);
+/// Identifies the repeatable Tasks definition for shared facilities.
+pub const SHARED_TASK_PLUGIN_DEFINITION_ID: nara_app::PluginDefinitionId =
+    nara_app::PluginDefinitionId::new("nara.tasks.shared", 1);
 pub const TASK_POOLS_SHUTDOWN_OBLIGATION: nara_app::PluginShutdownObligationId =
     nara_app::PluginShutdownObligationId::new("nara.tasks.pools");
 /// Identifies the Tasks participant in managed close acquisition evidence.
 pub const TASK_POOLS_CLOSE_PARTICIPANT: RuntimeCloseParticipantId =
     RuntimeCloseParticipantId::new("nara.tasks.pools");
+/// Identifies an independently retired Tasks activity in managed close evidence.
+pub const TASK_SCOPE_CLOSE_PARTICIPANT: RuntimeCloseParticipantId =
+    RuntimeCloseParticipantId::new("nara.tasks.scope");
 pub const TASK_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(TASK_PLUGIN_ID, nara_app::PluginCategory::Service)
         .shutdown_obligations(&[TASK_POOLS_SHUTDOWN_OBLIGATION]);
@@ -4245,7 +4251,7 @@ impl TaskPlugin {
 /// Creates a repeatable task plugin definition with canonical pool settings.
 #[must_use]
 pub fn plugin(config: TaskPoolConfig) -> nara_app::PluginDefinition {
-    task_plugin_definition(config, false)
+    task_plugin_definition(TaskPlugin::new(config))
 }
 
 /// Creates a repeatable owned-lazy task plugin with an explicit activation identity.
@@ -4253,28 +4259,36 @@ pub fn plugin(config: TaskPoolConfig) -> nara_app::PluginDefinition {
 /// See [`TaskPlugin::lazy`] for first-use costs, failure and physical close ownership.
 #[must_use]
 pub fn lazy_plugin(config: TaskPoolConfig) -> nara_app::PluginDefinition {
-    task_plugin_definition(config, true)
+    task_plugin_definition(TaskPlugin::lazy(config))
 }
 
-fn task_plugin_definition(config: TaskPoolConfig, lazy: bool) -> nara_app::PluginDefinition {
-    let canonical_configuration = task_plugin_configuration(config, lazy);
+/// Creates a repeatable definition that installs one activity per App on the supplied facilities.
+///
+/// Its configuration identity describes scoped placement and the facilities' configured pool
+/// limits and shutdown policy. See [`TaskPlugin::shared`] for ownership and close behavior.
+#[must_use]
+pub fn shared_plugin(facilities: Arc<TaskFacilities>) -> nara_app::PluginDefinition {
+    task_plugin_definition(TaskPlugin::shared(facilities))
+}
+
+fn task_plugin_definition(plugin: TaskPlugin) -> nara_app::PluginDefinition {
+    let (definition, facility_policy) = match &plugin.facilities {
+        TaskPluginFacilities::Eager => (TASK_PLUGIN_DEFINITION_ID, 0),
+        TaskPluginFacilities::Lazy => (TASK_PLUGIN_DEFINITION_ID, 1),
+        TaskPluginFacilities::Shared(_) => (SHARED_TASK_PLUGIN_DEFINITION_ID, 2),
+    };
+    let canonical_configuration = task_plugin_configuration(plugin.config, facility_policy);
     nara_app::PluginDefinition::infallible::<TaskPlugin, _>(
-        TASK_PLUGIN_DEFINITION_ID,
+        definition,
         canonical_configuration,
-        move || {
-            if lazy {
-                TaskPlugin::lazy(config)
-            } else {
-                TaskPlugin::new(config)
-            }
-        },
+        move || plugin.clone(),
     )
 }
 
-fn task_plugin_configuration(config: TaskPoolConfig, lazy: bool) -> Vec<u8> {
+fn task_plugin_configuration(config: TaskPoolConfig, facility_policy: u8) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(96);
     bytes.extend_from_slice(b"nara.tasks.plugin-config.v1\0");
-    bytes.push(u8::from(lazy));
+    bytes.push(facility_policy);
     for kind in TaskPoolKind::ALL {
         let kind = config.kind(kind);
         bytes.extend_from_slice(&(kind.workers().get() as u64).to_le_bytes());
@@ -4311,7 +4325,7 @@ impl Plugin for TaskPlugin {
                 let spawner = scope.spawner();
                 app.register_plugin_runtime_close_participant(
                     TASK_POOLS_SHUTDOWN_OBLIGATION,
-                    TASK_POOLS_CLOSE_PARTICIPANT,
+                    TASK_SCOPE_CLOSE_PARTICIPANT,
                     scope,
                 )?;
                 app.insert_resource(spawner)?;

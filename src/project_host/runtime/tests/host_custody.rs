@@ -1,5 +1,6 @@
 use super::*;
 
+use nara_tasks::{TaskFacilities, TaskPoolConfig};
 use nara_tooling::{
     EditorDocumentId, EditorPersistenceRejection, EditorPersistenceRequestResult,
     EditorPlayCommand, EditorPlayRejection, EditorPlayRequestResult,
@@ -7,6 +8,15 @@ use nara_tooling::{
 
 #[test]
 fn real_task_cleanup_failure_reaches_the_host_after_physical_retirement() {
+    assert_real_task_cleanup_failure(false);
+}
+
+#[test]
+fn real_scoped_task_cleanup_failure_reaches_the_host_before_shared_worker_join() {
+    assert_real_task_cleanup_failure(true);
+}
+
+fn assert_real_task_cleanup_failure(scoped: bool) {
     struct FailedCleanup(Arc<AtomicUsize>);
     impl Drop for FailedCleanup {
         fn drop(&mut self) {
@@ -16,7 +26,11 @@ fn real_task_cleanup_failure_reaches_the_host_after_physical_retirement() {
     }
 
     let project = TestProject::new("host-task-cleanup-failure");
-    let (snapshot, plan) = project.snapshot_and_plan(false);
+    let facilities = scoped.then(shared_test_facilities);
+    let (snapshot, plan) = match &facilities {
+        Some(facilities) => scoped_task_plan(&project, facilities, None),
+        None => project.snapshot_and_plan(false),
+    };
     let mut host = ProjectHost::new(RuntimeClosePolicy::new(Duration::ZERO));
     let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
     host.complete_start(&mut attempt).unwrap();
@@ -63,11 +77,217 @@ fn real_task_cleanup_failure_reaches_the_host_after_physical_retirement() {
             "project.run.cleanup-participant-error",
             "failure-code"
         ),
-        Some("nara.tasks.cleanup-failed")
+        Some(if scoped {
+            "nara.tasks.scope-cleanup-failed"
+        } else {
+            "nara.tasks.cleanup-failed"
+        })
     );
+    assert!(!report_has_code(
+        &diagnostics,
+        "project.run.task-shutdown-report-invalid"
+    ));
     assert!(!host.has_cleanup_owner());
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
+    if let Some(facilities) = facilities {
+        assert!(facilities.stats().for_kind(TaskPoolKind::Io).live_workers > 0);
+        assert!(facilities.shutdown_blocking().unwrap().is_complete());
+    }
 }
+
+#[test]
+fn stopping_requires_the_scoped_return_report_on_both_close_paths() {
+    let project = TestProject::new("host-missing-task-activity-report");
+    let facilities = shared_test_facilities();
+    for delayed in [false, true] {
+        let (snapshot, plan) = scoped_task_plan(&project, &facilities, None);
+        let mut host = ProjectHost::new(RuntimeClosePolicy::new(Duration::ZERO));
+        let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+        remove_scope_report_on_close(&mut attempt, delayed);
+        host.complete_start(&mut attempt).unwrap();
+        let refusal = host.stop_running().unwrap_err();
+        assert_eq!(host.has_cleanup_owner(), delayed);
+        let diagnostics = if delayed {
+            assert!(!refusal.diagnostics.has_errors());
+            let (failed, diagnostics) = drive_host_cleanup_to_completion(&mut host);
+            assert!(failed);
+            diagnostics
+        } else {
+            refusal.diagnostics
+        };
+        assert!(report_has_code(
+            &diagnostics,
+            "project.run.task-shutdown-report-invalid"
+        ));
+        assert!(!host.has_cleanup_owner());
+    }
+    assert!(facilities.shutdown_blocking().unwrap().is_complete());
+}
+
+#[test]
+fn failed_construction_requires_the_scoped_report_only_after_acquisition() {
+    let project = TestProject::new("host-scoped-task-construction-failure");
+    let facilities = shared_test_facilities();
+    for (failure, acquired) in [
+        (prepare_failure_definition(), false),
+        (
+            PluginDefinition::infallible::<FinishFailurePlugin, _>(
+                FINISH_FAILURE_DEFINITION_ID,
+                b"project-finish-failure-v1",
+                FinishFailurePlugin::default,
+            ),
+            true,
+        ),
+    ] {
+        let (snapshot, plan) = scoped_task_plan(&project, &facilities, Some(failure));
+        let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+        let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+        if acquired {
+            remove_scope_report_on_close(&mut attempt, false);
+        }
+        let refusal = host.complete_start(&mut attempt).unwrap_err();
+        assert_eq!(
+            first_code(&refusal.diagnostics),
+            if acquired {
+                "project.run.plugin-hook-failed"
+            } else {
+                "nara.test.project-prepare-failure"
+            }
+        );
+        assert!(host.running_runtime().is_none());
+        let (failed, diagnostics) = drive_host_cleanup_to_completion(&mut host);
+        assert_eq!(failed, acquired, "{diagnostics:?}");
+        assert_eq!(
+            report_has_code(&diagnostics, "project.run.task-shutdown-report-invalid"),
+            acquired
+        );
+    }
+    assert!(facilities.shutdown_blocking().unwrap().is_complete());
+}
+
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[test]
+fn desktop_terminal_close_checks_the_original_scoped_report() {
+    use crate::project_host::desktop_run::{
+        PendingDesktopTerminal, desktop_terminal_after_native_retirement,
+    };
+
+    let project = TestProject::new("desktop-task-activity-close");
+    let facilities = shared_test_facilities();
+    for remove_report in [false, true] {
+        let (snapshot, plan) = scoped_task_plan(&project, &facilities, None);
+        let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+        let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+        if remove_report {
+            remove_scope_report_on_close(&mut attempt, false);
+        }
+        host.complete_start(&mut attempt).unwrap();
+        let (mut runtime, context) = host.take_desktop_runtime().unwrap();
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Stop),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        assert_eq!(runtime.state(), RuntimeState::Stopped);
+        assert!(!runtime.close_evidence().has_terminal_failure());
+        let mut diagnostics = DiagnosticReport::default();
+        let terminal = desktop_terminal_after_native_retirement(
+            Ok(AppExit::Requested),
+            &runtime,
+            Some(&context),
+            &mut diagnostics,
+        );
+        match (remove_report, terminal) {
+            (true, PendingDesktopTerminal::Failed)
+            | (false, PendingDesktopTerminal::Completed(AppExit::Requested)) => {}
+            (_, terminal) => panic!("unexpected desktop terminal state: {terminal:?}"),
+        }
+        assert_eq!(
+            report_has_code(&diagnostics, "project.run.task-shutdown-report-invalid"),
+            remove_report
+        );
+    }
+    assert!(facilities.shutdown_blocking().unwrap().is_complete());
+}
+
+fn shared_test_facilities() -> Arc<TaskFacilities> {
+    Arc::new(TaskFacilities::try_new_lazy(TaskPoolConfig::default()).unwrap())
+}
+
+fn scoped_task_plan(
+    project: &TestProject,
+    facilities: &Arc<TaskFacilities>,
+    failure: Option<PluginDefinition>,
+) -> (ProjectContentSnapshot, RuntimePlan) {
+    let root = project.capability();
+    let manifest = root
+        .open_file(&RelativePath::new(PROJECT_MANIFEST).unwrap())
+        .unwrap();
+    let candidate = ingest_project_manifest(&manifest, None).unwrap();
+    drop(manifest);
+    let recipe = crate::ProductRecipe::new()
+        .with_shared_task_facilities(Arc::clone(facilities))
+        .unwrap();
+    let request = crate::project_host::composition::project_runtime_plugins_with_recipe(
+        &candidate, recipe, None,
+    );
+    let request = if let Some(failure) = failure {
+        let builds = Arc::new(AtomicUsize::new(0));
+        let closes = Arc::new(AtomicUsize::new(0));
+        request
+            .insert_after::<GameplayCommandPlugin>(close_probe_definition(&builds, &closes))
+            .insert_after::<CloseProbePlugin>(failure)
+    } else {
+        request
+    };
+    let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
+    let snapshot =
+        load_runtime_snapshot(&ProjectContentLoader::new(root).unwrap(), &candidate, &plan);
+    (snapshot, plan)
+}
+
+fn remove_scope_report_on_close(attempt: &mut RuntimeStartAttempt, delayed: bool) {
+    struct RemoveScopeReport {
+        delayed: bool,
+    }
+
+    impl RuntimeCloseParticipant for RemoveScopeReport {
+        fn begin_close(
+            &mut self,
+            _: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            Ok(RuntimeCloseProgress::Pending)
+        }
+
+        fn poll_close(
+            &mut self,
+            context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            if std::mem::take(&mut self.delayed) {
+                return Ok(RuntimeCloseProgress::Pending);
+            }
+            let report = context
+                .remove_resource::<TaskScopeCloseReport>()
+                .unwrap()
+                .unwrap();
+            assert!(report.is_complete());
+            Ok(RuntimeCloseProgress::Complete)
+        }
+    }
+
+    attempt
+        .inputs
+        .as_mut()
+        .unwrap()
+        .obligations
+        .register(
+            RuntimeCloseParticipantId::new("nara.test.remove-scope-report"),
+            RemoveScopeReport { delayed },
+        )
+        .unwrap();
+}
+
 #[cfg(windows)]
 use nara_tooling::{
     EditorDocumentKind, EditorPersistenceFailureStage, EditorPersistenceRequestKind,

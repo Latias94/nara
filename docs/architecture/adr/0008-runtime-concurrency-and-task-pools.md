@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-11-15
+**Last Revised**: 2026-11-23
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0052: Task Backpressure,
 Cancellation, and Long-Running Diagnostics; ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
@@ -128,6 +128,12 @@ Core rules:
   interface without worker-close authority. [The R4b design](../task-activity-scope-design.md)
   records the bounded custody implementation and remaining lazy/product comparison; the complete
   long-term execution model remains under the rebaseline plan.
+- A file-backed `ProductRecipe` can explicitly select caller-owned facilities through the existing
+  Tasks slot. Each installation acquires its own scope and owes a `TaskScopeCloseReport`.
+  Construction failure owes evidence for the participant actually acquired. The selected scoped
+  definition and configured limits enter the processed recipe identity. The outer Host owns the
+  facility and explicitly joins it after its sessions have retired. See the
+  [file-backed selection design](../task-activity-scope-design.md#file-backed-runtime-activity-selection).
 - `TaskPools::try_new_lazy` and `TaskFacilities::try_new_lazy` retain the same bounded execution
   and close mechanics while starting only a used kind on first submission. First-use OS startup
   is explicit submitter cost and can fail before admission; ADR 0052 defines partial-worker

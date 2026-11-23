@@ -18,6 +18,13 @@ verifies one component recipe across native composition, Editor authoring and st
 The filesystem, project-workflow, asset-domain, material and editor-panel members exercise their own declared
 public surfaces. The project-workflow member consumes that workflow through the root facade.
 
+`tests/project_task_activity.rs` starts independent Headless sessions on the same caller-owned
+Tasks facility using the ordinary recipe. It covers two source sessions and a source session
+alongside a reopened processed pack. A retained task holds the first session's close pending
+while the sibling drives gameplay and makes progress on the same worker pool. The caller joins
+the original workers after both sessions retire. The pack also checks recipe agreement across
+different facilities and limits.
+
 `tests/source_locations.rs` exercises canonical source locations and scoped authored aliases
 through public `nara_asset` APIs. It covers three same-named document/resource roots, a second
 resource root of the same role, overlapping scopes, Path/StableId/Product equivalence, reverse

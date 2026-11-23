@@ -1055,6 +1055,47 @@ fn close_retains_accepted_game_activation_until_matching_commit_then_retires_wit
 }
 
 #[test]
+fn accepted_shared_play_keeps_session_close_pending_after_private_workers_return() {
+    let project = TestProject::new("game-view-close-accepted-shared-activation");
+    let probe = GameViewLifetimeProbe::default();
+    let facilities = Arc::new(
+        nara_tasks::TaskFacilities::try_new_lazy(nara_tasks::TaskPoolConfig::default()).unwrap(),
+    );
+    let recipe = game_view_lifetime_recipe(&probe)
+        .with_shared_task_facilities(Arc::clone(&facilities))
+        .unwrap();
+    let (mut editor, request) = open_game_awaiting_target(&project, false, recipe);
+    let activation = editor.prepare_game_start_activation(request).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let before_commit = loop {
+        let progress = editor.advance_close();
+        if progress.task_shutdown().is_complete() || Instant::now() >= deadline {
+            break progress;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    editor.commit_game_start_activation(activation);
+    let completed = drive_editor_close_to_completion(&mut editor);
+
+    assert!(matches!(
+        before_commit,
+        EditorProjectCloseProgress::Incomplete {
+            play_cleanup_pending: true,
+            ..
+        }
+    ));
+    assert!(
+        before_commit.task_shutdown().is_complete(),
+        "{before_commit:?}"
+    );
+    assert!(matches!(completed, EditorProjectCloseProgress::Complete(_)));
+    assert_eq!(probe.frames.load(Ordering::SeqCst), 0);
+    assert_eq!(probe.closes.load(Ordering::SeqCst), 1);
+    assert!(facilities.shutdown_blocking().unwrap().is_complete());
+}
+
+#[test]
 fn close_waits_for_exact_in_flight_game_completion_and_refuses_fresh_work() {
     let project = TestProject::new("game-view-close-in-flight-candidate");
     let probe = GameViewLifetimeProbe::default();

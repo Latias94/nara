@@ -1224,7 +1224,17 @@ impl EditorProjectSession {
         let Some(lane) = self.trusted_compiled() else {
             return authoring;
         };
-        let current = lane.runtime_host.current_task_shutdown();
+        let current = match &lane.runtime_owner {
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            EditorRuntimeOwnerState::AwaitingGameTarget { prepared, .. }
+            | EditorRuntimeOwnerState::CommittingGameTarget { prepared, .. }
+                if super::ProjectTaskClose::planned(&prepared.plan)
+                    == Some(super::ProjectTaskClose::Scope) =>
+            {
+                None
+            }
+            _ => lane.runtime_host.current_task_shutdown(),
+        };
         let play = lane.close_summary.report_with(current.as_ref());
         TaskShutdownReport::aggregate([&authoring, &play])
     }

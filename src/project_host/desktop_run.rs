@@ -475,11 +475,11 @@ impl DesktopRun {
             }
         };
         let runtime = retired.runtime;
-        let mut terminal = desktop_terminal_after_runner(
+        let mut terminal = desktop_terminal_after_native_retirement(
             retired.result.map(|exit| reports.reconcile_exit(exit)),
-            runtime.state(),
-            runtime.close_evidence(),
-            runtime.fault(),
+            &runtime,
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            _context.as_ref(),
             &mut self.diagnostics,
         );
         if startup_failed {
@@ -682,6 +682,29 @@ impl DesktopRunState {
 pub(super) enum PendingDesktopTerminal {
     Completed(AppExit),
     Failed,
+}
+
+pub(super) fn desktop_terminal_after_native_retirement(
+    result: Result<AppExit, AppRunError>,
+    runtime: &nara_app::RuntimeInstance,
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))] context: Option<&DesktopRuntimeContext>,
+    diagnostics: &mut DiagnosticReport,
+) -> PendingDesktopTerminal {
+    let terminal = desktop_terminal_after_runner(
+        result,
+        runtime.state(),
+        runtime.close_evidence(),
+        runtime.fault(),
+        diagnostics,
+    );
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    if runtime.state() == RuntimeState::Stopped
+        && let Some(context) = context
+        && context.report_task_retirement(runtime, diagnostics)
+    {
+        return PendingDesktopTerminal::Failed;
+    }
+    terminal
 }
 
 fn desktop_terminal_after_runner(

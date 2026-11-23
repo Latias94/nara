@@ -4,7 +4,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara_app::{App, RuntimeCloseParticipantId, RuntimeControl, RuntimeState};
+use nara_app::{
+    App, RuntimeCandidateRetirementState, RuntimeCloseParticipantId, RuntimeClosePolicy,
+    RuntimeControl, RuntimeState,
+};
 
 use super::{
     close::{drive_until_state, request_stop, start_runtime},
@@ -471,6 +474,57 @@ fn dropping_activity_cancels_queued_work_and_keeps_shared_workers_alive() {
     );
     assert_eq!(facilities.run_pending_for_tests().executed, 1);
     assert!(handle.is_finished());
+}
+
+#[test]
+fn shared_plugin_definition_tracks_scoped_configuration_and_retains_facilities() {
+    let config = test_config(4);
+    let facilities = Arc::new(TaskFacilities::try_new_lazy(config).unwrap());
+    let facilities_owner = Arc::downgrade(&facilities);
+    let definition = shared_plugin(facilities);
+    let key = definition.key().unwrap();
+    assert_eq!(key.definition(), SHARED_TASK_PLUGIN_DEFINITION_ID);
+    assert_ne!(
+        key.configuration(),
+        plugin(config).key().unwrap().configuration()
+    );
+    assert_ne!(
+        key.configuration(),
+        lazy_plugin(config).key().unwrap().configuration()
+    );
+
+    let same_config = shared_plugin(Arc::new(TaskFacilities::try_new_lazy(config).unwrap()));
+    assert_eq!(same_config.key(), Some(key));
+    for kind in [
+        TaskKindConfig::new(items(2), items(4)),
+        TaskKindConfig::new(ItemLimit::ONE, items(8)),
+    ] {
+        let changed_config = config.with_kind(TaskPoolKind::Io, kind).unwrap();
+        let changed = shared_plugin(Arc::new(
+            TaskFacilities::try_new_lazy(changed_config).unwrap(),
+        ));
+        assert_ne!(key.configuration(), changed.key().unwrap().configuration());
+    }
+
+    let mut app = App::new();
+    app.add_plugins(definition).unwrap();
+    assert_eq!(app.world().resource::<TaskPools>().config(), &config);
+    let mut retirement = app.begin_retirement(RuntimeClosePolicy::default());
+    assert!(facilities_owner.upgrade().is_some());
+    let evidence = retirement.close_evidence().unwrap();
+    let [pending] = evidence.pending_participants() else {
+        panic!("expected one Tasks close participant");
+    };
+    assert_eq!(pending.participant(), TASK_SCOPE_CLOSE_PARTICIPANT);
+    assert_eq!(
+        retirement.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    let world = retirement.world().unwrap();
+    assert!(world.resource::<TaskScopeCloseReport>().is_complete());
+    assert!(!world.contains_resource::<TaskShutdownReport>());
+    drop(retirement);
+    assert!(facilities_owner.upgrade().is_none());
 }
 
 #[test]

@@ -1,22 +1,24 @@
+use std::sync::Arc;
+
 use nara_app::{EditedPluginGroup, PluginGroup, PluginGroupBuilder, PluginGroupId};
 #[cfg(feature = "runtime-ui")]
 use nara_project::ProductCapability;
 use nara_project::ProductCapabilitySet;
+use nara_tasks::TaskFacilities;
 
-use super::ProductRecipe;
-#[cfg(feature = "runtime-ui")]
-use super::ProductRecipeError;
+use super::{ProductRecipe, ProductRecipeError};
 
 #[derive(Default, Clone)]
 pub(super) struct ProductDefaultSettings {
+    task_facilities: Option<Arc<TaskFacilities>>,
     #[cfg(feature = "runtime-ui")]
     ui_font: Option<nara_ui::FontFace>,
 }
 
 impl std::fmt::Debug for ProductDefaultSettings {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        #[allow(unused_mut)]
         let mut debug = formatter.debug_struct("ProductDefaultSettings");
+        debug.field("shared_task_facilities", &self.task_facilities.is_some());
         #[cfg(feature = "runtime-ui")]
         debug.field("ui_font", &self.ui_font.as_ref().map(nara_ui::FontFace::id));
         debug.finish()
@@ -26,6 +28,7 @@ impl std::fmt::Debug for ProductDefaultSettings {
 impl ProductDefaultSettings {
     pub(super) const fn new() -> Self {
         Self {
+            task_facilities: None,
             #[cfg(feature = "runtime-ui")]
             ui_font: None,
         }
@@ -36,7 +39,7 @@ impl ProductDefaultSettings {
         if self.ui_font.is_some() {
             return false;
         }
-        true
+        self.task_facilities.is_none()
     }
 
     pub(super) fn unsupported_plugin(
@@ -55,6 +58,12 @@ impl ProductDefaultSettings {
         self,
         defaults: EditedPluginGroup<G>,
     ) -> EditedPluginGroup<G> {
+        let defaults = match self.task_facilities {
+            Some(facilities) => {
+                defaults.configure_slot(super::SLOT_TASKS, nara_tasks::shared_plugin(facilities))
+            }
+            None => defaults,
+        };
         #[cfg(feature = "runtime-ui")]
         if let Some(face) = self.ui_font {
             let defaults = defaults.configure_slot(super::SLOT_UI, nara_ui::plugin(face.clone()));
@@ -68,6 +77,25 @@ impl ProductDefaultSettings {
 }
 
 impl ProductRecipe {
+    /// Selects a new task activity on the caller's facilities for every Runtime installation.
+    ///
+    /// File-backed projects supply the Tasks slot through their selected profile. Direct `App`
+    /// composition uses [`Self::with_defaults`] with a group that owns that slot. A processed
+    /// catalog requires the scoped placement, pool bounds and shutdown policy used to build it.
+    /// Retire the individual activities before the caller joins the shared workers.
+    pub fn with_shared_task_facilities(
+        mut self,
+        facilities: Arc<TaskFacilities>,
+    ) -> Result<Self, ProductRecipeError> {
+        if self.defaults.task_facilities.is_some() {
+            return Err(ProductRecipeError::DuplicateDefaultConfiguration {
+                plugin: nara_tasks::TASK_PLUGIN_ID,
+            });
+        }
+        self.defaults.task_facilities = Some(facilities);
+        Ok(self)
+    }
+
     /// Selects one admitted immutable face for UI compilation and any UI presentation default.
     ///
     /// The enclosing defaults must install `RuntimeUiPlugins`. Presentation, when installed,
