@@ -139,6 +139,7 @@ fn confirm_unchanged_note(kind: EditorDocumentKind, source: &str) {
     host.inspect(&app, &token, |panel, _| {
         let report = panel.completed(submitted);
         assert!(!report.applied);
+        assert!(report.is_unchanged());
         assert_eq!(report.document, Some(document));
         assert_eq!(report.active_document, undone.workspace().active_document);
         assert_eq!(report.revision, Some(checkpoint.revision));

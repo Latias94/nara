@@ -358,7 +358,7 @@ impl EditorProjectSession {
             return;
         };
         match outcome {
-            EditorActionOutcome::Workspace(report) if report.applied => {
+            EditorActionOutcome::Workspace(report) if report.applied || report.is_unchanged() => {
                 if self
                     .field_feedback
                     .as_ref()

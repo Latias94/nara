@@ -344,7 +344,7 @@ impl FieldEditors {
         let Some(key) = key else {
             return;
         };
-        if matches!(result, PanelActionDispatch::Dispatched(EditorActionOutcome::Workspace(report)) if report.applied)
+        if matches!(result, PanelActionDispatch::Dispatched(EditorActionOutcome::Workspace(report)) if report.applied || report.is_unchanged())
         {
             self.drafts.remove(&key);
         } else if let Some(draft) = self.drafts.get_mut(&key) {

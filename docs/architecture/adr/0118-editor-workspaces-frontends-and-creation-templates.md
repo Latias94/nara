@@ -516,6 +516,10 @@ is finite; capacity rejects new input before admission rather than silently evic
 The actual panel lifecycle above still retires its state. No second document or undo authority is
 created, and shared schema validation does not imply arbitrary native readiness.
 
+An accepted unchanged field patch completes its corresponding draft and clears matching field
+feedback. The Workspace preserves the document revision, dirty state and both history branches.
+Consumers use the original patch receipt to distinguish that outcome from a rejected mutation.
+
 A source-built panel can submit several existing actions and receive an opaque local ID for each
 accepted enqueue. Immediate failure queues no action. Dispatch completion is delivered at most
 once to the originating live panel incarnation, after painting borrows release, application drive

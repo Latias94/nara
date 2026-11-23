@@ -1186,6 +1186,23 @@ Correctness Clippy passes for Scene, Tooling, Nara and Editor. Root and independ
 formatting and changed local documentation links pass.
 [Scene integration cases](../../crates/nara_scene/tests/default_property_writes.rs)
 
+The [round twelve Inspector correction](../audits/2026-11-23-prefab-authoring-player-and-input-review.md#p3-findings)
+reduces both direct Inspector and prepared-edit completion to the original Workspace patch
+receipt. The draft closes and the Host clears matching field feedback after an accepted unchanged
+edit. An independent review identified a remaining Host rejection branch after the first draft
+fix. Both consumers now use `EditorWorkspaceCommandReport::is_unchanged()`.
+
+The final Windows x64 Rust 1.95.0 runs pass 11/11 Editor interaction tests
+(`09dc423f-004d-40d7-8e96-a9dde36d8b84`), 2/2 independent panel tests
+(`616fe00e-36c7-4e74-8af9-49c74603dd3d`) and 2/2 native DX12 tests
+(`dd33092c-83b1-40a6-ab6a-8f303fda7f9b`). The direct cases submit an equal integer using
+different text after Undo in Scene and Prefab, clear the draft with no rejection feedback,
+preserve the document tab and then execute the original Redo. The native Scene case also
+completes Save and Reopen through the existing Inspector workflow. Editor correctness Clippy,
+root formatting and the changed independent panel package's formatting pass. The complete
+independent workspace formatting command exceeds the Windows command-line length, so the
+format check is scoped to the changed package.
+
 Acceptance uses an independently registered panel in non-active Scene and Prefab documents.
 It compares live and proposed values, crosses a value page boundary, and checks cursor ownership.
 The panel consumes the reviewed candidate through normal submission, Undo, Redo, Save and Reopen.

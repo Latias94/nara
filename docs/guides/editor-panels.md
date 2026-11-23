@@ -859,10 +859,9 @@ workspace and a candidate, or between candidates prepared from the same basis, r
 working copy changes. Commit checks the current source before publication.
 
 When a field edit returns to the exact stored state, the prepared forward and inverse patches
-are empty. A successful dispatch reports `applied = false` and
-`report.patch_report.as_ref().is_some_and(ScenePatchReport::is_unchanged)`. The document
-revision, dirty flag and Undo/Redo remain current. Writing a default explicitly still changes
-the source.
+are empty. The accepted workspace report has `applied = false` and `report.is_unchanged()`
+returns true. Inspector drafts and field feedback use that same receipt. The document revision,
+dirty flag and Undo/Redo remain current. Writing a default explicitly still changes the source.
 
 Mixed construction admits one bounded ordered patch: create empty direct entities, add admitted
 component templates and edit their fields/references. Final classification and forward/inverse

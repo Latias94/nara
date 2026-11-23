@@ -821,6 +821,25 @@ impl AuthoringWorkflow<'_> {
         self.owned_test_document(OWNED_LABEL, 42, 4, "explicit numeric Apply")?;
         self.click("Undo")?;
         self.owned_test_document(OWNED_LABEL, 10, 3, "toolbar document Undo")?;
+
+        let before_unchanged = self.frame()?;
+        let before_tab = before_unchanged
+            .workspace()
+            .document(document)
+            .ok_or("the original source tab disappeared after Undo")?;
+        self.owned_test_select("value")?;
+        self.owned_test_ime(Ime::Enabled)?;
+        self.owned_test_ime(Ime::Commit("010".into()))?;
+        self.owned_test_draft("value", Some("010"))?;
+        self.owned_test_apply("value")?;
+        let after_unchanged = self.frame()?;
+        if after_unchanged.workspace().document(document) != Some(before_tab) {
+            return Err("unchanged Apply altered the source tab or its history".into());
+        }
+        if after_unchanged.field_feedback().is_some() {
+            return Err("unchanged Apply published rejected field feedback".into());
+        }
+
         self.click("Redo")?;
         self.owned_test_document(OWNED_LABEL, 42, 4, "toolbar document Redo")?;
 

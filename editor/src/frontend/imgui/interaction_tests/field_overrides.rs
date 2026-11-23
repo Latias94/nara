@@ -236,6 +236,25 @@ fn field_reset_and_remove_controls_preserve_authored_presence_through_history_an
                     .undo_depth,
                 depth - 1
             );
+            if name == "required_default" {
+                let before = interaction.frame();
+                let tab = before.workspace().document(document).unwrap();
+                assert_eq!(tab.history.redo_depth, 1);
+                interaction.replace_field(name, "01");
+                interaction
+                    .field_operation(name, InspectorOperation::Apply)
+                    .unwrap();
+                assert!(
+                    interaction
+                        .frontend
+                        .retained_field_draft(CUSTOM_COMPONENT, name)
+                        .is_none(),
+                    "{kind:?}: the accepted unchanged edit must clear its field draft"
+                );
+                let after = interaction.frame();
+                assert_eq!(after.workspace().document(document), Some(tab));
+                assert!(after.field_feedback().is_none(), "{kind:?}");
+            }
             interaction.click("Redo");
             expect_field(&interaction, name, state.clone(), effective.clone());
             assert!(

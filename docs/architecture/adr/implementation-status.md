@@ -4478,7 +4478,9 @@ with one prior conversion budget assertion reproduced separately.
 retain the source revision, saved state and both history stacks when every touched stored
 root returns to its original value. The existing Scene/Prefab owners compare stored presence
 and exact value bits. Registered panels and field-only Source Tool proposals receive the
-accepted unchanged receipt.
+accepted unchanged receipt. The built-in Inspector uses the same workspace result to complete
+its draft and clear matching field feedback. The final Windows cohorts cover direct Scene and
+Prefab interaction, independent registered panel consumption, and native DX12 presentation.
 
 The [selective collection edit](../authoring-read-projection-design.md#selective-edits-in-authored-collections)
 keeps the selected replacement and previous value in the original Scene and Prefab history.

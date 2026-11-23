@@ -3038,6 +3038,20 @@ pub struct EditorWorkspaceCommandReport {
     pub diagnostics: DiagnosticReport,
 }
 
+impl EditorWorkspaceCommandReport {
+    /// Returns whether the source owner accepted a patch without changing stored content.
+    #[must_use]
+    pub fn is_unchanged(&self) -> bool {
+        !self.applied
+            && !self.diagnostics.has_errors()
+            && self
+                .patch_report
+                .as_ref()
+                .or_else(|| self.inspector_report.as_ref()?.patch_report.as_ref())
+                .is_some_and(ScenePatchReport::is_unchanged)
+    }
+}
+
 #[derive(Debug)]
 pub struct EditorSceneSessionPublicationError {
     report: Box<EditorWorkspaceCommandReport>,

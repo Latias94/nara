@@ -441,9 +441,11 @@ fn editor_edit_commit_outcome(
             return "stale_revision";
         }
     }
-    match &report.patch_report {
-        Some(patch) if patch.is_unchanged() && !report.diagnostics.has_errors() => "unchanged",
-        Some(_) => "domain_rejected",
-        None => "rejected",
+    if report.is_unchanged() {
+        "unchanged"
+    } else if report.patch_report.is_some() {
+        "domain_rejected"
+    } else {
+        "rejected"
     }
 }
