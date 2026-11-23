@@ -44,6 +44,13 @@ enum Record {
     Set { scope: ScopeId, index: usize },
 }
 
+#[cfg(feature = "serde")]
+struct SelectedComponentDeclaration {
+    node: NodeId,
+    index: usize,
+    underlying: Option<Record>,
+}
+
 #[derive(Debug, Clone)]
 struct Program {
     record: Record,
@@ -166,6 +173,8 @@ struct Compiler<'root, 'context, 'owner, F, E> {
     nodes: Vec<Node>,
     locators: BTreeMap<SceneEntityId, NodeId>,
     postorder: Vec<ScopeId>,
+    #[cfg(feature = "serde")]
+    selected_component_overrides: Vec<SelectedComponentDeclaration>,
 }
 
 /// Borrows the actual source topology without changing its nominal document kind.
@@ -285,6 +294,8 @@ where
             nodes: Vec::new(),
             locators: BTreeMap::new(),
             postorder: Vec::new(),
+            #[cfg(feature = "serde")]
+            selected_component_overrides: Vec::new(),
         };
         compiler.admit(Some(size_of::<Scope>()))?;
         compiler.scopes.push(Scope {
@@ -1507,6 +1518,8 @@ where
         #[cfg(feature = "work-observation")]
         let _work_span =
             tracing::info_span!(target: "nara::scene::work", "scene_program_composition").entered();
+        #[cfg(feature = "serde")]
+        self.selected_component_overrides.clear();
         let bytes = self
             .nodes
             .iter()
@@ -1616,15 +1629,7 @@ where
         let mut touched = BTreeSet::new();
         let mut intents = Vec::with_capacity(count);
         for (index, intent) in overlay.components.iter().enumerate() {
-            let (target, component) = match intent {
-                PrefabComponentIntent::Set {
-                    target, component, ..
-                }
-                | PrefabComponentIntent::Suppress { target, component }
-                | PrefabComponentIntent::Properties {
-                    target, component, ..
-                } => (target, component),
-            };
+            let (target, component) = intent.address();
             if target.through.is_empty()
                 && matches!(target.entity, PrefabEntityOrigin::InstanceAddition(_))
             {
@@ -1657,8 +1662,34 @@ where
             }
             intents.push((node, component.clone(), index));
         }
+        #[cfg(feature = "serde")]
+        let inspect_declarations = self.root.inspect
+            && self
+                .selected_anchor
+                .and_then(|anchor| self.nodes[anchor].entered)
+                == Some(scope);
+        #[cfg(feature = "serde")]
+        if inspect_declarations {
+            self.admit(
+                intents
+                    .len()
+                    .checked_mul(size_of::<SelectedComponentDeclaration>()),
+            )?;
+            self.selected_component_overrides
+                .reserve_exact(intents.len());
+        }
         for (node, component, index) in intents {
-            let exists = self.nodes[node].programs.contains_key(&component);
+            let underlying = self.nodes[node].programs.get(&component);
+            let exists = underlying.is_some();
+            #[cfg(feature = "serde")]
+            if inspect_declarations {
+                self.selected_component_overrides
+                    .push(SelectedComponentDeclaration {
+                        node,
+                        index,
+                        underlying: underlying.map(|program| program.record),
+                    });
+            }
             match &self.overlay(scope).unwrap().components[index] {
                 PrefabComponentIntent::Set { mode, .. } => {
                     if (*mode == PrefabComponentSetMode::Add) == exists {
@@ -1715,7 +1746,6 @@ where
                 }
             }
         }
-
         Ok(())
     }
 

@@ -1494,6 +1494,9 @@ fn admit_value_depth(value: &ComponentValue, depth: usize) -> Option<()> {
 }
 
 #[cfg(all(test, feature = "serde"))]
+mod prefab_instance_tests;
+
+#[cfg(all(test, feature = "serde"))]
 mod bounded_cost_tests {
     use super::*;
     use crate::{
@@ -2713,22 +2716,8 @@ fn set_prefab_instance<D: EntityDocument + ?Sized>(
     value: &Option<PrefabInstance>,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
-    prefab_instance_record(document, entity, expected, operation_index)?.prefab = value.clone();
-    Ok(vec![ScenePatchOperation::SetPrefabInstance {
-        entity: entity.clone(),
-        expected: value.clone(),
-        value: expected.clone(),
-    }])
-}
-
-fn prefab_instance_record<'document, D: EntityDocument + ?Sized>(
-    document: &'document mut D,
-    entity: &SceneEntityId,
-    expected: &Option<PrefabInstance>,
-    operation_index: usize,
-) -> Result<&'document mut SceneEntityRecord, Diagnostic> {
     let record = entity_mut(document, entity, operation_index)?;
-    if &record.prefab != expected {
+    if !PrefabInstance::declarations_exactly_match(&record.prefab, expected) {
         return Err(patch_diagnostic(
             operation_index,
             "scene.patch-prefab-instance-context-mismatch",
@@ -2738,7 +2727,12 @@ fn prefab_instance_record<'document, D: EntityDocument + ?Sized>(
             None,
         ));
     }
-    Ok(record)
+    let previous = std::mem::replace(&mut record.prefab, value.clone());
+    Ok(vec![ScenePatchOperation::SetPrefabInstance {
+        entity: entity.clone(),
+        expected: value.clone(),
+        value: previous,
+    }])
 }
 
 fn add_entity<D: EntityDocument>(

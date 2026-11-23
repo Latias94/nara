@@ -4,9 +4,10 @@ use super::inputs::ResolvedReference;
 use super::reference_program::{ReferenceProgram, ReferencePrograms};
 use super::*;
 use crate::prefab::inspection::{
-    AuthoringPrefabComponentFact, AuthoringPrefabPropertyClaim, AuthoringPrefabPropertyClaimKind,
-    AuthoringPrefabRecordOrigin, CapturedPrefabInspection, InspectedComponent,
-    InspectedPrefabPropertyApply,
+    AuthoringPrefabComponentFact, AuthoringPrefabComponentOverrideKind,
+    AuthoringPrefabPropertyClaim, AuthoringPrefabPropertyClaimKind, AuthoringPrefabRecordOrigin,
+    CapturedPrefabInspection, InspectedComponent, InspectedComponentOwnership,
+    InspectedPrefabComponentOverride, InspectedPrefabPropertyApply,
 };
 use crate::{
     AuthoringRecordOwnerClaim, AuthoringRecordReadiness, PrefabPropertyClaim, PrefabPropertyIntent,
@@ -18,6 +19,19 @@ use nara_reflect::{
 };
 
 const TREE_ENTRY_BYTES: usize = 6 * size_of::<usize>();
+
+fn component_ownership(record: Record, selected_scope: ScopeId) -> InspectedComponentOwnership {
+    match record {
+        Record::Source { scope: 0, .. } => InspectedComponentOwnership::LocalRecord,
+        Record::Addition { scope, .. } if scope == selected_scope => {
+            InspectedComponentOwnership::LocalRecord
+        }
+        Record::Set { scope, .. } if scope == selected_scope => {
+            InspectedComponentOwnership::SelectedOverride
+        }
+        _ => InspectedComponentOwnership::Inherited,
+    }
+}
 
 impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
 where
@@ -60,6 +74,48 @@ where
                 .get(&self.nodes[facet].locator)
                 .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
             result.targets.insert(target, id.clone());
+        }
+
+        for SelectedComponentDeclaration {
+            node,
+            index,
+            underlying,
+        } in std::mem::take(&mut self.selected_component_overrides)
+        {
+            if !self.scopes[0].output.contains(&node) {
+                continue;
+            }
+            let id = identifiers
+                .get(&self.nodes[node].locator)
+                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+            let intent = self
+                .overlay(selected_scope)
+                .and_then(|overlay| overlay.components.get(index))
+                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+            self.retain_inspection(
+                &mut result,
+                provenance_string_bytes(intent.address().1.as_str()).and_then(|bytes| {
+                    bytes
+                        .checked_add(
+                            2 * TREE_ENTRY_BYTES + size_of::<InspectedPrefabComponentOverride>(),
+                        )?
+                        .checked_add(provenance_string_bytes(id.as_str())?)
+                }),
+            )?;
+            let intent = &self.overlay(selected_scope).unwrap().components[index];
+            result
+                .component_overrides
+                .entry(id.clone())
+                .or_default()
+                .insert(
+                    intent.address().1.clone(),
+                    InspectedPrefabComponentOverride {
+                        index,
+                        kind: AuthoringPrefabComponentOverrideKind::of(intent),
+                        underlying: underlying
+                            .map(|record| component_ownership(record, selected_scope)),
+                    },
+                );
         }
 
         // ReferencePrograms indexes the actual materialized selected entities, including empty
@@ -257,12 +313,7 @@ where
             defaulted_roots,
             payload: None,
             selected_overlay_intent,
-            accepts_selected_overlay_properties: match record {
-                Record::Source { scope, .. } => scope != 0,
-                Record::Addition { scope, .. } | Record::Set { scope, .. } => {
-                    scope != selected_scope
-                }
-            },
+            ownership: component_ownership(record, selected_scope),
             property_apply: None,
         };
         if readiness.is_available() {

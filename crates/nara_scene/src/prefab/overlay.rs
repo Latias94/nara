@@ -75,6 +75,20 @@ pub enum PrefabComponentSetMode {
     Replace,
 }
 
+/// An edit of the complete component declaration in the selected instance layer.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PrefabComponentEdit {
+    /// Supplies a complete authored value for the requested presence change.
+    Set {
+        mode: PrefabComponentSetMode,
+        value: ComponentValue,
+    },
+    /// Hides an inherited component at this occurrence.
+    Suppress,
+    /// Removes the local declaration and restores the lower layer's contribution.
+    Revert,
+}
+
 /// An explicit property pin or authored absence; removing it resumes inheritance.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

@@ -5,6 +5,7 @@ use std::{
     fmt,
     mem::size_of,
     ops::Bound,
+    sync::{Arc, Weak},
 };
 
 use nara_asset::AssetRef;
@@ -25,24 +26,59 @@ use super::{
 use crate::{
     AuthoringPropertyChildrenLimits, AuthoringPropertyChildrenPage,
     AuthoringPropertyChildrenPosition, AuthoringReadError, AuthoringRecordOwnerClaim,
-    AuthoringRecordReadiness, AuthoringSchemaBasis, ExpandedSceneComponent,
+    AuthoringRecordReadiness, AuthoringSchemaBasis, ExpandedSceneComponent, PrefabComponentIntent,
     PrefabDeclarationSource, PrefabEntityTarget, PrefabInstanceLocation, PrefabOverlaySlot,
-    ResolvedPrefabSource, SceneCompilationFailure, SceneCompilationFailureKind,
-    SceneCompilationOptions, SceneCompilationWorkingSet, SceneEntityId,
+    ResolvedPrefabSource, SceneAuthoringRevision, SceneCompilationFailure,
+    SceneCompilationFailureKind, SceneCompilationOptions, SceneCompilationWorkingSet,
+    SceneEntityId, SourceDocumentKey,
     authoring_decode::{property_children_in_schema, property_root},
     draft::SceneDraft,
 };
 
+mod component_write;
 mod property_apply;
 mod property_write;
 
+pub use component_write::{AuthoringPrefabComponentEditError, ObservedPrefabComponentEdit};
 pub use property_apply::{AuthoringPrefabPropertyApplyError, ObservedPrefabPropertyApply};
 pub use property_write::{AuthoringPrefabPropertyWriteError, ObservedPrefabPropertyWrite};
+
+/// A working-source inspection can prepare edits against its captured document allocation.
+#[doc(hidden)]
+pub enum PrefabInspectionInput<'a> {
+    WorkingScene(&'a Arc<crate::SceneDocument>, SceneAuthoringRevision),
+    WorkingPrefab(&'a Arc<crate::PrefabDocument>, SceneAuthoringRevision),
+    Borrowed(SourceDocumentInput<'a>),
+}
+
+#[derive(Debug, Clone)]
+enum WorkingSourceObservation {
+    Scene(Weak<crate::SceneDocument>, SceneAuthoringRevision),
+    Prefab(Weak<crate::PrefabDocument>, SceneAuthoringRevision),
+}
+
+impl WorkingSourceObservation {
+    fn revision_for(&self, input: SourceDocumentInput<'_>) -> Option<SceneAuthoringRevision> {
+        match (self, input) {
+            (Self::Scene(original, revision), SourceDocumentInput::Scene(current))
+                if std::ptr::eq(original.as_ptr(), current) =>
+            {
+                Some(*revision)
+            }
+            (Self::Prefab(original, revision), SourceDocumentInput::Prefab(current))
+                if std::ptr::eq(original.as_ptr(), current) =>
+            {
+                Some(*revision)
+            }
+            _ => None,
+        }
+    }
+}
 
 /// Compiles an actual source's selected directly owned Prefab instance for authoring reads.
 /// The loader receives only requests made by structural and surviving effective-value demand.
 pub fn try_inspect_authoring_prefab_instance_with_loader<F, E>(
-    source: SourceDocumentInput<'_>,
+    input: PrefabInspectionInput<'_>,
     anchor: &SceneEntityId,
     basis: &AuthoringSchemaBasis,
     options: SceneCompilationOptions,
@@ -51,6 +87,23 @@ pub fn try_inspect_authoring_prefab_instance_with_loader<F, E>(
 where
     F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
+    let (source, working_source) = match input {
+        PrefabInspectionInput::WorkingScene(document, revision) => (
+            SourceDocumentInput::Scene(document),
+            Some(WorkingSourceObservation::Scene(
+                Arc::downgrade(document),
+                revision,
+            )),
+        ),
+        PrefabInspectionInput::WorkingPrefab(document, revision) => (
+            SourceDocumentInput::Prefab(document),
+            Some(WorkingSourceObservation::Prefab(
+                Arc::downgrade(document),
+                revision,
+            )),
+        ),
+        PrefabInspectionInput::Borrowed(source) => (source, None),
+    };
     let compiled = try_compile_selected_authoring_instance_with_loader(
         source,
         anchor,
@@ -73,6 +126,7 @@ where
         data,
         basis: basis.clone(),
         diagnostics: compiled.diagnostics,
+        working_source,
     })
 }
 
@@ -91,6 +145,7 @@ pub struct AuthoringPrefabInstanceSnapshot {
     data: CapturedPrefabInspection,
     basis: AuthoringSchemaBasis,
     diagnostics: DiagnosticReport,
+    working_source: Option<WorkingSourceObservation>,
 }
 
 impl fmt::Debug for AuthoringPrefabInstanceSnapshot {
@@ -139,10 +194,12 @@ impl AuthoringPrefabInstanceSnapshot {
 
     /// Every retained root alias resolves to its actual merged component record inventory.
     pub fn target(&self, target: &PrefabEntityTarget) -> Option<AuthoringPrefabTargetView<'_>> {
-        let components = self.data.entities.get(self.data.targets.get(target)?)?;
+        let entity = self.data.targets.get(target)?;
+        let components = self.data.entities.get(entity)?;
         Some(AuthoringPrefabTargetView {
             snapshot: self,
             components,
+            component_overrides: self.data.component_overrides.get(entity),
         })
     }
 }
@@ -151,6 +208,7 @@ impl AuthoringPrefabInstanceSnapshot {
 pub struct AuthoringPrefabTargetView<'a> {
     snapshot: &'a AuthoringPrefabInstanceSnapshot,
     components: &'a BTreeMap<ComponentTypeId, InspectedComponent>,
+    component_overrides: Option<&'a BTreeMap<ComponentTypeId, InspectedPrefabComponentOverride>>,
 }
 
 impl fmt::Debug for AuthoringPrefabTargetView<'_> {
@@ -189,6 +247,28 @@ impl<'a> AuthoringPrefabTargetView<'a> {
                 snapshot,
                 component,
             })
+    }
+
+    /// Lists the selected layer's declarations, including suppression of absent effective records.
+    pub fn component_overrides(
+        &self,
+    ) -> impl Iterator<Item = (&'a ComponentTypeId, AuthoringPrefabComponentOverrideKind)> + 'a
+    {
+        self.component_overrides.into_iter().flat_map(|overrides| {
+            overrides
+                .iter()
+                .map(|(component, override_)| (component, override_.kind))
+        })
+    }
+
+    /// Reports the selected layer's declaration for this component, if any.
+    pub fn component_override(
+        &self,
+        component: &ComponentTypeId,
+    ) -> Option<AuthoringPrefabComponentOverrideKind> {
+        self.component_overrides
+            .and_then(|overrides| overrides.get(component))
+            .map(|override_| override_.kind)
     }
 
     pub fn component(
@@ -254,6 +334,15 @@ impl AuthoringPrefabComponentFact {
 pub enum AuthoringPrefabPropertyClaimKind {
     Set,
     Absent,
+}
+
+/// The authored component declaration in the selected instance layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthoringPrefabComponentOverrideKind {
+    Added,
+    Replaced,
+    Suppressed,
+    Properties,
 }
 
 /// One claim in the surviving complete record's ordered compiler program.
@@ -569,8 +658,34 @@ impl AuthoringPrefabValue<'_> {
 pub(crate) struct CapturedPrefabInspection {
     pub(crate) targets: BTreeMap<PrefabEntityTarget, SceneEntityId>,
     pub(crate) entities: BTreeMap<SceneEntityId, BTreeMap<ComponentTypeId, InspectedComponent>>,
+    pub(crate) component_overrides:
+        BTreeMap<SceneEntityId, BTreeMap<ComponentTypeId, InspectedPrefabComponentOverride>>,
     pub(crate) references: BTreeMap<SceneEntityId, EntityReference>,
     pub(crate) retained_bytes: usize,
+}
+
+#[derive(Debug)]
+pub(crate) struct InspectedPrefabComponentOverride {
+    pub(crate) index: usize,
+    pub(crate) kind: AuthoringPrefabComponentOverrideKind,
+    pub(crate) underlying: Option<InspectedComponentOwnership>,
+}
+
+impl AuthoringPrefabComponentOverrideKind {
+    pub(crate) const fn of(intent: &PrefabComponentIntent) -> Self {
+        match intent {
+            PrefabComponentIntent::Set {
+                mode: crate::PrefabComponentSetMode::Add,
+                ..
+            } => Self::Added,
+            PrefabComponentIntent::Set {
+                mode: crate::PrefabComponentSetMode::Replace,
+                ..
+            } => Self::Replaced,
+            PrefabComponentIntent::Suppress { .. } => Self::Suppressed,
+            PrefabComponentIntent::Properties { .. } => Self::Properties,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -580,8 +695,15 @@ pub(crate) struct InspectedComponent {
     pub(crate) defaulted_roots: Vec<ComponentFieldId>,
     pub(crate) payload: Option<ExpandedSceneComponent>,
     pub(crate) selected_overlay_intent: Option<usize>,
-    pub(crate) accepts_selected_overlay_properties: bool,
+    pub(crate) ownership: InspectedComponentOwnership,
     pub(crate) property_apply: Option<Box<InspectedPrefabPropertyApply>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InspectedComponentOwnership {
+    LocalRecord,
+    SelectedOverride,
+    Inherited,
 }
 
 #[derive(Debug)]

@@ -3,11 +3,15 @@ use nara_core::{ByteLimit, ItemLimit};
 use nara_identity::{AuthoredEntityReference, EntityReference, ReferenceInputId};
 use nara_reflect::{ComponentPropertyPath, ComponentPropertyReadBudget};
 use nara_scene::{
-    AuthoringPrefabPropertyValue, PrefabComponentIntent, PrefabEntityOrigin, PrefabEntityTarget,
-    PrefabInstanceHop, PrefabOverlay, PrefabPropertyClaim, PrefabReferenceArguments,
-    ScenePatchDocument, ScenePatchOperation, SourceDocumentKey,
+    AuthoringPrefabPropertyValue, PrefabComponentEdit, PrefabComponentIntent,
+    PrefabComponentSetMode, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop,
+    PrefabOverlay, PrefabPropertyClaim, PrefabReferenceArguments, ScenePatchDocument,
+    ScenePatchOperation, SourceDocumentKey,
 };
-use nara_tooling::{EditorPrefabInspectionId, EditorPrefabInspectionView};
+use nara_tooling::{
+    EditorPrefabComponentAddress, EditorPrefabComponentEditKind, EditorPrefabInspectionId,
+    EditorPrefabInspectionView,
+};
 
 use super::*;
 
@@ -22,6 +26,120 @@ fn effective_reference_write_revalidates_original_and_candidate_files() {
 #[test]
 fn effective_reference_write_revalidates_original_and_candidate_working_copies() {
     check_reference_write_freshness(true);
+}
+
+#[test]
+fn whole_component_edit_revalidates_the_source_first_demanded_by_its_reference() {
+    let project = Project::new(1, false);
+    write_endpoint(&project, DESTINATION, "new-leaf", 0);
+    let source = SceneDocument::from_ordered_roots([
+        mount("anchor", BASE),
+        mount("new-target", DESTINATION),
+    ]);
+    project.write_source(SCENE, &source);
+    let mut editor = project.editor();
+    let document = open_source(&mut editor, SCENE);
+    let before = source_state(&editor, document);
+    let original_file = fs::read(project.root.join(SCENE)).unwrap();
+    let address = EditorPrefabComponentAddress {
+        entity: PrefabEntityTarget {
+            through: vec![instance_hop("anchor", BASE)],
+            entity: PrefabEntityOrigin::SourceEntity(id("leaf-0")),
+        },
+        component: payload_type(),
+    };
+    let reference = sibling_reference("new-target", DESTINATION, "new-leaf");
+    let complete = ComponentValue::map([
+        ("amount", ComponentValue::U64(35)),
+        ("target", ComponentValue::EntityReference(reference.clone())),
+    ]);
+    for drift in [true, false] {
+        let operation = inspect_link(&mut editor, document);
+        assert_eq!(
+            inspection(
+                &mut editor,
+                InspectAction::PrepareComponentEdit {
+                    inspection: operation,
+                    address: address.clone(),
+                    edit: PrefabComponentEdit::Set {
+                        mode: PrefabComponentSetMode::Replace,
+                        value: complete.clone()
+                    },
+                    limits: Default::default(),
+                }
+            ),
+            InspectOutcome::Accepted {
+                inspection: operation,
+                phase: InspectPhase::PreparingEdit
+            },
+        );
+        let review = settled_inspection(&mut editor);
+        assert_eq!(review.phase, InspectPhase::Review, "{review:?}");
+        let edit = editor.prefab_inspection_review(operation).unwrap();
+        let [
+            ScenePatchOperation::SetPrefabInstance {
+                value: Some(candidate),
+                ..
+            },
+        ] = edit.patch().operations.as_slice()
+        else {
+            panic!("expected one instance declaration edit");
+        };
+        let [PrefabComponentIntent::Set { record, .. }] =
+            candidate.overrides.as_ref().unwrap().components.as_slice()
+        else {
+            panic!("expected one complete component declaration");
+        };
+        assert_eq!(record.value(), &complete);
+        assert_eq!(source_state(&editor, document), before);
+        request_commit(&mut editor, operation);
+        if drift {
+            write_endpoint(&project, DESTINATION, "new-leaf", 1);
+        }
+        let terminal = settled_inspection(&mut editor);
+        if drift {
+            assert!(
+                matches!(
+                    terminal.result,
+                    Some(InspectResult::Failed {
+                        reason: InspectRejection::StaleSource,
+                        ..
+                    })
+                ),
+                "{terminal:?}"
+            );
+            assert_eq!(source_state(&editor, document), before);
+            write_endpoint(&project, DESTINATION, "new-leaf", 0);
+        } else {
+            assert!(
+                matches!(
+                    terminal.result,
+                    Some(InspectResult::ComponentEdited {
+                        kind: EditorPrefabComponentEditKind::Replaced,
+                        ..
+                    })
+                ),
+                "{terminal:?}"
+            );
+            assert!(source_state(&editor, document).dirty);
+        }
+        assert_eq!(fs::read(project.root.join(SCENE)).unwrap(), original_file);
+        acknowledge_inspection(&mut editor, operation);
+    }
+    let operation = inspect_link(&mut editor, document);
+    assert_eq!(
+        read_reference(
+            &editor,
+            operation,
+            &EditorPrefabPropertyAddress {
+                entity: address.entity,
+                component: address.component,
+                property: ComponentPropertyPath::new(ComponentFieldId::new("target")),
+            }
+        ),
+        (ComponentValue::EntityReference(reference), None)
+    );
+    close(&mut editor);
 }
 
 fn check_reference_write_freshness(working_copies: bool) {

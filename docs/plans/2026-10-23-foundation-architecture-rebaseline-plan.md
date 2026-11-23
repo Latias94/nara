@@ -622,8 +622,7 @@ Commit retains the original document authority and refuses obsolete bases.
 The [explicit scalar override successor](../architecture/authoring-read-projection-design.md#explicit-scalar-overrides)
 completes Set and Revert of an effective scalar on a selected instance in a non-active Scene or
 Prefab. The original source owner lowers the claim, and the same Host validates its effective
-meaning and participating sources before exposing the ordinary prepared edit for review. Complete
-component editing and cross-source Apply retain their own contracts.
+meaning and participating sources before exposing the ordinary prepared edit for review.
 
 The [authored root absence successor](../architecture/authoring-read-projection-design.md#authored-root-absence)
 uses the same verified property write for optional and default-bearing roots. The registered
@@ -646,6 +645,16 @@ owning Prefab. Review borrows both candidates. A confirmed destination checkpoin
 consuming the containing Revert. The [qualification](../architecture/authoring-read-projection-design.md#november-23-selected-property-apply-qualification)
 covers separate document histories, sibling inheritance, exact source selection, and a retry
 from the saved destination with the pin still present.
+
+The [whole-component successor](../architecture/authoring-read-projection-design.md#whole-component-overrides)
+uses the selected compiler to discover the complete-record declaration even when a Suppress
+hides its effective component. The Scene and Prefab owners prepare Add, Replace, Suppress and
+exact Revert through the existing instance patch and history. The Host reviews the original
+candidate and validates any newly demanded sources before Commit. This is editing of the selected
+containing layer. The [qualification](../architecture/authoring-read-projection-design.md#november-23-whole-component-qualification)
+records independent registered-panel workflows and the Scene and Host evidence.
+[Outer unpack with retained nested links](2026-10-27-prefab-conversion-plan.md#retained-nested-links)
+and complete component Apply across sources retain separate design and acceptance requirements.
 
 The [stored declaration Revert contract](../architecture/authoring-read-projection-design.md#stored-prefab-property-claims)
 requires a live property handle or the complete observed declaration at the live slot.

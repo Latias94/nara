@@ -4419,6 +4419,16 @@ records registered Scene and Prefab consumers, file-conflict and checkpoint timi
 the shared native conversion path. Linked Undo and recovery of a pending review across processes
 remain separate work.
 
+The [whole-component edit](../authoring-read-projection-design.md#whole-component-overrides)
+reuses selected inspection, prepared Review, source revalidation, and exact document history for
+Add, Replace, Suppress and Revert. The selected compiler observes a declaration even when the
+effective component is absent and preserves ownership beneath Suppress and Replace. The ordinary
+instance patch checks exact prior value bits and supplies the actual replaced declaration to its
+inverse. The [qualification](../authoring-read-projection-design.md#november-23-whole-component-qualification)
+covers independent non-active Scene and Prefab workflows and refusal when a newly demanded
+dependency changes after Review. Editing the owning base through complete component Apply and
+preserving distinct nested override layers during outer unpack remain open.
+
 [Exact declaration Revert](../authoring-read-projection-design.md#november-22-exact-declaration-revert)
 requires the observed live property or component intent at its original slot and basis. The
 registered panel and built-in Inspector use the same source transaction. Candidate coordinates

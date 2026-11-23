@@ -508,6 +508,44 @@ reference and its instance-specific resolution.
 [Godot NodePath picker](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/inspector/editor_properties.cpp#L3036-L3066) ·
 [Bevy entity mapping](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_ecs/src/entity/map_entities.rs#L19-L55)
 
+##### Whole-component overrides
+
+The same inspection can edit a complete component in the directly owned instance layer of a
+named Scene or Prefab. An effective target exposes its present records and a separate borrowed
+inventory of component declarations in that layer. The second inventory includes Suppress,
+which has no effective record, and typed root aliases share the same declaration. The compiler
+retains the declaration kind and position and the ownership of the underlying record. That last
+fact still identifies a local record under a stored Suppress or Replace. The source owner reads
+the complete declaration from the working allocation captured by the inspection. The allocation
+and revision are both checked before lowering, without retaining a copy of the document.
+
+`PrepareComponentEdit` takes the selected target, component ID, intent and declaration limits.
+Add requires an absent lower-layer record. Replace and Suppress require a lower-layer record,
+including one already hidden by a local Suppress. Set supplies the complete authored value, so
+omitted members and explicit values keep their ordinary Schema semantics. Revert removes the
+exact local declaration and exposes the lower layer again. A complete replacement or suppression
+can supersede a selected property group. Review shows that change and the inverse retains the
+original group. Components declared directly on the containing anchor or on an addition's own
+record remain edits of their respective storage locations.
+
+Scene and Prefab prepare the existing `SetPrefabInstance` transaction. The Host compiles the
+exact candidate and checks the stored intent and its effective consequence at the selected
+address. A complete Set can introduce authored references. The compiler resolves them and the
+Host retains both the original source evidence and the evidence acquired at new candidate
+demands. The bounded complete value is copied into compact storage before the task retains it.
+The same inspection ID binds Review, Commit and Cancel. Commit reports the accepted component
+edit kind and revision, and the original document history supplies Undo and Redo.
+The separate stored-declaration Revert remains available for repair when composition is rejected.
+
+Godot's resource picker distinguishes assigning an empty value from making a local copy of a
+shared resource. Bevy's resolved Scene applies a prepared template to its destination, and its
+dynamic World update retires the previous instance before materializing the current contents.
+Nara likewise keeps authored complete-value assignment, explicit component suppression and
+runtime materialization as separate decisions, with per-occurrence source history.
+[Godot resource picker](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/inspector/editor_resource_picker.cpp#L494-L510) ·
+[Bevy resolved Scene patch](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_scene/src/scene_patch.rs#L69-L88) ·
+[Bevy dynamic World update](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_world_serialization/src/world_asset_spawner.rs#L397-L429)
+
 ##### Apply an instance property to its source
 
 Apply identifies an exact controlling claim in the containing instance and the explicitly named
@@ -706,6 +744,53 @@ Continuation of the original Review in another process remains open.
 
 Correctness Clippy passes for the affected libraries. Scene checks without default features.
 Root and independent panel formatting and changed-document links pass.
+
+##### November 23 whole-component qualification
+
+The Windows x64 Scene cohort passes 76/76 with Rust 1.95.0 in nextest
+`13b5493f-f9cc-45e4-ab2d-d8ae69dec4e4`. The final Scene library run
+`33276396-3ca1-438a-972c-34a4dd196c19` passes 851/851 without skips. It covers Add and Replace
+admission, bounded compact operands, exact source identity, signed-zero history and dormant
+declarations under root aliases. A stale edit plan is refused even after Undo restores the
+original declaration.
+The review exposed a suppressed local record whose ownership disappeared from the final program.
+The compiler now observes the lower record before the selected declaration applies. Both aliases
+refuse a complete rewrite of that local record and still permit exact Revert. The ordinary patch
+control compares signed zero in Set, Properties, additions and nested instance claims, and checks
+the actual source bytes after the inverse and replay.
+[Scene component edit cases](../../crates/nara_scene/src/prefab/overlay/compile/selected_tests/component_edits.rs) ·
+[Exact instance patch case](../../crates/nara_scene/src/patch/prefab_instance_tests.rs)
+
+Independently locked release nextest `f0d44358-43b4-464a-bac7-02e25d245330` passes 42/42 ordinary
+`prepared_authoring` cases, with nine ignored cases. Three new registered-panel cases drive
+non-active Scene and Prefab workspaces through invalid Add, review and cancel, Suppress, saved
+Reopen, Revert, complete Replace and Add, Undo/Redo and further Save/Reopen. The sibling's
+effective value and declarations survive. A complete record can introduce a dependency that
+the original inspection did not load. An external same-length write to that dependency after
+Review makes Commit refuse and preserves the original document and history.
+[Registered component edit workflows](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/component_edit.rs)
+
+An isolated run of the existing `last_loader_restriction_governs_complete_root_and_classification_copies`
+case reproduced a stale assertion about the 7 MiB copy limit. The known JSON source now reaches
+`classification-snapshot` after the single JSON publication check. The unbound source checks
+both encodings and stops at `publication-buffer`. The revised test exercises both at the same
+allowance while preserving the tighter Scene limits, Prefab cases, and shallow certificate
+control. The original loader limit still gates each owning copy.
+[Encoding-specific conversion controls](../../crates/nara_scene/src/authoring/prefab_conversion/localize/tests.rs)
+
+The resumed release test execution uses the completed Host, Tooling and Editor binaries from
+the interrupted joint build. Host passes 21/21, including rejection of a newly demanded source
+changed after Commit dispatch and successful retry after restoring it. Tooling passes 9/9
+declaration and prepared-edit cases. The shared Windows/DX12 native conversion case passes 1/1,
+driving review, commit, Undo/Redo and disk round trips for both containing sources. The new
+component-edit action itself is exercised by the registered panels above.
+[Host dependency control](../../src/project_host/runtime/editor/prefab_conversion/tests/effective_reference_write.rs) ·
+[Shared native conversion](../../editor/src/platform/imgui/authoring_workflow_tests/prefab_conversion.rs)
+
+The affected Scene, Tooling and Host libraries pass correctness Clippy, and Scene compiles with
+default features disabled. Root workspace and independent panel package formatting pass. The
+all-package independent formatter invocation hits Windows error 206, so the changed independent
+package is checked explicitly. Local document links and diff whitespace pass.
 
 ## Workspace Contract
 

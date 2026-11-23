@@ -29,6 +29,30 @@ that scope. An outer-only unpack operation that preserves selected nested links 
 capability, not an undocumented mode flag. A nested declaration embedded inside an overlay first
 needs a separately designed source-targeting workflow; it is not a direct source anchor.
 
+### Retained nested links
+
+Outer unpack still needs a storage decision. Consider a nested instance with its own property
+pin and an enclosing instance with a second pin at the same field. After unpacking the enclosing
+instance, reverting the outer pin should reveal the nested pin. Reverting the nested pin should
+then expose the current nested base, including a later edit to that base. One flattened declaration
+can reproduce the initial value, but loses one of those transitions. The same issue applies when
+a complete record suppresses or replaces an inner declaration.
+
+Compare keeping these declarations as distinct owned contributions with an explicitly flattening
+operation whose review exposes the lost inheritance. A retained-link workflow must test a later
+nested base edit, both Reverts, exact Undo/Redo and Save/Reopen with the original nested link still
+usable. It also needs the existing placement and declared-reference correspondence, including a
+root-bound alias. Complete conversion continues to serve deliberate localization of the entire
+selected occurrence. The retained-link alternatives remain open.
+
+Godot packs node declarations according to the owner and editable-instance policy. Property lookup
+checks the local scene state and then the remapped base state. Its editor's Make Local operation
+records the ownership change in Undo. These are concrete ways to retain the distinction between
+local and inherited contributions through source editing.
+[Godot packed ownership](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/scene/resources/packed_scene.cpp#L877-L895) ·
+[Godot base lookup](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/scene/resources/packed_scene.cpp#L1616-L1671) ·
+[Godot Make Local](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/docks/scene_tree_dock.cpp#L1422)
+
 ## Concrete Design Pressure
 
 The implementation inspected at design time established these constraints:

@@ -32,7 +32,8 @@ use crate::{
     SourceDocumentKey, SourceDocumentKind,
     prefab::{
         AuthoringSceneCompilationOmissionReason, SelectedInstanceCompilation,
-        SelectedInstanceConsumer, SourceDocumentInput, try_compile_authoring_scene_with_loader,
+        SelectedInstanceConsumer, SourceDocumentInput, inspection::PrefabInspectionInput,
+        try_compile_authoring_scene_with_loader,
         try_compile_selected_authoring_instance_with_loader,
     },
 };
@@ -41,6 +42,9 @@ const CONVERSION: SelectedInstanceConsumer<'static> = SelectedInstanceConsumer::
     reference_queries: &[],
     initial_reference_work: (0, 0),
 };
+
+#[path = "selected_tests/component_edits.rs"]
+mod component_edits;
 
 fn id(value: &str) -> SceneEntityId {
     SceneEntityId::new(value).unwrap()
@@ -1263,7 +1267,7 @@ fn absent_write_requires_an_exact_claim_even_when_the_effective_root_is_already_
     let scene = SceneDocument::from_ordered_roots([anchor("A", "alias", None)]);
     let inspect = |scene: &SceneDocument| {
         try_inspect_authoring_prefab_instance_with_loader(
-            SourceDocumentInput::Scene(scene),
+            PrefabInspectionInput::Borrowed(SourceDocumentInput::Scene(scene)),
             &id("A"),
             &basis,
             Default::default(),
@@ -1391,7 +1395,7 @@ fn property_write_verification_checks_the_exact_authored_reference() {
     };
     let observe = |source| {
         try_inspect_authoring_prefab_instance_with_loader(
-            source,
+            PrefabInspectionInput::Borrowed(source),
             &id("mount"),
             &basis,
             Default::default(),
@@ -1588,7 +1592,7 @@ fn inspection_preserves_root_aliases_ordered_claims_and_typed_reference_reads() 
     ];
     let mut reads = Vec::new();
     let snapshot = try_inspect_authoring_prefab_instance_with_loader(
-        SourceDocumentInput::Prefab(&source),
+        PrefabInspectionInput::Borrowed(SourceDocumentInput::Prefab(&source)),
         &id("A"),
         &basis,
         Default::default(),
@@ -1843,7 +1847,7 @@ fn inspection_resolves_a_contextual_default_only_when_it_supplies_the_effective_
     );
     let inspect = |fixture: &Fixture, reads: &mut Vec<AssetRef>| {
         try_inspect_authoring_prefab_instance_with_loader(
-            SourceDocumentInput::Scene(&fixture.scene),
+            PrefabInspectionInput::Borrowed(SourceDocumentInput::Scene(&fixture.scene)),
             &id("A"),
             &basis,
             Default::default(),
@@ -1937,7 +1941,7 @@ fn inspection_copies_repeated_references_at_the_exact_projected_value_limit() {
     ));
     let scene = SceneDocument::from_ordered_roots([instance]);
     let snapshot = try_inspect_authoring_prefab_instance_with_loader(
-        SourceDocumentInput::Scene(&scene),
+        PrefabInspectionInput::Borrowed(SourceDocumentInput::Scene(&scene)),
         &id("p"),
         &basis,
         Default::default(),

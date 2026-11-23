@@ -8,12 +8,19 @@ use super::{
     report_for_document, report_for_document_patch, workspace_document_error_report,
     workspace_revision_error_report,
 };
-use crate::{EditorDocumentQueryBasis, document_query::EditorDocumentQueryOwner};
+use crate::{
+    EditorDocumentQueryBasis, EditorPrefabComponentEditKind,
+    document_query::EditorDocumentQueryOwner,
+};
 use nara_scene::{
-    __private::{ObservedPrefabPropertyApply, ObservedPrefabPropertyWrite, SourceDocumentInput},
-    AuthoringPrefabPropertyClaimKind, AuthoringPropertyEdit, PrefabDeclarationLimits,
-    PrefabDocument, PrefabInstancePath, PrefabRevert, PreparedPrefabAuthoringEdit,
-    PreparedSceneAuthoringEdit, SceneAuthoringRevision, ScenePatchDocument,
+    __private::{
+        ObservedPrefabComponentEdit, ObservedPrefabPropertyApply, ObservedPrefabPropertyWrite,
+        SourceDocumentInput,
+    },
+    AuthoringPrefabPropertyClaimKind, AuthoringPropertyEdit, PrefabComponentEdit,
+    PrefabComponentSetMode, PrefabDeclarationLimits, PrefabDocument, PrefabInstancePath,
+    PrefabRevert, PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit, SceneAuthoringRevision,
+    ScenePatchDocument,
 };
 use std::sync::Arc;
 
@@ -31,6 +38,7 @@ enum PreparedEditOrigin {
     Authoring,
     PrefabRevert,
     PrefabPropertyWrite(AuthoringPrefabPropertyClaimKind),
+    PrefabComponentEdit(EditorPrefabComponentEditKind),
 }
 
 #[derive(Debug)]
@@ -49,6 +57,10 @@ enum EditRequest<'a> {
     },
     PrefabPropertyWrite {
         edit: &'a ObservedPrefabPropertyWrite,
+        limits: PrefabDeclarationLimits,
+    },
+    PrefabComponentEdit {
+        edit: &'a ObservedPrefabComponentEdit,
         limits: PrefabDeclarationLimits,
     },
 }
@@ -72,6 +84,14 @@ impl PreparedEditorDocumentEdit {
     pub const fn prefab_property_write_kind(&self) -> Option<AuthoringPrefabPropertyClaimKind> {
         match &self.origin {
             PreparedEditOrigin::PrefabPropertyWrite(kind) => Some(*kind),
+            _ => None,
+        }
+    }
+
+    #[doc(hidden)]
+    pub const fn prefab_component_edit_kind(&self) -> Option<EditorPrefabComponentEditKind> {
+        match &self.origin {
+            PreparedEditOrigin::PrefabComponentEdit(kind) => Some(*kind),
             _ => None,
         }
     }
@@ -195,6 +215,16 @@ impl EditorWorkspace {
     }
 
     #[doc(hidden)]
+    pub fn prepare_prefab_component_edit(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+        edit: &ObservedPrefabComponentEdit,
+        limits: PrefabDeclarationLimits,
+    ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
+        self.prepare_edit(basis, EditRequest::PrefabComponentEdit { edit, limits })
+    }
+
+    #[doc(hidden)]
     pub fn prepare_prefab_property_apply(
         &self,
         basis: &EditorDocumentQueryBasis,
@@ -238,6 +268,20 @@ impl EditorWorkspace {
             EditRequest::PrefabPropertyWrite { edit, .. } => {
                 PreparedEditOrigin::PrefabPropertyWrite(edit.kind())
             }
+            EditRequest::PrefabComponentEdit { edit, .. } => {
+                PreparedEditOrigin::PrefabComponentEdit(match edit.operation() {
+                    PrefabComponentEdit::Set {
+                        mode: PrefabComponentSetMode::Add,
+                        ..
+                    } => EditorPrefabComponentEditKind::Added,
+                    PrefabComponentEdit::Set {
+                        mode: PrefabComponentSetMode::Replace,
+                        ..
+                    } => EditorPrefabComponentEditKind::Replaced,
+                    PrefabComponentEdit::Suppress => EditorPrefabComponentEditKind::Suppressed,
+                    PrefabComponentEdit::Revert => EditorPrefabComponentEditKind::Reverted,
+                })
+            }
             EditRequest::Patch(_) | EditRequest::Properties(_) => PreparedEditOrigin::Authoring,
         };
         let prepared = match slot {
@@ -258,6 +302,9 @@ impl EditorWorkspace {
                 EditRequest::PrefabPropertyWrite { edit, limits } => slot
                     .session
                     .prepare_prefab_property_write(base_revision, edit, limits),
+                EditRequest::PrefabComponentEdit { edit, limits } => slot
+                    .session
+                    .prepare_prefab_component_edit(base_revision, edit, limits),
             }
             .map(PreparedDocumentEdit::Scene),
             EditorDocumentSlot::Prefab(slot) => match request {
@@ -277,6 +324,9 @@ impl EditorWorkspace {
                 EditRequest::PrefabPropertyWrite { edit, limits } => slot
                     .session
                     .prepare_prefab_property_write(base_revision, edit, limits),
+                EditRequest::PrefabComponentEdit { edit, limits } => slot
+                    .session
+                    .prepare_prefab_component_edit(base_revision, edit, limits),
             }
             .map(PreparedDocumentEdit::Prefab),
             EditorDocumentSlot::Extension(_) => {

@@ -25,6 +25,8 @@ use nara_tooling::{
 mod absent;
 #[path = "prefab_effective_inspection/apply.rs"]
 mod apply;
+#[path = "prefab_effective_inspection/component_edit.rs"]
+mod component_edit;
 #[path = "prefab_effective_inspection/recursive.rs"]
 mod recursive;
 #[path = "prefab_effective_inspection/reference.rs"]

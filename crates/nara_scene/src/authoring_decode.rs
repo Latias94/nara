@@ -3154,7 +3154,7 @@ fn prepare_prefab_authoring_patch_impl(
     })
 }
 
-fn component_allows_composition(schema: &ComponentSchema) -> bool {
+pub(crate) fn component_allows_composition(schema: &ComponentSchema) -> bool {
     schema.has_capability(ComponentCapability::Scene)
         && schema.has_capability(ComponentCapability::Edit)
         && schema

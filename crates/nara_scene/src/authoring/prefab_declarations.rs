@@ -16,6 +16,7 @@ use crate::{
     prefab::{PrefabOverlayCostLimits, prefab_instance_cost},
 };
 
+mod component_write;
 mod property_write;
 
 /// Inclusive logical limits for source declaration observation and edit lowering.
@@ -122,7 +123,7 @@ impl PrefabDeclarationError {
             Self::StaleObservedIntent => {
                 "the observed declaration disagrees with current source intent"
             }
-            Self::AlreadyWritten => "the selected property already has this exact claim",
+            Self::AlreadyWritten => "the selected declaration already has this exact value",
             Self::BudgetExceeded => "source declaration work exceeds its logical limits",
         }
     }

@@ -586,6 +586,13 @@ original operation identity to query the candidate, submit Commit or Cancel, and
 retained result. The containing working copy can stay in a non-active tab throughout the
 operation.
 
+The effective observation also exposes complete component declarations in the selected instance
+layer, including a suppression whose effective record is absent. A registered panel uses the
+same inspection, Review, Commit and Cancel to add or replace a complete component, suppress an
+inherited component, or revert its local declaration. It can display the original and proposed
+declarations from the retained candidate and consume the explicit `ComponentEdited` result.
+[Whole-component override contract](../authoring-read-projection-design.md#whole-component-overrides)
+
 Source-built panels may borrow finite, read-only preparation access during paint. The existing
 Session may also return a bounded selector-directed property observation through that read-only
 borrow, without action/result multi-frame choreography just to read a scalar. Empty selector steps

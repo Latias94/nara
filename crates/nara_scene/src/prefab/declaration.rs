@@ -5,8 +5,9 @@ use nara_reflect::{
 };
 
 use crate::{
-    PrefabComponentIntent, PrefabEntityTarget, PrefabPropertyClaim, PrefabPropertyIntent,
-    SceneEntityId, SourceDocumentKey,
+    PrefabAddition, PrefabComponentIntent, PrefabEntityTarget, PrefabInstance, PrefabInstanceClaim,
+    PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent, SceneComponentRecord, SceneEntityId,
+    SourceDocumentKey,
 };
 
 /// Why composition refused publication.
@@ -132,7 +133,120 @@ fn property_claims_exactly_match(left: &PrefabPropertyClaim, right: &PrefabPrope
             })
 }
 
+impl PrefabInstance {
+    pub(crate) fn declarations_exactly_match(left: &Option<Self>, right: &Option<Self>) -> bool {
+        match (left, right) {
+            (None, None) => true,
+            (Some(left), Some(right)) => left.exactly_matches(right),
+            _ => false,
+        }
+    }
+
+    fn exactly_matches(&self, other: &Self) -> bool {
+        let Self {
+            source,
+            binding,
+            arguments,
+            overrides,
+        } = self;
+        source == &other.source
+            && binding == &other.binding
+            && arguments == &other.arguments
+            && match (overrides, &other.overrides) {
+                (None, None) => true,
+                (Some(left), Some(right)) => left.exactly_matches(right),
+                _ => false,
+            }
+    }
+}
+
+impl PrefabOverlay {
+    fn exactly_matches(&self, other: &Self) -> bool {
+        let Self {
+            base,
+            additions,
+            instances,
+            components,
+            placements,
+            suppressions,
+        } = self;
+        base == &other.base
+            && placements == &other.placements
+            && suppressions == &other.suppressions
+            && additions.len() == other.additions.len()
+            && instances.len() == other.instances.len()
+            && components.len() == other.components.len()
+            && additions
+                .iter()
+                .zip(&other.additions)
+                .all(|(left, right)| left.exactly_matches(right))
+            && instances
+                .iter()
+                .zip(&other.instances)
+                .all(|(left, right)| left.exactly_matches(right))
+            && components
+                .iter()
+                .zip(&other.components)
+                .all(|(left, right)| left.exactly_matches(right))
+    }
+}
+
+impl PrefabAddition {
+    fn exactly_matches(&self, other: &Self) -> bool {
+        let Self {
+            id,
+            components,
+            prefab,
+        } = self;
+        id == &other.id
+            && components.len() == other.components.len()
+            && components.iter().zip(&other.components).all(
+                |((component, record), (other_component, other_record))| {
+                    component == other_component
+                        && component_records_exactly_match(record, other_record)
+                },
+            )
+            && PrefabInstance::declarations_exactly_match(prefab, &other.prefab)
+    }
+}
+
+impl PrefabInstanceClaim {
+    fn exactly_matches(&self, other: &Self) -> bool {
+        let Self { target, value } = self;
+        target == &other.target && PrefabInstance::declarations_exactly_match(value, &other.value)
+    }
+}
+
+fn component_records_exactly_match(
+    left: &SceneComponentRecord,
+    right: &SceneComponentRecord,
+) -> bool {
+    left.owner == right.owner
+        && left.version == right.version
+        && component_values_exactly_match(left.value(), right.value())
+        && left.contextual_defaults.len() == right.contextual_defaults.len()
+        && left
+            .contextual_defaults
+            .iter()
+            .zip(&right.contextual_defaults)
+            .all(|((field, value), (other_field, other_value))| {
+                field == other_field && component_values_exactly_match(value, other_value)
+            })
+}
+
 impl PrefabComponentIntent {
+    pub(crate) fn address(&self) -> (&PrefabEntityTarget, &ComponentTypeId) {
+        match self {
+            Self::Set {
+                target, component, ..
+            }
+            | Self::Suppress { target, component }
+            | Self::Properties {
+                target, component, ..
+            } => (target, component),
+        }
+    }
+
     pub(crate) fn exactly_matches(&self, other: &Self) -> bool {
         match (self, other) {
             (
@@ -152,18 +266,7 @@ impl PrefabComponentIntent {
                 mode == other_mode
                     && target == other_target
                     && component == other_component
-                    && record.owner == other_record.owner
-                    && record.version == other_record.version
-                    && component_values_exactly_match(record.value(), other_record.value())
-                    && record.contextual_defaults.len() == other_record.contextual_defaults.len()
-                    && record
-                        .contextual_defaults
-                        .iter()
-                        .zip(&other_record.contextual_defaults)
-                        .all(|((field, value), (other_field, other_value))| {
-                            field == other_field
-                                && component_values_exactly_match(value, other_value)
-                        })
+                    && component_records_exactly_match(record, other_record)
             }
             (
                 Self::Suppress { target, component },

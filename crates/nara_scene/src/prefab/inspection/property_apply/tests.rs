@@ -199,7 +199,7 @@ impl Fixture {
         destination: Arc<PrefabDocument>,
     ) -> AuthoringPrefabInstanceSnapshot {
         try_inspect_authoring_prefab_instance_with_loader(
-            SourceDocumentInput::Scene(scene),
+            PrefabInspectionInput::Borrowed(SourceDocumentInput::Scene(scene)),
             &id("mount"),
             &self.basis,
             Default::default(),

@@ -429,6 +429,10 @@ Rules:
 - Authoring revision remains monotonic for conflict detection. Dirty state compares the current
   opaque content-state identity with the receipt-backed saved content-state identity, with
   source-upgrade-required as an additional dirty condition.
+- Effective Prefab component edits retain the same reviewed candidate and inspection identity as
+  property writes. Review checks the consequence of the complete declaration at the selected
+  route in the candidate. Commit checks original and newly demanded sources and working copies
+  before publication. The exact containing document owns the accepted revision and history.
 - Selected Prefab property Apply retains the exact destination edit and containing Revert for
   review. Commit publishes a destination edit and its own history when the planned edit changes
   the working copy. The original pin remains in the saved containing source. Pending persistence

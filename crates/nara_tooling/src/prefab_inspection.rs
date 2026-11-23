@@ -3,8 +3,8 @@
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{ComponentPropertyPath, ComponentTypeId};
 use nara_scene::{
-    AuthoringPrefabPropertyClaimKind, PrefabDeclarationLimits, PrefabEntityTarget,
-    PrefabPropertyIntent, SceneAuthoringRevision, SceneEntityId,
+    AuthoringPrefabPropertyClaimKind, PrefabComponentEdit, PrefabDeclarationLimits,
+    PrefabEntityTarget, PrefabPropertyIntent, SceneAuthoringRevision, SceneEntityId,
 };
 
 use crate::{
@@ -33,6 +33,22 @@ pub struct EditorPrefabPropertyAddress {
     pub entity: PrefabEntityTarget,
     pub component: ComponentTypeId,
     pub property: ComponentPropertyPath,
+}
+
+/// A component address in one selected Prefab occurrence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorPrefabComponentAddress {
+    /// The first hop enters the instance selected by [`EditorPrefabInspectionAction::Inspect`].
+    pub entity: PrefabEntityTarget,
+    pub component: ComponentTypeId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorPrefabComponentEditKind {
+    Added,
+    Replaced,
+    Suppressed,
+    Reverted,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -77,6 +93,7 @@ pub enum EditorPrefabInspectionRejection {
     TaskCleanupFailed,
     IdExhausted,
     InvalidProperty,
+    InvalidComponent,
     ConflictingClaim,
     AlreadyWritten,
     NoCurrentClaim,
@@ -121,6 +138,12 @@ pub enum EditorPrefabInspectionResult {
         document: EditorDocumentId,
         revision: SceneAuthoringRevision,
         kind: AuthoringPrefabPropertyClaimKind,
+    },
+    ComponentEdited {
+        inspection: EditorPrefabInspectionId,
+        document: EditorDocumentId,
+        revision: SceneAuthoringRevision,
+        kind: EditorPrefabComponentEditKind,
     },
     Applied {
         inspection: EditorPrefabInspectionId,
@@ -171,6 +194,16 @@ pub enum EditorPrefabInspectionAction {
         inspection: EditorPrefabInspectionId,
         address: EditorPrefabPropertyAddress,
         intent: PrefabPropertyIntent,
+        limits: PrefabDeclarationLimits,
+    },
+    /// Reviews a whole component declaration in the selected layer.
+    ///
+    /// Set supplies the complete authored value. Revert removes the selected layer's
+    /// declaration for this component, including suppression of an inherited record.
+    PrepareComponentEdit {
+        inspection: EditorPrefabInspectionId,
+        address: EditorPrefabComponentAddress,
+        edit: PrefabComponentEdit,
         limits: PrefabDeclarationLimits,
     },
     /// Promotes the selected exact override to the explicitly named open Prefab source.

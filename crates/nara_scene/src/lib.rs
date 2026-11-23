@@ -126,16 +126,17 @@ pub use placement::{
 };
 #[cfg(feature = "serde")]
 pub use prefab::inspection::{
-    AuthoringPrefabComponentFact, AuthoringPrefabComponentView, AuthoringPrefabInstanceSnapshot,
-    AuthoringPrefabProperty, AuthoringPrefabPropertyClaim, AuthoringPrefabPropertyClaimKind,
-    AuthoringPrefabPropertyValue, AuthoringPrefabRecordOrigin, AuthoringPrefabTargetView,
-    AuthoringPrefabValue, AuthoringPrefabValueError,
+    AuthoringPrefabComponentFact, AuthoringPrefabComponentOverrideKind,
+    AuthoringPrefabComponentView, AuthoringPrefabInstanceSnapshot, AuthoringPrefabProperty,
+    AuthoringPrefabPropertyClaim, AuthoringPrefabPropertyClaimKind, AuthoringPrefabPropertyValue,
+    AuthoringPrefabRecordOrigin, AuthoringPrefabTargetView, AuthoringPrefabValue,
+    AuthoringPrefabValueError,
 };
 pub use prefab::{
-    InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
-    PrefabDeclarationSource, PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget,
-    PrefabInstance, PrefabInstanceBinding, PrefabInstanceClaim, PrefabInstanceHop,
-    PrefabInstanceLocation, PrefabInstancePath, PrefabInstancePathSegment,
+    InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentEdit, PrefabComponentIntent,
+    PrefabComponentSetMode, PrefabDeclarationSource, PrefabDocument, PrefabEntityOrigin,
+    PrefabEntityTarget, PrefabInstance, PrefabInstanceBinding, PrefabInstanceClaim,
+    PrefabInstanceHop, PrefabInstanceLocation, PrefabInstancePath, PrefabInstancePathSegment,
     PrefabInstantiationReport, PrefabOverlay, PrefabOverlaySlot, PrefabPropertyClaim,
     PrefabPropertyClaimRef, PrefabPropertyIntent, PrefabReferenceArguments, PrefabRevert,
     PrefabSourceResolver, ResolvedPrefabSource, SceneCompilationBudgetKind,
@@ -230,9 +231,11 @@ pub mod __private {
         PrefabExtractionEnvironment,
     };
     pub use crate::prefab::inspection::{
+        AuthoringPrefabComponentEditError, AuthoringPrefabComponentOverrideKind,
         AuthoringPrefabInspectionError, AuthoringPrefabPropertyApplyError,
-        AuthoringPrefabPropertyWriteError, ObservedPrefabPropertyApply,
-        ObservedPrefabPropertyWrite, try_inspect_authoring_prefab_instance_with_loader,
+        AuthoringPrefabPropertyWriteError, ObservedPrefabComponentEdit,
+        ObservedPrefabPropertyApply, ObservedPrefabPropertyWrite, PrefabInspectionInput,
+        try_inspect_authoring_prefab_instance_with_loader,
     };
     pub use crate::prefab::{
         AuthoringNativePreview, AuthoringSceneCompilationOmission,

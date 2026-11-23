@@ -9,15 +9,16 @@ use nara_reflect::{
 };
 use nara_scene::{
     __private::{
-        AuthoringPrefabInspectionError, AuthoringPrefabPropertyWriteError,
-        ObservedPrefabPropertyWrite, SourceDocumentInput,
+        AuthoringPrefabComponentEditError, AuthoringPrefabInspectionError,
+        AuthoringPrefabPropertyWriteError, ObservedPrefabComponentEdit,
+        ObservedPrefabPropertyWrite, PrefabInspectionInput, SourceDocumentInput,
         try_inspect_authoring_prefab_instance_with_loader,
     },
     AuthoringPrefabInstanceSnapshot, AuthoringPrefabPropertyClaim,
-    AuthoringPrefabPropertyClaimKind, AuthoringReadError, PrefabDeclarationError,
-    PrefabDeclarationLimits, PrefabDocument, PrefabPropertyClaimRef, PrefabPropertyIntent,
-    PrefabRevert, SceneCompilationFailureKind, SceneCompilationOptions, SceneDocument,
-    SceneEntityId,
+    AuthoringPrefabPropertyClaimKind, AuthoringReadError, PrefabComponentEdit,
+    PrefabDeclarationError, PrefabDeclarationLimits, PrefabDocument, PrefabPropertyClaimRef,
+    PrefabPropertyIntent, PrefabRevert, SceneAuthoringRevision, SceneCompilationFailureKind,
+    SceneCompilationOptions, SceneDocument, SceneEntityId,
 };
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskRejection, TaskReturnState, TaskSpawnRequest,
@@ -25,13 +26,13 @@ use nara_tasks::{
 };
 use nara_tooling::{
     EditorActionOutcome, EditorDocumentId, EditorDocumentKind, EditorDocumentQueryBasis,
-    EditorPrefabApplyDestination, EditorPrefabApplyReview, EditorPrefabInspectionAction as Action,
-    EditorPrefabInspectionId, EditorPrefabInspectionOutcome as Outcome,
-    EditorPrefabInspectionPhase as Phase, EditorPrefabInspectionRejection as Rejection,
-    EditorPrefabInspectionResult as Terminal, EditorPrefabInspectionView,
-    EditorPrefabPropertyAddress, MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES,
-    MAX_EDITOR_PROPERTY_READ_SCAN_BYTES, MAX_EDITOR_PROPERTY_READ_SCAN_ENTRIES,
-    PreparedEditorDocumentEdit,
+    EditorPrefabApplyDestination, EditorPrefabApplyReview, EditorPrefabComponentAddress,
+    EditorPrefabInspectionAction as Action, EditorPrefabInspectionId,
+    EditorPrefabInspectionOutcome as Outcome, EditorPrefabInspectionPhase as Phase,
+    EditorPrefabInspectionRejection as Rejection, EditorPrefabInspectionResult as Terminal,
+    EditorPrefabInspectionView, EditorPrefabPropertyAddress,
+    MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES, MAX_EDITOR_PROPERTY_READ_SCAN_BYTES,
+    MAX_EDITOR_PROPERTY_READ_SCAN_ENTRIES, PreparedEditorDocumentEdit,
 };
 
 use crate::project_host::authoring::{
@@ -64,7 +65,7 @@ impl From<Rejection> for Failure {
             reason,
             diagnostics: super::single_error(
                 "project.editor.prefab-inspection-refused",
-                "The selected Prefab inspection or property edit could not proceed",
+                "The selected Prefab inspection or source edit could not proceed",
             ),
         }
     }
@@ -126,8 +127,13 @@ impl InspectionWork {
 
 enum InspectionEdit {
     Revert(InspectionRevert),
-    Write(ObservedPrefabPropertyWrite),
+    Write(InspectionWrite),
     Apply(Box<ApplyRequest>),
+}
+
+enum InspectionWrite {
+    Property(ObservedPrefabPropertyWrite),
+    Component(ObservedPrefabComponentEdit),
 }
 
 enum InspectionReview {
@@ -357,6 +363,7 @@ impl EditorProjectSession {
             }
             Action::PrepareRevert { inspection, .. }
             | Action::PreparePropertyWrite { inspection, .. }
+            | Action::PrepareComponentEdit { inspection, .. }
             | Action::PrepareApply { inspection, .. }
             | Action::Commit { inspection }
             | Action::FinishApply { inspection }
@@ -375,6 +382,12 @@ impl EditorProjectSession {
                     limits,
                     ..
                 } => self.start_prefab_inspection_write(&address, intent, limits),
+                Action::PrepareComponentEdit {
+                    address,
+                    edit,
+                    limits,
+                    ..
+                } => self.start_prefab_component_edit(&address, edit, limits),
                 Action::PrepareApply {
                     address,
                     destination,
@@ -473,6 +486,7 @@ impl EditorProjectSession {
             .and_then(|bytes| bytes.checked_add(mem::size_of::<InspectionDocument>()))
             .ok_or(Rejection::BudgetExceeded)?;
         let (selection, context) = self.capture_prefab_inspection_sources(root, 0, None)?;
+        let revision = document.revision;
         #[cfg(test)]
         let gate = self.prefab_inspection.next_inspect_gate.take();
         let task = self
@@ -482,7 +496,8 @@ impl EditorProjectSession {
                 TaskPoolKind::Io,
                 TaskSpawnRequest::new(sequence, INSPECTION_DOMAIN),
                 move |_| {
-                    let result = inspect_prefab(input.view(), &anchor, &schema, context, retained);
+                    let result =
+                        inspect_prefab(input.view(revision), &anchor, &schema, context, retained);
                     #[cfg(test)]
                     if let Some(gate) = gate {
                         gate();
@@ -573,7 +588,46 @@ impl EditorProjectSession {
                 &mut prefab_property_read_budget(),
             )
             .map_err(property_write_rejection)?;
-        self.queue_prefab_inspection_edit(InspectionEdit::Write(edit), limits);
+        self.queue_prefab_inspection_edit(
+            InspectionEdit::Write(InspectionWrite::Property(edit)),
+            limits,
+        );
+        Ok(())
+    }
+
+    fn start_prefab_component_edit(
+        &mut self,
+        address: &EditorPrefabComponentAddress,
+        edit: PrefabComponentEdit,
+        limits: PrefabDeclarationLimits,
+    ) -> Result<(), Rejection> {
+        let State::Ready { basis, snapshot } = &self.prefab_inspection.state else {
+            return Err(Rejection::WrongPhase);
+        };
+        self.check_prefab_inspection_basis(basis)?;
+        admit_prefab_component_address(address)?;
+        if self.workspace.document_kind(basis.document.document) == Some(EditorDocumentKind::Prefab)
+            && super::actions::component_uses_ui_domain(&address.component)
+        {
+            return Err(Rejection::InvalidComponent);
+        }
+        let document = basis.document.document;
+        let source = if let Some(slot) = self.workspace.scene(document) {
+            SourceDocumentInput::Scene(slot.session().document())
+        } else {
+            let slot = self
+                .workspace
+                .prefab(document)
+                .ok_or(Rejection::StaleSource)?;
+            SourceDocumentInput::Prefab(slot.session().document())
+        };
+        let edit = snapshot
+            .plan_component_edit(source, &address.entity, &address.component, edit, limits)
+            .map_err(component_edit_rejection)?;
+        self.queue_prefab_inspection_edit(
+            InspectionEdit::Write(InspectionWrite::Component(edit)),
+            limits,
+        );
         Ok(())
     }
 
@@ -690,8 +744,9 @@ impl EditorProjectSession {
                 self.revalidate_prefab_inspection_sources(&basis)?;
                 let document = edit.document();
                 let write_kind = edit.prefab_property_write_kind();
-                let outcome = if write_kind.is_some() {
-                    self.commit_verified_prefab_write(edit)
+                let component_kind = edit.prefab_component_edit_kind();
+                let outcome = if write_kind.is_some() || component_kind.is_some() {
+                    self.commit_verified_prefab_override(edit)
                 } else {
                     self.commit_authoring_edit(edit)
                 };
@@ -699,7 +754,14 @@ impl EditorProjectSession {
                     EditorActionOutcome::Workspace(report) if report.applied => {
                         let inspection = self.prefab_inspection.id();
                         let revision = report.revision.expect("applied source edit has a revision");
-                        Ok(State::Terminal(if let Some(kind) = write_kind {
+                        Ok(State::Terminal(if let Some(kind) = component_kind {
+                            Terminal::ComponentEdited {
+                                inspection,
+                                document,
+                                revision,
+                                kind,
+                            }
+                        } else if let Some(kind) = write_kind {
                             Terminal::Written {
                                 inspection,
                                 document,
@@ -834,21 +896,33 @@ impl EditorProjectSession {
     fn start_prefab_write_verification(
         &mut self,
         basis: InspectionBasis,
-        write: ObservedPrefabPropertyWrite,
+        write: InspectionWrite,
         limits: PrefabDeclarationLimits,
     ) -> Result<InspectionWork, Failure> {
-        let edit = self
-            .workspace
-            .prepare_prefab_property_write(&basis.document, &write, limits)
-            .map_err(|report| {
-                preparation_failure(EditorEditPreparationError::Document(Box::new(report)))
-            })?;
+        let prepared = match &write {
+            InspectionWrite::Property(write) => {
+                self.workspace
+                    .prepare_prefab_property_write(&basis.document, write, limits)
+            }
+            InspectionWrite::Component(edit) => {
+                self.workspace
+                    .prepare_prefab_component_edit(&basis.document, edit, limits)
+            }
+        };
+        let edit = prepared.map_err(|report| {
+            preparation_failure(EditorEditPreparationError::Document(Box::new(report)))
+        })?;
+        let write_bytes = match &write {
+            InspectionWrite::Property(write) => write.checked_retained_bytes(),
+            InspectionWrite::Component(edit) => edit.checked_retained_bytes(),
+        }
+        .ok_or(Rejection::BudgetExceeded)?;
         let root = self
             .authoring_source_selection(basis.document.document)
             .ok_or(Rejection::StaleSource)?;
         let retained = edit
             .checked_retained_bytes()
-            .and_then(|bytes| bytes.checked_add(write.checked_retained_bytes()?))
+            .and_then(|bytes| bytes.checked_add(write_bytes))
             .ok_or(Rejection::BudgetExceeded)?;
         let (selection, mut context) =
             self.capture_prefab_inspection_sources(root, retained, Some(&basis.sources))?;
@@ -873,13 +947,36 @@ impl EditorProjectSession {
                 TaskSpawnRequest::new(self.prefab_inspection.sequence, INSPECTION_DOMAIN),
                 move |_| {
                     let source = edit.source_input();
-                    let inspected = inspect_prefab(source, write.anchor(), &schema, context, 0)?;
-                    if !inspected
-                        .snapshot
-                        .verifies_property_write(source, &write, &mut prefab_property_read_budget())
-                        .map_err(property_write_rejection)?
-                    {
-                        return Err(Rejection::InvalidProperty.into());
+                    let anchor = match &write {
+                        InspectionWrite::Property(write) => write.anchor(),
+                        InspectionWrite::Component(edit) => edit.anchor(),
+                    };
+                    let inspected = inspect_prefab(
+                        PrefabInspectionInput::Borrowed(source),
+                        anchor,
+                        &schema,
+                        context,
+                        0,
+                    )?;
+                    match &write {
+                        InspectionWrite::Property(write) => {
+                            if !inspected
+                                .snapshot
+                                .verifies_property_write(
+                                    source,
+                                    write,
+                                    &mut prefab_property_read_budget(),
+                                )
+                                .map_err(property_write_rejection)?
+                            {
+                                return Err(Rejection::InvalidProperty.into());
+                            }
+                        }
+                        InspectionWrite::Component(edit) => {
+                            if !inspected.snapshot.verifies_component_edit(source, edit) {
+                                return Err(Rejection::InvalidComponent.into());
+                            }
+                        }
                     }
                     let verified = verified_edit(
                         InspectionReview::Edit(edit),
@@ -986,16 +1083,16 @@ impl InspectionDocument {
         Ok((capture, bytes))
     }
 
-    fn view(&self) -> SourceDocumentInput<'_> {
+    fn view(&self, revision: SceneAuthoringRevision) -> PrefabInspectionInput<'_> {
         match self {
-            Self::Scene(document) => SourceDocumentInput::Scene(document),
-            Self::Prefab(document) => SourceDocumentInput::Prefab(document),
+            Self::Scene(document) => PrefabInspectionInput::WorkingScene(document, revision),
+            Self::Prefab(document) => PrefabInspectionInput::WorkingPrefab(document, revision),
         }
     }
 }
 
 fn inspect_prefab(
-    input: SourceDocumentInput<'_>,
+    input: PrefabInspectionInput<'_>,
     anchor: &SceneEntityId,
     schema: &nara_scene::AuthoringSchemaBasis,
     mut capture: AuthoringPrefabCaptureRequest,
@@ -1083,6 +1180,25 @@ fn admit_prefab_property_address(address: &EditorPrefabPropertyAddress) -> Resul
         .logical_bytes_up_to(MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES)
         .ok_or(Rejection::BudgetExceeded)?;
     Ok(())
+}
+
+fn admit_prefab_component_address(address: &EditorPrefabComponentAddress) -> Result<(), Rejection> {
+    address
+        .entity
+        .logical_bytes_up_to(MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES)
+        .and_then(|bytes| bytes.checked_add(address.component.as_str().len()))
+        .filter(|bytes| *bytes <= MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES)
+        .map(|_| ())
+        .ok_or(Rejection::BudgetExceeded)
+}
+
+fn component_edit_rejection(error: AuthoringPrefabComponentEditError) -> Rejection {
+    match error {
+        AuthoringPrefabComponentEditError::InvalidComponent => Rejection::InvalidComponent,
+        AuthoringPrefabComponentEditError::BudgetExceeded => Rejection::BudgetExceeded,
+        AuthoringPrefabComponentEditError::NoCurrentClaim => Rejection::NoCurrentClaim,
+        AuthoringPrefabComponentEditError::StaleObservedIntent => Rejection::StaleSource,
+    }
 }
 
 fn prefab_property_read_budget() -> ComponentPropertyReadBudget {

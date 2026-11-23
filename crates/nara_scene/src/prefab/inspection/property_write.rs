@@ -136,7 +136,7 @@ impl AuthoringPrefabInstanceSnapshot {
             .component(component)?;
         let schema = selected.schema()?;
         let field = property_root(schema, property)?;
-        if !selected.component.accepts_selected_overlay_properties
+        if selected.component.ownership != InspectedComponentOwnership::Inherited
             || !schema.has_capability(ComponentCapability::Edit)
             || !field.has_capability(ComponentCapability::Edit)
         {

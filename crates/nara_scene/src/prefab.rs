@@ -56,9 +56,9 @@ pub(crate) use overlay::cost::{
     scene_placements_cost,
 };
 pub use overlay::{
-    PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityOrigin,
-    PrefabEntityTarget, PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPropertyClaim,
-    PrefabPropertyIntent,
+    PrefabAddition, PrefabComponentEdit, PrefabComponentIntent, PrefabComponentSetMode,
+    PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay,
+    PrefabPropertyClaim, PrefabPropertyIntent,
 };
 
 #[derive(Debug, Default, Clone, PartialEq)]

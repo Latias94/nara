@@ -1367,6 +1367,31 @@ An inspection reads one selected occurrence. Per-frame reads use that retained o
 The stored claim query remains available when composition fails or when a tool needs to repair
 a dormant declaration. [Effective instance contract](../architecture/authoring-read-projection-design.md#effective-instance-fields)
 
+## Edit A Complete Prefab Component
+
+Start the same effective inspection for the containing source and instance. On the target view,
+use `components()` for effective records and `component_overrides()` to discover declarations
+from the selected layer, including a suppressed component. Use `component_override(&component)`
+to check one declaration.
+
+Submit `PrepareComponentEdit` with the inspection ID, `EditorPrefabComponentAddress`, a
+`PrefabComponentEdit` and `PrefabDeclarationLimits`.
+
+- `Set { mode: Add, value }` adds a complete authored record where the lower layer has none.
+- `Set { mode: Replace, value }` assigns a complete record over a lower-layer record, including
+  a suppressed one. Supply the whole value in its authored Schema shape. Omitted members keep
+  their usual Schema default or missing semantics.
+- `Suppress` hides a lower-layer record. `Revert` removes the local component declaration and
+  restores the underlying state.
+
+Use `prefab_inspection_review` to examine the exact declaration change and inverse. Replacing
+or suppressing a component can replace its selected property group, which the inverse preserves.
+Use a property write when the remaining fields should keep inheriting. Submit `Commit` or
+`Cancel` for the same inspection. After `ComponentEdited`, acknowledge the result and inspect
+again to read the current effective component. Undo, Redo and Save use the containing document's
+ordinary Workspace operations. The base source and sibling instances retain their declarations.
+[Whole-component override contract](../architecture/authoring-read-projection-design.md#whole-component-overrides)
+
 ## Apply A Prefab Property To Its Source
 
 Open the Prefab that owns the selected effective property and obtain its current query basis.

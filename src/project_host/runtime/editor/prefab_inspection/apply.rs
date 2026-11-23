@@ -201,7 +201,7 @@ impl EditorProjectSession {
                 TaskSpawnRequest::new(self.prefab_inspection.sequence, INSPECTION_DOMAIN),
                 move |_| {
                     let inspected = inspect_prefab(
-                        containing.source_input(),
+                        PrefabInspectionInput::Borrowed(containing.source_input()),
                         property.anchor(),
                         &schema,
                         context,

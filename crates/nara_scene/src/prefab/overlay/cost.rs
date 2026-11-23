@@ -125,6 +125,33 @@ impl PrefabOverlayCostLimits {
         }
         Ok(walker.cost)
     }
+
+    #[cfg(feature = "serde")]
+    pub(crate) fn component_edit_delta_cost(
+        self,
+        new_overlay_base: Option<&SourceDocumentKey>,
+        target: &PrefabEntityTarget,
+        component: &ComponentTypeId,
+        record: Option<(&ComponentValue, &str)>,
+    ) -> Result<PrefabOverlayCost, PrefabOverlayCostError> {
+        let mut walker = CostWalker::new(self, None);
+        let overlay_depth = ROOT_DEPTH + 1;
+        let component_depth = overlay_depth + 1;
+        if let Some(base) = new_overlay_base {
+            walker.node(overlay_depth)?;
+            walker.overlay_base(base, overlay_depth)?;
+        }
+        walker.declarations(1)?;
+        walker.component_header(component_depth)?;
+        walker.target(target, component_depth)?;
+        walker.bytes(component.as_str().len())?;
+        if let Some((value, owner)) = record {
+            walker.node(component_depth + 1)?;
+            walker.bytes(6_usize.saturating_add(owner.len()))?;
+            walker.value(value, component_depth + 2)?;
+        }
+        Ok(walker.cost)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,6 +205,16 @@ pub(crate) fn prefab_overlay_cost(
     limits: PrefabOverlayCostLimits,
 ) -> Result<PrefabOverlayCost, PrefabOverlayCostError> {
     CostWalker::new(limits, None).walk(Frame::Overlay(overlay, 1))
+}
+
+#[cfg(feature = "serde")]
+pub(crate) fn prefab_component_intent_cost(
+    intent: &PrefabComponentIntent,
+    limits: PrefabOverlayCostLimits,
+) -> Result<PrefabOverlayCost, PrefabOverlayCostError> {
+    let mut walker = CostWalker::new(limits, None);
+    walker.component(intent, 1)?;
+    Ok(walker.cost)
 }
 
 /// Uses the same raw target accounting for source and overlay placement declarations.

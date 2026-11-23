@@ -159,6 +159,14 @@ Rules:
   transaction and inverse. A same-value inherited write is still an explicit claim. The Host
   checks the resulting selected composition under the original source observation before review
   and revalidates that observation before commit. Raw Revert continues to serve unresolved intent.
+- An effective whole-component edit changes the complete declaration for a component in the
+  selected containing layer. The source owner distinguishes Add, Replace, Suppress and exact
+  Revert, checks the current declaration, and prepares the same instance patch and inverse.
+  Complete Set preserves authored storage and is admitted by the current component Schema.
+  Suppress records absence of the component, and Revert exposes the lower layer. Undo restores
+  the previous declaration, including a property group superseded by a complete edit.
+- `SetPrefabInstance` checks its expected declaration recursively, including authored floating
+  point bits. The inverse retains the declaration actually replaced by the source transaction.
 - Complete instance conversion is a dedicated source-owned preparation, not an arbitrary populated
   record patch. It compiles the actual selected instance, allocates persistent local IDs and lowers
   one exact declaration/record transaction. Its closed replay footprint remains with the same
