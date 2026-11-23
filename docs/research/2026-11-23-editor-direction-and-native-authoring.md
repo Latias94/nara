@@ -81,9 +81,10 @@ and avoids restoring an obsolete value into the document.
 [Blender source trace](#blenders-move-gesture-and-location-field) · [Continuous interaction in Nara](../architecture/adr/0026-editor-command-patch-and-undo-model.md#continuous-interaction-transactions)
 
 1. **Make editing a 2D Scene an ordinary workspace operation.** Start with the designed Hierarchy,
-   Inspector and Scene View. Select an entity, edit its local X in the Inspector, drag it with a
-   gizmo, cancel a drag, then Undo a committed edit and reopen the file. Reuse the source-local
-   Transform tool's existing prepare/commit path. One concrete refactor is already visible.
+   Inspector and Scene View. Select an entity, commit a local X value different from the saved
+   value, then commit a gizmo drag and cancel a second drag. Undo the committed drag and check that
+   the Inspector value remains. Wait for Save to complete, then Reopen and check that same value.
+   Reuse the source-local Transform tool's existing prepare/commit path.
    `dispatch_gesture` accepts Begin on the active trusted UI Prefab path and commits with
    `ApplyPrefabPatch`. A Scene gizmo needs a Scene-owned candidate and the transform for its
    presented view. Share the preview/commit/cancel behavior while preserving both target checks.
@@ -95,10 +96,13 @@ and avoids restoring an obsolete value into the document.
    panel is an unqualified working-tree draft at the research baseline. When editor development
    resumes, finish a writer's task in the product window. Keep the Scene visible, edit a line
    with Chinese IME, change a choice, play that branch, Undo, save and reopen. Closing the graph
-   should leave the Scene usable. That one task distinguishes two views of one graph from two
-   independent documents with correct input and history. It also exposes which controls both
-   tools genuinely share.
+   should leave the Scene usable. While Dialogue is active, accept new presentation receipts for
+   the Scene still bound to its View. Scene geometry picking requires that bound document to be
+   active again and uses the latest displayed receipt. Verify both behaviors in the same workflow.
+   The reference Editor already exercises this distinction with an active Prefab. The Dialogue
+   task also exposes which controls the two tools share.
    [Dialogue workflow](../plans/2026-11-12-dialogue-graph-integration-plan.md#complete-consumer) · [Two-view public consumer](../../tests/fixtures/gpui-engine-consumer/tests/dialogue_document/external_source.rs#L105-L124) · [Recorded native scope](../plans/2026-11-12-dialogue-graph-integration-plan.md#L838-L861)
+   [Reference Editor regression](../../editor/src/platform/imgui/scene.rs#L408)
 3. **Move the working view before building another window system.** Start in one window. Then
    move a view between two differently scaled displays, preserve its document and camera, and
    pick the object that was actually shown after the move. Godot's editor provides a second
@@ -145,10 +149,12 @@ at X = 10 and 20, typing 15 sets both to 15. Dragging by +1 from their original 
 already handles the label, editor, action and status layout at wide and narrow widths.
 [Number Field](https://coss.com/ui/docs/components/number-field) · [Field](https://coss.com/ui/docs/components/field) · [Nara numeric and vector rules](../design/editor-reference/nara-editor-design-spec-v0.4.md#L1242-L1249) · [Row layout](../../crates/nara_ui_widgets/src/property_row.rs#L6-L15)
 
-At the Open-GPUI revision selected by Nara's fixture, `NumberInput` already handles keyboard
-stepping with Up/Down and range endpoints with Home/End. It paints a text value beside two step
-buttons. A native Inspector can build on that behavior and use a text editor and drag target for
-direct entry and scrubbing. [Fixture revision](../../tests/fixtures/gpui-engine-consumer/README.md#L3-L9) · [Keyboard behavior](https://github.com/Latias94/open-gpui/blob/f75c10b2a9bf7b4dcb2c8c2aa446203997601369/crates/ui_components/src/number_input.rs#L238-L270) · [Rendered control](https://github.com/Latias94/open-gpui/blob/f75c10b2a9bf7b4dcb2c8c2aa446203997601369/crates/ui_components/src/number_input.rs#L485-L565)
+At the Open-GPUI revision selected by Nara's fixture, `NumberInput` handles Up/Down stepping and
+Home/End requests for the bounds. It normalizes each request to the step grid. End gives 9 for a
+range of 0 through 10 with step 3, and 10 with step 2. Steps at or below `f32::EPSILON`, such as
+`1e-8`, become 1. A native Inspector can reuse the key assignments and step-button layout. The
+property editor defines its endpoints, steps and numeric precision for direct entry and scrubbing.
+[Fixture revision](../../tests/fixtures/gpui-engine-consumer/README.md#L3-L9) · [Keyboard behavior](https://github.com/Latias94/open-gpui/blob/f75c10b2a9bf7b4dcb2c8c2aa446203997601369/crates/ui_components/src/number_input.rs#L238-L270) · [Step normalization](https://github.com/Latias94/open-gpui/blob/f75c10b2a9bf7b4dcb2c8c2aa446203997601369/crates/ui_components/src/slider.rs#L555-L568)
 
 Two other patterns transfer well. A searchable picker can reuse the Combobox's grouped results
 and empty state. An empty search only describes the query. A missing assigned asset still needs

@@ -163,6 +163,8 @@ use the original semantic panel/native image/presenter/render owners. Its select
 owns source structure, document switching, history and exact persistence qualification. It does
 not claim the remaining Inspector, Browser, Scene/Game, workspace or project-manager matrix.
 
+<a id="frontend-switch-conditions"></a>
+
 Retain the reference until the self-drawn composition covers the agreed complete incumbent
 workflow matrix, native lifetime/input behavior and measured work budgets. Then switch the
 default composition and remove the displaced first-party ImGui implementation and migration-only
@@ -1206,7 +1208,7 @@ The qualification probe and complete migration are separate milestones, and an u
 | Generic construction | Custom component add/remove/Undo/Save/Reopen succeeds in Scene and Prefab without project execution |
 | Ordinary structure | Stable-ID reparent/reorder preserves unavailable semantics; reference-safe subtree Delete and exact Undo/Redo survive Save/Reopen and ordinary Check/Play |
 | Independent render views | Concurrent actual Scene/Game rendering with correct focus, resize and retirement |
-| Qualified replacement | All existing workflows selected for migration and their required native/backend checks pass in the self-drawn Editor |
+| Qualified replacement | The self-drawn Editor meets the [frontend switch conditions](#frontend-switch-conditions) |
 | Controlled scope | No competing history, generic widget IR, dynamic ABI or abandoned production frontend |
 
 ## Risks and Mitigations
