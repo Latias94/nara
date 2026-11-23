@@ -102,8 +102,9 @@ serves direct Record-root discovery.
 
 `EditorAuthoringPropertyStatus::Available` describes a declaration or collection identity.
 Read its selected value separately with `read_document_property`. The value distinguishes
-explicit Null, a declared default and missing source. Set the entry, row, metadata and
-`with_scan_logical_bytes` allowances for the workload. A property page stops before the next
+explicit Null, a declared default and missing source. Start with `EditorAuthoringQueryLimits::default()`
+for the engine's discovery bounds. Set explicit limits when the panel needs smaller pages or a
+tighter work allowance. A property page stops before the next
 child that would exceed its metadata allowance. The result shares the parent path and a Map
 cursor reuses the last returned key. `metadata_bytes` reflects these shared identities once.
 If the first child cannot fit, the query returns `MetadataBudgetExceeded`. A scan can also
@@ -881,22 +882,19 @@ protected by the ordinary preservation check. Preparing a declaration does not r
 qualify nested preview or activate Runtime data. Native snapshot loading requires current Schema
 semantics without silently migrating either comparison side.
 
-For removal of stored override intent, use the source-owned Revert port instead of constructing
-replacement declarations in the tool:
+Use the source-owned Revert port to remove stored override intent.
 
 ```rust,ignore
 let basis = application.document_query_basis(document)?;
 let path = PrefabInstancePath::new(anchor);
 let limits = PrefabDeclarationLimits::default();
 let observation = application.observe_prefab_instance(&basis, &path, limits)?;
-let observed = observation.instance.as_ref()
-    .and_then(|instance| instance.overrides.as_ref())
-    .and_then(|overlay| overlay.components.get(index))
-    .ok_or("The observed component declaration is unavailable")?;
+let revert = observation.revert(0, Some(PrefabOverlaySlot::Component { index }))
+    .ok_or("The observed instance is unavailable")?;
 let prepared = application.prepare_prefab_revert(
     &basis,
-    &observation.path,
-    PrefabRevert::Component { index, observed },
+    observation.path(),
+    revert,
     limits,
 )?;
 preview_changes(prepared.patch(), prepared.inverse());
@@ -906,8 +904,8 @@ let submission = application.commit_authoring_edit(prepared, Duration::ZERO);
 The reader observes source declarations without requiring entity selection, inherited targets or
 successful preview. Nested addition and instance-claim paths refer to indices in this exact
 snapshot. The complete query basis fences source incarnation, revision and Schema admission;
-requery after any change rather than transplanting old indices. Scene/Prefab sessions provide
-the same bounded primitives, with their caller responsible for validating retained Schema basis.
+requery after any change. Scene and Prefab sessions validate the retained observation's revision,
+Schema, and selected instance path before preparing the change.
 
 For property-only review, pass `EditorAuthoringProjection::PrefabPropertyClaims { steps }` to
 `query_document_authoring` with the direct anchor as the query target's `entity`. Reuse the
@@ -927,13 +925,14 @@ forward and inverse edits before committing. A copy refusal for a
 large value leaves its header available for review. These operations observe the saved or dirty
 working declaration in the containing source and do not resolve inherited values.
 
-For a property selected from a complete live overlay observation, borrow the declaration with
-`overlay.property_claim_at(slot)` and use `PrefabRevert::Property(declaration)` with the
-observation's path and basis. The source owner checks that declaration against the current slot.
-For a whole component declaration, pass `PrefabRevert::Component { index, observed }` with
-the component intent from the observation. Use `PrefabRevert::Intent(slot)` for additions,
-instance claims, placements and entity suppressions. A property slot supplied on its own
-returns `scene.authoring-prefab-property-claim-required`.
+Use `observation.revert(instance_index, Some(slot))` for a property or whole component selected
+from a complete instance observation. Index zero selects `observation.path()`. Later indices follow
+`observation.nested_instances()` in order. Use the corresponding path for preparation. Raw overlay
+reads such as `overlay.property_claim_at(slot)` provide display data. A direct borrowed
+`PrefabRevert::Property` requires a declaration from the current Scene or Prefab session.
+For explicit source repair, `PrefabRevert::Intent(slot)` accepts additions, instance claims,
+placements and entity suppressions. A bare property slot returns
+`scene.authoring-prefab-property-claim-required`.
 
 Revert removes only the selected intent and preserves unknown siblings. Removing the last property
 claim removes its empty Properties container but retains the overlay's base pin.
@@ -1183,7 +1182,7 @@ let discovery = EditorAuthoringQuery {
         entity: entity.clone(),
         projection: EditorAuthoringProjection::Components,
     }),
-    limits: EditorAuthoringQueryLimits::new(64, 16, 4096)?,
+    limits: EditorAuthoringQueryLimits::default(),
 };
 let action = EditorAction::QueryDocumentAuthoring(discovery);
 // Consume DocumentAuthoring through the ordinary owned dispatch result or panel callback.

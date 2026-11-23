@@ -2432,6 +2432,13 @@ observable progress. Project Cook admits verified late groups through their sele
 domains. Processed Material publication requires both the codec facet and its resolved plugin.
 The ordinary and scaled source-free Server installations pass Windows process qualification.
 
+The [authored scene membership](../../plans/2026-10-20-persistent-two-level-game-plan.md#authored-scene-membership-in-the-cooked-player)
+and [Server timing follow-up](../../plans/2026-10-31-cooked-player-delivery-plan.md#checkpoint-readiness-and-region-verification-at-the-authored-timestep)
+at `9c1dae0` pass two actual Cook and source-free runs on Windows x64. The Player accepts the
+edited twelve- and twenty-entity Scenes and verifies their member identities. Server checkpoint startup uses
+one exact tick before the live clock. The region verifier uses simulated-time movement bounds
+with actual 240 Hz and 480 Hz packs.
+
 The [processed Server continuation](../../plans/2026-11-13-rust-state-reconstruction-plan.md#processed-server-continuation-successor)
 adds paused capture and clean reconstruction through the original Host. The game checks the exact
 committed Scene Product, catalog, Schema and App configuration. The candidate admits the captured
@@ -4056,6 +4063,14 @@ two closures block. ADRs 0008/0052 adopt explicit activation costs/failure and d
 from progress isolation; no product default changes. Actual Editor failure/refresh/close owners
 and deployment qualification remain open, not replaced by the bounded Image evidence.
 
+The [file-backed activity selection](../task-activity-scope-design.md#file-backed-runtime-activity-selection)
+adds an explicit shared Tasks definition to the existing product slot. Ordinary source and
+processed Runtimes return their own scopes while the caller retains worker ownership. The locked
+consumer passes both sibling workflows. The two Windows DX12 controls observe the original event
+loop return and outer worker join, with a terminal failure when the original activity report is
+unavailable. Definition identity records pool bounds and close policy for actual pack admission.
+Sharing is opt-in and retains the facility's capacity policy.
+
 The [retained authoring replacement qualification](../../knowledge/engineering/verification/2026-10/2026-10-25T172648Z-retained-authoring-replacement-and-physical-retirement-qualification-f93efd28e9324ff4accf45fc3d38311c.md)
 adds a bounded Session-owned predecessor or rejected post-start Runtime, independent retirement
 maintenance and exact file-Host transfer before successor publication. A held predecessor permits
@@ -4262,6 +4277,17 @@ one confirmed P2 multi-row budget proof gap is closed by literal two-row exact/u
 cases for Scene/Prefab, five passing focused tests and an independent targeted follow-up.
 Production sources were unchanged during that review correction. Populated/degraded index
 maintenance costs remain unmeasured. This is not full R2 or prepared panel submission.
+
+The [single parent traversal](../authoring-read-projection-design.md#resolving-a-directory-parent-once)
+resolves the admitted Schema and value during one property directory read. Both live and prepared
+Scene and Prefab views expand the 130th Map within the original bounds. Reflect 286/286 and the
+locked panel consumer 5/5 pass. The existing caps still cover child work and returned metadata.
+
+The [nested Revert correction](../authoring-read-projection-design.md#november-23-nested-revert-identity)
+binds selected declarations to the original live revision and complete instance path. The
+54-case owner cohort and 34-case independent consumer pass. Both Scene and Prefab retain the
+correct sibling when a prepared preview changes the indices of identical declarations. A live
+selection still produces the exact history entry and saved source round trip.
 
 The [prepared-panel qualification](../../knowledge/engineering/verification/2026-10/2026-10-25T024527Z-prepared-panel-complete-review-and-scoped-workflow-qualification-49e27d9779054a5b8fda1142add06519.md)
 records the bounded successor: finite read-only context preparation, complete query-basis

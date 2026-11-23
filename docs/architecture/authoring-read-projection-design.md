@@ -298,11 +298,11 @@ claims. Interpretation of inheritance, defaults, and effective targets stays wit
 composition. Source repair can prepare Revert using the retained live claim address. A
 candidate claim handle remains attached to its candidate. Repeated instances with equal
 declaration indices cannot redirect that address. A consumer with a full stored observation
-can instead supply the borrowed property declaration and current document basis. Scene checks
-the complete declaration in its original slot, including its target route, component and
-version, selector and original Set or Absent intent, before preparing the ordinary transaction.
-The declaration browser uses the same rule when reverting a whole component intent, retaining
-every claim in a property group as part of the observed declaration.
+selects a Revert from the original live `PrefabInstanceObservation`. The selected action retains
+the observation's exact revision, Schema and nested path. Scene checks those facts against the
+current source before accessing the selected slot. A direct borrowed property Revert requires the
+stored declaration from that exact live revision and path. Preview and detached overlay borrows
+remain available for display. Equal values in sibling declarations cannot establish live identity.
 
 Charge each examined component or property claim, then admit aggregate row metadata, the
 page target and the shared claim/continuation path before copying. Stop measuring a header at
@@ -377,6 +377,30 @@ After review migrated the independent component-intent consumer, release run
 `7a4a3095-50f1-4233-9836-73822e925429` passes its 1/1 case. Both source kinds check Cancel,
 outdated preparation, preservation of an unavailable sibling, Undo/Redo and Save/Reopen.
 [Independent panel regressions](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_property_claims.rs)
+
+#### November 23 nested Revert identity
+
+The source owner rejects a generic Revert if the chosen property was borrowed from a preview or
+another instance. A live borrow carries its document revision and must match the original slot
+at the selected path. The retained `PrefabInstanceObservation` can select a property, whole
+component or overlay while preserving the original revision, Schema and complete path. The
+built-in declaration panel prepares from that observation.
+
+Windows x64 release nextest passes 54/54 selected Host, Scene and Tooling tests
+(`fb1b6419-6379-40e9-877a-5056bdca4e60`) and 34/34 tests in the independent consumer
+(`6f275ff1-6758-4a3b-b670-71b761555e05`). Scene checks same-value siblings and a foreign session
+that shares the declaration storage. The independent Scene and Prefab consumers remove the
+first nested instance in a preview. They confirm that using the second instance's equal
+declaration at the old live index changes neither source nor history. The exact live selection
+produces one inverse and survives Undo, Redo, Save and Reopen. The independent run also covers
+existing effective property Set, Absent, Apply, complete component edit and conversion workflows.
+The built-in Prefab Intent and Windows DX12 conversion selection passes 11/11 in
+`be0baaf3-bee8-4889-baa4-8aab4a38cc37`. The first Editor test build exposed four remaining direct
+reads of the observation fields in the fixtures. The passing run uses the observation accessors
+with the same assertions. Scene also builds without default features. Focused correctness
+Clippy and format checks pass.
+[Audit reproduction](../audits/2026-11-23-prefab-authoring-player-and-input-review.md#p2--generic-revert-can-remove-an-identical-declaration-from-the-wrong-parent)
+· [Independent nested Revert](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_property_claims/nested_revert.rs)
 
 #### Effective instance fields
 
@@ -979,6 +1003,35 @@ The independently locked `prepared_authoring` target passes 19/19 in release run
 `e60bdfae-6ca6-4053-980a-57856ec12505`. The registered Scene and Prefab tests each page 4,097
 entries in a non-active document, compute a durable edit and verify the complete result through
 Undo, Redo, Save and Reopen. The same run includes separate Cook and camera work.
+
+### Resolving a directory parent once
+
+The property directory borrows the admitted root and resolves the Schema shape and wire value in
+the same traversal. The selected root's keyed-list index remains available to the walk. Map and
+keyed-list pages charge the actual child entries and their retained metadata after the parent.
+The borrowed location belongs to the original live or prepared read. The page cursor still
+requires the same source and Schema.
+
+`EditorAuthoringQueryLimits::default()` supplies the engine's existing bounds. A panel can request
+the first page or resume with its cursor without computing a separate parent allowance. Explicit
+custom limits remain available for smaller pages or tighter work budgets. A first child above the
+metadata allowance returns the structured refusal. An admitted prefix can continue on another page.
+
+The design applies the reuse rule in [ADR 0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md).
+Bevy Reflect exposes named Struct and keyed Map access, and Godot presents variable-length
+dictionaries in pages. Their APIs separate finding a field from materializing the displayed
+children. [Bevy Struct](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_reflect/src/structs.rs#L50-L55)
+· [Bevy Map](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_reflect/src/map.rs#L53-L58)
+· [Godot dictionary pages](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/inspector/editor_properties_array_dict.cpp#L1589-L1620)
+
+Windows x64 release nextest passes 286/286 in the Reflect library
+(`ebfc5b90-687a-44fe-a0fd-06aefd55108e`) and 5/5 in the independently locked panel consumer
+(`6c375883-9420-471e-94bc-da931aa7bfca`). Both non-active source kinds expand the 130th Map in
+live and prepared views with 132 observed entries. The same run retains the large-key,
+keyed-list and first-child metadata controls. A schema-only directory can now borrow the root
+value during resolution. An unindexed keyed-list lookup can reach the scan limit before a
+terminal unkeyed-list refusal. This evidence measures the selected scan counts.
+[Panel regression](../../tests/fixtures/editor-ui-host-consumer/tests/property_children/late_map.rs)
 
 ### Prepared Edit Property Preview
 

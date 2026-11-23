@@ -565,9 +565,16 @@ prepared-authoring target passes 10/10. The linked qualification records exact r
 corrections and limits. The [metadata-limited discovery successor](../architecture/authoring-read-projection-design.md#metadata-limited-property-discovery)
 retains one shared parent and Map continuation identity and returns a fitting prefix under
 the requested allowance in both live and prepared views. The
+[single parent traversal](../architecture/authoring-read-projection-design.md#resolving-a-directory-parent-once)
+at `aa1f8d9` uses the original admitted Schema and value in the same read. Ordinary panel queries can use
+engine defaults while still charging actual child work. The
 [stored Prefab claim successor](../architecture/authoring-read-projection-design.md#stored-prefab-property-claims)
 provides bounded access to authored override declarations from the same query interface. Selected
-claims retain their exact containing-source address through raw reads and prepared Revert.
+claims retain their exact containing-source address through raw reads and prepared Revert. A
+selection from a retained instance observation also fences the complete nested path. Equal sibling
+declarations cannot transfer edit authority from a prepared view to the live document. See the
+[nested Revert qualification](../architecture/authoring-read-projection-design.md#november-23-nested-revert-identity)
+at `8c51056`.
 The [effective instance field successor](../architecture/authoring-read-projection-design.md#effective-instance-fields)
 uses the selected compiler and the Host's actual dependency evidence. A registered semantic
 panel can inspect a non-active Scene or Prefab, find the controlling authored claim, and Revert
@@ -775,6 +782,14 @@ deployment and whole-Session physical close have their
 [bounded qualification](../knowledge/engineering/verification/2026-10/2026-10-25T213241Z-private-lazy-editor-tasks-and-whole-session-physical-close-qualification-4c62c82789e4449dba02bb60f145760c.md);
 broader activity-scope integration and R4c remain open.
 **Owners:** App/Tasks, executable Host and domains.
+
+The [file-backed activity successor](../architecture/task-activity-scope-design.md#file-backed-runtime-activity-selection)
+at `83e8a62` extends the same custody to ordinary products with explicit shared placement. It pairs the selected
+Tasks definition with an activity return report and keeps the original physical join with the
+outer facility. The independent source/source and source/pack consumers each hold work in one
+Runtime while the sibling advances and submits to the same task domain. Windows DX12 also
+qualifies ordinary Desktop close with the original scope report and refusal when that report is
+removed. Editor's default deployment retains its separately qualified private-lazy policy.
 
 The [I/O substrate study](../research/2026-11-03-io-substrate-and-engine-contracts.md) separates
 crate-backed file/execution mechanisms from Nara's authority, publication and physical-return

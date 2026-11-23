@@ -450,7 +450,7 @@ continuation controls. Sample formatting and the changed links pass.
 
 ### Checkpoint Readiness And Region Verification At The Authored Timestep
 
-A packaged Server with a requested checkpoint slot applies the launch command in one exact
+A fresh packaged Server with a requested checkpoint slot applies the launch command in one exact
 startup tick. A running launch resumes at zero elapsed time, then establishes its live clock
 after initialization. A paused launch retains its paused control boundary. Both return Ready
 with the original command acknowledged.

@@ -580,10 +580,10 @@ The live loop shortens its wake interval at faster time scales and passes measur
 to Runtime. `resume` acknowledges the completed control frame with zero new elapsed time.
 The live loop then waits for the next request or frame deadline, so an immediate `pause` can
 leave an accepted future command pending. The authored fixed-step and debt limits still apply.
-A requested checkpoint slot is configured in an exact startup tick. A running Server starts its
-live clock after initialization. `--paused` or an initially paused profile keeps it paused at
-Ready. The finite `--verify-*` commands drive exact ticks and Scene maintenance under any admitted
-time scale.
+On a fresh launch, the Server configures a requested checkpoint slot in one exact startup tick.
+A running Server starts its live clock after initialization. `--paused` or an initially paused
+profile keeps it paused at Ready. The finite `--verify-*` commands drive exact ticks and Scene
+maintenance under any admitted time scale.
 A malformed complete line receives a rejection. A line that exceeds the byte limit, a truncated
 line at EOF or an unsupported elapsed interval closes the session with an error. The server also
 closes with an error if the bounded reply queue fills. The parent must drain stdout to receive the
