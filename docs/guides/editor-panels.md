@@ -1385,6 +1385,8 @@ Submit `PrepareComponentEdit` with the inspection ID, `EditorPrefabComponentAddr
 
 Use `prefab_inspection_review` to examine the exact declaration change and inverse. Replacing
 or suppressing a component can replace its selected property group, which the inverse preserves.
+Add and Replace capture reference defaults in the containing source's scope. A supplied value
+can shadow a captured default. Clearing that field can reveal the default again.
 Use a property write when the remaining fields should keep inheriting. Submit `Commit` or
 `Cancel` for the same inspection. After `ComponentEdited`, acknowledge the result and inspect
 again to read the current effective component. Undo, Redo and Save use the containing document's
@@ -1398,6 +1400,9 @@ Keep the containing document and the selected dependencies saved. Inspect the oc
 submit `PrepareApply` with the exact property address and destination query basis. Use
 `prefab_apply_review` to inspect the destination edit and containing Revert. Other instances
 that inherit the edited source can observe the new value after Apply.
+
+For a reference to a nested Prefab input, Apply keeps the input selector when the destination
+owns the binding chain and its endpoint. Each occurrence resolves that selector in its own scope.
 
 1. Submit `Commit` and wait for `AwaitingDestinationSave`. Its `apply_destination` names the
    destination working revision. `changed` indicates whether Commit edited that working copy.

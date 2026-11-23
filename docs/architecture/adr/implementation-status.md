@@ -4455,6 +4455,12 @@ covers independent non-active Scene and Prefab workflows and refusal when a newl
 dependency changes after Review. Editing the owning base through complete component Apply and
 preserving distinct nested override layers during outer unpack remain open.
 
+The [contextual defaults and nested Input qualification](../authoring-read-projection-design.md#november-23-contextual-defaults-and-nested-input-apply)
+covers both Scene and Prefab consumers of complete Set and property Apply. Schema admission
+supplies source-dependent defaults to the existing record constructor and patch budget. The
+selected compiler follows actual input bindings and retains the destination-relative Input
+operand when its lexical ownership and resolved endpoint are preserved.
+
 [Exact declaration Revert](../authoring-read-projection-design.md#november-22-exact-declaration-revert)
 requires the observed live property or component intent at its original slot and basis. The
 registered panel and built-in Inspector use the same source transaction. Candidate coordinates

@@ -546,8 +546,13 @@ and revision are both checked before lowering, without retaining a copy of the d
 `PrepareComponentEdit` takes the selected target, component ID, intent and declaration limits.
 Add requires an absent lower-layer record. Replace and Suppress require a lower-layer record,
 including one already hidden by a local Suppress. Set supplies the complete authored value, so
-omitted members and explicit values keep their ordinary Schema semantics. Revert removes the
-exact local declaration and exposes the lower layer again. A complete replacement or suppression
+omitted members and explicit values keep their ordinary Schema semantics. The ordinary record
+constructor captures all contextual defaults. The immutable Schema admission records the field
+positions once. Construction, patch budgeting and candidate verification borrow them from the
+same admission. The patch budget includes the captured default values. Their references resolve
+in the containing source layer, and an explicit field can shadow a default without removing it
+from the declaration. Revert removes the exact local declaration and exposes the lower layer
+again. A complete replacement or suppression
 can supersede a selected property group. Review shows that change and the inverse retains the
 original group. Components declared directly on the containing anchor or on an addition's own
 record remain edits of their respective storage locations.
@@ -582,7 +587,17 @@ destination change can affect other occurrences that inherit the same record.
 Root-bound aliases can select the same component. The compiler identifies the record that
 supplies it and retains the exact stored claim for Revert. An authored entity reference can
 move into the destination only if the traversed instance declarations and endpoint belong to
-its source subtree. The candidate must resolve to the same endpoint in the selected occurrence.
+its source subtree. An Input reference also requires every argument in its binding chain to
+belong to that subtree. The original resolver checks those facts while resolving the reference.
+Apply removes the destination prefix from the original operand and keeps the Input selector.
+The candidate must resolve to the same endpoint in the selected occurrence.
+
+Godot records node paths relative to their property owner, then resolves them after inherited
+nodes have been instantiated. Bevy's named entity references resolve in their own invocation
+scope and can be passed into another scene. A nested Nara Input retains its authored parameter
+name so each instance can resolve it in its own scope. [Godot path storage](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/scene/resources/packed_scene.cpp#L968-L977)
+· [Godot deferred resolution](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/scene/resources/packed_scene.cpp#L673-L693)
+· [Bevy reference scope](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_scene/src/lib.rs#L219-L236)
 
 Use the exact saved containing source for promotion. Any working copies supplying other selected
 inputs must also match their confirmed checkpoints. Pending persistence blocks its own
@@ -815,6 +830,48 @@ The affected Scene, Tooling and Host libraries pass correctness Clippy, and Scen
 default features disabled. Root workspace and independent panel package formatting pass. The
 all-package independent formatter invocation hits Windows error 206, so the changed independent
 package is checked explicitly. Local document links and diff whitespace pass.
+
+##### November 23 contextual defaults and nested input Apply
+
+The [workflow review](../audits/2026-11-23-prefab-authoring-player-and-input-review.md)
+found that complete Add and Replace could omit a Schema default that referred to a local
+entity. It also found that Apply could reject a nested Input whose entire binding chain already
+belonged to the destination. Both corrections use facts from the original owners. The Schema
+admission identifies contextual default fields for ordinary construction and complete Set.
+The existing reference resolver observes lexical ownership as it resolves a selected property.
+The selected original route must enter the actual destination occurrence. All later instance
+declarations, Input arguments and the terminal record must belong to its subtree.
+
+Windows x64 Scene nextest `7cc7dbd3-732e-4d92-a064-6c750b253b1f` passes 46/46 selected cases
+on Rust 1.95.0. It covers ordinary source construction, complete Set and exact history, and
+the inclusive node and byte allowances for the retained declaration. A candidate with an
+altered shadowed default still compiles but fails exact declaration verification. The reference
+control compares two chains that resolve to the same endpoint. The chain that leaves the
+destination's lexical scope remains ineligible for Apply even after returning to that endpoint.
+[Expected declaration and budgets](../../crates/nara_scene/src/prefab/overlay/compile/selected_tests/component_edits.rs) ·
+[Binding chain controls](../../crates/nara_scene/src/prefab/inspection/property_apply/tests.rs)
+
+Independently locked Windows release nextest `91cc22cd-eefe-4c9f-9ab4-acbb4acde4af` passes
+28/28 selected registered-panel cases. The component cases exercise Add and Replace with the
+reference omitted and explicitly stored in non-active Scene and Prefab tabs. They compare
+the exact forward and inverse instance patches, Undo/Redo, Save/Reopen and the sibling's
+inherited reference. The Apply cases Set and Save the containing claim, review both edits,
+Save the destination before Finish and then save the containing Revert. Reloading the saved
+sources resolves the same nested Input to the corresponding entity in each instance. The
+two outer-binding controls refuse before either document changes.
+[Component panel cases](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/component_edit/contextual_defaults.rs) ·
+[Input Apply panel cases](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/apply/nested_input.rs)
+
+Root release nextest `bd067383-66bb-47d5-b9a6-16d9c5f78ae9` passes 34/34 selected cases.
+Host passes 21, Tooling passes 12 and the existing Windows/DX12 complete Prefab conversion
+passes one. The Host cohort includes rejection of a change to a source first read by a complete
+Set candidate between Commit dispatch and publication. The shared native case covers the
+conversion path. The registered panel cases above cover the new component and Input actions.
+[Host source revalidation](../../src/project_host/runtime/editor/prefab_conversion/tests/effective_reference_write.rs) ·
+[Native conversion case](../../editor/src/platform/imgui/authoring_workflow_tests/prefab_conversion.rs)
+
+Correctness Clippy passes for Scene, Tooling and the affected Host library. Scene compiles
+with default features disabled. Root workspace and independent panel package formatting pass.
 
 ## Workspace Contract
 

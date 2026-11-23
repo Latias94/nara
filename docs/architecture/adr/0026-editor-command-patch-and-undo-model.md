@@ -164,7 +164,10 @@ Rules:
 - An effective whole-component edit changes the complete declaration for a component in the
   selected containing layer. The source owner distinguishes Add, Replace, Suppress and exact
   Revert, checks the current declaration, and prepares the same instance patch and inverse.
-  Complete Set preserves authored storage and is admitted by the current component Schema.
+  Complete Set uses the ordinary authored record constructor. The exact Schema admission
+  identifies which defaults need a lexical source scope. Construction and the patch budget use
+  those fields from the same admission. Their values enter the containing layer's scope even
+  when an explicit value shadows them. History retains the explicit values and defaults separately.
   Suppress records absence of the component, and Revert exposes the lower layer. Undo restores
   the previous declaration, including a property group superseded by a complete edit.
 - `SetPrefabInstance` checks its expected declaration recursively, including authored floating

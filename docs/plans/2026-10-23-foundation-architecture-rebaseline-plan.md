@@ -663,11 +663,16 @@ records independent registered-panel workflows and the Scene and Host evidence.
 [Outer unpack with retained nested links](2026-10-27-prefab-conversion-plan.md#retained-nested-links)
 and complete component Apply across sources retain separate design and acceptance requirements.
 
+The [contextual default and nested Input corrections](../architecture/authoring-read-projection-design.md#november-23-contextual-defaults-and-nested-input-apply)
+share the exact Schema admission with ordinary component construction and preserve the full
+stored declaration through Add and Replace. Property Apply now retains a nested Input when
+the original resolver proves that the destination owns its binding chain and endpoint.
+
 The [stored declaration Revert contract](../architecture/authoring-read-projection-design.md#stored-prefab-property-claims)
-requires a live property handle or the complete observed declaration at the live slot.
-Whole-component Revert also checks the observed declaration. The source owner compares
-the actual stored intent before preparing a change, including when a candidate exposes
-a different declaration at numerically equal coordinates.
+requires the original live observation and exact stored declaration. A borrowed property claim
+must originate in the current source allocation and revision. A retained selection from a live
+instance observation also carries its complete nested path. The source owner checks this basis
+before resolving the declared slot for property or whole-component Revert.
 
 The [unchanged field transaction](../architecture/authoring-read-projection-design.md#confirming-an-unchanged-property-edit)
 compares the final stored roots of a validated candidate. Commit returns an accepted unchanged
