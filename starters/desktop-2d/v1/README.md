@@ -111,8 +111,9 @@ Cook and Player agree on Image decoding.
 
 The generated `package.metadata.nara.project-tool-protocol = 1` declares that entry contract. Superseded
 entry/response shapes are unsupported; both the headless entry and CLI use this current contract.
-Project Rust and Cargo code remain trusted native code. Default tooling has no window or graphics
-backend; checking the explicit `desktop` profile builds its desktop feature set.
+Project Rust and Cargo code remain trusted native code. The base Headless profile builds its
+reduced tool. Checking a profile that requests desktop capabilities enables the `desktop` Cargo
+feature, including when you give that profile another name.
 
 After changing persistent component definitions or their contributions, refresh the declared
 data-only schema bundle explicitly, then reopen the project in the Editor:

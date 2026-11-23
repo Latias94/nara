@@ -174,6 +174,27 @@ fn ingest_project_manifest_bytes_with_digest(
     project_root_identity: Option<FileIdentity>,
     manifest_digest: ContentDigest,
 ) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
+    let settings = resolve_manifest_profile(bytes, profile)?;
+    let lineage = project_settings_lineage(
+        manifest_digest,
+        settings.profile_name.as_deref(),
+        project_root_identity,
+    );
+    validate_product_request(settings, lineage, manifest_digest)
+}
+
+#[cfg(feature = "project-tooling")]
+pub(crate) fn read_manifest_profile(
+    manifest: &FileCapability,
+    profile: Option<&str>,
+) -> Result<EffectiveProjectSettings, ProjectCandidateError> {
+    resolve_manifest_profile(&read_manifest_bytes(manifest)?, profile)
+}
+
+fn resolve_manifest_profile(
+    bytes: &[u8],
+    profile: Option<&str>,
+) -> Result<EffectiveProjectSettings, ProjectCandidateError> {
     let load = ProjectManifest::parse_toml_bytes(bytes);
     if load.has_errors() || load.manifest.is_none() {
         return Err(ProjectCandidateError::new(
@@ -185,15 +206,9 @@ fn ingest_project_manifest_bytes_with_digest(
         .manifest
         .expect("a successful project manifest load contains a manifest");
 
-    let settings = manifest
+    manifest
         .resolve_profile(profile)
-        .map_err(project_profile_error)?;
-    let lineage = project_settings_lineage(
-        manifest_digest,
-        settings.profile_name.as_deref(),
-        project_root_identity,
-    );
-    validate_product_request(settings, lineage, manifest_digest)
+        .map_err(project_profile_error)
 }
 
 fn read_manifest_bytes(manifest: &FileCapability) -> Result<Vec<u8>, ProjectCandidateError> {

@@ -60,6 +60,13 @@ pub struct CargoMetadataFacts {
     project_tool_protocol: Option<u64>,
 }
 
+#[cfg(feature = "project-tooling")]
+pub(crate) struct CargoProjectToolPackage {
+    pub(crate) name: String,
+    pub(crate) protocol: Option<u64>,
+    pub(crate) declares_feature: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CargoTargetDeclaration {
     pub(super) selection: CargoBuildSelection,
@@ -85,12 +92,7 @@ impl CargoMetadataFacts {
         // package's node is a workspace observation, not an expected single-build feature set.
         let metadata_features =
             selected_metadata_features(value.get("resolve"), selected.package_id)?;
-        let project_tool_protocol = selected
-            .metadata
-            .get("metadata")
-            .and_then(|metadata| metadata.get("nara"))
-            .and_then(|nara| nara.get("project-tool-protocol"))
-            .and_then(Value::as_u64);
+        let project_tool_protocol = selected.project_tool_protocol();
         Ok(Self {
             declaration,
             package_graph: selected.package_graph,
@@ -114,11 +116,11 @@ impl CargoMetadataFacts {
     }
 
     #[cfg(feature = "project-tooling")]
-    pub(crate) fn package_declares_feature(
+    pub(crate) fn project_tool_package(
         metadata: &[u8],
         expected_package_manifest: &Path,
         feature: &str,
-    ) -> Result<bool, CargoMetadataFactsError> {
+    ) -> Result<CargoProjectToolPackage, CargoMetadataFactsError> {
         let value = metadata_document(metadata, expected_package_manifest)?;
         let package = manifest_owner(&value, expected_package_manifest)?;
         let features = package
@@ -128,7 +130,11 @@ impl CargoMetadataFacts {
             .ok_or(CargoMetadataFactsError::InvalidField {
                 field: "packages[].features",
             })?;
-        Ok(features.contains_key(feature))
+        Ok(CargoProjectToolPackage {
+            protocol: package.project_tool_protocol(),
+            name: package.package.name,
+            declares_feature: features.contains_key(feature),
+        })
     }
 
     pub fn package(&self) -> &CargoPackageGraphFact {
@@ -266,6 +272,14 @@ struct ManifestOwner<'a> {
 }
 
 impl ManifestOwner<'_> {
+    fn project_tool_protocol(&self) -> Option<u64> {
+        self.metadata
+            .get("metadata")
+            .and_then(|metadata| metadata.get("nara"))
+            .and_then(|nara| nara.get("project-tool-protocol"))
+            .and_then(Value::as_u64)
+    }
+
     fn target_declaration(
         &self,
         selection: &CargoBuildSelection,

@@ -322,6 +322,43 @@ Correctness Clippy and workspace formatting pass.
 [Round eleven reproduction](../audits/2026-11-22-starter-input-authoring-and-runtime-review.md#p2--desktop-check-accepts-keyboard-bindings-the-stock-runner-cannot-deliver) ·
 [Input guide](../guides/input-actions.md#desktop-keyboard-bindings)
 
+### Selected Profile Tool Build
+
+The [round twelve reproduction](../audits/2026-11-23-prefab-authoring-player-and-input-review.md#p2--renaming-an-otherwise-identical-desktop-profile-changes-the-check-tool)
+copies the starter's desktop profile to `qa`. Both names select the same effective settings, but
+the CLI used only the original name to enable the Cargo feature. Check, Schema and startup repair
+now use the resolved capability request as a build hint. Cargo remains responsible for the
+declared feature and selected artifact. The compiled project still performs the complete
+operation and publishes its ordinary project diagnostics.
+
+The bootstrap binds its tool package and protocol from the existing declaration-only Cargo
+metadata. Cargo resolves dependencies for the locked build. The tool still requires the exact
+target and its compiler artifact before launch.
+
+Godot selects the registered export platform before assigning each preset its display name.
+Bevy selects Winit and render plugins through compiled Cargo features. Together they illustrate
+the separate responsibilities of a named settings selection and the build that can run it.
+[Godot preset loading](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/export/editor_export.cpp#L303-L318) ·
+[Bevy default plugins](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_internal/src/default_plugins.rs#L38-L44)
+
+The generated v2 workflow uses `qa` for desktop Check, Schema and startup repair. It checks
+the stock adapter's rejection of an unsupported binding and the Headless profile's acceptance
+of that same binding. The Headless profile named `desktop` also checks without the Cargo feature.
+
+The Windows x64 Rust 1.95.0 release run `f20a20ec-6a90-48d8-a0ad-bbaf8540fdca` passes all seven
+selected CLI cases. The real v2 project rejects `é` with the original Action Map path and then
+repairs its `qa` startup choice without changing the base choice. A compile-time guard in the
+generated Headless entry confirms that both Headless Checks omit the Cargo feature. An absent
+profile reaches the compiled Schema tool and reports its ordinary manifest admission error.
+The same run includes the v1 package identity workflow and rejects unsupported protocols before
+launch, while preserving an actual Cargo compiler diagnosis for the supported protocol.
+[Public CLI regression](../../tests/project_workflow_cli.rs)
+
+Run `ff908a66-99e8-495d-9e0a-78e4147d947c` also passes the existing custom-Schema and external-domain
+Check, Repair and source Export workflow. It verifies the Headless and Windows/DX12 Desktop
+acceptance receipts and executes the published Headless binary after removing the source project.
+Correctness Clippy passes for the CLI and its integration target.
+
 ### Starter Cargo package identity
 
 The same creation owner derives `nara-project-<source-universe-uuid>` for the Cargo package in

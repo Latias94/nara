@@ -375,7 +375,7 @@ admitting the request; normal game startup calls the same definition through its
 entry. Keep component and migration registration in the contribution's provider callback. Its
 runtime plugin does not register that provider again.
 
-`nara check`, `nara export`, and `nara repair startup-scene` first discover and build the existing
+`nara check`, `nara schema`, `nara export`, and `nara repair startup-scene` build the existing
 `headless` target. A new project generates its initial lockfile as a separate Cargo authoring
 operation; all subsequent metadata/build commands use `--locked`. Strict checking then runs inside
 that executable with its native schema. Export retains the checked closure, captured executable
@@ -384,10 +384,13 @@ receives bounded display summaries, never reconstructed authority. The [explicit
 guide](cargo-builds.md) covers custom package/bin/profile/target selection independently of this
 starter tool policy and native execution qualification.
 
-Default tools require no window, graphics backend, or editor toolkit. Explicitly checking the
-`desktop` profile builds the matching Cargo feature. Missing or unsupported tool metadata rejects
-an unsupported headless entry before launch, since an entry without tool mode may ignore arguments
-and start gameplay. Both endpoints use canonical protocol 1 with the current response shape;
+For Check, Schema and startup repair, the starter tool build follows the effective profile's
+capabilities. It enables the package's declared `desktop` Cargo feature when the profile requests
+`presentation-2d`, `desktop-winit` or `render-wgpu`. A copy of the desktop profile named `qa`
+uses the same build features with `nara check . --profile qa`. The starter's base Headless profile
+keeps the reduced build. Missing or unsupported tool metadata rejects an unsupported headless
+entry before launch, since an entry without tool mode may ignore arguments and start gameplay.
+Both endpoints use canonical protocol 1 with the current response shape;
 superseded startup-only counts and string-only failures are not supported.
 The declaration is a compatibility contract for trusted Rust and Cargo code, not a sandbox or proof
 that arbitrary project code obeys the entry contract. The generated starter includes this wiring.

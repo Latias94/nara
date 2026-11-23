@@ -11,8 +11,9 @@ use toml::Value;
 use super::{ProjectSlug, ProjectStarter, STARTER_ACTION_MAP_PATH};
 use crate::{
     ProductRecipe,
-    project_workflow::dependency::{
-        NaraDependencyReceipt, NaraDependencySourceKind, validate_git_repository,
+    project_workflow::{
+        STARTER_DESKTOP_CAPABILITIES,
+        dependency::{NaraDependencyReceipt, NaraDependencySourceKind, validate_git_repository},
     },
 };
 
@@ -217,13 +218,8 @@ pub(super) fn validate(
     let desktop = manifest
         .resolve_profile(Some("desktop"))
         .map_err(|_| "generated desktop settings are invalid")?;
-    let expected_headless = ProductCapabilitySet::from_capabilities([ProductCapability::Runtime2d]);
-    let expected_desktop = ProductCapabilitySet::from_capabilities([
-        ProductCapability::Runtime2d,
-        ProductCapability::Presentation2d,
-        ProductCapability::DesktopWinit,
-        ProductCapability::RenderWgpu,
-    ]);
+    let expected_headless = ProductCapabilitySet::singleton(ProductCapability::Runtime2d);
+    let expected_desktop = expected_headless.union(STARTER_DESKTOP_CAPABILITIES);
     let expected_action_map = starter.has_action_map().then_some(STARTER_ACTION_MAP_PATH);
     if manifest.project.name != slug.as_str()
         || manifest.project.source_universe != sources.source_universe

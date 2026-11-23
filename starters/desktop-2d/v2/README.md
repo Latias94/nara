@@ -24,12 +24,12 @@ cargo run --features desktop --bin desktop -- --verify-first-present
 1. Open `input/starter.actions.json`. Find the `move.left` binding with
    `"input": {"Key": {"Character": "a"}}`. Change `"a"` to `"j"`.
 2. Preserve the `action`, `context`, and `transform` fields and the file's `product` identity.
-   Save the file and run `nara check .`.
+   Save the file and run `nara check . --profile desktop`.
 3. Close the game and rerun `cargo run --features desktop --bin desktop`. Hold J to move left.
    Press A on its own to verify that the square stays in place.
 
 To change a gamepad binding, find its `GamepadButton` entry. For example, change the `confirm`
-button code from `0` (South) to `1` (East), then check the project and restart the game. Standard
+button code from `0` (South) to `1` (East), then check the desktop profile and restart the game. Standard
 codes come from `nara::input::GamepadButton::code()`. The `[input]` section of `nara.toml` selects
 this action map for the primary seat. Each new Runtime reads the selected definition at startup.
 Run Cook again to deliver an edited map to a new Player installation.

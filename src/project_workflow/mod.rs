@@ -16,6 +16,12 @@ mod publication;
 mod repair;
 mod starter;
 
+pub(crate) const STARTER_DESKTOP_CAPABILITIES: nara_project::ProductCapabilitySet =
+    nara_project::ProductCapabilitySet::EMPTY
+        .with(nara_project::ProductCapability::Presentation2d)
+        .with(nara_project::ProductCapability::DesktopWinit)
+        .with(nara_project::ProductCapability::RenderWgpu);
+
 pub use crate::project_host::{
     ProjectContentMemberKind, ProjectContentMemberReceipt, StartupContentClosureReceipt,
 };

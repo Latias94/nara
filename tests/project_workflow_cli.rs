@@ -718,6 +718,162 @@ fn compiled_project_check_uses_custom_schema_without_starting_gameplay() {
 }
 
 #[test]
+#[ignore = "builds the generated project's desktop and headless tool variants"]
+fn compiled_project_tools_follow_selected_profile_capabilities() {
+    use nara::{
+        input::{ActionMapBuilder, ActionMapFileCandidate, ActionMapLimits, InputBinding, KeyCode},
+        project::{ProjectManifest, ProjectPath, ProjectProfileOverlay},
+    };
+
+    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let target = checkout.join("target");
+    let sequence = NEXT_TEST_ROOT.fetch_add(1, Ordering::Relaxed);
+    let parent = TestRoot::at(target.join(format!(
+        "nara-project-workflow-cli-profiles-{}-{sequence}",
+        std::process::id()
+    )));
+    let nara = |directory: &Path| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_nara"));
+        command
+            .current_dir(directory)
+            .env("CARGO_TARGET_DIR", &target)
+            .env("CARGO_BUILD_JOBS", "1")
+            .env("CARGO_NET_OFFLINE", "true");
+        command
+    };
+    let created = nara(parent.path())
+        .args(["new", "desktop-2d/v2", "profile-selection", "--parent"])
+        .arg(parent.path())
+        .arg("--local-checkout")
+        .arg(&checkout)
+        .output()
+        .unwrap();
+    assert!(
+        created.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&created.stdout),
+        String::from_utf8_lossy(&created.stderr)
+    );
+
+    let project = parent.path().join("profile-selection");
+    let manifest_path = project.join("nara.toml");
+    let mut manifest = ProjectManifest::parse_toml_bytes(&fs::read(&manifest_path).unwrap())
+        .manifest
+        .unwrap();
+    let desktop = manifest.profiles.remove("desktop").unwrap();
+    manifest.profiles.insert("qa".to_owned(), desktop);
+    manifest
+        .profiles
+        .insert("desktop".to_owned(), ProjectProfileOverlay::default());
+    fs::write(&manifest_path, manifest.to_canonical_toml_bytes().unwrap()).unwrap();
+
+    let run = |args: &[&str]| nara(&project).args(args).output().unwrap();
+    let assert_passed = |args: &[&str], summary: &str| {
+        let output = run(args);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains(summary),
+            "{args:?}\nstdout={stdout}\nstderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    let check_qa = ["check", ".", "--profile", "qa"];
+    assert_passed(&check_qa, "Project check passed");
+    assert_passed(
+        &["schema", ".", "--check", "--profile", "qa"],
+        "The declared authoring schema bundle is current.",
+    );
+    let action_map_path = manifest.input.action_map.as_deref().unwrap();
+    let map_path = project.join(action_map_path);
+    let original_map = fs::read(&map_path).unwrap();
+    let map = ActionMapFileCandidate::decode_json_bytes(&original_map).unwrap();
+    let mut bindings = map.definition().bindings().to_vec();
+    let keyboard = bindings
+        .iter_mut()
+        .find(|binding| binding.input == InputBinding::Key(KeyCode::Character('d')))
+        .expect("the starter must have a keyboard binding for moving right");
+    keyboard.input = InputBinding::Key(KeyCode::Character('é'));
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    for context in map.definition().contexts() {
+        builder
+            .declare_context(context.context.clone(), context.enabled)
+            .unwrap();
+    }
+    for binding in bindings {
+        builder.bind(binding).unwrap();
+    }
+    let unsupported_map = ActionMapFileCandidate::new(map.product(), builder.compile().unwrap())
+        .unwrap()
+        .to_json_string()
+        .unwrap();
+    fs::write(&map_path, &unsupported_map).unwrap();
+    let rejected = run(&check_qa);
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert_eq!(rejected.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains("project.tool.content-rejected:"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("project.content.input-unsupported-keyboard-binding:")
+            && stderr.contains(&format!("\n  at {action_map_path}")),
+        "{stderr}"
+    );
+    fs::write(&map_path, original_map).unwrap();
+
+    let replacement = manifest.startup.default_scene.clone().unwrap();
+    manifest
+        .replace_startup_scene(Some("qa"), ProjectPath::new("missing.scene.json").unwrap())
+        .unwrap();
+    fs::write(&manifest_path, manifest.to_canonical_toml_bytes().unwrap()).unwrap();
+    assert_passed(
+        &[
+            "repair",
+            "startup-scene",
+            ".",
+            "--profile",
+            "qa",
+            "--replacement",
+            &replacement,
+        ],
+        &format!("Repaired startup Scene selection to {replacement}."),
+    );
+    let repaired = ProjectManifest::parse_toml_bytes(&fs::read(&manifest_path).unwrap())
+        .manifest
+        .unwrap();
+    assert_eq!(
+        repaired.profiles["qa"].startup.default_scene.as_deref(),
+        Some(replacement.as_str())
+    );
+    assert_eq!(repaired.startup, manifest.startup);
+    assert_passed(&check_qa, "Project check passed");
+
+    let headless_path = project.join("src/bin/headless.rs");
+    let headless = fs::read_to_string(&headless_path).unwrap();
+    fs::write(
+        headless_path,
+        format!(
+            "{headless}\n#[cfg(feature = \"desktop\")]\n\
+             compile_error!(\"headless Check enabled the desktop Cargo feature\");\n"
+        ),
+    )
+    .unwrap();
+    fs::write(&map_path, unsupported_map).unwrap();
+    assert_passed(
+        &["check", ".", "--profile", "desktop"],
+        "Project check passed",
+    );
+    assert_passed(&["check", "."], "Project check passed");
+    let rejected = run(&["schema", ".", "--check", "--profile", "absent"]);
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert_eq!(rejected.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains("project.tool.schema-manifest-rejected:"),
+        "{stderr}"
+    );
+}
+
+#[test]
 #[ignore = "builds a real legacy headless binary and exercises compiled-tool bootstrap failures"]
 fn legacy_tool_entry_and_failed_bootstrap_never_launch_or_publish() {
     let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -782,11 +938,15 @@ fn legacy_tool_entry_and_failed_bootstrap_never_launch_or_publish() {
     )
     .unwrap();
     let output = invoke();
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("bootstrap build failed"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("bootstrap fixture failure"),
-        "the structured compiler diagnostic must remain actionable"
+        stderr.contains("the selected Cargo compilation failed or its protocol was rejected"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("bootstrap fixture failure"),
+        "the structured compiler diagnostic must remain actionable: {stderr}"
     );
     assert!(!marker.exists());
     assert!(!root.path().join("must-stay-absent").exists());

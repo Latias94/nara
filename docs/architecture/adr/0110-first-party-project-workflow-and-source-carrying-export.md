@@ -97,6 +97,16 @@ types and duplicate artifact selectors. Starter defaults remain explicit adapter
 the closed source Export still selects its two roles, while other trusted callers may select
 custom package/bin/profile/features independently of that starter.
 
+For Check, Schema and startup repair, the starter bootstrap observes the effective settings of
+the selected project profile through the ordinary bounded manifest reader. Requests for
+`presentation-2d`, `desktop-winit` or `render-wgpu` select the package's `desktop` feature when
+Cargo reports that declaration. The bootstrap uses bounded declaration-only metadata to check the
+tool protocol and bind the target. The locked build and selected compiler artifact provide actual
+eligibility and compiled features. Profiles with the same capability requests select the same
+tool features. A read or profile resolution failure leaves the base tool build available so the
+compiled operation can report the project diagnostic. The compiled tool admits the project and
+reports the result of the operation.
+
 The native build result captures exact selected executable bytes, digest/length, actual tool
 observations, requested/resolved features and a finite declared-input revision. Original Cargo
 paths are transient facts, never immutable output authority or persisted public diagnostics.

@@ -4935,6 +4935,11 @@ selected startup Action Map. Source validation names the project member. Process
 names the Input Product and uses the same definition decoded by the selected codec.
 [Stock keyboard admission](../../plans/2026-10-16-0940-feat-first-2d-author-workflow-plan.md#desktop-keyboard-admission)
 
+ADR 0110's [selected profile tool build](../../plans/2026-10-16-0940-feat-first-2d-author-workflow-plan.md#selected-profile-tool-build)
+qualifies capability-based selection through Check, Schema and repair in a generated project, plus
+the original desktop and Headless source Export path. The bootstrap observes Cargo declarations
+and retains the locked build and selected artifact checks.
+
 Rows retain their own last-qualified source and scope. Some older broad decisions remain partial
 or proposed while narrower Accepted ADRs implement particular workflows. Read the relevant Accepted
 refinement before treating an older gap as the current product's behavior. Links are selected

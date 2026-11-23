@@ -660,7 +660,7 @@ exact Revert through the existing instance patch and history. The Host reviews t
 candidate and validates any newly demanded sources before Commit. This is editing of the selected
 containing layer. The [qualification](../architecture/authoring-read-projection-design.md#november-23-whole-component-qualification)
 records independent registered-panel workflows and the Scene and Host evidence.
-[Outer unpack with retained nested links](2026-10-27-prefab-conversion-plan.md#retained-nested-links)
+[Outer unpack with retained nested links](2026-10-27-prefab-conversion-plan.md#outcome-and-scope)
 and complete component Apply across sources retain separate design and acceptance requirements.
 
 The [contextual default and nested Input corrections](../architecture/authoring-read-projection-design.md#november-23-contextual-defaults-and-nested-input-apply)
@@ -5831,6 +5831,10 @@ The [stock keyboard admission](2026-10-16-0940-feat-first-2d-author-workflow-pla
 uses the selected desktop adapter's physical mapping to qualify the startup Action Map. Source
 Check, desktop Cook and processed delivery share that capability rule. Generic and Headless
 consumers retain their own input vocabulary.
+
+The [selected profile tool build](2026-10-16-0940-feat-first-2d-author-workflow-plan.md#selected-profile-tool-build)
+uses requested capabilities to select the generated package's compiled tool. The selected
+project profile and its manifest diagnostics still belong to the compiled operation.
 
 The [Starter Cargo package identity](2026-10-16-0940-feat-first-2d-author-workflow-plan.md#starter-cargo-package-identity)
 binds the generated package to its new source universe. The project slug supplies the directory,

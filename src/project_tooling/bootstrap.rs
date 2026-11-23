@@ -9,7 +9,9 @@ use thiserror::Error;
 use super::cargo_build::{
     CargoBuildFailure, CargoBuildTools, bounded_status_output as bounded_output, parse_host_target,
 };
-use super::{ProjectToolFailure, ProjectToolRequest, ProjectToolSummary, protocol};
+use super::{ProjectToolFailure, ProjectToolRequest, ProjectToolSummary, host_fs, protocol};
+use crate::project_host::read_manifest_profile;
+use crate::project_workflow::STARTER_DESKTOP_CAPABILITIES;
 use crate::project_workflow::cargo::{
     CargoBuildDecoder, CargoBuildInvocation, CargoBuildSelection, CargoCompilerDiagnostic,
     CargoMetadataFacts,
@@ -88,12 +90,9 @@ pub fn invoke_project_tool(
             *parent = fs::canonicalize(&parent).map_err(ProjectToolInvocationError::Resolve)?;
         }
     }
-    let desktop_feature = match &request {
-        ProjectToolRequest::Export { .. } => DesktopToolFeature::IfDeclared,
-        _ if request.profile() == Some("desktop") => DesktopToolFeature::Required,
-        _ => DesktopToolFeature::Disabled,
-    };
-    let executable = build_headless(request.project(), desktop_feature)?;
+    let desktop_if_declared = matches!(request, ProjectToolRequest::Export { .. })
+        || profile_requests_desktop_tool(request.project(), request.profile()).unwrap_or(false);
+    let executable = build_headless(request.project(), desktop_if_declared)?;
     let mut command = Command::new(executable);
     command
         .current_dir(request.project())
@@ -193,15 +192,24 @@ mod completion_tests {
     }
 }
 
-enum DesktopToolFeature {
-    Disabled,
-    Required,
-    IfDeclared,
+/// Observes a build hint. The compiled tool owns the operation and any project diagnostics.
+fn profile_requests_desktop_tool(project: &Path, profile: Option<&str>) -> Option<bool> {
+    let root = host_fs::readable_directory(project).ok()?;
+    let path = crate::fs::RelativePath::new("nara.toml").expect("the manifest path is valid");
+    let manifest = root.open_file(&path).ok()?;
+    let requested = read_manifest_profile(&manifest, profile)
+        .ok()?
+        .requested_capabilities;
+    Some(
+        !requested
+            .intersection(STARTER_DESKTOP_CAPABILITIES)
+            .is_empty(),
+    )
 }
 
 fn build_headless(
     project: &Path,
-    desktop_feature: DesktopToolFeature,
+    desktop_if_declared: bool,
 ) -> Result<PathBuf, ProjectToolInvocationError> {
     let manifest = project.join("Cargo.toml");
     let tools = CargoBuildTools::discover_in(project)?;
@@ -230,62 +238,43 @@ fn build_headless(
         ));
     }
     let host = parse_host_target(&bytes)?;
-    let load_metadata = |arguments: &[&str]| {
-        let mut metadata = Command::new(tools.cargo_path());
-        metadata
-            .current_dir(project)
-            .args([
-                "metadata",
-                "--locked",
-                "--no-default-features",
-                "--format-version",
-                "1",
-                "--manifest-path",
-            ])
-            .arg(&manifest)
-            .arg("--filter-platform")
-            .arg(&host)
-            .args(arguments)
-            .env("RUSTC", tools.rustc_path());
-        let (status, bytes) = bounded_output(&mut metadata, 16 * 1024 * 1024)?;
-        if !status.success() {
-            return Err(ProjectToolInvocationError::Bootstrap(
-                "Cargo could not discover the project's headless tool target".to_owned(),
-            ));
-        }
-        Ok(bytes)
-    };
-    let desktop = match desktop_feature {
-        DesktopToolFeature::Disabled => false,
-        DesktopToolFeature::Required => true,
-        DesktopToolFeature::IfDeclared => {
-            let declarations = load_metadata(&["--no-deps"])?;
-            CargoMetadataFacts::package_declares_feature(&declarations, &manifest, "desktop")
-                .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?
-        }
-    };
-    let bytes = load_metadata(if desktop {
-        &["--features", "desktop"]
-    } else {
-        &[]
-    })?;
-    let package = CargoMetadataFacts::package_name_for_manifest(&bytes, &manifest)
+    let mut metadata = Command::new(tools.cargo_path());
+    metadata
+        .current_dir(project)
+        .args([
+            "metadata",
+            "--locked",
+            "--no-deps",
+            "--no-default-features",
+            "--format-version",
+            "1",
+            "--manifest-path",
+        ])
+        .arg(&manifest)
+        .env("RUSTC", tools.rustc_path());
+    let (status, declarations) = bounded_output(&mut metadata, 16 * 1024 * 1024)?;
+    if !status.success() {
+        return Err(ProjectToolInvocationError::Bootstrap(
+            "Cargo could not discover the project's headless tool target".to_owned(),
+        ));
+    }
+    let package = CargoMetadataFacts::project_tool_package(&declarations, &manifest, "desktop")
         .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
-    // This is the desktop-2D starter's tool policy. The generic Cargo contract neither names
-    // these binaries/features nor derives them from a product profile label.
-    let features: Vec<&str> = if desktop { vec!["desktop"] } else { Vec::new() };
-    let selection = CargoBuildSelection::new(package, "headless", "dev", &host, features, false)
-        .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
-    let facts = CargoMetadataFacts::parse(&bytes, &manifest, &selection)
-        .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
-    if facts.project_tool_protocol() != Some(1) {
+    if package.protocol != Some(1) {
         return Err(ProjectToolInvocationError::Bootstrap(
             "the project does not declare supported package.metadata.nara.project-tool-protocol = 1".to_owned(),
         ));
     }
-    let invocation = facts
-        .build_invocation(selection)
-        .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
+    let desktop = desktop_if_declared && package.declares_feature;
+    // This is the desktop-2D starter's tool policy. The generic Cargo contract neither names
+    // these binaries/features nor derives them from a product profile label.
+    let features: Vec<&str> = if desktop { vec!["desktop"] } else { Vec::new() };
+    let selection =
+        CargoBuildSelection::new(package.name, "headless", "dev", &host, features, false)
+            .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
+    let invocation =
+        CargoBuildInvocation::from_metadata_declarations(&declarations, &manifest, selection)
+            .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
     if !paths_match(
         invocation.source_path(),
         &project.join("src/bin/headless.rs"),

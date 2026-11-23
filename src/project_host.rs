@@ -104,6 +104,8 @@ pub use composition::{
     RuntimePlanError, SchemaValidationInput, compiled_product_capabilities, resolve_product_recipe,
     resolve_runtime_configuration,
 };
+#[cfg(feature = "project-tooling")]
+pub(crate) use ingest::read_manifest_profile;
 pub use ingest::{ProjectCandidateError, ProjectCandidateErrorKind, ingest_project_manifest};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use product_launch::HeadlessProductRun;
