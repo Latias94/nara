@@ -388,9 +388,28 @@ impl ComponentFixture {
                 .unwrap_or_else(|| panic!("the selected mount must expose {route:?}"));
             let occurrence = snapshot.target(target).unwrap();
             let component = ComponentTypeId::new(COMPONENT);
-            assert_eq!(occurrence.component_override(&component), expected_override);
+            let declaration = occurrence.component_override(&component);
+            assert_eq!(declaration.map(|value| value.kind()), expected_override);
+            let expected_underlying = match expected_override {
+                Some(OverrideKind::Replaced | OverrideKind::Suppressed) => {
+                    Some(AuthoringPrefabRecordOrigin::SourceEntity {
+                        source: PrefabDeclarationSource::Prefab(
+                            route.through.last().unwrap().expected_base.clone(),
+                        ),
+                        entity: route.entity.entity().clone(),
+                    })
+                }
+                _ => None,
+            };
             assert_eq!(
-                occurrence.component_overrides().collect::<Vec<_>>(),
+                declaration.and_then(|value| value.underlying_record()),
+                expected_underlying.as_ref(),
+            );
+            assert_eq!(
+                occurrence
+                    .component_overrides()
+                    .map(|(id, value)| (id, value.kind()))
+                    .collect::<Vec<_>>(),
                 expected_override.map(|kind| (&component, kind)).as_slice(),
             );
             let view = occurrence.component(&component);

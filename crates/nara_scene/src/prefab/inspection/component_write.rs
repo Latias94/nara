@@ -144,7 +144,7 @@ impl AuthoringPrefabInstanceSnapshot {
             .ok_or(Error::InvalidComponent)?;
         let underlying = observation.map_or_else(
             || current.map(|record| record.ownership),
-            |entry| entry.underlying,
+            |entry| entry.underlying.as_ref().map(|record| record.ownership),
         );
         if !matches!(&edit, PrefabComponentEdit::Revert)
             && (!self.basis.has_authoring_adapter(component)

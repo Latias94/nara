@@ -112,6 +112,9 @@ root, placement and inline-reference replacement; value relocation alone does no
   separately from value presence. References copied from that observation use typed authored
   endpoints relative to the containing source. The exact containing claim may feed the
   source-owned Revert. Its interpretation is bound to the captured composition and Schema.
+  A selected whole-component declaration also reports the physical record beneath its layer.
+  Root aliases share that record observation, including when Suppress removes the effective
+  value.
   Editing a declared reference leaf stores the authored operand in that containing instance
   layer. The selected compiler must resolve its endpoint and confirm the exact controlling claim
   in the prepared source. Commit revalidates the original dependency observations and any inputs

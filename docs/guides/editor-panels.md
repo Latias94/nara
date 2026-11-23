@@ -1394,6 +1394,10 @@ Use a property write when the remaining fields should keep inheriting. Submit `C
 `Cancel` for the same inspection. After `ComponentEdited`, acknowledge the result and inspect
 again to read the current effective component. Undo, Redo and Save use the containing document's
 ordinary Workspace operations. The base source and sibling instances retain their declarations.
+`component_override` and `component_overrides` return borrowed declarations. Use `kind()` for
+the authored intent and `underlying_record()` for the physical record that supplied the component
+before that intent. The lower record is available when Suppress hides the effective component.
+An Add has no lower record. A bound root's alias reports the same underlying origin.
 [Whole-component override contract](../architecture/authoring-read-projection-design.md#whole-component-overrides)
 
 ## Apply A Prefab Property To Its Source

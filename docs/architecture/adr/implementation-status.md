@@ -4472,6 +4472,12 @@ covers independent non-active Scene and Prefab workflows and refusal when a newl
 dependency changes after Review. Editing the owning base through complete component Apply and
 preserving distinct nested override layers during outer unpack remain open.
 
+The [lower-record observation](../authoring-read-projection-design.md#lower-record-and-mixed-generation-qualification)
+reports the physical source of a component beneath a selected declaration, including Suppress
+and merged root aliases. Scene controls exercise both mixed file generations and the return
+of a nested record after deleting its overriding lower record. The independent panel observes
+actual origins across non-active Scene and Prefab workflows.
+
 The [contextual defaults and nested Input qualification](../authoring-read-projection-design.md#november-23-contextual-defaults-and-nested-input-apply)
 covers both Scene and Prefab consumers of complete Set and property Apply. Schema admission
 supplies source-dependent defaults to the existing record constructor and patch budget. The

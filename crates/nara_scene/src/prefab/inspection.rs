@@ -252,12 +252,12 @@ impl<'a> AuthoringPrefabTargetView<'a> {
     /// Lists the selected layer's declarations, including suppression of absent effective records.
     pub fn component_overrides(
         &self,
-    ) -> impl Iterator<Item = (&'a ComponentTypeId, AuthoringPrefabComponentOverrideKind)> + 'a
+    ) -> impl Iterator<Item = (&'a ComponentTypeId, AuthoringPrefabComponentOverride<'a>)> + 'a
     {
         self.component_overrides.into_iter().flat_map(|overrides| {
-            overrides
-                .iter()
-                .map(|(component, override_)| (component, override_.kind))
+            overrides.iter().map(|(component, declaration)| {
+                (component, AuthoringPrefabComponentOverride { declaration })
+            })
         })
     }
 
@@ -265,10 +265,10 @@ impl<'a> AuthoringPrefabTargetView<'a> {
     pub fn component_override(
         &self,
         component: &ComponentTypeId,
-    ) -> Option<AuthoringPrefabComponentOverrideKind> {
+    ) -> Option<AuthoringPrefabComponentOverride<'a>> {
         self.component_overrides
             .and_then(|overrides| overrides.get(component))
-            .map(|override_| override_.kind)
+            .map(|declaration| AuthoringPrefabComponentOverride { declaration })
     }
 
     pub fn component(
@@ -343,6 +343,28 @@ pub enum AuthoringPrefabComponentOverrideKind {
     Replaced,
     Suppressed,
     Properties,
+}
+
+/// One declaration and the origin of the record beneath its selected instance layer.
+#[derive(Debug, Clone, Copy)]
+pub struct AuthoringPrefabComponentOverride<'a> {
+    declaration: &'a InspectedPrefabComponentOverride,
+}
+
+impl<'a> AuthoringPrefabComponentOverride<'a> {
+    #[must_use]
+    pub const fn kind(self) -> AuthoringPrefabComponentOverrideKind {
+        self.declaration.kind
+    }
+
+    /// Returns the physical source of the record before this declaration was applied.
+    #[must_use]
+    pub fn underlying_record(self) -> Option<&'a AuthoringPrefabRecordOrigin> {
+        self.declaration
+            .underlying
+            .as_ref()
+            .map(|underlying| &underlying.origin)
+    }
 }
 
 /// One claim in the surviving complete record's ordered compiler program.
@@ -688,7 +710,13 @@ pub(crate) struct CapturedPrefabInspection {
 pub(crate) struct InspectedPrefabComponentOverride {
     pub(crate) index: usize,
     pub(crate) kind: AuthoringPrefabComponentOverrideKind,
-    pub(crate) underlying: Option<InspectedComponentOwnership>,
+    pub(crate) underlying: Option<InspectedUnderlyingComponent>,
+}
+
+#[derive(Debug)]
+pub(crate) struct InspectedUnderlyingComponent {
+    pub(crate) origin: AuthoringPrefabRecordOrigin,
+    pub(crate) ownership: InspectedComponentOwnership,
 }
 
 impl AuthoringPrefabComponentOverrideKind {

@@ -725,33 +725,81 @@ with the new presence. The property Apply checkpoint order therefore needs a dif
 publication contract for operations that change presence.
 [Presence checks](../../crates/nara_scene/src/prefab/overlay/compile/staged.rs)
 
-Keep the current presence rules as the baseline for a recoverable two-source operation. Review
-would bind the exact containing declaration and destination storage, retain both candidate
-files, and validate the affected saved composition, including dependents that are closed in
-the Editor. For Replace or Suppress, locate the actual lower record across root-bound aliases.
-For Add, select the destination's writable entity declaration explicitly. Verify the selected
-effective component and the effect of removing the original declaration. Complete stored
-values include omissions, explicit Null, and contextual defaults that are currently shadowed.
-Relocating references also requires the destination to own their traversed sources and Input
-arguments. The selected occurrence must retain its original resolved endpoints.
+`AuthoringPrefabTargetView::component_override` now returns the selected declaration and the
+physical origin of its lower record, including when Suppress makes that record absent from
+the effective view. The compiler retains that location at the point where it applies the
+selected layer. A root binding can merge two facets into one visual entity. Selection of either
+facet reports the same winning lower record, so the caller can distinguish the visible entity
+from the Prefab declaration that would be edited. The view borrows the location from the
+admitted snapshot and preserves the existing bounded query.
+[Selected declaration observation](../../crates/nara_scene/src/prefab/inspection.rs)
 
-Prefab Extraction already supplies authenticated project Pending storage, fixed outputs, and
-recovery that preserves a file already published with the expected bytes. Reuse `SourceInventory`,
-`RecoveryStorageHost`, and `FilePublicationHost` for this comparison. The new operation would
-publish two existing source records under Pending and check the final saved generation before
-Ready. Extraction's topology proof, newly created Prefab and sidecar are specific to extraction.
-The consumer needs interruption after the first source write, source drift refusal, and ordinary
-Reopen and Check or Cook after recovery. The comparison should also cover an unaffected sibling
-that inherits the result and a closed dependent whose conflicting declaration prevents publication.
-[Current recovery transport](../../src/project_host/authoring/recovery_storage.rs) ·
-[Extraction publication evidence](../plans/2026-11-02-prefab-extraction-plan.md)
+Use the same presence rules for the planned component Apply. Scene prepares a pair against the
+original working copies and the common Schema. For Replace and Suppress, locate the physical
+lower record. For Add, require an explicit writable destination facet, and prove both the
+merged lower program and the selected storage slot are empty. An overlay origin identifies its
+instance and slot. A direct record write requires a direct source record.
 
-History remains open. Independent Undo entries can restore a now-conflicting declaration on
-only one side. A visible history checkpoint for the two participants can reuse the current
-project-operation boundary. A paired Undo would need joint validation, branch semantics and
-the same recovery guarantees. Changing persistent presence declarations to converge after base
-changes would also change how existing projects diagnose rebase conflicts and requires its own
-authoring comparison. No complete-component Apply option has been admitted for publication.
+For Add and Replace, move the complete stored record, including its owner, version, omissions,
+explicit Null and contextual defaults. Use a component-specific request in the selected
+compiler to prove the effective and dormant reference routes. Each moved reference retains
+its destination-relative route and the original Input selector. The destination must own the
+traversed declarations, every binding in the argument chain and the endpoint before alias
+merging. Ordinary inspection continues to follow surviving reference demand. Validate the joint
+candidate against the original selected occurrence. Require equal effective values and
+endpoints, the exact new physical contributor, and inheritance of the promoted record without
+a property pin. Suppress requires the selected entity to survive and the component to be absent.
+Removing the correct record can expose a second record through a root binding.
+[Reference demand](../../crates/nara_scene/src/prefab/overlay/compile/staged/reference_program.rs)
+
+Keep this as a concrete Project Host operation using the existing project Pending/Ready
+boundary. Review binds the exact containing declaration and destination, selects their two
+existing files for replacement, and validates the affected saved composition using the captured
+disk sources for the other members. The selected independent consumer includes a sibling that
+inherits the change and a closed dependent whose conflicting declaration prevents confirmation.
+Use `SourceInventory` for physical membership and environment evidence, `RecoveryStorageHost`
+for the authenticated Pending package, and `FilePublicationHost` for each fixed output. After
+both outputs are accepted and the final saved generation is verified, bind both live
+destinations before completing the original project's Ready transition.
+[Source inventory](../../src/project_host/authoring/source_inventory.rs) ·
+[Recovery storage](../../src/project_host/authoring/recovery_storage.rs) ·
+[Extraction publication](../plans/2026-11-02-prefab-extraction-plan.md)
+
+Review explicitly selects a new document-history checkpoint for the replaced sources. Guard
+documents retain their existing history. Independent Undo entries can restore a conflicting
+declaration on only one side. A future paired Undo requires the same joint validation and
+publication guarantees. The new checkpoint uses the existing Scene source-history owner.
+
+The complete acceptance runs Add, Replace and Suppress from preparation through Review and
+reopen. It includes exact declared storage and contextual defaults, a reference with an
+outer-owned argument that happens to resolve to the same endpoint, and an incorrect source
+facet at a bound root. Interrupt actual publication after the first output. Fresh Check and
+Play must refuse the Pending generation. A fresh process uses the authenticated package to
+retain the already-published member's identity and exact bytes, publish the other member,
+and approve Ready. Also exercise a third file state and dependent drift. Ordinary Reopen,
+Check and a later edit with Undo verify the completed generation and history checkpoint.
+
+###### Lower record and mixed-generation qualification
+
+Windows x64 nextest `93040e7f-2fd5-446e-bb66-db37e14bab10` passes 53/53 selected Scene tests
+with Rust 1.95.0. At a bound root, both aliases expose the same lower direct source or
+addition while the selected declaration suppresses it. A second control removes the exact
+lower direct record and its Suppress from the two candidates. The compiler then exposes the
+nested Prefab's record. This makes effective absence a separate acceptance condition from
+identifying the right storage slot.
+
+The original compiler accepts the paired candidate for each intent in a simple direct source.
+The destination-only Add and Suppress candidates fail component composition when the original
+declaration is still present. Destination-only Replace keeps its pin. Publishing only the
+containing edit changes the effective value or presence for all three intents.
+[Selected Scene controls](../../crates/nara_scene/src/prefab/overlay/compile/selected_tests/component_edits.rs)
+
+The independent `prepared_authoring` selection passes 33/33 in
+`44ee4514-0a33-4f12-bac5-281f98d24340`. Registered panels query the declaration and its lower
+record in both non-active Scene and Prefab documents, including nested sources. The cases retain
+their Review, Revert, Undo/Redo, Save and Reopen assertions. Scene correctness Clippy, minimal
+library compilation and root and panel format checks pass.
+[Registered component workflows](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/component_edit.rs)
 
 ##### Effective field verification
 

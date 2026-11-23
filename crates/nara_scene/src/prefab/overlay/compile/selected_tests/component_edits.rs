@@ -1,11 +1,15 @@
+use nara_reflect::ComponentPropertyReadBudget;
+
 use super::*;
 use crate::{
     __private::{
-        AuthoringPrefabComponentEditError as EditError,
+        AuthoringPrefabComponentEditError as EditError, AuthoringPrefabInspectionError,
         try_inspect_authoring_prefab_instance_with_loader,
     },
-    AuthoringDocumentSource, AuthoringPrefabInstanceSnapshot, PrefabComponentEdit,
-    PrefabComponentSetMode, PrefabDeclarationLimits, SceneAuthoringSession, SceneDocumentCandidate,
+    AuthoringDocumentSource, AuthoringPrefabComponentOverrideKind, AuthoringPrefabInstanceSnapshot,
+    AuthoringPrefabPropertyValue, AuthoringPrefabRecordOrigin, PrefabComponentEdit,
+    PrefabComponentSetMode, PrefabDeclarationLimits, PrefabDeclarationSource, PrefabOverlaySlot,
+    SceneAuthoringSession, SceneDocumentCandidate,
 };
 
 fn edit_basis() -> AuthoringSchemaBasis {
@@ -51,6 +55,14 @@ fn inspect(
     basis: &AuthoringSchemaBasis,
     sources: &[(&str, Arc<PrefabDocument>)],
 ) -> AuthoringPrefabInstanceSnapshot {
+    try_inspect(input, basis, sources).unwrap()
+}
+
+fn try_inspect(
+    input: PrefabInspectionInput<'_>,
+    basis: &AuthoringSchemaBasis,
+    sources: &[(&str, Arc<PrefabDocument>)],
+) -> Result<AuthoringPrefabInstanceSnapshot, AuthoringPrefabInspectionError<Infallible>> {
     try_inspect_authoring_prefab_instance_with_loader(
         input,
         &id("mount"),
@@ -68,7 +80,6 @@ fn inspect(
             )))
         },
     )
-    .unwrap()
 }
 
 fn mount_target(entity: PrefabEntityOrigin) -> PrefabEntityTarget {
@@ -156,14 +167,32 @@ fn whole_component_edit_cannot_replace_or_suppress_an_additions_own_record_throu
                 &sources,
             );
             for address in [&addition, &alias] {
-                assert_eq!(
-                    observed
-                        .target(address)
-                        .unwrap()
-                        .component(&component())
-                        .is_err(),
-                    hidden
-                );
+                let target = observed.target(address).unwrap();
+                assert_eq!(target.component(&component()).is_err(), hidden);
+                let declaration = target.component_override(&component());
+                assert_eq!(declaration.is_some(), has_declaration);
+                if let Some(declaration) = declaration {
+                    let origin = declaration.underlying_record().unwrap();
+                    if addition_owns_component {
+                        assert!(matches!(
+                            origin,
+                            AuthoringPrefabRecordOrigin::Overlay {
+                                location,
+                                slot: PrefabOverlaySlot::Addition { index: 0 },
+                            } if location.source() == &PrefabDeclarationSource::Containing
+                                && location.path().anchor == id("mount")
+                                && location.path().steps.is_empty()
+                        ));
+                    } else {
+                        assert_eq!(
+                            origin,
+                            &AuthoringPrefabRecordOrigin::SourceEntity {
+                                source: PrefabDeclarationSource::Prefab(key("leaf")),
+                                entity: id("leaf-root"),
+                            }
+                        );
+                    }
+                }
                 for edit in [
                     if has_declaration {
                         PrefabComponentEdit::Revert
@@ -205,6 +234,242 @@ fn whole_component_edit_cannot_replace_or_suppress_an_additions_own_record_throu
             assert_eq!(session.document(), &original);
             assert_eq!(session.history_usage().records, 0);
         }
+    }
+}
+
+#[test]
+fn component_apply_suppression_can_reveal_another_record_under_a_bound_root() {
+    let basis = edit_basis();
+    let component = component();
+    let mut base_root = SceneEntityRecord::new(id("base-root"))
+        .with_component(component.clone(), owned_record(offset(1.0)));
+    base_root.prefab = Some(PrefabInstance::root(
+        request("leaf"),
+        key("leaf"),
+        PrefabEntityTarget::source(id("leaf-root")),
+    ));
+    let leaf = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("leaf-root"))
+        .with_component(component.clone(), owned_record(offset(3.0)))]);
+    let original_sources = [
+        (
+            "base",
+            Arc::new(PrefabDocument::from_ordered_roots([base_root.clone()])),
+        ),
+        ("leaf", Arc::new(leaf)),
+    ];
+    let mut overlay = PrefabOverlay::new(key("base"));
+    overlay.components.push(PrefabComponentIntent::Suppress {
+        target: PrefabEntityTarget::source(id("base-root")),
+        component: component.clone(),
+    });
+    let containing = SceneDocument::from_ordered_roots([anchor("mount", "base", Some(overlay))]);
+    let session = source_session(&containing, &basis);
+    let working = session.shared_document();
+    let original = inspect(
+        PrefabInspectionInput::WorkingScene(&working, session.revision()),
+        &basis,
+        &original_sources,
+    );
+    let address = mount_target(PrefabEntityOrigin::SourceEntity(id("base-root")));
+    let leaf_address = PrefabEntityTarget {
+        through: address
+            .through
+            .iter()
+            .cloned()
+            .chain([PrefabInstanceHop {
+                anchor: address.entity.clone(),
+                expected_base: key("leaf"),
+            }])
+            .collect(),
+        entity: PrefabEntityOrigin::SourceEntity(id("leaf-root")),
+    };
+    let expected_record = AuthoringPrefabRecordOrigin::SourceEntity {
+        source: PrefabDeclarationSource::Prefab(key("base")),
+        entity: id("base-root"),
+    };
+    for address in [&address, &leaf_address] {
+        let target = original.target(address).unwrap();
+        assert!(target.component(&component).is_err());
+        let suppressed = target.component_override(&component).unwrap();
+        assert_eq!(
+            suppressed.kind(),
+            AuthoringPrefabComponentOverrideKind::Suppressed
+        );
+        assert_eq!(suppressed.underlying_record(), Some(&expected_record));
+    }
+    let revert = original
+        .plan_component_edit(
+            SourceDocumentInput::Scene(&working),
+            &leaf_address,
+            &component,
+            PrefabComponentEdit::Revert,
+            Default::default(),
+        )
+        .unwrap();
+    let cleared = session
+        .prepare_prefab_component_edit(session.revision(), &revert, Default::default())
+        .unwrap();
+    base_root.components.remove(&component).unwrap();
+    let promoted_sources = [
+        (
+            "base",
+            Arc::new(PrefabDocument::from_ordered_roots([base_root])),
+        ),
+        ("leaf", Arc::clone(&original_sources[1].1)),
+    ];
+    let candidate = inspect(
+        PrefabInspectionInput::Borrowed(SourceDocumentInput::Scene(cleared.document())),
+        &basis,
+        &promoted_sources,
+    );
+    let target = candidate.target(&leaf_address).unwrap();
+    assert!(target.component_override(&component).is_none());
+    assert_eq!(
+        target.component(&component).unwrap().fact().record(),
+        &AuthoringPrefabRecordOrigin::SourceEntity {
+            source: PrefabDeclarationSource::Prefab(key("leaf")),
+            entity: id("leaf-root"),
+        }
+    );
+}
+
+#[test]
+fn component_apply_mixed_generations_expose_presence_and_value_conflicts() {
+    let basis = edit_basis();
+    let address = mount_target(PrefabEntityOrigin::SourceEntity(id("base-root")));
+    let component = component();
+    let document_with_component = |stored: Option<f64>| {
+        let mut root = SceneEntityRecord::new(id("base-root"));
+        if let Some(value) = stored {
+            root.components
+                .insert(component.clone(), owned_record(offset(value)));
+        }
+        [("base", Arc::new(PrefabDocument::from_ordered_roots([root])))]
+    };
+    let set = |mode| PrefabComponentIntent::Set {
+        mode,
+        target: PrefabEntityTarget::source(id("base-root")),
+        component: component.clone(),
+        record: owned_record(offset(2.0)),
+    };
+    let inspect_source = |scene: &SceneDocument, sources: &[(&str, Arc<PrefabDocument>)]| {
+        try_inspect(
+            PrefabInspectionInput::Borrowed(SourceDocumentInput::Scene(scene)),
+            &basis,
+            sources,
+        )
+    };
+    let value_at = |snapshot: &AuthoringPrefabInstanceSnapshot| {
+        let target = snapshot.target(&address).unwrap();
+        let Ok(record) = target.component(&component) else {
+            return None;
+        };
+        let observed = record
+            .property_value(
+                &ComponentPropertyPath::new(ComponentFieldId::new("offset")),
+                &mut ComponentPropertyReadBudget::new(
+                    ItemLimit::new(8).unwrap(),
+                    ByteLimit::new(512).unwrap(),
+                ),
+            )
+            .unwrap();
+        let AuthoringPrefabPropertyValue::Present(value) = observed.value else {
+            panic!("the complete record must expose its offset");
+        };
+        Some(value.copy_value(Default::default()).unwrap())
+    };
+    for (kind, intent, original, promoted) in [
+        (
+            AuthoringPrefabComponentOverrideKind::Added,
+            set(PrefabComponentSetMode::Add),
+            None,
+            Some(2.0),
+        ),
+        (
+            AuthoringPrefabComponentOverrideKind::Replaced,
+            set(PrefabComponentSetMode::Replace),
+            Some(1.0),
+            Some(2.0),
+        ),
+        (
+            AuthoringPrefabComponentOverrideKind::Suppressed,
+            PrefabComponentIntent::Suppress {
+                target: PrefabEntityTarget::source(id("base-root")),
+                component: component.clone(),
+            },
+            Some(1.0),
+            None,
+        ),
+    ] {
+        let mut overlay = PrefabOverlay::new(key("base"));
+        overlay.components.push(intent);
+        let containing =
+            SceneDocument::from_ordered_roots([anchor("mount", "base", Some(overlay))]);
+        let session = source_session(&containing, &basis);
+        let original_sources = document_with_component(original);
+        let promoted_sources = document_with_component(promoted);
+        let working = session.shared_document();
+        let inspected = inspect(
+            PrefabInspectionInput::WorkingScene(&working, session.revision()),
+            &basis,
+            &original_sources,
+        );
+        assert_eq!(
+            inspected
+                .target(&address)
+                .unwrap()
+                .component_override(&component)
+                .unwrap()
+                .kind(),
+            kind
+        );
+        assert_eq!(
+            value_at(&inspected),
+            promoted.map(|value| ComponentValue::f64(value).unwrap())
+        );
+        let revert = inspected
+            .plan_component_edit(
+                SourceDocumentInput::Scene(&working),
+                &address,
+                &component,
+                PrefabComponentEdit::Revert,
+                Default::default(),
+            )
+            .unwrap();
+        let cleared = session
+            .prepare_prefab_component_edit(session.revision(), &revert, Default::default())
+            .unwrap();
+
+        let destination_only = inspect_source(&containing, &promoted_sources);
+        if kind == AuthoringPrefabComponentOverrideKind::Replaced {
+            assert_eq!(value_at(&destination_only.unwrap()), value_at(&inspected));
+        } else {
+            assert!(matches!(
+                destination_only,
+                Err(AuthoringPrefabInspectionError::Compilation { failure, .. })
+                    if failure.reason == SceneCompilationFailureKind::Component
+            ));
+        }
+        let containing_only = inspect_source(cleared.document(), &original_sources).unwrap();
+        assert_ne!(value_at(&containing_only), value_at(&inspected));
+        let complete = inspect_source(cleared.document(), &promoted_sources).unwrap();
+        assert_eq!(value_at(&complete), value_at(&inspected));
+        let target = complete.target(&address).unwrap();
+        assert!(target.component_override(&component).is_none());
+        if let Some(value) = promoted {
+            assert_eq!(
+                target.component(&component).unwrap().fact().record(),
+                &AuthoringPrefabRecordOrigin::SourceEntity {
+                    source: PrefabDeclarationSource::Prefab(key("base")),
+                    entity: id("base-root"),
+                },
+                "promoted value {value}"
+            );
+        } else {
+            assert!(target.component(&component).is_err());
+        }
+        assert_eq!(session.document(), &containing);
+        assert_eq!(session.history_usage().records, 0);
     }
 }
 

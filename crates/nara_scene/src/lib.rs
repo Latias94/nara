@@ -128,11 +128,11 @@ pub use placement::{
 pub use prefab::ObservedPrefabRevert;
 #[cfg(feature = "serde")]
 pub use prefab::inspection::{
-    AuthoringPrefabComponentFact, AuthoringPrefabComponentOverrideKind,
-    AuthoringPrefabComponentView, AuthoringPrefabInstanceSnapshot, AuthoringPrefabProperty,
-    AuthoringPrefabPropertyClaim, AuthoringPrefabPropertyClaimKind, AuthoringPrefabPropertyValue,
-    AuthoringPrefabRecordOrigin, AuthoringPrefabTargetView, AuthoringPrefabValue,
-    AuthoringPrefabValueError,
+    AuthoringPrefabComponentFact, AuthoringPrefabComponentOverride,
+    AuthoringPrefabComponentOverrideKind, AuthoringPrefabComponentView,
+    AuthoringPrefabInstanceSnapshot, AuthoringPrefabProperty, AuthoringPrefabPropertyClaim,
+    AuthoringPrefabPropertyClaimKind, AuthoringPrefabPropertyValue, AuthoringPrefabRecordOrigin,
+    AuthoringPrefabTargetView, AuthoringPrefabValue, AuthoringPrefabValueError,
 };
 pub use prefab::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentEdit, PrefabComponentIntent,

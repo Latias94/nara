@@ -672,9 +672,13 @@ containing layer. The [qualification](../architecture/authoring-read-projection-
 records independent registered-panel workflows and the Scene and Host evidence.
 [Outer unpack with retained nested links](2026-10-27-prefab-conversion-plan.md#outcome-and-scope)
 and [complete component Apply across sources](../architecture/authoring-read-projection-design.md#open-design-for-applying-complete-component-declarations)
-retain separate design and acceptance requirements. A destination-first Save can invalidate an
-unconsumed Add or Suppress. Compare recovery under the original project Pending owner and
-explicit history checkpoint semantics before selecting the publication API.
+retain separate design and acceptance requirements. The
+[lower-record observation and mixed-generation proof](../architecture/authoring-read-projection-design.md#lower-record-and-mixed-generation-qualification)
+identifies the physical destination beneath a selected declaration, including a suppressed or
+root-bound record. It also demonstrates that a destination-first Save can invalidate an
+unconsumed Add or Suppress. The planned component Apply uses joint publication under the
+original Project Pending owner and an explicit history checkpoint for its two replacements.
+Candidate construction and the complete recoverable consumer remain open.
 
 The [contextual default and nested Input corrections](../architecture/authoring-read-projection-design.md#november-23-contextual-defaults-and-nested-input-apply)
 share the exact Schema admission with ordinary component construction and preserve the full

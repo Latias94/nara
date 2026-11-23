@@ -7,7 +7,7 @@ use crate::prefab::inspection::{
     AuthoringPrefabComponentFact, AuthoringPrefabComponentOverrideKind,
     AuthoringPrefabPropertyClaim, AuthoringPrefabPropertyClaimKind, AuthoringPrefabRecordOrigin,
     CapturedPrefabInspection, InspectedComponent, InspectedComponentOwnership,
-    InspectedPrefabComponentOverride, InspectedPrefabPropertyApply,
+    InspectedPrefabComponentOverride, InspectedPrefabPropertyApply, InspectedUnderlyingComponent,
 };
 use crate::{
     AuthoringRecordOwnerClaim, AuthoringRecordReadiness, PrefabPropertyClaim, PrefabPropertyIntent,
@@ -92,6 +92,10 @@ where
                 .overlay(selected_scope)
                 .and_then(|overlay| overlay.components.get(index))
                 .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+            let underlying_bytes = match underlying {
+                Some(record) => self.record_origin_bytes(record),
+                None => Some(0),
+            };
             self.retain_inspection(
                 &mut result,
                 provenance_string_bytes(intent.address().1.as_str()).and_then(|bytes| {
@@ -99,9 +103,18 @@ where
                         .checked_add(
                             2 * TREE_ENTRY_BYTES + size_of::<InspectedPrefabComponentOverride>(),
                         )?
-                        .checked_add(provenance_string_bytes(id.as_str())?)
+                        .checked_add(provenance_string_bytes(id.as_str())?)?
+                        .checked_add(underlying_bytes?)
                 }),
             )?;
+            let underlying = underlying
+                .map(|record| {
+                    Ok::<_, SceneCompilationFailure>(InspectedUnderlyingComponent {
+                        origin: self.record_origin(record)?,
+                        ownership: component_ownership(record, selected_scope),
+                    })
+                })
+                .transpose()?;
             let intent = &self.overlay(selected_scope).unwrap().components[index];
             result
                 .component_overrides
@@ -112,8 +125,7 @@ where
                     InspectedPrefabComponentOverride {
                         index,
                         kind: AuthoringPrefabComponentOverrideKind::of(intent),
-                        underlying: underlying
-                            .map(|record| component_ownership(record, selected_scope)),
+                        underlying,
                     },
                 );
         }
