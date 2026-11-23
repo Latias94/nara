@@ -4,6 +4,8 @@
 
 #[path = "property_children/fixture.rs"]
 mod fixture;
+#[path = "property_children/late_map.rs"]
+mod late_map;
 
 use std::{fs, rc::Rc, time::Duration};
 

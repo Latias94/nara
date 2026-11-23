@@ -1,12 +1,15 @@
 use std::{collections::BTreeMap, error::Error, fmt, ops::Bound};
 
 use nara_reflect::{
-    __private::{ComponentPropertyReadIndex, read_admitted_component_property_in_root},
+    __private::{
+        ComponentPropertyReadIndex, read_admitted_component_property_in_root,
+        resolve_admitted_component_property_parent,
+    },
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldPathError,
     ComponentFieldSchema, ComponentMemberPath, ComponentMemberPathSegment, ComponentPropertyError,
     ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyReadBudget,
     ComponentPropertySchemaClaim, ComponentPropertyStep, ComponentSchema, ComponentShapeMember,
-    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
+    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueRef, ComponentValueShape,
     resolve_component_property_schema_in_root,
 };
 
@@ -295,19 +298,6 @@ fn admit_child<'a>(
     }
 }
 
-fn authoring_property_value(value: AuthoringPropertyValue<'_>) -> Option<&ComponentValue> {
-    match value {
-        AuthoringPropertyValue::Present(value) | AuthoringPropertyValue::Defaulted(value)
-            if !matches!(value, ComponentValue::Null) =>
-        {
-            Some(value)
-        }
-        AuthoringPropertyValue::Present(_)
-        | AuthoringPropertyValue::Defaulted(_)
-        | AuthoringPropertyValue::Missing => None,
-    }
-}
-
 fn keyed_list_member<'a>(
     shape: &'a ComponentValueShape,
     key: &ComponentFieldId,
@@ -578,14 +568,24 @@ impl<'a> AuthoringComponentView<'a> {
         limits: AuthoringPropertyChildrenLimits,
     ) -> Result<AuthoringPropertyChildrenPage<'a>, AuthoringReadError> {
         property_children_in_schema(
-            || self.schema().map(|entry| &entry.schema),
+            || {
+                let entry = self.schema()?;
+                let field = property_root(&entry.schema, property)?;
+                let root = self
+                    .root_value(entry, field, property.steps.is_empty())
+                    .map(|(value, index)| {
+                        let value = match value {
+                            AuthoringPropertyValue::Present(value)
+                            | AuthoringPropertyValue::Defaulted(value) => Some(value.into()),
+                            AuthoringPropertyValue::Missing => None,
+                        };
+                        (value, index)
+                    });
+                Ok((field, root))
+            },
             property,
             position,
             limits,
-            |_, budget| {
-                self.property_value(property, budget)
-                    .map(authoring_property_value)
-            },
         )
     }
 
@@ -626,15 +626,22 @@ fn property_root_field<'a>(
     Ok(&fields[index])
 }
 
+type PropertyChildrenRoot<'a> = (
+    &'a ComponentFieldSchema,
+    Result<
+        (
+            Option<ComponentValueRef<'a>>,
+            Option<&'a ComponentPropertyReadIndex>,
+        ),
+        AuthoringReadError,
+    >,
+);
+
 pub(crate) fn property_children_in_schema<'a>(
-    schema: impl FnOnce() -> Result<&'a ComponentSchema, AuthoringReadError>,
+    root: impl FnOnce() -> Result<PropertyChildrenRoot<'a>, AuthoringReadError>,
     property: &ComponentPropertyPath,
     position: AuthoringPropertyChildrenPosition<'_>,
     limits: AuthoringPropertyChildrenLimits,
-    value: impl FnOnce(
-        &'a ComponentFieldSchema,
-        &mut ComponentPropertyReadBudget,
-    ) -> Result<Option<&'a ComponentValue>, AuthoringReadError>,
 ) -> Result<AuthoringPropertyChildrenPage<'a>, AuthoringReadError> {
     let AuthoringPropertyChildrenLimits {
         max_scan_entries,
@@ -651,9 +658,11 @@ pub(crate) fn property_children_in_schema<'a>(
         nara_core::ByteLimit::new(max_scan_logical_bytes)
             .expect("property child logical bytes are positive"),
     );
-    let field = property_root(schema()?, property)?;
-    let claim = resolve_component_property_schema_in_root(field, property, &mut budget)?;
-    let shape = unwrap_authoring_shape(claim.shape, &mut budget)?;
+    let (field, root) = root()?;
+    let (value, index) = root.as_ref().copied().unwrap_or((None, None));
+    let (shape, value) =
+        resolve_admitted_component_property_parent(field, value, property, &mut budget, index)?;
+    let shape = unwrap_authoring_shape(shape, &mut budget)?;
     if matches!(shape, ComponentValueShape::List { .. }) {
         return Err(ComponentPropertyError::UnkeyedList {
             step: property.steps.len(),
@@ -678,7 +687,10 @@ pub(crate) fn property_children_in_schema<'a>(
             ComponentPropertyStep::MapEntry(_) | ComponentPropertyStep::ListItem { .. }
         )
     }) {
-        value(field, &mut budget)?
+        root?;
+        value?
+            .map(|value| value.as_value().ok_or(AuthoringReadError::InvalidFieldPath))
+            .transpose()?
     } else {
         None
     };
@@ -699,7 +711,7 @@ pub(crate) fn property_children_in_schema<'a>(
         (position, _) => position,
     };
     let initial_entries = budget.scanned_entries();
-    let edit_capability = claim.field.has_capability(ComponentCapability::Edit);
+    let edit_capability = field.has_capability(ComponentCapability::Edit);
     let mut remaining_metadata_bytes = max_child_metadata_bytes;
     let mut children = Vec::new();
     let next = match (position, shape) {
@@ -710,7 +722,7 @@ pub(crate) fn property_children_in_schema<'a>(
             },
             ComponentValueShape::Record { members },
         ) => {
-            if next_member > members.len() || next_tombstone > claim.field.member_tombstones.len() {
+            if next_member > members.len() || next_tombstone > field.member_tombstones.len() {
                 return Err(AuthoringReadError::InvalidFieldPath);
             }
             while children.len() < max_rows {
@@ -734,7 +746,7 @@ pub(crate) fn property_children_in_schema<'a>(
                         }),
                         &mut next_member,
                     )
-                } else if let Some(tombstone) = claim.field.member_tombstones.get(next_tombstone) {
+                } else if let Some(tombstone) = field.member_tombstones.get(next_tombstone) {
                     if !admit_child_scan(
                         &mut budget,
                         initial_entries,
@@ -764,7 +776,7 @@ pub(crate) fn property_children_in_schema<'a>(
                 *next_index += 1;
             }
             let has_more =
-                next_member < members.len() || next_tombstone < claim.field.member_tombstones.len();
+                next_member < members.len() || next_tombstone < field.member_tombstones.len();
             has_more.then_some(AuthoringPropertyChildrenPosition::Record {
                 next_member,
                 next_tombstone,

@@ -439,18 +439,32 @@ impl<'a> AuthoringPrefabComponentView<'a> {
         limits: AuthoringPropertyChildrenLimits,
     ) -> Result<AuthoringPropertyChildrenPage<'a>, AuthoringReadError> {
         property_children_in_schema(
-            || self.schema(),
+            || {
+                let field = property_root(self.schema()?, property)?;
+                let root = self
+                    .component
+                    .payload
+                    .as_ref()
+                    .ok_or(AuthoringReadError::NotAdmitted)
+                    .and_then(|record| match record.value().get_path(field.path()) {
+                        Ok(value) => Ok((Some(value), None)),
+                        Err(
+                            error @ (ComponentFieldPathError::MissingField { .. }
+                            | ComponentFieldPathError::IndexOutOfBounds { .. }),
+                        ) => {
+                            if property.steps.is_empty() {
+                                Ok((None, None))
+                            } else {
+                                Err(ComponentPropertyError::ValueUnavailable(error).into())
+                            }
+                        }
+                        Err(_) => Err(AuthoringReadError::InvalidFieldPath),
+                    });
+                Ok((field, root))
+            },
             property,
             position,
             limits,
-            |field, budget| match self.resolve_value(field, property, budget)? {
-                Some(selected) => selected
-                    .value
-                    .as_value()
-                    .map(Some)
-                    .ok_or(AuthoringReadError::InvalidFieldPath),
-                None => Ok(None),
-            },
         )
     }
 

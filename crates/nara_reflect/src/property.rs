@@ -752,8 +752,17 @@ fn resolve_component_property_schema_claim_impl<'schema>(
         path.logical_bytes()?,
     )?;
     let field = resolve_root_field(schema, &path.root, Some(&mut *budget), &mut admission)?;
-    let selected =
-        resolve_root_location(field, None, path, Some(budget), None, admission, None, None)?;
+    let selected = resolve_root_location(
+        field,
+        None,
+        path,
+        Some(budget),
+        None,
+        admission,
+        None,
+        None,
+        None,
+    )?;
     Ok(ComponentPropertySchemaClaim {
         field,
         shape: selected.shape,
@@ -769,7 +778,8 @@ pub fn resolve_component_property_in_root<'schema, 'value>(
     path: &ComponentPropertyPath,
     budget: &mut ComponentPropertyReadBudget,
 ) -> Result<ResolvedComponentProperty<'schema, 'value>, ComponentPropertyError> {
-    let selected = admitted_root_location(field, Some(value.into()), path, budget, false, None)?;
+    let selected =
+        admitted_root_location(field, Some(value.into()), path, budget, false, None, None)?;
     Ok(ResolvedComponentProperty {
         shape: selected.shape,
         value: selected
@@ -791,8 +801,15 @@ pub fn read_admitted_component_property_in_root<'value>(
     index: Option<&ComponentPropertyReadIndex>,
 ) -> Result<(ComponentValueRef<'value>, ComponentFieldPath), ComponentPropertyError> {
     let lists = index.and_then(|index| index.lists(field.id()));
-    let selected =
-        admitted_root_location(field, Some(value), path, budget, capture_read_path, lists)?;
+    let selected = admitted_root_location(
+        field,
+        Some(value),
+        path,
+        budget,
+        capture_read_path,
+        lists,
+        None,
+    )?;
     Ok((
         selected.value.expect("the observed root has a value"),
         selected.storage.unwrap_or_default(),
@@ -810,11 +827,42 @@ pub fn resolve_component_property_schema_in_root<'schema>(
     path: &ComponentPropertyPath,
     budget: &mut ComponentPropertyReadBudget,
 ) -> Result<ComponentPropertySchemaClaim<'schema>, ComponentPropertyError> {
-    let selected = admitted_root_location(field, None, path, budget, false, None)?;
+    let selected = admitted_root_location(field, None, path, budget, false, None, None)?;
     Ok(ComponentPropertySchemaClaim {
         field,
         shape: selected.shape,
     })
+}
+
+/// Resolves an admitted directory parent in one walk. Its declaration can succeed independently
+/// of its value so a Record directory can still show members below an absent optional parent.
+/// The caller pairs the original root and index, then checks value availability when needed.
+#[doc(hidden)]
+pub fn resolve_admitted_component_property_parent<'schema, 'value>(
+    field: &'schema ComponentFieldSchema,
+    value: Option<ComponentValueRef<'value>>,
+    path: &ComponentPropertyPath,
+    budget: &mut ComponentPropertyReadBudget,
+    index: Option<&ComponentPropertyReadIndex>,
+) -> Result<
+    (
+        &'schema ComponentValueShape,
+        Result<Option<ComponentValueRef<'value>>, ComponentPropertyError>,
+    ),
+    ComponentPropertyError,
+> {
+    let lists = index.and_then(|index| index.lists(field.id()));
+    let mut unavailable = None;
+    let selected = admitted_root_location(
+        field,
+        value,
+        path,
+        budget,
+        false,
+        lists,
+        Some(&mut unavailable),
+    )?;
+    Ok((selected.shape, unavailable.map_or(Ok(selected.value), Err)))
 }
 
 fn admitted_root_location<'schema, 'value>(
@@ -824,6 +872,7 @@ fn admitted_root_location<'schema, 'value>(
     budget: &mut ComponentPropertyReadBudget,
     capture_read_path: bool,
     indexed_lists: Option<&KeyedListLocations>,
+    unavailable: Option<&mut Option<ComponentPropertyError>>,
 ) -> Result<PropertyLocation<'schema, 'value>, ComponentPropertyError> {
     path.validate()?;
     if field.id != path.root {
@@ -838,6 +887,7 @@ fn admitted_root_location<'schema, 'value>(
         None,
         None,
         indexed_lists,
+        unavailable,
     )
 }
 
@@ -1023,6 +1073,7 @@ fn resolve_location_with_admission<'schema, 'value, 'path>(
         admission,
         edit,
         None,
+        None,
     )?;
     Ok((
         ResolvedComponentProperty {
@@ -1065,6 +1116,7 @@ fn resolve_root_location<'schema, 'value, 'path>(
     mut admission: Option<&mut PropertyAdmission<'_>>,
     mut edit: Option<&mut PropertyReplacement<'path, '_>>,
     mut indexed_lists: Option<&KeyedListLocations>,
+    mut unavailable: Option<&mut Option<ComponentPropertyError>>,
 ) -> Result<PropertyLocation<'schema, 'value>, ComponentPropertyError> {
     let mut shape = &root.shape;
     let mut depth = 0;
@@ -1073,7 +1125,11 @@ fn resolve_root_location<'schema, 'value, 'path>(
         while let ComponentValueShape::Optional { value } = shape {
             observe_read(&mut budget, &mut admission, 0)?;
             if current.is_some_and(|value| value.kind() == ComponentValueKind::Null) {
-                return Err(ComponentPropertyError::OptionalAbsent { step });
+                defer_value_error(
+                    ComponentPropertyError::OptionalAbsent { step },
+                    &mut unavailable,
+                )?;
+                current = None;
             }
             advance_declaration_depth(&mut depth)?;
             shape = value;
@@ -1155,15 +1211,18 @@ fn resolve_root_location<'schema, 'value, 'path>(
                     id: id.clone(),
                 })?;
                 if let Some(value) = current {
-                    let Some(value) = value.get(&member.name) else {
+                    current = value.get(&member.name);
+                    if current.is_none() {
                         if meter_candidate {
                             admit_property_work(&mut admission, 0, 0, member.name.len())?;
                         }
-                        return Err(ComponentPropertyError::InvalidValue(
-                            ComponentCodecError::missing_field(&member.name),
-                        ));
-                    };
-                    current = Some(value);
+                        defer_value_error(
+                            ComponentPropertyError::InvalidValue(
+                                ComponentCodecError::missing_field(&member.name),
+                            ),
+                            &mut unavailable,
+                        )?;
+                    }
                 }
                 if let Some(storage) = &mut storage {
                     reserve_storage(storage, &mut admission)?;
@@ -1225,43 +1284,42 @@ fn resolve_root_location<'schema, 'value, 'path>(
                 let Some(value) = current else {
                     continue;
                 };
-                let Some(items) = value.as_list() else {
-                    if meter_candidate {
-                        admit_property_work(
+                let selected = (|| {
+                    let Some(items) = value.as_list() else {
+                        if meter_candidate {
+                            admit_property_work(
+                                &mut admission,
+                                0,
+                                0,
+                                "keyed list".len() + "list".len(),
+                            )?;
+                        }
+                        return Err(ComponentPropertyError::InvalidValue(
+                            ComponentCodecError::invalid_field("keyed list", "list"),
+                        ));
+                    };
+                    if let Some(rows) = indexed_lists.and_then(KeyedListLocations::rows) {
+                        observe_read(
+                            &mut budget,
                             &mut admission,
-                            0,
-                            0,
-                            "keyed list".len() + "list".len(),
+                            member.name.len().saturating_add(key.logical_bytes()),
                         )?;
-                    }
-                    return Err(ComponentPropertyError::InvalidValue(
-                        ComponentCodecError::invalid_field("keyed list", "list"),
-                    ));
-                };
-                let indexed = indexed_lists.and_then(KeyedListLocations::rows);
-                let (index, value) = if let Some(rows) = indexed {
-                    observe_read(
-                        &mut budget,
-                        &mut admission,
-                        member.name.len().saturating_add(key.logical_bytes()),
-                    )?;
-                    let index =
-                        *rows
-                            .get(key)
-                            .ok_or_else(|| ComponentPropertyError::ListItemNotFound {
+                        let index = *rows.get(key).ok_or_else(|| {
+                            ComponentPropertyError::ListItemNotFound {
                                 step,
                                 key: key.clone(),
-                            })?;
-                    let value = items
-                        .get(index)
-                        .filter(|value| {
-                            value
-                                .get(&member.name)
-                                .is_some_and(|identity| key.matches(identity))
-                        })
-                        .ok_or(ComponentPropertyError::InvalidListItemKey { step, index })?;
-                    (index, value)
-                } else {
+                            }
+                        })?;
+                        let value = items
+                            .get(index)
+                            .filter(|value| {
+                                value
+                                    .get(&member.name)
+                                    .is_some_and(|identity| key.matches(identity))
+                            })
+                            .ok_or(ComponentPropertyError::InvalidListItemKey { step, index })?;
+                        return Ok((index, value));
+                    }
                     let new_key = match (&edit, &path.steps[step + 1..]) {
                         (Some(edit), []) => {
                             admit_property_work(&mut admission, 1, member.name.len(), 0)?;
@@ -1315,7 +1373,16 @@ fn resolve_root_location<'schema, 'value, 'path>(
                     if let (Some(edit), Some(change)) = (&mut edit, key_change) {
                         edit.key_change = Some(change);
                     }
-                    selected
+                    Ok(selected)
+                })();
+                let (index, value) = match selected {
+                    Ok(selected) => selected,
+                    Err(error @ ComponentPropertyError::ReadBudgetExceeded) => return Err(error),
+                    Err(error) => {
+                        defer_value_error(error, &mut unavailable)?;
+                        current = None;
+                        continue;
+                    }
                 };
                 current = Some(value);
                 indexed_lists = indexed_lists.and_then(|lists| lists.item(index));
@@ -1331,16 +1398,18 @@ fn resolve_root_location<'schema, 'value, 'path>(
                     return Err(ComponentPropertyError::ExpectedMap { step });
                 };
                 observe_read(&mut budget, &mut admission, key.len())?;
-                current = current
-                    .map(|value| {
-                        value
-                            .get(key)
-                            .ok_or_else(|| ComponentPropertyError::MapEntryNotFound {
+                if let Some(value) = current {
+                    current = value.get(key);
+                    if current.is_none() {
+                        defer_value_error(
+                            ComponentPropertyError::MapEntryNotFound {
                                 step,
                                 key: key.clone(),
-                            })
-                    })
-                    .transpose()?;
+                            },
+                            &mut unavailable,
+                        )?;
+                    }
+                }
                 if let Some(storage) = &mut storage {
                     reserve_storage(storage, &mut admission)?;
                     admit_property_work(&mut admission, 0, 0, key.len())?;
@@ -1356,6 +1425,17 @@ fn resolve_root_location<'schema, 'value, 'path>(
         value: current,
         storage: storage.map(ComponentFieldPath::new),
     })
+}
+
+fn defer_value_error(
+    error: ComponentPropertyError,
+    unavailable: &mut Option<&mut Option<ComponentPropertyError>>,
+) -> Result<(), ComponentPropertyError> {
+    let Some(unavailable) = unavailable else {
+        return Err(error);
+    };
+    **unavailable = Some(error);
+    Ok(())
 }
 
 fn advance_declaration_depth(depth: &mut usize) -> Result<(), ComponentPropertyError> {

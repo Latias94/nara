@@ -167,7 +167,7 @@ pub mod __private {
     };
     pub use crate::property::{
         ComponentPropertyAdmissionError, ComponentPropertyReadIndex,
-        read_admitted_component_property_in_root,
+        read_admitted_component_property_in_root, resolve_admitted_component_property_parent,
         resolve_component_property_schema_claim_with_admission,
         resolve_component_property_storage_path_with_admission,
         validate_component_property_value_with_admission,

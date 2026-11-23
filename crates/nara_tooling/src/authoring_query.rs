@@ -38,6 +38,17 @@ pub struct EditorAuthoringQueryLimits {
     max_scan_logical_bytes: usize,
 }
 
+impl Default for EditorAuthoringQueryLimits {
+    fn default() -> Self {
+        Self {
+            max_scan_entries: MAX_EDITOR_AUTHORING_QUERY_ENTRIES,
+            max_rows: MAX_EDITOR_AUTHORING_QUERY_ENTRIES,
+            max_metadata_bytes: MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES,
+            max_scan_logical_bytes: MAX_EDITOR_AUTHORING_QUERY_SCAN_BYTES,
+        }
+    }
+}
+
 impl EditorAuthoringQueryLimits {
     pub fn new(
         max_scan_entries: usize,
