@@ -149,6 +149,16 @@ impl AuthoringSchemaBasis {
             .is_some_and(|entry| entry.adapter.is_some())
     }
 
+    pub(crate) fn component_template<'a>(
+        &'a self,
+        component: &ComponentTypeId,
+        value: &'a ComponentValue,
+    ) -> Option<AuthoringComponentTemplate<'a>> {
+        let entry = self.0.schemas.get(component)?;
+        entry.adapter.as_ref()?;
+        Some(entry.template(value))
+    }
+
     pub(crate) fn has_native_preview_adapter(&self, component: &ComponentTypeId) -> bool {
         self.0
             .schemas
@@ -1606,39 +1616,33 @@ pub(crate) struct AuthoringComponentTemplate<'a> {
     pub(crate) schema: &'a ComponentSchema,
     pub(crate) value: &'a ComponentValue,
     pub(crate) owner: &'a PersistentComponentSchemaOwnerId,
+    pub(crate) contextual_default_fields: &'a [usize],
 }
 
 impl<'a> AuthoringComponentTemplate<'a> {
     pub(crate) fn contextual_defaults(
         self,
-    ) -> impl Iterator<
-        Item = Result<
-            (&'a ComponentFieldId, &'a ComponentValue),
-            nara_reflect::ComponentCodecError,
-        >,
-    > {
-        self.schema.fields().iter().filter_map(|field| {
-            match nara_reflect::__private::component_field_default_requires_context(field) {
-                Ok(true) => field.default_value().map(|value| Ok((field.id(), value))),
-                Ok(false) => None,
-                Err(error) => Some(Err(error)),
-            }
+    ) -> impl ExactSizeIterator<Item = (&'a ComponentFieldId, &'a ComponentValue)> {
+        self.contextual_default_fields.iter().map(move |&index| {
+            let field = &self.schema.fields()[index];
+            let value = field
+                .default_value()
+                .expect("admitted contextual default field has a value");
+            (field.id(), value)
         })
     }
 
-    pub(crate) fn to_record(
-        self,
-    ) -> Result<SceneComponentRecord, nara_reflect::ComponentCodecError> {
+    pub(crate) fn to_record(self) -> SceneComponentRecord {
         // Defaults enter the new record's lexical source scope even when an explicit initial
         // value hides them. Keep the authored value and its absence/Null distinction intact.
         let contextual_defaults = self
             .contextual_defaults()
-            .map(|entry| entry.map(|(field, value)| (field.clone(), value.clone())))
-            .collect::<Result<_, _>>()?;
+            .map(|(field, value)| (field.clone(), value.clone()))
+            .collect();
         let mut record = SceneComponentRecord::new(self.schema.version(), self.value.clone())
             .with_owner(self.owner.clone());
         record.contextual_defaults = contextual_defaults;
-        Ok(record)
+        record
     }
 }
 
@@ -1707,7 +1711,7 @@ impl AuthoringDocumentState {
         component: &ComponentTypeId,
     ) -> Option<SceneComponentRecord> {
         self.initial_component_template(component)
-            .and_then(|template| template.to_record().ok())
+            .map(AuthoringComponentTemplate::to_record)
     }
 
     pub(crate) fn initial_component_template(
@@ -1718,11 +1722,7 @@ impl AuthoringDocumentState {
         if entry.adapter.is_none() || !component_allows_composition(&entry.schema) {
             return None;
         }
-        Some(AuthoringComponentTemplate {
-            schema: &entry.schema,
-            value: entry.schema.authoring_initial_value()?,
-            owner: &entry.owner,
-        })
+        Some(entry.template(entry.schema.authoring_initial_value()?))
     }
     pub(crate) const fn readiness(&self) -> AuthoringDocumentReadiness {
         self.readiness
@@ -1796,6 +1796,18 @@ struct AuthoringSchemaEntry {
     schema: ComponentSchema,
     adapter: Option<AuthoringAdapterEvidence>,
     default_property_reads: Option<Arc<ComponentPropertyReadIndex>>,
+    contextual_default_fields: Vec<usize>,
+}
+
+impl AuthoringSchemaEntry {
+    fn template<'a>(&'a self, value: &'a ComponentValue) -> AuthoringComponentTemplate<'a> {
+        AuthoringComponentTemplate {
+            schema: &self.schema,
+            value,
+            owner: &self.owner,
+            contextual_default_fields: &self.contextual_default_fields,
+        }
+    }
 }
 
 impl SceneDocumentCandidate {
@@ -1879,6 +1891,7 @@ impl AuthoringClassificationBasis {
                         schema: schema.clone(),
                         adapter: None,
                         default_property_reads: None,
+                        contextual_default_fields: Vec::new(),
                     },
                 );
             }
@@ -1944,6 +1957,24 @@ impl AuthoringClassificationBasis {
                 ))
             })?;
             entry.default_property_reads = (!index.is_empty()).then(|| Arc::new(index));
+            if component_allows_composition(&entry.schema) {
+                for (index, field) in entry.schema.fields().iter().enumerate() {
+                    let contextual = nara_reflect::__private::component_field_default_requires_context(field)
+                        .map_err(|error| {
+                            rejection(with_codec_error(
+                                diagnostic_error(
+                                    "scene.authoring-component-value-invalid",
+                                    "Persistent authoring Schema has an invalid contextual default",
+                                ),
+                                &error,
+                                Some(&entry.schema),
+                            ))
+                        })?;
+                    if contextual {
+                        entry.contextual_default_fields.push(index);
+                    }
+                }
+            }
         }
 
         Ok(Self {

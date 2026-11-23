@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    PrefabComponentEdit, PrefabInstanceBinding, SceneComponentRecord, SourceDocumentKind,
+    PrefabComponentEdit, PrefabInstanceBinding, SourceDocumentKind,
     authoring::prepared::stale_basis,
     prefab::{SourceDocumentInput, inspection::ObservedPrefabComponentEdit},
 };
@@ -126,8 +126,12 @@ fn lower_write(
         }
         None
     };
-    let record = match &edit.edit {
-        PrefabComponentEdit::Set { value, .. } => Some((value, edit.owner.as_str())),
+    let set = match &edit.edit {
+        PrefabComponentEdit::Set { mode, value } => Some((
+            *mode,
+            edit.component_template(value)
+                .ok_or(Error::StaleObservedIntent)?,
+        )),
         PrefabComponentEdit::Suppress => None,
         PrefabComponentEdit::Revert => {
             unreachable!("Revert uses the existing declaration transaction")
@@ -139,25 +143,21 @@ fn lower_write(
             overlay.is_none().then_some(&edit.base),
             &edit.target,
             &edit.component,
-            record,
+            set.map(|(_, template)| template),
         )
         .map_err(|_| Error::BudgetExceeded)?;
     budget.charge(cost.nodes, cost.logical_bytes())?;
-    let intent = match &edit.edit {
-        PrefabComponentEdit::Set { mode, value } => PrefabComponentIntent::Set {
-            mode: *mode,
+    let intent = match set {
+        Some((mode, template)) => PrefabComponentIntent::Set {
+            mode,
             target: edit.target.clone(),
             component: edit.component.clone(),
-            record: SceneComponentRecord::new(edit.version, value.clone())
-                .with_owner(edit.owner.clone()),
+            record: template.to_record(),
         },
-        PrefabComponentEdit::Suppress => PrefabComponentIntent::Suppress {
+        None => PrefabComponentIntent::Suppress {
             target: edit.target.clone(),
             component: edit.component.clone(),
         },
-        PrefabComponentEdit::Revert => {
-            unreachable!("Revert uses the existing declaration transaction")
-        }
     };
     if existing.is_some_and(|(_, current)| current.exactly_matches(&intent)) {
         return Err(Error::AlreadyWritten);

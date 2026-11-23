@@ -10,9 +10,14 @@ use nara::{
 };
 use nara_tooling::{EditorPrefabComponentAddress, EditorPrefabComponentEditKind as EditKind};
 
+#[path = "component_edit/contextual_defaults.rs"]
+mod contextual_defaults;
+
 const INHERITED: &str = "base-root";
 const EMPTY: &str = "empty-root";
 const SCHEMA: &str = "schema/authoring.bundle.json";
+const TARGET_FIELD: &str = "target";
+const TARGET_STORAGE: &str = "wire_target";
 
 #[test]
 fn a_registered_panel_edits_whole_prefab_components_on_a_nonactive_scene() {
@@ -72,12 +77,7 @@ fn a_registered_panel_rejects_drift_in_a_prefab_newly_demanded_by_a_component_ed
     let ComponentValue::Map(fields) = &mut addition else {
         unreachable!();
     };
-    fields.insert(
-        "wire_target".into(),
-        ComponentValue::EntityReference(EntityReference::Authored {
-            reference: AuthoredEntityReference::from(route),
-        }),
-    );
+    fields.insert(TARGET_STORAGE.into(), authored_reference(route));
     let edited = with_intents(&mount, [set_intent(SetMode::Add, EMPTY, &addition)]);
     fixture.review(
         inspection,
@@ -261,7 +261,7 @@ struct ComponentFixture {
     initial_frame: std::sync::Arc<EditorFrameModel>,
     original: String,
     right: PrefabInstance,
-    untouched: [(&'static str, String); 4],
+    untouched: Vec<(&'static str, String)>,
 }
 
 impl ComponentFixture {
@@ -271,30 +271,40 @@ impl ComponentFixture {
         mount: &PrefabInstance,
         inherited: &ComponentValue,
     ) -> Self {
-        let project = text_project::TextProject::new();
-        let containing = containing_source(mount, mount);
-        let original = match kind {
-            EditorDocumentKind::Scene => containing.to_json_string(),
-            EditorDocumentKind::Prefab => {
-                PrefabDocument::new(containing.placements, containing.entities).to_json_string()
-            }
-            EditorDocumentKind::Extension(_) => unreachable!(),
-        }
-        .unwrap();
-        let startup = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("active"))]);
         let base = PrefabDocument::from_ordered_roots([
             SceneEntityRecord::new(id(INHERITED))
                 .with_component(ComponentTypeId::new(COMPONENT), component_record(inherited)),
             SceneEntityRecord::new(id(EMPTY)),
         ]);
+        Self::with_sources(
+            kind,
+            source,
+            mount,
+            [
+                (BASE, base.to_json_string().unwrap()),
+                (SCHEMA, component_schema(None).to_json_string().unwrap()),
+            ],
+        )
+    }
+
+    fn with_sources(
+        kind: EditorDocumentKind,
+        source: &str,
+        mount: &PrefabInstance,
+        inputs: impl IntoIterator<Item = (&'static str, String)>,
+    ) -> Self {
+        let project = text_project::TextProject::new();
+        let original = containing_json(kind, mount, mount);
+        let startup = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("active"))]);
         let unrelated =
             PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("unrelated-root"))]);
         let untouched = [
             (STARTUP, startup.to_json_string().unwrap()),
-            (BASE, base.to_json_string().unwrap()),
             (UNRELATED, unrelated.to_json_string().unwrap()),
-            (SCHEMA, component_schema().to_json_string().unwrap()),
-        ];
+        ]
+        .into_iter()
+        .chain(inputs)
+        .collect::<Vec<_>>();
         for (path, contents) in &untouched {
             fs::write(project.root.join(path), contents).unwrap();
         }
@@ -357,13 +367,25 @@ impl ComponentFixture {
         expected_override: Option<OverrideKind>,
         expected_value: Option<&ComponentValue>,
     ) -> (EditorPrefabInspectionId, EditorPrefabComponentAddress) {
+        let route = mounted_target(anchor, &PrefabEntityTarget::source(id(entity)));
+        self.inspect_target(anchor, &route, expected_override, expected_value)
+    }
+
+    fn inspect_target(
+        &mut self,
+        anchor: &str,
+        route: &PrefabEntityTarget,
+        expected_override: Option<OverrideKind>,
+        expected_value: Option<&ComponentValue>,
+    ) -> (EditorPrefabInspectionId, EditorPrefabComponentAddress) {
         let inspection = start(&mut self.panel, &mut self.app, self.document, anchor);
         expect_phase(&mut self.app, inspection, Phase::Ready);
         let address = self.panel.observe(&mut self.app, |context| {
             let snapshot = context.prefab_effective_observation(inspection).unwrap();
-            let mut route = address(anchor, "score").entity;
-            route.entity = PrefabEntityOrigin::SourceEntity(id(entity));
-            let target = snapshot.targets().find(|target| *target == &route).unwrap();
+            let target = snapshot
+                .targets()
+                .find(|target| *target == route)
+                .unwrap_or_else(|| panic!("the selected mount must expose {route:?}"));
             let occurrence = snapshot.target(target).unwrap();
             let component = ComponentTypeId::new(COMPONENT);
             assert_eq!(occurrence.component_override(&component), expected_override);
@@ -568,7 +590,36 @@ impl ComponentFixture {
     }
 }
 
-fn component_schema() -> AuthoringSchemaBundle {
+fn containing_json(
+    kind: EditorDocumentKind,
+    left: &PrefabInstance,
+    right: &PrefabInstance,
+) -> String {
+    let containing = containing_source(left, right);
+    match kind {
+        EditorDocumentKind::Scene => containing.to_json_string(),
+        EditorDocumentKind::Prefab => {
+            PrefabDocument::new(containing.placements, containing.entities).to_json_string()
+        }
+        EditorDocumentKind::Extension(_) => unreachable!(),
+    }
+    .unwrap()
+}
+
+fn mounted_target(anchor: &str, target: &PrefabEntityTarget) -> PrefabEntityTarget {
+    let mut route = address(anchor, TARGET_FIELD).entity;
+    route.through.extend(target.through.iter().cloned());
+    route.entity = target.entity.clone();
+    route
+}
+
+fn authored_reference(target: PrefabEntityTarget) -> ComponentValue {
+    ComponentValue::EntityReference(EntityReference::Authored {
+        reference: AuthoredEntityReference::from(target),
+    })
+}
+
+fn component_schema(target_default: Option<ComponentValue>) -> AuthoringSchemaBundle {
     let bundle = schema();
     let owner = &bundle.owners()[0];
     let mut catalog = owner.current().clone();
@@ -589,14 +640,17 @@ fn component_schema() -> AuthoringSchemaBundle {
             .with_id(ComponentFieldId::new("level"))]),
         )
         .with_capabilities(ComponentCapability::SCENE_AUTHORING),
-        ComponentFieldSchema::optional(
-            ComponentFieldId::new("target"),
-            "Target",
-            ComponentFieldPath::from_fields(["wire_target"]),
-            ComponentValueShape::EntityRef,
-        )
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-        .with_capability(ComponentCapability::EntityRef),
+        ComponentFieldSchema {
+            default_value: target_default,
+            ..ComponentFieldSchema::optional(
+                ComponentFieldId::new(TARGET_FIELD),
+                "Target",
+                ComponentFieldPath::from_fields([TARGET_STORAGE]),
+                ComponentValueShape::EntityRef,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_capability(ComponentCapability::EntityRef)
+        },
     ]);
     AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
         owner.owner_id().clone(),

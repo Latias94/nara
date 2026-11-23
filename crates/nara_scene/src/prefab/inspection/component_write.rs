@@ -1,12 +1,12 @@
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_reflect::{__private::component_values_exactly_match, PersistentComponentSchemaOwnerId};
+use nara_reflect::__private::component_values_exactly_match;
 
 use super::*;
 use crate::{
     PrefabComponentEdit, PrefabComponentSetMode, PrefabDeclarationLimits, PrefabEntityOrigin,
-    PrefabInstance, SceneAuthoringRevision,
+    PrefabInstance, SceneAuthoringRevision, SceneComponentRecord,
     authoring::prefab_anchor_instance,
-    authoring_decode::retained_prefab_target_bytes,
+    authoring_decode::{AuthoringComponentTemplate, retained_prefab_target_bytes},
     prefab::overlay::cost::{
         PrefabOverlayCost, PrefabOverlayCostLimits, prefab_component_intent_cost,
     },
@@ -27,8 +27,6 @@ pub struct ObservedPrefabComponentEdit {
     pub(crate) base: SourceDocumentKey,
     pub(crate) target: PrefabEntityTarget,
     pub(crate) component: ComponentTypeId,
-    pub(crate) version: ComponentSchemaVersion,
-    pub(crate) owner: PersistentComponentSchemaOwnerId,
     pub(crate) edit: PrefabComponentEdit,
     pub(crate) existing: Option<ObservedComponentDeclaration>,
     pub(crate) basis: AuthoringSchemaBasis,
@@ -51,6 +49,13 @@ impl ObservedPrefabComponentEdit {
 
     pub const fn operation(&self) -> &PrefabComponentEdit {
         &self.edit
+    }
+
+    pub(crate) fn component_template<'a>(
+        &'a self,
+        value: &'a ComponentValue,
+    ) -> Option<AuthoringComponentTemplate<'a>> {
+        self.basis.component_template(&self.component, value)
     }
 
     pub(crate) fn matches_working_source(
@@ -76,7 +81,6 @@ impl ObservedPrefabComponentEdit {
             .checked_add(retained_prefab_target_bytes(&self.target)?)?
             .checked_add(retained_prefab_target_bytes(&self.selected)?)?
             .checked_add(provenance_string_bytes(self.component.as_str())?)?
-            .checked_add(provenance_string_bytes(self.owner.as_str())?)?
             .checked_add(self.value_bytes)?
             .checked_add(existing_bytes)
     }
@@ -137,10 +141,6 @@ impl AuthoringPrefabInstanceSnapshot {
         let schema = self
             .basis
             .schema(component)
-            .ok_or(Error::InvalidComponent)?;
-        let owner = self
-            .basis
-            .component_schema_owner(component)
             .ok_or(Error::InvalidComponent)?;
         let underlying = observation.map_or_else(
             || current.map(|record| record.ownership),
@@ -243,8 +243,6 @@ impl AuthoringPrefabInstanceSnapshot {
             base: hop.expected_base.clone(),
             target,
             component: component.clone(),
-            version: schema.version(),
-            owner: owner.clone(),
             edit: edit.clone(),
             existing,
             source: working_source.clone(),
@@ -291,8 +289,11 @@ impl AuthoringPrefabInstanceSnapshot {
                 else {
                     return false;
                 };
-                *mode == *stored_mode && record.version == edit.version && record.owner() == Some(&edit.owner)
-                    && component_values_exactly_match(record.value(), value)
+                let Some(template) = edit.component_template(value) else {
+                    return false;
+                };
+                *mode == *stored_mode
+                    && record_matches_template(record, template)
                     && current.is_some_and(|entry| {
                         entry.fact.readiness().is_available() && matches!(entry.fact.record(),
                             AuthoringPrefabRecordOrigin::Overlay { location, slot: PrefabOverlaySlot::Component { index } }
@@ -311,6 +312,26 @@ impl AuthoringPrefabInstanceSnapshot {
             }
         }
     }
+}
+
+fn record_matches_template(
+    record: &SceneComponentRecord,
+    template: AuthoringComponentTemplate<'_>,
+) -> bool {
+    if record.version != template.schema.version()
+        || record.owner() != Some(template.owner)
+        || !component_values_exactly_match(record.value(), template.value)
+    {
+        return false;
+    }
+    let mut defaults = template.contextual_defaults();
+    record.contextual_defaults.len() == defaults.len()
+        && defaults.all(|(field, expected)| {
+            record
+                .contextual_defaults
+                .get(field)
+                .is_some_and(|value| component_values_exactly_match(value, expected))
+        })
 }
 
 fn instance_at<'a>(

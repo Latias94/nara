@@ -3,13 +3,15 @@
 #[cfg(test)]
 use nara_asset::AssetRef;
 use nara_reflect::{
-    ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep, ComponentTypeId,
-    ComponentValue, ComponentValueCost,
+    ComponentFieldId, ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep,
+    ComponentTypeId, ComponentValue, ComponentValueCost,
 };
 
 use super::{
     PrefabAddition, PrefabComponentIntent, PrefabEntityTarget, PrefabOverlay, PrefabPropertyIntent,
 };
+#[cfg(feature = "serde")]
+use crate::authoring_decode::AuthoringComponentTemplate;
 use crate::patch::{SourceCostObserver, source_cost_progress, with_source_cost_admission};
 use crate::provenance::{CostScratchAdmission, reserve_cost_scratch};
 use crate::{
@@ -126,13 +128,14 @@ impl PrefabOverlayCostLimits {
         Ok(walker.cost)
     }
 
+    /// Accounts for the new intent before its payload or captured defaults are copied.
     #[cfg(feature = "serde")]
     pub(crate) fn component_edit_delta_cost(
         self,
         new_overlay_base: Option<&SourceDocumentKey>,
         target: &PrefabEntityTarget,
         component: &ComponentTypeId,
-        record: Option<(&ComponentValue, &str)>,
+        template: Option<AuthoringComponentTemplate<'_>>,
     ) -> Result<PrefabOverlayCost, PrefabOverlayCostError> {
         let mut walker = CostWalker::new(self, None);
         let overlay_depth = ROOT_DEPTH + 1;
@@ -144,11 +147,19 @@ impl PrefabOverlayCostLimits {
         walker.declarations(1)?;
         walker.component_header(component_depth)?;
         walker.target(target, component_depth)?;
-        walker.bytes(component.as_str().len())?;
-        if let Some((value, owner)) = record {
-            walker.node(component_depth + 1)?;
-            walker.bytes(6_usize.saturating_add(owner.len()))?;
-            walker.value(value, component_depth + 2)?;
+        walker.bytes(
+            component
+                .as_str()
+                .len()
+                .saturating_add(usize::from(template.is_some())),
+        )?;
+        if let Some(template) = template {
+            let record_depth = component_depth + 1;
+            walker.record_value(template.value, template.owner.as_str().len(), record_depth)?;
+            for (field, value) in template.contextual_defaults() {
+                walker.declarations(1)?;
+                walker.contextual_default(field, value, record_depth)?;
+            }
         }
         Ok(walker.cost)
     }
@@ -557,16 +568,35 @@ impl<'a> CostWalker<'a> {
         record: &SceneComponentRecord,
         depth: usize,
     ) -> Result<(), PrefabOverlayCostError> {
-        self.node(depth)?;
-        self.bytes(5_usize.saturating_add(record.owner().map_or(0, |owner| owner.as_str().len())))?;
-        self.value(record.value(), depth.saturating_add(1))?;
+        let owner_bytes = record.owner().map_or(0, |owner| owner.as_str().len());
+        self.record_value(record.value(), owner_bytes, depth)?;
         self.declarations(record.contextual_defaults.len())?;
         for (field, value) in &record.contextual_defaults {
-            self.node(depth.saturating_add(1))?;
-            self.bytes(field.as_str().len())?;
-            self.value(value, depth.saturating_add(2))?;
+            self.contextual_default(field, value, depth)?;
         }
         Ok(())
+    }
+
+    fn record_value(
+        &mut self,
+        value: &ComponentValue,
+        owner_bytes: usize,
+        depth: usize,
+    ) -> Result<(), PrefabOverlayCostError> {
+        self.node(depth)?;
+        self.bytes(5_usize.saturating_add(owner_bytes))?;
+        self.value(value, depth.saturating_add(1))
+    }
+
+    fn contextual_default(
+        &mut self,
+        field: &ComponentFieldId,
+        value: &ComponentValue,
+        record_depth: usize,
+    ) -> Result<(), PrefabOverlayCostError> {
+        self.node(record_depth.saturating_add(1))?;
+        self.bytes(field.as_str().len())?;
+        self.value(value, record_depth.saturating_add(2))
     }
 
     fn value(

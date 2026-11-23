@@ -381,3 +381,133 @@ fn whole_component_edit_checks_value_limits_and_retains_only_compact_value_stora
     assert_eq!(labels.capacity(), labels.len());
     assert!(edit.checked_retained_bytes().unwrap() < 4096);
 }
+
+#[test]
+fn whole_component_edit_admits_the_shadowed_default_in_the_complete_patch_budget() {
+    use crate::{PrefabDeclarationError, ScenePatchOperation, prefab::PrefabOverlayCostLimits};
+
+    let basis = basis();
+    let sources = [(
+        "base",
+        Arc::new(PrefabDocument::from_ordered_roots([
+            SceneEntityRecord::new(id("root")),
+        ])),
+    )];
+    let original = SceneDocument::from_ordered_roots([
+        anchor("mount", "base", None),
+        SceneEntityRecord::new(id("socket")),
+        SceneEntityRecord::new(id("other")),
+    ]);
+    let mut session = source_session(&original, &basis);
+    let revision = session.revision();
+    let history = session.history_status();
+    let shared = session.shared_document();
+    let observed = inspect(
+        PrefabInspectionInput::WorkingScene(&shared, revision),
+        &basis,
+        &sources,
+    );
+    let value = ComponentValue::map([("target", local("other"))]);
+    let plan = observed
+        .plan_component_edit(
+            SourceDocumentInput::Scene(&shared),
+            &mount_target(PrefabEntityOrigin::SourceEntity(id("root"))),
+            &component(),
+            PrefabComponentEdit::Set {
+                mode: PrefabComponentSetMode::Add,
+                value: value.clone(),
+            },
+            Default::default(),
+        )
+        .unwrap();
+
+    let original_instance = original.entities[0].prefab.as_ref().unwrap();
+    let mut overlay = PrefabOverlay::new(key("base"));
+    overlay.components.push(PrefabComponentIntent::Set {
+        mode: PrefabComponentSetMode::Add,
+        target: PrefabEntityTarget::source(id("root")),
+        component: component(),
+        record: record(value),
+    });
+    let mut next_instance = original_instance.clone();
+    next_instance.overrides = Some(overlay);
+    let raw_cost = |instance| {
+        crate::prefab::prefab_instance_cost(instance, PrefabOverlayCostLimits::UNBOUNDED).unwrap()
+    };
+    let previous = raw_cost(original_instance);
+    let next = raw_cost(&next_instance);
+    let nodes = 1 + previous.nodes + next.nodes;
+    let bytes = "mount".len() + previous.logical_bytes() + next.logical_bytes();
+    for (nodes, bytes, depth) in [
+        (nodes - 1, bytes, next.depth),
+        (nodes, bytes - 1, next.depth),
+        (nodes, bytes, next.depth - 1),
+    ] {
+        let report = session
+            .prepare_prefab_component_edit(
+                revision,
+                &plan,
+                PrefabDeclarationLimits::new(nodes, bytes, depth).unwrap(),
+            )
+            .unwrap_err();
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == PrefabDeclarationError::BudgetExceeded.diagnostic_code()
+        }));
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.history_status(), history);
+        assert_eq!(session.document(), &original);
+    }
+
+    let prepared = session
+        .prepare_prefab_component_edit(
+            revision,
+            &plan,
+            PrefabDeclarationLimits::new(nodes, bytes, next.depth).unwrap(),
+        )
+        .unwrap();
+    let forward = ScenePatchOperation::SetPrefabInstance {
+        entity: id("mount"),
+        expected: Some(original_instance.clone()),
+        value: Some(next_instance.clone()),
+    };
+    let inverse = ScenePatchOperation::SetPrefabInstance {
+        entity: id("mount"),
+        expected: Some(next_instance.clone()),
+        value: Some(original_instance.clone()),
+    };
+    assert_eq!(prepared.patch().operations.as_slice(), &[forward]);
+    assert_eq!(prepared.inverse().operations.as_slice(), &[inverse]);
+    let source = SourceDocumentInput::Scene(prepared.document());
+    assert!(
+        inspect(PrefabInspectionInput::Borrowed(source), &basis, &sources)
+            .verifies_component_edit(source, &plan)
+    );
+    let mut different_default = prepared.document().clone();
+    let intents = &mut different_default.entities[0]
+        .prefab
+        .as_mut()
+        .unwrap()
+        .overrides
+        .as_mut()
+        .unwrap()
+        .components;
+    let [PrefabComponentIntent::Set { record, .. }] = intents.as_mut_slice() else {
+        panic!("complete Set expected")
+    };
+    record
+        .contextual_defaults
+        .insert(ComponentFieldId::new("target"), local("other"));
+    let source = SourceDocumentInput::Scene(&different_default);
+    assert!(
+        !inspect(PrefabInspectionInput::Borrowed(source), &basis, &sources)
+            .verifies_component_edit(source, &plan)
+    );
+    let mut expected = original.clone();
+    expected.entities[0].prefab = Some(next_instance);
+    assert!(session.commit_authoring_edit(prepared).applied);
+    assert_eq!(session.document(), &expected);
+    assert!(session.undo_authoring().applied);
+    assert_eq!(session.document(), &original);
+    assert!(session.redo_authoring().applied);
+    assert_eq!(session.document(), &expected);
+}

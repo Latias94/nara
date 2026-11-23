@@ -591,7 +591,7 @@ fn lower(
         patch.operations.push(ScenePatchOperation::AddComponent {
             entity,
             component,
-            value: template.to_record().map_err(|_| rejected())?,
+            value: template.to_record(),
         });
     }
     patch.operations.extend(fields.operations);
@@ -644,13 +644,12 @@ fn admit_template_payloads<'a>(
             .and_then(|bytes| bytes.checked_add(template.schema.id().as_str().len()))
             .and_then(|bytes| bytes.checked_add(template.owner.as_str().len()))
             .ok_or_else(refused)?;
-        let values = std::iter::once(Ok((None, template.value))).chain(
+        let values = std::iter::once((None, template.value)).chain(
             template
                 .contextual_defaults()
-                .map(|entry| entry.map(|(field, value)| (Some(field), value))),
+                .map(|(field, value)| (Some(field), value)),
         );
-        for entry in values {
-            let (field, value) = entry.map_err(|_| rejected())?;
+        for (field, value) in values {
             if let Some(field) = field {
                 // ScenePatchCost::add_patch_record_cost counts each retained contextual
                 // declaration in operation_count, independently of its payload nodes.
@@ -767,6 +766,7 @@ mod tests {
             schema: &schema,
             value: &value,
             owner: &owner,
+            contextual_default_fields: &[],
         };
         let copies = [(&entity, template); 2];
         // Each record retains its entity/component/owner locators plus four payload bytes.
