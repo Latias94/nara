@@ -1404,8 +1404,12 @@ submit `PrepareApply` with the exact property address and destination query basi
 `prefab_apply_review` to inspect the destination edit and containing Revert. Other instances
 that inherit the edited source can observe the new value after Apply.
 
-For a reference to a nested Prefab input, Apply keeps the input selector when the destination
-owns the binding chain and its endpoint. Each occurrence resolves that selector in its own scope.
+Apply can promote a Set on a complete Record, Map, List or keyed-list item. Every authored
+reference inside the value must be portable to the destination Prefab. Apply preserves the
+collection's keys and values and makes the reference routes relative to that Prefab. A nested
+Input keeps its selector when the destination owns its binding chain and endpoint. Each
+occurrence resolves that selector in its own scope. A reference to a sibling occurrence in the
+containing document prevents promotion of the whole claim.
 
 1. Submit `Commit` and wait for `AwaitingDestinationSave`. Its `apply_destination` names the
    destination working revision. `changed` indicates whether Commit edited that working copy.

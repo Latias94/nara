@@ -661,6 +661,59 @@ document-scoped editing and persistence.
 [Godot scene Save](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/editor_node.cpp#L2540-L2610) ·
 [Bevy scene application](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_scene/src/scene_patch.rs#L69-L110)
 
+###### Structured property promotion
+
+An exact Set claim can promote a complete admitted Record, Map, List or keyed-list item through
+the same Apply operation. The selected compiler joins all scoped reference results for the exact
+claim. Every route and argument chain must belong to the destination. A single failure rejects
+the claim even when it currently resolves to the same entity. The existing value copy visits
+references in the admitted value without building a storage path per leaf. It preserves wire
+members, collection keys, Null, and all non-reference values. It removes the destination prefix
+from each authored reference and keeps the remaining route and Input selector. The ordinary
+property editor still admits the destination's stored value and exact inverse.
+
+For a claim with scoped references, admission charges the raw and projected values before
+retaining copies. The joint candidate compiler checks the complete effective value with exact
+float comparison and normalized reference endpoints. Remaining ancestor or descendant pins
+prevent Apply, including pins that happen to produce the same value. The destination retains its
+ordinary Save fence. The selected occurrence is the observed scope; other occurrences can
+inherit the new value or report an authored conflict on their next compilation.
+
+Assess the workflow through a registered panel on non-active Scene and Prefab documents. Review
+the exact destination patch and inverse, retain the containing pin until the destination is saved,
+and verify separate Undo/Redo and Save/Reopen. Compare two sibling occurrences with destination-local
+references. Exercise a mixed-ownership claim whose two leaves resolve successfully and a retry
+from the saved destination checkpoint. Godot resolves deferred node references in typed Arrays
+and Dictionaries relative to the owning node. Bevy applies one entity mapper to every container
+element. Nara uses the same path-free value copy for projected reads and destination operands.
+[Godot collection resolution](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/scene/resources/packed_scene.cpp#L680-L722) ·
+[Bevy collection remapping](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_ecs/src/entity/map_entities.rs#L139-L178)
+
+On Windows x64 with Rust 1.95.0, nextest `17e7ba89-e9b2-45b6-80a3-e1d5a813ae88` passes
+51/51 selected Scene cases. The structured controls compare the original combined value
+budget, independently changed reference endpoints, signed zero and an equal value still pinned
+by a descendant. Independent review identified a repeated Map-key charge in the temporary
+Apply reference plan. The shared value copy admits a 16 KiB key with eight references under a
+36 KiB declaration allowance and verifies the resulting candidate. A 32 KiB key with eight
+references in the same fixture reaches the existing `reference-work-bytes` limit during selected
+compilation.
+[Scene Apply controls](../../crates/nara_scene/src/prefab/inspection/property_apply/tests.rs)
+
+The selected Host and Tooling suite passes 30/30 in `f5a258e7-a383-4ed2-86f4-248e677159fe`.
+The independently locked release panel passes 33/33 in `4f244fc8-d999-4d42-938a-7c0217c000e4`.
+The new public cases compare both reviewed patches and their inverses, confirm the saved
+destination before consuming the pin, replay both histories, and read each sibling's normalized
+references after reopening. The Prefab case cancels at the saved prefix and retries without
+a destination edit or history entry. The refused Scene case resolves two valid endpoints,
+including one owned by a sibling. Apply preserves the original claim and both files.
+[Registered structured Apply workflows](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/apply/structured.rs)
+
+The shared native conversion trajectory passes 1/1 in Windows/DX12 release nextest
+`2e63bdc0-21d1-4a55-bf33-14e6afa4d16b`. It covers Inspector input, reviewed conversion, history
+and disk round trips in both source kinds. The independent panel cases qualify structured Apply
+through the shared authoring and persistence APIs. Scene correctness Clippy and the
+no-default-features library also pass. The root workspace and independent panel pass formatting.
+
 ##### Open design for applying complete component declarations
 
 The existing compiler requires an absent lower-layer record for Add and a present record for

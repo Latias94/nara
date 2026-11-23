@@ -118,11 +118,13 @@ root, placement and inline-reference replacement; value relocation alone does no
   introduced by the new reference before it publishes the source edit.
 - Apply selects an exact containing override and the explicitly named Prefab owning its source
   record. Each source prepares its own candidate. The selected compiler verifies that removing
-  the containing claim makes the instance inherit the same effective value from the destination.
-  The compiler identifies the contributing record across root-bound aliases. A relocated reference
-  must follow declarations owned by the destination subtree and preserve the selected endpoint.
-  For a nested Input operand, that scope also owns each forwarding argument. The stored reference
-  keeps its Input and relative route so another occurrence can resolve its own argument chain.
+  the containing claim makes the instance inherit the same complete effective property from the
+  destination, free of any remaining property claim that contributes to that value. The compiler
+  identifies the contributing record across root-bound aliases. A Set can carry an admitted
+  collection value. Every relocated reference in the value must follow declarations owned by the
+  destination subtree and preserve its selected endpoint. For a nested Input operand, that scope
+  also owns each forwarding argument. The stored reference keeps its Input and relative route so
+  another occurrence can resolve its own argument chain.
   The destination's confirmed checkpoint precedes consuming the containing Revert.
 - Projection ancestry is a sequence of typed instance-entry steps. `SourceEntity` binds the
   admitted canonical Prefab source and its local entity, retaining lookup spelling as evidence.

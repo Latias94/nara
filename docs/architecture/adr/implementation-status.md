@@ -4445,8 +4445,7 @@ The [structured property write](../authoring-read-projection-design.md#structure
 admits the original instance declarations and the new value before retaining a compact request.
 Review borrows the exact stored edit and its compiled reference endpoints. The
 [independent qualification](../authoring-read-projection-design.md#november-23-structured-property-qualification)
-covers non-active Scene and Prefab, history and persistence. Promotion of a structured claim
-to another source still requires complete reference-ownership evidence.
+covers non-active Scene and Prefab, history and persistence.
 
 The [selected Prefab property Apply](../authoring-read-projection-design.md#apply-an-instance-property-to-its-source)
 incorporates a destination source edit and the exact containing Revert in one selected review.
@@ -4457,6 +4456,11 @@ Save persist both steps. The [qualification](../authoring-read-projection-design
 records registered Scene and Prefab consumers, file-conflict and checkpoint timing controls, and
 the shared native conversion path. Linked Undo and recovery of a pending review across processes
 remain separate work.
+
+The [structured property promotion](../authoring-read-projection-design.md#structured-property-promotion)
+extends this Apply to admitted collections. It preserves every destination-owned reference route
+and verifies the complete resulting inherited value. A sibling-owned leaf or a remaining pin
+blocks promotion. The two files retain their existing Save and document history checkpoints.
 
 The [whole-component edit](../authoring-read-projection-design.md#whole-component-overrides)
 reuses selected inspection, prepared Review, source revalidation, and exact document history for

@@ -650,8 +650,11 @@ The [structured property successor](../architecture/authoring-read-projection-de
 uses the same non-active Scene and Prefab workflow for a complete collection value. The source
 owner admits the original declaration and the change before retaining the proposal. Review
 borrows the raw claim and the composed candidate, including the resolved endpoints of its nested
-references. Structured Apply to another source still requires destination ownership proof for
-every nested reference.
+references. [Structured property promotion](../architecture/authoring-read-projection-design.md#structured-property-promotion)
+uses the same two-source Apply and the same Save checkpoint. The selected compiler proves
+destination ownership of nested routes and their Input bindings. It verifies that the selected
+occurrence inherits the complete value after the exact containing Revert, including when a retry
+reuses the saved destination.
 
 The [selected source Apply successor](../architecture/authoring-read-projection-design.md#apply-an-instance-property-to-its-source)
 extends the effective property workflow across the containing instance and its explicitly named

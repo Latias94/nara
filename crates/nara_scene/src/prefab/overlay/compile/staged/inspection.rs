@@ -365,34 +365,41 @@ where
         let claim_target = selected_intent
             .and_then(|index| self.inspection_properties(selected_scope, index))
             .map(|(target, _)| target.clone());
-        let mut portable_reference_claims = BTreeSet::new();
+        let mut reference_ownership: BTreeMap<PrefabOverlaySlot, bool> = BTreeMap::new();
         if let Some(index) = selected_intent {
             for origin in references.origins.values() {
                 let Some((
                     layer,
                     slot @ PrefabOverlaySlot::Property {
-                        component_index, ..
+                        component_index,
+                        claim_index,
                     },
                 )) = origin.declaration
                 else {
                     continue;
                 };
-                if layer == selected_scope
-                    && component_index == index
-                    && origin.destination_owns_route
+                if layer != selected_scope || component_index != index {
+                    continue;
+                }
+                if let Some(owned) = reference_ownership.get_mut(&slot) {
+                    *owned &= origin.destination_owns_route;
+                } else if self
+                    .inspection_properties(selected_scope, index)
+                    .and_then(|(_, claims)| claims.get(claim_index))
+                    .is_some_and(|claim| matches!(claim.intent, PrefabPropertyIntent::Set(_)))
                 {
                     self.retain_inspection(
                         result,
-                        Some(TREE_ENTRY_BYTES + size_of::<PrefabOverlaySlot>()),
+                        Some(TREE_ENTRY_BYTES + size_of::<(PrefabOverlaySlot, bool)>()),
                     )?;
-                    portable_reference_claims.insert(slot);
+                    reference_ownership.insert(slot, origin.destination_owns_route);
                 }
             }
         }
         Ok(Some(Box::new(InspectedPrefabPropertyApply {
             record_target,
             claim_target,
-            portable_reference_claims,
+            reference_ownership,
         })))
     }
 

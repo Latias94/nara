@@ -8,6 +8,8 @@ use nara_tooling::{
 
 #[path = "apply/nested_input.rs"]
 mod nested_input;
+#[path = "apply/structured.rs"]
+mod structured;
 
 const INSTANCE_NOTE: &str = "keep this local note";
 

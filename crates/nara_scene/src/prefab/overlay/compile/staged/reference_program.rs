@@ -406,11 +406,7 @@ where
                                 .is_some_and(|(_, claims)| {
                                     matches!(
                                         claims.get(claim_index).map(|claim| &claim.intent),
-                                        Some(crate::PrefabPropertyIntent::Set(
-                                            nara_reflect::ComponentValue::EntityReference(
-                                                EntityReference::Authored { .. }
-                                            )
-                                        ))
+                                        Some(crate::PrefabPropertyIntent::Set(_))
                                     )
                                 })
                     });

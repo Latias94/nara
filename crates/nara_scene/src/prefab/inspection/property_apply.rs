@@ -10,8 +10,7 @@ use crate::{
     AuthoringPropertyEdit, AuthoringPropertyValue, PrefabAuthoringSession, PrefabDeclarationLimits,
     PrefabEntityOrigin, PrefabPropertyClaimRef, PrefabPropertyIntent, PreparedPrefabAuthoringEdit,
     SceneAuthoringRevision, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
-    SourceDocumentKey,
-    authoring_decode::{retained_entity_reference_bytes, retained_prefab_target_bytes},
+    SourceDocumentKey, authoring_decode::retained_prefab_target_bytes,
     provenance::provenance_string_bytes,
 };
 
@@ -29,8 +28,8 @@ pub struct ObservedPrefabPropertyApply {
 #[derive(Debug)]
 enum ApplyValue {
     Set {
-        raw: ComponentValue,
-        endpoint: Option<EntityReference>,
+        destination: ComponentValue,
+        projected: Option<ComponentValue>,
     },
     Absent {
         default: Option<ComponentValue>,
@@ -58,21 +57,22 @@ impl ObservedPrefabPropertyApply {
             AuthoringRecordOwnerClaim::Declared(owner) => provenance_string_bytes(owner.as_str())?,
             AuthoringRecordOwnerClaim::Unclaimed => 0,
         };
-        let (value, endpoint_bytes) = match &self.value {
-            ApplyValue::Set { raw, endpoint } => (
-                Some(raw),
-                endpoint
-                    .as_ref()
-                    .map_or(Some(0), retained_entity_reference_bytes)?,
-            ),
-            ApplyValue::Absent { default } => (default.as_ref(), 0),
+        let values = match &self.value {
+            ApplyValue::Set {
+                destination,
+                projected,
+            } => [Some(destination), projected.as_ref()],
+            ApplyValue::Absent { default } => [default.as_ref(), None],
         };
-        let value_bytes = value.map_or(Some(0), |value| {
-            let cost = value.cost();
-            cost.nodes()
-                .checked_mul(96)?
-                .checked_add(cost.logical_bytes())
-        })?;
+        let value_bytes = values
+            .into_iter()
+            .flatten()
+            .try_fold(0usize, |bytes, value| {
+                let cost = value.cost();
+                bytes
+                    .checked_add(cost.nodes().checked_mul(96)?)?
+                    .checked_add(cost.logical_bytes())
+            })?;
         size_of::<Self>()
             .checked_add(retained_prefab_target_bytes(&self.target)?)?
             .checked_add(
@@ -92,8 +92,7 @@ impl ObservedPrefabPropertyApply {
                     .len()
                     .checked_mul(size_of::<ComponentPropertyStep>() + 4 * size_of::<usize>())?,
             )?
-            .checked_add(value_bytes)?
-            .checked_add(endpoint_bytes)
+            .checked_add(value_bytes)
     }
 }
 
@@ -187,38 +186,46 @@ impl AuthoringPrefabInstanceSnapshot {
                 while let ComponentValueShape::Optional { value } = shape {
                     shape = value;
                 }
-                if !matches!(
-                    shape,
-                    ComponentValueShape::Scalar { .. } | ComponentValueShape::EntityRef
-                ) {
+                if matches!(shape, ComponentValueShape::Opaque { .. }) {
                     return Err(Error::InvalidProperty);
                 }
                 let cost = validate_value_materialization_budget(raw, value_limits)
                     .map_err(|_| Error::BudgetExceeded)?;
-                let endpoint = match raw {
-                    ComponentValue::EntityReference(EntityReference::Authored { reference }) => {
-                        if reference.through.len() > limits.max_depth() {
-                            return Err(Error::BudgetExceeded);
-                        }
-                        if !reference.through.starts_with(&record_target.through)
-                            || !apply.portable_reference_claims.contains(&claim.slot())
-                        {
-                            return Err(Error::InvalidProperty);
-                        }
-                        let endpoint =
-                            effective_reference(&effective)?.ok_or(Error::InvalidProperty)?;
+                let (destination, projected) = match apply.reference_ownership.get(&claim.slot()) {
+                    Some(true) => {
                         let remaining = value_limits.remaining(cost.nodes(), cost.logical_bytes());
-                        endpoint
-                            .cost_up_to(remaining.nodes(), remaining.bytes())
-                            .ok_or(Error::BudgetExceeded)?;
-                        Some(endpoint.clone())
+                        let projected = effective.copy_value(remaining)?;
+                        let destination = copy_value_with_references(
+                            raw.into(),
+                            &mut |reference| match reference {
+                                EntityReference::Authored { reference } => {
+                                    if reference.through.len() > limits.max_depth() {
+                                        return Err(Error::BudgetExceeded);
+                                    }
+                                    let through = reference
+                                        .through
+                                        .as_slice()
+                                        .strip_prefix(record_target.through.as_slice())
+                                        .ok_or(Error::InvalidProperty)?;
+                                    Ok(EntityReference::Authored {
+                                        reference: AuthoredEntityReference {
+                                            through: through.to_vec(),
+                                            target: reference.target.clone(),
+                                        },
+                                    })
+                                }
+                                EntityReference::SceneLocal { .. } => Err(Error::InvalidProperty),
+                                EntityReference::Persistent { .. } => Ok(reference.clone()),
+                            },
+                        )?;
+                        (destination, Some(projected))
                     }
-                    _ if matches_effective_value(effective, raw)? => None,
+                    None if matches_effective_value(effective, raw)? => (raw.clone(), None),
                     _ => return Err(Error::InvalidProperty),
                 };
                 ApplyValue::Set {
-                    raw: raw.clone(),
-                    endpoint,
+                    destination,
+                    projected,
                 }
             }
             (PrefabPropertyIntent::Absent, AuthoringPrefabPropertyClaimKind::Absent, value)
@@ -278,20 +285,18 @@ impl AuthoringPrefabInstanceSnapshot {
             return Ok(false);
         }
         let observed = selected.property_value(&edit.property, read)?;
-        if observed.controlling_claim().is_some() {
+        if observed.controlling_claim().is_some() || observed.has_descendant_claim {
             return Ok(false);
         }
         match (&edit.value, observed.value) {
-            (ApplyValue::Set { raw, endpoint }, AuthoringPrefabPropertyValue::Present(value)) => {
-                match endpoint {
-                    Some(expected) => Ok(effective_reference(&value)? == Some(expected)),
-                    None => matches_effective_value(value, raw),
-                }
-            }
-            (ApplyValue::Absent { default: None }, AuthoringPrefabPropertyValue::Missing) => {
-                Ok(true)
-            }
             (
+                ApplyValue::Set {
+                    projected: Some(expected),
+                    ..
+                },
+                AuthoringPrefabPropertyValue::Present(value),
+            )
+            | (
                 ApplyValue::Absent {
                     default: Some(expected),
                 },
@@ -299,6 +304,16 @@ impl AuthoringPrefabInstanceSnapshot {
             ) => {
                 let actual = value.copy_value(edit.value_limits)?;
                 Ok(component_values_exactly_match(&actual, expected))
+            }
+            (
+                ApplyValue::Set {
+                    destination,
+                    projected: None,
+                },
+                AuthoringPrefabPropertyValue::Present(value),
+            ) => matches_effective_value(value, destination),
+            (ApplyValue::Absent { default: None }, AuthoringPrefabPropertyValue::Missing) => {
+                Ok(true)
             }
             _ => Ok(false),
         }
@@ -340,26 +355,7 @@ impl PrefabAuthoringSession {
             ));
         }
         match &edit.value {
-            ApplyValue::Set { raw, .. } => {
-                let value = match raw {
-                    ComponentValue::EntityReference(EntityReference::Authored { reference }) => {
-                        let through = reference
-                            .through
-                            .as_slice()
-                            .strip_prefix(record_target.through.as_slice())
-                            .ok_or_else(|| {
-                                rejected("Prefab property promotion requires a destination-local reference route")
-                            })?
-                            .to_vec();
-                        ComponentValue::EntityReference(EntityReference::Authored {
-                            reference: AuthoredEntityReference {
-                                through,
-                                target: reference.target.clone(),
-                            },
-                        })
-                    }
-                    _ => raw.clone(),
-                };
+            ApplyValue::Set { destination, .. } => {
                 let prepared = self.prepare_authoring_property_edit(
                     base_revision,
                     &[AuthoringPropertyEdit {
@@ -367,7 +363,7 @@ impl PrefabAuthoringSession {
                         component: component.clone(),
                         component_version: fact.version(),
                         property: edit.property.clone(),
-                        value,
+                        value: destination.clone(),
                     }],
                 )?;
                 Ok((!prepared.patch().is_empty()).then_some(prepared))

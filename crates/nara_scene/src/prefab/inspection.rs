@@ -1,7 +1,7 @@
 //! Read-only observations from the selected authoring compiler.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     fmt,
     mem::size_of,
     ops::Bound,
@@ -388,12 +388,17 @@ impl<'a> AuthoringPrefabComponentView<'a> {
         let field = property_root(self.schema()?, property)?;
         let value = self.resolve_value(field, property, budget)?;
         let mut controlling_claim = None;
+        let mut has_descendant_claim = false;
         for claim in self.property_claims().iter().rev() {
             budget.observe_entry(claim.path.logical_bytes()?)?;
-            if claim.path.root == property.root && property.steps.starts_with(&claim.path.steps) {
+            if claim.path.root != property.root {
+                continue;
+            }
+            if property.steps.starts_with(&claim.path.steps) {
                 controlling_claim = Some(claim);
                 break;
             }
+            has_descendant_claim |= claim.path.steps.starts_with(&property.steps);
         }
         let defaulted = controlling_claim.map_or_else(
             || {
@@ -429,6 +434,7 @@ impl<'a> AuthoringPrefabComponentView<'a> {
             record: self.fact().record(),
             controlling_claim,
             revert_claim,
+            has_descendant_claim,
         })
     }
 
@@ -518,6 +524,7 @@ pub struct AuthoringPrefabProperty<'a> {
     pub record: &'a AuthoringPrefabRecordOrigin,
     controlling_claim: Option<&'a AuthoringPrefabPropertyClaim>,
     revert_claim: Option<&'a AuthoringPrefabPropertyClaim>,
+    has_descendant_claim: bool,
 }
 
 impl<'a> AuthoringPrefabProperty<'a> {
@@ -574,6 +581,30 @@ impl fmt::Display for AuthoringPrefabValueError {
 
 impl std::error::Error for AuthoringPrefabValueError {}
 
+fn copy_value_with_references<E>(
+    value: ComponentValueRef<'_>,
+    rewrite: &mut impl FnMut(&EntityReference) -> Result<EntityReference, E>,
+) -> Result<ComponentValue, E> {
+    if let Some(reference) = value.as_entity_reference() {
+        return rewrite(reference).map(ComponentValue::EntityReference);
+    }
+    if let Some(fields) = value.as_map() {
+        return fields
+            .iter()
+            .map(|(key, child)| Ok((key.to_owned(), copy_value_with_references(child, rewrite)?)))
+            .collect::<Result<_, _>>()
+            .map(ComponentValue::Map);
+    }
+    if let Some(items) = value.as_list() {
+        return items
+            .iter()
+            .map(|child| copy_value_with_references(child, rewrite))
+            .collect::<Result<_, _>>()
+            .map(ComponentValue::List);
+    }
+    Ok(value.to_owned())
+}
+
 impl AuthoringPrefabValue<'_> {
     /// Copies the selected value under the explicit limit. Any local reference in the copy is an
     /// `Authored` route rooted in the original containing document, including nested leaves.
@@ -590,7 +621,9 @@ impl AuthoringPrefabValue<'_> {
         if nodes > limits.nodes() || bytes > limits.bytes() {
             return Err(AuthoringPrefabValueError::BudgetExceeded);
         }
-        self.copy_projected_value(self.value)
+        copy_value_with_references(self.value, &mut |reference| {
+            self.authored_reference(reference).cloned()
+        })
     }
 
     fn adjust_reference_cost(
@@ -622,33 +655,6 @@ impl AuthoringPrefabValue<'_> {
             }
         }
         Ok(())
-    }
-
-    fn copy_projected_value(
-        &self,
-        value: ComponentValueRef<'_>,
-    ) -> Result<ComponentValue, AuthoringPrefabValueError> {
-        if let Some(reference) = value.as_entity_reference() {
-            return self
-                .authored_reference(reference)
-                .cloned()
-                .map(ComponentValue::EntityReference);
-        }
-        if let Some(fields) = value.as_map() {
-            return fields
-                .iter()
-                .map(|(key, child)| Ok((key.to_owned(), self.copy_projected_value(child)?)))
-                .collect::<Result<_, _>>()
-                .map(ComponentValue::Map);
-        }
-        if let Some(items) = value.as_list() {
-            return items
-                .iter()
-                .map(|child| self.copy_projected_value(child))
-                .collect::<Result<_, _>>()
-                .map(ComponentValue::List);
-        }
-        Ok(value.to_owned())
     }
 
     fn authored_reference<'a>(
@@ -724,7 +730,7 @@ pub(crate) enum InspectedComponentOwnership {
 pub(crate) struct InspectedPrefabPropertyApply {
     pub(crate) record_target: PrefabEntityTarget,
     pub(crate) claim_target: Option<PrefabEntityTarget>,
-    pub(crate) portable_reference_claims: BTreeSet<PrefabOverlaySlot>,
+    pub(crate) reference_ownership: BTreeMap<PrefabOverlaySlot, bool>,
 }
 
 impl CapturedPrefabInspection {

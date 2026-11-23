@@ -14,7 +14,7 @@ use nara::{
 
 const ROUTES: &str = "routes";
 const KEY: &str = "primary";
-const SOCKET: &str = "socket";
+pub(super) const SOCKET: &str = "socket";
 
 #[test]
 fn a_registered_panel_sets_and_reverts_a_structured_property_on_a_nonactive_scene() {
@@ -302,7 +302,7 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
     assert!(app.close());
 }
 
-fn structured_schema() -> AuthoringSchemaBundle {
+pub(super) fn structured_schema() -> AuthoringSchemaBundle {
     let bundle = schema();
     let owner = &bundle.owners()[0];
     let mut catalog = owner.current().clone();
@@ -349,7 +349,11 @@ fn row(key: &str, weight: u64, links: [(&str, ComponentValue); 3]) -> ComponentV
     ])
 }
 
-fn pinned_row(key: &str, first: ComponentValue, second: ComponentValue) -> ComponentValue {
+pub(super) fn pinned_row(
+    key: &str,
+    first: ComponentValue,
+    second: ComponentValue,
+) -> ComponentValue {
     row(
         key,
         37,
@@ -361,7 +365,11 @@ fn pinned_row(key: &str, first: ComponentValue, second: ComponentValue) -> Compo
     )
 }
 
-fn inherited_row(weight: u64, root: ComponentValue, socket: ComponentValue) -> ComponentValue {
+pub(super) fn inherited_row(
+    weight: u64,
+    root: ComponentValue,
+    socket: ComponentValue,
+) -> ComponentValue {
     row(
         KEY,
         weight,
@@ -373,7 +381,7 @@ fn inherited_row(weight: u64, root: ComponentValue, socket: ComponentValue) -> C
     )
 }
 
-fn base_source(weight: u64) -> String {
+pub(super) fn base_source(weight: u64) -> String {
     let mut document = base(INITIAL_SCORE);
     document.entities[0]
         .components
@@ -399,23 +407,23 @@ fn base_source(weight: u64) -> String {
     document.to_json_string().unwrap()
 }
 
-fn local(entity: &str) -> ComponentValue {
+pub(super) fn local(entity: &str) -> ComponentValue {
     ComponentValue::EntityReference(EntityReference::SceneLocal { entity: id(entity) })
 }
 
-fn authored(target: PrefabEntityTarget) -> ComponentValue {
+pub(super) fn authored(target: PrefabEntityTarget) -> ComponentValue {
     ComponentValue::EntityReference(EntityReference::Authored {
         reference: AuthoredEntityReference::from(target),
     })
 }
 
-fn occurrence_target(anchor: &str, entity: &str) -> PrefabEntityTarget {
+pub(super) fn occurrence_target(anchor: &str, entity: &str) -> PrefabEntityTarget {
     let mut target = address(anchor, ROUTES).entity;
     target.entity = PrefabEntityOrigin::SourceEntity(id(entity));
     target
 }
 
-fn projected_inheritance(anchor: &str, weight: u64) -> ComponentValue {
+pub(super) fn projected_inheritance(anchor: &str, weight: u64) -> ComponentValue {
     inherited_row(
         weight,
         authored(PrefabEntityTarget::source(id(anchor))),
@@ -423,14 +431,14 @@ fn projected_inheritance(anchor: &str, weight: u64) -> ComponentValue {
     )
 }
 
-fn row_property() -> ComponentPropertyPath {
+pub(super) fn row_property() -> ComponentPropertyPath {
     property(ROUTES).with_steps([ComponentPropertyStep::ListItem {
         by: ComponentFieldId::new("id"),
         key: ComponentPropertyKey::String(KEY.into()),
     }])
 }
 
-fn inspect_row(
+pub(super) fn inspect_row(
     panel: &mut PanelDriver,
     app: &mut EditorApplication,
     document: EditorDocumentId,

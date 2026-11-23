@@ -3,7 +3,7 @@ use std::{convert::Infallible, sync::Arc};
 use nara_identity::{AuthoredReferenceTarget, ReferenceInputId};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldPath, ComponentSchemaCatalog,
-    ComponentValueKind, PersistentComponentSchemaOwnerId,
+    ComponentShapeMember, ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
 
 use super::*;
@@ -87,6 +87,24 @@ fn basis() -> AuthoringSchemaBasis {
             ),
             optional("target", ComponentValueShape::EntityRef)
                 .with_capability(ComponentCapability::EntityRef),
+            optional(
+                "groups",
+                ComponentValueShape::map(ComponentValueShape::list(ComponentValueShape::EntityRef)),
+            )
+            .with_capability(ComponentCapability::EntityRef),
+            optional(
+                "binding",
+                ComponentValueShape::record_members([
+                    ComponentShapeMember::new("weight", ComponentValueKind::F64),
+                    ComponentShapeMember::new(
+                        "links",
+                        ComponentValueShape::map(ComponentValueShape::optional(
+                            ComponentValueShape::EntityRef,
+                        )),
+                    ),
+                ]),
+            )
+            .with_capability(ComponentCapability::EntityRef),
         ]);
     let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
         owner(),
@@ -861,6 +879,216 @@ fn apply_requires_each_input_binding_to_belong_to_the_destination_even_at_the_sa
     assert!(
         fixture
             .inspect(source.document(), destination.shared_document())
+            .verifies_property_apply(&edit, &mut read())
+            .unwrap()
+    );
+}
+
+#[test]
+fn structured_apply_admits_both_values_and_verifies_each_rebased_leaf() {
+    let property = property("binding");
+    let projected_ref = |through, entity| {
+        ComponentValue::EntityReference(EntityReference::Authored {
+            reference: AuthoredEntityReference {
+                through,
+                target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                    entity,
+                ))),
+            },
+        })
+    };
+    let binding = |weight, through: &[PrefabInstanceHop], other| {
+        ComponentValue::map([
+            ("weight", ComponentValue::f64(weight).unwrap()),
+            (
+                "links",
+                ComponentValue::map([
+                    ("root", projected_ref(through.to_vec(), "hero")),
+                    ("other", projected_ref(through.to_vec(), other)),
+                    ("optional", ComponentValue::Null),
+                ]),
+            ),
+        ])
+    };
+    let through = [hop("mount", "branch"), hop("nested", "destination")];
+    let raw = binding(-0.0, &through, "other");
+    let mut fixture = Fixture::new(
+        ComponentValue::map([("binding", binding(1.0, &[], "hero"))]),
+        &property,
+        PrefabPropertyIntent::Set(raw.clone()),
+        None,
+    );
+    let mut destination = fixture.destination.document().clone();
+    destination
+        .entities
+        .push(SceneEntityRecord::new(id("other")));
+    destination.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::source(id("other")),
+        ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+            id("hero"),
+        ))),
+    ));
+    fixture.replace_destination(destination);
+    let snapshot = fixture.inspect(
+        fixture.scene.document(),
+        fixture.destination.shared_document(),
+    );
+    let selected = snapshot
+        .target(&fixture.target)
+        .unwrap()
+        .component(&component())
+        .unwrap()
+        .property_value(&property, &mut read())
+        .unwrap();
+    let AuthoringPrefabPropertyValue::Present(value) = selected.value else {
+        panic!("the structured claim must supply a composed value");
+    };
+    let projected = value.copy_value(Default::default()).unwrap();
+    let raw_cost = raw.cost();
+    let projected_cost = projected.cost();
+    let nodes = 2 + 2 * fixture.target.through.len() + raw_cost.nodes() + projected_cost.nodes();
+    let bytes = fixture.target.logical_bytes_up_to(8192).unwrap()
+        + property.logical_bytes().unwrap()
+        + component().as_str().len()
+        + raw_cost.logical_bytes()
+        + projected_cost.logical_bytes();
+    let plan = |nodes, bytes| {
+        snapshot.plan_property_apply(
+            &fixture.target,
+            &component(),
+            &property,
+            fixture.claim(),
+            &key("destination"),
+            PrefabDeclarationLimits::new(nodes, bytes, 64).unwrap(),
+            &mut read(),
+        )
+    };
+    for (nodes, bytes) in [(nodes - 1, bytes), (nodes, bytes - 1)] {
+        assert!(matches!(
+            plan(nodes, bytes),
+            Err(AuthoringPrefabPropertyApplyError::BudgetExceeded)
+        ));
+    }
+    let edit = plan(nodes, bytes).unwrap();
+    let (source, destination) = fixture.prepare(&edit);
+    let destination = destination.unwrap();
+    assert!(matches!(
+        destination.patch().operations.as_slice(),
+        [ScenePatchOperation::SetField { value, .. }]
+            if component_values_exactly_match(value, &binding(-0.0, &[], "other"))
+    ));
+    let verifies = |document| {
+        fixture
+            .inspect(source.document(), document)
+            .verifies_property_apply(&edit, &mut read())
+            .unwrap()
+    };
+    assert!(verifies(destination.shared_document()));
+    for value in [binding(0.0, &[], "other"), binding(-0.0, &[], "hero")] {
+        let wrong = fixture
+            .destination
+            .prepare_authoring_property_edit(
+                fixture.destination.revision(),
+                &[AuthoringPropertyEdit {
+                    entity: id("hero"),
+                    component: component(),
+                    component_version: ComponentSchemaVersion::ONE,
+                    property: property.clone(),
+                    value,
+                }],
+            )
+            .unwrap();
+        assert!(!verifies(wrong.shared_document()));
+    }
+}
+
+#[test]
+fn structured_apply_copies_many_references_under_one_long_map_key() {
+    let property = property("groups");
+    let group = |through| {
+        let leaf = ComponentValue::EntityReference(EntityReference::Authored {
+            reference: AuthoredEntityReference {
+                through,
+                target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                    "hero",
+                ))),
+            },
+        });
+        ComponentValue::map([("g".repeat(16_384), ComponentValue::List(vec![leaf; 8]))])
+    };
+    let initial = ComponentValue::map([("groups", ComponentValue::Map(Default::default()))]);
+    let raw = group(vec![hop("mount", "branch"), hop("nested", "destination")]);
+    let fixture = Fixture::new(initial, &property, PrefabPropertyIntent::Set(raw), None);
+    let limits = PrefabDeclarationLimits::new(128, 36 * 1024, 64).unwrap();
+    let edit = fixture
+        .inspect(
+            fixture.scene.document(),
+            fixture.destination.shared_document(),
+        )
+        .plan_property_apply(
+            &fixture.target,
+            &component(),
+            &property,
+            fixture.claim(),
+            &key("destination"),
+            limits,
+            &mut read(),
+        )
+        .unwrap();
+    let (source, destination) = fixture.prepare(&edit);
+    let destination = destination.unwrap();
+    assert!(matches!(
+        destination.patch().operations.as_slice(),
+        [ScenePatchOperation::SetField { value, .. }]
+            if component_values_exactly_match(value, &group(Vec::new()))
+    ));
+    assert!(
+        fixture
+            .inspect(source.document(), destination.shared_document())
+            .verifies_property_apply(&edit, &mut read())
+            .unwrap()
+    );
+}
+
+#[test]
+fn structured_apply_refuses_equal_values_still_pinned_by_a_descendant_claim() {
+    let weights = property("weights");
+    let value = |first| ComponentValue::map([("first", ComponentValue::U64(first))]);
+    let mut fixture = Fixture::new(
+        ComponentValue::map([("weights", value(3))]),
+        &weights,
+        PrefabPropertyIntent::Set(value(4)),
+        None,
+    );
+    Arc::make_mut(&mut fixture.branch).entities[0]
+        .prefab
+        .as_mut()
+        .unwrap()
+        .overrides = Some(overlay(
+        "destination",
+        PrefabEntityTarget::source(id("hero")),
+        &weights
+            .clone()
+            .with_steps([ComponentPropertyStep::MapEntry("first".into())]),
+        PrefabPropertyIntent::Set(ComponentValue::U64(4)),
+    ));
+    let edit = fixture.plan(&weights);
+    let (source, destination) = fixture.prepare(&edit);
+    let candidate = fixture.inspect(source.document(), destination.unwrap().shared_document());
+    let observed = candidate
+        .target(&fixture.target)
+        .unwrap()
+        .component(&component())
+        .unwrap()
+        .property_value(&weights, &mut read())
+        .unwrap();
+    let AuthoringPrefabPropertyValue::Present(actual) = observed.value else {
+        panic!("the remaining descendant must supply its value");
+    };
+    assert_eq!(actual.copy_value(Default::default()).unwrap(), value(4));
+    assert!(observed.controlling_claim().is_none());
+    assert!(
+        !candidate
             .verifies_property_apply(&edit, &mut read())
             .unwrap()
     );
