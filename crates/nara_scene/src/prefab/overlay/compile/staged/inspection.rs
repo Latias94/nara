@@ -12,7 +12,7 @@ use crate::prefab::inspection::{
 use crate::{
     AuthoringRecordOwnerClaim, AuthoringRecordReadiness, PrefabPropertyClaim, PrefabPropertyIntent,
 };
-use nara_identity::{AuthoredReferenceTarget, EntityReference};
+use nara_identity::EntityReference;
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPathSegment, ComponentFieldSchema, ComponentPropertyStep,
     ComponentValue, ComponentValueRef,
@@ -371,29 +371,15 @@ where
                 let Some((
                     layer,
                     slot @ PrefabOverlaySlot::Property {
-                        component_index,
-                        claim_index,
+                        component_index, ..
                     },
                 )) = origin.declaration
                 else {
                     continue;
                 };
-                if layer != selected_scope || component_index != index {
-                    continue;
-                }
-                let Some(ResolvedReference::Local(target)) = &origin.resolved else {
-                    continue;
-                };
-                let claim = self
-                    .inspection_properties(selected_scope, index)
-                    .and_then(|(_, claims)| claims.get(claim_index))
-                    .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
-                if matches!(
-                    &claim.intent,
-                    PrefabPropertyIntent::Set(ComponentValue::EntityReference(
-                        EntityReference::Authored { reference },
-                    )) if matches!(reference.target, AuthoredReferenceTarget::Entity(_))
-                ) && self.reference_route_is_local(scope, *target)?
+                if layer == selected_scope
+                    && component_index == index
+                    && origin.destination_owns_route
                 {
                     self.retain_inspection(
                         result,
@@ -410,34 +396,7 @@ where
         })))
     }
 
-    /// Checks the actual endpoint route, including declarations supplied by outer replacements.
-    fn reference_route_is_local(
-        &mut self,
-        destination: ScopeId,
-        target: NodeId,
-    ) -> Result<bool, SceneCompilationFailure> {
-        let depth = self.scopes[destination].depth;
-        let owner = self.record_reference_scope(self.nodes[target].record)?;
-        if self.scopes[owner].depth < depth {
-            return Ok(false);
-        }
-        let mut current = self.nodes[target].scope;
-        while current != destination {
-            self.admit(Some(size_of::<ScopeId>() + size_of::<NodeId>()))?;
-            if self.scopes[current].depth <= depth
-                || self.scopes[self.overlay_reference_scope(current)?].depth < depth
-            {
-                return Ok(false);
-            }
-            let anchor = self.scopes[current]
-                .anchor
-                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
-            current = self.nodes[anchor].scope;
-        }
-        Ok(true)
-    }
-
-    fn inspection_properties(
+    pub(super) fn inspection_properties(
         &self,
         scope: ScopeId,
         index: usize,

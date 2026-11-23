@@ -31,6 +31,8 @@ pub(super) struct ScopedReference {
     target: AuthoredEntityReference,
     pub(super) declaration: Option<(ScopeId, PrefabOverlaySlot)>,
     pub(super) resolved: Option<ResolvedReference>,
+    #[cfg(feature = "serde")]
+    pub(super) destination_owns_route: bool,
 }
 
 pub(super) type ReferenceOrigins = BTreeMap<ComponentFieldPath, ScopedReference>;
@@ -197,6 +199,8 @@ where
                     target,
                     declaration,
                     resolved: None,
+                    #[cfg(feature = "serde")]
+                    destination_owns_route: false,
                 },
             );
             Ok(())
@@ -270,6 +274,8 @@ where
                             },
                         )),
                         resolved: None,
+                        #[cfg(feature = "serde")]
+                        destination_owns_route: false,
                     },
                 );
             }
@@ -342,7 +348,7 @@ where
                         .flat_map(|program| program.origins.values()),
                 ) {
                     if matches!(
-                        self.reference_target(origin.scope, &origin.target)?,
+                        self.reference_target(origin.scope, &origin.target, None)?,
                         ReferenceResolution::Entered
                     ) {
                         return Ok(false);
@@ -354,26 +360,69 @@ where
         // reject before another witnessed reference opens a scope and requires recomposition.
         for query in self.root.reference_queries {
             if matches!(
-                self.reference_target(0, query)?,
+                self.reference_target(0, query, None)?,
                 ReferenceResolution::Entered
             ) {
                 return Ok(false);
             }
         }
+        #[cfg(feature = "serde")]
+        let inspected_scope = self
+            .selected_anchor
+            .filter(|_| self.root.inspect)
+            .and_then(|anchor| self.nodes[anchor].entered);
         for (node, components) in programs {
             for (component, programs) in components {
+                #[cfg(feature = "serde")]
+                let destination = inspected_scope
+                    .filter(|_| !programs.value.origins.is_empty())
+                    .and_then(
+                        |_| match self.nodes[*node].programs.get(component)?.record {
+                            super::Record::Source { scope, .. } if scope != 0 => Some(scope),
+                            _ => None,
+                        },
+                    );
                 for (path, origin) in programs.value.origins.iter_mut().chain(
                     programs
                         .contextual_defaults
                         .values_mut()
                         .flat_map(|program| program.origins.iter_mut()),
                 ) {
-                    let (resolved, declaring_scope) =
-                        match self.reference_target(origin.scope, &origin.target)? {
+                    #[cfg(feature = "serde")]
+                    let destination = destination.filter(|_| {
+                        let Some((
+                            scope,
+                            PrefabOverlaySlot::Property {
+                                component_index,
+                                claim_index,
+                            },
+                        )) = origin.declaration
+                        else {
+                            return false;
+                        };
+                        inspected_scope == Some(scope)
+                            && self
+                                .inspection_properties(scope, component_index)
+                                .is_some_and(|(_, claims)| {
+                                    matches!(
+                                        claims.get(claim_index).map(|claim| &claim.intent),
+                                        Some(crate::PrefabPropertyIntent::Set(
+                                            nara_reflect::ComponentValue::EntityReference(
+                                                EntityReference::Authored { .. }
+                                            )
+                                        ))
+                                    )
+                                })
+                    });
+                    #[cfg(not(feature = "serde"))]
+                    let destination = None;
+                    let (resolved, declaring_scope, destination_owns_route) =
+                        match self.reference_target(origin.scope, &origin.target, destination)? {
                             ReferenceResolution::Resolved {
                                 reference,
                                 declaring_scope,
-                            } => (reference, declaring_scope),
+                                destination_owns_route,
+                            } => (reference, declaring_scope, destination_owns_route),
                             ReferenceResolution::Invalid { reason, input } => {
                                 return Err(self.reference_target_failure(
                                     *node, component, path, origin, reason, input,
@@ -406,6 +455,12 @@ where
                         }
                     }
                     origin.resolved = Some(resolved);
+                    #[cfg(feature = "serde")]
+                    {
+                        origin.destination_owns_route = destination_owns_route;
+                    }
+                    #[cfg(not(feature = "serde"))]
+                    let _ = destination_owns_route;
                 }
             }
         }

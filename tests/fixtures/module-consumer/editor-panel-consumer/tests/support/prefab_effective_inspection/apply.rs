@@ -6,6 +6,9 @@ use nara_tooling::{
     EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPrefabApplyDestination,
 };
 
+#[path = "apply/nested_input.rs"]
+mod nested_input;
+
 const INSTANCE_NOTE: &str = "keep this local note";
 
 #[test]
@@ -34,20 +37,7 @@ fn apply_round_trip(kind: EditorDocumentKind, source: &'static str) {
 
     let published = fixture.commit_destination(inspection, true);
     assert_ne!(published.revision, destination_before.revision);
-    assert_eq!(
-        fixture
-            .panel
-            .dispatch(&mut fixture.app, |_| Action::FinishApply { inspection }),
-        Outcome::Rejected {
-            inspection: Some(inspection),
-            reason: Rejection::DestinationSaveRequired,
-        }
-    );
-    expect_phase(&mut fixture.app, inspection, Phase::AwaitingDestinationSave);
-    assert_eq!(
-        frame(&fixture.app).prefab_inspection().apply_destination,
-        Some(published)
-    );
+    fixture.require_destination_save(inspection, published);
     assert_eq!(basis(&fixture.app, fixture.containing), containing_before);
     fixture.assert_containing(true, (false, 0, 0));
     fixture.assert_destination(CHANGED_SCORE, (true, 1, 0));
@@ -280,20 +270,9 @@ impl ApplyFixture {
         );
         let cleared = with_claim_intents(&instance, [("note", note)]);
         let sibling = PrefabInstance::forest(asset);
-        let containing = two_mount_source(&pinned, &sibling);
-        let original = match kind {
-            EditorDocumentKind::Scene => containing.to_json_string(),
-            EditorDocumentKind::Prefab => {
-                PrefabDocument::new(containing.placements, containing.entities).to_json_string()
-            }
-            EditorDocumentKind::Extension(_) => unreachable!(),
-        }
-        .unwrap();
-        let startup = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("active"))]);
+        write_containing_source(&project, kind, source, two_mount_source(&pinned, &sibling));
         for (path, bytes) in [
-            (source, original),
             (BASE, base(INITIAL_SCORE).to_json_string().unwrap()),
-            (STARTUP, startup.to_json_string().unwrap()),
             (
                 "schema/authoring.bundle.json",
                 schema().to_json_string().unwrap(),
@@ -301,6 +280,23 @@ impl ApplyFixture {
         ] {
             fs::write(project.root.join(path), bytes).unwrap();
         }
+        Self::open(project, kind, source, pinned, cleared, sibling)
+    }
+
+    fn open(
+        project: text_project::TextProject,
+        kind: EditorDocumentKind,
+        source: &'static str,
+        pinned: PrefabInstance,
+        cleared: PrefabInstance,
+        sibling: PrefabInstance,
+    ) -> Self {
+        let startup = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("active"))]);
+        fs::write(
+            project.root.join(STARTUP),
+            startup.to_json_string().unwrap(),
+        )
+        .unwrap();
 
         let mut app = Application(EditorApplication::new(EditorLaunchOptions::new(
             &project.root,
@@ -382,14 +378,7 @@ impl ApplyFixture {
 
     fn review(&mut self, destination_score: u64) -> EditorPrefabInspectionId {
         let (inspection, address) = self.inspect("left", CHANGED_SCORE, true);
-        assert_eq!(
-            self.prepare(inspection, address, self.destination),
-            Outcome::Accepted {
-                inspection,
-                phase: Phase::PreparingEdit,
-            }
-        );
-        expect_phase(&mut self.app, inspection, Phase::Review);
+        self.prepare_apply_review(inspection, address);
         let containing_basis = basis(&self.app, self.containing);
         let destination_basis = basis(&self.app, self.destination);
         let patch = instance_patch(&self.pinned, &self.cleared);
@@ -424,11 +413,22 @@ impl ApplyFixture {
         inspection
     }
 
-    fn commit_destination(
+    fn prepare_apply_review(
         &mut self,
         inspection: EditorPrefabInspectionId,
-        changed: bool,
-    ) -> EditorPrefabApplyDestination {
+        address: EditorPrefabPropertyAddress,
+    ) {
+        assert_eq!(
+            self.prepare(inspection, address, self.destination),
+            Outcome::Accepted {
+                inspection,
+                phase: Phase::PreparingEdit,
+            }
+        );
+        expect_phase(&mut self.app, inspection, Phase::Review);
+    }
+
+    fn commit(&mut self, inspection: EditorPrefabInspectionId, phase: Phase) {
         assert_eq!(
             self.panel
                 .dispatch(&mut self.app, |_| Action::Commit { inspection }),
@@ -437,7 +437,15 @@ impl ApplyFixture {
                 phase: Phase::Validating,
             }
         );
-        expect_phase(&mut self.app, inspection, Phase::AwaitingDestinationSave);
+        expect_phase(&mut self.app, inspection, phase);
+    }
+
+    fn commit_destination(
+        &mut self,
+        inspection: EditorPrefabInspectionId,
+        changed: bool,
+    ) -> EditorPrefabApplyDestination {
+        self.commit(inspection, Phase::AwaitingDestinationSave);
         let published = frame(&self.app)
             .prefab_inspection()
             .apply_destination
@@ -451,6 +459,26 @@ impl ApplyFixture {
             }
         );
         published
+    }
+
+    fn require_destination_save(
+        &mut self,
+        inspection: EditorPrefabInspectionId,
+        destination: EditorPrefabApplyDestination,
+    ) {
+        assert_eq!(
+            self.panel
+                .dispatch(&mut self.app, |_| Action::FinishApply { inspection }),
+            Outcome::Rejected {
+                inspection: Some(inspection),
+                reason: Rejection::DestinationSaveRequired,
+            }
+        );
+        expect_phase(&mut self.app, inspection, Phase::AwaitingDestinationSave);
+        assert_eq!(
+            frame(&self.app).prefab_inspection().apply_destination,
+            Some(destination)
+        );
     }
 
     fn request_finish(&mut self, inspection: EditorPrefabInspectionId) {
@@ -512,12 +540,7 @@ impl ApplyFixture {
     }
 
     fn assert_destination(&mut self, score: u64, history: (bool, usize, usize)) {
-        assert_history(
-            &frame(&self.app),
-            self.destination,
-            EditorDocumentKind::Prefab,
-            history,
-        );
+        self.assert_destination_history(history);
         let document = self.destination;
         self.panel.observe(&mut self.app, |context| {
             let basis = context.document_query_basis(document).unwrap();
@@ -530,6 +553,15 @@ impl ApplyFixture {
                 score
             );
         });
+    }
+
+    fn assert_destination_history(&self, expected: (bool, usize, usize)) {
+        assert_history(
+            &frame(&self.app),
+            self.destination,
+            EditorDocumentKind::Prefab,
+            expected,
+        );
     }
 
     fn stored_sources(&self) -> (Vec<u8>, Vec<u8>) {
@@ -549,6 +581,23 @@ impl ApplyFixture {
         );
         assert_eq!(destination.as_slice(), saved_destination);
     }
+}
+
+fn write_containing_source(
+    project: &text_project::TextProject,
+    kind: EditorDocumentKind,
+    source: &str,
+    containing: SceneDocument,
+) {
+    let bytes = match kind {
+        EditorDocumentKind::Scene => containing.to_json_string(),
+        EditorDocumentKind::Prefab => {
+            PrefabDocument::new(containing.placements, containing.entities).to_json_string()
+        }
+        EditorDocumentKind::Extension(_) => unreachable!(),
+    }
+    .unwrap();
+    fs::write(project.root.join(source), bytes).unwrap();
 }
 
 fn two_mount_source(left: &PrefabInstance, right: &PrefabInstance) -> SceneDocument {

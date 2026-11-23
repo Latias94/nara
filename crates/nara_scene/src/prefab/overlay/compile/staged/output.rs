@@ -485,7 +485,7 @@ where
         #[cfg(feature = "serde")]
         for query in self.root.reference_queries {
             use super::inputs::ReferenceResolution;
-            let (reference, bytes) = match self.reference_target(0, query)? {
+            let (reference, bytes) = match self.reference_target(0, query, None)? {
                 ReferenceResolution::Resolved {
                     reference: ResolvedReference::Local(facet),
                     ..

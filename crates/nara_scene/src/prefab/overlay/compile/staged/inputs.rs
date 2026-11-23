@@ -13,8 +13,7 @@ use crate::diagnostics::{error as diagnostic_error, usize_to_u64, with_public_u6
 use crate::prefab::SceneCompilationWorkingSet;
 use crate::provenance::provenance_string_bytes;
 use crate::{
-    PrefabEntityOrigin, PrefabInstanceHop, ResolvedPrefabSource, SceneCompilationFailure,
-    SceneCompilationFailureKind,
+    PrefabInstanceHop, ResolvedPrefabSource, SceneCompilationFailure, SceneCompilationFailureKind,
 };
 
 pub(super) enum ResolvedReference {
@@ -38,6 +37,7 @@ pub(super) enum ReferenceResolution {
     Resolved {
         reference: ResolvedReference,
         declaring_scope: ScopeId,
+        destination_owns_route: bool,
     },
 }
 
@@ -126,14 +126,19 @@ where
 
     /// A binding chain has one successor at a time. Its active keys are actual occurrences,
     /// never canonical source keys; resolving another leaf starts a fresh chain.
+    /// For Apply, the original route prefix enters the destination. Ownership checks cover
+    /// the suffix that will be stored there and every argument it follows.
     pub(super) fn reference_target(
         &mut self,
         scope: ScopeId,
         target: &AuthoredEntityReference,
+        destination: Option<ScopeId>,
     ) -> Result<ReferenceResolution, SceneCompilationFailure> {
         let mut declaring_scope = scope;
         let mut reference = Cow::Borrowed(target);
         let mut active = Vec::<(ScopeId, ReferenceInputId)>::new();
+        let destination_depth = destination.map(|scope| self.scopes[scope].depth);
+        let mut portable_depth = destination_depth.filter(|_| destination == Some(scope));
         loop {
             let mut current = declaring_scope;
             for (index, hop) in reference.through.iter().enumerate() {
@@ -158,8 +163,7 @@ where
                         SceneCompilationFailureKind::MissingTarget,
                     ));
                 };
-                current = entered;
-                if self.scopes[current]
+                if self.scopes[entered]
                     .source
                     .as_ref()
                     .is_none_or(|source| source.key() != &hop.expected_base)
@@ -168,18 +172,23 @@ where
                         SceneCompilationFailureKind::SourceChanged,
                     ));
                 }
+                if let Some(depth) = portable_depth
+                    && self.scopes[self.overlay_reference_scope(entered)?].depth < depth
+                {
+                    portable_depth = None;
+                }
+                if active.is_empty() && destination == Some(entered) {
+                    portable_depth = destination_depth;
+                }
+                current = entered;
             }
             let input = match &reference.target {
                 AuthoredReferenceTarget::Entity(entity) => {
-                    return Ok(match self.scopes[current].nodes.get(entity) {
-                        Some(&node) => ReferenceResolution::Resolved {
-                            reference: ResolvedReference::Local(node),
-                            declaring_scope,
-                        },
-                        None => {
-                            ReferenceResolution::invalid(SceneCompilationFailureKind::MissingTarget)
-                        }
-                    });
+                    return self.local_reference(
+                        self.scopes[current].nodes.get(entity).copied(),
+                        declaring_scope,
+                        portable_depth,
+                    );
                 }
                 AuthoredReferenceTarget::Input(input) => input,
             };
@@ -231,39 +240,56 @@ where
                 .input_argument(current, input)
                 .ok_or(SceneCompilationFailureKind::OwnerAdmission)?
                 .clone();
-            declaring_scope = self.scopes[current]
-                .site
-                .as_ref()
-                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?
-                .source;
+            declaring_scope = self.overlay_reference_scope(current)?;
+            portable_depth =
+                portable_depth.filter(|&depth| self.scopes[declaring_scope].depth >= depth);
             match argument {
                 EntityReference::Authored {
                     reference: argument,
                 } => reference = Cow::Owned(argument),
                 EntityReference::SceneLocal { entity } => {
-                    return Ok(
-                        match self.scopes[declaring_scope]
+                    return self.local_reference(
+                        self.scopes[declaring_scope]
                             .nodes
-                            .get(&PrefabEntityOrigin::SourceEntity(entity))
-                        {
-                            Some(&node) => ReferenceResolution::Resolved {
-                                reference: ResolvedReference::Local(node),
-                                declaring_scope,
-                            },
-                            None => ReferenceResolution::invalid(
-                                SceneCompilationFailureKind::MissingTarget,
-                            ),
-                        },
+                            .source_entity(&entity)
+                            .copied(),
+                        declaring_scope,
+                        portable_depth,
                     );
                 }
                 argument @ EntityReference::Persistent { .. } => {
                     return Ok(ReferenceResolution::Resolved {
                         reference: ResolvedReference::Persistent(argument),
                         declaring_scope,
+                        destination_owns_route: false,
                     });
                 }
             }
         }
+    }
+
+    fn local_reference(
+        &self,
+        node: Option<NodeId>,
+        declaring_scope: ScopeId,
+        portable_depth: Option<usize>,
+    ) -> Result<ReferenceResolution, SceneCompilationFailure> {
+        let Some(node) = node else {
+            return Ok(ReferenceResolution::invalid(
+                SceneCompilationFailureKind::MissingTarget,
+            ));
+        };
+        let destination_owns_route = if let Some(depth) = portable_depth {
+            let owner = self.record_reference_scope(self.nodes[node].record)?;
+            self.scopes[owner].depth >= depth
+        } else {
+            false
+        };
+        Ok(ReferenceResolution::Resolved {
+            reference: ResolvedReference::Local(node),
+            declaring_scope,
+            destination_owns_route,
+        })
     }
 
     pub(super) fn push_input_failure(&mut self, failure: InputFailure) {

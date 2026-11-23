@@ -410,12 +410,13 @@ where
     fn close_source_reference_demands(&mut self) -> Result<bool, SceneCompilationFailure> {
         use inputs::{ReferenceResolution, ResolvedReference};
         for query in self.root.reference_queries {
-            match self.reference_target(0, query)? {
+            match self.reference_target(0, query, None)? {
                 ReferenceResolution::Entered => return Ok(false),
                 ReferenceResolution::Invalid { reason, .. } => return Err(reason.into()),
                 ReferenceResolution::Resolved {
                     reference: ResolvedReference::Local(node),
                     declaring_scope,
+                    ..
                 } => {
                     if !self.scopes[declaring_scope].output.contains(&node)
                         || !self.scopes[0].output.contains(&node)

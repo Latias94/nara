@@ -1,5 +1,6 @@
 use std::{convert::Infallible, sync::Arc};
 
+use nara_identity::{AuthoredReferenceTarget, ReferenceInputId};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldPath, ComponentSchemaCatalog,
     ComponentValueKind, PersistentComponentSchemaOwnerId,
@@ -10,8 +11,8 @@ use crate::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, PrefabAddition,
     PrefabComponentIntent, PrefabDocument, PrefabDocumentCandidate, PrefabInstance,
     PrefabInstanceClaim, PrefabInstanceHop, PrefabInstancePath, PrefabOverlay, PrefabPropertyClaim,
-    PrefabRevert, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityPlacement, SceneEntityRecord, ScenePlacement,
+    PrefabReferenceArguments, PrefabRevert, SceneAuthoringSession, SceneComponentRecord,
+    SceneDocument, SceneDocumentCandidate, SceneEntityPlacement, SceneEntityRecord, ScenePlacement,
     ScenePlacementParent, SourceDocumentKind,
 };
 
@@ -207,12 +208,10 @@ impl Fixture {
                 let (document, key) = if request == &asset("branch") {
                     (Arc::clone(&self.branch), key("branch"))
                 } else if request == &asset("leaf") {
-                    (
-                        Arc::new(PrefabDocument::from_ordered_roots([
-                            SceneEntityRecord::new(id("socket")),
-                        ])),
-                        key("leaf"),
-                    )
+                    let mut leaf =
+                        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("socket"))]);
+                    leaf.inputs.insert(ReferenceInputId::new("point").unwrap());
+                    (Arc::new(leaf), key("leaf"))
                 } else {
                     assert_eq!(request, &asset("destination"));
                     (Arc::clone(&destination), key("destination"))
@@ -225,6 +224,20 @@ impl Fixture {
             },
         )
         .unwrap()
+    }
+
+    fn replace_destination(&mut self, document: PrefabDocument) {
+        let published = PrefabDocumentCandidate::decode_json_bytes(
+            document.to_json_string().unwrap().as_bytes(),
+        )
+        .unwrap()
+        .admit_authoring_with_basis(
+            AuthoringDocumentSource::new(asset("destination")),
+            &self.basis,
+        )
+        .unwrap()
+        .publish();
+        self.destination = PrefabAuthoringSession::from_published_authoring_document(published);
     }
 
     fn claim(&self) -> PrefabPropertyClaimRef<'_> {
@@ -700,17 +713,7 @@ fn apply_requires_the_destination_to_own_the_nested_instance_route() {
         .overrides = None;
     let mut destination = fixture.destination.document().clone();
     destination.entities[0].prefab = Some(leaf);
-    let published = PrefabDocumentCandidate::decode_json_bytes(
-        destination.to_json_string().unwrap().as_bytes(),
-    )
-    .unwrap()
-    .admit_authoring_with_basis(
-        AuthoringDocumentSource::new(asset("destination")),
-        &fixture.basis,
-    )
-    .unwrap()
-    .publish();
-    fixture.destination = PrefabAuthoringSession::from_published_authoring_document(published);
+    fixture.replace_destination(destination);
     let edit = fixture.plan(&property);
     let (source, destination) = fixture.prepare(&edit);
     let destination = destination.unwrap();
@@ -745,6 +748,119 @@ fn apply_requires_the_destination_to_own_the_nested_instance_route() {
     assert!(
         !fixture
             .inspect(source.document(), different_endpoint.shared_document())
+            .verifies_property_apply(&edit, &mut read())
+            .unwrap()
+    );
+}
+
+#[test]
+fn apply_requires_each_input_binding_to_belong_to_the_destination_even_at_the_same_endpoint() {
+    let property = property("target");
+    let point = ReferenceInputId::new("point").unwrap();
+    let outer = ReferenceInputId::new("outer").unwrap();
+    let raw = ComponentValue::EntityReference(EntityReference::Authored {
+        reference: AuthoredEntityReference {
+            through: vec![
+                hop("mount", "branch"),
+                hop("nested", "destination"),
+                hop("hero", "leaf"),
+            ],
+            target: AuthoredReferenceTarget::Input(point.clone()),
+        },
+    });
+    let mut fixture = Fixture::new(
+        ComponentValue::map([] as [(&str, ComponentValue); 0]),
+        &property,
+        PrefabPropertyIntent::Set(raw),
+        None,
+    );
+    let build_destination = |argument| {
+        let mut destination = fixture.destination.document().clone();
+        destination.entities[0].prefab = Some(PrefabInstance {
+            arguments: Some(PrefabReferenceArguments {
+                base: key("leaf"),
+                values: [(point.clone(), argument)].into(),
+            }),
+            ..PrefabInstance::forest(asset("leaf"))
+        });
+        destination.inputs.insert(outer.clone());
+        destination
+    };
+    let local_destination = build_destination(EntityReference::SceneLocal { entity: id("hero") });
+    let forwarded_destination = build_destination(EntityReference::Authored {
+        reference: AuthoredEntityReference::input(outer.clone()),
+    });
+    Arc::make_mut(&mut fixture.branch).entities[0]
+        .prefab
+        .as_mut()
+        .unwrap()
+        .arguments = Some(PrefabReferenceArguments {
+        base: key("destination"),
+        values: [(
+            outer,
+            EntityReference::Authored {
+                reference: AuthoredEntityReference {
+                    through: vec![hop("nested", "destination")],
+                    target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                        "hero",
+                    ))),
+                },
+            },
+        )]
+        .into(),
+    });
+    let read_resolved = |snapshot: &AuthoringPrefabInstanceSnapshot,
+                         target: &PrefabEntityTarget| {
+        let read = snapshot
+            .target(target)
+            .unwrap()
+            .component(&component())
+            .unwrap()
+            .property_value(&property, &mut read())
+            .unwrap();
+        let AuthoringPrefabPropertyValue::Present(value) = read.value else {
+            panic!("the nested input must resolve");
+        };
+        value.copy_value(Default::default()).unwrap()
+    };
+
+    fixture.replace_destination(forwarded_destination);
+    let original = fixture.inspect(
+        fixture.scene.document(),
+        fixture.destination.shared_document(),
+    );
+    let forwarded_endpoint = read_resolved(&original, &fixture.target);
+    assert!(matches!(
+        original.plan_property_apply(
+            &fixture.target,
+            &component(),
+            &property,
+            fixture.claim(),
+            &key("destination"),
+            Default::default(),
+            &mut read(),
+        ),
+        Err(AuthoringPrefabPropertyApplyError::InvalidProperty)
+    ));
+
+    fixture.replace_destination(local_destination);
+    let local = fixture.inspect(
+        fixture.scene.document(),
+        fixture.destination.shared_document(),
+    );
+    assert_eq!(read_resolved(&local, &fixture.target), forwarded_endpoint);
+    let edit = fixture.plan(&property);
+    let (source, destination) = fixture.prepare(&edit);
+    let destination = destination.unwrap();
+    assert!(matches!(
+        destination.patch().operations.as_slice(),
+        [ScenePatchOperation::SetField { value: ComponentValue::EntityReference(EntityReference::Authored { reference }), .. }]
+            if reference.through == [hop("hero", "leaf")]
+                && reference.target == AuthoredReferenceTarget::Input(point)
+    ));
+    assert!(
+        fixture
+            .inspect(source.document(), destination.shared_document())
             .verifies_property_apply(&edit, &mut read())
             .unwrap()
     );

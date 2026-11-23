@@ -1,5 +1,5 @@
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget};
+use nara_identity::AuthoredEntityReference;
 use nara_reflect::{
     __private::component_values_exactly_match, ComponentCapability, ComponentFieldPathSegment,
     ComponentPropertyStep,
@@ -200,8 +200,7 @@ impl AuthoringPrefabInstanceSnapshot {
                         if reference.through.len() > limits.max_depth() {
                             return Err(Error::BudgetExceeded);
                         }
-                        if !matches!(reference.target, AuthoredReferenceTarget::Entity(_))
-                            || !reference.through.starts_with(&record_target.through)
+                        if !reference.through.starts_with(&record_target.through)
                             || !apply.portable_reference_claims.contains(&claim.slot())
                         {
                             return Err(Error::InvalidProperty);
