@@ -629,6 +629,45 @@ document-scoped editing and persistence.
 [Godot scene Save](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/editor/editor_node.cpp#L2540-L2610) ·
 [Bevy scene application](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_scene/src/scene_patch.rs#L69-L110)
 
+##### Open design for applying complete component declarations
+
+The existing compiler requires an absent lower-layer record for Add and a present record for
+Replace and Suppress. Saving an Add to the destination while its containing declaration is
+still on disk makes the original Add conflict. Removing the destination record while its
+Suppress remains has the same problem. Saving the containing Revert first temporarily loses
+the effect of the selected override. Other instances can also carry declarations that conflict
+with the new presence. The property Apply checkpoint order therefore needs a different
+publication contract for operations that change presence.
+[Presence checks](../../crates/nara_scene/src/prefab/overlay/compile/staged.rs)
+
+Keep the current presence rules as the baseline for a recoverable two-source operation. Review
+would bind the exact containing declaration and destination storage, retain both candidate
+files, and validate the affected saved composition, including dependents that are closed in
+the Editor. For Replace or Suppress, locate the actual lower record across root-bound aliases.
+For Add, select the destination's writable entity declaration explicitly. Verify the selected
+effective component and the effect of removing the original declaration. Complete stored
+values include omissions, explicit Null, and contextual defaults that are currently shadowed.
+Relocating references also requires the destination to own their traversed sources and Input
+arguments. The selected occurrence must retain its original resolved endpoints.
+
+Prefab Extraction already supplies authenticated project Pending storage, fixed outputs, and
+recovery that preserves a file already published with the expected bytes. Reuse `SourceInventory`,
+`RecoveryStorageHost`, and `FilePublicationHost` for this comparison. The new operation would
+publish two existing source records under Pending and check the final saved generation before
+Ready. Extraction's topology proof, newly created Prefab and sidecar are specific to extraction.
+The consumer needs interruption after the first source write, source drift refusal, and ordinary
+Reopen and Check or Cook after recovery. The comparison should also cover an unaffected sibling
+that inherits the result and a closed dependent whose conflicting declaration prevents publication.
+[Current recovery transport](../../src/project_host/authoring/recovery_storage.rs) ·
+[Extraction publication evidence](../plans/2026-11-02-prefab-extraction-plan.md)
+
+History remains open. Independent Undo entries can restore a now-conflicting declaration on
+only one side. A visible history checkpoint for the two participants can reuse the current
+project-operation boundary. A paired Undo would need joint validation, branch semantics and
+the same recovery guarantees. Changing persistent presence declarations to converge after base
+changes would also change how existing projects diagnose rebase conflicts and requires its own
+authoring comparison. No complete-component Apply option has been admitted for publication.
+
 ##### Effective field verification
 
 The implementation and independent consumer land together at `d175fa3`.
