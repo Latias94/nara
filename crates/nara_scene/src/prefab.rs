@@ -454,6 +454,16 @@ impl ResolvedPrefabSource {
         }
     }
 
+    /// Substitutes an unpublished authoring candidate under the existing source binding.
+    #[cfg(feature = "serde")]
+    pub(crate) fn replace_authoring_source_document(
+        &mut self,
+        document: Arc<PrefabDocument>,
+        basis: crate::AuthoringSchemaBasis,
+    ) {
+        self.document = ResolvedPrefabDocument::AuthoringSource { document, basis };
+    }
+
     /// Classification is retained only by a published authoring allocation. Raw composition
     /// sources share their Schema catalogue but own no record facts or preservation manifest.
     #[cfg(feature = "serde")]
@@ -1129,6 +1139,17 @@ pub enum SourceDocumentInput<'a> {
     Prefab(&'a PrefabDocument),
 }
 
+/// Both facet routes start in the containing source, through the selected anchor.
+#[cfg(feature = "serde")]
+#[derive(Clone, Copy)]
+pub(crate) struct ComponentApplyScope<'a> {
+    pub(crate) selected: &'a PrefabEntityTarget,
+    pub(crate) destination: &'a PrefabEntityTarget,
+    pub(crate) component: &'a nara_reflect::ComponentTypeId,
+    pub(crate) destination_document: &'a PrefabDocument,
+    pub(crate) declaration: Option<usize>,
+}
+
 #[cfg(feature = "serde")]
 #[derive(Clone, Copy)]
 pub(crate) enum SelectedInstanceConsumer<'a> {
@@ -1137,6 +1158,11 @@ pub(crate) enum SelectedInstanceConsumer<'a> {
         initial_reference_work: (usize, usize),
     },
     Inspection,
+    ComponentApply {
+        scope: ComponentApplyScope<'a>,
+        reference_queries: &'a [nara_identity::AuthoredEntityReference],
+        initial_reference_work: (usize, usize),
+    },
 }
 
 /// A semantic fragment has no authority to stand in for a complete expanded document.
@@ -1157,6 +1183,8 @@ pub(crate) struct SelectedInstanceFragment {
 pub(crate) struct SelectedInstanceCompilation {
     pub(crate) fragment: Option<SelectedInstanceFragment>,
     pub(crate) inspection: Option<inspection::CapturedPrefabInspection>,
+    pub(crate) component_apply_references:
+        BTreeMap<nara_identity::AuthoredEntityReference, nara_identity::EntityReference>,
     pub(crate) diagnostics: DiagnosticReport,
     pub(crate) failure: Option<SceneCompilationFailure>,
     pub(crate) omissions: Vec<AuthoringSceneCompilationOmission>,
@@ -1191,6 +1219,10 @@ where
             SelectedInstanceConsumer::Conversion {
                 initial_reference_work,
                 ..
+            }
+            | SelectedInstanceConsumer::ComponentApply {
+                initial_reference_work,
+                ..
             } => initial_reference_work,
             SelectedInstanceConsumer::Inspection => (0, 0),
         };
@@ -1201,7 +1233,8 @@ where
             SelectedInstanceConsumer::Conversion { .. } => {
                 std::mem::size_of::<SelectedInstanceFragment>()
             }
-            SelectedInstanceConsumer::Inspection => {
+            SelectedInstanceConsumer::Inspection
+            | SelectedInstanceConsumer::ComponentApply { .. } => {
                 std::mem::size_of::<inspection::AuthoringPrefabInstanceSnapshot>()
             }
         };
@@ -1235,12 +1268,15 @@ where
             }
             .into());
         }
-        if matches!(consumer, SelectedInstanceConsumer::Inspection) {
+        if matches!(
+            consumer,
+            SelectedInstanceConsumer::Inspection | SelectedInstanceConsumer::ComponentApply { .. }
+        ) {
             let mut inspection = output
                 .inspection
                 .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
             inspection.retain_admitted_payloads(document)?;
-            return Ok((None, Some(inspection)));
+            return Ok((None, Some(inspection), output.reference_targets));
         }
         // These source-only snapshots have their own lexical proof and allocation admission.
         // Restore them only after the flat effective values passed their ordinary validator.
@@ -1301,13 +1337,13 @@ where
             targets,
             reference_targets: output.reference_targets,
         };
-        Ok((Some(fragment), None))
+        Ok((Some(fragment), None, BTreeMap::new()))
     })();
-    let (fragment, inspection, failure) = match result {
-        Ok((fragment, inspection)) => (fragment, inspection, None),
+    let (fragment, inspection, component_apply_references, failure) = match result {
+        Ok((fragment, inspection, references)) => (fragment, inspection, references, None),
         Err(failure) => {
             context.push_expansion_failure(&failure);
-            (None, None, Some(failure))
+            (None, None, BTreeMap::new(), Some(failure))
         }
     };
     let work_bytes = context.usage.checked_work_bytes();
@@ -1317,6 +1353,7 @@ where
     Ok(SelectedInstanceCompilation {
         fragment,
         inspection,
+        component_apply_references,
         diagnostics: context.diagnostics,
         failure,
         omissions: context.omissions,

@@ -208,11 +208,14 @@ pub mod __private {
         PreparedSceneExtractionSource, SceneExtractionSourceCommit, SceneSourceExtractionInput,
     };
     pub use crate::authoring::{
-        PrefabSchemaReclassificationCommit, PrefabSchemaReclassificationRequest,
+        PrefabComponentApplyPreparationError, PrefabComponentApplyRequest,
+        PrefabComponentApplySource, PrefabSchemaReclassificationCommit,
+        PrefabSchemaReclassificationRequest, PreparedPrefabComponentApply,
         PreparedPrefabSchemaSource, PreparedSceneSchemaSource,
         RetainedSchemaReclassificationSource, SceneSchemaReclassificationCommit,
         SceneSchemaReclassificationRequest, borrow_prepared_prefab_schema_source,
         borrow_prepared_scene_schema_source, require_schema_reclassification_successor,
+        try_prepare_prefab_component_apply_with_loader,
     };
     pub use crate::authoring_decode::schema_upgrade::AuthoredFieldUpgrade;
     pub use crate::authoring_decode::{

@@ -801,6 +801,43 @@ their Review, Revert, Undo/Redo, Save and Reopen assertions. Scene correctness C
 library compilation and root and panel format checks pass.
 [Registered component workflows](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/component_edit.rs)
 
+###### Scene-side component Apply preparation
+
+Scene prepares an in-memory pair for a live containing Scene or Prefab and its exact
+destination Prefab revision. The containing edit uses the original observed Revert.
+The destination uses one direct Add, Replace or Remove operation with the captured
+Schema, classification, file encoding and existing preservation rules.
+
+The selected compiler checks the direct destination facet and the exact contributor in
+the merged entity. Complete Set retains stored values and contextual defaults, including
+defaults hidden by explicit fields. The existing reference resolver proves destination
+ownership for each rebased route and checks its endpoint across the two compilations.
+Suppress requires the merged entity to survive with the component absent.
+The compiler requires one captured allocation for the destination identity across request
+aliases. Declaration copying, both candidate preparations and both compilers share one
+work allowance. A loader restriction carries through subsequent stages. The containing
+candidate uses the same exact Revert with source preparation limits. The forthcoming
+history checkpoint does not require an ordinary Undo entry to fit.
+[Pair preparation](../../crates/nara_scene/src/authoring/prefab_declarations/component_apply.rs)
+
+On Windows x64 with Rust 1.95.0, the initial selection passes 28/28 nextest cases
+(`fc9dbfa8-9698-4c34-898d-cd214c0ee725`). The final Scene library run passes 866/866
+(`9a4c7a5c-d484-4167-920f-1471023fc276`). The new cases prepare all three intents in both
+containing source kinds, preserve exact value bits and omissions, and verify forward and
+reverse patches. They reject a wrong bound-root facet, a reappearing lower record, a hidden
+reference that reaches the same endpoint through an outer-owned binding, and distinct
+allocations under one destination identity. The work controls require refusal before loading
+an oversized declaration and retain a tightened loader allowance across both compilations.
+[Scene pair tests](../../crates/nara_scene/src/prefab/overlay/compile/selected_tests/component_apply.rs)
+
+The independently locked registered-panel selection passes 33/33 in release
+(`8a0faf11-5ec1-4992-80c0-9c9ae060e087`). It exercises the existing component edits,
+structured property Apply and exact Revert through ordinary panel and Host workflows.
+Scene correctness Clippy, its no-default-features library check and root formatting pass.
+
+Project Review, closed-dependent validation, paired history checkpoints, disk publication
+and fresh-process recovery remain open.
+
 ##### Effective field verification
 
 The implementation and independent consumer land together at `d175fa3`.

@@ -86,6 +86,8 @@ where
             preserve_source_defaults: false,
             #[cfg(feature = "serde")]
             inspect: false,
+            #[cfg(feature = "serde")]
+            component_apply: None,
         },
     )
 }
@@ -128,12 +130,17 @@ fn source_topology<'a>(
 ) -> staged::SourceTopology<'a> {
     use crate::prefab::SelectedInstanceConsumer;
 
-    let (reference_queries, preserve_source_defaults, inspect) = match consumer {
+    let (reference_queries, preserve_source_defaults, inspect, component_apply) = match consumer {
         Some(SelectedInstanceConsumer::Conversion {
             reference_queries, ..
-        }) => (reference_queries, true, false),
-        Some(SelectedInstanceConsumer::Inspection) => (&[][..], false, true),
-        None => (&[][..], false, false),
+        }) => (reference_queries, true, false, None),
+        Some(SelectedInstanceConsumer::Inspection) => (&[][..], false, true, None),
+        Some(SelectedInstanceConsumer::ComponentApply {
+            scope,
+            reference_queries,
+            ..
+        }) => (reference_queries, false, true, Some(scope)),
+        None => (&[][..], false, false, None),
     };
     let (placements, entities, inputs) = match source {
         crate::prefab::SourceDocumentInput::Scene(document) => (
@@ -154,6 +161,7 @@ fn source_topology<'a>(
         reference_queries,
         preserve_source_defaults,
         inspect,
+        component_apply,
     }
 }
 

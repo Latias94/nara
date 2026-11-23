@@ -624,6 +624,7 @@ fn structural_observation_does_not_prepare_values_with_real_native_codecs() {
             reference_queries: &[],
             preserve_source_defaults: false,
             inspect: false,
+            component_apply: None,
         },
         &id("root"),
     )

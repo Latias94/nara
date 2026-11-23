@@ -124,6 +124,47 @@ where
             .get(input)
     }
 
+    pub(super) fn source_reference_target(
+        &mut self,
+        query: &AuthoredEntityReference,
+        destination: Option<ScopeId>,
+    ) -> Result<ReferenceResolution, SceneCompilationFailure> {
+        if destination.is_some() {
+            self.context
+                .admit_terminal_work(query.cost_nodes(), 0, Some(0))
+                .map_err(|()| SceneCompilationFailureKind::WorkLimit)?;
+            self.context
+                .admit_terminal_work(0, query.cost().logical_bytes(), Some(0))
+                .map_err(|()| SceneCompilationFailureKind::WorkLimit)?;
+        }
+        self.reference_target(0, query, destination)
+    }
+
+    pub(super) fn resolved_source_reference(
+        &mut self,
+        query: &AuthoredEntityReference,
+        destination: Option<ScopeId>,
+    ) -> Result<Option<ResolvedReference>, SceneCompilationFailure> {
+        match self.source_reference_target(query, destination)? {
+            ReferenceResolution::Entered => Ok(None),
+            ReferenceResolution::Invalid { reason, .. } => Err(reason.into()),
+            ReferenceResolution::Resolved {
+                reference,
+                declaring_scope,
+                destination_owns_route,
+            } => {
+                if (destination.is_some() && !destination_owns_route)
+                    || matches!(&reference, ResolvedReference::Local(node)
+                        if !self.scopes[declaring_scope].output.contains(node)
+                            || !self.scopes[0].output.contains(node))
+                {
+                    return Err(SceneCompilationFailureKind::Reference.into());
+                }
+                Ok(Some(reference))
+            }
+        }
+    }
+
     /// A binding chain has one successor at a time. Its active keys are actual occurrences,
     /// never canonical source keys; resolving another leaf starts a fresh chain.
     /// For Apply, the original route prefix enters the destination. Ownership checks cover

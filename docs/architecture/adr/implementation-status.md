@@ -4478,6 +4478,12 @@ and merged root aliases. Scene controls exercise both mixed file generations and
 of a nested record after deleting its overriding lower record. The independent panel observes
 actual origins across non-active Scene and Prefab workflows.
 
+The [Scene-side component Apply pair](../authoring-read-projection-design.md#scene-side-component-apply-preparation)
+prepares the exact containing Revert and direct destination edit for Add, Replace and
+Suppress. The compiler checks the merged contributor, effective value and the endpoint of
+each moved reference, including shadowed contextual defaults. Scene library tests pass
+866/866. Project publication, history checkpoints and recovery remain open.
+
 The [contextual defaults and nested Input qualification](../authoring-read-projection-design.md#november-23-contextual-defaults-and-nested-input-apply)
 covers both Scene and Prefab consumers of complete Set and property Apply. Schema admission
 supplies source-dependent defaults to the existing record constructor and patch budget. The

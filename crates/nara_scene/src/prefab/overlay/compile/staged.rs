@@ -13,6 +13,8 @@ use crate::prefab::SceneCompilationWorkingSet;
 use crate::provenance::{provenance_asset_ref_bytes, provenance_string_bytes};
 
 #[cfg(feature = "serde")]
+mod component_apply;
+#[cfg(feature = "serde")]
 mod extraction;
 mod inputs;
 #[cfg(feature = "serde")]
@@ -37,7 +39,7 @@ struct Site {
     segments: Vec<PrefabInstancePathSegment>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Record {
     Source { scope: ScopeId, entity: usize },
     Addition { scope: ScopeId, index: usize },
@@ -183,11 +185,13 @@ pub(super) struct SourceTopology<'a> {
     pub(super) inputs: Option<&'a BTreeSet<ReferenceInputId>>,
     pub(super) placements: &'a [SceneEntityPlacement],
     pub(super) entities: &'a [SceneEntityRecord],
-    /// Witnessed containing-source references that must survive explicit source conversion.
+    /// Witnessed containing-source references for conversion or component Apply.
     pub(super) reference_queries: &'a [nara_identity::AuthoredEntityReference],
     pub(super) preserve_source_defaults: bool,
     #[cfg(feature = "serde")]
     pub(super) inspect: bool,
+    #[cfg(feature = "serde")]
+    pub(super) component_apply: Option<crate::prefab::ComponentApplyScope<'a>>,
 }
 
 /// Preserves a standalone Prefab's declared input environment at the source boundary.
@@ -252,17 +256,29 @@ where
     // A newly entered scope invalidates this unpublished value/visibility candidate.
     loop {
         compiler.compose_programs()?;
+        #[cfg(feature = "serde")]
+        let reference_destination = source
+            .component_apply
+            .map(|scope| compiler.component_apply_destination(scope))
+            .transpose()?;
+        #[cfg(not(feature = "serde"))]
+        let reference_destination = None;
         let mut references = compiler.materialize_components(&mut layout)?;
         let references_closed = {
             #[cfg(feature = "work-observation")]
             let _work_span =
                 tracing::info_span!(target: "nara::scene::work", "scene_reference_closure")
                     .entered();
-            compiler.close_reference_demands(&mut references)?
-                && compiler.close_source_reference_demands()?
+            compiler.close_reference_demands(&mut references, reference_destination)?
+                && compiler.close_source_reference_demands(reference_destination)?
         };
         if references_closed {
-            return compiler.materialize(layout, references);
+            return compiler.materialize(
+                layout,
+                references,
+                #[cfg(feature = "serde")]
+                reference_destination,
+            );
         }
 
         drop(references);
@@ -378,24 +394,42 @@ where
         let Some(target) = self.bound_root_target(scope) else {
             return Ok(None);
         };
+        let facet = self.entered_target(scope, target).map_err(|mut failure| {
+            if failure.reason == SceneCompilationFailureKind::MissingTarget {
+                failure.reason = SceneCompilationFailureKind::RootBinding;
+            }
+            failure
+        })?;
+        Ok(Some(self.canonical_node(scope, facet)))
+    }
+
+    fn entered_target(
+        &self,
+        scope: ScopeId,
+        target: &PrefabEntityTarget,
+    ) -> Result<NodeId, SceneCompilationFailure> {
         let mut current = scope;
         for hop in &target.through {
             let anchor = *self.scopes[current]
                 .nodes
                 .get(&hop.anchor)
-                .ok_or(SceneCompilationFailureKind::RootBinding)?;
+                .ok_or(SceneCompilationFailureKind::MissingTarget)?;
             current = self.nodes[anchor]
                 .entered
-                .ok_or(SceneCompilationFailureKind::RootBinding)?;
-            if self.scopes[current].source.as_ref().unwrap().key() != &hop.expected_base {
+                .ok_or(SceneCompilationFailureKind::MissingTarget)?;
+            if self.scopes[current]
+                .source
+                .as_ref()
+                .is_none_or(|source| source.key() != &hop.expected_base)
+            {
                 return Err(SceneCompilationFailureKind::SourceChanged.into());
             }
         }
-        let facet = *self.scopes[current]
+        self.scopes[current]
             .nodes
             .get(&target.entity)
-            .ok_or(SceneCompilationFailureKind::RootBinding)?;
-        Ok(Some(self.canonical_node(scope, facet)))
+            .copied()
+            .ok_or_else(|| SceneCompilationFailureKind::MissingTarget.into())
     }
 
     /// Resolves only materialized identity. Declaration lookup always retains the original facet.
@@ -407,24 +441,16 @@ where
             .unwrap_or(node)
     }
 
-    fn close_source_reference_demands(&mut self) -> Result<bool, SceneCompilationFailure> {
-        use inputs::{ReferenceResolution, ResolvedReference};
+    fn close_source_reference_demands(
+        &mut self,
+        destination: Option<ScopeId>,
+    ) -> Result<bool, SceneCompilationFailure> {
         for query in self.root.reference_queries {
-            match self.reference_target(0, query, None)? {
-                ReferenceResolution::Entered => return Ok(false),
-                ReferenceResolution::Invalid { reason, .. } => return Err(reason.into()),
-                ReferenceResolution::Resolved {
-                    reference: ResolvedReference::Local(node),
-                    declaring_scope,
-                    ..
-                } => {
-                    if !self.scopes[declaring_scope].output.contains(&node)
-                        || !self.scopes[0].output.contains(&node)
-                    {
-                        return Err(SceneCompilationFailureKind::Reference.into());
-                    }
-                }
-                ReferenceResolution::Resolved { .. } => {}
+            if self
+                .resolved_source_reference(query, destination)?
+                .is_none()
+            {
+                return Ok(false);
             }
         }
         Ok(true)

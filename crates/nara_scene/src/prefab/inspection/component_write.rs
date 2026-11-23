@@ -87,6 +87,48 @@ impl ObservedPrefabComponentEdit {
 }
 
 impl AuthoringPrefabInstanceSnapshot {
+    pub(crate) fn component_apply_declaration<'a>(
+        &self,
+        source: SourceDocumentInput<'a>,
+        revision: SceneAuthoringRevision,
+        selected: &'a PrefabEntityTarget,
+        component: &ComponentTypeId,
+        limits: PrefabDeclarationLimits,
+    ) -> Result<
+        (
+            &'a SceneEntityId,
+            usize,
+            &'a PrefabComponentIntent,
+            PrefabOverlayCost,
+        ),
+        AuthoringPrefabComponentEditError,
+    > {
+        use AuthoringPrefabComponentEditError as Error;
+        if self
+            .working_source
+            .as_ref()
+            .and_then(|original| original.revision_for(source))
+            != Some(revision)
+        {
+            return Err(Error::StaleObservedIntent);
+        }
+        let Some(PrefabEntityOrigin::SourceEntity(anchor)) =
+            selected.through.first().map(|hop| &hop.anchor)
+        else {
+            return Err(Error::InvalidComponent);
+        };
+        let bytes = remaining_selector_bytes(selected, component, limits)?;
+        let view = self.target(selected).ok_or(Error::InvalidComponent)?;
+        let declaration = view
+            .component_overrides
+            .and_then(|entries| entries.get(component))
+            .ok_or(Error::NoCurrentClaim)?;
+        let instance = instance_at(source, anchor).ok_or(Error::StaleObservedIntent)?;
+        let intent = declaration.stored_intent(instance, component)?;
+        let cost = declaration_copy_cost(intent, limits, bytes)?;
+        Ok((anchor, declaration.index, intent, cost))
+    }
+
     /// Selects a complete component edit against the captured working source and its revision.
     #[doc(hidden)]
     pub fn plan_component_edit(
@@ -98,8 +140,6 @@ impl AuthoringPrefabInstanceSnapshot {
         limits: PrefabDeclarationLimits,
     ) -> Result<ObservedPrefabComponentEdit, AuthoringPrefabComponentEditError> {
         use AuthoringPrefabComponentEditError as Error;
-        use AuthoringPrefabComponentOverrideKind as Kind;
-
         let working_source = self
             .working_source
             .as_ref()
@@ -126,14 +166,7 @@ impl AuthoringPrefabInstanceSnapshot {
         let instance = instance_at(source, anchor).ok_or(Error::StaleObservedIntent)?;
         let declared = observation
             .map(|observation| {
-                let intent = instance
-                    .overrides
-                    .as_ref()
-                    .and_then(|overlay| overlay.components.get(observation.index))
-                    .ok_or(Error::StaleObservedIntent)?;
-                if intent.address().1 != component || Kind::of(intent) != observation.kind {
-                    return Err(Error::StaleObservedIntent);
-                }
+                let intent = observation.stored_intent(instance, component)?;
                 Ok((observation.index, intent))
             })
             .transpose()?;
@@ -185,16 +218,7 @@ impl AuthoringPrefabInstanceSnapshot {
 
         let existing = declared
             .map(|(index, intent)| {
-                let cost = prefab_component_intent_cost(
-                    intent,
-                    PrefabOverlayCostLimits {
-                        nodes: limits.max_nodes(),
-                        depth: limits.max_depth(),
-                        logical_bytes: bytes,
-                        ..PrefabOverlayCostLimits::UNBOUNDED
-                    },
-                )
-                .map_err(|_| Error::BudgetExceeded)?;
+                let cost = declaration_copy_cost(intent, limits, bytes)?;
                 Ok(ObservedComponentDeclaration {
                     index,
                     intent: intent.clone(),
@@ -312,6 +336,41 @@ impl AuthoringPrefabInstanceSnapshot {
             }
         }
     }
+}
+
+impl InspectedPrefabComponentOverride {
+    fn stored_intent<'a>(
+        &self,
+        instance: &'a PrefabInstance,
+        component: &ComponentTypeId,
+    ) -> Result<&'a PrefabComponentIntent, AuthoringPrefabComponentEditError> {
+        instance
+            .overrides
+            .as_ref()
+            .and_then(|overlay| overlay.components.get(self.index))
+            .filter(|intent| {
+                intent.address().1 == component
+                    && AuthoringPrefabComponentOverrideKind::of(intent) == self.kind
+            })
+            .ok_or(AuthoringPrefabComponentEditError::StaleObservedIntent)
+    }
+}
+
+fn declaration_copy_cost(
+    intent: &PrefabComponentIntent,
+    limits: PrefabDeclarationLimits,
+    bytes: usize,
+) -> Result<PrefabOverlayCost, AuthoringPrefabComponentEditError> {
+    prefab_component_intent_cost(
+        intent,
+        PrefabOverlayCostLimits {
+            nodes: limits.max_nodes(),
+            depth: limits.max_depth(),
+            logical_bytes: bytes,
+            ..PrefabOverlayCostLimits::UNBOUNDED
+        },
+    )
+    .map_err(|_| AuthoringPrefabComponentEditError::BudgetExceeded)
 }
 
 fn record_matches_template(

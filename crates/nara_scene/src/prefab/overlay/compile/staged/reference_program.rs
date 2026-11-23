@@ -336,6 +336,7 @@ where
     pub(super) fn close_reference_demands(
         &mut self,
         programs: &mut ReferencePrograms,
+        reference_destination: Option<ScopeId>,
     ) -> Result<bool, SceneCompilationFailure> {
         // Do not reject a stale leaf before another surviving leaf has had a chance to
         // open a scope and trigger structural/program recomposition.
@@ -356,11 +357,11 @@ where
                 }
             }
         }
-        // Source-conversion queries share this discovery round. No stale value or query may
+        // Explicit source queries share this discovery round. No stale value or query may
         // reject before another witnessed reference opens a scope and requires recomposition.
         for query in self.root.reference_queries {
             if matches!(
-                self.reference_target(0, query, None)?,
+                self.source_reference_target(query, reference_destination)?,
                 ReferenceResolution::Entered
             ) {
                 return Ok(false);

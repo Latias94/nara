@@ -1732,13 +1732,21 @@ impl AuthoringDocumentState {
         &self.record_facts
     }
 
+    fn direct_record_fact(
+        &self,
+        entity: &SceneEntityId,
+        component: &ComponentTypeId,
+    ) -> Option<&AuthoringRecordFact> {
+        let index = self.direct_record_facts.get(entity)?.get(component)?;
+        self.record_facts.get(*index)
+    }
+
     pub(crate) fn available_component_schema(
         &self,
         entity: &SceneEntityId,
         component: &ComponentTypeId,
     ) -> Option<&ComponentSchema> {
-        let fact = self.direct_record_facts.get(entity)?.get(component)?;
-        let fact = &self.record_facts[*fact];
+        let fact = self.direct_record_fact(entity, component)?;
         if !fact.readiness.is_available() {
             return None;
         }
@@ -3067,6 +3075,46 @@ pub(crate) fn prepare_prefab_authoring_patch_with_admission(
     prepare_prefab_authoring_patch_impl(document, state, patch, history, Some(admit))
 }
 
+pub(crate) fn prepare_prefab_component_apply_patch(
+    document: &PrefabDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    admit: &mut reclassification::AdmissionCallback<'_>,
+) -> Result<PreparedPrefabAuthoringPatch, ScenePatchReport> {
+    let prepared = structure::prepare_prefab_component_apply(document, state, patch, admit)?;
+    finish_prefab_authoring_structure(document, prepared, Some(admit))
+}
+
+fn finish_prefab_authoring_structure(
+    original: &PrefabDocument,
+    prepared: PreparedSceneAuthoringPatch,
+    mut admit: Option<&mut reclassification::AdmissionCallback<'_>>,
+) -> Result<PreparedPrefabAuthoringPatch, ScenePatchReport> {
+    if let Some(admit) = admit.as_deref_mut() {
+        admit(
+            "prefab-inputs",
+            retention::prefab_inputs_bytes(&original.inputs),
+        )?;
+    }
+    let document = PrefabDocument {
+        inputs: original.inputs.clone(),
+        placements: prepared.document.placements,
+        entities: prepared.document.entities,
+    };
+    reclassification::validate_prefab_shape(
+        &document,
+        prepared.state.limits,
+        prepared.state.encoding,
+        admit,
+    )?;
+    Ok(PreparedPrefabAuthoringPatch {
+        document,
+        state: prepared.state,
+        patch: prepared.patch,
+        report: prepared.report,
+    })
+}
+
 fn prepare_prefab_authoring_patch_impl(
     document: &PrefabDocument,
     state: &AuthoringDocumentState,
@@ -3099,29 +3147,7 @@ fn prepare_prefab_authoring_patch_impl(
             history,
             admit.as_deref_mut(),
         )?;
-        if let Some(admit) = admit.as_deref_mut() {
-            admit(
-                "prefab-inputs",
-                retention::prefab_inputs_bytes(&document.inputs),
-            )?;
-        }
-        let candidate = PrefabDocument {
-            inputs: document.inputs.clone(),
-            placements: prepared.document.placements,
-            entities: prepared.document.entities,
-        };
-        reclassification::validate_prefab_shape(
-            &candidate,
-            state.limits,
-            state.encoding,
-            admit.as_deref_mut(),
-        )?;
-        return Ok(PreparedPrefabAuthoringPatch {
-            document: candidate,
-            state: prepared.state,
-            patch: prepared.patch,
-            report: prepared.report,
-        });
+        return finish_prefab_authoring_structure(document, prepared, admit);
     }
     if let Some(admit) = admit.as_deref_mut() {
         reclassification::admit_document(

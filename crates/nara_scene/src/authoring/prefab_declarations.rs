@@ -17,8 +17,13 @@ use crate::{
     prefab::{PrefabOverlayCostLimits, prefab_instance_cost},
 };
 
+mod component_apply;
 mod component_write;
 mod property_write;
+pub use component_apply::{
+    PrefabComponentApplyPreparationError, PrefabComponentApplyRequest, PrefabComponentApplySource,
+    PreparedPrefabComponentApply, try_prepare_prefab_component_apply_with_loader,
+};
 pub(crate) use property_write::admit_property_write;
 
 /// Inclusive logical limits for source declaration observation and edit lowering.
@@ -515,6 +520,16 @@ fn lower_revert(
     limits: PrefabDeclarationLimits,
     select: impl FnOnce(&PrefabOverlay) -> Result<Option<PrefabOverlaySlot>, PrefabDeclarationError>,
 ) -> Result<ScenePatchDocument, PrefabDeclarationError> {
+    lower_revert_with_admission(entities, path, limits, |_| Ok(()), select)
+}
+
+fn lower_revert_with_admission(
+    entities: &[SceneEntityRecord],
+    path: &PrefabInstancePath,
+    limits: PrefabDeclarationLimits,
+    admit: impl FnOnce(Option<usize>) -> Result<(), PrefabDeclarationError>,
+    select: impl FnOnce(&PrefabOverlay) -> Result<Option<PrefabOverlaySlot>, PrefabDeclarationError>,
+) -> Result<ScenePatchDocument, PrefabDeclarationError> {
     let mut budget = DeclarationBudget::new(limits);
     budget.location(path.anchor.as_str(), &path.steps)?;
     let root = anchor_instance(entities, &path.anchor)?;
@@ -532,6 +547,12 @@ fn lower_revert(
         .as_ref()
         .ok_or(PrefabDeclarationError::OverlayAbsent)?;
     let slot = select(overlay)?;
+    admit(
+        budget
+            .nodes
+            .checked_mul(512)
+            .and_then(|bytes| bytes.checked_add(budget.bytes)),
+    )?;
     let mut value = root.clone();
     let selected = instance_at_mut(&mut value, &path.steps)?
         .as_mut()

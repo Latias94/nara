@@ -1,9 +1,10 @@
 use super::{
-    AuthoringDocumentReadiness, AuthoringDocumentState, AuthoringRecordLocation, DiagnosticReport,
-    PreparedSceneAuthoringPatch, SceneDocument, ScenePatchDocument, ScenePatchOperation,
-    ScenePatchReport, UnavailableRecordManifest, UnavailableRecordManifestEntry,
-    classify_scene_document, component_allows_composition, diagnostic_error,
-    is_authoring_field_operation,
+    AuthoringDocumentKind, AuthoringDocumentReadiness, AuthoringDocumentState,
+    AuthoringRecordLocation, AuthoringRecordOwnerClaim, AuthoringSourceParts, DiagnosticReport,
+    PrefabDocument, PreparedSceneAuthoringPatch, SceneComponentRecord, SceneDocument,
+    SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
+    UnavailableRecordManifest, UnavailableRecordManifestEntry, classify_scene_document,
+    component_allows_composition, diagnostic_error, is_authoring_field_operation,
 };
 use crate::authoring::prefab_conversion::{
     retention,
@@ -17,6 +18,7 @@ enum StructureAdmission<'a> {
     Direct,
     History,
     PrefabConversion(&'a crate::authoring::prefab_conversion::PrefabConversionFootprint),
+    PrefabComponentApply,
 }
 
 pub(super) fn prepare_scene_authoring_structure(
@@ -48,8 +50,7 @@ pub(super) fn prepare_scene_authoring_structure_with_admission(
         return prepare_scene_authoring_structure(document, state, patch, history);
     }
     prepare_structure_from_parts(
-        &document.placements,
-        &document.entities,
+        document.into(),
         state,
         patch,
         if history {
@@ -62,6 +63,22 @@ pub(super) fn prepare_scene_authoring_structure_with_admission(
     )
 }
 
+pub(super) fn prepare_prefab_component_apply(
+    document: &PrefabDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    admit: &mut super::reclassification::AdmissionCallback<'_>,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    prepare_structure_from_parts(
+        document.into(),
+        state,
+        patch,
+        StructureAdmission::PrefabComponentApply,
+        None,
+        Some(admit),
+    )
+}
+
 pub(super) fn prepare_conversion_structure_with_admission(
     document: &SceneDocument,
     state: &AuthoringDocumentState,
@@ -71,8 +88,7 @@ pub(super) fn prepare_conversion_structure_with_admission(
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
     footprint.admit_patch(patch)?;
     prepare_structure_from_parts(
-        &document.placements,
-        &document.entities,
+        document.into(),
         state,
         patch,
         StructureAdmission::PrefabConversion(footprint),
@@ -118,8 +134,11 @@ pub(super) fn prepare_conversion_structure_with_work(
         ));
     }
     prepare_structure_from_parts(
-        placements,
-        entities,
+        AuthoringSourceParts {
+            placements,
+            entities,
+            inputs: None,
+        },
         state,
         patch,
         StructureAdmission::PrefabConversion(footprint),
@@ -134,26 +153,22 @@ fn prepare_structure(
     patch: &ScenePatchDocument,
     admission: StructureAdmission<'_>,
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
-    prepare_structure_from_parts(
-        &document.placements,
-        &document.entities,
-        state,
-        patch,
-        admission,
-        None,
-        None,
-    )
+    prepare_structure_from_parts(document.into(), state, patch, admission, None, None)
 }
 
 fn prepare_structure_from_parts(
-    placements: &[crate::SceneEntityPlacement],
-    entities: &[crate::SceneEntityRecord],
+    source: AuthoringSourceParts<'_>,
     state: &AuthoringDocumentState,
     patch: &ScenePatchDocument,
     admission: StructureAdmission<'_>,
     mut work: Option<&mut ConversionWork>,
     mut admit: Option<&mut super::reclassification::AdmissionCallback<'_>>,
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    let AuthoringSourceParts {
+        placements,
+        entities,
+        inputs,
+    } = source;
     let history = matches!(admission, StructureAdmission::History);
     if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION
         || patch.is_empty()
@@ -163,10 +178,16 @@ fn prepare_structure_from_parts(
             "Authoring composition requires a bounded nonempty transaction",
         ));
     }
-    for operation in &patch.operations {
-        if !matches!(admission, StructureAdmission::PrefabConversion(_)) {
-            validate_operation_shape(operation, history)?;
+    match &admission {
+        StructureAdmission::Direct | StructureAdmission::History => {
+            for operation in &patch.operations {
+                validate_operation_shape(operation, history)?;
+            }
         }
+        StructureAdmission::PrefabComponentApply => {
+            validate_prefab_component_apply(entities, state, patch)?;
+        }
+        StructureAdmission::PrefabConversion(_) => {}
     }
     if let Some(admit) = admit.as_deref_mut() {
         super::reclassification::admit_document(placements, entities, state.limits, admit)?;
@@ -245,7 +266,10 @@ fn prepare_structure_from_parts(
                 footprint.admit_operation(&candidate, operation)?;
                 validate_conversion_record(state, operation)?;
             }
-            _ => validate_structure_operation(&candidate, state, operation, history, &created)?,
+            StructureAdmission::Direct | StructureAdmission::History => {
+                validate_structure_operation(&candidate, state, operation, history, &created)?;
+            }
+            StructureAdmission::PrefabComponentApply => {}
         }
         let inverse = crate::patch::apply_authoring_structure_operation(
             &mut candidate,
@@ -371,10 +395,15 @@ fn prepare_structure_from_parts(
     let candidate_state = if let Some(work) = work.as_deref_mut() {
         super::conversion::classify_conversion_document(&candidate, state, patch, work)?
     } else if let Some(admit) = admit.as_deref_mut() {
-        super::reclassification::classify_with_admission(
-            &candidate,
+        super::reclassification::classify_source_with_admission(
+            AuthoringSourceParts {
+                placements: &candidate.placements,
+                entities: &candidate.entities,
+                inputs,
+            },
             state,
             &state.schema_basis(),
+            state.encoding,
             admit,
         )?
     } else {
@@ -604,6 +633,84 @@ fn validate_operation_shape(
         )),
         _ => Ok(()),
     }
+}
+
+fn validate_prefab_component_apply(
+    entities: &[SceneEntityRecord],
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+) -> Result<(), ScenePatchReport> {
+    let invalid_operation = || {
+        authoring_structure_rejection(
+            "Prefab component Apply requires one direct Prefab component operation",
+        )
+    };
+    if state.kind != AuthoringDocumentKind::Prefab {
+        return Err(invalid_operation());
+    }
+    let [operation] = patch.operations.as_slice() else {
+        return Err(invalid_operation());
+    };
+    let (entity, component, value) = match operation {
+        ScenePatchOperation::AddComponent {
+            entity,
+            component,
+            value,
+        }
+        | ScenePatchOperation::ReplaceComponent {
+            entity,
+            component,
+            value,
+        } => (entity, component, Some(value)),
+        ScenePatchOperation::RemoveComponent { entity, component } => (entity, component, None),
+        _ => return Err(invalid_operation()),
+    };
+    let Some(entry) = state
+        .basis
+        .schemas
+        .get(component)
+        .filter(|entry| entry.adapter.is_some() && component_allows_composition(&entry.schema))
+    else {
+        return Err(authoring_structure_rejection(
+            "Prefab component Apply requires a composable authoring Schema",
+        ));
+    };
+    let current = |record: &SceneComponentRecord| {
+        record.version == entry.schema.version()
+            && record.owner().is_none_or(|owner| owner == &entry.owner)
+    };
+    if value.is_some_and(|record| !current(record)) {
+        return Err(authoring_structure_rejection(
+            "Prefab component Apply requires a record for the current Schema and owner",
+        ));
+    }
+    if matches!(operation, ScenePatchOperation::AddComponent { .. }) {
+        return Ok(());
+    }
+    let unavailable = || {
+        authoring_structure_rejection("Prefab component Apply requires an Available direct record")
+    };
+    let incumbent = entities
+        .iter()
+        .find(|record| &record.id == entity)
+        .and_then(|record| record.components.get(component))
+        .ok_or_else(unavailable)?;
+    let fact = state
+        .direct_record_fact(entity, component)
+        .ok_or_else(unavailable)?;
+    let owner_claim = match fact.owner() {
+        AuthoringRecordOwnerClaim::Declared(owner) => Some(owner),
+        AuthoringRecordOwnerClaim::Unclaimed => None,
+    };
+    if !fact.readiness().is_available()
+        || !current(incumbent)
+        || fact.version() != incumbent.version
+        || fact.resolved_owner() != Some(&entry.owner)
+        || owner_claim != incumbent.owner()
+    {
+        return Err(unavailable());
+    }
+    Ok(())
 }
 
 fn validate_structure_operation(

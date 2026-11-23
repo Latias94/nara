@@ -678,7 +678,10 @@ identifies the physical destination beneath a selected declaration, including a 
 root-bound record. It also demonstrates that a destination-first Save can invalidate an
 unconsumed Add or Suppress. The planned component Apply uses joint publication under the
 original Project Pending owner and an explicit history checkpoint for its two replacements.
-Candidate construction and the complete recoverable consumer remain open.
+The [Scene-side pair preparation](../architecture/authoring-read-projection-design.md#scene-side-component-apply-preparation)
+validates the complete candidate values, exact merged contributor and destination-owned
+references for Add, Replace and Suppress. Project Review, publication and the complete
+recoverable consumer remain open.
 
 The [contextual default and nested Input corrections](../architecture/authoring-read-projection-design.md#november-23-contextual-defaults-and-nested-input-apply)
 share the exact Schema admission with ordinary component construction and preserve the full

@@ -42,7 +42,11 @@ pub use prefab_conversion::{
 mod prefab_declarations;
 #[cfg(feature = "serde")]
 #[doc(hidden)]
-pub use prefab_declarations::{PrefabComponentPropertyClaims, PrefabPropertyClaims};
+pub use prefab_declarations::{
+    PrefabComponentApplyPreparationError, PrefabComponentApplyRequest, PrefabComponentApplySource,
+    PrefabComponentPropertyClaims, PrefabPropertyClaims, PreparedPrefabComponentApply,
+    try_prepare_prefab_component_apply_with_loader,
+};
 #[cfg(feature = "serde")]
 pub use prefab_declarations::{
     PrefabDeclarationError, PrefabDeclarationLimits, PrefabInstanceObservation,

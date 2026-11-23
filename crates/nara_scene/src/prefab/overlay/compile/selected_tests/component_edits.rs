@@ -12,6 +12,9 @@ use crate::{
     SceneAuthoringSession, SceneDocumentCandidate,
 };
 
+#[path = "component_apply.rs"]
+mod component_apply;
+
 fn edit_basis() -> AuthoringSchemaBasis {
     let capabilities = ComponentCapability::SCENE_AUTHORING;
     basis_with_schema(

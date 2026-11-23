@@ -99,6 +99,7 @@ where
         &mut self,
         mut document: SceneDraft,
         references: ReferencePrograms,
+        #[cfg(feature = "serde")] reference_destination: Option<ScopeId>,
     ) -> Result<StagedSceneOutput, SceneCompilationFailure> {
         #[cfg(feature = "work-observation")]
         let _work_span =
@@ -484,12 +485,11 @@ where
         let mut reference_targets = BTreeMap::new();
         #[cfg(feature = "serde")]
         for query in self.root.reference_queries {
-            use super::inputs::ReferenceResolution;
-            let (reference, bytes) = match self.reference_target(0, query, None)? {
-                ReferenceResolution::Resolved {
-                    reference: ResolvedReference::Local(facet),
-                    ..
-                } => {
+            let resolved = self
+                .resolved_source_reference(query, reference_destination)?
+                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+            let (reference, bytes) = match resolved {
+                ResolvedReference::Local(facet) => {
                     let node = self.canonical_node(0, facet);
                     if self.selects_values(node) || self.nodes[node].scope == 0 {
                         let id = identifiers
@@ -512,10 +512,7 @@ where
                         )
                     }
                 }
-                ReferenceResolution::Resolved {
-                    reference: ResolvedReference::Persistent(reference),
-                    ..
-                } => {
+                ResolvedReference::Persistent(reference) => {
                     let cost = reference.cost();
                     (
                         reference,
@@ -524,7 +521,6 @@ where
                             .and_then(|bytes| bytes.checked_add(cost.logical_bytes())),
                     )
                 }
-                _ => return Err(SceneCompilationFailureKind::OwnerAdmission.into()),
             };
             self.admit(
                 inputs::authored_clone_bytes(query)

@@ -603,7 +603,7 @@ impl fmt::Display for AuthoringPrefabValueError {
 
 impl std::error::Error for AuthoringPrefabValueError {}
 
-fn copy_value_with_references<E>(
+pub(crate) fn copy_value_with_references<E>(
     value: ComponentValueRef<'_>,
     rewrite: &mut impl FnMut(&EntityReference) -> Result<EntityReference, E>,
 ) -> Result<ComponentValue, E> {
