@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-11-11 (Nara-owned framework rendering adaptation)
+**Last Revised**: 2026-11-23 (self-drawn Editor and scope of the Dear ImGui reference)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -141,12 +141,12 @@ and qualified through the complete Nara View/input workflow before selecting the
 
 ### Independent reference and self-drawn Editor implementations
 
-Use dear-imgui-rs to validate Editor module interfaces, document/UI models, commands and Host
-integration through a complete reference Editor. Develop the Nara-drawn successor as another
-complete frontend composition over the same semantic/domain owners and admitted native/render
-services. Choose the frontend at whole-Editor construction/launch; neither implementation needs
-to construct the other toolkit to operate. An independent composition is not a second document
-model, mutation/history system, event loop or GPU owner inside one running Editor.
+Build the UI for new first-party authoring tools in the self-drawn Editor. Nara owns their controls and
+interaction design. The [Editor Design Kit](../../design/editor-reference/README.md) guides their
+appearance and behavior. Keep the existing Dear ImGui frontend usable as a reference for the
+runtime, document commands and native Host workflows it exercises during migration. Select one
+frontend at Editor launch. Each runs independently with the existing document and history owners
+and one event loop and GPU owner per running Editor.
 
 Incremental development may add one complete workflow at a time to the successor, using its own
 workspace/shell and input/presentation path. Do not require Nara panels inside an ImGui shell,
@@ -171,14 +171,10 @@ product embedding and user-authored frontend attachment remain allowed under the
 capabilities; this development choice does not prohibit them or require building an embedding
 adapter during migration.
 
-Existing selected Nara panels hosted by Dear are bounded implementation/evidence, not the
-destination or a required stepping stone. Their corresponding Dear painters have already been
-removed in some scopes. Identify the actual complete reference revision and any coverage gaps
-before using it as an oracle; current mixed code does not prove an intact pure-ImGui reference
-or qualify the independent successor's remaining workflows. Preserve qualified semantic/shared
-mechanisms and actual historical evidence while moving future development to separate compositions.
-If a historical revision supplies reference source, requalify its integration with the current
-semantic owners before using it for comparison; historical native results do not transfer by name.
+Compare incumbent workflows against a named reference revision and record its actual coverage
+and gaps. Some panels already use Nara controls inside the Dear shell and their original Dear
+painters have been removed. Their recorded behavior remains useful for comparison. When using
+historical reference source, requalify its integration with the current semantic owners.
 
 ### Independent document domains share the workspace lifecycle
 
@@ -1176,9 +1172,9 @@ leaving the default Inspector indefinitely preparing an image without a renderer
 2. **Complete a universal widget framework before Editor consumers.** Creates a broad toolkit
    project before real workflows establish its interfaces. Rejected; the independent self-drawn
    Editor grows through complete workflows rather than waiting for a complete component catalogue.
-3. **Reference Editor plus independent self-drawn successor.** Chosen: use Dear ImGui to validate
-   semantic owners, UI models and Host interfaces; build the successor's own complete composition
-   incrementally, compare complete workflows and switch/remove the reference after acceptance.
+3. **Reference Editor plus independent self-drawn successor.** The selected migration uses the
+   existing Dear frontend to compare incumbent workflows. The self-drawn composition gains new
+   authoring tools and becomes the default once it meets the agreed replacement criteria.
 4. **Load project Rust for creation/Inspector defaults.** Rejected because it changes ordinary Open into executable hosting and makes data authoring depend on successful project compilation. Pure creation templates preserve the existing isolation contract.
 5. **Continue replacing Dear panels with hosted Nara controls.** Bounded evidence already exists,
    but mixed-toolkit migration is not required. Develop an independently runnable self-drawn
@@ -1206,7 +1202,7 @@ The qualification probe and complete migration are separate milestones, and an u
 | Generic construction | Custom component add/remove/Undo/Save/Reopen succeeds in Scene and Prefab without project execution |
 | Ordinary structure | Stable-ID reparent/reorder preserves unavailable semantics; reference-safe subtree Delete and exact Undo/Redo survive Save/Reopen and ordinary Check/Play |
 | Independent render views | Concurrent actual Scene/Game rendering with correct focus, resize and retirement |
-| Qualified replacement | Full parity matrix plus exact native/backend acceptance, not a demo |
+| Qualified replacement | All existing workflows selected for migration and their required native/backend checks pass in the self-drawn Editor |
 | Controlled scope | No competing history, generic widget IR, dynamic ABI or abandoned production frontend |
 
 ## Risks and Mitigations
