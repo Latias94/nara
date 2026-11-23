@@ -2,7 +2,7 @@ use super::{
     Viewer,
     renderer::{Diagnostic, Failure, Snapshot},
 };
-use anyhow::{Result, ensure};
+use anyhow::{Context as _, Result, ensure};
 use open_gpui::{
     DevicePixels, HostedSurfaceGeometry, KeyDownEvent, Keystroke, MouseMoveEvent, PlatformInput,
     point, px, size,
@@ -33,6 +33,11 @@ enum Phase {
     PanelsFocusApply,
     PanelsApplied,
     PanelsUndo,
+    PanelsFocusUnchanged,
+    PanelsUnchanged,
+    PanelsFocusRevisionConflict,
+    PanelsRevisionConflict,
+    PanelsRevisionUndo,
     PanelsLocality,
     PanelsLocalityUndo,
     PanelsRemoved,
@@ -48,6 +53,7 @@ enum Phase {
     CollectionCleared,
     CollectionSprite,
     CollectionRestored,
+    BoundSceneInactive,
     Refused,
     RecoveredRefusal,
     Panicked,
@@ -74,6 +80,10 @@ pub(super) struct Smoke {
     panel_hierarchy_renders: u64,
     panel_inspector_renders: [u64; 2],
     panel_revision: Option<nara_engine::scene::SceneAuthoringRevision>,
+    panel_history: Option<(nara_core::DocumentHistoryStatus, bool)>,
+    panel_captures: u64,
+    panel_refusals: u64,
+    scene_completions: u64,
     collection_rows: u64,
     collection_anchor: Option<(nara_engine::scene::SceneEntityId, open_gpui::Pixels)>,
 }
@@ -91,6 +101,10 @@ impl Smoke {
             panel_hierarchy_renders: 0,
             panel_inspector_renders: [0; 2],
             panel_revision: None,
+            panel_history: None,
+            panel_captures: 0,
+            panel_refusals: 0,
+            scene_completions: 0,
             collection_rows: 0,
             collection_anchor: None,
         }
@@ -492,10 +506,10 @@ impl Smoke {
                     inspector_text(viewer, 1)? == "40",
                     "Reload did not explicitly reset the stale draft"
                 );
-                viewer.click(260., 38.)?;
                 self.panel_revision = Some(revision);
+                viewer.focus_inspector(0)?;
                 self.submitted = renderer.submissions.get();
-                self.phase = Phase::PanelsUndo;
+                self.phase = Phase::PanelsFocusUnchanged;
             }
             Phase::PanelsUndo => {
                 let Some(snapshot) = renderer.presented.borrow().clone() else {
@@ -514,6 +528,96 @@ impl Smoke {
                     inspector_text(viewer, 0)? == "0" && inspector_text(viewer, 1)? == "0",
                     "Undo did not update both clean Inspector projections"
                 );
+                viewer.focus_inspector(0)?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::PanelsFocusRevisionConflict;
+            }
+            Phase::PanelsFocusUnchanged if renderer.submissions.get() > self.submitted => {
+                let engine = viewer.engine.as_ref().unwrap().borrow();
+                self.panel_history = Some(engine.scene_history()?);
+                self.panel_revision = Some(engine.revision()?);
+                self.panel_captures = engine.captures;
+                self.panel_refusals = viewer.panel_refusals;
+                drop(engine);
+                replace_inspector_text(viewer, 0, "40.0")?;
+                viewer.click(970., 292.)?;
+                ensure!(
+                    !viewer.commands.borrow().is_empty(),
+                    "same-value Apply did not enqueue the original owner command"
+                );
+                self.phase = Phase::PanelsUnchanged;
+            }
+            Phase::PanelsUnchanged if viewer.commands.borrow().is_empty() => {
+                let engine = viewer.engine.as_ref().unwrap().borrow();
+                ensure!(
+                    Some(engine.revision()?) == self.panel_revision
+                        && Some(engine.scene_history()?) == self.panel_history
+                        && engine.captures == self.panel_captures
+                        && viewer.panel_refusals == self.panel_refusals,
+                    "accepted same-value Apply changed history, requested a Scene capture or reported refusal"
+                );
+                drop(engine);
+                ensure!(
+                    inspector_text(viewer, 0)? == "40",
+                    "unchanged receipt did not finish its original Inspector draft"
+                );
+                self.submitted = renderer.submissions.get();
+                viewer.click(260., 38.)?;
+                self.phase = Phase::PanelsUndo;
+            }
+            Phase::PanelsFocusRevisionConflict if renderer.submissions.get() > self.submitted => {
+                replace_inspector_text(viewer, 0, "25")?;
+                let mut engine = viewer.engine.as_ref().unwrap().borrow_mut();
+                self.panel_revision = Some(engine.revision()?);
+                engine.set_sprite_y_for_smoke(3.)?;
+                drop(engine);
+                self.submitted = renderer.submissions.get();
+                viewer.refresh_preview()?;
+                viewer.publish_panels()?;
+                self.phase = Phase::PanelsRevisionConflict;
+            }
+            Phase::PanelsRevisionConflict if renderer.submissions.get() > self.submitted => {
+                let engine = viewer.engine.as_ref().unwrap().borrow();
+                let revision = engine.revision()?;
+                ensure!(
+                    Some(revision) != self.panel_revision && engine.sprite_x()? == 0.,
+                    "unrelated edit did not advance the same Scene basis while retaining X"
+                );
+                drop(engine);
+                let conflicted = viewer.application.as_ref().unwrap().update(|cx| {
+                    viewer
+                        .root
+                        .unwrap()
+                        .read_with(cx, |root, cx| root.inspectors[0].read(cx).has_conflict())
+                })?;
+                ensure!(
+                    conflicted && inspector_text(viewer, 0)? == "25",
+                    "revision-only publication rebound the original dirty draft"
+                );
+                viewer.click(970., 292.)?;
+                ensure!(
+                    viewer.commands.borrow().is_empty(),
+                    "unrelated edit silently upgraded the dirty Inspector submission basis"
+                );
+                viewer.click(970., 322.)?;
+                ensure!(
+                    inspector_text(viewer, 0)? == "0",
+                    "Reload did not adopt the current value after a revision-only conflict"
+                );
+                println!(
+                    "NARA_GPUI_INSPECTOR_ACK unchanged=true history_retained=true revision_conflict=true"
+                );
+                self.panel_revision = Some(revision);
+                self.submitted = renderer.submissions.get();
+                viewer.commands.borrow_mut().push_back(super::Command::Undo);
+                self.phase = Phase::PanelsRevisionUndo;
+            }
+            Phase::PanelsRevisionUndo if renderer.submissions.get() > self.submitted => {
+                ensure!(
+                    viewer.engine.as_ref().unwrap().borrow().revision()?
+                        != self.panel_revision.unwrap(),
+                    "Undo did not publish the revision-only control edit"
+                );
                 self.panel_hierarchy_renders = viewer.panel_work.hierarchy_renders.get();
                 let snapshot = viewer.engine.as_ref().unwrap().borrow().panels_snapshot()?;
                 self.panel_revision = Some(snapshot.basis.revision);
@@ -526,6 +630,7 @@ impl Smoke {
                             .sprite
                             .expect("locality source still contains the Sprite"),
                         value: 16.,
+                        origin: None,
                     });
                 self.submitted = renderer.submissions.get();
                 self.phase = Phase::PanelsLocality;
@@ -799,7 +904,7 @@ impl Smoke {
                         >= (super::engine::SOURCE_ROWS + 1) as u64,
                     "filtering hid its full-source work"
                 );
-                let engine = viewer.engine.as_ref().unwrap().borrow();
+                let mut engine = viewer.engine.as_ref().unwrap().borrow_mut();
                 println!(
                     "NARA_GPUI_COLLECTION logical_rows={} row_callbacks={} query_pages={} query_records={} filter_records={} reconciled_records={} variable_heights=true keyed_anchor=true wheel=true filter=true exact_selection=true scope=caller_work_counts",
                     super::engine::SOURCE_ROWS + 1,
@@ -808,6 +913,50 @@ impl Smoke {
                     engine.panel_query_records.get(),
                     viewer.panel_work.hierarchy_filter_records.get(),
                     viewer.panel_work.hierarchy_reconciled_records.get()
+                );
+                self.scene_completions = engine.completions;
+                engine.open_graph()?;
+                drop(engine);
+                self.submitted = renderer.submissions.get();
+                viewer.refresh_preview()?;
+                self.phase = Phase::BoundSceneInactive;
+            }
+            Phase::BoundSceneInactive if renderer.submissions.get() > self.submitted => {
+                let snapshot = renderer
+                    .presented
+                    .borrow()
+                    .clone()
+                    .context("the bound Scene lost its presented image")?;
+                let preview = viewer.application.as_ref().unwrap().update(|cx| {
+                    viewer
+                        .root
+                        .unwrap()
+                        .read_with(cx, |root, cx| root.scene_view.read(cx).preview.clone())
+                })?;
+                let mut engine = viewer.engine.as_ref().unwrap().borrow_mut();
+                ensure!(
+                    engine.completions > self.scene_completions
+                        && Rc::ptr_eq(&snapshot.preview, &preview),
+                    "inactive Scene did not complete a new native presentation"
+                );
+                let point = [344., 286.];
+                let error = engine
+                    .pick(&snapshot.preview, snapshot.mapping, point)
+                    .expect_err("inactive Scene incorrectly admitted geometry input");
+                ensure!(
+                    error.to_string() == "the displayed Scene is not the active document",
+                    "inactive Scene pick failed before checking active-document admission: {error:#}"
+                );
+                engine.activate_scene()?;
+                ensure!(
+                    engine
+                        .pick(&snapshot.preview, snapshot.mapping, point)?
+                        .is_some(),
+                    "reactivating the Scene did not restore picking through the newly displayed receipt"
+                );
+                drop(engine);
+                println!(
+                    "NARA_GPUI_BOUND_SCENE inactive_receipt=true inactive_pick_refused=true reactivated_pick=true"
                 );
                 self.submitted = renderer.submissions.get();
                 renderer.failure.set(Some(Failure::Refuse));
@@ -920,7 +1069,6 @@ impl Smoke {
                     "resize/ABA retained an old pending candidate"
                 );
                 let physical = viewer.engine.as_ref().unwrap().borrow().window.inner_size();
-                viewer.refresh_preview()?;
                 let geometry = HostedSurfaceGeometry::from_physical_size(
                     size(
                         DevicePixels(physical.width.try_into()?),
@@ -928,7 +1076,7 @@ impl Smoke {
                     ),
                     1.25,
                 )?;
-                surface.set_geometry(geometry.size(), geometry.scale_factor())?;
+                viewer.set_surface_geometry(geometry)?;
                 self.submitted = renderer.submissions.get();
                 renderer.diagnostic_next.set(true);
                 self.phase = Phase::Scaled;

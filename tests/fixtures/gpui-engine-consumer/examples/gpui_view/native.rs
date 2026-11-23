@@ -45,8 +45,8 @@ use open_gpui::{
     HostedSurface, HostedSurfaceGeometry, HostedSurfaceOptions, ImageTexture, KeyDownEvent,
     KeyUpEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     Pixels, PlatformInput, PrepaintPublicationId, Render, RequestFrameOptions, ScrollDelta,
-    ScrollEvent, StyleRefinement, TouchPhase, WindowHandle, canvas, div, point, prelude::*, px,
-    rgb, rgba, size,
+    ScrollEvent, StyleRefinement, TouchPhase, WeakEntity, WindowHandle, canvas, div, point,
+    prelude::*, px, rgb, rgba, size,
 };
 use open_gpui_wgpu::CosmicTextSystem;
 use open_gpui_windows::{
@@ -86,6 +86,7 @@ enum Command {
         basis: EditorDocumentQueryBasis,
         entity: SceneEntityId,
         value: f64,
+        origin: Option<WeakEntity<Inspector>>,
     },
 }
 
@@ -719,8 +720,11 @@ impl Viewer {
         }
         let mut changed = false;
         let mut panels_changed = false;
-        while let Some(command) = self.commands.borrow_mut().pop_front() {
-            panels_changed = true;
+        loop {
+            let Some(command) = self.commands.borrow_mut().pop_front() else {
+                break;
+            };
+            panels_changed |= !matches!(&command, Command::SetX { .. });
             let mut engine = self.engine.as_ref().unwrap().borrow_mut();
             match command {
                 Command::Move => {
@@ -758,13 +762,32 @@ impl Viewer {
                     basis,
                     entity,
                     value,
-                } => match engine.set_sprite_x(&basis, &entity, value) {
-                    Ok(()) => changed = true,
-                    Err(error) => {
-                        self.panel_refusals += 1;
-                        println!("NARA_GPUI_PANEL_REFUSED {error:#}");
+                    origin,
+                } => {
+                    let result = engine.set_sprite_x(&basis, &entity, value);
+                    drop(engine);
+                    let completion = match result {
+                        Ok((applied, basis)) => {
+                            changed |= applied;
+                            panels_changed |= applied;
+                            Ok(basis)
+                        }
+                        Err(error) => {
+                            self.panel_refusals += 1;
+                            println!("NARA_GPUI_PANEL_REFUSED {error:#}");
+                            Err(error.to_string())
+                        }
+                    };
+                    if let Some(origin) = origin {
+                        self.application.as_ref().unwrap().update(|cx| {
+                            self.root.unwrap().update(cx, |_, window, cx| {
+                                let _ = origin.update(cx, |inspector, cx| {
+                                    inspector.finish_write(&basis, value, completion, window, cx);
+                                });
+                            })
+                        })?;
                     }
-                },
+                }
             }
         }
         if changed {
@@ -1028,6 +1051,33 @@ impl Viewer {
         Ok(())
     }
 
+    fn set_surface_geometry(&self, geometry: HostedSurfaceGeometry) -> Result<()> {
+        let surface = self.surface.as_ref().unwrap();
+        if surface.geometry() == geometry {
+            return Ok(());
+        }
+        {
+            let mut engine = self.engine.as_ref().unwrap().borrow_mut();
+            engine.invalidate();
+            if self.views_mode {
+                for (key, image) in [engine::views::ViewKey::A, engine::views::ViewKey::B]
+                    .into_iter()
+                    .zip(engine.view_images())
+                {
+                    if image.is_some() {
+                        engine.redisplay_view(key)?;
+                    }
+                }
+            }
+        }
+        let size = geometry.size();
+        if !self.views_mode && size.width > px(0.) && size.height > px(0.) {
+            self.refresh_preview()?;
+        }
+        surface.set_geometry(size, geometry.scale_factor())?;
+        Ok(())
+    }
+
     fn input(&mut self, event: WindowEvent) -> Result<()> {
         if self.closing || self.finished {
             return Ok(());
@@ -1053,29 +1103,7 @@ impl Viewer {
                     ),
                     scale,
                 )?;
-                if surface.geometry() == geometry {
-                    return Ok(());
-                }
-                self.engine.as_ref().unwrap().borrow_mut().invalidate();
-                if self.views_mode {
-                    let images = self.engine.as_ref().unwrap().borrow().view_images();
-                    for (key, image) in [engine::views::ViewKey::A, engine::views::ViewKey::B]
-                        .into_iter()
-                        .zip(images)
-                    {
-                        if image.is_some() {
-                            self.engine
-                                .as_ref()
-                                .unwrap()
-                                .borrow_mut()
-                                .redisplay_view(key)?;
-                        }
-                    }
-                }
-                if !self.views_mode && physical.width > 0 && physical.height > 0 {
-                    self.refresh_preview()?;
-                }
-                surface.set_geometry(geometry.size(), geometry.scale_factor())?;
+                self.set_surface_geometry(geometry)?;
             }
             WindowEvent::Focused(active) => {
                 if !active {

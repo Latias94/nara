@@ -3,8 +3,8 @@ use super::views_panel::{ViewPublication, ViewSnapshot};
 use anyhow::{Context as _, Result, ensure};
 use nara_render::DisplayMapping2d;
 use nara_render_wgpu::{
-    TextureAlpha, TextureTransfer, WgpuImageCompositeReceipt, WgpuImageDisplay,
-    WgpuRenderHostError, WgpuSubmissionPrefix,
+    TextureAlpha, TextureInterpretation, TextureTransfer, WgpuImageCompositeReceipt,
+    WgpuImageDisplay, WgpuRenderHostError, WgpuSubmissionPrefix,
 };
 use open_gpui::{
     AtlasTextureLease, Bounds, DevicePixels, HostedSurfaceGeometry, HostedSurfaceRenderer,
@@ -182,6 +182,9 @@ impl Renderer {
 
     pub fn import_display(&self, display: &WgpuImageDisplay) -> Result<ImageTexture> {
         let descriptor = display.output().descriptor();
+        let TextureInterpretation::Color { transfer, alpha } = descriptor.interpretation else {
+            anyhow::bail!("the GPUI image import requires a color output");
+        };
         let texture = self
             .engine
             .borrow_mut()
@@ -198,7 +201,7 @@ impl Renderer {
             .borrow()
             .sprite_atlas()
             .import_image(WgpuImportedImageDescriptor {
-                transfer: match descriptor.transfer {
+                transfer: match transfer {
                     TextureTransfer::Srgb => ImageTextureTransfer::Srgb,
                     TextureTransfer::Linear => ImageTextureTransfer::Linear,
                 },
@@ -212,7 +215,7 @@ impl Renderer {
                         DevicePixels(extent.height as i32),
                     ),
                 ),
-                alpha: match descriptor.alpha {
+                alpha: match alpha {
                     TextureAlpha::Opaque => ImageTextureAlpha::Opaque,
                     TextureAlpha::Straight => ImageTextureAlpha::Straight,
                     TextureAlpha::Premultiplied => ImageTextureAlpha::Premultiplied,
@@ -579,7 +582,7 @@ impl Renderer {
             if !self
                 .engine
                 .borrow()
-                .accepts_preview(&submitted.snapshot.preview)
+                .accepts_bound_preview(&submitted.snapshot.preview)
             {
                 continue;
             }

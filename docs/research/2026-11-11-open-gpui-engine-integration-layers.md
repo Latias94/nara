@@ -1344,13 +1344,14 @@ visual equality does not replace current operation-basis validation. Full entity
 keys row state. One shared row-identity snapshot avoids cloning the entire list per row; this
 finite consumer is not a virtualized collection or a total O(visible) work claim.
 
-The original Session prepares/commits X edits and owns Undo/Redo. An invalid draft queues no
-mutation. A changed source value updates clean drafts, while another panel's dirty draft remains
-and refuses Apply until explicit Reload. A changed source/selection binding resets its local
-field under the selected policy. Window-aware observation and Reload issue the original native
-text content/selection notifications immediately. Source removal is an explicit absent projection,
-so Undo of initial Sprite construction keeps the Viewer usable for Redo. This does not qualify
-every source/schema/preedit replacement path, continuous property gestures or generic field types.
+The original Session prepares and commits X edits and owns Undo/Redo. An invalid draft queues no
+mutation. Clean drafts follow the current source. Dirty drafts retain their exact basis through
+document revision changes and temporary unselection. Reload starts a draft from the current
+basis. The original receipt settles the corresponding submitted draft, including an accepted
+unchanged edit. Window-aware updates issue the original text content and selection notifications.
+Source removal produces an absent projection, so Undo of initial Sprite construction keeps the
+Viewer usable for Redo. Source and Schema replacement, continuous property gestures and generic
+field types have separate qualification requirements.
 
 Early native execution identifies actual fixture/integration mistakes. The Hierarchy click
 first misses its row; fixed coordinates then exercise the real row handler. Review separates
@@ -1387,6 +1388,27 @@ YAML checks pass. No Nara product default/dependency switch, additional GPU or c
 new Signal runtime, persistent layout, upload/raster cache, thread transport, physical input or
 numeric budget follows. R11a/e still require phase attribution, current-source allocation/
 retention/upload/GPU/latency costs and broader sparse/structural/virtualized consumers.
+
+### November 23 authoring and presentation corrections
+
+The independently locked release consumer passes 5/5 native cases on Windows/DX12
+(`6491ea2a-d578-4559-a739-97d0508165d8`) and the selected Scene/Inspector case passes 1/1 on
+Vulkan (`d4315f04-f394-450e-9f79-bcd51f64f3bf`). Both use Rust 1.95.0 and RTX 4090. The
+Scene case checks that an unrelated Y edit keeps the old X draft and refuses its Apply, and
+that an unchanged receipt settles the original draft while preserving history and avoiding
+a Scene recapture. It activates an extension document, presents a fresh image of the bound
+Scene, and verifies that geometry picking requires the Scene to become active. Both modes
+retain the exact image, mapping and presented-frame checks.
+
+The first locked build exposed the fixture's missing Material dependencies. The texture import
+now obtains transfer and alpha from the current descriptor's color interpretation, with the
+existing Source/Processed pixel checks. The first DX12 run exposed a graph scale change bypassing
+the Viewer geometry path. The final graph and Scene fixtures use that path to refresh the exact
+displayed mapping. The corrected runs use injected input and a fractional logical scale.
+Physical IME, mixed-DPI movement and the full native Editor remain separate qualification scopes.
+[Inspector](../../tests/fixtures/gpui-engine-consumer/examples/gpui_view/panels.rs) ·
+[Ordinary native trajectory](../../tests/fixtures/gpui-engine-consumer/examples/gpui_view/smoke.rs) ·
+[Frontend switch conditions](../architecture/adr/0118-editor-workspaces-frontends-and-creation-templates.md#frontend-switch-conditions)
 
 ## Implemented Variable-Height Source Collections
 

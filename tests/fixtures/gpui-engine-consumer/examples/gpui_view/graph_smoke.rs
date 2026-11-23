@@ -232,7 +232,7 @@ impl GraphSmoke {
                     ),
                     1.25,
                 )?;
-                surface.set_geometry(geometry.size(), geometry.scale_factor())?;
+                viewer.set_surface_geometry(geometry)?;
             }
             31 => {
                 ensure!(

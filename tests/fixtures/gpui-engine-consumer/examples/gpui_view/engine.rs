@@ -349,7 +349,7 @@ impl Engine {
         composite: WgpuImageCompositeReceipt,
         mapping: DisplayMapping2d,
     ) -> Result<()> {
-        self.require_current(preview)?;
+        self.require_bound_preview(preview)?;
         let image = preview.display.receipt();
         let window = composite.window();
         ensure!(
@@ -391,7 +391,11 @@ impl Engine {
         mapping: DisplayMapping2d,
         point: [f32; 2],
     ) -> Result<Option<SceneEntityId>> {
-        self.require_current(preview)?;
+        self.require_bound_preview(preview)?;
+        ensure!(
+            self.session.current_frame().workspace().active_document == Some(preview.document),
+            "the displayed Scene is not the active document"
+        );
         let presented =
             (*preview.presented.borrow()).context("the Scene has no accepted GPUI presentation")?;
         ensure!(
@@ -542,7 +546,7 @@ impl Engine {
         basis: &EditorDocumentQueryBasis,
         entity: &SceneEntityId,
         x: f64,
-    ) -> Result<()> {
+    ) -> Result<(bool, EditorDocumentQueryBasis)> {
         source_step!(self, 0, {
             self.session.validate_authoring_query_basis(basis)?;
             ensure!(
@@ -576,10 +580,26 @@ impl Engine {
                 EditorAction::CommitAuthoringEdit(prepared),
             )
         )?;
-        source_step!(self, 3, self.session.drive_editor_frame(Duration::ZERO));
-        require_applied(&report)?;
-        self.invalidate();
-        Ok(())
+        let (applied, revision) = match report.outcomes() {
+            [EditorActionOutcome::Workspace(report)] if report.applied || report.is_unchanged() => {
+                let revision = report
+                    .revision
+                    .context("Inspector edit lost its accepted revision")?;
+                (report.applied, revision)
+            }
+            outcomes => bail!("Inspector edit was refused: {outcomes:?}"),
+        };
+        if applied {
+            source_step!(self, 3, self.session.drive_editor_frame(Duration::ZERO));
+            self.invalidate();
+        }
+        Ok((
+            applied,
+            EditorDocumentQueryBasis {
+                revision,
+                ..basis.clone()
+            },
+        ))
     }
 
     pub fn selected_sprite(&self) -> bool {
@@ -592,6 +612,37 @@ impl Engine {
                 scene.document == self.document
                     && scene.selection.top_entity() == Some(&self.sprite)
             })
+    }
+
+    pub(super) fn scene_history(&self) -> Result<(nara_core::DocumentHistoryStatus, bool)> {
+        let frame = self.session.current_frame();
+        let tab = frame
+            .workspace()
+            .document(self.document)
+            .context("the Scene tab is unavailable")?;
+        Ok((tab.history, tab.dirty))
+    }
+
+    pub(super) fn set_sprite_y_for_smoke(&mut self, y: f64) -> Result<()> {
+        set_field(
+            &mut self.session,
+            self.document,
+            &self.sprite,
+            TRANSFORM,
+            "translation.y",
+            y,
+        )?;
+        self.invalidate();
+        Ok(())
+    }
+
+    pub(super) fn activate_scene(&mut self) -> Result<()> {
+        dispatch(
+            &mut self.session,
+            EditorAction::Navigate(EditorNavigationAction::SetActiveDocument {
+                document: self.document,
+            }),
+        )
     }
 
     pub fn sprite_x(&self) -> Result<f64> {
@@ -710,16 +761,15 @@ impl Engine {
         Ok(())
     }
 
-    pub fn accepts_preview(&self, preview: &Preview) -> bool {
-        self.require_current(preview).is_ok()
+    pub fn accepts_bound_preview(&self, preview: &Preview) -> bool {
+        self.require_bound_preview(preview).is_ok()
     }
 
-    fn require_current(&self, preview: &Preview) -> Result<()> {
+    fn require_bound_preview(&self, preview: &Preview) -> Result<()> {
         ensure!(!self.closing, "the engine is closing");
         let frame = self.session.current_frame();
         ensure!(
             preview.document == self.document
-                && frame.workspace().active_document == Some(preview.document)
                 && frame.scene_preview_document() == Some(preview.document)
                 && self.revision()? == preview.revision
                 && self.session.current_editor_preview_content_stamp().as_ref()

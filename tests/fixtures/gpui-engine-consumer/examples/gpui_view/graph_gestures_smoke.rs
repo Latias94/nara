@@ -194,7 +194,7 @@ impl GraphGesturesSmoke {
                     ),
                     1.25,
                 )?;
-                surface.set_geometry(geometry.size(), geometry.scale_factor())?;
+                viewer.set_surface_geometry(geometry)?;
                 Phase::Scaled
             }
             Phase::Scaled => {

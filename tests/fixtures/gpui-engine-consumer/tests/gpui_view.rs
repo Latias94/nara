@@ -128,6 +128,8 @@ fn engine_owned_gpui_renders_edits_picks_and_retires_under_original_host() {
         "NARA_GPUI_VIEW_OK",
         "NARA_GPUI_STATE_LOCALITY",
         "NARA_GPUI_COLLECTION",
+        "NARA_GPUI_INSPECTOR_ACK",
+        "NARA_GPUI_BOUND_SCENE",
         "NARA_GPUI_CONTENT_PIXELS mode=source",
         "NARA_GPUI_CONTENT_PIXELS mode=processed",
     ] {
