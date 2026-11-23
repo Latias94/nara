@@ -373,9 +373,9 @@ fn state(editor: &EditorProjectSession, document: EditorDocumentId) -> SourceSta
             Default::default(),
         )
         .unwrap();
-    assert_eq!(declaration.revision, basis.revision);
-    assert_eq!(Some(declaration.schema), basis.schema);
-    assert!(declaration.nested_instances.is_empty());
+    assert_eq!(declaration.revision(), basis.revision);
+    assert_eq!(Some(declaration.schema()), basis.schema.as_ref());
+    assert!(declaration.nested_instances().is_empty());
     SourceState {
         tab: frame.workspace().document(document).unwrap().clone(),
         selection: active.selection.clone(),
@@ -385,7 +385,7 @@ fn state(editor: &EditorProjectSession, document: EditorDocumentId) -> SourceSta
             .source_placements()
             .to_vec(),
         records,
-        instance: declaration.instance,
+        instance: declaration.instance().cloned(),
     }
 }
 

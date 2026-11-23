@@ -9,10 +9,11 @@ use super::{
     SceneAuthoringRevision, SceneAuthoringSession, history_error_report,
 };
 use crate::{
-    AuthoringSchemaBasis, PrefabComponentIntent, PrefabEntityTarget, PrefabInstance,
-    PrefabInstancePath, PrefabInstancePathSegment, PrefabOverlay, PrefabOverlaySlot,
-    PrefabPropertyClaim, PrefabPropertyClaimRef, PrefabPropertyIntent, PrefabRevert, SceneEntityId,
-    SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
+    AuthoringSchemaBasis, ObservedPrefabRevert, PrefabComponentIntent, PrefabEntityTarget,
+    PrefabInstance, PrefabInstancePath, PrefabInstancePathSegment, PrefabOverlay,
+    PrefabOverlaySlot, PrefabPropertyClaim, PrefabPropertyClaimRef, PrefabPropertyIntent,
+    PrefabRevert, SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    ScenePatchReport,
     prefab::{PrefabOverlayCostLimits, prefab_instance_cost},
 };
 
@@ -152,7 +153,7 @@ impl PrefabDeclarationError {
     }
 }
 
-/// Complete owned source observation, not activation or mutation authority.
+/// Complete owned source observation. Revert preparation revalidates its source and Schema.
 ///
 /// Nested paths are in source declaration order: additions before instance claims at each
 /// overlay. They include explicit `None` instance claims, exclude additions without an instance,
@@ -160,17 +161,67 @@ impl PrefabDeclarationError {
 /// Retained indices require this exact revision and Schema admission at later preparation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrefabInstanceObservation {
-    pub revision: SceneAuthoringRevision,
-    pub schema: AuthoringSchemaBasis,
-    pub path: PrefabInstancePath,
-    pub instance: Option<PrefabInstance>,
-    pub nested_instances: Vec<PrefabInstancePath>,
+    revision: SceneAuthoringRevision,
+    schema: AuthoringSchemaBasis,
+    path: PrefabInstancePath,
+    instance: Option<PrefabInstance>,
+    nested_instances: Vec<PrefabInstancePath>,
+}
+
+impl PrefabInstanceObservation {
+    #[must_use]
+    pub const fn revision(&self) -> SceneAuthoringRevision {
+        self.revision
+    }
+
+    #[must_use]
+    pub const fn schema(&self) -> &AuthoringSchemaBasis {
+        &self.schema
+    }
+
+    #[must_use]
+    pub const fn path(&self) -> &PrefabInstancePath {
+        &self.path
+    }
+
+    #[must_use]
+    pub const fn instance(&self) -> Option<&PrefabInstance> {
+        self.instance.as_ref()
+    }
+
+    #[must_use]
+    pub fn nested_instances(&self) -> &[PrefabInstancePath] {
+        &self.nested_instances
+    }
+
+    /// Selects a stored declaration, or the entire overlay for `None`, from this observation.
+    /// Index zero selects the observed instance and subsequent indices select nested instances
+    /// in observation order. Preparation checks that the selected slot exists in the exact source.
+    #[must_use]
+    pub fn revert(
+        &self,
+        instance_index: usize,
+        slot: Option<PrefabOverlaySlot>,
+    ) -> Option<PrefabRevert<'_>> {
+        let path = match instance_index.checked_sub(1) {
+            Some(index) => self.nested_instances.get(index)?,
+            None => &self.path,
+        };
+        Some(PrefabRevert::Observed(ObservedPrefabRevert {
+            observation: self,
+            path,
+            slot,
+        }))
+    }
 }
 
 /// Borrowed property declarations from one stored overlay. Indices belong to this revision.
 #[doc(hidden)]
 #[derive(Clone, Copy)]
-pub struct PrefabPropertyClaims<'a>(&'a [PrefabComponentIntent]);
+pub struct PrefabPropertyClaims<'a> {
+    components: &'a [PrefabComponentIntent],
+    revision: Option<SceneAuthoringRevision>,
+}
 
 /// One component's stored property declarations, with their complete authored target.
 #[doc(hidden)]
@@ -185,7 +236,7 @@ pub struct PrefabComponentPropertyClaims<'a> {
 impl<'a> PrefabPropertyClaims<'a> {
     #[must_use]
     pub const fn component_intent_count(self) -> usize {
-        self.0.len()
+        self.components.len()
     }
 
     /// Looks up a single component slot without walking or decoding its payload.
@@ -196,7 +247,7 @@ impl<'a> PrefabPropertyClaims<'a> {
             component,
             version,
             claims,
-        } = self.0.get(index)?
+        } = self.components.get(index)?
         else {
             return None;
         };
@@ -225,6 +276,7 @@ impl<'a> PrefabPropertyClaims<'a> {
             component: component.component,
             version: component.version,
             claim: component.claims.get(claim_index)?,
+            revision: self.revision,
         })
     }
 
@@ -242,7 +294,11 @@ impl PrefabOverlay {
     /// Borrows a property declaration from this overlay observation.
     #[must_use]
     pub fn property_claim_at(&self, slot: PrefabOverlaySlot) -> Option<PrefabPropertyClaimRef<'_>> {
-        PrefabPropertyClaims(&self.components).claim_at(slot)
+        PrefabPropertyClaims {
+            components: &self.components,
+            revision: None,
+        }
+        .claim_at(slot)
     }
 }
 
@@ -257,7 +313,12 @@ impl SceneAuthoringSession {
         if self.authority.published().is_none() {
             return Err(PrefabDeclarationError::NotAdmitted);
         }
-        property_claims(&self.document.entities, anchor, steps)
+        property_claims(
+            &self.document.entities,
+            anchor,
+            steps,
+            Some(self.revision()),
+        )
     }
 
     /// Observes a complete optional declaration after aggregate payload/location admission.
@@ -280,7 +341,7 @@ impl SceneAuthoringSession {
 
     /// Lowers one source-owned Revert into the ordinary exact transaction and inverse.
     ///
-    /// The caller must also validate any retained observation's exact Schema basis.
+    /// Retained observations require their original source, revision and Schema admission.
     /// This prepares current source only; it neither resolves a base nor edits another source.
     pub fn prepare_prefab_revert(
         &self,
@@ -292,11 +353,13 @@ impl SceneAuthoringSession {
         if base_revision != self.revision() {
             return Err(super::prepared::stale_basis());
         }
-        if self.authority.published().is_none() {
-            return Err(PrefabDeclarationError::NotAdmitted.report());
-        }
-        let patch = lower_revert(&self.document.entities, path, action, limits)
-            .map_err(PrefabDeclarationError::report)?;
+        let schema = self
+            .authoring_schema_basis()
+            .ok_or_else(|| PrefabDeclarationError::NotAdmitted.report())?;
+        let patch = lower_revert(&self.document.entities, path, limits, |overlay| {
+            validate_revert(overlay, path, base_revision, &schema, action)
+        })
+        .map_err(PrefabDeclarationError::report)?;
         self.prepare_authoring_edit(base_revision, &patch)
     }
 }
@@ -312,7 +375,12 @@ impl PrefabAuthoringSession {
         if self.authority.published().is_none() {
             return Err(PrefabDeclarationError::NotAdmitted);
         }
-        property_claims(&self.document.entities, anchor, steps)
+        property_claims(
+            &self.document.entities,
+            anchor,
+            steps,
+            Some(self.revision()),
+        )
     }
 
     /// Uses the same bounded raw observation without changing nominal Prefab ownership.
@@ -335,7 +403,7 @@ impl PrefabAuthoringSession {
 
     /// Prepares one Revert through this Prefab's existing exact preparation/history owner.
     ///
-    /// Retained observation Schema admission must be checked by the calling adapter.
+    /// Retained observations require their original source, revision and Schema admission.
     pub fn prepare_prefab_revert(
         &self,
         base_revision: SceneAuthoringRevision,
@@ -346,11 +414,13 @@ impl PrefabAuthoringSession {
         if base_revision != self.revision() {
             return Err(super::prepared::stale_basis());
         }
-        if self.authority.published().is_none() {
-            return Err(PrefabDeclarationError::NotAdmitted.report());
-        }
-        let patch = lower_revert(&self.document.entities, path, action, limits)
-            .map_err(PrefabDeclarationError::report)?;
+        let schema = self
+            .authoring_schema_basis()
+            .ok_or_else(|| PrefabDeclarationError::NotAdmitted.report())?;
+        let patch = lower_revert(&self.document.entities, path, limits, |overlay| {
+            validate_revert(overlay, path, base_revision, &schema, action)
+        })
+        .map_err(PrefabDeclarationError::report)?;
         self.prepare_authoring_edit(base_revision, &patch)
     }
 }
@@ -363,7 +433,7 @@ impl PreparedSceneAuthoringEdit {
         anchor: &SceneEntityId,
         steps: &[PrefabInstancePathSegment],
     ) -> Result<PrefabPropertyClaims<'_>, PrefabDeclarationError> {
-        property_claims(&self.document().entities, anchor, steps)
+        property_claims(&self.document().entities, anchor, steps, None)
     }
 }
 
@@ -375,7 +445,7 @@ impl PreparedPrefabAuthoringEdit {
         anchor: &SceneEntityId,
         steps: &[PrefabInstancePathSegment],
     ) -> Result<PrefabPropertyClaims<'_>, PrefabDeclarationError> {
-        property_claims(&self.document().entities, anchor, steps)
+        property_claims(&self.document().entities, anchor, steps, None)
     }
 }
 
@@ -383,6 +453,7 @@ fn property_claims<'a>(
     entities: &'a [SceneEntityRecord],
     anchor: &SceneEntityId,
     steps: &[PrefabInstancePathSegment],
+    revision: Option<SceneAuthoringRevision>,
 ) -> Result<PrefabPropertyClaims<'a>, PrefabDeclarationError> {
     if steps.len() > PrefabDeclarationLimits::MAX_DEPTH {
         return Err(PrefabDeclarationError::BudgetExceeded);
@@ -394,7 +465,10 @@ fn property_claims<'a>(
         .overrides
         .as_ref()
         .ok_or(PrefabDeclarationError::OverlayAbsent)?;
-    Ok(PrefabPropertyClaims(&overlay.components))
+    Ok(PrefabPropertyClaims {
+        components: &overlay.components,
+        revision,
+    })
 }
 
 fn observe(
@@ -437,8 +511,8 @@ fn observe(
 fn lower_revert(
     entities: &[SceneEntityRecord],
     path: &PrefabInstancePath,
-    action: PrefabRevert<'_>,
     limits: PrefabDeclarationLimits,
+    select: impl FnOnce(&PrefabOverlay) -> Result<Option<PrefabOverlaySlot>, PrefabDeclarationError>,
 ) -> Result<ScenePatchDocument, PrefabDeclarationError> {
     let mut budget = DeclarationBudget::new(limits);
     budget.location(path.anchor.as_str(), &path.steps)?;
@@ -456,7 +530,7 @@ fn lower_revert(
         .overrides
         .as_ref()
         .ok_or(PrefabDeclarationError::OverlayAbsent)?;
-    let slot = validate_revert(overlay, action)?;
+    let slot = select(overlay)?;
     let mut value = root.clone();
     let selected = instance_at_mut(&mut value, &path.steps)?
         .as_mut()
@@ -571,31 +645,45 @@ fn visit_nested(
 
 fn validate_revert(
     overlay: &PrefabOverlay,
+    path: &PrefabInstancePath,
+    revision: SceneAuthoringRevision,
+    schema: &AuthoringSchemaBasis,
     action: PrefabRevert<'_>,
 ) -> Result<Option<PrefabOverlaySlot>, PrefabDeclarationError> {
-    let slot = match action {
+    let (slot, observed) = match action {
         PrefabRevert::Overlay => return Ok(None),
-        PrefabRevert::Component { index, observed } => {
-            return overlay
-                .components
-                .get(index)
-                .filter(|current| current.exactly_matches(observed))
-                .map(|_| Some(PrefabOverlaySlot::Component { index }))
-                .ok_or(PrefabDeclarationError::StaleObservedIntent);
-        }
         PrefabRevert::Property(expected) => {
-            return (overlay.property_claim_at(expected.slot()) == Some(expected))
-                .then_some(Some(expected.slot()))
-                .ok_or(PrefabDeclarationError::StaleObservedIntent);
+            if expected.revision != Some(revision)
+                || !overlay
+                    .property_claim_at(expected.slot())
+                    .is_some_and(|current| std::ptr::eq(current.claim(), expected.claim()))
+            {
+                return Err(PrefabDeclarationError::StaleObservedIntent);
+            }
+            return Ok(Some(expected.slot()));
         }
-        PrefabRevert::Intent(slot) => slot,
+        PrefabRevert::Observed(selected) => {
+            if selected.observation.revision() != revision
+                || selected.observation.schema() != schema
+                || selected.path != path
+            {
+                return Err(PrefabDeclarationError::StaleObservedIntent);
+            }
+            let Some(slot) = selected.slot else {
+                return Ok(None);
+            };
+            (slot, true)
+        }
+        PrefabRevert::Intent(slot) => (slot, false),
     };
     let found = match slot {
         PrefabOverlaySlot::Addition { index } => index < overlay.additions.len(),
         PrefabOverlaySlot::InstanceClaim { index } => index < overlay.instances.len(),
+        PrefabOverlaySlot::Component { index } if observed => index < overlay.components.len(),
         PrefabOverlaySlot::Component { .. } => {
             return Err(PrefabDeclarationError::ComponentClaimRequired);
         }
+        PrefabOverlaySlot::Property { .. } if observed => overlay.property_claim_at(slot).is_some(),
         PrefabOverlaySlot::Property { .. } => {
             return Err(PrefabDeclarationError::PropertyClaimRequired);
         }

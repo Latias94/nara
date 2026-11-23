@@ -425,7 +425,7 @@ impl Fixture {
                         Default::default(),
                     )
                     .unwrap();
-                assert_eq!(observed.instance.as_ref(), Some(expected));
+                assert_eq!(observed.instance(), Some(expected));
             }
         });
     }

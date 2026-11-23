@@ -400,10 +400,10 @@ impl AuthoringWorkflow<'_> {
                 PrefabDeclarationLimits::default(),
             )
             .map_err(|error| format!("conversion declaration: {error:?}"))?;
-        if observed.instance.as_ref() != expected {
+        if observed.instance() != expected {
             return Err(format!(
                 "unexpected stored anchor declaration: {:?}",
-                observed.instance
+                observed.instance()
             ));
         }
         Ok(())

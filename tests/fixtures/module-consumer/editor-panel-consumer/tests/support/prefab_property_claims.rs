@@ -17,6 +17,9 @@ use nara_tooling::{
     EditorPrefabPropertyClaimTarget,
 };
 
+#[path = "prefab_property_claims/nested_revert.rs"]
+mod nested_revert;
+
 const PANEL: &str = "consumer.prefab-property-claims";
 const COMPONENT: &str = "consumer.prefab.Settings";
 const UNKNOWN: &str = "consumer.prefab.Unavailable";
@@ -451,12 +454,12 @@ impl ClaimPanel {
         else {
             panic!("the candidate claim must identify a property");
         };
-        let live_instance = context
+        let live_observation = context
             .observe_prefab_instance(&basis, selected.path(), Default::default())
-            .unwrap()
-            .instance
             .unwrap();
-        let live_declaration = live_instance
+        let live_declaration = live_observation
+            .instance()
+            .unwrap()
             .overrides
             .as_ref()
             .unwrap()
@@ -479,10 +482,7 @@ impl ClaimPanel {
                 "scene.authoring-prefab-component-claim-required",
             ),
             (
-                PrefabRevert::Component {
-                    index: component_index,
-                    observed: &preview_overlay.components[component_index],
-                },
+                PrefabRevert::Property(live_declaration),
                 "scene.authoring-prefab-stale-observed-intent",
             ),
         ] {
@@ -513,7 +513,7 @@ impl ClaimPanel {
             .prepare_prefab_revert(
                 &basis,
                 selected.path(),
-                PrefabRevert::Property(live_declaration),
+                live_observation.revert(0, Some(selected.slot())).unwrap(),
                 Default::default(),
             )
             .unwrap();
@@ -856,7 +856,7 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
             let observation = app
                 .observe_prefab_instance(&current, path, Default::default())
                 .unwrap();
-            assert_eq!(observation.instance.as_ref(), Some(expected_instance));
+            assert_eq!(observation.instance(), Some(expected_instance));
             let (rows, _) = discover(&current, path, |query| {
                 app.query_document_authoring(query).unwrap()
             });

@@ -120,7 +120,10 @@ fn review_retains_exact_before_after_and_cancel_publishes_nothing() {
     else {
         panic!("exact replacement required")
     };
-    assert_eq!(expected, &state.observation.as_ref().unwrap().instance);
+    assert_eq!(
+        expected.as_ref(),
+        state.observation.as_ref().unwrap().instance()
+    );
     let after = value.as_ref().unwrap();
     assert!(after.overrides.as_ref().unwrap().suppressions.is_empty());
     assert_eq!(after.source, expected.as_ref().unwrap().source);
@@ -397,13 +400,7 @@ fn source_observation_retains_nested_paths_and_every_intent_kind_including_detac
         let mut state = ImguiPrefabIntent::default();
         state.refresh(context, query_basis.clone());
         let observation = state.observation.as_ref().unwrap();
-        let overlay = observation
-            .instance
-            .as_ref()
-            .unwrap()
-            .overrides
-            .as_ref()
-            .unwrap();
+        let overlay = observation.instance().unwrap().overrides.as_ref().unwrap();
         let rows = &state.rows;
         assert_eq!(rows.len(), 7);
         assert!(rows.iter().any(|(slot, label)| matches!(
@@ -414,7 +411,7 @@ fn source_observation_retains_nested_paths_and_every_intent_kind_including_detac
             assert!(!intent_detail(overlay, *slot).unwrap().is_empty());
         }
         assert_eq!(
-            observation.nested_instances,
+            observation.nested_instances(),
             [
                 PrefabInstancePath {
                     anchor: id("intent-anchor"),
@@ -560,15 +557,14 @@ fn inspector_prefab_tab_paints_without_selection_and_retains_its_bounded_observa
     );
     let state = &harness.frontend.presentation.widgets[&inspector].prefab_intent;
     assert_eq!(
-        state.observation.as_ref().unwrap().path.anchor,
+        state.observation.as_ref().unwrap().path().anchor,
         id("intent-anchor")
     );
     let allocation = state
         .observation
         .as_ref()
         .unwrap()
-        .instance
-        .as_ref()
+        .instance()
         .unwrap()
         .overrides
         .as_ref()
@@ -582,8 +578,7 @@ fn inspector_prefab_tab_paints_without_selection_and_retains_its_bounded_observa
             .observation
             .as_ref()
             .unwrap()
-            .instance
-            .as_ref()
+            .instance()
             .unwrap()
             .overrides
             .as_ref()

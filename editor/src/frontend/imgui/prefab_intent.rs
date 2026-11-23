@@ -7,7 +7,7 @@ use nara::{
     scene::{
         PrefabComponentIntent, PrefabDeclarationLimits, PrefabDeclarationSource, PrefabInstance,
         PrefabInstanceObservation, PrefabInstancePath, PrefabInstancePathSegment, PrefabOverlay,
-        PrefabOverlaySlot, PrefabRevert, SceneCompilationFailure, ScenePatchOperation,
+        PrefabOverlaySlot, SceneCompilationFailure, ScenePatchOperation,
     },
     tooling::{
         EditorDocumentQueryBasis, EditorEntityPage, EditorEntityQuery, EditorEntityQueryLimits,
@@ -315,17 +315,19 @@ impl ImguiPrefabIntent {
     fn selected_path(&self) -> Option<&PrefabInstancePath> {
         let observation = self.observation.as_ref()?;
         if self.instance_index == 0 {
-            Some(&observation.path)
+            Some(observation.path())
         } else {
-            observation.nested_instances.get(self.instance_index - 1)
+            observation.nested_instances().get(self.instance_index - 1)
         }
     }
 
     fn selected_instance(&self) -> Option<&PrefabInstance> {
         let observation = self.observation.as_ref()?;
         let path = self.selected_path()?;
-        let relative = path.steps.strip_prefix(observation.path.steps.as_slice())?;
-        let mut instance = observation.instance.as_ref();
+        let relative = path
+            .steps
+            .strip_prefix(observation.path().steps.as_slice())?;
+        let mut instance = observation.instance();
         for step in relative {
             let overlay = instance?.overrides.as_ref()?;
             instance = match step {
@@ -348,8 +350,8 @@ impl ImguiPrefabIntent {
         let mut selected = None;
         ui.with_disabled_if(locked, || {
             if let Some(_combo) = ui.begin_combo("Stored instance", title) {
-                for (index, path) in std::iter::once(&observation.path)
-                    .chain(&observation.nested_instances)
+                for (index, path) in std::iter::once(observation.path())
+                    .chain(observation.nested_instances())
                     .enumerate()
                 {
                     let identity = index.to_string();
@@ -488,33 +490,14 @@ impl ImguiPrefabIntent {
         let Some((basis, path)) = self.basis.as_ref().zip(self.selected_path()) else {
             return;
         };
-        let overlay = self
-            .selected_instance()
-            .and_then(|instance| instance.overrides.as_ref());
-        let action = match slot {
-            Some(PrefabOverlaySlot::Component { index }) => {
-                let Some(observed) = overlay.and_then(|overlay| overlay.components.get(index))
-                else {
-                    self.notice = Some(
-                        "The selected component intent is unavailable. Refresh declarations."
-                            .into(),
-                    );
-                    return;
-                };
-                PrefabRevert::Component { index, observed }
-            }
-            Some(slot @ PrefabOverlaySlot::Property { .. }) => {
-                let Some(claim) = overlay.and_then(|overlay| overlay.property_claim_at(slot))
-                else {
-                    self.notice = Some(
-                        "The selected property claim is unavailable. Refresh declarations.".into(),
-                    );
-                    return;
-                };
-                PrefabRevert::Property(claim)
-            }
-            Some(slot) => PrefabRevert::Intent(slot),
-            None => PrefabRevert::Overlay,
+        let Some(action) = self
+            .observation
+            .as_ref()
+            .and_then(|observed| observed.revert(self.instance_index, slot))
+        else {
+            self.notice =
+                Some("The selected instance is unavailable. Refresh declarations.".into());
+            return;
         };
         match context.prepare_prefab_revert(basis, path, action, PrefabDeclarationLimits::default())
         {

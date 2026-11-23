@@ -567,10 +567,10 @@ fn observe_and_prepare_non_active_sources_preserve_navigation_and_one_undo_owner
         let observation = workspace
             .observe_prefab_instance(&basis, &root_path(), PrefabDeclarationLimits::default())
             .unwrap();
-        assert_eq!(observation.revision, basis.revision);
-        assert_eq!(Some(observation.schema), basis.schema);
-        assert_eq!(observation.instance, original.entities[0].prefab);
-        assert_eq!(observation.nested_instances.len(), 2);
+        assert_eq!(observation.revision(), basis.revision);
+        assert_eq!(Some(observation.schema()), basis.schema.as_ref());
+        assert_eq!(observation.instance(), original.entities[0].prefab.as_ref());
+        assert_eq!(observation.nested_instances().len(), 2);
         let nested = PrefabInstancePath {
             anchor: entity_id("anchor"),
             steps: vec![PrefabInstancePathSegment::Addition { index: 0 }],
@@ -579,7 +579,7 @@ fn observe_and_prepare_non_active_sources_preserve_navigation_and_one_undo_owner
             workspace
                 .observe_prefab_instance(&basis, &nested, PrefabDeclarationLimits::default(),)
                 .unwrap()
-                .instance
+                .instance()
                 .unwrap()
                 .overrides
                 .is_some()
@@ -599,7 +599,7 @@ fn observe_and_prepare_non_active_sources_preserve_navigation_and_one_undo_owner
         assert!(matches!(&prepared.patch().operations[..],
             [ScenePatchOperation::SetPrefabInstance { entity, expected, value }]
             if entity == &entity_id("anchor")
-                && expected == &observation.instance
+                && expected.as_ref() == observation.instance()
                 && value.as_ref().unwrap().overrides.is_none()));
         assert_eq!(workspace.authoring_model(), before);
         assert_eq!(document_value(&workspace, document), original);

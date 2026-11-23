@@ -129,15 +129,7 @@ impl EditorProjectSession {
             original_destination,
         } = request;
         require_confirmed_apply_inputs(self, &basis, &original_destination)?;
-        let claim = self.current_inspected_property_claim(basis.document.document, &declaration)?;
-        let containing = self
-            .prepare_prefab_revert(
-                &basis.document,
-                declaration.claim.location.path(),
-                PrefabRevert::Property(claim),
-                limits,
-            )
-            .map_err(preparation_failure)?;
+        let containing = self.prepare_inspected_property_revert(&basis, &declaration, limits)?;
         let destination_edit = self
             .workspace
             .prepare_prefab_property_apply(&destination, &property)

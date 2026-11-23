@@ -243,7 +243,7 @@ fn assert_reference_review(
                 Default::default(),
             )
             .unwrap();
-        assert_eq!(live.instance.as_ref(), Some(before));
+        assert_eq!(live.instance(), Some(before));
         let preview = review.preview();
         assert_eq!(preview.basis(), basis);
         let page = preview

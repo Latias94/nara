@@ -29,7 +29,7 @@ use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
     PrefabDeclarationLimits, PrefabDocument, PrefabDocumentCandidate, PrefabEntityOrigin,
     PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabInstancePath, PrefabOverlay,
-    PrefabPropertyClaim, PrefabPropertyIntent, PrefabRevert, PrefabSourceResolver,
+    PrefabOverlaySlot, PrefabPropertyClaim, PrefabPropertyIntent, PrefabSourceResolver,
     SceneAuthoringRevision, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
     SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
     ScenePatchOperation, ScenePlacement, ScenePlacementParent, SourceDocumentKey,
@@ -1641,17 +1641,16 @@ fn observed_prefab_intent_revert_preserves_unknown_siblings_and_round_trips_both
         let observed = editor
             .observe_prefab_instance(&basis, &path, limits)
             .unwrap();
-        let original = observed.instance.as_ref().unwrap();
-        assert_eq!(observed.revision, basis.revision);
-        assert_eq!(Some(&observed.schema), basis.schema.as_ref());
+        let original = observed.instance().unwrap();
+        assert_eq!(observed.revision(), basis.revision);
+        assert_eq!(Some(observed.schema()), basis.schema.as_ref());
         let components = &original.overrides.as_ref().unwrap().components;
         assert_eq!(components.len(), 2);
-        let action = PrefabRevert::Component {
-            index: 0,
-            observed: &components[0],
-        };
+        let action = observed
+            .revert(0, Some(PrefabOverlaySlot::Component { index: 0 }))
+            .unwrap();
         let cancelled = editor
-            .prepare_prefab_revert(&basis, &observed.path, action, limits)
+            .prepare_prefab_revert(&basis, observed.path(), action, limits)
             .unwrap();
         assert!(cancelled.is_prefab_revert());
         drop(cancelled);
@@ -1659,10 +1658,10 @@ fn observed_prefab_intent_revert_preserves_unknown_siblings_and_round_trips_both
         assert_eq!(editor.current_frame().workspace(), &before);
 
         let prepared = editor
-            .prepare_prefab_revert(&basis, &observed.path, action, limits)
+            .prepare_prefab_revert(&basis, observed.path(), action, limits)
             .unwrap();
         let stale = editor
-            .prepare_prefab_revert(&basis, &observed.path, action, limits)
+            .prepare_prefab_revert(&basis, observed.path(), action, limits)
             .unwrap();
         let mut retained = original.clone();
         retained.overrides.as_mut().unwrap().components.remove(0);
@@ -1677,8 +1676,8 @@ fn observed_prefab_intent_revert_preserves_unknown_siblings_and_round_trips_both
             editor
                 .observe_prefab_instance(&current, &path, limits)
                 .unwrap()
-                .instance,
-            Some(retained.clone()),
+                .instance(),
+            Some(&retained),
         );
         assert!(
             editor
@@ -1721,8 +1720,7 @@ fn observed_prefab_intent_revert_preserves_unknown_siblings_and_round_trips_both
                 editor
                     .observe_prefab_instance(&current, &path, limits)
                     .unwrap()
-                    .instance
-                    .as_ref(),
+                    .instance(),
                 Some(instance),
             );
         }
@@ -1753,13 +1751,14 @@ fn observed_prefab_intent_revert_preserves_unknown_siblings_and_round_trips_both
             .observe_prefab_instance(&current, &path, limits)
             .unwrap();
         assert_eq!(
-            repaired.instance,
+            repaired.instance(),
             expected
                 .entities
                 .iter()
                 .find(|entity| entity.id == id("actor"))
                 .unwrap()
-                .prefab,
+                .prefab
+                .as_ref(),
         );
         close_editor(&mut editor);
     }

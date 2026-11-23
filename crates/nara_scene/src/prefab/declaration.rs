@@ -9,6 +9,8 @@ use crate::{
     PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent, SceneComponentRecord, SceneEntityId,
     SourceDocumentKey,
 };
+#[cfg(feature = "serde")]
+use crate::{PrefabInstanceObservation, SceneAuthoringRevision};
 
 /// Why composition refused publication.
 ///
@@ -78,6 +80,7 @@ pub enum PrefabOverlaySlot {
 }
 
 /// A borrowed property declaration, including the authored route and the exact stored intent.
+/// Equality compares stored declarations. Revert checks the original live source separately.
 #[derive(Debug, Clone, Copy)]
 pub struct PrefabPropertyClaimRef<'a> {
     pub(crate) slot: PrefabOverlaySlot,
@@ -85,6 +88,8 @@ pub struct PrefabPropertyClaimRef<'a> {
     pub(crate) component: &'a ComponentTypeId,
     pub(crate) version: ComponentSchemaVersion,
     pub(crate) claim: &'a PrefabPropertyClaim,
+    #[cfg(feature = "serde")]
+    pub(crate) revision: Option<SceneAuthoringRevision>,
 }
 
 impl<'a> PrefabPropertyClaimRef<'a> {
@@ -303,18 +308,25 @@ impl PrefabComponentIntent {
     }
 }
 
+/// A Revert selected from an immutable, retained live instance observation.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, Copy)]
+pub struct ObservedPrefabRevert<'a> {
+    pub(crate) observation: &'a PrefabInstanceObservation,
+    pub(crate) path: &'a PrefabInstancePath,
+    pub(crate) slot: Option<PrefabOverlaySlot>,
+}
+
 /// Explicit source changes, distinct from detaching or converting an instance.
 #[derive(Debug, Clone, Copy)]
 pub enum PrefabRevert<'a> {
-    /// Removes an addition, instance claim, placement or entity suppression at this slot.
+    /// Explicit source repair for an addition, instance claim, placement or entity suppression.
     Intent(PrefabOverlaySlot),
-    /// Removes a whole component declaration when it matches the observed declaration.
-    Component {
-        index: usize,
-        observed: &'a PrefabComponentIntent,
-    },
-    /// Removes a property declaration only when it agrees with the current source.
+    /// Removes a property borrowed from this live session and this exact instance declaration.
     Property(PrefabPropertyClaimRef<'a>),
+    /// Removes the selected declaration or overlay from its original live observation.
+    #[cfg(feature = "serde")]
+    Observed(ObservedPrefabRevert<'a>),
     /// Removes the complete overlay, including its base pin, while preserving the source link.
     Overlay,
 }

@@ -506,7 +506,7 @@ impl ApplyFixture {
                         Default::default(),
                     )
                     .unwrap();
-                assert_eq!(observation.instance.as_ref(), Some(expected));
+                assert_eq!(observation.instance(), Some(expected));
             }
         });
     }

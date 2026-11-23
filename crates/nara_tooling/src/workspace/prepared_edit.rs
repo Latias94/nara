@@ -184,7 +184,7 @@ impl EditorWorkspace {
     /// Prepares one source-owned Revert without activating its document or changing selection.
     ///
     /// Snapshot selectors require the exact incarnation, revision and Schema admission.
-    /// Property and component Revert also require the complete observed declaration.
+    /// Selected property and component declarations must come from the original live observation.
     /// The source owner lowers the Revert and retains the candidate and inverse consumed by
     /// [`Self::commit_authoring_edit`]; this method adds no publication or history authority.
     pub fn prepare_prefab_revert(

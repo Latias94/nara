@@ -44,6 +44,8 @@ mod overlay;
 #[cfg(feature = "serde")]
 pub(crate) use overlay::validate_claim_paths;
 
+#[cfg(feature = "serde")]
+pub use declaration::ObservedPrefabRevert;
 pub use declaration::{
     PrefabDeclarationSource, PrefabInstanceLocation, PrefabInstancePath, PrefabInstancePathSegment,
     PrefabOverlaySlot, PrefabPropertyClaimRef, PrefabRevert, SceneCompilationFailure,

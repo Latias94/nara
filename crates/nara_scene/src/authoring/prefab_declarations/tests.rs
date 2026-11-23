@@ -168,11 +168,10 @@ fn property_revert_preserves_unknown_siblings_and_one_exact_history_entry() {
     assert_eq!(observation.revision, session.revision());
     assert_eq!(Some(observation.schema), session.authoring_schema_basis());
     assert_eq!(observation.instance, document.entities[0].prefab);
-    let declaration = observation
-        .instance
-        .as_ref()
-        .and_then(|instance| instance.overrides.as_ref())
-        .and_then(|overlay| overlay.property_claim_at(FIRST_PROPERTY))
+    let declaration = session
+        .prefab_property_claims(&root_path().anchor, &[])
+        .unwrap()
+        .claim_at(FIRST_PROPERTY)
         .unwrap();
     let prepared = session
         .prepare_prefab_revert(
@@ -215,11 +214,14 @@ fn final_property_revert_keeps_empty_base_pin_and_overlay_revert_keeps_source() 
     original.components.push(properties());
     let document = document(Some(instance(original.clone())));
     let mut session = prefab(&document);
+    let observation = session
+        .observe_prefab_instance(&root_path(), limits())
+        .unwrap();
     let prepared = session
         .prepare_prefab_revert(
             session.revision(),
             &root_path(),
-            PrefabRevert::Property(original.property_claim_at(FIRST_PROPERTY).unwrap()),
+            observation.revert(0, Some(FIRST_PROPERTY)).unwrap(),
             limits(),
         )
         .unwrap();
@@ -372,6 +374,9 @@ fn intent_slots_remove_only_the_selected_array_entry_without_cascades() {
         .push(PrefabEntityTarget::source(id("suppressed")));
     let document = document(Some(instance(original.clone())));
     let session = scene(&document);
+    let observation = session
+        .observe_prefab_instance(&root_path(), limits())
+        .unwrap();
     for slot in [
         PrefabOverlaySlot::Addition { index: 0 },
         PrefabOverlaySlot::InstanceClaim { index: 0 },
@@ -389,10 +394,7 @@ fn intent_slots_remove_only_the_selected_array_entry_without_cascades() {
             PrefabOverlaySlot::Property { .. } => unreachable!(),
         }
         let action = match slot {
-            PrefabOverlaySlot::Component { index } => PrefabRevert::Component {
-                index,
-                observed: &original.components[index],
-            },
+            PrefabOverlaySlot::Component { .. } => observation.revert(0, Some(slot)).unwrap(),
             _ => PrefabRevert::Intent(slot),
         };
         let prepared = session
@@ -702,18 +704,30 @@ fn property_revert_refuses_a_coordinate_or_a_changed_stored_declaration() {
     let revision = session.revision();
     let history = session.history_status();
     let retained = session.shared_document();
+    let component_slot = PrefabOverlaySlot::Component { index: 0 };
+    let observation = session
+        .observe_prefab_instance(&root_path(), limits())
+        .unwrap();
     let mut changed_value = original.clone();
-    let observed = original.components[0].clone();
     let PrefabComponentIntent::Properties { claims, .. } = &mut changed_value.components[0] else {
         unreachable!();
     };
     claims[0].intent = PrefabPropertyIntent::Set(ComponentValue::f64(0.0).unwrap());
+    assert_ne!(
+        original.property_claim_at(FIRST_PROPERTY),
+        changed_value.property_claim_at(FIRST_PROPERTY)
+    );
     let mut changed_field = original;
     let PrefabComponentIntent::Properties { claims, .. } = &mut changed_field.components[0] else {
         unreachable!();
     };
     claims[0].path = ComponentPropertyPath::new(ComponentFieldId::new("another-field"));
     claims[0].intent = PrefabPropertyIntent::Absent;
+    let mut foreign_document = document.clone();
+    foreign_document.entities[0].prefab = Some(instance(changed_field.clone()));
+    let foreign = scene(&foreign_document)
+        .observe_prefab_instance(&root_path(), limits())
+        .unwrap();
 
     for (action, expected) in [
         (
@@ -721,7 +735,7 @@ fn property_revert_refuses_a_coordinate_or_a_changed_stored_declaration() {
             PrefabDeclarationError::PropertyClaimRequired,
         ),
         (
-            PrefabRevert::Intent(PrefabOverlaySlot::Component { index: 0 }),
+            PrefabRevert::Intent(component_slot),
             PrefabDeclarationError::ComponentClaimRequired,
         ),
         (
@@ -733,17 +747,7 @@ fn property_revert_refuses_a_coordinate_or_a_changed_stored_declaration() {
             PrefabDeclarationError::StaleObservedIntent,
         ),
         (
-            PrefabRevert::Component {
-                index: 0,
-                observed: &changed_value.components[0],
-            },
-            PrefabDeclarationError::StaleObservedIntent,
-        ),
-        (
-            PrefabRevert::Component {
-                index: 0,
-                observed: &changed_field.components[0],
-            },
+            foreign.revert(0, Some(component_slot)).unwrap(),
             PrefabDeclarationError::StaleObservedIntent,
         ),
     ] {
@@ -767,10 +771,7 @@ fn property_revert_refuses_a_coordinate_or_a_changed_stored_declaration() {
         .prepare_prefab_revert(
             revision,
             &root_path(),
-            PrefabRevert::Component {
-                index: 0,
-                observed: &observed,
-            },
+            observation.revert(0, Some(component_slot)).unwrap(),
             limits(),
         )
         .unwrap();
@@ -788,6 +789,112 @@ fn property_revert_refuses_a_coordinate_or_a_changed_stored_declaration() {
 }
 
 #[test]
+fn borrowed_property_revert_checks_storage_and_session_incarnation() {
+    let mut leaf = overlay();
+    leaf.components.push(properties());
+    let mut parent = overlay();
+    parent.instances = ["guard", "leaf"]
+        .map(|name| PrefabInstanceClaim {
+            target: PrefabEntityTarget::source(id(name)),
+            value: Some(instance(leaf.clone())),
+        })
+        .into();
+    let document = document(Some(instance(parent)));
+    let published =
+        SceneDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
+            .unwrap()
+            .admit_authoring_with_basis(
+                AuthoringDocumentSource::new(AssetRef::path("scenes/main.scene.json").unwrap()),
+                &basis(),
+            )
+            .unwrap()
+            .publish();
+    let sibling = SceneAuthoringSession::from_published_authoring_document(
+        crate::__private::fork_published_authoring_scene_document(&published),
+    );
+    let session = SceneAuthoringSession::from_published_authoring_document(published);
+    let guard = nested_path(&[PrefabInstancePathSegment::InstanceClaim { index: 0 }]);
+    let leaf = nested_path(&[PrefabInstancePathSegment::InstanceClaim { index: 1 }]);
+    assert_ne!(
+        session.revision().source_id(),
+        sibling.revision().source_id()
+    );
+    assert!(Arc::ptr_eq(
+        &session.shared_document(),
+        &sibling.shared_document()
+    ));
+
+    fn claim<'a>(
+        owner: &'a SceneAuthoringSession,
+        path: &PrefabInstancePath,
+    ) -> PrefabPropertyClaimRef<'a> {
+        owner
+            .prefab_property_claims(&path.anchor, &path.steps)
+            .unwrap()
+            .claim_at(FIRST_PROPERTY)
+            .unwrap()
+    }
+    let live_guard = claim(&session, &guard);
+    let live_leaf = claim(&session, &leaf);
+    let foreign_guard = claim(&sibling, &guard);
+    assert_eq!(live_guard, live_leaf);
+    assert!(std::ptr::eq(live_guard.claim(), foreign_guard.claim()));
+    let preview = session
+        .prepare_prefab_revert(
+            session.revision(),
+            &root_path(),
+            PrefabRevert::Intent(PrefabOverlaySlot::InstanceClaim { index: 0 }),
+            limits(),
+        )
+        .unwrap();
+    let preview_leaf = preview
+        .prefab_property_claims(&guard.anchor, &guard.steps)
+        .unwrap()
+        .claim_at(FIRST_PROPERTY)
+        .unwrap();
+    assert_eq!(live_guard, preview_leaf);
+    for declaration in [live_leaf, foreign_guard, preview_leaf] {
+        let rejected = session
+            .prepare_prefab_revert(
+                session.revision(),
+                &guard,
+                PrefabRevert::Property(declaration),
+                limits(),
+            )
+            .unwrap_err();
+        assert!(rejected.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str()
+                == PrefabDeclarationError::StaleObservedIntent.diagnostic_code()
+        }));
+        assert!(rejected.inverse.is_none());
+    }
+    let removal = session
+        .prepare_prefab_revert(
+            session.revision(),
+            &leaf,
+            PrefabRevert::Property(live_leaf),
+            limits(),
+        )
+        .unwrap();
+    assert!(
+        removal
+            .prefab_property_claims(&leaf.anchor, &leaf.steps)
+            .unwrap()
+            .claim_at(FIRST_PROPERTY)
+            .is_none()
+    );
+    assert_eq!(
+        removal
+            .prefab_property_claims(&guard.anchor, &guard.steps)
+            .unwrap()
+            .claim_at(FIRST_PROPERTY),
+        Some(live_guard),
+    );
+    assert_eq!(session.history_status().undo_depth, 0);
+    assert_eq!(session.document(), &document);
+}
+
+#[test]
 fn reverted_source_round_trips_keep_unknown_intent_and_reject_pre_reopen_tokens() {
     let mut original = overlay();
     original.components.push(properties());
@@ -799,7 +906,6 @@ fn reverted_source_round_trips_keep_unknown_intent_and_reject_pre_reopen_tokens(
         value: None,
     });
     let document = document(Some(instance(original.clone())));
-    let action = PrefabRevert::Property(original.property_claim_at(FIRST_PROPERTY).unwrap());
     let mut expected = document.clone();
     expected.entities[0]
         .prefab
@@ -816,7 +922,12 @@ fn reverted_source_round_trips_keep_unknown_intent_and_reject_pre_reopen_tokens(
         .observe_prefab_instance(&root_path(), limits())
         .unwrap();
     let prepared = session
-        .prepare_prefab_revert(before.revision, &before.path, action, limits())
+        .prepare_prefab_revert(
+            before.revision,
+            &before.path,
+            before.revert(0, Some(FIRST_PROPERTY)).unwrap(),
+            limits(),
+        )
         .unwrap();
     assert!(session.commit_authoring_edit(prepared).applied);
     assert!(session.undo_authoring().applied);
@@ -861,7 +972,12 @@ fn reverted_source_round_trips_keep_unknown_intent_and_reject_pre_reopen_tokens(
         .observe_prefab_instance(&root_path(), limits())
         .unwrap();
     let prepared = session
-        .prepare_prefab_revert(before.revision, &before.path, action, limits())
+        .prepare_prefab_revert(
+            before.revision,
+            &before.path,
+            before.revert(0, Some(FIRST_PROPERTY)).unwrap(),
+            limits(),
+        )
         .unwrap();
     assert!(session.commit_authoring_edit(prepared).applied);
     assert!(session.undo_authoring().applied);

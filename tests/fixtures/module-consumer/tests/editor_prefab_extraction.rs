@@ -11,7 +11,7 @@ use nara_engine::project_host::{
 use nara_reflect::{ComponentFieldId, ComponentPropertyPath, ComponentValue};
 use nara_scene::{
     PrefabComponentIntent, PrefabEntityOrigin, PrefabInstanceBinding, PrefabInstancePath,
-    PrefabOverlaySlot, PrefabPropertyIntent, PrefabRevert, SceneAuthoringHistoryStatus,
+    PrefabOverlaySlot, PrefabPropertyIntent, SceneAuthoringHistoryStatus,
 };
 use nara_tooling::{
     EditorAction, EditorActionOutcome, EditorDocumentQueryRejection, EditorPrefabConversionAction,
@@ -348,7 +348,7 @@ fn public_extraction_adopts_real_outputs_preserves_selective_history_and_reopens
         let observation = editor
             .observe_prefab_instance(&basis, &path, Default::default())
             .unwrap();
-        let overlay = observation.instance.unwrap().overrides.unwrap();
+        let overlay = observation.instance().unwrap().overrides.as_ref().unwrap();
         assert_eq!(overlay.additions.len(), 1);
         assert_eq!(overlay.additions[0].id, id("badge"));
         let mut pins = overlay.components.iter().enumerate().flat_map(
@@ -374,14 +374,9 @@ fn public_extraction_adopts_real_outputs_preserves_selective_history_and_reopens
             .next()
             .expect("extraction preserves the original property pin");
         assert!(pins.next().is_none());
-        let pin = overlay.property_claim_at(pin_slot).unwrap();
+        let pin = observation.revert(0, Some(pin_slot)).unwrap();
         let prepared = editor
-            .prepare_prefab_revert(
-                &basis,
-                &path,
-                PrefabRevert::Property(pin),
-                Default::default(),
-            )
+            .prepare_prefab_revert(&basis, &path, pin, Default::default())
             .unwrap();
         applied(editor.commit_authoring_edit(prepared));
         editor.drive_editor_frame(Duration::ZERO);

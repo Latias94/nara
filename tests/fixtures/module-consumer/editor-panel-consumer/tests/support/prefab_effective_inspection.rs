@@ -1067,7 +1067,7 @@ fn round_trip(kind: EditorDocumentKind, source: &str) {
                     Default::default(),
                 )
                 .unwrap();
-            assert_eq!(observed.instance.as_ref(), entity.prefab.as_ref());
+            assert_eq!(observed.instance(), entity.prefab.as_ref());
         }
     });
     assert_left(&mut panel, &mut app, CHANGED_SCORE, false);

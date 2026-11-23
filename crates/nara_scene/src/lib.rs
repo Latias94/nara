@@ -125,6 +125,8 @@ pub use placement::{
     SceneEntityPlacement, ScenePlacement, ScenePlacementParent, ScenePlacementSlot,
 };
 #[cfg(feature = "serde")]
+pub use prefab::ObservedPrefabRevert;
+#[cfg(feature = "serde")]
 pub use prefab::inspection::{
     AuthoringPrefabComponentFact, AuthoringPrefabComponentOverrideKind,
     AuthoringPrefabComponentView, AuthoringPrefabInstanceSnapshot, AuthoringPrefabProperty,

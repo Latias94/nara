@@ -145,10 +145,12 @@ Rules:
   arbitrary raw structural patches. The dedicated preparation origin is not caller-set metadata,
   and commit still checks the source owner, revision and Schema admission.
   Property-claim discovery retains the original read-source identity, instance path and slot
-  together. A property Revert requires that live claim handle or the complete observed
-  declaration. The source owner checks its target, component version, field path and exact
-  stored intent before cloning the selected overlay. A whole-component Revert requires its
-  complete observed declaration at the same slot, including every property in a property group.
+  together. A property Revert requires the live claim handle, a declaration borrowed from that
+  exact live revision and path, or a selection from its retained live instance observation.
+  A whole-component Revert uses the original live instance observation or the effective edit
+  owner's verified declaration. Scene validates the observation before cloning the selected
+  overlay. Detached or prepared declarations provide read data. Payload equality alone cannot
+  establish that a slot belongs to the intended instance.
   Effective inspection resolves the compiler's controlling claim to the live declaration under
   the original source basis.
   The Host retains the prepared edit and verifies the original composition sources before

@@ -206,7 +206,8 @@ impl EditorWorkspace {
         AuthoringReadScope::Live(self).read_prefab_property_claim(claim, limits)
     }
 
-    /// Retains the discovered claim's exact source identity through ordinary Revert preparation.
+    /// Resolves the original live claim and passes its source borrow to ordinary Revert
+    /// preparation. A prepared preview's target has a different query owner.
     pub fn prepare_prefab_property_revert(
         &self,
         claim: &EditorPrefabPropertyClaimTarget,

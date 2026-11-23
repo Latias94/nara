@@ -78,11 +78,19 @@ fn lower_write(
         return lower_revert(
             entities,
             &PrefabInstancePath::new(edit.anchor.clone()),
-            PrefabRevert::Component {
-                index: previous.index,
-                observed: &previous.intent,
-            },
             limits,
+            |overlay| {
+                overlay
+                    .components
+                    .get(previous.index)
+                    .filter(|current| current.exactly_matches(&previous.intent))
+                    .map(|_| {
+                        Some(PrefabOverlaySlot::Component {
+                            index: previous.index,
+                        })
+                    })
+                    .ok_or(Error::StaleObservedIntent)
+            },
         );
     }
 

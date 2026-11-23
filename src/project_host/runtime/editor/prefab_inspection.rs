@@ -700,16 +700,8 @@ impl EditorProjectSession {
                 self.revalidate_prefab_inspection_sources(&basis)?;
                 match change {
                     InspectionEdit::Revert(observed) => {
-                        let declaration = self
-                            .current_inspected_property_claim(basis.document.document, &observed)?;
-                        let edit = self
-                            .prepare_prefab_revert(
-                                &basis.document,
-                                observed.claim.location.path(),
-                                PrefabRevert::Property(declaration),
-                                limits,
-                            )
-                            .map_err(preparation_failure)?;
+                        let edit =
+                            self.prepare_inspected_property_revert(&basis, &observed, limits)?;
                         Ok(State::Review {
                             basis,
                             edit: InspectionReview::Edit(edit),
@@ -785,6 +777,23 @@ impl EditorProjectSession {
             }
             state => Ok(state),
         }
+    }
+
+    fn prepare_inspected_property_revert(
+        &self,
+        basis: &InspectionBasis,
+        observed: &InspectionRevert,
+        limits: PrefabDeclarationLimits,
+    ) -> Result<PreparedEditorDocumentEdit, Failure> {
+        let declaration =
+            self.current_inspected_property_claim(basis.document.document, observed)?;
+        self.prepare_prefab_revert(
+            &basis.document,
+            observed.claim.location.path(),
+            PrefabRevert::Property(declaration),
+            limits,
+        )
+        .map_err(preparation_failure)
     }
 
     fn current_inspected_property_claim(

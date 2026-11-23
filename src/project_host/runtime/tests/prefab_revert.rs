@@ -89,13 +89,12 @@ fn ui_prefab_revert_uses_source_owner_proof_and_keeps_one_undo() {
     let repaired = editor
         .observe_prefab_instance(&current, &selector, limits)
         .unwrap();
-    let instance = repaired.instance.as_ref().unwrap();
-    assert_eq!(instance.source, observed.instance.as_ref().unwrap().source);
+    let instance = repaired.instance().unwrap();
+    assert_eq!(instance.source, observed.instance().unwrap().source);
     assert_eq!(
         instance.overrides.as_ref().unwrap().base,
         observed
-            .instance
-            .as_ref()
+            .instance()
             .unwrap()
             .overrides
             .as_ref()
