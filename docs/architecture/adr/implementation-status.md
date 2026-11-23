@@ -4935,6 +4935,10 @@ selected startup Action Map. Source validation names the project member. Process
 names the Input Product and uses the same definition decoded by the selected codec.
 [Stock keyboard admission](../../plans/2026-10-16-0940-feat-first-2d-author-workflow-plan.md#desktop-keyboard-admission)
 
+The [startup Input ownership correction](../../plans/2026-10-30-input-definition-and-source-admission-plan.md#startup-action-map-installation-ownership)
+binds PRIMARY replacement eligibility to the installation that created its default map. The
+embedded App transfer, source and processed readers, and two Windows Winit keyboard paths qualify.
+
 ADR 0110's [selected profile tool build](../../plans/2026-10-16-0940-feat-first-2d-author-workflow-plan.md#selected-profile-tool-build)
 qualifies capability-based selection through Check, Schema and repair in a generated project, plus
 the original desktop and Headless source Export path. The bootstrap observes Cargo declarations

@@ -3,6 +3,7 @@
 use std::{
     error::Error,
     fmt::{self, Display, Formatter},
+    sync::Arc,
 };
 
 use nara_app::{
@@ -879,12 +880,15 @@ impl Plugin for InputPlugin {
         app.insert_resource(
             ButtonInput::<MouseButton>::with_limits(limits).map_err(projection_error)?,
         )?;
-        if !app.world().contains_resource::<ActionMaps>() {
-            app.insert_resource(ActionMaps::pristine())?;
-        }
-        app.insert_resource(state::InputInstallation::new(
-            app.world().resource::<ActionMaps>(),
-        ))?;
+        let pristine_primary = if !app.world().contains_resource::<ActionMaps>() {
+            let primary = ActionMap::pristine();
+            let revision = Arc::clone(&primary.revision);
+            app.insert_resource(ActionMaps::new(primary))?;
+            Some(revision)
+        } else {
+            None
+        };
+        app.insert_resource(state::InputInstallation::new(pristine_primary))?;
         app.insert_resource(ActionOutcomes {
             outcomes: Vec::new(),
         })?;

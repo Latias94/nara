@@ -44,10 +44,6 @@ impl Default for ActionMaps {
 }
 
 impl ActionMaps {
-    pub(crate) fn pristine() -> Self {
-        Self::new(ActionMap::pristine())
-    }
-
     /// Installs an owned map for the default seat.
     #[must_use]
     pub fn new(primary: ActionMap) -> Self {
@@ -304,12 +300,9 @@ pub(crate) struct InputInstallation {
 }
 
 impl InputInstallation {
-    pub(crate) fn new(maps: &ActionMaps) -> Self {
+    pub(crate) fn new(pristine: Option<Arc<ActionMapRevision>>) -> Self {
         Self {
-            pristine: maps
-                .get(InputSeatId::PRIMARY)
-                .filter(|map| !map.explicit)
-                .map(|map| Arc::clone(&map.revision)),
+            pristine,
             finalized: false,
             selected: None,
         }

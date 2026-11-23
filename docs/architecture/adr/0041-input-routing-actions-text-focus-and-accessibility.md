@@ -351,9 +351,10 @@ backend-independent key vocabulary. Runtime keyboard ingress uses physical posit
 unshifted punctuation on the standard US layout. Text and IME input keep logical text semantics.
 
 A manifest-selected default map is installed for PRIMARY once through `RuntimeCandidateScope`,
-before Scene materialization and Startup. The actual Input owner verifies that seat's pristine
-resource identity and rejects a competing explicit PRIMARY configuration, including an explicit
-empty map. Independent code configuration of another seat does not replace PRIMARY. Missing Input
+before Scene materialization and Startup. The Input installation records the revision of the
+pristine PRIMARY it creates and verifies that identity before replacement. A preinstalled map is
+caller configuration, including an untouched empty map transferred from another World.
+Independent code configuration of another seat does not replace PRIMARY. Missing Input
 ownership, resource replacement and repeated selection refuse installation. No installation API
 accepts an arbitrary World or a post-Startup runtime scope. With no file selection, code-first
 configuration remains valid. Startup selection and later explicit runtime rebinding are separate

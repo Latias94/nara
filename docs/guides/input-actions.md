@@ -79,6 +79,10 @@ that seat, and `remove(seat)` to recover its original map. A refused insert retu
 map through `ActionMapInstallError::into_map`. A seat without a map has no gameplay mapping;
 it does not borrow PRIMARY policy. Raw input and UI routing remain independently available.
 
+To use the manifest's startup Action Map, let `InputPlugin` create PRIMARY. A map supplied by the
+embedding App counts as code configuration even when it is empty. A file selection that would
+replace that map returns `CompetingConfiguration` before Startup.
+
 Create separately admitted map state for another seat or World. `required_state_bytes()` is the
 conservative logical allowance for contexts and retained lifetime observations; it is not a
 measurement of the entire input pipeline's memory.

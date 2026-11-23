@@ -100,3 +100,34 @@ independent physical/travel consumer, relocated Export, games and selected nativ
 It preserves failed-fixture history and final focused corrections. Continue processed Input
 through the delivery plan and the endpoint correction above; this source unit does not close R7,
 R10 or the full foundation Goal.
+
+### Startup Action Map Installation Ownership
+
+The [round twelve embedded App case](../audits/2026-11-23-prefab-authoring-player-and-input-review.md#p3-findings)
+transfers the donor World's untouched `ActionMaps` before the receiving App installs Input.
+Startup file selection must preserve that caller-supplied PRIMARY. `InputPlugin` records the map
+revision only when the installation creates the default map. The existing revision check and
+code configuration guards continue to govern replacement before Startup. With no file selection,
+the transferred configuration can reach ordinary Startup.
+
+Bevy initializes a resource only when it is absent. Its World API treats explicit insertion as a
+separate operation with its own replacement semantics. Nara's pre-Startup selection uses the
+same separation between initialization and an explicitly supplied resource.
+[Bevy World resource initialization](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_ecs/src/world/mod.rs#L2034-L2058)
+
+The Windows x64 Rust 1.95.0 pre-fix run `b87c64bc-f8b3-405b-955c-7630cd912747` observed
+`Ok(())` for the transferred resource and aborted after the failed assertion while the candidate
+still owned its Runtime. The regression now retires the candidate before reporting an unexpected
+result. Release nextest `a09b249f-e8af-4307-9681-b912fa344c71` passes 80/80 selected Input
+tests. The receiver refuses a file selection, reports no captured startup definition, and then
+completes Startup using the transferred bindings with no file selected. The existing cases
+also retain first Startup visibility of an admitted file and preserve code configuration on
+other seats.
+[Input selection tests](../../crates/nara_input/tests/input_selection.rs)
+
+Root release nextest `c5e31fef-ebdb-4d3b-86c2-c18955a00871` passes 29/29 selected source
+Input, processed Host and bootstrap cases. Processed startup sees the installed file map on its
+first Startup and retains the existing refusal and retirement behavior for an explicit empty map.
+Windows Winit nextest `43faa185-b9c1-4db5-a89e-aaee608fcc6b` passes both posted-key trajectories,
+including focus recovery and balanced Tab, Enter and punctuation edges. Input correctness Clippy
+and workspace formatting also pass.

@@ -277,6 +277,48 @@ fn an_explicit_default_collection_before_input_plugin_refuses_file_selection() {
 }
 
 #[test]
+fn a_transferred_default_collection_before_input_plugin_refuses_file_selection() {
+    let mut donor = candidate(true);
+    let (sender, receiver) = mpsc::channel();
+    with_scope(&mut donor, |scope| {
+        scope.apply_command(move |world: &mut World| {
+            sender
+                .send(world.remove_resource::<ActionMaps>().unwrap())
+                .unwrap();
+        });
+    });
+    retire(donor);
+    let transferred = receiver.try_recv().unwrap();
+    let expected = transferred
+        .get(InputSeatId::PRIMARY)
+        .unwrap()
+        .bindings_handle();
+
+    let mut app = App::new();
+    app.insert_resource(transferred).unwrap();
+    app.add_plugins((InputPlugin, StartupObserverPlugin))
+        .unwrap();
+    let mut receiver = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            app.seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
+    let result = with_scope(&mut receiver, |scope| {
+        finalize_input_selection(scope, Some(action_map("file.jump", KeyCode::Space)))
+    });
+    if result != Err(InputSelectionError::CompetingConfiguration) {
+        retire(receiver);
+        panic!("expected the supplied map to refuse file selection, got {result:?}");
+    }
+    assert!(startup_action_map_bindings(receiver.world()).is_none());
+    with_scope(&mut receiver, |scope| finalize_input_selection(scope, None)).unwrap();
+    assert_startup_selection(receiver, &expected, false);
+}
+
+#[test]
 fn another_explicit_seat_does_not_compete_with_primary_selection() {
     let mut candidate = candidate(true);
     let other_seat = InputSeatId::new(1);
