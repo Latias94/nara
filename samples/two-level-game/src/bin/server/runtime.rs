@@ -44,6 +44,43 @@ use super::{
 
 pub(super) const MAX_FRAMES: usize = 200_000;
 
+pub(super) struct ScenarioProgress {
+    latest: GameSnapshot,
+    visited_levels: BTreeSet<LevelId>,
+}
+
+impl ScenarioProgress {
+    fn new(latest: GameSnapshot) -> Self {
+        Self {
+            visited_levels: latest.level.map(LevelKey::level).into_iter().collect(),
+            latest,
+        }
+    }
+
+    pub(super) fn latest(&self) -> &GameSnapshot {
+        &self.latest
+    }
+
+    pub(super) fn step(
+        &mut self,
+        session: &mut HeadlessSession,
+        deadline: Instant,
+    ) -> Result<&GameSnapshot, Failure> {
+        if Instant::now() >= deadline {
+            return Err("Server exceeded its 60-second execution deadline".into());
+        }
+        if session.step()?.is_some() {
+            return Err("Server exited before the finite scenario completed".into());
+        }
+        self.latest = snapshot(session)?;
+        if let Some(level) = self.latest.level {
+            self.visited_levels.insert(level.level());
+        }
+        check_gameplay(&self.latest)?;
+        Ok(&self.latest)
+    }
+}
+
 pub(super) enum Failure {
     Rejected(String),
     Error(String),
@@ -93,6 +130,7 @@ pub(super) fn run(invocation: Invocation) -> ExitCode {
         None
     };
     let mut session = None;
+    let mut scenario_progress = None;
     let deadline = Instant::now() + Duration::from_secs(60);
     let outcome = catch_unwind(AssertUnwindSafe(|| -> Result<(), Failure> {
         let base = open_pack().map_err(Failure::Rejected)?;
@@ -107,6 +145,7 @@ pub(super) fn run(invocation: Invocation) -> ExitCode {
             return Err("Server did not complete its initial maintenance frame".into());
         }
         let initial = snapshot(original)?;
+        check_gameplay(&initial)?;
         if initial.tick != 0
             || !initial.initialized
             || initial.phase != GamePhase::Running
@@ -117,24 +156,24 @@ pub(super) fn run(invocation: Invocation) -> ExitCode {
             ));
         }
         verify_runtime(original, &initial)?;
-        report.state = Some(state(&initial));
         if !matches!(&invocation, Invocation::Serve(_)) {
             report.ready = true;
             report.stage = "scenario";
         }
         match invocation {
             Invocation::Player(options) => {
-                run_player(original, options, deadline, &mut report)?;
+                let progress = scenario_progress.insert(ScenarioProgress::new(initial));
+                run_player(original, options, deadline, progress, &mut report)?;
             }
             Invocation::Regions => {
+                let progress = scenario_progress.insert(ScenarioProgress::new(initial));
                 prepare_verification(original)?;
-                let (snapshot, evidence) = regions::verify(original, initial, deadline)?;
-                verify_runtime(original, &snapshot)?;
-                report.state = Some(state(&snapshot));
-                report.visited_levels = json!(LevelId::ALL);
+                let evidence = regions::verify(original, progress, deadline)?;
+                verify_runtime(original, progress.latest())?;
                 report.server_evidence = Some(evidence);
             }
             Invocation::Serve(options) => {
+                report.state = Some(state(&initial));
                 service::run(
                     original,
                     options,
@@ -164,6 +203,10 @@ pub(super) fn run(invocation: Invocation) -> ExitCode {
     } else {
         false
     };
+    if let Some(progress) = scenario_progress {
+        report.state = Some(state(&progress.latest));
+        report.visited_levels = json!(progress.visited_levels);
+    }
     let (status, message) = match outcome {
         Ok(Ok(())) if report.close == "complete" && !failed_diagnostics => {
             report.stage = "complete";
@@ -290,30 +333,25 @@ fn run_player(
     session: &mut HeadlessSession,
     options: RunOptions,
     deadline: Instant,
+    progress: &mut ScenarioProgress,
     report: &mut Report,
 ) -> Result<(), Failure> {
     let Some(command) =
         two_level_game::player_launch(options.clone()).map_err(Failure::Rejected)?
     else {
-        report.visited_levels = json!([LevelId::Meadow]);
         return Ok(());
     };
     prepare_verification(session)?;
     session.submit(command)?;
-    let mut visited = BTreeSet::from([LevelId::Meadow]);
     let mut restored = None;
     for _ in 0..MAX_FRAMES {
-        let snapshot = verification_step(session, deadline)?;
-        if let Some(level) = snapshot.level {
-            visited.insert(level.level());
-        }
+        progress.step(session, deadline)?;
+        let snapshot = progress.latest();
         if snapshot.restores == 1 && restored.is_none() {
             restored = Some(snapshot.clone());
         }
         if snapshot.verified {
-            report.state = Some(state(&snapshot));
-            report.visited_levels = json!(visited);
-            verify_runtime(session, &snapshot)?;
+            verify_runtime(session, snapshot)?;
             let launch = session.observe(|world| {
                 two_level_game::player_launch_result(world).is_some_and(|result| result.is_ok())
             })?;
@@ -328,7 +366,7 @@ fn run_player(
             if !snapshot.initialized
                 || snapshot.phase != GamePhase::Running
                 || snapshot.restoring
-                || visited.len() != LevelId::ALL.len()
+                || progress.visited_levels.len() != LevelId::ALL.len()
                 || snapshot.level != Some(LevelKey::main(level))
                 || snapshot.score != 30
                 || snapshot.collected != 3
@@ -355,27 +393,17 @@ fn prepare_verification(session: &mut HeadlessSession) -> Result<(), Failure> {
     Ok(())
 }
 
-pub(super) fn verification_step(
-    session: &mut HeadlessSession,
-    deadline: Instant,
-) -> Result<GameSnapshot, Failure> {
-    if Instant::now() >= deadline {
-        return Err("Server exceeded its 60-second execution deadline".into());
-    }
-    if session.step()?.is_some() {
-        return Err("Server exited before the finite scenario completed".into());
-    }
-    snapshot(session)
+fn snapshot(session: &HeadlessSession) -> Result<GameSnapshot, Failure> {
+    Ok(session.observe(|world| world.resource::<GameSnapshot>().clone())?)
 }
 
-fn snapshot(session: &HeadlessSession) -> Result<GameSnapshot, Failure> {
-    let snapshot = session.observe(|world| world.resource::<GameSnapshot>().clone())?;
+fn check_gameplay(snapshot: &GameSnapshot) -> Result<(), Failure> {
     if let Some(error) = &snapshot.error {
         return Err(Failure::Rejected(format!(
             "gameplay rejected the scenario: {error}"
         )));
     }
-    Ok(snapshot)
+    Ok(())
 }
 
 pub(super) fn submit_external(

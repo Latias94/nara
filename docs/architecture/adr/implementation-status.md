@@ -2439,6 +2439,12 @@ edited twelve- and twenty-entity Scenes and verifies their member identities. Se
 one exact tick before the live clock. The region verifier uses simulated-time movement bounds
 with actual 240 Hz and 480 Hz packs.
 
+The [finite Server scenario receipt](../../plans/2026-10-31-cooked-player-delivery-plan.md#finite-server-scenario-receipts)
+retains the last observed state and distinct levels before both verification and Session close.
+The Windows source-free product reports a committed Cavern Restore that the verification script
+refused, together with its original error and complete native cleanup. Both selected actual Cook
+and relocation cases pass.
+
 The [processed Server continuation](../../plans/2026-11-13-rust-state-reconstruction-plan.md#processed-server-continuation-successor)
 adds paused capture and clean reconstruction through the original Host. The game checks the exact
 committed Scene Product, catalog, Schema and App configuration. The candidate admits the captured

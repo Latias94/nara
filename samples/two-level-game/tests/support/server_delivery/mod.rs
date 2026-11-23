@@ -21,6 +21,7 @@ use crate::{
 
 mod checkpoint_handoff;
 mod continuation;
+pub(super) mod finite_failure;
 mod graph;
 mod package;
 mod scaled;

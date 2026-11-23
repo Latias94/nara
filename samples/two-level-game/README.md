@@ -530,10 +530,13 @@ server --verify-save ABSOLUTE_CHECKPOINT_PATH
 server --verify-restore ABSOLUTE_CHECKPOINT_PATH
 ```
 
-The finite runners report `TWO_LEVEL_SERVER_RESULT`. `--verify-regions` sends external semantic
-commands through the same queue used by the game. Each movement check allows four seconds of
-simulation at the selected fixed timestep. The west-wall check observes one more exact tick
-after contact. Save and Restore use separate invocations.
+The finite runners report `TWO_LEVEL_SERVER_RESULT`. After readiness, `state` contains the last
+observed gameplay snapshot and `visited_levels` lists the distinct levels observed so far. A
+scenario refusal retains those observations and reports its reason and the Session close result.
+`--verify-regions` sends external semantic commands through the same queue used by the game.
+Each movement check allows four seconds of simulation at the selected fixed timestep. The
+west-wall check observes one more exact tick after contact. Save and Restore use separate
+invocations.
 [Dedicated Cook workflow](../../docs/guides/cooked-player-delivery.md#cook-a-dedicated-server)
 
 ### Operate The Server

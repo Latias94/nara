@@ -467,6 +467,26 @@ retains the previous scaled command drain, stall, Resume, Restore and shutdown c
 [Round 12 observations](../audits/2026-11-23-prefab-authoring-player-and-input-review.md#p2--a-running-server-can-exhaust-its-startup-deadline-waiting-to-configure-a-checkpoint)
 · [Scaled delivery tests](../../samples/two-level-game/tests/support/server_delivery/scaled.rs)
 
+### Finite Server Scenario Receipts
+
+The finite runner retains the last gameplay snapshot read after an exact Session step and the
+distinct levels it observed. Both the launch and region verifiers update that same record before
+judging the scenario. A refused verification reports the retained state and the refusal after the
+original Session closes. A Session step that fails before a snapshot can be read leaves the last
+observed snapshot in place.
+
+Windows x64 release nextest run `4311c86f-7ac8-4b12-b173-7aa442ed7c81` passes 2/2 on Rust
+1.95.0. The new test cooks a Cavern Scene with a twelfth entity, relocates the installation,
+and removes the copied source and cook cache. A ten-point checkpoint reaches Cavern and the
+verification script rejects its score. The receipt reports that committed Scene, positive tick,
+ten points, one completed Restore, both observed levels, the gameplay error and complete close.
+The checkpoint bytes match the input, and the same relocated package passes region verification.
+The other case repeats the ordinary dedicated Server delivery workflow. Correctness Clippy
+passes for the delivery test and the Server binary with a Cook-generated bootstrap. Sample
+formatting passes. This run qualifies the Windows native process and filesystem path.
+[Round 12 report](../audits/2026-11-23-prefab-authoring-player-and-input-review.md#p3-findings)
+· [Relocated refusal test](../../samples/two-level-game/tests/support/server_delivery/finite_failure.rs)
+
 ### Packaged Server Continuation
 
 Implementation: `c488d72`. Process acceptance: `196f003`.

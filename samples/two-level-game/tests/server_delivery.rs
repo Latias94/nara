@@ -23,6 +23,12 @@ fn production_cooker_delivers_the_source_free_two_level_server() {
 }
 
 #[test]
+#[ignore = "actual Two-Level Server Cook and relocated finite scenario; requires locked offline Rust 1.95.0, serial Cargo jobs=1 and the absolute shared root target"]
+fn relocated_server_reports_committed_state_when_finite_restore_is_rejected() {
+    server_delivery::finite_failure::accept(std::path::Path::new(env!("CARGO_BIN_EXE_cook")));
+}
+
+#[test]
 #[ignore = "actual Two-Level Server Cook and scaled process execution; requires locked offline Rust 1.95.0, serial Cargo jobs=1 and the absolute shared root target"]
 fn production_cooker_delivers_scaled_two_level_server_timing() {
     server_delivery::accept_scaled(std::path::Path::new(env!("CARGO_BIN_EXE_cook")));

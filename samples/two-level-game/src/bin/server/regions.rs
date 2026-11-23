@@ -19,7 +19,7 @@ use two_level_game::{
     side_room::{LOOKOUT_RELIC, RELIC},
 };
 
-use super::runtime::{Failure, MAX_FRAMES, submit_external, verification_step};
+use super::runtime::{Failure, MAX_FRAMES, ScenarioProgress, submit_external};
 
 const WEST_WALL: &str = "wall-west";
 const CONTACT_MARGIN: f32 = 0.01;
@@ -28,9 +28,9 @@ const MOVEMENT_TIMEOUT: Duration = Duration::from_secs(4);
 
 pub(super) fn verify(
     session: &mut HeadlessSession,
-    startup: GameSnapshot,
+    progress: &mut ScenarioProgress,
     deadline: Instant,
-) -> Result<(GameSnapshot, Value), Failure> {
+) -> Result<Value, Failure> {
     let (meadow, instances, movement_ticks) = session.observe(|world| {
         let timestep = world.resource::<FixedTime>().timestep();
         let movement_ticks = MOVEMENT_TIMEOUT
@@ -47,26 +47,27 @@ pub(super) fn verify(
         )
     })?;
     let meadow = meadow.ok_or("Server has no original Meadow Scene receipt")?;
+    let startup = progress.latest();
+    let startup_instance = startup.current_instance;
+    let fresh = startup.held == [false; 4]
+        && startup.side_room == SideRoomPhase::Closed
+        && startup.lookout == SideRoomPhase::Closed;
     let mut driver = Driver {
         session,
+        progress,
         deadline,
         sequence: 0,
         movement_ticks,
     };
     let queue = driver.queue()?;
-    if queue.accepted != 0
-        || queue.acknowledged != 0
-        || startup.held != [false; 4]
-        || startup.side_room != SideRoomPhase::Closed
-        || startup.lookout != SideRoomPhase::Closed
-    {
+    if queue.accepted != 0 || queue.acknowledged != 0 || !fresh {
         return Err("Server region verification requires a fresh interactive game".into());
     }
     driver.submit(ServerCommand::SideRoom)?;
     let first_opened = driver.until(MAX_FRAMES, "Side Room to open", |snapshot| {
         snapshot.side_room == SideRoomPhase::Open
     })?;
-    if first_opened.current_instance != startup.current_instance
+    if first_opened.current_instance != startup_instance
         || first_opened.lookout != SideRoomPhase::Closed
     {
         return Err("Opening Side Room changed the main Scene or the closed Lookout".into());
@@ -78,9 +79,7 @@ pub(super) fn verify(
     let opened = driver.until(MAX_FRAMES, "Lookout to open", |snapshot| {
         snapshot.lookout == SideRoomPhase::Open
     })?;
-    if opened.current_instance != startup.current_instance
-        || opened.side_room != SideRoomPhase::Open
-    {
+    if opened.current_instance != startup_instance || opened.side_room != SideRoomPhase::Open {
         return Err("Opening Lookout changed the main Scene or the open Side Room".into());
     }
     let lookout = driver.room_receipt(LOOKOUT_RELIC)?;
@@ -92,7 +91,7 @@ pub(super) fn verify(
     let closed = driver.after_command(close)?;
     if closed.side_room != SideRoomPhase::Closed
         || closed.lookout != SideRoomPhase::RelicFound
-        || closed.current_instance != startup.current_instance
+        || closed.current_instance != startup_instance
     {
         return Err("Closing Side Room did not preserve Lookout on the original Meadow".into());
     }
@@ -102,7 +101,7 @@ pub(super) fn verify(
     let reopened = driver.until(MAX_FRAMES, "Side Room to reopen", |snapshot| {
         snapshot.side_room == SideRoomPhase::Open
     })?;
-    if reopened.current_instance != startup.current_instance
+    if reopened.current_instance != startup_instance
         || reopened.lookout != SideRoomPhase::RelicFound
     {
         return Err("Reopening Side Room did not preserve Lookout on the original Meadow".into());
@@ -135,7 +134,7 @@ pub(super) fn verify(
     let release = driver.movement(0, false)?;
     let released = driver.after_command(release)?;
     if released.held[0]
-        || released.current_instance != startup.current_instance
+        || released.current_instance != startup_instance
         || released.side_room != SideRoomPhase::Open
         || released.lookout != SideRoomPhase::RelicFound
     {
@@ -149,7 +148,7 @@ pub(super) fn verify(
             && snapshot.level == Some(LevelKey::main(LevelId::Cavern))
             && snapshot.travel_count == 1
     })?;
-    if travelled.current_instance == startup.current_instance
+    if travelled.current_instance == startup_instance
         || travelled.score != 0
         || travelled.held != [false; 4]
         || travelled.side_room != SideRoomPhase::Closed
@@ -167,7 +166,7 @@ pub(super) fn verify(
     {
         return Err("Server did not acknowledge the exact external semantic command stream".into());
     }
-    let evidence = json!({
+    Ok(json!({
         "source": SERVER_COMMAND_SOURCE,
         "commands_consumed": queue.acknowledged,
         "rooms": {
@@ -181,12 +180,12 @@ pub(super) fn verify(
             "held_tick": blocked.tick,
         },
         "services_absent": true,
-    });
-    Ok((travelled, evidence))
+    }))
 }
 
 struct Driver<'a> {
     session: &'a mut HeadlessSession,
+    progress: &'a mut ScenarioProgress,
     deadline: Instant,
     sequence: u64,
     movement_ticks: usize,
@@ -203,9 +202,9 @@ impl Driver<'_> {
             .session
             .observe(|world| world.resource::<FixedTime>().tick())?;
         for _ in 0..MAX_FRAMES {
-            let snapshot = verification_step(self.session, self.deadline)?;
-            if predicate(&snapshot) {
-                return Ok(snapshot);
+            let snapshot = self.progress.step(self.session, self.deadline)?;
+            if predicate(snapshot) {
+                return Ok(snapshot.clone());
             }
             if snapshot.tick.saturating_sub(start) >= ticks as u64 {
                 break;
