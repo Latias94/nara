@@ -341,6 +341,7 @@ pub(super) fn action_map_string_bytes(
                         KeyCode::ArrowLeft => "ArrowLeft".len(),
                         KeyCode::ArrowRight => "ArrowRight".len(),
                         KeyCode::Character(character) => "Character".len() + character.len_utf8(),
+                        KeyCode::IntlBackslash => "IntlBackslash".len(),
                     }
             }
             InputBinding::Mouse(button) => {
@@ -1185,6 +1186,7 @@ mod tests {
             InputBinding::Key(KeyCode::ArrowLeft),
             InputBinding::Key(KeyCode::ArrowRight),
             InputBinding::Key(KeyCode::Character('é')),
+            InputBinding::Key(KeyCode::IntlBackslash),
             InputBinding::Mouse(MouseButton::Left),
             InputBinding::Mouse(MouseButton::Right),
             InputBinding::Mouse(MouseButton::Middle),

@@ -131,3 +131,36 @@ first Startup and retains the existing refusal and retirement behavior for an ex
 Windows Winit nextest `43faa185-b9c1-4db5-a89e-aaee608fcc6b` passes both posted-key trajectories,
 including focus recovery and balanced Tab, Enter and punctuation edges. Input correctness Clippy
 and workspace formatting also pass.
+
+### Distinct ISO Physical Key
+
+The vendored macOS Winit adapter normalizes the two Cocoa event codes according to the Carbon
+keyboard type. The ISO type swaps the raw `0x0a` and `0x32` before the physical lookup. The
+normalized table and its inverse use `0x0a` for `IntlBackslash` and `0x32` for `Backquote`.
+Logical key and text translation still use the original Cocoa event code. The Input owner
+gives the extra ISO position its own serialized key. Desktop dispatch and
+configuration Check accept the same key. The Windows continuation inventory retains its narrower
+selection. A Mac project that intentionally bound the extra key through its former alias can
+rebind that position to `IntlBackslash`.
+
+Godot's macOS mapping keeps the positions in separate rows. Bevy carries Winit's physical code
+through ingress independently of logical text. SDL's Cocoa event adapter swaps the code pair
+for the ISO keyboard type, which explains why the fixed table alone was insufficient.
+[Godot physical mapping](https://github.com/godotengine/godot/blob/b070e63b161aa816afac71dcfc9d60859d38f220/platform/macos/key_mapping_macos.mm#L83-L123)
+· [Bevy ingress](https://github.com/bevyengine/bevy/blob/779770720e6ad916c1de38cf66a67d0e079ed1e3/crates/bevy_winit/src/converters.rs#L20-L30)
+· [SDL Cocoa event adapter](https://github.com/libsdl-org/SDL/blob/release-3.2.10/src/video/cocoa/SDL_cocoakeyboard.m)
+
+Windows x64 release nextest `f981b062-2ba6-4100-a85d-41e52730d808` passes 270/270 Input and
+Winit tests, including exact wire accounting and an overlapping hold that keeps Backquote active
+after the ISO key releases. Run `d525eeb7-874b-4d79-a4a5-105aaf316aa2` passes both Win32 message
+pump trajectories for balanced key edges and ordinary refocus. The initial test command named an
+absent `action_map_file` target. The corrected run uses `action_map_format`.
+
+Independent review raised the Cocoa ISO normalization issue after the fixed-table change. The
+revised vendored Winit library and test targets pass locked `aarch64-apple-darwin` compilation on
+Rust 1.95.0. The added test covers both code pairs, their inverse and an unaffected key. The full
+`nara_winit` cross-check reaches the BLAKE3 C build. After selecting Clang for this target, the
+build lacks the macOS SDK's `assert.h`. Native macOS execution, hold/release pairing on real ISO
+hardware, and event attribution with mixed ANSI and ISO devices remain open. The Windows test
+runs the same normalized action pipeline with Windows scancodes.
+[Vendor patch](../../vendor/winit/NARA-PATCH.md#macos-iso-key-identity)

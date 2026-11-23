@@ -33,6 +33,9 @@ the top-row digits, Escape, Space, Enter, Tab, the four arrows, and physical pun
 represented by the unshifted US key names. For example, use `Character(';')` for Semicolon or
 `Character(']')` for BracketRight. These bindings name physical positions even on a different
 keyboard layout. A shifted punctuation character or Unicode text belongs to logical text input.
+Bind the extra ISO position with `KeyCode::IntlBackslash`, encoded as `"IntlBackslash"` in an
+Action Map. An existing grave accent binding uses the Backquote position. A macOS project
+that bound the extra ISO position through the previous alias can rebind it explicitly.
 
 Unsupported keys produce `project.content.input-unsupported-keyboard-binding` at the map's
 project-relative path. The direct Check report also includes the zero-based binding index.

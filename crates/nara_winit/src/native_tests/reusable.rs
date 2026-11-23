@@ -12,7 +12,9 @@ use windows_sys::{
     Win32::{
         Foundation::HWND,
         UI::{
-            Input::KeyboardAndMouse::{VK_OEM_1, VK_OEM_6, VK_RETURN, VK_TAB, VK_W},
+            Input::KeyboardAndMouse::{
+                VK_OEM_1, VK_OEM_3, VK_OEM_6, VK_OEM_102, VK_RETURN, VK_TAB, VK_W,
+            },
             WindowsAndMessaging::{
                 CreateWindowExW, DestroyWindow, HWND_MESSAGE, IsWindowVisible, MSG, PM_NOREMOVE,
                 PeekMessageW, PostMessageW, WM_KEYDOWN, WM_KEYFIRST, WM_KEYLAST, WM_KEYUP,
@@ -697,6 +699,13 @@ fn native_posted_tab_enter_and_punctuation_publish_balanced_key_edges() {
             KeyCode::Character(']'),
             "test.posted-right-bracket",
         ),
+        (
+            VK_OEM_3,
+            0x29,
+            KeyCode::Character('`'),
+            "test.posted-backquote",
+        ),
+        (VK_OEM_102, 0x56, KeyCode::IntlBackslash, "test.posted-iso"),
     ]
     .map(|(virtual_key, scan_code, key, name)| {
         let action = ActionId::new(name).unwrap();

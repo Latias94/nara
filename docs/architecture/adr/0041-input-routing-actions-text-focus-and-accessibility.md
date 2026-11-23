@@ -349,6 +349,8 @@ device. A rejected binding has a source location or Product and its original bin
 Generic ActionMap compilation, CPU acquisition, and plans without `DesktopWinit` keep their
 backend-independent key vocabulary. Runtime keyboard ingress uses physical positions, including
 unshifted punctuation on the standard US layout. Text and IME input keep logical text semantics.
+The extra ISO key has its own `IntlBackslash` identity. On macOS the native adapter maps it
+separately from Backquote so each physical press retains its own release and action state.
 
 A manifest-selected default map is installed for PRIMARY once through `RuntimeCandidateScope`,
 before Scene materialization and Startup. The Input installation records the revision of the

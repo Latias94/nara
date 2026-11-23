@@ -1,4 +1,4 @@
-# Nara Windows DPI Patch
+# Nara Platform Patches
 
 This directory contains the published `winit` 0.30.13 crate from crates.io. Its upstream Git
 revision is `e9809ef54b18499bb4f2cac945719ecc2a61061b`, also recorded in
@@ -8,7 +8,7 @@ restored from that same upstream revision so maintained files retain the origina
 its unstable formatting options use the installed nightly rustfmt, separately from the qualified
 Rust 1.95.0 production compiler.
 
-## Selected Repair
+## Windows DPI Repair
 
 The original Windows 11 mixed-DPI title-bar trajectory reproducibly leaves the window on the
 old monitor while the held cursor reaches the other monitor. Native scale changes oscillate
@@ -34,9 +34,8 @@ The normal stable `cargo fmt --all` also formats local path dependencies. Its si
 normalizations are retained in `linux/x11/{dnd.rs,event_processor.rs,mod.rs,util/input.rs}`,
 `macos/window_delegate.rs`, and `windows/window_state.rs`, all under `src/platform_impl`.
 Each was checked byte-for-byte against the same formatter's output from pristine published
-source. No behavioral edit is included in those files; every other imported source file remains
-byte-identical to the package. The four behaviorally maintained files also pass the restored
-upstream nightly formatting configuration.
+source. The four Windows repair files also pass the restored upstream nightly formatting
+configuration. The macOS keyboard table below is a separate behavioral change.
 
 The Windows 11 policy follows upstream's merged
 [`488c036a05d418e13bbdcdc349e2db2f6b7f58e2`](https://github.com/rust-windowing/winit/commit/488c036a05d418e13bbdcdc349e2db2f6b7f58e2).
@@ -46,6 +45,17 @@ Preserving an explicit size override is a local correction for the separately re
 [`InnerSizeWriter` issue](https://github.com/rust-windowing/winit/issues/4721), rather than a
 claim that either upstream change already resolves it. Nara does not adopt the 0.31 platform
 split to obtain this repair.
+
+## macOS ISO Key Identity
+
+The macOS event adapter asks Carbon for the keyboard type when Cocoa reports `0x0a` or `0x32`.
+It swaps those two event codes for the ISO keyboard type before choosing the Winit physical key.
+The normalized table and its inverse use `0x0a` for `IntlBackslash` and `0x32` for `Backquote`.
+Logical key and text translation continue to use the original Cocoa event. The Cocoa adapter in
+SDL 3.2.10 uses the same two-code normalization. Nara's real ISO hardware and mixed ANSI/ISO
+device delivery remain open for native verification.
+[SDL Cocoa event adapter](https://github.com/libsdl-org/SDL/blob/release-3.2.10/src/video/cocoa/SDL_cocoakeyboard.m) ·
+[Round twelve report](../../docs/audits/2026-11-23-prefab-authoring-player-and-input-review.md)
 
 ## Integration And Retirement
 
@@ -66,5 +76,6 @@ original native retirement. Actual results and remaining scope belong in the Nar
 qualification guide and UI integration handoff.
 
 Retire this directory and the corresponding manifest patches when a compatible upstream source
-passes those affected consumers, including explicit size overrides. Foreign native execution,
-maximized/snap/keyboard moves and GPU presentation retain their separate qualification scope.
+passes the affected consumers, including explicit size overrides and both ISO key identities.
+Foreign native execution, maximized/snap/keyboard moves and GPU presentation retain their
+separate qualification scope.

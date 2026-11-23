@@ -95,13 +95,13 @@ fn converts_common_keyboard_codes_and_physical_keys() {
         (WinitKeyCode::ArrowLeft, KeyCode::ArrowLeft),
         (WinitKeyCode::KeyA, KeyCode::Character('a')),
         (WinitKeyCode::Digit1, KeyCode::Character('1')),
+        (WinitKeyCode::IntlBackslash, KeyCode::IntlBackslash),
     ] {
         assert_eq!(convert_key_code(code), Some(key));
         assert_eq!(convert_physical_key(PhysicalKey::Code(code)), Some(key));
     }
     for code in [
         WinitKeyCode::F1,
-        WinitKeyCode::IntlBackslash,
         WinitKeyCode::IntlRo,
         WinitKeyCode::IntlYen,
         WinitKeyCode::NumpadSubtract,
@@ -141,8 +141,84 @@ fn punctuation_dispatch_and_action_map_validation_agree() {
             .bind(ActionBinding::key(action.clone(), key))
             .unwrap();
     }
+    bindings
+        .bind(ActionBinding::key(action, KeyCode::IntlBackslash))
+        .unwrap();
     let definition = bindings.compile().unwrap();
     assert_eq!(validate_action_map_keyboard(&definition), Ok(()));
+}
+
+#[test]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn iso_extra_key_release_does_not_release_a_held_backquote() {
+    use nara_input::SemanticActions;
+    use winit::platform::scancode::PhysicalKeyExtScancode;
+
+    #[cfg(target_os = "macos")]
+    let scans = [0x32, 0x0a];
+    #[cfg(target_os = "windows")]
+    let scans = [0x29, 0x56];
+    let [backquote, iso] = scans.map(PhysicalKey::from_scancode);
+    assert_eq!(backquote, PhysicalKey::Code(WinitKeyCode::Backquote));
+    assert_eq!(iso, PhysicalKey::Code(WinitKeyCode::IntlBackslash));
+    assert_eq!(
+        [backquote, iso].map(PhysicalKey::to_scancode),
+        scans.map(Some)
+    );
+
+    let context = ActionContext::gameplay();
+    let actions = ["test.backquote", "test.iso"].map(|name| ActionId::new(name).unwrap());
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder.declare_context(context.clone(), true).unwrap();
+    for (action, key) in actions
+        .iter()
+        .zip([KeyCode::Character('`'), KeyCode::IntlBackslash])
+    {
+        builder
+            .bind(ActionBinding::key(action.clone(), key))
+            .unwrap();
+    }
+    let definition = builder.compile().unwrap();
+    assert_eq!(validate_action_map_keyboard(&definition), Ok(()));
+    let mut app = window_app();
+    app.insert_resource(ActionMaps::new(
+        ActionMap::new(
+            definition.into_bindings(),
+            nara_core::ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+        )
+        .unwrap(),
+    ))
+    .unwrap();
+    app.add_plugin(InputPlugin).unwrap();
+    let mut state = platform_app(start_runtime(app));
+    state.connect_window_input(WindowId::PRIMARY).unwrap();
+    for (physical_key, phase, expected) in [
+        (backquote, ElementState::Pressed, [true, false]),
+        (iso, ElementState::Pressed, [true, true]),
+        (iso, ElementState::Released, [true, false]),
+        (backquote, ElementState::Released, [false, false]),
+    ] {
+        assert!(
+            state
+                .apply_physical_keyboard_driver_event(
+                    RawKeyEvent {
+                        physical_key,
+                        state: phase
+                    },
+                    false,
+                )
+                .unwrap()
+        );
+        state.runtime.drive(Duration::ZERO).unwrap();
+        let semantic = state.runtime.world().resource::<SemanticActions>();
+        for (action, expected) in actions.iter().zip(expected) {
+            assert_eq!(
+                semantic.pressed(InputSeatId::PRIMARY, action, &context),
+                expected
+            );
+        }
+    }
+    finish_unit_app(state);
 }
 
 #[test]

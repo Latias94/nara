@@ -198,6 +198,8 @@ extern "C" {
 
     pub fn LMGetKbdType() -> u8;
 
+    pub fn KBGetLayoutType(keyboard_type: i16) -> u32;
+
     #[allow(non_snake_case)]
     pub fn UCKeyTranslate(
         keyLayoutPtr: *const UCKeyboardLayout,

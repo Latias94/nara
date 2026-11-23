@@ -2546,6 +2546,7 @@ physical_key_map! {
     Digit8 => Character('8'),
     Digit9 => Character('9'),
     Backquote => Character('`'),
+    IntlBackslash => IntlBackslash,
     Minus => Character('-'),
     Equal => Character('='),
     BracketLeft => Character('['),

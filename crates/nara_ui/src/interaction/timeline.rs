@@ -257,7 +257,7 @@ fn project_key(seat: UiSeatId, key: KeyCode, phase: ButtonTransitionPhase) -> Op
             seat,
             direction: UiNavigation::Next,
         }),
-        KeyCode::Escape | KeyCode::Character(_) => None,
+        KeyCode::Escape | KeyCode::Character(_) | KeyCode::IntlBackslash => None,
     }
 }
 

@@ -89,6 +89,15 @@ fn get_logical_key_char(ns_event: &NSEvent, modifierless_chars: &str) -> Key {
     Key::Character(SmolStr::new(string))
 }
 
+fn event_scancode_to_physicalkey(scancode: u16, iso: bool) -> PhysicalKey {
+    let scancode = match (scancode, iso) {
+        (0x0a, true) => 0x32,
+        (0x32, true) => 0x0a,
+        _ => scancode,
+    };
+    scancode_to_physicalkey(u32::from(scancode))
+}
+
 /// Create `KeyEvent` for the given `NSEvent`.
 ///
 /// This function shouldn't be called when the IME input is in process.
@@ -97,7 +106,11 @@ pub(crate) fn create_key_event(ns_event: &NSEvent, is_press: bool, is_repeat: bo
     let state = if is_press { Pressed } else { Released };
 
     let scancode = unsafe { ns_event.keyCode() };
-    let mut physical_key = scancode_to_physicalkey(scancode as u32);
+    let iso = matches!(scancode, 0x0a | 0x32)
+        && run_on_main(|_mtm| unsafe {
+            ffi::KBGetLayoutType(i16::from(ffi::LMGetKbdType())) == u32::from_be_bytes(*b"ISO ")
+        });
+    let mut physical_key = event_scancode_to_physicalkey(scancode, iso);
 
     // NOTE: The logical key should heed both SHIFT and ALT if possible.
     // For instance:
@@ -367,6 +380,7 @@ pub(crate) fn physicalkey_to_scancode(physical_key: PhysicalKey) -> Option<u32> 
         KeyCode::KeyX => Some(0x07),
         KeyCode::KeyC => Some(0x08),
         KeyCode::KeyV => Some(0x09),
+        KeyCode::IntlBackslash => Some(0x0a),
         KeyCode::KeyB => Some(0x0b),
         KeyCode::KeyQ => Some(0x0c),
         KeyCode::KeyW => Some(0x0d),
@@ -484,7 +498,7 @@ pub(crate) fn scancode_to_physicalkey(scancode: u32) -> PhysicalKey {
         0x07 => KeyCode::KeyX,
         0x08 => KeyCode::KeyC,
         0x09 => KeyCode::KeyV,
-        // 0x0a => World 1,
+        0x0a => KeyCode::IntlBackslash,
         0x0b => KeyCode::KeyB,
         0x0c => KeyCode::KeyQ,
         0x0d => KeyCode::KeyW,
@@ -607,10 +621,26 @@ pub(crate) fn scancode_to_physicalkey(scancode: u32) -> PhysicalKey {
         0x7d => KeyCode::ArrowDown,
         0x7e => KeyCode::ArrowUp,
         // 0x7f =>  unknown,
-
-        // 0xA is the caret (^) an macOS's German QERTZ layout. This key is at the same location as
-        // backquote (`) on Windows' US layout.
-        0xa => KeyCode::Backquote,
         _ => return PhysicalKey::Unidentified(NativeKeyCode::MacOS(scancode as u16)),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cocoa_iso_event_codes_normalize_to_distinct_physical_positions() {
+        for (scancode, iso, key, physical_scancode) in [
+            (0x32, false, KeyCode::Backquote, 0x32),
+            (0x0a, false, KeyCode::IntlBackslash, 0x0a),
+            (0x0a, true, KeyCode::Backquote, 0x32),
+            (0x32, true, KeyCode::IntlBackslash, 0x0a),
+            (0x00, true, KeyCode::KeyA, 0x00),
+        ] {
+            let physical = event_scancode_to_physicalkey(scancode, iso);
+            assert_eq!(physical, PhysicalKey::Code(key));
+            assert_eq!(physicalkey_to_scancode(physical), Some(physical_scancode));
+        }
+    }
 }

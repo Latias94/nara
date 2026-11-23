@@ -75,6 +75,8 @@ pub enum KeyCode {
     ArrowLeft,
     ArrowRight,
     Character(char),
+    /// The additional physical key on an ISO keyboard.
+    IntlBackslash,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
