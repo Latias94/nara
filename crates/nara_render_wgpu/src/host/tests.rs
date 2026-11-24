@@ -201,11 +201,7 @@ fn viewport_allocation_failure_preserves_publication_and_smaller_retry() {
     );
     let output = allocated_test_output(&execution, &namespace, receipt);
     let retained_bytes = execution.retained_resource_bytes();
-    let larger = nara_render::__private::editor_viewport_image_target(
-        target.image(),
-        Extent2d::new(128, 128).unwrap(),
-    )
-    .unwrap();
+    let larger = RenderImagePacket::new(target.image(), Extent2d::new(128, 128).unwrap()).unwrap();
     // Check both texture allocation and view allocation failures. Neither candidate may
     // consume a generation, replace the live target or create a new registered view.
     for failure_stage in [1, 2] {
@@ -248,11 +244,7 @@ fn viewport_allocation_failure_preserves_publication_and_smaller_retry() {
     assert!(!execution.views.contains_key(&unregistered));
     assert_eq!(execution.retained_resource_bytes(), retained_bytes);
 
-    let smaller = nara_render::__private::editor_viewport_image_target(
-        target.image(),
-        Extent2d::new(32, 32).unwrap(),
-    )
-    .unwrap();
+    let smaller = RenderImagePacket::new(target.image(), Extent2d::new(32, 32).unwrap()).unwrap();
     let retry = execution
         .reserve_image_target(&producer, source, smaller)
         .unwrap();
@@ -547,7 +539,7 @@ fn resizing_one_view_preserves_both_producer_admission_and_other_view_identity()
         .unwrap()
         .admission
         .last_frame_index = Some(1);
-    let resized_target = nara_render::__private::editor_viewport_image_target(
+    let resized_target = RenderImagePacket::new(
         image_target(&scene).image(),
         Extent2d::new(128, 96).unwrap(),
     )
@@ -650,7 +642,8 @@ fn multiple_composites_certify_only_exact_sampled_images_in_one_window() {
     );
     let window = WgpuWindowPresentedReceipt::new(WindowId::PRIMARY, 3, 21, 4, 19);
     let mut generation = 0;
-    let composites = join_composite_receipts(
+    let mut composites = Vec::with_capacity(4);
+    join_composite_receipts_into(
         &mut generation,
         &[
             first_display.clone(),
@@ -685,6 +678,7 @@ fn multiple_composites_certify_only_exact_sampled_images_in_one_window() {
             },
         ],
         window,
+        &mut composites,
     )
     .unwrap();
 
@@ -1500,10 +1494,18 @@ fn composite_generation_exhaustion_cannot_publish_or_wrap() {
         join_composite_receipt(&mut generation, Some(receipt), Some(sample), window),
         Err(WgpuRenderHostError::PresentationGenerationExhausted)
     ));
+    let mut composites = Vec::with_capacity(1);
     assert!(matches!(
-        join_composite_receipts(&mut generation, &[display], &[sample], window),
+        join_composite_receipts_into(
+            &mut generation,
+            &[display],
+            &[sample],
+            window,
+            &mut composites,
+        ),
         Err(WgpuRenderHostError::PresentationGenerationExhausted)
     ));
+    assert!(composites.is_empty());
     assert_eq!(generation, u64::MAX);
 }
 
@@ -2323,7 +2325,7 @@ fn test_namespace(execution: &mut WgpuRenderHost) -> Option<WgpuDeviceNamespace>
             Some(namespace)
         }
         Err(error @ WgpuRenderError::AdapterUnavailable { .. })
-            if std::env::var("DEAR_IMGUI_REQUIRE_WGPU_ADAPTER").as_deref() != Ok("1") =>
+            if std::env::var("NARA_WGPU_REQUIRE_ADAPTER").as_deref() != Ok("1") =>
         {
             eprintln!("skipping image fixture without a WGPU adapter: {error}");
             None
@@ -2517,11 +2519,94 @@ fn publish_editor_ui_outcomes(
 
 #[cfg(feature = "stock-ui")]
 fn test_ui_packet() -> std::sync::Arc<UiPaintPacket> {
+    test_solid_ui_packet(RenderTarget::Window(WindowId::PRIMARY))
+}
+
+#[cfg(feature = "stock-ui")]
+fn test_solid_ui_packet(target: RenderTarget) -> Arc<UiPaintPacket> {
     compile_test_ui_packet(
         nara_ui_kernel::UiVisual::solid(nara_ui_kernel::UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
-        RenderTarget::Window(WindowId::PRIMARY),
+        target,
         &nara_ui_render::UiPreparedImages::default(),
     )
+}
+
+#[cfg(feature = "stock-ui")]
+#[test]
+#[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
+fn image_targets_share_submitted_instance_budget_and_recover_next_frame() {
+    let mut host = WgpuRenderHost::offscreen();
+    let instance_bytes = std::mem::size_of::<crate::quad::WgpuQuadInstance>() as u64;
+    host.begin_frame(1).unwrap();
+    host.backend
+        .stock_quad_resources()
+        .set_instance_budget_limit(instance_bytes);
+    let targets = [(); 2].map(|()| {
+        let producer = host.create_producer().unwrap();
+        let packet = test_image_frame();
+        let target = image_target(&packet);
+        let source = packet.source_generation();
+        let view = packet.views()[0].id;
+        let reservation = host
+            .reserve_image_target(&producer, source, target)
+            .unwrap();
+        host.activate_image_target(&producer, reservation).unwrap();
+        let capture = crate::WgpuStockCapture::new().with_ui(
+            vec![test_solid_ui_packet(RenderTarget::Image(target.image()))],
+            None,
+            None,
+        );
+        let next = image_frame_for(source, view, 2, target, Color::BLACK);
+        (
+            producer,
+            test_stock_capture(packet, capture.clone()),
+            test_stock_capture(next, capture),
+        )
+    });
+    let [
+        (first, first_input, first_next),
+        (second, second_input, second_next),
+    ] = targets;
+
+    let output = host.submit(&first, &first_input).unwrap();
+    assert!(matches!(
+        host.submit(&second, &second_input),
+        Err(WgpuRenderHostError::Backend(
+            WgpuRenderError::ContentRejected { .. }
+        ))
+    ));
+    assert_eq!(host.frame_transaction_stats().queue_submissions(), 1);
+    assert_eq!(
+        host.views[&first.id()].admission.last_frame_index,
+        Some(output.receipt().render_transaction_frame_index())
+    );
+    assert_eq!(host.views[&second.id()].admission.last_frame_index, None);
+    host.wait_for_idle().unwrap();
+    let stats = host.frame_transaction_stats();
+    assert_eq!(stats.candidate_instance_buffer_demand_bytes(), 0);
+    assert_eq!(
+        stats.submitted_instance_buffer_demand_bytes(),
+        instance_bytes
+    );
+
+    host.begin_frame(2).unwrap();
+    host.backend
+        .stock_quad_resources()
+        .set_instance_budget_limit(2 * instance_bytes);
+    assert_eq!(
+        host.frame_transaction_stats()
+            .submitted_instance_buffer_demand_bytes(),
+        0
+    );
+    host.submit(&first, &first_next).unwrap();
+    host.submit(&second, &second_next).unwrap();
+    let stats = host.frame_transaction_stats();
+    assert_eq!(stats.queue_submissions(), 2);
+    assert_eq!(stats.candidate_instance_buffer_demand_bytes(), 0);
+    assert_eq!(
+        stats.submitted_instance_buffer_demand_bytes(),
+        2 * instance_bytes
+    );
 }
 
 #[cfg(feature = "stock-ui")]

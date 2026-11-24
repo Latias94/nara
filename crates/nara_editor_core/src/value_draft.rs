@@ -1,0 +1,591 @@
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
+
+use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
+use nara_identity::{EntityReference, SceneEntityId};
+use nara_reflect::{
+    ComponentValue, ComponentValueKind, ComponentValueShape, decode_asset_reference_value,
+    encode_asset_reference_value,
+};
+
+#[derive(Default, Clone, Debug, PartialEq)]
+pub struct RootDraft {
+    pub node: Option<ValueDraft>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ValueDraft {
+    Null,
+    Bool(Option<bool>),
+    Text {
+        text: String,
+        entered: bool,
+        original_reference: Option<Arc<OriginalEntityReference>>,
+    },
+    Record {
+        members: Vec<(String, ValueDraft)>,
+        confirmed: bool,
+    },
+    Optional {
+        value: Option<Box<ChildDraft>>,
+        pending: Option<Box<ChildDraft>>,
+        chosen: bool,
+    },
+    List {
+        items: Vec<ChildDraft>,
+        pending: Option<Box<ChildDraft>>,
+        confirmed: bool,
+    },
+    Map {
+        entries: BTreeMap<String, ChildDraft>,
+        pending: Option<(String, bool, Box<ChildDraft>)>,
+        confirmed: bool,
+    },
+}
+
+#[derive(Debug, PartialEq)]
+pub struct OriginalEntityReference {
+    text: String,
+    reference: EntityReference,
+}
+
+impl OriginalEntityReference {
+    fn matches_text(&self, text: &str) -> bool {
+        self.text == text
+            || self
+                .reference
+                .direct_source_entity()
+                .is_some_and(|entity| source_local_id_text(text) == entity.as_str())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChildDraft {
+    pub id: u64,
+    pub node: ValueDraft,
+}
+
+impl ChildDraft {
+    pub fn new(node: ValueDraft) -> Self {
+        static NEXT_ROW: AtomicU64 = AtomicU64::new(1);
+        Self {
+            id: NEXT_ROW.fetch_add(1, Ordering::Relaxed),
+            node,
+        }
+    }
+}
+
+impl ValueDraft {
+    /// A lossless recovery view includes invalid text and unfinished child drafts.
+    pub fn copy_text(&self) -> String {
+        match self {
+            Self::Text { text, .. } => text.clone(),
+            Self::Null => "null".to_owned(),
+            Self::Bool(value) => {
+                value.map_or_else(|| "<unconfirmed>".to_owned(), |value| value.to_string())
+            }
+            Self::Record { members, .. } => members
+                .iter()
+                .map(|(name, value)| format!("{name}: {}", value.copy_text()))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Self::Optional { value, pending, .. } => {
+                let mut text = value
+                    .as_ref()
+                    .map_or_else(|| "null".to_owned(), |value| value.node.copy_text());
+                if let Some(pending) = pending {
+                    text.push_str(&format!("\nUnconfirmed Some: {}", pending.node.copy_text()));
+                }
+                text
+            }
+            Self::List { items, pending, .. } => {
+                let mut text = items
+                    .iter()
+                    .map(|child| child.node.copy_text())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if let Some(pending) = pending {
+                    text.push_str(&format!("\nUnconfirmed item: {}", pending.node.copy_text()));
+                }
+                text
+            }
+            Self::Map {
+                entries, pending, ..
+            } => {
+                let mut text = entries
+                    .iter()
+                    .map(|(key, value)| format!("{key}: {}", value.node.copy_text()))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if let Some((key, _, pending)) = pending {
+                    text.push_str(&format!(
+                        "\nUnconfirmed entry {key}: {}",
+                        pending.node.copy_text()
+                    ));
+                }
+                text
+            }
+        }
+    }
+
+    pub fn new(shape: &ComponentValueShape) -> Self {
+        Self::from_value(shape, None)
+    }
+
+    pub fn from_value(shape: &ComponentValueShape, source: Option<&ComponentValue>) -> Self {
+        match shape {
+            ComponentValueShape::Scalar {
+                kind: ComponentValueKind::Null,
+                ..
+            } => Self::Null,
+            ComponentValueShape::Scalar {
+                kind: ComponentValueKind::Bool,
+                ..
+            } => Self::Bool(source.and_then(ComponentValue::as_bool)),
+            ComponentValueShape::EntityRef => {
+                let text = source.map_or_else(String::new, |value| scalar_text(shape, value));
+                let original_reference =
+                    source
+                        .and_then(ComponentValue::as_entity_reference)
+                        .map(|reference| {
+                            Arc::new(OriginalEntityReference {
+                                text: text.clone(),
+                                reference: reference.clone(),
+                            })
+                        });
+                Self::Text {
+                    text,
+                    entered: source.is_some(),
+                    original_reference,
+                }
+            }
+            ComponentValueShape::Scalar { .. } | ComponentValueShape::AssetRef { .. } => {
+                Self::Text {
+                    text: source.map_or_else(String::new, |value| scalar_text(shape, value)),
+                    entered: source.is_some(),
+                    original_reference: None,
+                }
+            }
+            ComponentValueShape::Record { members } => Self::Record {
+                members: members
+                    .iter()
+                    .map(|member| {
+                        (
+                            member.name.clone(),
+                            Self::from_value(
+                                &member.shape,
+                                source.and_then(|value| value.get(&member.name)),
+                            ),
+                        )
+                    })
+                    .collect(),
+                confirmed: source.is_some() || !members.is_empty(),
+            },
+            ComponentValueShape::Optional { value: shape } => Self::Optional {
+                value: source
+                    .filter(|value| **value != ComponentValue::Null)
+                    .map(|value| Box::new(ChildDraft::new(Self::from_value(shape, Some(value))))),
+                pending: None,
+                chosen: source.is_some(),
+            },
+            ComponentValueShape::List { item } => Self::List {
+                items: match source {
+                    Some(ComponentValue::List(values)) => values
+                        .iter()
+                        .map(|value| ChildDraft::new(Self::from_value(item, Some(value))))
+                        .collect(),
+                    _ => Vec::new(),
+                },
+                pending: None,
+                confirmed: source.is_some(),
+            },
+            ComponentValueShape::Map { value: shape } => Self::Map {
+                entries: match source {
+                    Some(ComponentValue::Map(values)) => values
+                        .iter()
+                        .map(|(key, value)| {
+                            (
+                                key.clone(),
+                                ChildDraft::new(Self::from_value(shape, Some(value))),
+                            )
+                        })
+                        .collect(),
+                    _ => BTreeMap::new(),
+                },
+                pending: None,
+                confirmed: source.is_some(),
+            },
+            ComponentValueShape::Opaque { .. } | ComponentValueShape::KeyedList { .. } => {
+                unreachable!("unsupported shapes never open a draft")
+            }
+        }
+    }
+
+    pub fn value(&self, shape: &ComponentValueShape) -> Result<ComponentValue, String> {
+        let value = match (self, shape) {
+            (Self::Null, _) => ComponentValue::Null,
+            (Self::Bool(value), _) => ComponentValue::Bool(value.ok_or("Choose true or false")?),
+            (
+                Self::Text {
+                    text,
+                    original_reference: Some(original),
+                    ..
+                },
+                ComponentValueShape::EntityRef,
+            ) if original.matches_text(text) => {
+                ComponentValue::EntityReference(original.reference.clone())
+            }
+            (Self::Text { text, entered, .. }, _) => {
+                if !entered {
+                    return Err("Enter a value explicitly".to_owned());
+                }
+                parse_scalar(shape, text)?
+            }
+            (
+                Self::Record {
+                    members: values,
+                    confirmed,
+                },
+                ComponentValueShape::Record { members },
+            ) => {
+                if !confirmed {
+                    return Err("Confirm the empty record explicitly".to_owned());
+                }
+                ComponentValue::Map(
+                    values
+                        .iter()
+                        .zip(members)
+                        .map(|((name, draft), member)| {
+                            draft
+                                .value(&member.shape)
+                                .map(|value| (name.clone(), value))
+                                .map_err(|error| format!("{name}: {error}"))
+                        })
+                        .collect::<Result<_, _>>()?,
+                )
+            }
+            (
+                Self::Optional {
+                    value,
+                    pending,
+                    chosen,
+                },
+                ComponentValueShape::Optional { value: shape },
+            ) => {
+                if pending.is_some() {
+                    return Err("Confirm or cancel the Some draft".to_owned());
+                }
+                if !chosen {
+                    return Err("Choose Null or Some explicitly".to_owned());
+                }
+                value
+                    .as_ref()
+                    .map_or(Ok(ComponentValue::Null), |value| value.node.value(shape))?
+            }
+            (
+                Self::List {
+                    items,
+                    pending,
+                    confirmed,
+                },
+                ComponentValueShape::List { item },
+            ) => {
+                if pending.is_some() {
+                    return Err("Confirm or cancel the new list item".to_owned());
+                }
+                if !confirmed {
+                    return Err("Confirm the empty list or add an item".to_owned());
+                }
+                ComponentValue::List(
+                    items
+                        .iter()
+                        .map(|draft| draft.node.value(item))
+                        .collect::<Result<_, _>>()?,
+                )
+            }
+            (
+                Self::Map {
+                    entries,
+                    pending,
+                    confirmed,
+                },
+                ComponentValueShape::Map { value: shape },
+            ) => {
+                if pending.is_some() {
+                    return Err("Confirm or cancel the new map entry".to_owned());
+                }
+                if !confirmed {
+                    return Err("Confirm the empty map or insert an entry".to_owned());
+                }
+                ComponentValue::Map(
+                    entries
+                        .iter()
+                        .map(|(key, draft)| {
+                            draft.node.value(shape).map(|value| (key.clone(), value))
+                        })
+                        .collect::<Result<_, _>>()?,
+                )
+            }
+            _ => return Err("The field shape changed; reopen the draft".to_owned()),
+        };
+        shape
+            .validate_value(&value)
+            .map_err(|error| error.to_string())?;
+        Ok(value)
+    }
+}
+
+pub fn supported(shape: &ComponentValueShape) -> bool {
+    match shape {
+        ComponentValueShape::Scalar { .. }
+        | ComponentValueShape::EntityRef
+        | ComponentValueShape::AssetRef { .. } => true,
+        ComponentValueShape::Optional { value } => supported(value),
+        ComponentValueShape::Record { members } => {
+            members.iter().all(|member| supported(&member.shape))
+        }
+        ComponentValueShape::List { item } => scalar_item(item),
+        ComponentValueShape::Map { value } => scalar_item(value),
+        // Collection controls currently support scalar items, not keyed Record rows.
+        ComponentValueShape::Opaque { .. } | ComponentValueShape::KeyedList { .. } => false,
+    }
+}
+
+fn scalar_item(shape: &ComponentValueShape) -> bool {
+    match shape {
+        ComponentValueShape::Scalar { .. }
+        | ComponentValueShape::EntityRef
+        | ComponentValueShape::AssetRef { .. } => true,
+        ComponentValueShape::Optional { value } => scalar_item(value),
+        _ => false,
+    }
+}
+
+fn scalar_text(shape: &ComponentValueShape, value: &ComponentValue) -> String {
+    if matches!(shape, ComponentValueShape::AssetRef { .. }) {
+        return decode_asset_reference_value(value)
+            .map(|reference| reference.to_string())
+            .unwrap_or_default();
+    }
+    if matches!(shape, ComponentValueShape::EntityRef) {
+        return match value.as_entity_reference() {
+            Some(EntityReference::SceneLocal { entity }) => format!("scene-local:{entity}"),
+            Some(EntityReference::Authored { .. }) => "<authored reference>".to_owned(),
+            Some(EntityReference::Persistent { .. }) => "<persistent reference>".to_owned(),
+            None => String::new(),
+        };
+    }
+    match value {
+        ComponentValue::I64(value) => value.to_string(),
+        ComponentValue::U64(value) => value.to_string(),
+        ComponentValue::F64(value) => value.get().to_string(),
+        ComponentValue::String(value) => value.clone(),
+        _ => String::new(),
+    }
+}
+
+fn source_local_id_text(text: &str) -> &str {
+    text.strip_prefix("scene-local:").unwrap_or(text).trim()
+}
+
+pub fn parse_scalar(shape: &ComponentValueShape, text: &str) -> Result<ComponentValue, String> {
+    if matches!(shape, ComponentValueShape::AssetRef { .. }) {
+        let reference = if let Some(product) = text.strip_prefix("product:") {
+            let (source, product) = product
+                .split_once('/')
+                .ok_or("Expected product:<source>/<primary-or-product-id>")?;
+            let source = StableAssetId::parse_str(source).map_err(|error| error.to_string())?;
+            let product = if product == "primary" {
+                ImportedProductId::PRIMARY
+            } else {
+                ImportedProductId::parse_subproduct(product).map_err(|error| error.to_string())?
+            };
+            AssetRef::Product(
+                AssetProductRef::new(source, product).map_err(|error| error.to_string())?,
+            )
+        } else if let Some(id) = text.strip_prefix("stable_id:") {
+            AssetRef::stable_id(id).map_err(|error| error.to_string())?
+        } else {
+            AssetRef::path(text).map_err(|error| error.to_string())?
+        };
+        return Ok(encode_asset_reference_value(&reference));
+    }
+    if matches!(shape, ComponentValueShape::EntityRef) {
+        let entity = SceneEntityId::new(source_local_id_text(text))
+            .map_err(|_| "Expected a valid source-local entity ID")?;
+        return Ok(ComponentValue::EntityReference(
+            EntityReference::SceneLocal { entity },
+        ));
+    }
+    match shape.value_kind() {
+        ComponentValueKind::I64 => text
+            .parse()
+            .map(ComponentValue::I64)
+            .map_err(|_| "Expected a signed integer".to_owned()),
+        ComponentValueKind::U64 => text
+            .parse()
+            .map(ComponentValue::U64)
+            .map_err(|_| "Expected an unsigned integer".to_owned()),
+        ComponentValueKind::F64 => {
+            ComponentValue::f64(text.parse().map_err(|_| "Expected a finite number")?)
+                .map_err(|error| error.to_string())
+        }
+        ComponentValueKind::String => Ok(ComponentValue::String(text.to_owned())),
+        _ => Err("Unsupported scalar draft".to_owned()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nara_identity::AuthoredEntityReference;
+    use nara_reflect::{ComponentFieldId, ComponentNumericDomain, ComponentShapeMember};
+
+    #[test]
+    fn new_children_require_explicit_values_and_complete_record_members() {
+        for kind in [
+            ComponentValueKind::Bool,
+            ComponentValueKind::I64,
+            ComponentValueKind::String,
+        ] {
+            let shape = ComponentValueShape::scalar(kind);
+            assert!(ValueDraft::new(&shape).value(&shape).is_err());
+        }
+        let shape = ComponentValueShape::record([
+            (
+                "x".into(),
+                ComponentValueShape::scalar(ComponentValueKind::F64)
+                    .with_numeric_domain(ComponentNumericDomain::F32),
+            ),
+            (
+                "y".into(),
+                ComponentValueShape::scalar(ComponentValueKind::F64)
+                    .with_numeric_domain(ComponentNumericDomain::F32),
+            ),
+        ]);
+        let mut draft = ValueDraft::new(&shape);
+        let ValueDraft::Record { members, .. } = &mut draft else {
+            panic!("record draft");
+        };
+        members[0].1 = ValueDraft::Text {
+            text: "1".into(),
+            entered: true,
+            original_reference: None,
+        };
+        assert!(draft.value(&shape).is_err());
+        let ValueDraft::Record { members, .. } = &mut draft else {
+            panic!("record draft");
+        };
+        members[1].1 = ValueDraft::Text {
+            text: "1e100".into(),
+            entered: true,
+            original_reference: None,
+        };
+        assert!(draft.value(&shape).is_err());
+        let empty = ComponentValueShape::record([]);
+        assert!(ValueDraft::new(&empty).value(&empty).is_err());
+    }
+
+    #[test]
+    fn source_local_reference_descendants_are_supported_and_opaque_descendants_are_not() {
+        assert!(supported(&ComponentValueShape::optional(
+            ComponentValueShape::record([("child".into(), ComponentValueShape::EntityRef)])
+        )));
+        assert!(!supported(&ComponentValueShape::optional(
+            ComponentValueShape::record([(
+                "child".into(),
+                ComponentValueShape::opaque(ComponentValueKind::Map),
+            )])
+        )));
+    }
+
+    #[test]
+    fn keyed_record_lists_remain_outside_scalar_collection_controls() {
+        let item = ComponentValueShape::record_members([ComponentShapeMember::new(
+            "id",
+            ComponentValueKind::String,
+        )
+        .with_id(ComponentFieldId::new("item-id"))]);
+        assert!(!supported(&ComponentValueShape::list(item.clone())));
+        assert!(!supported(&ComponentValueShape::keyed_list(
+            item,
+            ComponentFieldId::new("item-id"),
+        )));
+    }
+
+    #[test]
+    fn entity_reference_draft_uses_source_local_text() {
+        let shape = ComponentValueShape::EntityRef;
+        let value = ComponentValue::EntityReference(EntityReference::SceneLocal {
+            entity: SceneEntityId::new("target").unwrap(),
+        });
+        assert_eq!(scalar_text(&shape, &value), "scene-local:target");
+        assert_eq!(parse_scalar(&shape, "scene-local:target").unwrap(), value);
+        assert_eq!(parse_scalar(&shape, "target").unwrap(), value);
+        assert!(parse_scalar(&shape, "scene-local:bad id").is_err());
+    }
+
+    #[test]
+    fn authored_reference_draft_parses_only_changed_targets() {
+        let shape = ComponentValueShape::EntityRef;
+        let original = ComponentValue::EntityReference(EntityReference::Authored {
+            reference: AuthoredEntityReference::source(SceneEntityId::new("target").unwrap()),
+        });
+        let mut draft = ValueDraft::from_value(&shape, Some(&original));
+        assert_eq!(draft.value(&shape).unwrap(), original);
+        let expected = ComponentValue::EntityReference(EntityReference::SceneLocal {
+            entity: SceneEntityId::new("other").unwrap(),
+        });
+        for (input, result) in [
+            (" target ", Ok(original.clone())),
+            ("scene-local:other", Ok(expected)),
+            (
+                "",
+                Err("Expected a valid source-local entity ID".to_owned()),
+            ),
+            ("scene-local:target", Ok(original)),
+        ] {
+            let ValueDraft::Text { text, .. } = &mut draft else {
+                panic!("reference draft");
+            };
+            *text = input.to_owned();
+            assert_eq!(draft.value(&shape), result);
+        }
+    }
+
+    #[test]
+    fn asset_reference_drafts_preserve_complete_product_selection() {
+        let source = StableAssetId::parse_str("cc91a0c8-e2b4-42ae-9d78-3481b9f34d65").unwrap();
+        let shape = ComponentValueShape::from(ComponentValueKind::AssetRef);
+        for reference in [
+            AssetRef::path("bundle.json").unwrap(),
+            AssetRef::StableId(source),
+            AssetRef::Product(AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap()),
+            AssetRef::Product(
+                AssetProductRef::new(
+                    source,
+                    ImportedProductId::parse_subproduct("10a5c635-e71b-478d-86c4-ef933956a425")
+                        .unwrap(),
+                )
+                .unwrap(),
+            ),
+        ] {
+            let value = encode_asset_reference_value(&reference);
+            let text = scalar_text(&shape, &value);
+            assert_eq!(text, reference.to_string());
+            assert_eq!(parse_scalar(&shape, &text).unwrap(), value);
+        }
+        for text in [
+            "product:cc91a0c8-e2b4-42ae-9d78-3481b9f34d65",
+            "product:00000000-0000-0000-0000-000000000000/primary",
+            "product:cc91a0c8-e2b4-42ae-9d78-3481b9f34d65/unknown",
+        ] {
+            assert!(parse_scalar(&shape, text).is_err());
+        }
+    }
+}

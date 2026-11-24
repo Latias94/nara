@@ -199,33 +199,6 @@ requested = ["runtime-2d", "presentation-2d"]
 }
 
 #[test]
-fn runtime_tooling_capability_is_rejected_before_host_admission() {
-    let manifest = TestManifest::new(
-        br#"
-schema_version = 1
-
-[project]
-source_universe = 'fdb0ca56-759d-5f78-8b7b-83d3228d7cf5'
-native_document_identity = 'project_location'
-name = "Unavailable Tooling"
-
-[authoring]
-state = "ready"
-
-[capabilities]
-requested = ["tooling"]
-"#,
-    );
-
-    let error = ingest_project_manifest(&manifest.capability(), None).unwrap_err();
-
-    assert_eq!(error.kind(), ProjectCandidateErrorKind::Manifest);
-    let rendered = format!("{error:?}");
-    assert!(!rendered.contains("Unavailable Tooling"));
-    assert!(!rendered.contains(manifest.path().to_string_lossy().as_ref()));
-}
-
-#[test]
 fn manifest_byte_limit_rejects_the_sentinel_byte() {
     let limit = usize::try_from(DEFAULT_MANIFEST_BYTE_LIMIT).unwrap();
     let manifest = TestManifest::new(&vec![b' '; limit + 1]);

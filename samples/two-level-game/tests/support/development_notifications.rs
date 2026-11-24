@@ -149,11 +149,11 @@ impl RunRecord {
             match retired.control_service {
                 Some(observed)
                     if observed.watcher_started
-                        && observed.watcher_joined
+                        && observed.watcher_closed
                         && !observed.counters_saturated
                         && observed.native_wake_delivery_failures == 0 => {}
                 observed => self.failures.push(format!(
-                    "original watcher did not join cleanly: {observed:?}"
+                    "request watcher close diagnostics were invalid: {observed:?}"
                 )),
             }
             retirements.push(json!({
@@ -562,7 +562,7 @@ pub fn evaluate(runs: &[RunRecord]) -> (Vec<Value>, Vec<String>) {
             .chain(run.before_close)
         {
             if !observation.watcher_started
-                || observation.watcher_joined
+                || observation.watcher_closed
                 || observation.counters_saturated
                 || observation.native_wake_delivery_failures != 0
             {
@@ -664,7 +664,7 @@ pub fn method() -> Value {
         "state": "exact encode_resume bytes across idle and explicit paused maintenance; one ordinary Step must advance exactly one logical tick",
         "frame": "two explicit public Frame calls advance the original FrameExecutionStart sequence (exactly one in quiescent headless), preserve engine/logical ticks and complete canonical state; no synthetic service counter",
         "desktop": "input isolated, no user input, original hardware confirm_active_presentation; receipt is submit/present evidence, not scanout or GPU completion",
-        "cleanup": "normal original game Close, final validated watcher join diagnostics, independent native cleanup receipt, then original Fixture removal before create_new output",
+        "cleanup": "normal game Close, validated watcher handle closure, independent native process cleanup receipt, then fixture removal before create_new output",
         "scope": "finite cooperative acceptance on this idle Windows desktop; synchronous callbacks, drivers and native calls are not interruptible hard real-time deadlines",
         "gain_scope": "aggregate child idle inbox-check reduction; unchanged 10 ms parent response polling prevents an inferred end-to-end latency gain",
     })

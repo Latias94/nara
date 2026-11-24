@@ -7,10 +7,6 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
-#[cfg(all(feature = "tooling", feature = "presentation-2d"))]
-#[path = "product_data_components/compiled_editor.rs"]
-mod compiled_editor;
-
 use std::{
     fs,
     num::NonZeroU32,

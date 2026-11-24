@@ -77,16 +77,6 @@ persistent component, custom schema, window or Editor. Change the printed messag
 observe a Rust edit. Keep the generated `product_recipe`, Image codec and all entry points.
 The same plugin also runs in the cooked Player; its first tick uses the same game code.
 
-Open the complete-schema startup Scene in the first-party Editor from the project root:
-
-```text
-nara-editor .
-```
-
-Select `main-camera`, edit `Camera2d.viewport_height` from `720` to `768`, then use the fixed
-Undo, Redo, Save, and Reopen controls. The Editor writes the same ordinary Scene source consumed
-by the commands below; it does not create an Editor-private project format.
-
 For one observable authored-data edit, change the startup Scene's
 `Camera2d.clear_color.r` value in `scenes/startup.scene.json` from `0.06` to `0.14`. No Rust source
 change is required. Then check the project's declared content and run both products from any process
@@ -116,7 +106,7 @@ reduced tool. Checking a profile that requests desktop capabilities enables the 
 feature, including when you give that profile another name.
 
 After changing persistent component definitions or their contributions, refresh the declared
-data-only schema bundle explicitly, then reopen the project in the Editor:
+data-only schema bundle before validating the scene and prefab data:
 
 ```text
 nara schema . --check
@@ -127,7 +117,7 @@ nara schema . --check
 Schema Check reports a missing or stale bundle without changing it. Schema Write atomically
 publishes the bundle generated from `product_recipe()` at `authoring.schema_bundle`; it does not
 start gameplay or rewrite Scene/Prefab records. Pass `--profile desktop` when checking or writing
-that profile's schema. Generic Editor Open reads the bundle without compiling project code.
+that profile's schema.
 
 After creating another Scene, such as `scenes/level-b.scene.json`, declare it in `nara.toml` so
 Check and Export include it and its admitted Prefab, Image, TileSet, and metadata dependencies:

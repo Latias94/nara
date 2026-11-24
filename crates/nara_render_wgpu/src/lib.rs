@@ -10,7 +10,6 @@ mod device;
 mod error;
 mod frame;
 mod graph;
-mod history;
 mod host;
 #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 mod material_textures;
@@ -51,19 +50,11 @@ mod view_uniform;
 mod work;
 
 use crate::backend::{WgpuRenderBackend, render_backend_state};
-#[cfg(test)]
-use crate::frame::WgpuFramePacketSlot;
 #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 use crate::quad::WgpuQuadBatch;
-#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
-use crate::quad::{WgpuQuadBatchBuffer, WgpuQuadPipelineDrawRef, draw_quad_batch_buffers};
 use crate::surface::SurfaceDropReason;
-#[cfg(test)]
-use crate::surface::WgpuSurfaceState;
 use nara_app::{RuntimeFault, RuntimeFaultKind};
 use nara_render::{RenderBackendStatus, RenderFrameSkipReason};
-#[cfg(test)]
-use nara_window::WindowId;
 
 pub use crate::backend::{WgpuBackendState, WgpuFrameTransactionStats};
 #[cfg(feature = "stock-ui")]
@@ -78,10 +69,6 @@ pub use crate::frame::{
 pub use crate::graph::{
     AccessRole, GraphError, GraphLimits, LimitKind, TextureAlpha, TextureInterpretation,
     TextureTransfer,
-};
-pub use crate::history::{
-    WgpuEmptyHistoryReason, WgpuHistoryBinding, WgpuHistoryBuffer, WgpuHistoryLineage,
-    WgpuHistoryReset, WgpuHistoryTexture, WgpuHistoryView,
 };
 pub use crate::host::{
     WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuImageTargetReservation, WgpuRenderHost,
@@ -128,7 +115,6 @@ pub use crate::program::{
     WgpuRenderProgram, WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 pub use crate::requirements::{WgpuDeviceRequirements, WgpuDeviceRequirementsError};
-pub use crate::retirement::{WgpuGpuRetirement, WgpuGpuRetirementError};
 pub use crate::runtime_timing::{
     WgpuNamespacePhase, WgpuNamespaceTimings, WgpuRuntimeFramePhase, WgpuRuntimeFrameTimings,
 };
@@ -165,10 +151,6 @@ pub use crate::ui::{
 
 #[doc(hidden)]
 pub mod __private {
-    #[cfg(feature = "editor-imgui")]
-    pub use crate::host::{
-        WgpuEditorImguiFrame, WgpuEditorImguiRenderer, WgpuEditorImguiRendererFailure,
-    };
     pub use crate::host::{WgpuRuntimeHostFacts, WgpuRuntimeMaintenance};
     pub use crate::{
         host::{
@@ -177,7 +159,6 @@ pub mod __private {
         },
         output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageOutput},
         presented::{WgpuPresentedFrameReceipt, WgpuSubmittedImageReceipt},
-        retirement::{WgpuGpuRetirement, WgpuGpuRetirementError},
         runtime::{
             WgpuRuntimeCapture, WgpuRuntimeCaptureFailure, WgpuRuntimeCaptureIdentity,
             WgpuRuntimeCompletion, WgpuRuntimeConnection, WgpuRuntimeExchangeError,
@@ -216,163 +197,6 @@ const WGPU_RENDER_BACKEND: &str = "wgpu";
 #[cfg(feature = "stock-ui")]
 fn saturating_u64(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
-}
-
-#[cfg(test)]
-impl PreparedSubmitterDraw {
-    fn instance_buffer_bytes(&self) -> u64 {
-        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-        {
-            self.buffers.iter().fold(0_u64, |total, buffer| {
-                total.saturating_add(buffer.logical_bytes())
-            })
-        }
-        #[cfg(not(any(feature = "stock-sprite", feature = "stock-ui")))]
-        {
-            0
-        }
-    }
-}
-
-// Private legacy quad oracle for native readback, allocation and Runtime custody tests.
-// Production execution uses typed programs through WgpuRenderHost.
-#[cfg(test)]
-#[derive(Debug, Default)]
-struct PreparedSubmitterDraw {
-    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-    pipelines: Vec<WgpuQuadPipelineDrawRef>,
-    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-    buffers: Vec<WgpuQuadBatchBuffer>,
-    #[cfg(feature = "stock-ui")]
-    ui_packets: Vec<ui::WgpuLoweredUiPacketFacts>,
-    draw_calls: u32,
-    sprites: u32,
-    #[cfg(feature = "stock-ui")]
-    image_sprites: u32,
-    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-    instance_reservation: Option<budget::InstanceReservation>,
-}
-
-#[cfg(test)]
-#[derive(Debug)]
-struct PreparedViewDraw {
-    viewport: nara_render::ViewportRect,
-    load: nara_render::ViewLoadOp,
-    draw: PreparedSubmitterDraw,
-}
-
-#[cfg(test)]
-#[derive(Debug, Default)]
-struct PreparedTargetDraw {
-    views: Vec<PreparedViewDraw>,
-    canvas: Option<canvas::PreparedWorldCanvas>,
-    draw_calls: u32,
-    sprites: u32,
-    #[cfg(feature = "stock-ui")]
-    image_sprites: u32,
-    #[cfg(feature = "stock-ui")]
-    ui_packets: Vec<ui::WgpuLoweredUiPacketFacts>,
-}
-
-#[cfg(test)]
-impl PreparedTargetDraw {
-    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-    fn commit_instance_reservations(&mut self) {
-        for view in &mut self.views {
-            if let Some(reservation) = view.draw.instance_reservation.as_mut() {
-                reservation.commit();
-            }
-        }
-    }
-
-    fn push(
-        &mut self,
-        viewport: nara_render::ViewportRect,
-        load: nara_render::ViewLoadOp,
-        mut draw: PreparedSubmitterDraw,
-    ) {
-        self.draw_calls = self.draw_calls.saturating_add(draw.draw_calls);
-        self.sprites = self.sprites.saturating_add(draw.sprites);
-        #[cfg(feature = "stock-ui")]
-        {
-            self.image_sprites = self.image_sprites.saturating_add(draw.image_sprites);
-            self.ui_packets.append(&mut draw.ui_packets);
-        }
-        self.views.push(PreparedViewDraw {
-            viewport,
-            load,
-            draw,
-        });
-    }
-
-    fn instance_buffer_bytes(&self) -> u64 {
-        self.views.iter().fold(0, |total, view| {
-            total.saturating_add(view.draw.instance_buffer_bytes())
-        })
-    }
-}
-
-/// Private legacy ordered-draw oracle for native readback and comparison tests.
-#[cfg(test)]
-fn encode_target_draw(
-    encoder: &mut wgpu::CommandEncoder,
-    target: &wgpu::TextureView,
-    prepared: &PreparedTargetDraw,
-) {
-    if let Some(canvas) = &prepared.canvas {
-        let (world, ui) = prepared.views.split_at(canvas.world_view_count);
-        encode_view_draws(encoder, canvas.view(), world);
-        canvas.encode_composite(encoder, target);
-        encode_view_draws(encoder, target, ui);
-    } else {
-        encode_view_draws(encoder, target, &prepared.views);
-    }
-}
-
-#[cfg(test)]
-fn encode_view_draws(
-    encoder: &mut wgpu::CommandEncoder,
-    target: &wgpu::TextureView,
-    views: &[PreparedViewDraw],
-) {
-    for view in views {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("nara_ordered_view_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: match view.load {
-                        nara_render::ViewLoadOp::Clear(color) => {
-                            wgpu::LoadOp::Clear(stock_policy::premultiplied_clear_color(color))
-                        }
-                        nara_render::ViewLoadOp::Load => wgpu::LoadOp::Load,
-                    },
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        pass.set_viewport(
-            view.viewport.physical_x as f32,
-            view.viewport.physical_y as f32,
-            view.viewport.physical_width as f32,
-            view.viewport.physical_height as f32,
-            0.0,
-            1.0,
-        );
-        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-        draw_quad_batch_buffers(
-            &mut pass,
-            &view.draw.pipelines,
-            &view.draw.buffers,
-            view.viewport,
-        );
-    }
 }
 
 fn handle_wgpu_render_error(
@@ -463,37 +287,6 @@ fn required_quad_pipeline_keys(
         }
     }
     keys
-}
-
-/// Private legacy surface-submit oracle used by the test-only backend transaction.
-#[cfg(test)]
-fn render_acquired_texture(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    window_id: WindowId,
-    surface_state: &WgpuSurfaceState,
-    surface_texture: wgpu::SurfaceTexture,
-    draw: &mut PreparedTargetDraw,
-) -> Result<(), WgpuRenderError> {
-    let config = surface_state
-        .config
-        .as_ref()
-        .ok_or(WgpuRenderError::SurfaceUnconfigured { window_id })?;
-    let view = surface_texture
-        .texture
-        .create_view(&wgpu::TextureViewDescriptor {
-            format: Some(config.format.add_srgb_suffix()),
-            ..Default::default()
-        });
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("nara_wgpu_surface_encoder"),
-    });
-    encode_target_draw(&mut encoder, &view, draw);
-    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-    draw.commit_instance_reservations();
-    queue.submit([encoder.finish()]);
-    queue.present(surface_texture);
-    Ok(())
 }
 
 #[cfg(test)]

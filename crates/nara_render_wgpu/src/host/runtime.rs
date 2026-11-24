@@ -386,7 +386,7 @@ impl WgpuRenderHost {
             self.prepare_candidate_in_namespace(id, &namespace, &input, acquired.format, false);
         self.backend
             .finish_runtime_frame_phase(WgpuRuntimeFramePhase::CandidatePreparation, timing);
-        let mut candidate = candidate?;
+        let candidate = candidate?;
         let policy = &candidate.built.output;
         Self::validate_policy_target(policy, packet, acquired.format, false)?;
         #[cfg(feature = "stock-ui")]
@@ -435,7 +435,7 @@ impl WgpuRenderHost {
                 work_started_at,
                 submitted_texture_bytes: &mut submitted_texture_bytes,
             }),
-            Some(&mut candidate.built),
+            Some(&candidate.built),
         );
         self.backend
             .finish_runtime_frame_phase(WgpuRuntimeFramePhase::ProgramExecution, timing);

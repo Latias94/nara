@@ -75,8 +75,6 @@ pub use nara_sprite_render as sprite_render;
 pub use nara_tasks as tasks;
 #[cfg(feature = "runtime-2d")]
 pub use nara_tilemap as tilemap;
-#[cfg(feature = "tooling")]
-pub use nara_tooling as tooling;
 #[cfg(feature = "runtime-core")]
 pub use nara_transform as transform;
 #[cfg(feature = "runtime-ui")]
@@ -135,8 +133,6 @@ pub mod runtime_content;
 
 #[cfg(feature = "runtime-core")]
 mod scene_retention;
-#[cfg(all(test, feature = "runtime-core"))]
-mod scene_test_support;
 
 #[cfg(all(feature = "runtime-core", feature = "serde"))]
 mod scene_format_diagnostic;
@@ -173,11 +169,6 @@ pub use product::{
     HeadlessRuntimePlugins, MinimalPlugins, ProductConfiguration, ProductRecipe,
     ProductRecipeEntry, ProductRecipeEntryKind, ProductRecipeError, SchemaContribution,
     ServerPlugins,
-};
-#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-pub use ui_presentation::{
-    WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_DECLARATION,
-    WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID, WinitUiAccessibilityContributionPlugin,
 };
 
 #[cfg(feature = "runtime-core")]
@@ -464,42 +455,12 @@ pub mod advanced_prelude {
     };
 }
 
-#[cfg(feature = "tooling")]
-pub mod tooling_prelude {
-    pub use nara_tooling::{
-        EditorApplyChangesRejection, EditorApplyChangesResult, EditorCloseDecision,
-        EditorDocumentDigest, EditorDocumentId, EditorDocumentKind, EditorDocumentSourceBinding,
-        EditorDocumentTabModel, EditorExternalReloadState, EditorPersistenceCommand,
-        EditorPersistenceFailureStage, EditorPersistenceOperation, EditorPersistenceRejection,
-        EditorPersistenceRequestKind, EditorPersistenceRequestResult, EditorPersistenceResult,
-        EditorPersistenceView, EditorPlayCommand, EditorPlayFailure, EditorPlayOperation,
-        EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult, EditorPlayState,
-        EditorPlayView, EditorPrefabSessionPublicationError, EditorPrefabSlot, EditorProjectView,
-        EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorRuntimeEditResult,
-        EditorSceneModel, EditorSceneSlot, EditorSceneTabModel, EditorSelectionSet,
-        EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
-        EditorWorkspaceIntent, EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection,
-        EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult, EditorWorkspaceIntentView,
-        EditorWorkspaceModel, SceneApplyChangesComponentReport, SceneApplyChangesComponentStatus,
-        SceneApplyChangesReport, SceneApplyChangesRequest, SceneCompositionCommand,
-        SceneCompositionEntityKind, SceneEditorModel, SceneEditorState, SceneInspectorCommand,
-        SceneInspectorCommandReport, SceneInspectorComponentView, SceneInspectorEntityRow,
-        SceneInspectorEntityView, SceneInspectorFieldState, SceneInspectorFieldView,
-        SceneInspectorModel, SceneInspectorState, WorldIdentitySnapshot,
-    };
-}
-
 #[cfg(feature = "runtime-core")]
 pub mod backend_prelude {
     #[cfg(feature = "desktop-winit")]
     pub use crate::DesktopWinitPlugins;
     #[cfg(feature = "render-wgpu")]
     pub use crate::WgpuBackendPlugins;
-    #[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-    pub use crate::{
-        WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_DECLARATION,
-        WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID, WinitUiAccessibilityContributionPlugin,
-    };
     #[cfg(feature = "render-wgpu")]
     pub use nara_render_wgpu::{
         SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus,

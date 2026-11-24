@@ -23,7 +23,7 @@ mod queue;
 pub use backend::AssetWatcher;
 pub use lifecycle::{
     ASSET_WATCH_NATIVE_INSTANCE_LIMIT, AssetWatchLifecycleStats, AssetWatchPath, AssetWatchRuntime,
-    AssetWatchRuntimeObserver, AssetWatchStartFailure,
+    AssetWatchRuntimeObserver,
 };
 pub use observability::{AssetWatchRuntimeState, AssetWatchRuntimeStatus};
 pub use queue::{
@@ -134,9 +134,6 @@ pub enum AssetWatchError {
     RuntimeClosing,
     ManagedRuntimeMissing,
     NoWatchPaths,
-    ManagedPlatformUnsupported,
-    NativeClose { joined: bool, message: String },
-    StartFailure(AssetWatchStartFailure),
     RescanRequired,
 }
 
@@ -166,20 +163,13 @@ impl Display for AssetWatchError {
             Self::Notify(error) => write!(formatter, "asset watch error: {error}"),
             Self::NativeCapacityExceeded { limit } => write!(
                 formatter,
-                "asset watch native instance limit {limit} is occupied by active or retiring sessions"
+                "asset watch runtime already owns {limit} native watcher handles"
             ),
             Self::RuntimeClosing => formatter.write_str("asset watch runtime is closing"),
             Self::ManagedRuntimeMissing => {
                 formatter.write_str("asset watch rescan requires a registered lifecycle owner")
             }
             Self::NoWatchPaths => formatter.write_str("asset watch needs at least one native path"),
-            Self::ManagedPlatformUnsupported => formatter
-                .write_str("managed native watcher join is supported only on Windows and Linux"),
-            Self::NativeClose { joined, message } => write!(
-                formatter,
-                "asset watch native close failed (original worker joined: {joined}): {message}"
-            ),
-            Self::StartFailure(failure) => Display::fmt(failure, formatter),
             Self::RescanRequired => {
                 formatter.write_str("asset watch scope requires a complete source rescan")
             }

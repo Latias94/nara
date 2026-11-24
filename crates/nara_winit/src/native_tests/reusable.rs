@@ -28,7 +28,6 @@ use windows_sys::{
 #[derive(Default)]
 struct Observations {
     window: Option<WinitWindowId>,
-    stale_wake_accepted: Option<bool>,
     timed_out: bool,
 }
 
@@ -36,11 +35,8 @@ struct SequentialDriver {
     proxy: EventLoopProxy<WinitUserEvent>,
     observe_window: Sender<WinitWindowId>,
     window: Receiver<WinitWindowId>,
-    old_wake: Option<(EventLoopProxy<WinitUserEvent>, SessionWakeId, Sender<bool>)>,
-    wake_result: Receiver<bool>,
     observations: Rc<RefCell<Observations>>,
     sent: bool,
-    expects_stale_wake: bool,
     deadline: Instant,
 }
 
@@ -63,36 +59,18 @@ impl __WinitPresentationDriver for SequentialDriver {
                     window: self.observe_window.clone(),
                 }))
                 .map_err(|_| AppRunError::runner("native observation proxy closed"))?;
-            if let Some((proxy, wake_id, accepted)) = self.old_wake.take() {
-                // Send only after the new window exists. The handoff drain cannot consume this
-                // late old-proxy wake; the current App must reject the old physical-pump ticket.
-                #[cfg(feature = "platform-accessibility")]
-                proxy
-                    .send_event(WinitUserEvent::AccessibilityWake(wake_id))
-                    .map_err(|_| AppRunError::runner("old accessibility proxy closed"))?;
-                proxy
-                    .send_event(WinitUserEvent::NativeTest(NativeTestEvent::ProbeWake {
-                        wake_id,
-                        accepted,
-                    }))
-                    .map_err(|_| AppRunError::runner("old native proxy closed"))?;
-            }
             self.sent = true;
         }
         let mut observations = self.observations.borrow_mut();
         if let Ok(window) = self.window.try_recv() {
             observations.window = Some(window);
         }
-        if let Ok(accepted) = self.wake_result.try_recv() {
-            observations.stale_wake_accepted = Some(accepted);
-        }
-        let observed = observations.window.is_some()
-            && (!self.expects_stale_wake || observations.stale_wake_accepted.is_some());
         if now >= self.deadline {
             observations.timed_out = true;
         }
         Ok(__WinitPresentationProgress {
-            exit: (observed || observations.timed_out).then_some(AppExit::Requested),
+            exit: (observations.window.is_some() || observations.timed_out)
+                .then_some(AppExit::Requested),
             next_wake: Some((now + Duration::from_millis(10)).min(self.deadline)),
         })
     }
@@ -108,10 +86,7 @@ impl __WinitPresentationDriver for SequentialDriver {
     }
 }
 
-fn observed_session(
-    event_loop: WinitEventLoop,
-    old_wake: Option<(EventLoopProxy<WinitUserEvent>, SessionWakeId)>,
-) -> WinitSession {
+fn observed_session(event_loop: WinitEventLoop) -> WinitSession {
     let mut app = App::new();
     app.add_plugin(WindowPlugin {
         primary_window: Some(Window::new(
@@ -122,15 +97,11 @@ fn observed_session(
     .unwrap();
     let handles = app.world().resource::<BackendWindowHandles>().clone();
     let (observe_window, window) = mpsc::channel();
-    let (accepted, wake_result) = mpsc::channel();
     let observations = Rc::new(RefCell::new(Observations::default()));
     let driver = SequentialDriver {
         proxy: event_loop.event_loop.create_proxy(),
         observe_window,
         window,
-        expects_stale_wake: old_wake.is_some(),
-        old_wake: old_wake.map(|(proxy, wake_id)| (proxy, wake_id, accepted)),
-        wake_result,
         observations: observations.clone(),
         sent: false,
         deadline: Instant::now() + Duration::from_secs(3),
@@ -158,21 +129,16 @@ fn observed_session(
     let observations = observations.borrow();
     assert!(!observations.timed_out);
     assert!(observations.window.is_some());
-    assert!(
-        observations
-            .stale_wake_accepted
-            .is_none_or(|accepted| !accepted)
-    );
     session
 }
 
 #[test]
 #[ignore = "requires an interactive Windows desktop; run in its own nextest process"]
-fn retired_pump_runs_sequential_apps_and_rejects_queued_and_late_old_proxy_events() {
+fn retired_pump_runs_sequential_apps_and_discards_queued_old_proxy_events() {
     let mut builder = EventLoop::<WinitUserEvent>::with_user_event();
     builder.with_any_thread(true);
     let event_loop = WinitEventLoop::from_native(builder.build().unwrap());
-    let first = observed_session(event_loop, None);
+    let first = observed_session(event_loop);
     let generation = first.runtime().generation();
     let app = first.app.as_ref().unwrap();
     let old_proxy = app.event_proxy.clone().unwrap();
@@ -190,7 +156,7 @@ fn retired_pump_runs_sequential_apps_and_rejects_queued_and_late_old_proxy_event
             NativeTestEvent::RetainWindowAndExit { window: retained },
         ))
         .unwrap();
-    let second = observed_session(event_loop, Some((old_proxy, old_wake_id)));
+    let second = observed_session(event_loop);
     assert_ne!(second.runtime().generation(), generation);
     assert!(unexpected_window.try_recv().is_err());
     assert_ne!(
@@ -222,7 +188,7 @@ fn supplied_unused_pump_survives_initial_failure_and_runs_the_next_app() {
     );
     let event_loop = retired.event_loop.unwrap();
     drop(retired.runtime);
-    let session = observed_session(event_loop, None);
+    let session = observed_session(event_loop);
     assert_ne!(session.runtime().generation(), generation);
     assert_eq!(
         session.into_retired().unwrap().result,

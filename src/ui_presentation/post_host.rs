@@ -134,14 +134,13 @@ impl UiPostHostConnection {
 mod tests {
     use std::time::Duration;
 
-    use nara_app::{RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter};
     use nara_hierarchy::{
         HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
     };
     use nara_input::{InputPointerId, InputSeatId, InputWindowId};
     use nara_ui::{
-        UiColor, UiNode, UiPresentationReceipt, UiRoot, UiRuntimeKey, UiSafeAreaInsets, UiSize,
-        UiSurfaceContentTransform, UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot, UiVisual,
+        UiColor, UiNode, UiRoot, UiRuntimeKey, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform,
+        UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot, UiVisual,
     };
     use nara_ui_render::{
         __private::{
@@ -154,40 +153,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::ui_presentation::{
-        NativeAccessibilityPresentationPort, UiPresentationBridgeStats,
-        latest_presented_ui_observation,
-    };
+    use crate::ui_presentation::{UiPresentationBridgeStats, latest_presented_ui_observation};
     use crate::{PresentationUiPlugins, RuntimeUiPlugins};
 
     const SURFACE: u64 = 79;
-    const POST_COMMIT_FAULT: &str = "nara.test.ui-post-host.after-consumption";
-
-    #[derive(Default, Resource)]
-    struct CommitNotifications {
-        count: u32,
-        fault_after_commit: bool,
-    }
-
-    fn observe_committed_receipt(
-        world: &mut World,
-        _receipt: UiPresentationReceipt,
-    ) -> Result<(), String> {
-        let fault_after_commit = {
-            let mut notifications = world.resource_mut::<CommitNotifications>();
-            notifications.count += 1;
-            notifications.fault_after_commit
-        };
-        if fault_after_commit {
-            world
-                .resource::<RuntimeFaultReporter>()
-                .report(RuntimeFault::engine(
-                    RuntimeFaultKind::RequiredService,
-                    POST_COMMIT_FAULT,
-                ));
-        }
-        Ok(())
-    }
 
     #[derive(Resource)]
     struct FixturePort;
@@ -268,19 +237,10 @@ mod tests {
             .unwrap_or_else(|(error, _)| panic!("fixture operation was refused: {error}"))
     }
 
-    fn fixture(fault_after_commit: bool) -> RuntimeInstance {
+    fn fixture() -> RuntimeInstance {
         let mut app = App::new();
         app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
             .unwrap();
-        app.insert_resource(CommitNotifications {
-            count: 0,
-            fault_after_commit,
-        })
-        .unwrap();
-        app.insert_resource(NativeAccessibilityPresentationPort {
-            publish_presented: observe_committed_receipt,
-        })
-        .unwrap();
         app.insert_resource(FixturePort).unwrap();
         app.__register_driver_port::<FixturePort>(apply_fixture)
             .unwrap();
@@ -380,13 +340,12 @@ mod tests {
                 .presented_packets,
             0
         );
-        assert_eq!(runtime.world().resource::<CommitNotifications>().count, 0);
         assert!(latest_presented_ui_observation(runtime.world()).is_none());
     }
 
     #[test]
     fn captured_original_post_host_connection_refuses_replaced_ledger_without_consumption() {
-        let mut runtime = fixture(false);
+        let mut runtime = fixture();
         let connection = UiPostHostConnection::capture(&runtime).unwrap().unwrap();
         let original_receiver = backend_outcome_receiver(runtime.world()).unwrap();
         let identity = return_original_presentation(&mut runtime);
@@ -418,7 +377,7 @@ mod tests {
 
     #[test]
     fn missing_post_host_port_refuses_without_blocking_original_receiver_close() {
-        let mut runtime = fixture(false);
+        let mut runtime = fixture();
         let connection = UiPostHostConnection::capture(&runtime).unwrap().unwrap();
         let original_receiver = backend_outcome_receiver(runtime.world()).unwrap();
         return_original_presentation(&mut runtime);
@@ -439,9 +398,9 @@ mod tests {
 
     #[test]
     fn captured_original_post_host_connection_refuses_replaced_port_owner() {
-        let mut runtime = fixture(false);
+        let mut runtime = fixture();
         let connection = UiPostHostConnection::capture(&runtime).unwrap().unwrap();
-        return_original_presentation(&mut runtime);
+        let identity = return_original_presentation(&mut runtime);
         let FixtureOutput::Port(original) = mutate(&mut runtime, FixtureInput::ReplacePort) else {
             unreachable!()
         };
@@ -453,14 +412,20 @@ mod tests {
             FixtureOutput::Done
         ));
         connection.complete(&mut runtime).unwrap();
-        assert_eq!(runtime.world().resource::<CommitNotifications>().count, 1);
+        assert_eq!(
+            latest_presented_ui_observation(runtime.world())
+                .unwrap()
+                .submission(),
+            identity
+        );
         runtime.finish().unwrap();
     }
 
     #[test]
     fn actual_post_host_join_commits_returned_original_once_without_another_frame() {
-        let mut runtime = fixture(false);
+        let mut runtime = fixture();
         let connection = UiPostHostConnection::capture(&runtime).unwrap().unwrap();
+        let original_receiver = backend_outcome_receiver(runtime.world()).unwrap();
         let identity = return_original_presentation(&mut runtime);
         let app_frame = runtime.world().resource::<nara_app::RealTime>().frame;
         assert_uncommitted(&runtime);
@@ -472,6 +437,8 @@ mod tests {
             observation.wgpu().is_none(),
             "the CPU fixture cannot issue native WGPU facts"
         );
+        connection.complete(&mut runtime).unwrap();
+        assert!(!original_receiver.has_unsettled_backend_results());
         assert_eq!(
             runtime
                 .world()
@@ -479,59 +446,9 @@ mod tests {
                 .presented_packets,
             1
         );
-        assert_eq!(runtime.world().resource::<CommitNotifications>().count, 1);
-        connection.complete(&mut runtime).unwrap();
-        assert_eq!(runtime.world().resource::<CommitNotifications>().count, 1);
         assert_eq!(
             runtime.world().resource::<nara_app::RealTime>().frame,
             app_frame
-        );
-        runtime.finish().unwrap();
-    }
-
-    #[test]
-    fn actual_post_host_join_retains_consumed_commit_when_output_has_postfault() {
-        let mut runtime = fixture(true);
-        let connection = UiPostHostConnection::capture(&runtime).unwrap().unwrap();
-        let original_receiver = backend_outcome_receiver(runtime.world()).unwrap();
-        let identity = return_original_presentation(&mut runtime);
-
-        let error = connection.complete(&mut runtime).unwrap_err();
-        assert!(matches!(
-            error,
-            AppRunError::ManagedRuntime {
-                kind: RuntimeFaultKind::RequiredService,
-                fault_source: POST_COMMIT_FAULT,
-                ..
-            }
-        ));
-        assert_eq!(
-            latest_presented_ui_observation(runtime.world())
-                .unwrap()
-                .submission(),
-            identity
-        );
-        assert_eq!(
-            runtime
-                .world()
-                .resource::<UiPresentationBridgeStats>()
-                .presented_packets,
-            1
-        );
-        assert_eq!(runtime.world().resource::<CommitNotifications>().count, 1);
-        assert!(!original_receiver.has_unsettled_backend_results());
-
-        // The Root driver has already consumed its WGPU result before this call. A fault means
-        // stop/retire; a later connection service cannot replay the settled UI acceptance.
-        assert_eq!(runtime.state(), RuntimeState::Faulted);
-        connection.complete(&mut runtime).unwrap();
-        assert_eq!(runtime.world().resource::<CommitNotifications>().count, 1);
-        assert_eq!(
-            runtime
-                .world()
-                .resource::<UiPresentationBridgeStats>()
-                .presented_packets,
-            1
         );
         runtime.finish().unwrap();
     }

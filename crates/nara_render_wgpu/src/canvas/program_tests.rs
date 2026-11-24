@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::*;
 use crate::{
     AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
@@ -8,8 +10,8 @@ use crate::{
 use nara_app::{App, RuntimeCandidateRetirementState, RuntimeInstance};
 use nara_core::Color;
 use nara_render::{
-    ExtractedView, ExtractedViews, RenderTarget, ViewLoadOp, ViewMapping2d, ViewportRect,
-    WorldCanvas, build_render_frame_packet_with_world_canvas,
+    ExtractedView, ExtractedViews, RenderFrameSourceGeneration, RenderTarget, ViewLoadOp,
+    ViewMapping2d, ViewportRect, WorldCanvas, build_render_frame_packet_with_world_canvas,
 };
 use nara_window::{Window, WindowId, WindowResolution};
 

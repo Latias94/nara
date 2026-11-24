@@ -7,10 +7,7 @@ use super::{
     ProjectCandidateError, ProjectContentError, ProjectContentErrorKind, ProjectContentLoader,
     ProjectContentSnapshot, ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan,
     RuntimePlanError,
-    composition::{
-        RuntimeHostPolicyContribution, RuntimePluginOverlay,
-        resolve_product_recipe_with_host_policy, resolve_product_recipe_with_overlay,
-    },
+    composition::{RuntimePluginOverlay, resolve_product_recipe_with_overlay},
     ingest_project_manifest, ingest_project_manifest_bytes,
     ingest_project_manifest_with_expected_digest,
     runtime_agreement::prepare_runtime_schema_agreement,
@@ -22,7 +19,6 @@ const PROJECT_MANIFEST: &str = "nara.toml";
 #[derive(Default)]
 struct ProjectSourceCheckOptions {
     overlay: Option<RuntimePluginOverlay>,
-    host_policy: Option<RuntimeHostPolicyContribution>,
     manifest_digest: Option<ContentDigest>,
     startup_scene_digest: Option<ContentDigest>,
     delivery: bool,
@@ -150,25 +146,6 @@ pub(crate) fn check_project_source_with_overlay(
     )
 }
 
-pub(crate) fn check_project_source_with_host_policy(
-    project_root: DirectoryCapability,
-    profile: Option<&str>,
-    recipe: ProductRecipe,
-    overlay: Option<RuntimePluginOverlay>,
-    host_policy: RuntimeHostPolicyContribution,
-) -> Result<CheckedProjectSource, ProjectSourceCheckError> {
-    check_project_source_inner(
-        project_root,
-        profile,
-        recipe,
-        ProjectSourceCheckOptions {
-            overlay,
-            host_policy: Some(host_policy),
-            ..ProjectSourceCheckOptions::default()
-        },
-    )
-}
-
 pub(crate) fn check_project_source_with_expected_digests(
     project_root: DirectoryCapability,
     profile: Option<&str>,
@@ -243,16 +220,8 @@ fn load_checked_candidate(
     manifest_identity: Option<FileIdentity>,
 ) -> Result<CheckedProjectSource, ProjectSourceCheckError> {
     let source_content_limits = recipe.source_content_limits();
-    let plan = match options.host_policy {
-        Some(host_policy) => resolve_product_recipe_with_host_policy(
-            &candidate,
-            recipe,
-            options.overlay,
-            host_policy,
-        ),
-        None => resolve_product_recipe_with_overlay(&candidate, recipe, options.overlay),
-    }
-    .map_err(ProjectSourceCheckError::ProductComposition)?;
+    let plan = resolve_product_recipe_with_overlay(&candidate, recipe, options.overlay)
+        .map_err(ProjectSourceCheckError::ProductComposition)?;
     let runtime_agreement = prepare_runtime_schema_agreement(&project_root, &candidate, &plan)
         .map_err(|error| startup_content_failure(error, &candidate, manifest_identity))?;
     let loader = ProjectContentLoader::with_limits(project_root, source_content_limits).map_err(

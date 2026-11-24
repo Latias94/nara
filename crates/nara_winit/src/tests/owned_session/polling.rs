@@ -899,22 +899,6 @@ fn input_after_the_full_frame_in_the_same_pump_keeps_capture_invalid() {
     assert_eq!(session.execute(), WinitRunProgress::Retired);
 }
 
-#[cfg(feature = "platform-accessibility")]
-#[test]
-fn accessibility_update_reconciliation_does_not_permanently_block_capture() {
-    let mut app = counted_app(true);
-    accessibility::__private::install_winit_accessibility_contribution(&mut app).unwrap();
-    let mut session = cpu_session(app, WinitControlFlow::Wait);
-    assert_eq!(poll_cpu(&mut session), WinitRunProgress::Running);
-    assert!(session.paused_frame_complete());
-    let before = counts(&session);
-    assert_eq!(poll_cpu(&mut session), WinitRunProgress::Running);
-    assert_eq!(counts(&session), before);
-    assert!(session.paused_frame_complete());
-    session.request_close();
-    assert_eq!(session.execute(), WinitRunProgress::Retired);
-}
-
 #[test]
 fn driver_scope_retains_owned_success_or_rejection_and_the_original_post_fault() {
     for (reject, immediately_close) in [(false, false), (true, false), (false, true), (true, true)]

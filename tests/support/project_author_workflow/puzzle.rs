@@ -4,7 +4,7 @@ use std::{fs, path::Path, time::Instant};
 mod workflow;
 
 use super::process::Output;
-use workflow::{Project, editor, source};
+use workflow::{Project, source};
 
 const SCENE: &str = "scenes/startup.scene.json";
 const DESKTOP_UNSUPPORTED_KEY: char = 'é';
@@ -78,7 +78,11 @@ pub fn accept() {
     source::assert_snapshots(&baseline.stdout, Some(2), 4);
     let game_edit_to_result = game_edit.elapsed();
 
-    let scene_edit = editor::move_pressure_plate(&project.root);
+    let scene_path = project.root.join(SCENE);
+    let original_scene = fs::read(&scene_path).unwrap();
+    let scene_edit = Instant::now();
+    let saved_scene = source::scene_with_pressure_plate_column(&original_scene, 2, 3);
+    fs::write(&scene_path, &saved_scene).unwrap();
     let edited = run_source(&mut project, &puzzle_headless, "keyboard");
     source::assert_snapshots(&edited.stdout, Some(6), 4);
     let scene_edit_to_result = scene_edit.elapsed();
@@ -86,9 +90,11 @@ pub fn accept() {
         fs::read(project.root.join(source::INPUT_MAP)).unwrap(),
         initial_input
     );
-    let scene_path = project.root.join(SCENE);
-    let saved_scene = fs::read(&scene_path).unwrap();
-    fs::write(&scene_path, source::blocked_door_scene(&saved_scene)).unwrap();
+    fs::write(
+        &scene_path,
+        source::scene_with_pressure_plate_column(&saved_scene, 3, 5),
+    )
+    .unwrap();
     let blocked = run_source(&mut project, &puzzle_headless, "keyboard");
     source::assert_snapshots(&blocked.stdout, None, 2);
     fs::write(&scene_path, &saved_scene).unwrap();

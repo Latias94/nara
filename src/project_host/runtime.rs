@@ -7,7 +7,7 @@ use std::{
 };
 
 #[cfg(feature = "runtime-2d")]
-pub(crate) use super::composition::{RuntimeHostPolicyContribution, RuntimePluginOverlay};
+pub(crate) use super::composition::RuntimePluginOverlay;
 use super::runtime_diagnostics::*;
 #[cfg(feature = "runtime-2d")]
 use super::{
@@ -32,17 +32,9 @@ use nara_app::{
     RuntimeObligationLedger, RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement,
     RuntimeState,
 };
-#[cfg(feature = "runtime-2d")]
-use nara_asset::{
-    AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets, SourceHash,
-};
 use nara_diagnostic::{Diagnostic, DiagnosticField, DiagnosticReport, PublicDiagnosticIdentifier};
-#[cfg(feature = "runtime-2d")]
-use nara_ecs::Mut;
 use nara_ecs::{Resource, World};
 use nara_gameplay::{GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandQueue, GameplayCommandSubmission};
-#[cfg(feature = "runtime-2d")]
-use nara_image::ImageAsset;
 #[cfg(feature = "runtime-2d")]
 use nara_reflect::SchemaCompositionFingerprint;
 use nara_reflect::{component_registry, validate_component_registry_authority};
@@ -50,14 +42,12 @@ use nara_scene::{
     SceneComponentBindings, scene_component_bindings, validate_scene_component_bindings_authority,
 };
 use nara_tasks::{TaskScopeCloseReport, TaskShutdownReport};
-#[cfg(feature = "runtime-2d")]
-use nara_tilemap::TileSet;
 
 use super::composition::RuntimeConfigurationPlan;
 use crate::runtime_content::{ProcessedSceneContent, RuntimeContentBase, RuntimeContentError};
 use crate::startup_scene::{SceneSource, materialize_startup_scene};
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(all(test, feature = "runtime-2d"))]
 const PROJECT_MANIFEST: &str = "nara.toml";
 
 mod action;
@@ -100,42 +90,6 @@ pub use source_watch::{
     ProjectSceneWatchState, ProjectSceneWatchStatus,
 };
 
-#[cfg(all(feature = "runtime-2d", feature = "tooling"))]
-mod editor;
-#[cfg(all(feature = "runtime-2d", feature = "tooling"))]
-pub use editor::{
-    AuthoredSchemaUpgradeProposal, AuthoredSchemaUpgradeReview,
-    AuthoredSchemaUpgradeReviewedSource, AuthoredSchemaUpgradeSourceProposal,
-    EditorAuthoredSchemaUpgradeError, EditorAuthoredSchemaUpgradeId,
-    EditorAuthoredSchemaUpgradeInputs, EditorAuthoredSchemaUpgradeOutcome,
-    EditorAuthoredSchemaUpgradePhase, EditorAuthoredSchemaUpgradeSource,
-    EditorAuthoredSchemaUpgradeView, EditorAuthoredUpgradeWorkingSource,
-    EditorExtensionDocumentHostError, EditorInspectedAuthoringSource, EditorPrefabExtractionError,
-    EditorPrefabExtractionId, EditorPrefabExtractionOutcome, EditorPrefabExtractionPhase,
-    EditorPrefabExtractionRequest, EditorPrefabExtractionReview,
-    EditorPrefabExtractionReviewedOutput, EditorPrefabExtractionSelection,
-    EditorPrefabExtractionSelectionDocument, EditorPrefabExtractionView,
-    EditorSchemaOwnerAdoptionError, EditorSchemaOwnerAdoptionFailure, EditorSchemaOwnerAdoptionId,
-    EditorSchemaOwnerAdoptionOutcome, EditorSchemaOwnerAdoptionPhase,
-    EditorSchemaOwnerAdoptionView, EditorSourceAssetDomain, EditorSourceAssetImporters,
-    EditorSourceOperationId, EditorSourceToolArtifactCommitError, EditorSourceToolCommand,
-    EditorSourceToolDefinition, EditorSourceToolIncompleteArtifactRegistrationError,
-    EditorSourceToolIncompleteMember, EditorSourceToolIncompletePublication,
-    EditorSourceToolInstallation, EditorSourceToolInstallationError,
-    EditorSourceToolInstallationInspection, EditorSourceToolInstallationOrphan,
-    EditorSourceToolInstallationOutcome, EditorSourceToolInstallationPlan,
-    EditorSourceToolInstallationReceipt, EditorSourceToolInstalledMember,
-    EditorSourceToolManagedError, EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
-    EditorSourceToolPrefabTemplateFile, EditorSourceToolPrefabTemplateImportRequest,
-    EditorSourceToolPrefabTemplatePublication, EditorSourceToolReleaseError,
-    EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
-    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolArtifacts,
-    PreparedEditorSourceToolInstallations, PreparedEditorSourceToolPrefabTemplateImport,
-    PreparedEditorSourceToolReclamation, PreparedEditorSourceToolRelease,
-    PreparedEditorSourceToolSelection, PreparedEditorSourceToolTemplateImport,
-    PreparedEditorSourceToolWithdrawal,
-};
-
 #[cfg(all(
     feature = "runtime-2d",
     feature = "desktop-winit",
@@ -154,44 +108,6 @@ pub use action::{
     HeadlessRun, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport, HeadlessSession,
     HeadlessSessionClose, HeadlessSessionError,
 };
-#[cfg(all(
-    feature = "runtime-2d",
-    feature = "tooling",
-    feature = "presentation-ui"
-))]
-pub use editor::EditorUiPreviewCandidate;
-#[cfg(all(feature = "tooling", feature = "presentation-2d"))]
-pub use editor::{
-    EditorAcceptedPreview, EditorPresentationError, EditorPresentationImage, EditorPresentedToken,
-    EditorPreviewPresentation,
-};
-#[cfg(all(feature = "runtime-2d", feature = "tooling"))]
-#[doc(hidden)]
-pub use editor::{
-    EditorEditPreparationError, EditorProjectCloseProgress, EditorProjectCloseReceipt,
-    EditorProjectOpenAttempt, EditorProjectOpenError, EditorProjectOpenFailure,
-    EditorProjectOpenFailureImpact, EditorProjectOpenFailureSource, EditorProjectOpenHost,
-    EditorProjectOpenPhase, EditorProjectOpenProgress, EditorProjectOpenTasksCloseReport,
-    EditorProjectSession, EditorSupervisedPlayBinding, EditorSupervisedPlayOwnerError,
-    EditorSupervisedPlayRetirementAck, EditorSupervisedPlayRetirementRequest,
-    SupervisedDesktopSourceAdmissionError, SupervisedDesktopSourceAuthority,
-    TrustedCompiledEditorProjectIntent, admit_supervised_desktop_source_receipt,
-};
-#[cfg(all(
-    feature = "runtime-2d",
-    feature = "tooling",
-    any(feature = "presentation-2d", feature = "presentation-ui")
-))]
-pub use editor::{
-    EditorGameInputBatch, EditorGameInputEnvelope, EditorGameInputEvent, EditorGameStartActivation,
-    EditorGameStartRequest, EditorGameViewBridgeFailure, EditorGameViewCandidate,
-    EditorGameViewCandidateIdentity, EditorGameViewCandidateParts, EditorGameViewCompletion,
-    EditorGameViewCompletionDisposition,
-};
-#[cfg(all(feature = "tooling", feature = "presentation-2d"))]
-pub use editor::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
-#[cfg(all(feature = "runtime-2d", feature = "tooling", feature = "runtime-ui"))]
-pub use editor::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
 
 struct RuntimeStartAttempt {
     owner: Arc<HostStartClaim>,
@@ -1128,17 +1044,6 @@ impl ProjectHost {
     }
 
     #[cfg(feature = "runtime-2d")]
-    fn begin_editor_start(
-        &mut self,
-        snapshot: ProjectContentSnapshot,
-        plan: RuntimePlan,
-        startup_scene: SceneSource,
-        commands: Vec<GameplayCommandSubmission>,
-    ) -> Result<RuntimeStartAttempt, HostFault> {
-        self.begin_start_with_scene(snapshot, plan, startup_scene, commands)
-    }
-
-    #[cfg(feature = "runtime-2d")]
     fn begin_start_with_scene(
         &mut self,
         snapshot: ProjectContentSnapshot,
@@ -2022,153 +1927,6 @@ fn materialize_runtime(
     }
     verify_runtime_component_bindings(world, plan.schema_validation().bindings())?;
     Ok(diagnostics)
-}
-
-#[cfg(feature = "runtime-2d")]
-fn publish_snapshot_assets(
-    world: &mut World,
-    snapshot: &ProjectContentSnapshot,
-) -> Result<(), HostFault> {
-    if snapshot.images().is_empty() && snapshot.tilesets().is_empty() {
-        return Ok(());
-    }
-    if !world.contains_resource::<AssetServer>()
-        || !world.contains_resource::<Assets<ImageAsset>>()
-        || !world.contains_resource::<AssetStates>()
-        || !world.contains_resource::<AssetEvents>()
-    {
-        return Err(HostFault::new(single_error(
-            "project.run.image-resources-missing",
-            "Project runtime image resources are unavailable",
-        )));
-    }
-    if !snapshot.tilesets().is_empty() && !world.contains_resource::<Assets<TileSet>>() {
-        return Err(HostFault::new(single_error(
-            "project.run.tileset-resources-missing",
-            "Project runtime TileSet resources are unavailable",
-        )));
-    }
-
-    let mut publications = Vec::with_capacity(snapshot.images().len());
-    {
-        let mut server = world.resource_mut::<AssetServer>();
-        for (index, content) in snapshot.images().iter().enumerate() {
-            let source = content.source();
-            let record = AssetRecord::new(
-                source.stable_id(),
-                source.path().clone(),
-                AssetSourceKind::Image,
-            );
-            let handle = server.reserve_record::<ImageAsset>(&record).map_err(|_| {
-                HostFault::new(single_error(
-                    "project.run.image-identity-failed",
-                    "Project runtime image identity could not be reserved",
-                ))
-            })?;
-            let image = snapshot.share_image_for_consumer(index).ok_or_else(|| {
-                HostFault::new(single_error(
-                    "project.run.image-snapshot-invalid",
-                    "Project runtime image snapshot is inconsistent",
-                ))
-            })?;
-            publications.push((
-                handle,
-                image,
-                source.source_hash(),
-                source.import_recipe().digest(),
-            ));
-        }
-    }
-
-    world.resource_scope(
-        |world, mut images: Mut<'_, Assets<ImageAsset>>| -> Result<(), HostFault> {
-            world.resource_scope(
-                |world, mut states: Mut<'_, AssetStates>| -> Result<(), HostFault> {
-                    let mut events = world.resource_mut::<AssetEvents>();
-                    for (handle, image, source_hash, import_recipe_digest) in publications {
-                        images
-                            .commit_loaded(
-                                handle,
-                                image,
-                                &mut states,
-                                &mut events,
-                                Some(source_hash),
-                                Some(import_recipe_digest),
-                            )
-                            .map_err(|_| {
-                                HostFault::new(single_error(
-                                    "project.run.image-publication-failed",
-                                    "Project runtime image publication failed",
-                                ))
-                            })?;
-                    }
-                    Ok(())
-                },
-            )
-        },
-    )?;
-    world.insert_resource(snapshot.asset_database().clone());
-    publish_snapshot_tilesets(world, snapshot)?;
-    Ok(())
-}
-
-#[cfg(feature = "runtime-2d")]
-fn publish_snapshot_tilesets(
-    world: &mut World,
-    snapshot: &ProjectContentSnapshot,
-) -> Result<(), HostFault> {
-    if snapshot.tilesets().is_empty() {
-        return Ok(());
-    }
-    if !world.contains_resource::<nara_tilemap::TileSetAssets>() {
-        return Err(HostFault::new(single_error(
-            "project.run.tileset-owner-missing",
-            "Project runtime TileSet publication owner is unavailable",
-        )));
-    }
-    let mut access =
-        nara_ecs::bevy_ecs::system::SystemState::<nara_tilemap::TileSetContent>::new(world);
-    let mut tilesets = access.get_mut(world).map_err(|_| {
-        HostFault::new(single_error(
-            "project.run.tileset-resources-missing",
-            "Project runtime TileSet resources are unavailable",
-        ))
-    })?;
-    let mut handles = Vec::with_capacity(snapshot.tilesets().len());
-    for content in snapshot.tilesets() {
-        let record = AssetRecord::new(
-            content.stable_id(),
-            content.path().clone(),
-            AssetSourceKind::Other(String::from("tileset")),
-        );
-        let handle = tilesets
-            .request(
-                record,
-                content.source().clone(),
-                SourceHash::from_digest(*content.source_hash().as_bytes()),
-                snapshot.asset_resolution().scope(),
-            )
-            .map_err(|_| {
-                HostFault::new(single_error(
-                    "project.run.tileset-request-failed",
-                    "Project runtime TileSet source could not be admitted",
-                ))
-            })?;
-        handles.push(handle);
-    }
-    tilesets.reconcile();
-    if handles.into_iter().any(|handle| {
-        tilesets.error(handle).is_some()
-            || !tilesets
-                .get(handle)
-                .is_some_and(|tileset| tileset.image_content().is_some())
-    }) {
-        return Err(HostFault::new(single_error(
-            "project.run.tileset-publication-failed",
-            "Project runtime TileSet publication failed",
-        )));
-    }
-    Ok(())
 }
 
 fn verify_runtime_component_bindings(

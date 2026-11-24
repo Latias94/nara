@@ -142,7 +142,7 @@ fn action_node<'a>(capture: &'a ProductUiCapture, action: &str) -> &'a SemanticC
 
 fn retry_width(entities: &[nara::scene::SceneEntityRecord], entity_id: &str) -> f64 {
     component_in(entities, entity_id)
-        .value
+        .value()
         .get_path(&ComponentFieldPath::from_fields([
             "style", "width", "value",
         ]))

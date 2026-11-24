@@ -37,11 +37,6 @@ impl AcceptedPrimaryUiSurfaceProfile {
         Self(profile)
     }
 
-    #[cfg(feature = "tooling")]
-    pub(crate) const fn logical_extent(self) -> (u32, u32) {
-        (self.0.logical_width, self.0.logical_height)
-    }
-
     pub(crate) fn logical_size(self) -> Option<UiSize> {
         UiSize::new(self.0.logical_width as f32, self.0.logical_height as f32)
     }

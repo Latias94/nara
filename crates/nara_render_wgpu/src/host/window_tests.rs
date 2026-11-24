@@ -1,7 +1,7 @@
 use super::*;
 use std::time::{Duration, Instant};
 
-#[cfg(all(feature = "editor-imgui", target_os = "windows"))]
+#[cfg(windows)]
 mod native;
 
 #[test]

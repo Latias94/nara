@@ -4,15 +4,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(test)]
-use nara_app::RuntimeGeneration;
-#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
-use nara_material::AlphaMode2d;
-#[cfg(test)]
-use nara_render::{
-    Color, FrameStats, RenderBackendStatus, RenderFrame, RenderFrameSkipReason,
-    RenderFrameSourceGeneration, RenderFrameTarget, RenderTarget, ViewportRect,
-};
 use nara_render::{Extent2d, RenderBackendState, RenderWindowPacket};
 #[cfg(feature = "stock-ui")]
 use nara_ui_render::{
@@ -25,11 +16,7 @@ use nara_window::{
 
 use crate::WgpuRenderError;
 use crate::device::WgpuDeviceOwner;
-#[cfg(test)]
-use crate::frame::{LegacyWgpuCapturedFrame, LegacyWgpuFramePayload};
 use crate::presented::WgpuPresentedFrameReceipt;
-#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
-use crate::quad::create_quad_texture_bind_group_layout;
 use crate::runtime_timing::{
     RuntimeFramePhaseCapture, WgpuNamespacePhase, WgpuNamespaceTimings, WgpuRuntimeFramePhase,
     WgpuRuntimeFrameTimings,
@@ -42,12 +29,6 @@ use crate::surface::{
 use crate::telemetry::{
     WgpuAdapterSummary, WgpuBackendTelemetry, WgpuBackendTelemetryConfig,
     WgpuFrameCompletionSample, WgpuFrameCompletionStats, WgpuGpuResourceStats,
-};
-#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
-use crate::texture::WgpuSpriteTextureCache;
-#[cfg(test)]
-use crate::{
-    PreparedSubmitterDraw, PreparedTargetDraw, WGPU_RENDER_BACKEND, render_acquired_texture,
 };
 
 const TELEMETRY_COMPLETION_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -406,19 +387,6 @@ impl WgpuFrameTransactionStats {
 pub(crate) struct WgpuRenderBackend {
     // Rust drops fields in declaration order. Retire surfaces while their GPU owners are live.
     surfaces: BTreeMap<WindowId, WgpuSurfaceState>,
-    // Private legacy oracle state. Production Canvas and presentation custody belong to the Host.
-    #[cfg(test)]
-    world_canvas: crate::canvas::WorldCanvasCache,
-    #[cfg(test)]
-    world_presentation_guard: Option<nara_render::__private::WorldPresentationGuard>,
-    #[cfg(test)]
-    presented_world: Option<nara_render::__private::PresentedWorldFrame>,
-    #[cfg(test)]
-    world_presentation_target: Option<(RenderWindowPacket, Option<nara_render::WorldCanvasFrame>)>,
-    #[cfg(test)]
-    source_generation: Option<RenderFrameSourceGeneration>,
-    #[cfg(test)]
-    last_frame_index: Option<u64>,
     frame_transaction_stats: WgpuFrameTransactionStats,
     runtime_frame_timings_enabled: bool,
     presented_frame_this_transaction: Option<WgpuPresentedFrameReceipt>,
@@ -428,13 +396,9 @@ pub(crate) struct WgpuRenderBackend {
     #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     stock_quad: StockQuadResources,
     last_error: Option<String>,
-    runtime_execution: bool,
     runtime_close_started: bool,
     runtime_retirement: Option<crate::retirement::WgpuGpuRetirement>,
     resource_budget: Arc<crate::output::OutputBudget>,
-    // Private legacy oracle prefixes; production submitted custody belongs to the Host.
-    #[cfg(test)]
-    resource_prefixes: Vec<crate::WgpuSubmissionPrefix>,
     // Keep the device domain alive through surface/cache field destruction on direct Drop too.
     device_owner: WgpuDeviceOwner,
 }
@@ -463,33 +427,6 @@ impl WgpuRenderBackend {
         &self.resource_budget
     }
 
-    #[cfg(test)]
-    fn retain_resource_prefix(&mut self, prefix: crate::WgpuSubmissionPrefix) {
-        self.resource_prefixes
-            .retain(|prefix| !prefix.is_complete());
-        self.resource_prefixes.push(prefix);
-    }
-
-    #[cfg(test)]
-    fn maintain_resource_prefixes(&mut self) -> Result<(), WgpuRenderError> {
-        for prefix in &self.resource_prefixes {
-            let result = if prefix.callback_abandoned() {
-                prefix.recover_abandoned()
-            } else {
-                prefix.poll()
-            };
-            result.map_err(|error| WgpuRenderError::RetirementPollFailed {
-                message: error.to_string(),
-            })?;
-        }
-        self.resource_prefixes
-            .retain(|prefix| !prefix.is_complete());
-        Ok(())
-    }
-    pub(super) fn begin_runtime_execution(&mut self) {
-        self.runtime_execution = true;
-    }
-
     pub(super) const fn runtime_close_started(&self) -> bool {
         self.runtime_close_started
     }
@@ -511,13 +448,6 @@ impl WgpuRenderBackend {
                     message: error.to_string(),
                 })?
             {
-                return Ok(false);
-            }
-        }
-        #[cfg(test)]
-        {
-            self.maintain_resource_prefixes()?;
-            if !self.resource_prefixes.is_empty() {
                 return Ok(false);
             }
         }
@@ -743,10 +673,6 @@ impl WgpuRenderBackend {
             self.stock_quad.reset_instance_budget();
         }
         self.presented_frame_this_transaction = None;
-        #[cfg(test)]
-        {
-            self.presented_world = None;
-        }
         #[cfg(feature = "stock-ui")]
         self.clear_submitted_ui_facts();
     }
@@ -790,13 +716,6 @@ impl WgpuRenderBackend {
         let window_ids = self.surfaces.keys().copied().collect::<Vec<_>>();
         let retirement_result = self.retire_targets(&window_ids, reason);
         self.device_owner.invalidate_presentations();
-        #[cfg(test)]
-        {
-            self.world_canvas.clear();
-            self.world_presentation_guard = None;
-            self.presented_world = None;
-            self.world_presentation_target = None;
-        }
         #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         {
             self.stock_quad.clear();
@@ -1013,263 +932,6 @@ impl WgpuRenderBackend {
         }
     }
 
-    /// Private legacy Runtime transaction oracle for packet admission and custody tests.
-    #[cfg(test)]
-    pub(super) fn render_packet(
-        &mut self,
-        handles: Option<&BackendWindowHandles>,
-        captured: LegacyWgpuCapturedFrame,
-        #[cfg(feature = "stock-ui")] mut ui_submissions: Option<
-            &mut crate::frame::WgpuUiSubmissionState,
-        >,
-        frame: &mut RenderFrame,
-        stats: &mut FrameStats,
-        status: &mut RenderBackendStatus,
-    ) -> Result<(), WgpuRenderError> {
-        let LegacyWgpuCapturedFrame {
-            topology: packet,
-            payload,
-            app_frame_index,
-            work_started_at,
-        } = captured;
-        let source_generation = packet.source_generation();
-        let world_presentation = nara_render::__private::prepare_world_presentation(
-            &packet,
-            nara_render::WorldInputMapping2d::identity(),
-        );
-        stats.draw_calls = 0;
-        stats.sprites = 0;
-        self.begin_frame_transaction(packet.frame_index(), Some(app_frame_index));
-        let runtime_generation = source_generation.runtime_generation().ok_or_else(|| {
-            WgpuRenderError::ContentRejected {
-                message: "the runtime WGPU backend requires a managed-runtime packet".to_owned(),
-            }
-        })?;
-        if let Err(error) = self.admit_packet(source_generation, packet.frame_index()) {
-            self.frame_transaction_stats.packet_rejections = 1;
-            return Err(error);
-        }
-        self.frame_transaction_stats.packet_admissions = 1;
-        self.fail_if_device_lost()?;
-        status.mark_state(WGPU_RENDER_BACKEND, render_backend_state(self.state()));
-        status.clear_skip();
-
-        self.retire_requested_surfaces()?;
-
-        if self.state() == WgpuBackendState::Unavailable {
-            let message = self
-                .last_error
-                .clone()
-                .unwrap_or_else(|| WgpuRenderError::BackendUnavailable.to_string());
-            frame.mark_skipped();
-            status.mark_unavailable(WGPU_RENDER_BACKEND, message.clone());
-            status.mark_skipped_with_message(
-                frame.index,
-                RenderFrameSkipReason::BackendError,
-                message,
-            );
-            return Err(WgpuRenderError::BackendUnavailable);
-        }
-
-        let RenderFrameTarget::Window(window) = packet.target() else {
-            return Err(WgpuRenderError::ContentRejected {
-                message: "image render targets require the private Editor execution owner"
-                    .to_owned(),
-            });
-        };
-        if self
-            .world_presentation_target
-            .is_some_and(|target| target != (window, packet.world_canvas()))
-        {
-            self.world_presentation_guard = None;
-            self.world_presentation_target = None;
-        }
-        let Some(size) = surface_extent(
-            window.resolution.physical_width,
-            window.resolution.physical_height,
-        ) else {
-            frame.mark_skipped();
-            status.mark_skipped_with_message(
-                frame.index,
-                RenderFrameSkipReason::NoRenderableTarget,
-                "the admitted render target is zero sized",
-            );
-            return Ok(());
-        };
-        if !self.surfaces.contains_key(&window.id) {
-            let Some(handles) = handles else {
-                frame.mark_skipped();
-                status.mark_skipped_with_message(
-                    frame.index,
-                    RenderFrameSkipReason::SurfaceUnavailable,
-                    "backend window handles resource is missing",
-                );
-                return Ok(());
-            };
-            self.ensure_instance()?;
-            if !self.create_surface_if_missing(window, handles, size)? {
-                frame.mark_skipped();
-                status.mark_skipped_with_message(
-                    frame.index,
-                    RenderFrameSkipReason::SurfaceUnavailable,
-                    "the admitted native window target is unavailable",
-                );
-                return Ok(());
-            }
-        }
-        self.ensure_device(window.id, None)?;
-        self.fail_if_device_lost()?;
-        #[cfg(feature = "stock-ui")]
-        if let Some(ui_submissions) = ui_submissions.as_deref_mut() {
-            let backend_generation = nara_ui_render::UiPresentationBackendGeneration::new(
-                self.instance_id(),
-                self.device_epoch(),
-            )
-            .ok_or_else(|| WgpuRenderError::DeviceUnavailable {
-                message: "the initialized WGPU device has no non-zero presentation generation"
-                    .to_owned(),
-            })?;
-            ui_submissions.bind_backend(backend_generation)?;
-        }
-        status.mark_ready(WGPU_RENDER_BACKEND);
-        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-        self.stock_quad.begin_frame(frame.index);
-        self.telemetry
-            .observe_gpu_resources(self.logical_texture_bytes(), 0);
-        self.configure_surface_if_needed(window, size)?;
-        if !self
-            .surfaces
-            .get(&window.id)
-            .is_some_and(WgpuSurfaceState::can_acquire_frame)
-        {
-            frame.mark_skipped();
-            status.mark_skipped_with_message(
-                frame.index,
-                RenderFrameSkipReason::SurfaceUnavailable,
-                "the admitted surface cannot acquire a frame",
-            );
-            return Ok(());
-        }
-        let view_format = self.surface_view_format(window.id)?;
-        #[cfg(feature = "stock-ui")]
-        {
-            let ui = payload.ui_facts(packet.views()[0].target);
-            self.frame_transaction_stats.record_ui_payload(ui);
-        }
-        self.maintain_resource_prefixes()?;
-        if self.resource_prefixes.len() >= 256 {
-            return Err(WgpuRenderError::UploadDeferred {
-                message: "the original stock submission custody is at capacity".into(),
-            });
-        }
-        self.resource_prefixes.try_reserve_exact(1).map_err(|_| {
-            WgpuRenderError::UploadDeferred {
-                message: "the original stock prefix observation could not reserve storage".into(),
-            }
-        })?;
-        let (device, queue) = self
-            .device_owner
-            .device_queue()
-            .ok_or(WgpuRenderError::BackendNotReady)?;
-        let (device, queue) = (device.clone(), queue.clone());
-        let resource_budget = Arc::clone(&self.resource_budget);
-        let mut reservation =
-            crate::submission::WgpuSubmissionReservation::new(&device, &queue, payload.clone());
-        let mut native_work = crate::WgpuNativeWorkStats::default();
-        let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut preparation = crate::preparation::NativePreparation::new(
-                &device,
-                &queue,
-                &resource_budget,
-                &mut reservation,
-                &mut native_work,
-            );
-            let mut draw = match self.prepare_target_draw(
-                view_format,
-                &packet,
-                &payload,
-                frame.index,
-                &mut preparation,
-            ) {
-                Ok(draw) => draw,
-                Err(error) => {
-                    self.telemetry
-                        .observe_gpu_resources(self.logical_texture_bytes(), 0);
-                    return Err(error);
-                }
-            };
-            let submitted_texture_bytes = self.logical_texture_bytes();
-            let submitted_instance_buffer_bytes = draw.instance_buffer_bytes();
-            #[cfg(feature = "stock-ui")]
-            let submitted_frame_facts = WgpuSubmittedFrameFacts::new(
-                app_frame_index,
-                packet.frame_index(),
-                draw.sprites,
-                draw.image_sprites,
-                submitted_texture_bytes,
-                submitted_instance_buffer_bytes,
-            );
-            #[cfg(feature = "stock-ui")]
-            let submitted_ui_facts = ui_submissions
-                .as_deref()
-                .map(|ui_submissions| {
-                    Self::prepare_submitted_ui_facts(
-                        ui_submissions.bound_submissions(),
-                        &draw.ui_packets,
-                        submitted_frame_facts,
-                    )
-                })
-                .transpose()?;
-            self.telemetry
-                .observe_gpu_resources(submitted_texture_bytes, submitted_instance_buffer_bytes);
-            let presented = self.render_window(
-                window.id,
-                &mut draw,
-                runtime_generation,
-                app_frame_index,
-                packet.frame_index(),
-                work_started_at,
-            );
-            self.telemetry.finish_prepared_gpu_resources();
-            let presented = presented?;
-
-            if let Some(presented) = presented {
-                self.presented_frame_this_transaction = Some(presented);
-                self.world_presentation_guard = None;
-                if let Some((snapshot, guard)) = world_presentation {
-                    self.device_owner.retain_presentation(guard.revoker());
-                    guard.mark_presented();
-                    self.world_presentation_guard = Some(guard);
-                    self.presented_world = Some(snapshot);
-                    self.world_presentation_target = Some((window, packet.world_canvas()));
-                }
-                #[cfg(feature = "stock-ui")]
-                if let Some(facts) = submitted_ui_facts {
-                    self.publish_submitted_ui_facts(facts);
-                }
-                stats.draw_calls = draw.draw_calls;
-                stats.sprites = draw.sprites;
-                frame.mark_submitted();
-            } else {
-                frame.mark_skipped();
-                status.mark_skipped_with_message(
-                    frame.index,
-                    RenderFrameSkipReason::SurfaceUnavailable,
-                    "the admitted surface did not produce a presentable frame",
-                );
-            }
-            Ok(())
-        }));
-        self.record_native_work(native_work);
-        // The stock window route submits internally. Bind its original prefix on success and
-        // every failed/panicking preparation, including uploads before a surface became lost.
-        self.retain_resource_prefix(reservation.bind_current_prefix());
-        match prepared {
-            Ok(result) => result,
-            Err(payload) => std::panic::resume_unwind(payload),
-        }
-    }
-
     #[cfg(feature = "stock-ui")]
     pub(crate) fn prepare_submitted_ui_facts(
         submissions: &[nara_ui_render::__private::UiSubmittedBackendSubmission],
@@ -1330,32 +992,6 @@ impl WgpuRenderBackend {
         // Move that buffer through publication; extend would allocate again after acceptance.
         debug_assert!(self.submitted_ui_facts.is_empty());
         self.submitted_ui_facts = facts;
-    }
-
-    #[cfg(test)]
-    pub(super) fn admit_packet(
-        &mut self,
-        generation: RenderFrameSourceGeneration,
-        frame_index: u64,
-    ) -> Result<(), WgpuRenderError> {
-        if let Some(expected) = self.source_generation {
-            if expected != generation {
-                return Err(WgpuRenderError::StaleFrameGeneration {
-                    expected,
-                    actual: generation,
-                });
-            }
-        } else {
-            self.source_generation = Some(generation);
-        }
-        if self
-            .last_frame_index
-            .is_some_and(|last_frame_index| frame_index <= last_frame_index)
-        {
-            return Err(WgpuRenderError::FrameAlreadyConsumed { frame_index });
-        }
-        self.last_frame_index = Some(frame_index);
-        Ok(())
     }
 
     pub(super) fn reject_editor_packet(&mut self) {
@@ -1447,11 +1083,6 @@ impl WgpuRenderBackend {
         self.stock_quad.reserve_instance_buffer_bytes(bytes)
     }
 
-    #[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
-    pub(crate) fn set_instance_budget_limit(&mut self, maximum: u64) {
-        self.stock_quad.set_instance_budget_limit(maximum);
-    }
-
     pub(super) fn record_editor_window_presentation(&mut self) {
         self.frame_transaction_stats.queue_submissions = self
             .frame_transaction_stats
@@ -1486,7 +1117,7 @@ impl WgpuRenderBackend {
     }
 
     fn retain_runtime_retirement(&mut self) -> Result<(), WgpuRenderError> {
-        if self.runtime_execution && self.runtime_retirement.is_none() {
+        if self.runtime_retirement.is_none() {
             let (device, queue) = self
                 .device_owner
                 .device_queue()
@@ -1530,13 +1161,6 @@ impl WgpuRenderBackend {
         window_id: WindowId,
         reason: SurfaceDropReason,
     ) -> Result<(), WgpuRenderError> {
-        #[cfg(test)]
-        {
-            self.world_canvas.clear();
-            self.world_presentation_guard = None;
-            self.presented_world = None;
-            self.world_presentation_target = None;
-        }
         if self
             .presented_frame_this_transaction
             .is_some_and(|receipt| receipt.window_id() == window_id)
@@ -1547,93 +1171,6 @@ impl WgpuRenderBackend {
             return Ok(());
         };
         surface.retire(reason)
-    }
-
-    /// Private legacy surface oracle reached only through the test-only packet executor.
-    #[cfg(test)]
-    fn render_window(
-        &mut self,
-        window_id: WindowId,
-        draw: &mut PreparedTargetDraw,
-        runtime_generation: RuntimeGeneration,
-        app_frame_index: u64,
-        render_transaction_frame_index: u64,
-        work_started_at: std::time::Instant,
-    ) -> Result<Option<WgpuPresentedFrameReceipt>, WgpuRenderError> {
-        let backend_instance_id = self.instance_id();
-        let device_epoch = self.device_epoch();
-        let (device, queue) = self
-            .device_owner
-            .device_queue()
-            .ok_or(WgpuRenderError::BackendNotReady)?;
-        let (device, queue) = (device.clone(), queue.clone());
-        let surface_state = self
-            .surfaces
-            .get_mut(&window_id)
-            .ok_or(WgpuRenderError::SurfaceMissing { window_id })?;
-        let surface_generation = surface_state
-            .surface_generation()
-            .ok_or(WgpuRenderError::SurfaceMissing { window_id })?;
-        let presented_receipt = || {
-            WgpuPresentedFrameReceipt::new(
-                runtime_generation,
-                window_id,
-                surface_generation,
-                backend_instance_id,
-                device_epoch,
-                app_frame_index,
-                render_transaction_frame_index,
-            )
-        };
-
-        self.frame_transaction_stats.surface_acquire_attempts += 1;
-        match surface_state.surface(window_id)?.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(texture) => {
-                self.frame_transaction_stats.surface_acquires += 1;
-                render_acquired_texture(&device, &queue, window_id, surface_state, texture, draw)?;
-                if let Some(completion) = self.telemetry.begin_frame_submission(
-                    app_frame_index,
-                    render_transaction_frame_index,
-                    device_epoch,
-                    work_started_at,
-                ) {
-                    queue.on_submitted_work_done(move || completion.complete());
-                }
-                self.frame_transaction_stats.queue_submissions += 1;
-                self.frame_transaction_stats.presents += 1;
-                Ok(Some(presented_receipt()))
-            }
-            wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
-                self.frame_transaction_stats.surface_acquires += 1;
-                render_acquired_texture(&device, &queue, window_id, surface_state, texture, draw)?;
-                if let Some(completion) = self.telemetry.begin_frame_submission(
-                    app_frame_index,
-                    render_transaction_frame_index,
-                    device_epoch,
-                    work_started_at,
-                ) {
-                    queue.on_submitted_work_done(move || completion.complete());
-                }
-                self.frame_transaction_stats.queue_submissions += 1;
-                self.frame_transaction_stats.presents += 1;
-                surface_state.dirty = true;
-                Ok(Some(presented_receipt()))
-            }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                Ok(None)
-            }
-            wgpu::CurrentSurfaceTexture::Outdated => {
-                surface_state.dirty = true;
-                Ok(None)
-            }
-            wgpu::CurrentSurfaceTexture::Lost => {
-                self.retire_surface(window_id, SurfaceDropReason::SurfaceOrDeviceLost)?;
-                Ok(None)
-            }
-            wgpu::CurrentSurfaceTexture::Validation => {
-                Err(WgpuRenderError::SurfaceValidation { window_id })
-            }
-        }
     }
 
     fn create_surface_if_missing(
@@ -1703,173 +1240,6 @@ impl WgpuRenderBackend {
         Ok(config.format.add_srgb_suffix())
     }
 
-    /// Private legacy draw oracle for native readback, Canvas and resource-budget comparisons.
-    #[cfg(test)]
-    pub(super) fn prepare_target_draw(
-        &mut self,
-        format: wgpu::TextureFormat,
-        packet: &nara_render::RenderFramePacket,
-        payload: &LegacyWgpuFramePayload,
-        frame_index: u64,
-        preparation: &mut crate::preparation::NativePreparation<'_>,
-    ) -> Result<PreparedTargetDraw, WgpuRenderError> {
-        let mut canvas_cache = std::mem::take(&mut self.world_canvas);
-        let result = self.prepare_target_draw_with_canvas_cache(
-            format,
-            packet,
-            payload,
-            frame_index,
-            &mut canvas_cache,
-            preparation,
-        );
-        self.world_canvas = canvas_cache;
-        result
-    }
-
-    #[cfg(test)]
-    pub(super) fn prepare_target_draw_with_canvas_cache(
-        &mut self,
-        format: wgpu::TextureFormat,
-        packet: &nara_render::RenderFramePacket,
-        payload: &LegacyWgpuFramePayload,
-        frame_index: u64,
-        canvas_cache: &mut crate::canvas::WorldCanvasCache,
-        preparation: &mut crate::preparation::NativePreparation<'_>,
-    ) -> Result<PreparedTargetDraw, WgpuRenderError> {
-        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-        let lowered_views = packet
-            .views()
-            .iter()
-            .enumerate()
-            .map(|(index, view)| {
-                payload.lower_draw(
-                    view.target,
-                    view.viewport,
-                    Some(index),
-                    crate::view_uniform::WgpuViewUniform::capture(view, packet.captured_time()),
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        #[cfg(feature = "stock-ui")]
-        let (ui_viewport, lowered_ui) = {
-            let viewport = ViewportRect::from_extent(packet.target().extent())
-                .expect("admitted target extent");
-            (
-                viewport,
-                payload.lower_draw(
-                    packet.views()[0].target,
-                    viewport,
-                    None,
-                    crate::view_uniform::WgpuViewUniform::manual(viewport),
-                )?,
-            )
-        };
-        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-        {
-            let draws = lowered_views.iter();
-            #[cfg(feature = "stock-ui")]
-            let draws = draws.chain(std::iter::once(&lowered_ui));
-            let device = self
-                .device_owner
-                .device_queue()
-                .ok_or(WgpuRenderError::BackendNotReady)?
-                .0;
-            let draws_for_limits = lowered_views.iter();
-            #[cfg(feature = "stock-ui")]
-            let draws_for_limits = draws_for_limits.chain(std::iter::once(&lowered_ui));
-            self.stock_quad.preflight_material_device_limits(
-                draws_for_limits.flat_map(|draw| draw.batches.iter()),
-                &device.limits(),
-            )?;
-            self.stock_quad
-                .preflight_image_residency(draws.flat_map(|draw| draw.batches.iter()))?;
-            let draws = lowered_views.iter();
-            #[cfg(feature = "stock-ui")]
-            let draws = draws.chain(std::iter::once(&lowered_ui));
-            let cost = crate::stock_quad::StockPreparationCost::for_batches(
-                draws.flat_map(|draw| draw.batches.iter()),
-            )
-            .map_err(|error| WgpuRenderError::ContentRejected {
-                message: error.to_string(),
-            })?;
-            let metadata = cost
-                .modeled_metadata_bytes
-                .checked_add(
-                    crate::submission::WgpuSubmissionReservation::modeled_retain_bytes::<
-                        PreparedTargetDraw,
-                    >() + std::mem::size_of::<PreparedTargetDraw>(),
-                )
-                .ok_or_else(|| WgpuRenderError::ContentRejected {
-                    message: "stock native metadata cannot be represented".into(),
-                })?;
-            if metadata > crate::GraphLimits::default().max_modeled_metadata_bytes {
-                return Err(WgpuRenderError::ContentRejected {
-                    message: "stock native metadata exceeds the candidate allowance".into(),
-                });
-            }
-            // Image execution also retains the final complete draw before its queue submit.
-            // Reserve that owning record together with all known per-batch uses, not after
-            // preparation or instance-budget commit. Window execution may leave it unused.
-            let entries = cost.custody_entries.checked_add(1).ok_or_else(|| {
-                WgpuRenderError::ContentRejected {
-                    message: "stock submission custody count cannot be represented".into(),
-                }
-            })?;
-            preparation.reserve_entries(entries)?;
-        }
-        let mut prepared = PreparedTargetDraw::default();
-        let world_format = if let Some(canvas) = packet.world_canvas() {
-            prepared.canvas = Some(
-                canvas_cache.prepare(
-                    self.device_owner
-                        .device_queue()
-                        .ok_or(WgpuRenderError::BackendNotReady)?
-                        .0,
-                    self.device_epoch(),
-                    packet.source_generation(),
-                    format,
-                    canvas,
-                    packet.views().len(),
-                )?,
-            );
-            prepared.draw_calls = 1;
-            crate::canvas::WORLD_CANVAS_FORMAT
-        } else {
-            canvas_cache.clear();
-            format
-        };
-        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-        for (view, lowered_draw) in packet.views().iter().zip(lowered_views) {
-            let draw = self.prepare_submitter_draw_lowered(
-                world_format,
-                lowered_draw,
-                frame_index,
-                preparation,
-            )?;
-            prepared.push(view.viewport, view.load, draw);
-        }
-        #[cfg(not(any(feature = "stock-sprite", feature = "stock-ui")))]
-        for (index, view) in packet.views().iter().enumerate() {
-            let draw = self.prepare_submitter_draw(
-                world_format,
-                view.target,
-                view.viewport,
-                Some(index),
-                payload,
-                frame_index,
-                preparation,
-            )?;
-            prepared.push(view.viewport, view.load, draw);
-        }
-        #[cfg(feature = "stock-ui")]
-        {
-            let draw =
-                self.prepare_submitter_draw_lowered(format, lowered_ui, frame_index, preparation)?;
-            prepared.push(ui_viewport, nara_render::ViewLoadOp::Load, draw);
-        }
-        Ok(prepared)
-    }
-
     pub(super) fn retain_editor_world_presentation(
         &self,
         view: crate::host::WgpuRenderProducerId,
@@ -1882,75 +1252,15 @@ impl WgpuRenderBackend {
         self.device_owner.retire_editor_presentation(view);
     }
 
-    #[cfg(test)]
-    pub(crate) fn with_probe_device(device: wgpu::Device, queue: wgpu::Queue) -> Self {
-        let mut backend = Self::default();
-        backend.device_owner.install_probe_device(device, queue);
-        backend
-    }
-
-    #[cfg(test)]
-    pub(super) fn prepare_submitter_draw(
-        &mut self,
-        view_format: wgpu::TextureFormat,
-        target: RenderTarget,
-        viewport: ViewportRect,
-        view_index: Option<usize>,
-        payload: &LegacyWgpuFramePayload,
-        frame_index: u64,
-        preparation: &mut crate::preparation::NativePreparation<'_>,
-    ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
-        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-        {
-            let lowered = payload.lower_draw(
-                target,
-                viewport,
-                view_index,
-                crate::view_uniform::WgpuViewUniform::manual(viewport),
-            )?;
-            self.prepare_submitter_draw_lowered(view_format, lowered, frame_index, preparation)
-        }
-        #[cfg(not(any(feature = "stock-sprite", feature = "stock-ui")))]
-        {
-            let _ = (
-                view_format,
-                target,
-                viewport,
-                view_index,
-                payload,
-                frame_index,
-                preparation,
-            );
-            Ok(PreparedSubmitterDraw::default())
-        }
-    }
-
-    #[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
-    fn prepare_submitter_draw_lowered(
-        &mut self,
-        view_format: wgpu::TextureFormat,
-        lowered: crate::frame::WgpuLoweredFrameDraw,
-        frame_index: u64,
-        preparation: &mut crate::preparation::NativePreparation<'_>,
-    ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
-        let owner = &self.device_owner;
-        self.stock_quad.prepare(
-            preparation,
-            || owner.fail_if_device_lost(),
-            view_format,
-            lowered,
-            frame_index,
-        )
-    }
-
     pub(crate) fn logical_texture_bytes(&self) -> u64 {
         #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-        let images = self.stock_quad.logical_texture_bytes();
+        {
+            self.stock_quad.logical_texture_bytes()
+        }
         #[cfg(not(any(feature = "stock-sprite", feature = "stock-ui")))]
-        let images: u64 = 0;
-        #[cfg(test)]
-        let images = images.saturating_add(self.world_canvas.logical_bytes());
-        images
+        {
+            0
+        }
     }
 
     pub(super) fn mark_error(&mut self, error: &WgpuRenderError) -> String {
@@ -1978,8 +1288,6 @@ pub(super) fn render_backend_state(state: WgpuBackendState) -> RenderBackendStat
     }
 }
 
-#[cfg(all(test, feature = "stock-sprite", feature = "stock-ui"))]
-mod image_working_set;
 #[cfg(test)]
 mod tests {
     use std::{num::NonZeroU64, sync::Arc};
@@ -1988,17 +1296,25 @@ mod tests {
         App, RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeClosePolicy,
         RuntimeGeneration, RuntimeObligationLedger,
     };
-    use nara_ecs::Entity;
-    use nara_render::{
-        ExtractedView, ExtractedViews, RenderTarget, ViewportRect, build_render_frame_packet,
-    };
-    use nara_window::Window;
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+    use nara_material::AlphaMode2d;
     use nara_window::backend::{WindowHandleProvider, WindowTargetPhase};
     use raw_window_handle::{
         DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
     };
 
     use super::*;
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+    use crate::quad::create_quad_texture_bind_group_layout;
+
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+    fn backend_with_probe_device(device: &wgpu::Device, queue: &wgpu::Queue) -> WgpuRenderBackend {
+        let mut backend = WgpuRenderBackend::default();
+        backend
+            .device_owner
+            .install_probe_device(device.clone(), queue.clone());
+        backend
+    }
 
     #[derive(Debug)]
     struct TestWindowSource;
@@ -2327,8 +1643,7 @@ mod tests {
         };
 
         let (predecessor_namespace, prefix) = gpu.with_preparation(|preparation| {
-            let mut predecessor =
-                WgpuRenderBackend::with_probe_device(gpu.device.clone(), gpu.queue.clone());
+            let mut predecessor = backend_with_probe_device(&gpu.device, &gpu.queue);
             let _binding = predecessor.stock_quad.textures_mut().bind_group(
                 preparation,
                 &layout,
@@ -2353,8 +1668,7 @@ mod tests {
 
         // The test-owned Device is deliberately shared. Runtime-local backend identity and cache
         // ownership must remain fresh even when a process parent outlives the predecessor.
-        let replacement =
-            WgpuRenderBackend::with_probe_device(gpu.device.clone(), gpu.queue.clone());
+        let replacement = backend_with_probe_device(&gpu.device, &gpu.queue);
         let replacement_namespace = (replacement.instance_id(), replacement.device_epoch());
         assert_ne!(replacement_namespace, predecessor_namespace);
         assert_eq!(
@@ -2380,8 +1694,7 @@ mod tests {
         };
         let (_, (mut backend, old_binding)) =
             render_to_rgba(|device, queue, _, _, _, preparation| {
-                let mut backend =
-                    WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
+                let mut backend = backend_with_probe_device(device, queue);
                 let layout = create_quad_texture_bind_group_layout(device)?;
                 let binding = backend
                     .stock_quad
@@ -2472,143 +1785,12 @@ mod tests {
         generation
     }
 
-    fn test_packet(generation: RuntimeGeneration, frame_index: u64) -> LegacyWgpuCapturedFrame {
-        let window = Window::default();
-        let mut views = ExtractedViews::default();
-        views.push(ExtractedView {
-            id: nara_render::RenderViewId::try_acquire().unwrap(),
-            camera_entity: Entity::from_raw_u32(1).unwrap(),
-            target: RenderTarget::PrimaryWindow,
-            viewport: ViewportRect::new(0, 0, 1280, 720).unwrap(),
-            mapping: nara_render::ViewMapping2d::orthographic(
-                nara_core::Mat3::IDENTITY,
-                720.0,
-                ViewportRect::new(0, 0, 1280, 720).unwrap(),
-            )
-            .unwrap(),
-            order: 0,
-            load: nara_render::ViewLoadOp::Clear(Color::BLACK),
-        });
-        let topology = build_render_frame_packet(
-            generation,
-            frame_index,
-            Some(WindowId::PRIMARY),
-            [&window],
-            &views,
-        )
-        .unwrap()
-        .unwrap();
-        LegacyWgpuCapturedFrame {
-            topology,
-            payload: LegacyWgpuFramePayload::default(),
-            app_frame_index: frame_index,
-            work_started_at: std::time::Instant::now(),
-        }
-    }
-
-    fn render_packet_without_surface(
-        backend: &mut WgpuRenderBackend,
-        packet: LegacyWgpuCapturedFrame,
-    ) -> Result<(), WgpuRenderError> {
-        let mut frame = RenderFrame {
-            index: packet.topology.frame_index(),
-            state: nara_render::RenderFrameState::Rendering,
-        };
-        #[cfg(feature = "stock-ui")]
-        let mut ui_submissions = crate::frame::WgpuUiSubmissionState::Prepared(Vec::new());
-        backend.render_packet(
-            None,
-            packet,
-            #[cfg(feature = "stock-ui")]
-            Some(&mut ui_submissions),
-            &mut frame,
-            &mut FrameStats::default(),
-            &mut RenderBackendStatus::default(),
-        )
-    }
-
     #[test]
     fn backend_starts_without_surfaces_or_native_state() {
         let backend = WgpuRenderBackend::default();
         assert_eq!(backend.state(), WgpuBackendState::Uninitialized);
         assert_eq!(backend.surface_count(), 0);
         assert_eq!(backend.last_error(), None);
-    }
-
-    #[test]
-    fn render_packet_rejects_stale_generation_and_repeat_with_zero_surface_work() {
-        let (mut backend, handles) = backend_with_lease_only_surface(WindowId::PRIMARY);
-        let generation = test_runtime_generation();
-        let stale_generation = test_runtime_generation();
-        let surface_generation = handles
-            .snapshot(WindowId::PRIMARY)
-            .unwrap()
-            .surface_generation;
-
-        backend.source_generation = Some(generation.into());
-        backend.last_frame_index = Some(10);
-        let stale_error =
-            render_packet_without_surface(&mut backend, test_packet(stale_generation, 12))
-                .unwrap_err();
-        assert!(matches!(
-            stale_error,
-            WgpuRenderError::StaleFrameGeneration { .. }
-        ));
-        crate::handle_wgpu_render_error(
-            &mut backend,
-            stale_error,
-            12,
-            &mut RenderBackendStatus::default(),
-        );
-        assert_eq!(
-            backend.frame_transaction_stats(),
-            WgpuFrameTransactionStats {
-                app_frame_index: Some(12),
-                render_transaction_frame_index: Some(12),
-                packet_rejections: 1,
-                ..WgpuFrameTransactionStats::default()
-            }
-        );
-        assert_eq!(backend.surface_count(), 1);
-        assert_eq!(
-            handles
-                .snapshot(WindowId::PRIMARY)
-                .unwrap()
-                .surface_generation,
-            surface_generation
-        );
-
-        let repeat_error =
-            render_packet_without_surface(&mut backend, test_packet(generation, 10)).unwrap_err();
-        assert!(matches!(
-            repeat_error,
-            WgpuRenderError::FrameAlreadyConsumed { frame_index: 10 }
-        ));
-        crate::handle_wgpu_render_error(
-            &mut backend,
-            repeat_error,
-            10,
-            &mut RenderBackendStatus::default(),
-        );
-        assert_eq!(
-            backend.frame_transaction_stats(),
-            WgpuFrameTransactionStats {
-                app_frame_index: Some(10),
-                render_transaction_frame_index: Some(10),
-                packet_rejections: 1,
-                ..WgpuFrameTransactionStats::default()
-            }
-        );
-        assert_eq!(backend.surface_count(), 1);
-        assert_eq!(backend.state(), WgpuBackendState::Uninitialized);
-        assert_eq!(backend.last_error(), None);
-        assert!(backend.device_owner.instance().is_err());
-        assert!(backend.device_owner.ready().is_err());
-        assert!(backend.device_owner.device_queue().is_none());
-        let snapshot = handles.snapshot(WindowId::PRIMARY).unwrap();
-        assert!(snapshot.surface_active);
-        assert_eq!(snapshot.surface_generation, surface_generation);
-        assert!(snapshot.provider_present);
     }
 
     #[test]
@@ -2771,36 +1953,14 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_backend_rejects_an_admitted_frame() {
-        let generation = test_runtime_generation();
-        let mut backend = WgpuRenderBackend {
-            source_generation: Some(generation.into()),
-            last_error: Some("device lost".to_owned()),
-            ..WgpuRenderBackend::default()
-        };
-        backend.device_owner.mark_unavailable();
-
-        assert_eq!(
-            render_packet_without_surface(&mut backend, test_packet(generation, 1)),
-            Err(WgpuRenderError::BackendUnavailable)
-        );
-        assert_eq!(backend.state(), WgpuBackendState::Unavailable);
-        assert_eq!(backend.last_error(), Some("device lost"));
-    }
-
-    #[test]
     #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
     fn original_runtime_queue_retires_after_namespace_cleanup_without_telemetry() {
         for destroy_device in [false, true] {
             let mut backend = WgpuRenderBackend::default();
-            backend.begin_runtime_execution();
-            let epoch = backend.device_owner.acquire(None, None).unwrap().unwrap();
-            backend.telemetry.begin_device_epoch(epoch);
-            // This is the same pre-upload custody operation used by ensure_device.
-            backend.retain_runtime_retirement().unwrap();
+            let namespace = backend.prepare_image_device().unwrap();
             assert!(backend.runtime_retirement.is_some());
             assert!(!backend.frame_completion_stats().enabled());
-            let (device, queue) = backend.device_owner.device_queue().unwrap();
+            let (device, queue) = (&namespace.device, &namespace.queue);
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("original-runtime-retirement-work"),
                 size: 4096,
@@ -2815,6 +1975,7 @@ mod tests {
             if destroy_device {
                 device.destroy();
             }
+            drop(namespace);
             backend.mark_error(&WgpuRenderError::DeviceLost);
             assert!(backend.device_owner.device_queue().is_none());
             assert!(backend.runtime_retirement.is_some());

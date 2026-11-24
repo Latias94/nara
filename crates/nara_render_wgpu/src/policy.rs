@@ -40,14 +40,6 @@ pub trait WgpuRenderPolicy: Send + Sync + 'static {
         WgpuDeviceRequirements::default()
     }
 
-    /// Selects the original CPU temporal clock retained by this capture, if any.
-    /// It is evaluated at input admission, never through a later installed policy.
-    /// Return the clone frozen with the domain's semantic sample, not a clone of a later current
-    /// owner. Admission must not refresh a pre-discontinuity capture's semantic revision.
-    fn history_lineage(&self, _capture: &Self::Capture) -> Option<crate::WgpuHistoryLineage> {
-        None
-    }
-
     /// Declares the mapping from final-target physical pixels to original packet-target pixels.
     /// It is evaluated once at original capture admission and retained across reconstruction.
     /// Return `None` when this policy does not provide World picking for its output.
@@ -231,22 +223,14 @@ impl<P: WgpuRenderPolicy> WgpuPolicyInstallation<P> {
         if !self.is_open() {
             return Err(WgpuRenderProgramError::PolicyClosed);
         }
-        let (lineage, world_input_mapping) =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                (
-                    self.definition.0.policy.history_lineage(&capture),
-                    self.definition.0.policy.world_input_mapping(&capture),
-                )
-            }))
-            .map_err(|_| WgpuRenderProgramError::PolicyPanicked)?;
-        if let Some(lineage) = &lineage {
-            lineage.validate_current()?;
-        }
+        let world_input_mapping = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.definition.0.policy.world_input_mapping(&capture)
+        }))
+        .map_err(|_| WgpuRenderProgramError::PolicyPanicked)?;
         Ok(Arc::new(TypedPolicyCapture::<P> {
             admission: Arc::clone(&self.admission),
             definition: Arc::clone(&self.definition.0),
             capture,
-            lineage,
             world_input_mapping,
         }))
     }
@@ -257,7 +241,6 @@ impl<P: WgpuRenderPolicy> WgpuPolicyInstallation<P> {
 pub struct WgpuRenderInput {
     pub(crate) packet: Arc<RenderFramePacket>,
     pub(crate) capture: Arc<dyn CapturedPolicy>,
-    pub(crate) lineage: Option<crate::WgpuHistoryLineage>,
 }
 
 impl std::fmt::Debug for WgpuRenderInput {
@@ -278,17 +261,9 @@ impl WgpuRenderInput {
     ) -> Result<Self, WgpuRenderProgramError> {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| capture.validate(&packet)))
             .unwrap_or(Err(WgpuRenderProgramError::PolicyPanicked))?;
-        let lineage = capture.lineage().cloned();
-        if lineage
-            .as_ref()
-            .is_some_and(|lineage| lineage.source_generation() != packet.source_generation())
-        {
-            return Err(WgpuRenderProgramError::HistoryDeclaration);
-        }
         Ok(Self {
             packet: Arc::new(packet),
             capture,
-            lineage,
         })
     }
 
@@ -321,7 +296,6 @@ impl WgpuRenderInput {
     }
 
     /// Preserves the exact captured meaning while adapting an equal-sized window to an image.
-    /// It neither refreshes the frozen history revision nor revives a discontinued capture.
     pub fn with_image_target(
         &self,
         target: RenderImagePacket,
@@ -337,7 +311,6 @@ impl WgpuRenderInput {
         Ok(Self {
             packet: Arc::new(packet),
             capture: Arc::clone(&self.capture),
-            lineage: self.lineage.clone(),
         })
     }
 
@@ -357,43 +330,9 @@ pub struct WgpuPolicyBindingContext<'a> {
     pub(crate) requirements: &'a WgpuDeviceRequirements,
     pub(crate) resolutions: &'a mut FeatureResolutions,
     pub(crate) staged: &'a mut StagedFeatureBindings,
-    pub(crate) packet: &'a RenderFramePacket,
-    pub(crate) history: &'a mut crate::history::HistoryDeclarations,
-    pub(crate) temporal: bool,
 }
 
 impl WgpuPolicyBindingContext<'_> {
-    /// Declares one texture slot before the complete predecessor basis is pinned.
-    pub fn history_texture<S: 'static, F: WgpuRenderFeature>(
-        &mut self,
-        view: &crate::WgpuHistoryView,
-        feature: &WgpuFeatureDeclaration<F>,
-        slot: u64,
-        descriptor: crate::WgpuProgramTextureDescriptor,
-    ) -> Result<crate::WgpuHistoryTexture<S>, WgpuRenderProgramError> {
-        if !self.temporal {
-            return Err(WgpuRenderProgramError::HistoryDeclaration);
-        }
-        self.feature(feature)?;
-        self.history
-            .texture(self.packet, view, feature, slot, descriptor)
-    }
-
-    pub fn history_buffer<S: 'static, F: WgpuRenderFeature>(
-        &mut self,
-        view: &crate::WgpuHistoryView,
-        feature: &WgpuFeatureDeclaration<F>,
-        slot: u64,
-        descriptor: wgpu::BufferDescriptor<'static>,
-    ) -> Result<crate::WgpuHistoryBuffer<S>, WgpuRenderProgramError> {
-        if !self.temporal {
-            return Err(WgpuRenderProgramError::HistoryDeclaration);
-        }
-        self.feature(feature)?;
-        self.history
-            .buffer(self.packet, view, feature, slot, descriptor)
-    }
-
     pub fn feature<F: WgpuRenderFeature>(
         &mut self,
         declaration: &WgpuFeatureDeclaration<F>,
@@ -473,7 +412,6 @@ impl WgpuPolicyBindingContext<'_> {
 pub struct WgpuPolicyBuildContext<'a> {
     pub(crate) packet: &'a RenderFramePacket,
     pub(crate) format: wgpu::TextureFormat,
-    pub(crate) history: Option<&'a crate::history::PreparedHistory>,
 }
 
 impl<'a> WgpuPolicyBuildContext<'a> {
@@ -485,42 +423,6 @@ impl<'a> WgpuPolicyBuildContext<'a> {
     #[must_use]
     pub const fn format(&self) -> wgpu::TextureFormat {
         self.format
-    }
-
-    pub fn previous_texture<S: 'static>(
-        &self,
-        slot: &crate::WgpuHistoryTexture<S>,
-    ) -> Result<Option<crate::WgpuProgramTextureOutput<S>>, WgpuRenderProgramError> {
-        self.history
-            .ok_or(WgpuRenderProgramError::HistoryDeclaration)?
-            .previous_texture(slot)
-    }
-
-    pub fn previous_buffer<S: 'static>(
-        &self,
-        slot: &crate::WgpuHistoryBuffer<S>,
-    ) -> Result<Option<crate::WgpuProgramBufferOutput<S>>, WgpuRenderProgramError> {
-        self.history
-            .ok_or(WgpuRenderProgramError::HistoryDeclaration)?
-            .previous_buffer(slot)
-    }
-
-    pub fn empty_texture_reason<S: 'static>(
-        &self,
-        slot: &crate::WgpuHistoryTexture<S>,
-    ) -> Result<Option<crate::WgpuEmptyHistoryReason>, WgpuRenderProgramError> {
-        self.history
-            .ok_or(WgpuRenderProgramError::HistoryDeclaration)?
-            .empty_texture_reason(slot)
-    }
-
-    pub fn empty_buffer_reason<S: 'static>(
-        &self,
-        slot: &crate::WgpuHistoryBuffer<S>,
-    ) -> Result<Option<crate::WgpuEmptyHistoryReason>, WgpuRenderProgramError> {
-        self.history
-            .ok_or(WgpuRenderProgramError::HistoryDeclaration)?
-            .empty_buffer_reason(slot)
     }
 }
 
@@ -537,7 +439,6 @@ pub struct WgpuPolicyProgram {
     pub(crate) program: WgpuRenderProgram,
     pub(crate) final_version: ResourceVersion,
     pub(crate) facts: WgpuPolicyFrameFacts,
-    pub(crate) history: Vec<crate::WgpuHistoryBinding>,
     #[cfg(feature = "stock-ui")]
     pub(crate) ui: Option<WgpuUiProgramBinding>,
 }
@@ -563,17 +464,9 @@ impl WgpuPolicyProgram {
             program,
             final_version: final_texture.version.clone(),
             facts,
-            history: Vec::new(),
             #[cfg(feature = "stock-ui")]
             ui: None,
         })
-    }
-
-    /// Selects all declared temporal destinations for the same complete output publication.
-    #[must_use]
-    pub fn with_history(mut self, bindings: Vec<crate::WgpuHistoryBinding>) -> Self {
-        self.history = bindings;
-        self
     }
 
     #[cfg(feature = "stock-ui")]
@@ -592,7 +485,6 @@ pub(crate) trait CapturedPolicy: Send + Sync {
     fn admission(&self) -> &Arc<PolicyCaptureAdmission>;
     fn definition_id(&self) -> u64;
     fn requirements(&self) -> &WgpuDeviceRequirements;
-    fn lineage(&self) -> Option<&crate::WgpuHistoryLineage>;
     fn world_input_mapping(&self) -> Option<WorldInputMapping2d>;
     fn metadata_bytes(&self) -> Result<usize, WgpuRenderProgramError>;
     fn validate(&self, packet: &RenderFramePacket) -> Result<(), WgpuRenderProgramError>;
@@ -611,7 +503,6 @@ struct TypedPolicyCapture<P: WgpuRenderPolicy> {
     admission: Arc<PolicyCaptureAdmission>,
     definition: Arc<PolicyDefinition<P>>,
     capture: Arc<P::Capture>,
-    lineage: Option<crate::WgpuHistoryLineage>,
     world_input_mapping: Option<WorldInputMapping2d>,
 }
 
@@ -629,10 +520,6 @@ impl<P: WgpuRenderPolicy> CapturedPolicy for TypedPolicyCapture<P> {
 
     fn requirements(&self) -> &WgpuDeviceRequirements {
         &self.definition.requirements
-    }
-
-    fn lineage(&self) -> Option<&crate::WgpuHistoryLineage> {
-        self.lineage.as_ref()
     }
 
     fn world_input_mapping(&self) -> Option<WorldInputMapping2d> {
@@ -659,16 +546,9 @@ impl<P: WgpuRenderPolicy> CapturedPolicy for TypedPolicyCapture<P> {
     }
 
     fn validate(&self, packet: &RenderFramePacket) -> Result<(), WgpuRenderProgramError> {
-        if let Some(lineage) = &self.lineage {
-            lineage.validate_current()?;
-        }
         self.definition
             .policy
-            .validate_capture(packet, &self.capture)?;
-        if let Some(lineage) = &self.lineage {
-            lineage.validate_current()?;
-        }
-        Ok(())
+            .validate_capture(packet, &self.capture)
     }
 
     fn bind(
@@ -815,8 +695,6 @@ pub(crate) struct BuiltPolicy {
     pub(crate) custody: Arc<PolicyExecutionCustody>,
     pub(crate) metadata_bytes: usize,
     pub(crate) staged: PolicyBindingStage,
-    pub(crate) lineage: Option<crate::WgpuHistoryLineage>,
-    pub(crate) history: Option<crate::history::PreparedHistory>,
 }
 
 impl PolicyInstances {
@@ -898,7 +776,6 @@ impl PolicyInstances {
         producer: WgpuRenderProducerId,
         closed: &Arc<AtomicBool>,
         format: wgpu::TextureFormat,
-        history_owner: Option<&crate::history::HistoryRealization>,
     ) -> Result<BuiltPolicy, WgpuRenderProgramError> {
         if closed.load(Ordering::Acquire) {
             return Err(WgpuRenderProgramError::FeatureClosed);
@@ -931,7 +808,6 @@ impl PolicyInstances {
                     .ok_or(WgpuRenderProgramError::PolicyCapacity)?
             };
             let mut staged_features = StagedFeatureBindings::new()?;
-            let mut history_declarations = crate::history::HistoryDeclarations::default();
             // Bind every candidate from its original capture. Never substitute a current
             // installation's latest topology or reuse its per-candidate Bindings value.
             let value = {
@@ -942,36 +818,16 @@ impl PolicyInstances {
                     requirements: input.requirements(),
                     resolutions: &mut self.features,
                     staged: &mut staged_features,
-                    packet: input.packet(),
-                    history: &mut history_declarations,
-                    temporal: input.lineage.is_some(),
                 };
                 input.capture.bind(&mut context)?
-            };
-            let history = match (history_owner, input.lineage.as_ref()) {
-                (Some(owner), Some(lineage)) if owner.id == lineage.0.id => {
-                    lineage.validate_current()?;
-                    Some(history_declarations.pin(owner, input.packet().frame_index())?)
-                }
-                (None, None) if history_declarations.is_empty() => None,
-                _ => return Err(WgpuRenderProgramError::HistoryDeclaration),
             };
             let output = input.capture.build(
                 value.as_ref(),
                 WgpuPolicyBuildContext {
                     packet: &input.packet,
                     format,
-                    history: history.as_ref(),
                 },
             )?;
-            if let Some(lineage) = &input.lineage {
-                lineage.validate_current()?;
-            }
-            match &history {
-                Some(history) => history.validate_bindings(&output.program, &output.history)?,
-                None if output.history.is_empty() => {}
-                None => return Err(WgpuRenderProgramError::HistoryDeclaration),
-            }
             if output.program.source_generation() != input.packet.source_generation()
                 || output.program.frame_index() != input.packet.frame_index()
             {
@@ -1009,12 +865,6 @@ impl PolicyInstances {
                 .and_then(|bytes| bytes.checked_add(table_metadata))
                 .and_then(|bytes| bytes.checked_add(root_metadata))
                 .ok_or(WgpuRenderProgramError::PolicyCapacity)?;
-            let metadata_bytes = match &history {
-                Some(history) => metadata_bytes
-                    .checked_add(history.metadata_bytes()?)
-                    .ok_or(WgpuRenderProgramError::HistoryCapacity)?,
-                None => metadata_bytes,
-            };
             #[cfg(feature = "stock-ui")]
             let metadata_bytes = match &output.ui {
                 Some(binding) => {
@@ -1049,8 +899,6 @@ impl PolicyInstances {
             }
             Ok(BuiltPolicy {
                 output,
-                lineage: input.lineage.clone(),
-                history,
                 custody: Arc::new(PolicyExecutionCustody {
                     _capture: Arc::clone(&input.capture),
                     _bindings: Arc::clone(&bindings),
@@ -1067,8 +915,8 @@ impl PolicyInstances {
         outcome.unwrap_or(Err(WgpuRenderProgramError::PolicyPanicked))
     }
 
-    /// Publishes only pre-admitted pointer replacements. The caller validates candidate,
-    /// history and producer facts first, then retains the returned old owners until all
+    /// Publishes only pre-admitted pointer replacements. The caller validates the candidate
+    /// and producer facts first, then retains the returned old owners until all
     /// participating publication pointers and watermarks have committed.
     pub(crate) fn commit(&mut self, built: &BuiltPolicy) -> RetiredPolicyBindings {
         let staged = &built.staged;

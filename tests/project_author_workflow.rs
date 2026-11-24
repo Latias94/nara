@@ -21,14 +21,13 @@ fn missing_prefab_metadata_reports_its_project_location_and_recovers() {
     workflow::missing_metadata_location();
 }
 
-#[cfg(feature = "tooling")]
 #[test]
-#[ignore = "serial nested Cargo: v2 CLI, independent puzzle, public Editor, cooked and relocated Player"]
+#[ignore = "serial nested Cargo: v2 CLI, authored puzzle and input, cooked and relocated Player"]
 fn generated_v2_puzzle_observes_the_edited_scene_and_input_after_source_removal() {
     workflow::puzzle::accept();
 }
 
-#[cfg(all(feature = "tooling", target_os = "windows"))]
+#[cfg(target_os = "windows")]
 #[test]
 #[ignore = "interactive Windows desktop with native first presentation and WGI startup"]
 fn generated_v2_desktop_verifies_first_present() {

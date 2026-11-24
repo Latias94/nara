@@ -21,7 +21,7 @@ fn diagnostics(inbox_checks: u64) -> ControlServiceObservation {
         coalesced_hints: 0,
         native_wake_delivery_failures: 0,
         watcher_started: true,
-        watcher_joined: false,
+        watcher_closed: false,
         counters_saturated: false,
     }
 }

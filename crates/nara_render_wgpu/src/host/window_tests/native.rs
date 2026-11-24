@@ -45,28 +45,54 @@ impl Drop for LocalRecording {
 #[test]
 #[ignore = "requires an interactive Windows desktop and a working WGPU adapter"]
 fn native_window_attempt_observation_keeps_local_custody_across_every_terminal_path() {
+    with_native_event_loop(verify_custody);
+}
+
+#[test]
+#[ignore = "requires an interactive Windows desktop and a working WGPU adapter"]
+fn configured_primary_retires_before_first_present() {
+    with_native_event_loop(|event_loop| {
+        let (_window, packet, mut host) = native_host(event_loop);
+        let extent = host
+            .with_device(packet, |scope| scope.surface_extent())
+            .unwrap();
+        assert_eq!(
+            host.backend.configured_surface_extent(packet.id),
+            Some(extent)
+        );
+        host.wait_for_idle().unwrap();
+        let stats = host.frame_transaction_stats();
+        assert_eq!(stats.surface_acquire_attempts(), 0);
+        assert_eq!(stats.presents(), 0);
+        drop(host);
+    });
+}
+
+fn with_native_event_loop(check: fn(&ActiveEventLoop)) {
     let mut builder = EventLoop::builder();
     builder.with_any_thread(true);
     let event_loop = builder.build().unwrap();
-    let mut app = CustodyApp { result: None };
+    let mut app = WindowTestApp {
+        check,
+        result: None,
+    };
     event_loop.run_app(&mut app).unwrap();
-    if let Err(failure) = app.result.expect("the native custody trajectory must run") {
+    if let Err(failure) = app.result.expect("the native window test must run") {
         resume_unwind(failure);
     }
 }
 
-struct CustodyApp {
+struct WindowTestApp {
+    check: fn(&ActiveEventLoop),
     result: Option<std::thread::Result<()>>,
 }
 
-impl ApplicationHandler for CustodyApp {
+impl ApplicationHandler for WindowTestApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.result.is_some() {
             return;
         }
-        self.result = Some(catch_unwind(AssertUnwindSafe(|| {
-            verify_custody(event_loop)
-        })));
+        self.result = Some(catch_unwind(AssertUnwindSafe(|| (self.check)(event_loop))));
         event_loop.exit();
     }
 
@@ -79,7 +105,9 @@ impl ApplicationHandler for CustodyApp {
     }
 }
 
-fn verify_custody(event_loop: &ActiveEventLoop) {
+fn native_host(
+    event_loop: &ActiveEventLoop,
+) -> (Arc<NativeWindow>, RenderWindowPacket, WgpuRenderHost) {
     let window = Arc::new(
         event_loop
             .create_window(
@@ -99,9 +127,13 @@ fn verify_custody(event_loop: &ActiveEventLoop) {
         .with_scale_factor(window.scale_factor()),
         present_mode: nara_window::PresentMode::AutoNoVsync,
     };
-    let mut host =
+    let host =
         WgpuRenderHost::new(packet.id, WindowHandleProvider::new(Arc::clone(&window))).unwrap();
+    (window, packet, host)
+}
 
+fn verify_custody(event_loop: &ActiveEventLoop) {
+    let (window, packet, mut host) = native_host(event_loop);
     host.begin_frame(0).unwrap();
     let mut zero_extent = packet;
     zero_extent.resolution.physical_width = 0;

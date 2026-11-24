@@ -1,10 +1,6 @@
 use std::collections::BTreeMap;
 mod runtime;
 pub use runtime::{WgpuRuntimeHostFacts, WgpuRuntimeMaintenance};
-#[cfg(feature = "editor-imgui")]
-mod imgui;
-#[cfg(feature = "editor-imgui")]
-pub use imgui::{WgpuEditorImguiFrame, WgpuEditorImguiRenderer, WgpuEditorImguiRendererFailure};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -36,7 +32,6 @@ use crate::{
     output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageOutput, WgpuImageStorage},
     policy::{BuiltPolicy, PolicyInstances},
     presented::{WgpuImageCompositeReceipt, WgpuSubmittedImageReceipt, WgpuWindowPresentedReceipt},
-    retirement::WgpuGpuRetirement,
     runtime_timing::WgpuNamespaceTimings,
     submission::{WgpuSubmissionPrefix, WgpuSubmissionReservation},
 };
@@ -341,12 +336,6 @@ impl From<crate::WgpuRenderProgramError> for WgpuRenderHostError {
             crate::WgpuRenderProgramError::Backend(error) => Self::Backend(error),
             error => Self::Program(error),
         }
-    }
-}
-
-impl From<crate::history::HistoryError> for WgpuRenderHostError {
-    fn from(error: crate::history::HistoryError) -> Self {
-        Self::from(crate::WgpuRenderProgramError::from(error))
     }
 }
 
@@ -778,12 +767,6 @@ impl<'frame> WgpuWindowDeviceScope<'frame> {
         self.queue
     }
 
-    /// Retains the original device and queue before renderer initialization can queue uploads.
-    #[must_use]
-    pub fn gpu_retirement(&self) -> WgpuGpuRetirement {
-        WgpuGpuRetirement::new(self.device, self.queue)
-    }
-
     #[must_use]
     pub const fn surface_format(&self) -> wgpu::TextureFormat {
         self.surface_format
@@ -837,26 +820,6 @@ fn join_composite_receipt(
         window,
         generation,
     )))
-}
-
-#[cfg(any(test, feature = "editor-imgui"))]
-fn join_composite_receipts(
-    last_presentation_generation: &mut u64,
-    submitted: &[WgpuImageDisplay],
-    sampled: &[ImageSample],
-    window: WgpuWindowPresentedReceipt,
-) -> Result<Vec<WgpuImageCompositeReceipt>, WgpuRenderHostError> {
-    native_use_count(submitted.len(), "window image displays")?;
-    native_use_count(sampled.len(), "window image samples")?;
-    let mut composites = reserve_native_table(submitted.len())?;
-    join_composite_receipts_into(
-        last_presentation_generation,
-        submitted,
-        sampled,
-        window,
-        &mut composites,
-    )?;
-    Ok(composites)
 }
 
 fn join_composite_receipts_into(
@@ -1113,7 +1076,6 @@ struct ProducerState {
     admission: ProducerAdmission,
     target: Option<ImageTarget>,
     policies: PolicyInstances,
-    histories: Vec<crate::history::HistoryRealization>,
     world_presentation: Arc<WorldPresentationSlot>,
     runtime_presentation: Option<runtime::RuntimeWorldPresentation>,
     submitted_prefix: Option<WgpuSubmissionPrefix>,
@@ -1133,8 +1095,6 @@ impl Drop for ProducerState {
 /// resources. A retained output does not grant interaction or reconstruction authority.
 /// Call [`Self::poll_retirement`] to finish the Host after stopping its consumers.
 pub struct WgpuRenderHost {
-    #[cfg(feature = "editor-imgui")]
-    primary_window_id: WindowId,
     backend: WgpuRenderBackend,
     handles: Option<BackendWindowHandles>,
     presentation: crate::presentation::SurfacePresentationCache,
@@ -1143,7 +1103,6 @@ pub struct WgpuRenderHost {
     last_presentation_generation: u64,
     output_budget: Arc<OutputBudget>,
     candidate_budget: crate::candidate::CandidateBudget,
-    history_budget: Arc<OutputBudget>,
     feature_states: crate::program::NativeFeatureStates,
     native_prefix: Option<WgpuSubmissionPrefix>,
     retiring_prefixes: Vec<WgpuSubmissionPrefix>,
@@ -1228,12 +1187,9 @@ impl WgpuRenderHost {
     ) -> Result<Self, WgpuRenderHostError> {
         let handles = BackendWindowHandles::default();
         handles.insert(window_id, provider)?;
-        let mut backend = WgpuRenderBackend::default();
-        backend.begin_runtime_execution();
+        let backend = WgpuRenderBackend::default();
         let output_budget = Arc::clone(backend.resource_budget());
         Ok(Self {
-            #[cfg(feature = "editor-imgui")]
-            primary_window_id: window_id,
             backend,
             handles: Some(handles),
             presentation: crate::presentation::SurfacePresentationCache::default(),
@@ -1242,7 +1198,6 @@ impl WgpuRenderHost {
             last_presentation_generation: 0,
             output_budget,
             candidate_budget: crate::candidate::CandidateBudget::default(),
-            history_budget: Arc::new(OutputBudget::new(64 * 1024 * 1024)),
             feature_states: crate::program::NativeFeatureStates::default(),
             native_prefix: None,
             retiring_prefixes: Vec::new(),
@@ -1255,12 +1210,9 @@ impl WgpuRenderHost {
     /// Creates the same execution owner without a window, platform handle or hidden Surface.
     #[must_use]
     pub fn offscreen() -> Self {
-        let mut backend = WgpuRenderBackend::default();
-        backend.begin_runtime_execution();
+        let backend = WgpuRenderBackend::default();
         let output_budget = Arc::clone(backend.resource_budget());
         Self {
-            #[cfg(feature = "editor-imgui")]
-            primary_window_id: WindowId::PRIMARY,
             backend,
             handles: None,
             presentation: crate::presentation::SurfacePresentationCache::default(),
@@ -1269,7 +1221,6 @@ impl WgpuRenderHost {
             last_presentation_generation: 0,
             output_budget,
             candidate_budget: crate::candidate::CandidateBudget::default(),
-            history_budget: Arc::new(OutputBudget::new(64 * 1024 * 1024)),
             feature_states: crate::program::NativeFeatureStates::default(),
             native_prefix: None,
             retiring_prefixes: Vec::new(),
@@ -1401,7 +1352,7 @@ impl WgpuRenderHost {
     }
 
     fn maintain_producers(&mut self) -> Result<(), WgpuRenderHostError> {
-        self.maintain_cached_owners()?;
+        self.maintain_cached_owners();
         let prefix_count = self.retiring_prefixes.len();
         for prefix in &self.retiring_prefixes {
             let result = if prefix.callback_abandoned() {
@@ -1441,42 +1392,14 @@ impl WgpuRenderHost {
         self.abandoned_submission_count = self.abandoned_submission_count.saturating_add(abandoned);
         self.cleanup_faults = self.cleanup_faults.saturating_add(cleanup_faults);
         if self.retiring_prefixes.len() != prefix_count {
-            self.maintain_cached_owners()?;
+            self.maintain_cached_owners();
         }
         Ok(())
     }
 
-    fn maintain_cached_owners(&mut self) -> Result<(), WgpuRenderHostError> {
+    fn maintain_cached_owners(&mut self) {
         for view in self.views.values_mut() {
             view.policies.maintain();
-            view.histories
-                .retain(|history| history.lineage.strong_count() != 0);
-            for history in &mut view.histories {
-                if history
-                    .leases
-                    .iter()
-                    .all(crate::history::HistorySlotLease::is_live)
-                {
-                    continue;
-                }
-                let mut expired = Vec::new();
-                expired
-                    .try_reserve_exact(history.leases.len())
-                    .map_err(|_| crate::WgpuRenderProgramError::ResourceCapacity)?;
-                expired.extend(
-                    history
-                        .leases
-                        .iter()
-                        .filter_map(|lease| (!lease.is_live()).then_some(lease.key)),
-                );
-                if !expired.is_empty() {
-                    let retired = history.state.retire(&expired)?;
-                    history
-                        .leases
-                        .retain(crate::history::HistorySlotLease::is_live);
-                    drop(retired);
-                }
-            }
         }
         self.feature_states.maintain(self.backend.device_epoch());
         let closed = self
@@ -1490,7 +1413,6 @@ impl WgpuRenderHost {
             }
             self.backend.retire_editor_world_presentation(id);
         }
-        Ok(())
     }
 
     /// Counts resource callbacks recovered after abandonment; it never authorizes output success.
@@ -1546,8 +1468,8 @@ impl WgpuRenderHost {
 
     /// Builds and checks the captured policy's CPU graph, final target and Feature ownership.
     ///
-    /// This runs the original policy callbacks and may reserve their CPU installation/history
-    /// tables. It does not acquire a device, reserve a candidate, publish bindings/history or
+    /// This runs the original policy callbacks and may reserve their CPU installation
+    /// tables. It does not acquire a device, reserve a candidate, publish bindings or
     /// advance a producer watermark. Callback effects outside the Host are not rolled back.
     /// Device capabilities, imported native resources and native Feature preflight remain the
     /// responsibility of preparation/submission. Success is not a retained preparation: a later
@@ -1568,14 +1490,13 @@ impl WgpuRenderHost {
                 format,
                 matches!(input.packet().target(), RenderFrameTarget::Image(_)),
             )?;
-            self.validate_program_instances(id, &built.output.program)?;
-            self.validate_policy_history(id, &built)
+            self.validate_program_instances(id, &built.output.program)
         })();
         self.release_publication_value(built);
         result
     }
 
-    /// Pins one image candidate's original instances and complete temporal predecessor basis.
+    /// Prepares one image candidate with its original instances.
     /// No surface or native submission reservation escapes this preparation.
     pub fn prepare(
         &mut self,
@@ -1588,17 +1509,17 @@ impl WgpuRenderHost {
         self.prepare_candidate_in_namespace(id, &namespace, input, EDITOR_IMAGE_FORMAT, true)
     }
 
-    /// Executes the same prepared value. A refusal returns it without selecting new history.
+    /// Executes the same prepared value and returns it on refusal.
     pub fn submit_candidate(
         &mut self,
         producer: &WgpuRenderProducer,
-        mut candidate: crate::WgpuRenderCandidate,
+        candidate: crate::WgpuRenderCandidate,
     ) -> Result<crate::WgpuPublishedFrame, crate::WgpuCandidateSubmitFailure> {
         let submitted = (|| {
             let id = self.producer_id(producer)?;
             self.validate_candidate(id, &candidate)?;
             let namespace = self.prepare_namespace(None)?;
-            self.submit_candidate_image_in_namespace(id, &namespace, &mut candidate, None)
+            self.submit_candidate_image_in_namespace(id, &namespace, &candidate, None)
         })();
         match submitted {
             Ok(mut frame) => {
@@ -1678,7 +1599,6 @@ impl WgpuRenderHost {
         let reservation = self.candidate_budget.reserve()?;
         let built = self.build_policy(id, input, format)?;
         Self::validate_policy_target(&built.output, input.packet(), format, image)?;
-        self.validate_policy_history(id, &built)?;
         reservation.finish(&built)?;
         Ok(crate::WgpuRenderCandidate {
             backend: namespace.backend_instance_id,
@@ -1701,7 +1621,7 @@ impl WgpuRenderHost {
             || candidate.epoch != self.backend.device_epoch()
             || candidate.producer != producer
         {
-            return Err(crate::WgpuRenderProgramError::StaleHistory.into());
+            return Err(crate::WgpuRenderProgramError::StaleCandidate.into());
         }
         let owner = self
             .views
@@ -1719,8 +1639,7 @@ impl WgpuRenderHost {
             candidate.input.packet().source_generation(),
             candidate.input.packet().frame_index(),
         )?;
-        self.validate_program_instances(producer, &candidate.built.output.program)?;
-        self.validate_policy_history(producer, &candidate.built)
+        self.validate_program_instances(producer, &candidate.built.output.program)
     }
 
     /// Admits a policy's original request before any frame/target operation acquires a device.
@@ -1734,66 +1653,6 @@ impl WgpuRenderHost {
         self.request_device_requirements(definition.device_requirements())
     }
 
-    /// Explicitly empties selected slots while preserving their original successful watermark.
-    /// Already prepared candidates retain their old basis and will refuse after this reset.
-    /// This Host-local reset does not invalidate captures that have not yet been prepared. Use
-    /// [`crate::WgpuHistoryLineage::discontinue`] on the domain's current owner for a semantic cut,
-    /// and explicitly reset the affected slots as well when their predecessor must be discarded.
-    pub fn reset_history(
-        &mut self,
-        producer: &WgpuRenderProducer,
-        lineage: &crate::WgpuHistoryLineage,
-        requests: &[crate::WgpuHistoryReset],
-    ) -> Result<(), WgpuRenderHostError> {
-        self.maintain_producers()?;
-        let id = self.producer_id(producer)?;
-        self.backend.check_device_health()?;
-        if requests.len() > crate::history::MAX_HISTORY_SLOTS {
-            return Err(crate::WgpuRenderProgramError::HistoryCapacity.into());
-        }
-        let mut declarations = Vec::new();
-        declarations
-            .try_reserve_exact(requests.len())
-            .map_err(|_| crate::WgpuRenderProgramError::ResourceCapacity)?;
-        if requests.iter().any(|request| !request.lease.is_live()) {
-            return Err(crate::WgpuRenderProgramError::HistoryDeclaration.into());
-        }
-        declarations.extend(
-            requests
-                .iter()
-                .map(|request| (request.key, request.descriptor.clone())),
-        );
-        let realization = self
-            .views
-            .get_mut(&id)
-            .expect("admitted producer")
-            .histories
-            .iter_mut()
-            .find(|entry| entry.id == lineage.0.id)
-            .ok_or(crate::WgpuRenderProgramError::StaleHistory)?;
-        let mut next_leases = Vec::new();
-        next_leases
-            .try_reserve_exact(crate::history::MAX_HISTORY_SLOTS)
-            .map_err(|_| crate::WgpuRenderProgramError::ResourceCapacity)?;
-        next_leases.extend(realization.leases.iter().cloned());
-        for request in requests {
-            if let Some(existing) = next_leases.iter().find(|lease| lease.key == request.key) {
-                if !existing.matches(&request.lease) {
-                    return Err(crate::WgpuRenderProgramError::HistoryDeclaration.into());
-                }
-            } else {
-                if next_leases.len() == crate::history::MAX_HISTORY_SLOTS {
-                    return Err(crate::WgpuRenderProgramError::HistoryCapacity.into());
-                }
-                next_leases.push(request.lease.clone());
-            }
-        }
-        let retired = realization.state.reset(&declarations)?;
-        realization.leases = next_leases;
-        drop(retired);
-        Ok(())
-    }
-
     fn build_policy(
         &mut self,
         id: WgpuRenderProducerId,
@@ -1804,73 +1663,9 @@ impl WgpuRenderHost {
             .views
             .get_mut(&id)
             .ok_or(WgpuRenderHostError::ProducerClosed)?;
-        let history_index = if let Some(lineage) = &input.lineage {
-            lineage.validate_current()?;
-            if lineage.source_generation() != input.packet().source_generation() {
-                return Err(crate::WgpuRenderProgramError::HistoryDeclaration.into());
-            }
-            match view
-                .histories
-                .iter()
-                .position(|entry| entry.id == lineage.0.id)
-            {
-                Some(index) => Some(index),
-                None => {
-                    if view.histories.len() == crate::history::MAX_HISTORY_LINEAGES {
-                        return Err(crate::WgpuRenderProgramError::HistoryCapacity.into());
-                    }
-                    let rows = crate::history::History::<crate::program::ProgramResourceStorage>::required_metadata_bytes(
-                        crate::history::MAX_HISTORY_SLOTS,
-                    )?;
-                    // Explicit reset/retirement stages one full successor while the live table
-                    // remains intact. Candidate bases have a separate pending-candidate charge.
-                    let bytes = rows
-                        .checked_mul(2)
-                        .and_then(|bytes| {
-                            bytes.checked_add(
-                                std::mem::size_of::<crate::history::HistoryRealization>(),
-                            )
-                        })
-                        .and_then(|bytes| {
-                            bytes.checked_add(
-                                crate::history::MAX_HISTORY_SLOTS
-                                    * (2 * std::mem::size_of::<crate::history::HistorySlotLease>()
-                                        + std::mem::size_of::<crate::history::HistoryKey>()
-                                        + std::mem::size_of::<(
-                                            crate::history::HistoryKey,
-                                            crate::graph::ResourceDescriptor,
-                                        )>()),
-                            )
-                        })
-                        .ok_or(crate::WgpuRenderProgramError::HistoryCapacity)?;
-                    let reservation = self
-                        .history_budget
-                        .reserve(bytes as u64)
-                        .ok_or(crate::WgpuRenderProgramError::ResourceCapacity)?;
-                    view.histories
-                        .try_reserve(1)
-                        .map_err(|_| crate::WgpuRenderProgramError::ResourceCapacity)?;
-                    let index = view.histories.len();
-                    view.histories.push(crate::history::HistoryRealization::new(
-                        lineage,
-                        self.backend.instance_id(),
-                        reservation,
-                    ));
-                    Some(index)
-                }
-            }
-        } else {
-            None
-        };
-        let history = history_index.map(|index| &view.histories[index]);
-        Ok(view.policies.build(
-            input,
-            self.backend.instance_id(),
-            id,
-            &view.closed,
-            format,
-            history,
-        )?)
+        Ok(view
+            .policies
+            .build(input, self.backend.instance_id(), id, &view.closed, format)?)
     }
 
     /// Installs an exact capture/native pair for one producer-owned instance. Requirements join
@@ -1918,20 +1713,11 @@ impl WgpuRenderHost {
         program: &crate::WgpuRenderProgram,
         local_target: Option<&crate::program::HostProgramTexture>,
         mut surface: Option<ProgramSurfaceTarget<'_>>,
-        mut policy: Option<&mut BuiltPolicy>,
+        policy: Option<&BuiltPolicy>,
     ) -> Result<crate::WgpuProgramOutputs, WgpuRenderHostError> {
         let host_frame_index = self
             .host_frame_index
             .ok_or(WgpuRenderHostError::FrameTransactionUnavailable)?;
-        if let Some(built) = policy.as_deref() {
-            self.validate_policy_history(id, built)?;
-        }
-        let mut history_outputs = Vec::new();
-        if let Some(built) = policy.as_deref() {
-            history_outputs
-                .try_reserve_exact(built.output.history.len())
-                .map_err(|_| crate::WgpuRenderProgramError::ResourceCapacity)?;
-        }
         let mut outputs = Vec::new();
         outputs
             .try_reserve_exact(program.0.graph.outputs().len())
@@ -2142,7 +1928,6 @@ impl WgpuRenderHost {
         let allocation_error = pollster::block_on(allocation.pop());
         let internal_error = pollster::block_on(internal.pop());
         let validation_error = pollster::block_on(validation.pop());
-        let mut retired_history = None;
         let mut retired_bindings = None;
         let mut result = (|| {
             self.backend.check_device_health()?;
@@ -2166,7 +1951,7 @@ impl WgpuRenderHost {
             // Actual UI encoding must match the original final-image binding before this
             // group consumes publication admission. Completion storage was admitted earlier.
             #[cfg(feature = "stock-ui")]
-            if let Some(binding) = policy.as_deref().and_then(|built| built.output.ui.as_ref()) {
+            if let Some(binding) = policy.and_then(|built| built.output.ui.as_ref()) {
                 binding.submitted_facts(&outputs)?;
             }
             if let Some(surface) = &surface {
@@ -2176,37 +1961,7 @@ impl WgpuRenderHost {
                     surface.work_started_at,
                 )?;
             }
-            if let Some(built) = policy.as_deref_mut() {
-                self.validate_policy_history(id, built)?;
-                if let Some(history) = &mut built.history {
-                    for binding in &built.output.history {
-                        let storage = outputs
-                            .outputs
-                            .iter()
-                            .find(|(version, _)| *version == binding.version)
-                            .map(|(_, storage)| Arc::clone(storage))
-                            .ok_or(crate::WgpuRenderProgramError::HistoryDeclaration)?;
-                        history_outputs.push((binding.key, storage));
-                    }
-                    let lineage = built
-                        .lineage
-                        .as_ref()
-                        .ok_or(crate::WgpuRenderProgramError::HistoryDeclaration)?;
-                    let realization = self
-                        .views
-                        .get_mut(&id)
-                        .expect("admitted producer")
-                        .histories
-                        .iter_mut()
-                        .find(|entry| entry.id == lineage.0.id)
-                        .ok_or(crate::WgpuRenderProgramError::StaleHistory)?;
-                    retired_history = Some(
-                        realization
-                            .state
-                            .commit(&mut history.basis, &history_outputs)?,
-                    );
-                    std::mem::swap(&mut realization.leases, &mut history.leases);
-                }
+            if let Some(built) = policy {
                 retired_bindings = Some(
                     self.views
                         .get_mut(&id)
@@ -2250,7 +2005,6 @@ impl WgpuRenderHost {
         // Native target state and the successful result exist before arbitrary old Bindings
         // destructors run. An unwind here is a cleanup observation, never failed publication.
         let cleanup = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            drop(retired_history);
             drop(retired_bindings);
         }));
         if let Err(payload) = cleanup {
@@ -2262,33 +2016,6 @@ impl WgpuRenderHost {
             }
         }
         result
-    }
-
-    fn validate_policy_history(
-        &self,
-        producer: WgpuRenderProducerId,
-        built: &BuiltPolicy,
-    ) -> Result<(), WgpuRenderHostError> {
-        match (&built.lineage, &built.history) {
-            (Some(lineage), Some(history)) => {
-                lineage.validate_current()?;
-                let realization = self
-                    .views
-                    .get(&producer)
-                    .and_then(|owner| {
-                        owner
-                            .histories
-                            .iter()
-                            .find(|entry| entry.id == lineage.0.id)
-                    })
-                    .ok_or(crate::WgpuRenderProgramError::StaleHistory)?;
-                realization.state.validate(&history.basis)?;
-                history.validate_bindings(&built.output.program, &built.output.history)?;
-                Ok(())
-            }
-            (None, None) if built.output.history.is_empty() => Ok(()),
-            _ => Err(crate::WgpuRenderProgramError::HistoryDeclaration.into()),
-        }
     }
 
     fn validate_program_instances(
@@ -2687,7 +2414,7 @@ impl WgpuRenderHost {
     pub fn submit_candidate_for_display(
         &mut self,
         producer: &WgpuRenderProducer,
-        mut candidate: crate::WgpuRenderCandidate,
+        candidate: crate::WgpuRenderCandidate,
         mut ui: WgpuUiSubmission,
     ) -> Result<WgpuUiImageSubmission, crate::WgpuUiCandidateSubmitFailure> {
         let submitted = (|| {
@@ -2697,7 +2424,7 @@ impl WgpuRenderHost {
             let frame = self.submit_candidate_image_in_namespace(
                 id,
                 &namespace,
-                &mut candidate,
+                &candidate,
                 Some(&mut ui),
             )?;
             Ok::<_, WgpuRenderHostError>((id, frame))
@@ -2730,14 +2457,14 @@ impl WgpuRenderHost {
         #[cfg(feature = "stock-ui")] ui: Option<&mut WgpuUiSubmission>,
         #[cfg(not(feature = "stock-ui"))] ui: Option<&mut ()>,
     ) -> Result<WgpuImageOutput, WgpuRenderHostError> {
-        let mut candidate = self.prepare_candidate_in_namespace(
+        let candidate = self.prepare_candidate_in_namespace(
             view_id,
             namespace,
             input,
             EDITOR_IMAGE_FORMAT,
             true,
         )?;
-        match self.submit_candidate_image_in_namespace(view_id, namespace, &mut candidate, ui) {
+        match self.submit_candidate_image_in_namespace(view_id, namespace, &candidate, ui) {
             Ok(mut frame) => {
                 self.release_published_candidate(candidate, &mut frame.outputs);
                 let image = frame.image.clone();
@@ -2752,7 +2479,7 @@ impl WgpuRenderHost {
         &mut self,
         view_id: WgpuRenderProducerId,
         namespace: &WgpuDeviceNamespace,
-        candidate: &mut crate::WgpuRenderCandidate,
+        candidate: &crate::WgpuRenderCandidate,
         #[cfg(feature = "stock-ui")] mut ui: Option<&mut WgpuUiSubmission>,
         #[cfg(not(feature = "stock-ui"))] _ui: Option<&mut ()>,
     ) -> Result<crate::WgpuPublishedFrame, WgpuRenderHostError> {
@@ -2795,7 +2522,7 @@ impl WgpuRenderHost {
         if let (Some(ui), Some(backend_generation)) = (ui.as_deref_mut(), ui_backend_generation) {
             ui.bind_backend(backend_generation)?;
         }
-        let built = &mut candidate.built;
+        let built = &candidate.built;
         let policy = &built.output;
         Self::validate_policy_target(policy, packet, EDITOR_IMAGE_FORMAT, true)?;
         #[cfg(feature = "stock-ui")]
@@ -2879,7 +2606,7 @@ impl WgpuRenderHost {
             &program,
             local_target.as_ref(),
             None,
-            Some(&mut *built),
+            Some(built),
         )?;
         let storage = outputs
             .outputs
@@ -2906,7 +2633,6 @@ impl WgpuRenderHost {
         Ok(crate::WgpuPublishedFrame {
             image,
             outputs,
-            history: std::mem::take(&mut built.output.history),
             final_version,
         })
     }
@@ -3419,8 +3145,6 @@ impl WgpuRenderHost {
     }
 }
 
-#[cfg(test)]
-mod history_tests;
 #[cfg(test)]
 mod program_tests;
 #[cfg(test)]

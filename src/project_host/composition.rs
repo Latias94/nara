@@ -200,7 +200,6 @@ pub struct ProjectRuntimePlugins {
     plugins: EditedPluginGroup<crate::product::ProjectProfilePlugins>,
     recipe: crate::ProductRecipe,
     overlay: Option<RuntimePluginOverlay>,
-    host_policy: Option<RuntimeHostPolicyContribution>,
 }
 
 pub(crate) struct RuntimePluginOverlay {
@@ -211,49 +210,11 @@ pub(crate) fn runtime_plugin_overlay(definition: PluginDefinition) -> RuntimePlu
     RuntimePluginOverlay { definition }
 }
 
-pub(crate) struct RuntimeHostPolicyContribution {
-    definitions: Vec<PluginDefinition>,
-}
-
-pub(crate) fn runtime_host_policy_contribution(
-    definition: PluginDefinition,
-) -> RuntimeHostPolicyContribution {
-    RuntimeHostPolicyContribution {
-        definitions: vec![definition],
-    }
-}
-
-impl RuntimeHostPolicyContribution {
-    pub(crate) fn with_definition(mut self, definition: PluginDefinition) -> Self {
-        self.definitions.push(definition);
-        self
-    }
-}
-
 const PROJECT_RUNTIME_OVERLAY_GROUP_ID: PluginGroupId =
     PluginGroupId::new("nara.plugins.project-runtime-overlay");
 
 struct RuntimeOverlayPlugins {
     definition: PluginDefinition,
-}
-
-const PROJECT_RUNTIME_HOST_POLICY_GROUP_ID: PluginGroupId =
-    PluginGroupId::new("nara.plugins.project-runtime-host-policy");
-
-struct RuntimeHostPolicyPlugins {
-    definitions: Vec<PluginDefinition>,
-}
-
-impl PluginGroup for RuntimeHostPolicyPlugins {
-    const ID: PluginGroupId = PROJECT_RUNTIME_HOST_POLICY_GROUP_ID;
-
-    fn build(self) -> PluginGroupBuilder {
-        self.definitions
-            .into_iter()
-            .fold(PluginGroupBuilder::new(), |builder, definition| {
-                builder.add_definition(definition)
-            })
-    }
 }
 
 impl PluginGroup for RuntimeOverlayPlugins {
@@ -268,7 +229,6 @@ struct ProjectRuntimeAppPlugins {
     plugins: EditedPluginGroup<crate::product::ProjectProfilePlugins>,
     recipe: crate::ProductRecipe,
     overlay: Option<RuntimePluginOverlay>,
-    host_policy: Option<RuntimeHostPolicyContribution>,
 }
 
 impl PluginGroup for ProjectRuntimeAppPlugins {
@@ -277,15 +237,9 @@ impl PluginGroup for ProjectRuntimeAppPlugins {
     fn build(self) -> PluginGroupBuilder {
         let builder =
             PluginGroupBuilder::new().add_group(self.recipe.with_edited_defaults(self.plugins));
-        let builder = match self.overlay {
+        match self.overlay {
             Some(overlay) => builder.add_group(RuntimeOverlayPlugins {
                 definition: overlay.definition,
-            }),
-            None => builder,
-        };
-        match self.host_policy {
-            Some(host_policy) => builder.add_group(RuntimeHostPolicyPlugins {
-                definitions: host_policy.definitions,
             }),
             None => builder,
         }
@@ -299,7 +253,6 @@ impl fmt::Debug for ProjectRuntimePlugins {
             .field("lineage", &self.lineage)
             .field("recipe", &self.recipe)
             .field("has_advanced_overlay", &self.overlay.is_some())
-            .field("has_host_policy", &self.host_policy.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -338,11 +291,6 @@ impl ProjectRuntimePlugins {
 
     pub(crate) fn with_overlay(mut self, overlay: RuntimePluginOverlay) -> Self {
         self.overlay = Some(overlay);
-        self
-    }
-
-    pub(crate) fn with_host_policy(mut self, host_policy: RuntimeHostPolicyContribution) -> Self {
-        self.host_policy = Some(host_policy);
         self
     }
 }
@@ -727,7 +675,6 @@ fn project_runtime_plugins_from_profile(
         plugins: configured_profile_plugins(candidate.runtime_configuration(), plugins),
         recipe: crate::ProductRecipe::new(),
         overlay: None,
-        host_policy: None,
     }
 }
 
@@ -748,40 +695,7 @@ pub(crate) fn project_runtime_plugins_with_recipe(
     recipe: crate::ProductRecipe,
     overlay: Option<RuntimePluginOverlay>,
 ) -> ProjectRuntimePlugins {
-    finalize_project_runtime_plugins(project_runtime_plugins(candidate), recipe, overlay, None)
-}
-
-pub(crate) fn editor_play_runtime_plugins_with_recipe(
-    candidate: &ProjectSettingsCandidate,
-    recipe: crate::ProductRecipe,
-    overlay: Option<RuntimePluginOverlay>,
-    host_policy: Option<RuntimeHostPolicyContribution>,
-) -> ProjectRuntimePlugins {
-    finalize_project_runtime_plugins(
-        project_runtime_plugins_from_profile(
-            candidate,
-            crate::product::ProjectProfilePlugins::for_editor_play(
-                candidate.runtime_configuration(),
-                candidate.normalized_capabilities(),
-            ),
-        ),
-        recipe,
-        overlay,
-        host_policy,
-    )
-}
-
-fn finalize_project_runtime_plugins(
-    request: ProjectRuntimePlugins,
-    recipe: crate::ProductRecipe,
-    overlay: Option<RuntimePluginOverlay>,
-    host_policy: Option<RuntimeHostPolicyContribution>,
-) -> ProjectRuntimePlugins {
-    let request = request.with_recipe(recipe);
-    let request = match host_policy {
-        Some(host_policy) => request.with_host_policy(host_policy),
-        None => request,
-    };
+    let request = project_runtime_plugins(candidate).with_recipe(recipe);
     match overlay {
         Some(overlay) => request.with_overlay(overlay),
         None => request,
@@ -803,23 +717,6 @@ pub(crate) fn resolve_product_recipe_with_overlay(
     resolve_project_runtime_request(
         candidate,
         project_runtime_plugins_with_recipe(candidate, recipe, overlay),
-    )
-}
-
-pub(crate) fn resolve_product_recipe_with_host_policy(
-    candidate: &ProjectSettingsCandidate,
-    recipe: crate::ProductRecipe,
-    overlay: Option<RuntimePluginOverlay>,
-    host_policy: RuntimeHostPolicyContribution,
-) -> Result<RuntimePlan, RuntimePlanError> {
-    resolve_project_runtime_request(
-        candidate,
-        finalize_project_runtime_plugins(
-            project_runtime_plugins(candidate),
-            recipe,
-            overlay,
-            Some(host_policy),
-        ),
     )
 }
 
@@ -854,7 +751,6 @@ pub fn resolve_runtime_plan(
             plugins: request.plugins,
             recipe: request.recipe,
             overlay: request.overlay,
-            host_policy: request.host_policy,
         },
         known_providers,
     )?;

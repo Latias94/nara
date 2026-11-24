@@ -1,48 +1,18 @@
 use super::*;
 use crate::{
-    WgpuRenderBackend, WgpuRenderError,
-    frame::LegacyWgpuFramePayload,
+    WgpuRenderError,
     quad::{
         WgpuMaterial2d, WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture,
-        create_quad_texture_bind_group_layout,
+        create_quad_texture_bind_group_layout, draw_quad_batch_buffers,
     },
     readback_tests::{
         TEXTURE_MATERIAL_FRAGMENT, image_versions_with_handle, material_binding,
         material_generation, readback_pixel, readback_viewport, render_to_rgba, two_image_versions,
     },
+    stock_quad::StockQuadResources,
     texture::WgpuSpriteTextureCache,
 };
 use nara_material::{AlphaMode2d, SamplerDescriptor};
-use nara_render::RenderTarget;
-
-std::thread_local! {
-    static BATCHES: std::cell::RefCell<Option<Vec<WgpuQuadBatch>>> = const {
-        std::cell::RefCell::new(None)
-    };
-}
-
-pub(super) fn take_batches() -> Option<Vec<WgpuQuadBatch>> {
-    BATCHES.with(|batches| batches.borrow_mut().take())
-}
-
-struct BatchGuard;
-
-impl BatchGuard {
-    fn one(batch: WgpuQuadBatch) -> Self {
-        BATCHES.with(|batches| assert!(batches.replace(Some(vec![batch])).is_none()));
-        Self
-    }
-
-    fn was_consumed(&self) -> bool {
-        BATCHES.with(|batches| batches.borrow().is_none())
-    }
-}
-
-impl Drop for BatchGuard {
-    fn drop(&mut self) {
-        let _ = BATCHES.with(|batches| batches.borrow_mut().take());
-    }
-}
 
 #[test]
 fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
@@ -98,21 +68,19 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
         "nara_view_bind_group",
         "nara_wgpu_quad_instances",
     ];
-    let (pixels, ()) = render_to_rgba(|device, queue, format, output, encoder, preparation| {
+    let (pixels, ()) = render_to_rgba(|_, _, format, output, encoder, preparation| {
         for label in labels {
-            let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-            backend.begin_frame_transaction(1, None);
+            let mut resources = StockQuadResources::default();
+            resources.begin_frame(1);
             let failure = AllocationFailureGuard::at(label);
-            let batches = BatchGuard::one(batch.clone());
-            let error = backend
-                .prepare_submitter_draw(
-                    format,
-                    RenderTarget::PrimaryWindow,
-                    readback_viewport(),
-                    Some(0),
-                    &LegacyWgpuFramePayload::default(),
-                    1,
+            let error = resources
+                .prepare_batches(
                     preparation,
+                    || Ok(()),
+                    format,
+                    std::slice::from_ref(&batch),
+                    1,
+                    None,
                 )
                 .unwrap_err();
             assert!(
@@ -123,13 +91,7 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
                 failure.was_consumed(),
                 "{label} must reach its allocation check"
             );
-            assert!(batches.was_consumed());
-            let stats = backend.frame_transaction_stats();
-            assert_eq!(stats.candidate_instance_buffer_demand_bytes(), 0, "{label}");
-            assert_eq!(stats.submitted_instance_buffer_demand_bytes(), 0, "{label}");
-            assert_eq!(stats.queue_submissions(), 0, "{label}");
-            assert_eq!(stats.surface_acquire_attempts(), 0, "{label}");
-            assert_eq!(stats.presents(), 0, "{label}");
+            assert_eq!(resources.instance_charges(), (0, 0), "{label}");
             let binding_was_cached = matches!(
                 label,
                 "nara_material_2d_parameters"
@@ -139,7 +101,7 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
                     | "nara_wgpu_quad_instances"
             );
             assert_eq!(
-                backend.texture_stats().image_bindings,
+                resources.texture_stats().image_bindings,
                 usize::from(binding_was_cached),
                 "{label}"
             );
@@ -152,46 +114,49 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
                     | "nara_wgpu_texture_upload"
                     | "nara_wgpu_texture_view"
             ) {
-                assert_eq!(backend.texture_stats().image_textures, 0, "{label}");
+                assert_eq!(resources.texture_stats().image_textures, 0, "{label}");
             }
             drop(failure);
-            drop(batches);
 
-            let batches = BatchGuard::one(batch.clone());
-            let draw = backend.prepare_submitter_draw(
-                format,
-                RenderTarget::PrimaryWindow,
-                readback_viewport(),
-                Some(0),
-                &LegacyWgpuFramePayload::default(),
-                1,
+            let draw = resources.prepare_batches(
                 preparation,
+                || Ok(()),
+                format,
+                std::slice::from_ref(&batch),
+                1,
+                None,
             )?;
-            assert!(batches.was_consumed());
             assert_eq!(draw.buffers.len(), 1);
-            assert_eq!(backend.texture_stats().image_bindings, 1);
-            assert_eq!(backend.texture_stats().image_textures, 1);
-            assert_eq!(backend.texture_stats().uploaded_images, 1);
+            assert_eq!(resources.texture_stats().image_bindings, 1);
+            assert_eq!(resources.texture_stats().image_textures, 1);
+            assert_eq!(resources.texture_stats().uploaded_images, 1);
             assert_eq!(
-                backend
-                    .frame_transaction_stats()
-                    .candidate_instance_buffer_demand_bytes(),
-                std::mem::size_of::<WgpuQuadInstance>() as u64,
+                resources.instance_charges(),
+                (std::mem::size_of::<WgpuQuadInstance>() as u64, 0),
             );
-            let mut prepared = crate::PreparedTargetDraw::default();
-            prepared.push(
-                readback_viewport(),
-                nara_render::ViewLoadOp::Clear(nara_render::Color::BLACK),
-                draw,
-            );
-            crate::encode_target_draw(encoder, output, &prepared);
-            drop(prepared);
-            assert_eq!(
-                backend
-                    .frame_transaction_stats()
-                    .candidate_instance_buffer_demand_bytes(),
-                0
-            );
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("nara_stock_allocation_recovery"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: output,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+                draw_quad_batch_buffers(
+                    &mut pass,
+                    &draw.pipelines,
+                    &draw.buffers,
+                    readback_viewport(),
+                );
+            }
+            drop(draw);
+            assert_eq!(resources.instance_charges(), (0, 0));
         }
         Ok(())
     })

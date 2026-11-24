@@ -10,9 +10,8 @@ enum DrainState {
 }
 
 /// Failure to advance the retained device's physical queue drain.
-#[doc(hidden)]
 #[derive(Debug, Error)]
-pub enum WgpuGpuRetirementError {
+pub(crate) enum WgpuGpuRetirementError {
     #[error("GPU retirement cannot resume an interrupted destroy or flush")]
     Interrupted,
     #[error(transparent)]
@@ -25,9 +24,8 @@ pub enum WgpuGpuRetirementError {
 /// must stop all work on this device and queue before beginning retirement, and keep it stopped
 /// until the dependent owners retire. A completed token proves queue completion, not native
 /// presentation or OS window destruction.
-#[doc(hidden)]
 #[derive(Debug)]
-pub struct WgpuGpuRetirement {
+pub(crate) struct WgpuGpuRetirement {
     device: wgpu::Device,
     queue: wgpu::Queue,
     state: DrainState,
@@ -50,7 +48,7 @@ impl WgpuGpuRetirement {
     /// uploads not yet submitted. It does not assume physical loss or queue completion: previously
     /// accepted submissions still have to drain through the retained device's actual poll result.
     /// Repeated calls do not reset progress or change the selected branch.
-    pub fn begin(&mut self, discard_pending: bool) {
+    pub(crate) fn begin(&mut self, discard_pending: bool) {
         if !matches!(self.state, DrainState::Live) {
             return;
         }
@@ -73,7 +71,7 @@ impl WgpuGpuRetirement {
     /// token retryable. A panic during destroy/flush leaves a poisoned token that cannot claim
     /// completion on reuse; this is not an unwind recovery protocol. WGPU 30 can report HAL fence
     /// errors through its fatal handler rather than `PollError`; those are not completion.
-    pub fn poll(&mut self) -> Result<bool, WgpuGpuRetirementError> {
+    pub(crate) fn poll(&mut self) -> Result<bool, WgpuGpuRetirementError> {
         self.begin(false);
         if matches!(self.state, DrainState::Complete) {
             return Ok(true);

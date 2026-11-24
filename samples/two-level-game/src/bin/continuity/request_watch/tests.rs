@@ -14,17 +14,17 @@ fn construction_acquires_nothing_and_empty_close_is_idempotent() {
     assert_eq!(watch.snapshot(), Snapshot::default());
     assert!(watch.watcher.is_none());
     assert!(!watch.pending());
-    assert_eq!(watch.poll_close(), Ok(true));
-    assert_eq!(watch.poll_close(), Ok(true));
+    assert_eq!(watch.close(), Ok(()));
+    assert_eq!(watch.close(), Ok(()));
     assert!(!watch.snapshot().watcher_started);
-    assert!(watch.snapshot().watcher_joined);
+    assert!(watch.snapshot().watcher_closed);
     assert!(watch.start(Path::new("unused")).is_err());
 }
 
 #[test]
 fn closing_without_a_hint_still_waits_for_the_reconciliation_timeout() {
     let mut watch = RequestWatch::new();
-    assert_eq!(watch.poll_close(), Ok(true));
+    assert_eq!(watch.close(), Ok(()));
     watch.acknowledge().unwrap();
     let timeout = Duration::from_millis(20);
     let started = Instant::now();
@@ -144,9 +144,9 @@ fn callback_failure_is_bounded_sticky_and_survives_acknowledgment_and_close() {
         Err(notify::Error::generic("a different backend failure")),
     );
     assert_eq!(watch.acknowledge(), Err(failure.clone()));
-    assert_eq!(watch.poll_close(), Err(failure.clone()));
-    assert!(watch.snapshot().watcher_joined);
-    assert_eq!(watch.poll_close(), Err(failure));
+    assert_eq!(watch.close(), Err(failure.clone()));
+    assert!(watch.snapshot().watcher_closed);
+    assert_eq!(watch.close(), Err(failure));
     assert_eq!(watch.snapshot().callbacks, 2);
     assert_eq!(watch.snapshot().hints, 2);
 }
@@ -205,17 +205,6 @@ fn wait_releases_the_predicate_lock_for_the_original_callback() {
     assert!(watch.pending());
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
-#[test]
-fn unsupported_platform_refuses_start_before_native_acquisition() {
-    let mut watch = RequestWatch::new();
-    assert!(watch.start(Path::new("unused")).is_err());
-    assert!(watch.watcher.is_none());
-    assert!(!watch.snapshot().watcher_started);
-    assert!(watch.poll_close().is_err());
-    assert!(watch.snapshot().watcher_joined);
-}
-
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 mod native {
     use std::{
@@ -272,19 +261,6 @@ mod native {
         }
     }
 
-    fn join(watch: &mut RequestWatch) -> Result<(), String> {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let result = watch.poll_close();
-            if watch.snapshot().watcher_joined {
-                assert!(watch.watcher.is_none());
-                return result.map(|_| ());
-            }
-            assert!(Instant::now() < deadline, "original watcher did not join");
-            thread::sleep(Duration::from_millis(2));
-        }
-    }
-
     #[test]
     fn real_atomic_rename_notifies_without_reading_or_consuming_the_packet() {
         let directory = Directory::new();
@@ -301,15 +277,16 @@ mod native {
         assert!(snapshot.callbacks > 0);
         assert!(snapshot.hints > 0);
         assert!(snapshot.watcher_started);
-        assert!(!snapshot.watcher_joined);
+        assert!(!snapshot.watcher_closed);
         assert_eq!(
             fs::read(request).unwrap(),
             b"packet bytes remain with the fixed inbox",
         );
-        join(&mut watch).unwrap();
+        assert_eq!(watch.close(), Ok(()));
+        assert!(watch.watcher.is_none());
         let closed = watch.snapshot();
-        assert_eq!(watch.poll_close(), Ok(true));
-        assert_eq!(watch.poll_close(), Ok(true));
+        assert!(closed.watcher_closed);
+        assert_eq!(watch.close(), Ok(()));
         assert_eq!(watch.snapshot(), closed);
     }
 
@@ -326,56 +303,47 @@ mod native {
             fs::read(request).unwrap(),
             b"published before native subscription",
         );
-        join(&mut watch).unwrap();
+        assert_eq!(watch.close(), Ok(()));
         assert!(watch.snapshot().watcher_started);
-        assert!(watch.snapshot().watcher_joined);
+        assert!(watch.snapshot().watcher_closed);
     }
 
     #[test]
-    fn partial_registration_failure_retains_the_original_watcher_until_physical_join() {
+    fn partial_registration_failure_releases_the_watcher_and_preserves_the_error() {
         let directory = Directory::new();
         let mut watch = RequestWatch::new();
         let failure = watch
             .start(&directory.path.join("missing-directory"))
             .unwrap_err();
-        assert!(watch.watcher.is_some());
+        assert!(watch.watcher.is_none());
         assert!(watch.snapshot().watcher_started);
-        assert!(!watch.snapshot().watcher_joined);
-        assert!(!watch.watcher.as_ref().unwrap().is_closed());
+        assert!(watch.snapshot().watcher_closed);
         assert_eq!(watch.acknowledge(), Err(failure.clone()));
-        assert_eq!(join(&mut watch), Err(failure.clone()));
-        assert!(watch.snapshot().watcher_joined);
-        assert_eq!(watch.poll_close(), Err(failure));
-    }
-
-    struct CallbackRetirement {
-        entered: mpsc::SyncSender<()>,
-        release: mpsc::Receiver<()>,
-    }
-
-    impl Drop for CallbackRetirement {
-        fn drop(&mut self) {
-            let _ = self.entered.send(());
-            let _ = self.release.recv_timeout(Duration::from_secs(5));
-            panic!("original native callback retirement panic");
-        }
+        assert_eq!(watch.close(), Err(failure));
     }
 
     #[test]
-    fn close_waits_for_the_original_worker_and_retains_its_join_panic() {
+    fn close_discards_an_in_flight_native_request_hint() {
         let directory = Directory::new();
-        let (entered, observe) = mpsc::sync_channel(1);
-        let (release, retiring) = mpsc::sync_channel(1);
-        let retirement = CallbackRetirement {
-            entered,
-            release: retiring,
-        };
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let (handled_tx, handled_rx) = mpsc::channel();
+        let mut resume = Some(resume_rx);
         let mut watch = RequestWatch::new();
         let shared = Arc::clone(&watch.shared);
         let request = directory.path.join(REQUEST_FILE);
-        let original = notify::recommended_watcher(move |event| {
-            let _retirement = &retirement;
-            shared.on_event(&request, event);
+        let request_path = request.clone();
+        let original = notify::recommended_watcher(move |event: notify::Result<Event>| {
+            if event
+                .as_ref()
+                .is_ok_and(|event| request_hint(&request_path, event))
+                && let Some(resume) = resume.take()
+            {
+                let _ = entered_tx.send(());
+                let _ = resume.recv_timeout(Duration::from_secs(10));
+                shared.on_event(&request_path, event);
+                let _ = handled_tx.send(());
+            }
         })
         .unwrap();
         watch.shared.lock().snapshot.watcher_started = true;
@@ -384,15 +352,16 @@ mod native {
             .insert(original)
             .watch(&directory.path, RecursiveMode::NonRecursive)
             .unwrap();
-        assert_eq!(watch.poll_close(), Ok(false));
-        observe.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert!(!watch.snapshot().watcher_joined);
-        assert!(watch.watcher.is_some());
-        assert_eq!(watch.poll_close(), Ok(false));
-        release.send(()).unwrap();
-        let failure = join(&mut watch).unwrap_err();
-        assert!(watch.snapshot().watcher_joined);
-        assert_eq!(watch.poll_close(), Err(failure.clone()));
-        assert_eq!(watch.acknowledge(), Err(failure));
+        fs::write(request, b"request in flight at close").unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(watch.close(), Ok(()));
+        assert!(watch.watcher.is_none());
+        let closed = watch.snapshot();
+        assert!(closed.watcher_closed);
+        resume_tx.send(()).unwrap();
+        handled_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(watch.snapshot(), closed);
+        assert!(!watch.pending());
+        assert_eq!(watch.acknowledge(), Ok(()));
     }
 }

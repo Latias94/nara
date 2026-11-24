@@ -29,42 +29,6 @@ mod file_publication;
 #[cfg(feature = "project-tooling")]
 pub(crate) mod schema;
 
-#[cfg(feature = "serde")]
-#[allow(
-    dead_code,
-    reason = "the root-private schema receipt is consumed by the generic authoring decoder"
-)]
-mod authoring;
-#[cfg(all(
-    feature = "serde",
-    any(feature = "tooling", feature = "project-tooling")
-))]
-pub use authoring::{AuthoredSchemaUpgradeHistoryPolicy, AuthoringSourceOperationLimits};
-#[cfg(all(
-    feature = "serde",
-    any(feature = "tooling", feature = "project-tooling")
-))]
-pub use authoring::{
-    AuthoredSchemaUpgradeRecovery, AuthoredSchemaUpgradeRecoveryError,
-    AuthoredSchemaUpgradeRecoveryErrorKind, AuthoredSchemaUpgradeRecoveryInspectionFailure,
-    AuthoredSchemaUpgradeRecoveryMember, AuthoredSchemaUpgradeRecoveryMemberState,
-    AuthoredSchemaUpgradeRecoveryPhase, AuthoredSchemaUpgradeRecoveryReceipt,
-    AuthoredSchemaUpgradeRecoveryReview, AuthoredSchemaUpgradeRecoveryUsage,
-    AuthoredSchemaUpgradeRecoveryView, PendingAuthoringRecoveryInspection,
-    PendingAuthoringRecoveryInspectionError, PendingAuthoringRecoveryInspectionErrorKind,
-    PendingAuthoringRecoveryKind, PendingAuthoringRecoveryUsage, PrefabComponentApplyRecovery,
-    PrefabComponentApplyRecoveryError, PrefabComponentApplyRecoveryErrorKind,
-    PrefabComponentApplyRecoveryInspectionFailure, PrefabComponentApplyRecoveryOutput,
-    PrefabComponentApplyRecoveryPhase, PrefabComponentApplyRecoveryReceipt,
-    PrefabComponentApplyRecoveryReview, PrefabComponentApplyRecoveryView, PrefabExtractionRecovery,
-    PrefabExtractionRecoveryDestination, PrefabExtractionRecoveryErrorKind,
-    PrefabExtractionRecoveryFailure, PrefabExtractionRecoveryInspectionFailure,
-    PrefabExtractionRecoveryMember, PrefabExtractionRecoveryMemberDisposition,
-    PrefabExtractionRecoveryMemberState, PrefabExtractionRecoveryOutcome,
-    PrefabExtractionRecoveryPhase, PrefabExtractionRecoveryReview, PrefabExtractionRecoveryUsage,
-    PrefabExtractionRecoveryView,
-};
-
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub(crate) mod check;
 
@@ -78,17 +42,6 @@ mod runtime;
 
 #[cfg(feature = "serde")]
 pub(crate) use runtime::has_active_project_scene_addition;
-
-#[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
-mod persistence;
-
-#[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
-pub use persistence::EditorPersistenceReceipt;
-#[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
-pub use runtime::{
-    EditorExtensionDocumentHostError, EditorInspectedAuthoringSource, EditorSourceAssetDomain,
-    EditorSourceAssetImporters,
-};
 
 #[cfg(feature = "serde")]
 pub use crate::project_assets::{ProjectAssetCollection, ProjectDomainAssets};
@@ -164,91 +117,6 @@ pub(crate) use ingest::{
     feature = "render-wgpu"
 ))]
 pub use runtime::DesktopRunIntent;
-#[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
-    feature = "tooling",
-    feature = "presentation-ui"
-))]
-#[doc(hidden)]
-pub use runtime::EditorUiPreviewCandidate;
-#[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
-#[doc(hidden)]
-pub use runtime::{
-    AuthoredSchemaUpgradeProposal, AuthoredSchemaUpgradeReview,
-    AuthoredSchemaUpgradeReviewedSource, AuthoredSchemaUpgradeSourceProposal,
-    EditorAuthoredSchemaUpgradeError, EditorAuthoredSchemaUpgradeId,
-    EditorAuthoredSchemaUpgradeInputs, EditorAuthoredSchemaUpgradeOutcome,
-    EditorAuthoredSchemaUpgradePhase, EditorAuthoredSchemaUpgradeSource,
-    EditorAuthoredSchemaUpgradeView, EditorAuthoredUpgradeWorkingSource,
-    EditorEditPreparationError, EditorPrefabExtractionError, EditorPrefabExtractionId,
-    EditorPrefabExtractionOutcome, EditorPrefabExtractionPhase, EditorPrefabExtractionRequest,
-    EditorPrefabExtractionReview, EditorPrefabExtractionReviewedOutput,
-    EditorPrefabExtractionSelection, EditorPrefabExtractionSelectionDocument,
-    EditorPrefabExtractionView, EditorProjectCloseProgress, EditorProjectCloseReceipt,
-    EditorProjectOpenAttempt, EditorProjectOpenError, EditorProjectOpenFailure,
-    EditorProjectOpenFailureImpact, EditorProjectOpenFailureSource, EditorProjectOpenHost,
-    EditorProjectOpenPhase, EditorProjectOpenProgress, EditorProjectOpenTasksCloseReport,
-    EditorProjectSession, EditorSchemaOwnerAdoptionError, EditorSchemaOwnerAdoptionFailure,
-    EditorSchemaOwnerAdoptionId, EditorSchemaOwnerAdoptionOutcome, EditorSchemaOwnerAdoptionPhase,
-    EditorSchemaOwnerAdoptionView, EditorSourceOperationId, EditorSourceToolArtifactCommitError,
-    EditorSourceToolCommand, EditorSourceToolDefinition,
-    EditorSourceToolIncompleteArtifactRegistrationError, EditorSourceToolIncompleteMember,
-    EditorSourceToolIncompletePublication, EditorSourceToolInstallation,
-    EditorSourceToolInstallationError, EditorSourceToolInstallationInspection,
-    EditorSourceToolInstallationOrphan, EditorSourceToolInstallationOutcome,
-    EditorSourceToolInstallationPlan, EditorSourceToolInstallationReceipt,
-    EditorSourceToolInstalledMember, EditorSourceToolManagedError, EditorSourceToolManagedHost,
-    EditorSourceToolManagedHostDigests, EditorSourceToolPrefabTemplateFile,
-    EditorSourceToolPrefabTemplateImportRequest, EditorSourceToolPrefabTemplatePublication,
-    EditorSourceToolReleaseError, EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
-    EditorSourceToolReleaseRequirement, EditorSupervisedPlayBinding,
-    EditorSupervisedPlayOwnerError, EditorSupervisedPlayRetirementAck,
-    EditorSupervisedPlayRetirementRequest, PreparedEditorSourceToolArtifacts,
-    PreparedEditorSourceToolInstallations, PreparedEditorSourceToolPrefabTemplateImport,
-    PreparedEditorSourceToolReclamation, PreparedEditorSourceToolRelease,
-    PreparedEditorSourceToolSelection, PreparedEditorSourceToolTemplateImport,
-    PreparedEditorSourceToolWithdrawal, SupervisedDesktopSourceAdmissionError,
-    SupervisedDesktopSourceAuthority, TrustedCompiledEditorProjectIntent,
-    admit_supervised_desktop_source_receipt,
-};
-#[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
-    feature = "tooling",
-    feature = "presentation-2d"
-))]
-pub use runtime::{
-    EditorAcceptedPreview, EditorPresentationError, EditorPresentationImage, EditorPresentedToken,
-    EditorPreviewPresentation,
-};
-#[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
-    feature = "tooling",
-    any(feature = "presentation-2d", feature = "presentation-ui")
-))]
-pub use runtime::{
-    EditorGameInputBatch, EditorGameInputEnvelope, EditorGameInputEvent, EditorGameStartActivation,
-    EditorGameStartRequest, EditorGameViewBridgeFailure, EditorGameViewCandidate,
-    EditorGameViewCandidateIdentity, EditorGameViewCandidateParts, EditorGameViewCompletion,
-    EditorGameViewCompletionDisposition,
-};
-#[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
-    feature = "tooling",
-    feature = "presentation-2d"
-))]
-pub use runtime::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
-#[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
-    feature = "tooling",
-    feature = "runtime-ui"
-))]
-#[doc(hidden)]
-pub use runtime::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
 #[cfg(feature = "serde")]
 pub use runtime::{
     HeadlessRun, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport, HeadlessSession,

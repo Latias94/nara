@@ -18,7 +18,6 @@ use nara::{
 #[allow(dead_code)]
 #[path = "../project_cook/process.rs"]
 mod process;
-#[cfg(feature = "tooling")]
 pub(super) mod puzzle;
 mod workspace;
 

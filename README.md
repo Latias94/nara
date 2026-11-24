@@ -15,9 +15,9 @@ The repository currently includes:
 - a fallible `App`, plugin composition, schedules, fixed time, tasks, and managed runtime lifecycle;
 - versioned scene, prefab, schema, asset, and project-manifest data;
 - headless and Winit/wgpu desktop product Hosts;
-- a deterministic 2D reference game with sprites, input, HUD, Save/Play authoring evidence, and
-  bounded diagnostics;
-- an independent `reference-game` workspace and public-API consumer fixtures under `tests/fixtures/`.
+- a deterministic 2D reference game with sprites, input, HUD, and headless and desktop entry points;
+- shared format and image data in `tests/fixtures/`, with game-facing coverage in `reference-game`
+  and `samples/two-level-game`.
 
 ## Requirements
 
@@ -49,15 +49,18 @@ cargo run --manifest-path reference-game/Cargo.toml --locked --features desktop 
 See [`reference-game/README.md`](reference-game/README.md) for the gameplay controls, project data,
 and standalone candidate layout.
 
+Create and edit a standalone project with the CLI by following the
+[first 2D game guide](docs/guides/first-2d-game.md).
+
 For cross-level travel and game-owned checkpoint saves, see the independent
 [`samples/two-level-game`](samples/two-level-game/README.md) consumer.
 
 ## Repository Layout
 
 - `crates/`: engine modules and native adapters
-- `src/`: the integrated product facade and Project Host
+- `src/`: the game facade, runtime project loading, and headless project commands
 - `reference-game/`: the first complete headless and desktop game tracer
-- `tests/fixtures/`: test data and independent consumer projects; see the [fixture guide](tests/fixtures/README.md)
+- [`tests/fixtures/`](tests/fixtures/README.md) contains shared format and image test data.
 - [`docs/architecture/`](docs/architecture/overview.md) contains the v2 architecture and accepted ADRs.
 - [`docs/plans/`](docs/plans/v2-refactor-master-plan.md) contains the active roadmap and phase gates.
 

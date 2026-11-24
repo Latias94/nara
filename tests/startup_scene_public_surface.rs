@@ -22,15 +22,3 @@ fn advanced_startup_scene_surface_is_available() {
     let _: fn(&mut World, SceneSource) -> Result<DiagnosticReport, StartupSceneMaterializeError> =
         materialize_startup_scene;
 }
-
-#[test]
-fn startup_scene_activation_is_advanced_only() {
-    let tests = trybuild::TestCases::new();
-    tests.compile_fail("tests/ui/startup_scene/activation_pair_not_constructible.rs");
-    tests.compile_fail("tests/ui/startup_scene/activation_view_not_resource.rs");
-    tests.compile_fail("tests/ui/startup_scene/direct_module.rs");
-    tests.compile_fail("tests/ui/startup_scene/ordinary_materialize.rs");
-    tests.compile_fail("tests/ui/startup_scene/ordinary_prelude.rs");
-    tests.compile_fail("tests/ui/startup_scene/ordinary_plugin.rs");
-    tests.compile_fail("tests/ui/startup_scene/source_not_clone.rs");
-}

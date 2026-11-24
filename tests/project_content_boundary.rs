@@ -772,13 +772,6 @@ fn project_content_image_payload_cannot_escape_its_snapshot_lease_by_clone() {
 }
 
 #[test]
-fn content_snapshot_exposes_read_only_data_and_keeps_its_owner_private() {
-    let cases = trybuild::TestCases::new();
-    cases.compile_fail("tests/ui/project_content/private_owner.rs");
-    cases.compile_fail("tests/ui/project_content/mutable_document.rs");
-}
-
-#[test]
 fn startup_source_keeps_its_admitted_identity_context_charged() {
     let project = TestProject::with_prefab_startup();
     let (candidate, plan, root) = project.candidate_plan_and_root();

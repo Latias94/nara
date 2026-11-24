@@ -185,8 +185,8 @@ pub fn bind_keyboard_right_to_up(default_input: &[u8]) -> Vec<u8> {
     bytes
 }
 
-pub fn blocked_door_scene(saved: &[u8]) -> Vec<u8> {
-    let mut document: Value = serde_json::from_slice(saved).unwrap();
+pub fn scene_with_pressure_plate_column(scene: &[u8], from: i64, to: i64) -> Vec<u8> {
+    let mut document: Value = serde_json::from_slice(scene).unwrap();
     let plate = document["payload"]["entities"]
         .as_array_mut()
         .unwrap()
@@ -195,8 +195,8 @@ pub fn blocked_door_scene(saved: &[u8]) -> Vec<u8> {
         .unwrap();
     let column =
         &mut plate["components"]["push-box.PressurePlate"]["value"]["value"]["column"]["value"];
-    assert_eq!(column.as_i64(), Some(3));
-    *column = Value::from(5);
+    assert_eq!(column.as_i64(), Some(from));
+    *column = Value::from(to);
     serde_json::to_vec_pretty(&document).unwrap()
 }
 

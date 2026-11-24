@@ -403,7 +403,7 @@ fn native_unpickable_successor_revokes_displaced_world_without_issuing_permissio
     runtime.finish().unwrap();
 }
 
-#[cfg(all(feature = "editor-imgui", target_os = "windows"))]
+#[cfg(windows)]
 mod native {
     use std::{
         panic::{AssertUnwindSafe, catch_unwind, resume_unwind},

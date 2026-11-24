@@ -4,13 +4,9 @@ use nara_app::{FrameExecutionStart, RuntimeGeneration};
 use nara_ecs::{Res, Resource, SystemParam, SystemSet, World};
 #[cfg(feature = "stock-ui")]
 use nara_render::RenderFrameState;
-#[cfg(any(feature = "stock-ui", all(test, feature = "stock-sprite")))]
+#[cfg(feature = "stock-ui")]
 use nara_render::RenderTarget;
-#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
-use nara_render::ViewportRect;
 use nara_render::{RenderFramePacket, RenderFramePacketError, RenderWindowPacket};
-#[cfg(all(test, feature = "stock-sprite"))]
-use nara_sprite_render::__private::SpriteBatches;
 #[cfg(all(test, feature = "stock-ui"))]
 use nara_ui_render::__private::UiPresentationOutcomes;
 #[cfg(feature = "stock-ui")]
@@ -18,7 +14,7 @@ use nara_ui_render::__private::{
     UiBackendSubmission, UiCompletedBackendOutcome, UiSubmittedBackendSubmission,
 };
 #[cfg(all(test, feature = "stock-ui"))]
-use nara_ui_render::{UiPacketPrimitive, UiPaintPacket};
+use nara_ui_render::UiPaintPacket;
 #[cfg(feature = "stock-ui")]
 use nara_ui_render::{
     UiPaintPacketIdentity, UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
@@ -27,12 +23,8 @@ use nara_ui_render::{
 #[cfg(feature = "stock-ui")]
 use nara_window::WindowId;
 
-#[cfg(any(feature = "stock-ui", all(test, feature = "stock-sprite")))]
+#[cfg(feature = "stock-ui")]
 use crate::WgpuRenderError;
-#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
-use crate::quad::WgpuQuadBatch;
-#[cfg(all(test, feature = "stock-ui"))]
-use crate::ui::WgpuLoweredUiPacketFacts;
 use crate::{WgpuRenderInput, WgpuRenderProgramError, policy::CapturedPolicy};
 
 /// Ordered CPU capture and optional native-window publication in `CoreStage::Render`.
@@ -43,20 +35,6 @@ pub enum WgpuFrameSet {
     Capture,
     Seal,
     Publish,
-}
-
-/// Private legacy drawing input retained only for numerical comparison tests.
-#[cfg(test)]
-#[derive(Debug, Default, Clone)]
-pub(crate) struct LegacyWgpuFramePayload {
-    #[cfg(feature = "stock-ui")]
-    pub(crate) primary_window_id: Option<WindowId>,
-    #[cfg(feature = "stock-ui")]
-    pub(crate) ui_logical_target: Option<RenderTarget>,
-    #[cfg(feature = "stock-sprite")]
-    pub(crate) sprite_batches: Option<SpriteBatches>,
-    #[cfg(feature = "stock-ui")]
-    pub(crate) ui_packets: Vec<Arc<UiPaintPacket>>,
 }
 
 #[cfg(feature = "stock-ui")]
@@ -76,16 +54,6 @@ pub(crate) struct WgpuCapturedFrame {
     pub(crate) work_started_at: Instant,
 }
 
-/// Private legacy transaction retained only for numerical comparison tests.
-#[cfg(test)]
-#[derive(Debug)]
-pub(crate) struct LegacyWgpuCapturedFrame {
-    pub(crate) topology: RenderFramePacket,
-    pub(crate) payload: LegacyWgpuFramePayload,
-    pub(crate) app_frame_index: u64,
-    pub(crate) work_started_at: Instant,
-}
-
 /// Refusal to seal one exact CPU policy capture and its neutral render topology.
 #[derive(Debug, thiserror::Error)]
 pub enum WgpuFrameCaptureError {
@@ -93,8 +61,6 @@ pub enum WgpuFrameCaptureError {
     MissingRuntimeGeneration,
     #[error(transparent)]
     Topology(#[from] RenderFramePacketError),
-    #[error("a render batch does not belong to the admitted view and target")]
-    BatchTopologyMismatch,
     #[error("nonempty render views require a capture from the selected policy installation")]
     MissingPolicy,
     #[error(transparent)]
@@ -642,140 +608,6 @@ pub fn take_captured_policy_batch(world: &mut World) -> Option<WgpuCapturedPolic
     world
         .get_resource_mut::<WgpuFramePacketSlot>()?
         .take_batch()
-}
-
-#[cfg(test)]
-impl LegacyWgpuFramePayload {
-    #[cfg(feature = "stock-sprite")]
-    pub(crate) fn for_editor_sprites(sprite_batches: SpriteBatches) -> Self {
-        Self {
-            sprite_batches: Some(sprite_batches),
-            ..Self::default()
-        }
-    }
-
-    #[cfg(feature = "stock-ui")]
-    pub(crate) fn for_editor_runtime_ui(ui_packets: Vec<Arc<UiPaintPacket>>) -> Self {
-        Self {
-            primary_window_id: Some(WindowId::PRIMARY),
-            ui_logical_target: Some(RenderTarget::Window(WindowId::PRIMARY)),
-            ui_packets,
-            ..Self::default()
-        }
-    }
-
-    #[cfg(all(feature = "stock-sprite", feature = "stock-ui"))]
-    pub(crate) fn for_editor_viewport(
-        sprite_batches: SpriteBatches,
-        ui_packets: Vec<Arc<UiPaintPacket>>,
-    ) -> Self {
-        let mut payload = Self::for_editor_runtime_ui(ui_packets);
-        payload.sprite_batches = Some(sprite_batches);
-        payload
-    }
-
-    #[cfg(feature = "stock-ui")]
-    pub(crate) fn ui_facts(&self, target: RenderTarget) -> WgpuUiPayloadFacts {
-        let packet_target = self.ui_packet_target(target);
-        let mut facts = WgpuUiPayloadFacts::default();
-        for packet in self.ui_packets.iter().filter(|packet| {
-            crate::ui::ui_packet_targets_view(packet, packet_target, self.primary_window_id)
-        }) {
-            facts.packet_count = facts.packet_count.saturating_add(1);
-            facts.packet_identity = if facts.packet_count == 1 {
-                Some(packet.identity())
-            } else {
-                None
-            };
-            facts.primitives = facts
-                .primitives
-                .saturating_add(crate::saturating_u64(packet.primitives().len()));
-            facts.glyph_primitives = facts.glyph_primitives.saturating_add(crate::saturating_u64(
-                packet
-                    .primitives()
-                    .iter()
-                    .filter(|primitive| matches!(primitive, UiPacketPrimitive::Glyph { .. }))
-                    .count(),
-            ));
-            facts.glyph_pages = facts
-                .glyph_pages
-                .saturating_add(crate::saturating_u64(packet.glyph_pages().len()));
-        }
-        facts
-    }
-
-    #[cfg(feature = "stock-ui")]
-    fn ui_packet_target(&self, execution_target: RenderTarget) -> RenderTarget {
-        self.ui_logical_target.unwrap_or(execution_target)
-    }
-
-    /// Private legacy lowering oracle for ordered quad readback and Runtime comparison tests.
-    #[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
-    pub(crate) fn lower_draw(
-        &self,
-        target: RenderTarget,
-        viewport: ViewportRect,
-        view_index: Option<usize>,
-        view_uniform: crate::view_uniform::WgpuViewUniform,
-    ) -> Result<WgpuLoweredFrameDraw, WgpuRenderError> {
-        #[cfg(feature = "stock-sprite")]
-        let content = self
-            .sprite_batches
-            .as_ref()
-            .map_or_else(Vec::new, |batches| {
-                view_index.map_or_else(Vec::new, |index| {
-                    crate::sprite::collect_sprite_quad_batches(batches, index, view_uniform)
-                })
-            });
-        #[cfg(not(feature = "stock-sprite"))]
-        let content = {
-            let _ = view_uniform;
-            Vec::new()
-        };
-        #[cfg(feature = "stock-ui")]
-        let ui_packet_target = self.ui_packet_target(target);
-        #[cfg(feature = "stock-ui")]
-        let ui = crate::ui::lower_ui_packets(
-            if view_index.is_none() {
-                &self.ui_packets
-            } else {
-                &[]
-            },
-            ui_packet_target,
-            self.primary_window_id,
-            viewport,
-        )
-        .map_err(|error| WgpuRenderError::UiPacketInvariant {
-            message: error.to_string(),
-        })?;
-        #[cfg(feature = "stock-ui")]
-        ui.require_quad_only()
-            .map_err(|error| WgpuRenderError::UiPacketInvariant {
-                message: error.to_string(),
-            })?;
-        #[cfg(not(feature = "stock-ui"))]
-        let ui_batches = {
-            let _ = (target, viewport, view_index);
-            Vec::new()
-        };
-        #[cfg(feature = "stock-ui")]
-        let ui_batches = ui.batches;
-
-        Ok(WgpuLoweredFrameDraw {
-            batches: nara_render::__private::assemble_first_party_draws(content, ui_batches),
-            #[cfg(feature = "stock-ui")]
-            ui_packets: ui.packet_facts,
-        })
-    }
-}
-
-/// Private legacy combined draw used only by the native/unit comparison oracle.
-#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
-#[derive(Debug, Default)]
-pub(crate) struct WgpuLoweredFrameDraw {
-    pub(crate) batches: Vec<WgpuQuadBatch>,
-    #[cfg(feature = "stock-ui")]
-    pub(crate) ui_packets: Vec<WgpuLoweredUiPacketFacts>,
 }
 
 #[cfg(feature = "stock-ui")]

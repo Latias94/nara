@@ -5,6 +5,7 @@ name: CI
   push:
     branches:
       - main
+      - refactor/v2-clean-architecture
 
 permissions:
   contents: read
@@ -14,375 +15,88 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CARGO_BUILD_JOBS: "1"
-  CARGO_INCREMENTAL: "0"
+  RUSTUP_TOOLCHAIN: "1.95.0"
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
-  wasm:
-    name: "Wasm portable libraries"
+  fmt:
+    name: Formatting
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Install Rust and Wasm target
-        run: |
-          rustup toolchain install 1.95.0 --profile minimal --target wasm32-unknown-unknown
-          rustup default 1.95.0
-      - name: Check portable Wasm libraries
-        run: |
-          cargo check -p nara_fs --locked --lib --target wasm32-unknown-unknown
-          cargo check -p nara --locked --no-default-features --features runtime-core --lib --target wasm32-unknown-unknown
-          cargo check -p nara_app --locked --features parallel-executor --lib --target wasm32-unknown-unknown
-          cargo check -p nara --locked --no-default-features --features runtime-2d,presentation-2d,presentation-ui,tooling,serde --lib --target wasm32-unknown-unknown
+      - run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+      - run: cargo fmt --all -- --check
+      - run: cargo fmt --manifest-path reference-game/Cargo.toml --all -- --check
+      - run: cargo fmt --manifest-path samples/two-level-game/Cargo.toml --all -- --check
 
-  root:
-    name: "Root (${{ matrix.os }})"
-    runs-on: "${{ matrix.os }}"
-    # Cold Windows checks plus the default suite already take about 71 minutes;
-    # this job also owns the complete all-feature suite and Dear adapter gate.
-    timeout-minutes: 180
+  workspace:
+    name: Workspace (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
+        os: [ubuntu-latest, windows-latest]
     steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Install Rust
-        shell: bash
-        run: |
-          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
-          rustup default 1.95.0
-      - name: Install nextest
-        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+      - run: rustup toolchain install 1.95.0 --profile minimal
+      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:
           tool: nextest@0.9.138
           fallback: none
-      - name: Install root system test profile
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            sudo apt-get update
-            sudo apt-get install --yes --no-install-recommends libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxkbcommon0 libxkbcommon-x11-0 mesa-vulkan-drivers vulkan-tools xauth xvfb libudev-dev pkg-config
-          fi
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-      - name: Check root workspace
-        run: cargo check --workspace --locked --all-targets
-      - name: Check root feature matrix
-        shell: bash
-        run: |
-          cargo check -p nara --locked --no-default-features --lib
-          cargo check -p nara --locked --no-default-features --features runtime-core --lib
-          cargo check -p nara --locked --no-default-features --features runtime-input --lib
-          cargo check -p nara --locked --no-default-features --features runtime-window --lib
-          cargo check -p nara --locked --no-default-features --features runtime-2d --lib
-          cargo check -p nara --locked --no-default-features --features presentation-2d --lib
-          cargo check -p nara --locked --no-default-features --features runtime-ui --lib
-          cargo check -p nara --locked --no-default-features --features presentation-ui --lib
-          cargo check -p nara --locked --no-default-features --features tooling --lib
-          cargo check -p nara --locked --no-default-features --features asset-watch --lib
-          cargo check -p nara --locked --no-default-features --features desktop-winit --lib
-          cargo check -p nara --locked --no-default-features --features render-wgpu --lib
-          cargo check -p nara --locked --no-default-features --features serde --lib
-          cargo check -p nara --locked --no-default-features --features project-tooling --lib
-          cargo check -p nara --locked --no-default-features --features runtime-core,serde --lib
-          cargo check -p nara --locked --no-default-features --features runtime-2d,serde --lib
-          cargo check -p nara --locked --no-default-features --features runtime-ui,serde --lib
-          cargo check -p nara --locked --no-default-features --features tooling,runtime-2d,serde --lib
-          cargo check -p nara --locked --no-default-features --features desktop-winit,render-wgpu --example windowed_clear
-          cargo check -p nara --locked --no-default-features --features presentation-2d,desktop-winit,render-wgpu --example windowed_sprites
-          cargo check -p nara --locked --no-default-features --features presentation-2d,desktop-winit,render-wgpu --example palette_material
-          cargo run -p nara_ui_kernel --locked --example layout_gallery
-          cargo run -p nara_ui --locked --example interaction_lab
-          cargo run -p nara --locked --no-default-features --features presentation-ui,desktop-winit,render-wgpu --example ui_presentation_gallery
-          CARGO_TARGET_DIR=target cargo check --manifest-path tests/fixtures/product-slices/presentation-2d/Cargo.toml --locked
-          CARGO_TARGET_DIR=target cargo check --manifest-path tests/fixtures/product-slices/presentation-ui/Cargo.toml --locked
-          cargo check --workspace --locked --all-features --all-targets
-      - name: Test root workspace
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            NARA_WGPU_FORCE_FALLBACK=1 xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" cargo nextest run --workspace --locked --test-threads=1 --no-fail-fast
-            NARA_WGPU_FORCE_FALLBACK=1 xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" cargo nextest run --workspace --locked --all-features --test-threads=1 --no-fail-fast
-          else
-            cargo nextest run --workspace --locked --test-threads=1 --no-fail-fast
-            NARA_WGPU_FORCE_FALLBACK=1 cargo nextest run --workspace --locked --all-features --test-threads=1 --no-fail-fast
-          fi
-      - name: Test generated project and independent author delivery
-        if: runner.os == 'Windows'
-        timeout-minutes: 30
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: 3.13.5
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends libudev-dev pkg-config
+      - name: Check dependency and source boundaries
         env:
-          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
-          CARGO_NET_OFFLINE: "true"
-          RUSTUP_TOOLCHAIN: "1.95.0"
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python ci/check_boundaries.py
+      - name: Resolve a single WGPU package
+        run: cargo tree --locked -d -p wgpu
+      - run: cargo check --workspace --locked --all-features
+      - name: Test core engine crates
         run: >-
-          cargo nextest run --locked --offline -p nara --no-default-features --features project-workflow-cli,tooling
-          --test project_cook --test project_author_workflow --run-ignored only
-          -E 'test(=generated_project_cooks_custom_game_and_runs_after_relocation) | test(=live_cook_consumer_timeout_preserves_and_retires_the_original_child) | test(=same_named_new_games_keep_their_identities_and_complete_source_and_cooked_workflows) | test(=generated_v2_puzzle_observes_the_edited_scene_and_input_after_source_removal)'
-          --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test production Dear renderer adapter
-        shell: bash
-        env:
-          DEAR_IMGUI_REQUIRE_WGPU_ADAPTER: "1"
-          NARA_WGPU_FORCE_FALLBACK: "1"
-        run: |
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" cargo nextest run -p nara_render_wgpu --locked --features editor-imgui --lib --test-threads=1 --no-fail-fast
-          else
-            cargo nextest run -p nara_render_wgpu --locked --features editor-imgui --lib --test-threads=1 --no-fail-fast
-          fi
-      - name: Test independent DX12 program and output consumers
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
-          WGPU_BACKEND: dx12
-          NARA_WGPU_FORCE_FALLBACK: "1"
-        run: |
-          cargo nextest run --manifest-path tests/fixtures/render-program-consumer/Cargo.toml --locked --test offscreen --run-ignored only -E 'test(invalid_capture_preflight_refuses_before_known_native_resource_budget)' --test-threads=1
-          cargo nextest run --manifest-path tests/fixtures/render-output-consumer/Cargo.toml --locked --test offscreen --run-ignored only -E 'test(retained_pixels_survive_resize_and_a_close_while_b_keeps_submitting)' --test-threads=1
-      - name: Test original submission maintenance with and without telemetry
-        if: runner.os == 'Windows'
-        env:
-          WGPU_BACKEND: dx12
-          NARA_WGPU_FORCE_FALLBACK: "1"
-        run: cargo nextest run -p nara_render_wgpu --locked --features stock-sprite,stock-ui --lib --run-ignored only -E 'test(host::runtime::maintenance_tests::)' --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test live Scene updates and captured Material textures through an external DX12 Host
-        if: runner.os == 'Windows'
-        env:
-          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
-          WGPU_BACKEND: dx12
-          NARA_WGPU_FORCE_FALLBACK: "1"
-        run: cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-material-module-consumer --features native-source-watch-gpu --test source_watching --test captured_textures --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test original Sprite and Tile captures through an external DX12 Host
-        if: runner.os == 'Windows'
-        env:
-          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
-          WGPU_BACKEND: dx12
-          NARA_WGPU_FORCE_FALLBACK: "1"
-        run: cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-sprite-render-module-consumer --test geometry --run-ignored only -E 'test(original_tile_captures_and_pixels_survive_edits_views_and_runtime_retirement)' --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test authored collision, parallel Material motion and history through DX12 software
-        if: runner.os == 'Windows'
-        env:
-          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
-          WGPU_BACKEND: dx12
-          NARA_WGPU_FORCE_FALLBACK: "1"
-        run: cargo nextest run --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --locked --features production-parallel --test authored_collision --test joint_history --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test captured Material View time and temporal cuts through an external DX12 Host
-        if: runner.os == 'Windows'
-        env:
-          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
-          WGPU_BACKEND: dx12
-          NARA_WGPU_FORCE_FALLBACK: "1"
-        run: cargo nextest run --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --locked --test material_view_time --test joint_history --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test explicit depth and spatial units through DX12 software rendering
-        if: runner.os == 'Windows'
-        env:
-          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
-          WGPU_BACKEND: dx12
-          NARA_WGPU_FORCE_FALLBACK: "1"
-        run: cargo nextest run --manifest-path tests/fixtures/render-program-consumer/Cargo.toml --locked --test depth_units --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Run ordinary windowed Scene updates through DX12 software rendering
-        if: runner.os == 'Windows'
-        timeout-minutes: 15
-        env:
-          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
-          WGPU_BACKEND: dx12
-          NARA_WGPU_FORCE_FALLBACK: "1"
-        run: cargo run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-material-module-consumer --features native-source-watch-desktop --example source_watching_window
-      - name: Build ordinary presented drawing and picking consumer
-        if: runner.os == 'Windows'
-        env:
-          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
-        run: cargo build --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --example picking_window
-      - name: Test world picking, split resize and observer retirement through DX12 software rendering
-        if: runner.os == 'Windows'
-        timeout-minutes: 10
-        env:
-          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
-          WGPU_BACKEND: dx12
-          NARA_WGPU_FORCE_FALLBACK: "1"
-        run: cargo nextest run --manifest-path tests/fixtures/stock-composition-consumer/Cargo.toml --locked --test picking_window --run-ignored only -E 'test(ordinary_runtime_picking_matches_pixels_on_one_native_display) | test(observer_failure_retires_original_window_before_resuming_its_panic) | test(split_view_runtime_survives_native_resize_and_restores_picking)' --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Verify original native retirement after fixture callback panics
-        if: runner.os == 'Windows'
-        timeout-minutes: 10
-        shell: python
-        env:
-          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
-          WGPU_BACKEND: dx12
-          NARA_WGPU_FORCE_FALLBACK: "1"
-        run: |
-          import os
-          from pathlib import Path
-          import subprocess
-
-          binary = Path(os.environ["CARGO_TARGET_DIR"]) / "debug/examples/source_watching_window.exe"
-          for fault in ("update", "capture", "observer"):
-              environment = dict(os.environ, NARA_SOURCE_WINDOW_FAULT=fault)
-              result = subprocess.run([str(binary)], env=environment, capture_output=True,
-                                      text=True, encoding="utf-8", errors="replace", timeout=180)
-              output = result.stdout + result.stderr
-              print(output)
-              marker = (f"native source fault cleanup: mode={fault.title()} "
-                        "physical_loop_recovered=true native_destroyed=true "
-                        "watchers_joined_before_world_drop=true")
-              if result.returncode != 101 or marker not in output:
-                  raise RuntimeError(f"{fault}: original native retirement was not proved")
+          cargo nextest run --locked -p nara_app -p nara_asset_watch -p nara_editor_core
+          -p nara_input -p nara_scene --lib --features nara_input/serde,nara_scene/serde --no-tests fail
 
   reference-game:
-    name: "Reference game (${{ matrix.os }})"
-    runs-on: "${{ matrix.os }}"
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
+    name: Reference game
+    runs-on: windows-latest
+    timeout-minutes: 25
     steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Install Rust
-        shell: bash
-        run: |
-          rustup toolchain install 1.95.0 --profile minimal
-          rustup default 1.95.0
-      - name: Install nextest
-        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+      - run: rustup toolchain install 1.95.0 --profile minimal
+      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:
           tool: nextest@0.9.138
           fallback: none
-      - name: Install reference-game system test profile
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            sudo apt-get update
-            sudo apt-get install --yes --no-install-recommends libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxkbcommon0 libxkbcommon-x11-0 mesa-vulkan-drivers vulkan-tools xauth xvfb
-          fi
-      - name: Check reference game
-        run: cargo check --manifest-path reference-game/Cargo.toml --locked --all-targets
-      - name: Check reference game all features
-        run: cargo check --manifest-path reference-game/Cargo.toml --locked --all-features --all-targets
-      - name: Test reference game
-        run: cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test-threads=1 --no-fail-fast
-      - name: Test reference game all features
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            NARA_WGPU_FORCE_FALLBACK=1 xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" cargo nextest run --manifest-path reference-game/Cargo.toml --locked --all-features --test-threads=1 --no-fail-fast
-          else
-            NARA_WGPU_FORCE_FALLBACK=1 cargo nextest run --manifest-path reference-game/Cargo.toml --locked --all-features --test-threads=1 --no-fail-fast
-          fi
+      - name: Build desktop and test the game
+        run: >-
+          cargo nextest run --manifest-path reference-game/Cargo.toml --locked --features desktop
+          --test headless_cli --test headless_snapshot --test ui_product --test desktop_flow
+          --no-tests fail
 
-  module-consumer:
-    name: "Module consumer (${{ matrix.os }})"
-    runs-on: "${{ matrix.os }}"
-    timeout-minutes: 90
-    env:
-      CARGO_TARGET_DIR: "${{ github.workspace }}/target"
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
+  wasm-core:
+    name: Wasm core
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Install Rust
-        shell: bash
-        run: |
-          rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
-          rustup default 1.95.0
-      - name: Install nextest
-        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
-        with:
-          tool: nextest@0.9.138
-          fallback: none
-      - name: Install controller build prerequisites
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends libudev-dev pkg-config
-      - name: Check module consumer formatting
-        run: cargo fmt --manifest-path tests/fixtures/module-consumer/Cargo.toml --all -- --check
-      - name: Check module consumer
-        run: cargo check --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --workspace --all-targets
-      - name: Lint module consumer
-        run: cargo clippy --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --workspace --all-targets -- -D warnings
-      - name: Check native process consumer formatting
-        run: cargo fmt --manifest-path tests/fixtures/cargo-build-consumer/Cargo.toml --all -- --check
-      - name: Test independent process custody and persistence
-        run: cargo nextest run --manifest-path tests/fixtures/cargo-build-consumer/Cargo.toml --locked --test contained_process --test persistence_numbers --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test real project bootstrap and recipe diagnostics
-        if: runner.os == 'Windows'
-        timeout-minutes: 30
-        run: cargo nextest run --manifest-path tests/fixtures/cargo-build-consumer/Cargo.toml --locked --release --test bootstrap --test recipe --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test independent semantic panel authoring
-        run: cargo nextest run --manifest-path tests/fixtures/editor-ui-host-consumer/Cargo.toml --locked --test public_host --test property_children --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Check UI module consumer formatting
-        run: cargo fmt --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --all -- --check
-      - name: Check UI module consumer
-        run: cargo check --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --locked --all-targets
-      - name: Test UI module consumer
-        run: cargo nextest run --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --locked --test-threads=1
-      - name: Test independent render CPU contracts
-        shell: bash
-        run: |
-          for consumer in render-output-consumer render-program-consumer render-policy-consumer render-composition-consumer stock-composition-consumer; do
-            cargo nextest run --manifest-path "tests/fixtures/$consumer/Cargo.toml" --locked --workspace --no-tests warn --test-threads=1 --no-fail-fast
-          done
-      - name: Test direct module surfaces
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --workspace --test-threads=1
-          else
-            cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer -p nara-sprite-render-module-consumer --test-threads=1
-            cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-editor-panel-module-consumer --test-threads=1
-          fi
-      - name: Test explicit parallel managed motion and original serial controls
-        run: cargo nextest run --manifest-path tests/fixtures/motion-execution/Cargo.toml --locked -p motion-execution-consumer --features production-parallel --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test physical Scene source watching and native retirement
-        run: cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-material-module-consumer --features native-source-watch-gpu --test source_watching --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Check the ordinary windowed Scene source consumer
-        run: cargo check --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-material-module-consumer --features native-source-watch-desktop --example source_watching_window
-      - name: Check Collect Game sample all features
-        run: cargo check --manifest-path samples/collect-game/Cargo.toml --locked --workspace --all-features --all-targets
-      - name: Test Collect Game sample headless
-        run: cargo nextest run --manifest-path samples/collect-game/Cargo.toml --workspace --locked --test-threads=1
-      - name: Check Two-Level Game sample formatting
-        run: cargo fmt --manifest-path samples/two-level-game/Cargo.toml --all -- --check
-      - name: Check Two-Level Game sample all features
-        run: cargo check --manifest-path samples/two-level-game/Cargo.toml --locked --all-features --all-targets
-      - name: Check Two-Level Game shipping desktop without development tools
-        run: cargo check --manifest-path samples/two-level-game/Cargo.toml --locked --no-default-features --features cooked-player,desktop --all-targets
-      - name: Check Two-Level Game dedicated server without client dependencies
-        run: cargo check --manifest-path samples/two-level-game/Cargo.toml --locked --no-default-features --features cooked-server --all-targets
-      - name: Test Two-Level Game shipping headless without development tools
-        run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --no-default-features --features cooked-player --all-targets --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test Two-Level Game cook-only source controls
-        run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --no-default-features --features cook --test cook_source --test cooked_delivery --test sound_bank_content --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test Two-Level Game sample headless
-        run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --features cook,cooked-player --test-threads=1 --no-fail-fast
-      - name: Test explicit Player selection and round flow without native acquisition
-        run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --features gamepad,cook,audio-cpal,cooked-player,play-flow --lib --test cook_runtime --test play_flow -E 'test(controller::) | binary(cook_runtime) | binary(play_flow)' --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test runtime CPU evidence and atlas pixel oracle
-        run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --features desktop,cost-measurement,scene-work-observation --test runtime_workload_metrics --test runtime_workload_spans --test tile_payload_trial --test desktop_pixel_oracle --test-threads=1 --no-fail-fast --no-tests fail
-      - name: Test concrete game audio CPU controls and independent callback oracle
-        if: runner.os == 'Windows'
-        run: cargo nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --features audio-cpal --lib --test audio_oracle --test cooked_audio_oracle -E 'test(audio::) | test(sound_bank::) | binary(audio_oracle) | binary(cooked_audio_oracle)' --test-threads=1 --no-fail-fast --no-tests fail
+      - run: rustup toolchain install 1.95.0 --profile minimal --target wasm32-unknown-unknown
+      - run: cargo check -p nara --locked --no-default-features --features runtime-core --lib --target wasm32-unknown-unknown

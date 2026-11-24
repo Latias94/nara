@@ -174,24 +174,11 @@ impl WgpuSubmittedImageReceipt {
     }
 }
 
-/// Target identity whose presentation API was called by its owning backend.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WgpuWindowPresentationTarget {
-    HostSurface {
-        generation: u64,
-    },
-    /// Process-unique Dear ImGui native registration, not a surface configuration generation.
-    #[cfg(feature = "editor-imgui")]
-    DelegatedNativeWindow {
-        instance: u64,
-    },
-}
-
 /// Exact native-window submission and presentation-request facts from its original Host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WgpuWindowPresentedReceipt {
     window_id: WindowId,
-    target: WgpuWindowPresentationTarget,
+    surface_generation: u64,
     backend_instance_id: u64,
     device_epoch: u64,
     display_frame_index: u64,
@@ -207,9 +194,7 @@ impl WgpuWindowPresentedReceipt {
     ) -> Self {
         Self {
             window_id,
-            target: WgpuWindowPresentationTarget::HostSurface {
-                generation: surface_generation,
-            },
+            surface_generation,
             backend_instance_id,
             device_epoch,
             display_frame_index,
@@ -223,37 +208,7 @@ impl WgpuWindowPresentedReceipt {
 
     #[must_use]
     pub const fn surface_generation(self) -> Option<u64> {
-        match self.target {
-            WgpuWindowPresentationTarget::HostSurface { generation } => Some(generation),
-            #[cfg(feature = "editor-imgui")]
-            WgpuWindowPresentationTarget::DelegatedNativeWindow { .. } => None,
-        }
-    }
-
-    #[must_use]
-    pub const fn delegated_native_instance(self) -> Option<u64> {
-        match self.target {
-            #[cfg(feature = "editor-imgui")]
-            WgpuWindowPresentationTarget::DelegatedNativeWindow { instance } => Some(instance),
-            WgpuWindowPresentationTarget::HostSurface { .. } => None,
-        }
-    }
-
-    #[cfg(feature = "editor-imgui")]
-    pub(crate) const fn delegated(
-        window_id: WindowId,
-        instance: u64,
-        backend_instance_id: u64,
-        device_epoch: u64,
-        display_frame_index: u64,
-    ) -> Self {
-        Self {
-            window_id,
-            target: WgpuWindowPresentationTarget::DelegatedNativeWindow { instance },
-            backend_instance_id,
-            device_epoch,
-            display_frame_index,
-        }
+        Some(self.surface_generation)
     }
 
     #[must_use]

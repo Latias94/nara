@@ -50,10 +50,9 @@ plugin and the Image and Action Map codecs used by Cook and Player.
 
 ## Edit the startup Scene
 
-Run `nara-editor .` from the project root. Select `main-camera`, change `Camera2d.viewport_height`
-from `720` to `768`, and use Undo, Redo, Save, and Reopen to try the authoring workflow. The camera
-is authored in `scenes/startup.scene.json`, and the player spawns when the game runs. You can also
-edit the camera's `clear_color.r` from `0.06` to `0.14` in that file and relaunch to see the change.
+Open `scenes/startup.scene.json` and find the `main-camera` entity. Change
+`Camera2d.viewport_height` from `720` to `768` or `Camera2d.clear_color.r` from `0.06` to `0.14`.
+Save the file, run `nara check .`, and relaunch the desktop game to see the change.
 
 Keep `scenes/startup.scene.json.meta` with its Scene. Its stable asset ID and the manifest's
 `project.source_universe` preserve authored identity across saves and delivery. The generated
@@ -61,7 +60,7 @@ files are your project's copies. The starter and dependency coordinate above ide
 origin. Upgrading either is an explicit migration.
 
 If you add a persistent component, register its schema contribution in `product_recipe()` and
-refresh the schema bundle before reopening the project in the Editor.
+refresh the schema bundle before validating source that uses it.
 
 ```text
 nara schema . --check

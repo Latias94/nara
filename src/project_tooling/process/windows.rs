@@ -133,7 +133,7 @@ impl PlatformProcess {
         self.output
             .push_loss(
                 SupervisedProcessStream::Stderr,
-                b"[nara-editor: test output loss]\n".to_vec(),
+                b"[nara: test output loss]\n".to_vec(),
             )
             .expect("the test loss marker is accepted");
     }
@@ -761,7 +761,7 @@ fn record_cancelled_stream(
     output.push_loss(
         stream,
         format!(
-            "[nara-editor: {stream_name} capture was cancelled before EOF; remaining bytes were not retained]\n"
+            "[nara: {stream_name} capture was cancelled before EOF; remaining bytes were not retained]\n"
         )
         .into_bytes(),
     )
@@ -952,7 +952,7 @@ fn random_pipe_name(label: &str) -> io::Result<Vec<u16>> {
         use std::fmt::Write as _;
         write!(&mut token, "{byte:02x}").expect("writing to a String is infallible");
     }
-    let name = format!(r"\\.\pipe\nara-editor-supervised-{label}-{token}");
+    let name = format!(r"\\.\pipe\nara-supervised-{label}-{token}");
     Ok(nul_terminated_wide(OsStr::new(&name), "private pipe name")?)
 }
 

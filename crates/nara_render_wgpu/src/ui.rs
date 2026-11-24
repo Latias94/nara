@@ -308,18 +308,6 @@ pub(crate) fn ui_packet_targets_view(
     crate::frame::render_targets_match(packet.target(), target, primary_window_id)
 }
 
-#[cfg(test)]
-pub(crate) fn collect_ui_quad_batches(
-    packets: &[Arc<UiPaintPacket>],
-    target: RenderTarget,
-    primary_window_id: Option<nara_window::WindowId>,
-    viewport: ViewportRect,
-) -> Result<Vec<WgpuQuadBatch>, WgpuUiPacketError> {
-    let lowered = lower_ui_packets(packets, target, primary_window_id, viewport)?;
-    lowered.require_quad_only()?;
-    Ok(lowered.batches)
-}
-
 pub(crate) fn lower_ui_packets(
     packets: &[Arc<UiPaintPacket>],
     target: RenderTarget,
@@ -355,21 +343,6 @@ pub(crate) struct WgpuUiLowering {
     mesh_indices: Vec<u32>,
     merge_quad: bool,
     pub(crate) packet_facts: Vec<WgpuLoweredUiPacketFacts>,
-}
-
-impl WgpuUiLowering {
-    /// Legacy numerical quad oracles must refuse geometry instead of silently dropping it.
-    #[cfg(test)]
-    pub(crate) fn require_quad_only(&self) -> Result<(), WgpuUiPacketError> {
-        if self
-            .packet_facts
-            .iter()
-            .any(|facts| facts.mesh_primitive_count != 0)
-        {
-            return Err(WgpuUiPacketError::LegacyMeshUnsupported);
-        }
-        Ok(())
-    }
 }
 
 impl<S: 'static> UiCapture<S> {
@@ -721,9 +694,6 @@ pub(crate) enum WgpuUiPacketError {
     InvalidMesh { reason: &'static str },
     #[error("UI mesh geometry exceeds native indexed buffer capacity")]
     MeshCapacity,
-    #[cfg(test)]
-    #[error("the legacy quad-only oracle cannot execute a UI mesh; use the typed UI Feature")]
-    LegacyMeshUnsupported,
 }
 
 #[cfg(test)]
@@ -751,6 +721,16 @@ mod tests {
         AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
         WgpuFeatureDefinition, WgpuProgramTextureDescriptor, WgpuRenderProgramBuilder,
     };
+
+    fn collect_ui_quad_batches(
+        packets: &[Arc<UiPaintPacket>],
+        target: RenderTarget,
+        primary_window_id: Option<WindowId>,
+        viewport: ViewportRect,
+    ) -> Result<Vec<WgpuQuadBatch>, WgpuUiPacketError> {
+        lower_ui_packets(packets, target, primary_window_id, viewport)
+            .map(|lowered| lowered.batches)
+    }
 
     #[test]
     fn ui_capture_routes_logical_window_packets_and_retains_replayed_packet_facts() {

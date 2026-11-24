@@ -259,11 +259,6 @@ impl SourceWatchDriver {
     }
 
     fn poll(&mut self, world: &mut World) {
-        if let Err(error) = self.native.poll_retired() {
-            self.current = None;
-            self.error = Some(error.to_string());
-            return;
-        }
         if self.retry_requested {
             self.recover();
         }

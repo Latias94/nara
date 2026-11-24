@@ -1153,22 +1153,21 @@ reconciliation ceiling handles lost notifications within the existing operation 
 The child checks immediately at startup, then waits before another inbox probe unless a hint is
 already pending. Notification and reconciliation both return through the original lifetime and
 request-budget checks before the next receive; responding does not require an extra empty probe.
-Parent response polling remains 10 ms. This is not a zero-wakeup or hard real-time contract;
-the Windows vendor watcher retains its 100 ms internal wait and backend reporting limitations.
+The parent polls for responses every 10 ms. The upstream Windows backend uses a 100 ms
+internal wait in its notification loop.
 
-Protocol v6 requires `control_service` diagnostics in every response. The public Host exposes the
-last validated response from the active child through `control_service()`, and the CLI includes
-the same field. Candidate/predecessor observations do not replace active observations. Counters
-are outside canonical state and never prove authority, successful commands or native cleanup.
+Protocol v8 requires `control_service` diagnostics in every response. The public Host exposes
+the active child's last validated diagnostics through `control_service()`, and the CLI includes
+the same field. Counters are diagnostic and stay outside canonical game state.
 `frame()` requests original paused App maintenance without a fixed simulation tick.
 Observations include the original process-local `app_frame` sequence independently of
 `engine_tick` and logical ticks. It records original execution, not cross-process authority
 or canonical state.
 
-Close freezes notification delivery, closes the original game and joins the original watcher
-before replying Closed. Pending/failure retains those owners; the native process cleanup receipt
-remains independently required. Retirement reports preserve the last validated diagnostics after
-the active route is gone. These changes do not extend the Editor's supervised Play protocol.
+Close freezes notification delivery and releases the watcher handle before closing the game.
+`watcher_closed` records that release. The Host still requires the native process cleanup
+receipt. Retirement reports preserve the last validated diagnostics after the active route is
+gone.
 
 The finite Windows hardware comparison builds two variants differing only in the child's 2 ms
 versus 250 ms reconciliation constant. It uses three alternating pairs per placement, twelve

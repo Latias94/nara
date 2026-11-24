@@ -5,9 +5,6 @@ use nara_project::{EffectiveRuntimeConfiguration, ProductCapabilitySet, RuntimeP
 
 use super::{HeadlessRuntimePlugins, MinimalPlugins, ServerPlugins};
 
-#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-const SLOT_UI_WINIT_ACCESSIBILITY: PluginSlotId =
-    PluginSlotId::new("nara.plugins.slot.ui-winit-accessibility");
 #[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
 const SLOT_WGPU_STOCK_SPRITE: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.render-wgpu.stock-sprite");
@@ -37,34 +34,12 @@ pub(crate) struct ProjectProfilePlugins {
     render_definition: PluginDefinition,
     #[cfg(feature = "runtime-ui")]
     primary_ui_surface: Option<super::ui_surface::AcceptedPrimaryUiSurfaceProfile>,
-    placement: ProjectProfilePlacement,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProjectProfilePlacement {
-    Shipping,
-    EditorPlay,
 }
 
 impl ProjectProfilePlugins {
     pub(crate) fn new(
         settings: &EffectiveRuntimeConfiguration,
         capabilities: ProductCapabilitySet,
-    ) -> Self {
-        Self::with_placement(settings, capabilities, ProjectProfilePlacement::Shipping)
-    }
-
-    pub(crate) fn for_editor_play(
-        settings: &EffectiveRuntimeConfiguration,
-        capabilities: ProductCapabilitySet,
-    ) -> Self {
-        Self::with_placement(settings, capabilities, ProjectProfilePlacement::EditorPlay)
-    }
-
-    fn with_placement(
-        settings: &EffectiveRuntimeConfiguration,
-        capabilities: ProductCapabilitySet,
-        placement: ProjectProfilePlacement,
     ) -> Self {
         Self {
             preset: settings.runtime_preset(),
@@ -87,7 +62,6 @@ impl ProjectProfilePlugins {
                 .ui()
                 .primary_surface
                 .map(super::ui_surface::AcceptedPrimaryUiSurfaceProfile::from_effective),
-            placement,
         }
     }
 }
@@ -96,10 +70,7 @@ impl PluginGroup for ProjectProfilePlugins {
     const ID: PluginGroupId = PluginGroupId::new("nara.plugins.project-runtime");
 
     fn build(self) -> PluginGroupBuilder {
-        let task_plugin = match self.placement {
-            ProjectProfilePlacement::Shipping => nara_tasks::plugin(self.task_config),
-            ProjectProfilePlacement::EditorPlay => nara_tasks::lazy_plugin(self.task_config),
-        };
+        let task_plugin = nara_tasks::plugin(self.task_config);
         let product_group_includes_minimal = self
             .capabilities
             .contains(nara_project::ProductCapability::Runtime2d)
@@ -210,10 +181,9 @@ impl PluginGroup for ProjectProfilePlugins {
             let backend = super::WgpuBackendPlugins
                 .edit()
                 .configure_slot(super::SLOT_RENDER, self.render_definition.clone());
-            let backend = if self.placement == ProjectProfilePlacement::Shipping
-                && self
-                    .capabilities
-                    .contains(nara_project::ProductCapability::DesktopWinit)
+            let backend = if self
+                .capabilities
+                .contains(nara_project::ProductCapability::DesktopWinit)
             {
                 backend
             } else {
@@ -224,7 +194,7 @@ impl PluginGroup for ProjectProfilePlugins {
             builder
         };
 
-        let builder = add_product_contributions(builder, &self.capabilities, self.placement);
+        let builder = add_product_contributions(builder, &self.capabilities);
 
         builder.add_slot(
             PluginSlot::required(
@@ -270,27 +240,8 @@ pub fn window_from_settings(
 fn add_product_contributions(
     builder: PluginGroupBuilder,
     capabilities: &ProductCapabilitySet,
-    placement: ProjectProfilePlacement,
 ) -> PluginGroupBuilder {
-    let _ = (capabilities, placement);
-
-    #[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-    let builder = if placement == ProjectProfilePlacement::Shipping
-        && capabilities.contains(nara_project::ProductCapability::DesktopWinit)
-        && capabilities.contains(nara_project::ProductCapability::PresentationUi)
-    {
-        builder.add_slot(
-            PluginSlot::required(
-                SLOT_UI_WINIT_ACCESSIBILITY,
-                crate::ui_presentation::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID,
-            ),
-            PluginDefinition::for_default::<
-                crate::ui_presentation::WinitUiAccessibilityContributionPlugin,
-            >(),
-        )
-    } else {
-        builder
-    };
+    let _ = capabilities;
 
     #[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
     let builder = if capabilities.contains(nara_project::ProductCapability::Presentation2d)

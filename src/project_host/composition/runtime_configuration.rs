@@ -146,7 +146,6 @@ pub fn resolve_runtime_configuration(
             plugins,
             recipe,
             overlay: None,
-            host_policy: None,
         },
         built_in_schema_providers(),
     )

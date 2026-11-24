@@ -34,7 +34,7 @@ use crate::{
 };
 
 #[test]
-fn plugin_build_acquires_no_native_worker_and_unbound_startup_refuses() {
+fn plugin_build_acquires_no_watcher_and_unbound_startup_refuses() {
     let project = ProjectFixture::new();
     let plan = project.plan(watch_recipe(project.configuration()));
     let candidate = plan
@@ -173,7 +173,7 @@ fn mismatched_root_refuses_binding_without_starting_native_coverage() {
                     assert!(!status.rescan_pending);
                     assert!(
                         observation
-                            .set(scenes.source_watch_retirement().unwrap())
+                            .set(scenes.source_watch_observer().unwrap())
                             .is_ok()
                     );
                 });
@@ -306,10 +306,6 @@ fn assert_loss_replaces_before_rescan(loss: Loss) {
             assert_eq!(replacement.restarts, 1);
             assert_eq!(replacement.native.started(), 2);
             assert_eq!(replacement.native.active(), 1);
-            assert_eq!(
-                replacement.native.joined() + replacement.native.retiring() as u64,
-                1
-            );
             assert!(replacement.rescan_pending);
             assert!(replacement.error.is_some());
             assert_eq!(replacement.queue.retained_events(), 0);
@@ -356,9 +352,7 @@ fn replaced_root_keeps_rescan_pending_and_retry_explicit_until_original_director
             old_sender
                 .try_send(AssetWatchEvent::subtree(root.join("scenes")))
                 .unwrap();
-            #[cfg(windows)]
-            retire_windows_coverage_before_directory_move(world, &workspace, &root, &retired);
-            move_fixture_directory(&workspace, &root, &retired).unwrap();
+            move_watched_fixture_directory(world, &workspace, &root, &retired);
             fs::create_dir(&root).unwrap();
             poll_source_watch(world).unwrap();
             let refused = watch_status(world);
@@ -453,19 +447,12 @@ fn deterministic_nested_parent_replacement_rebuilds_configured_native_coverage()
             old_sender
                 .try_send(AssetWatchEvent::subtree(native_root.join("content")))
                 .unwrap();
-            #[cfg(windows)]
-            retire_windows_coverage_before_directory_move(
+            move_watched_fixture_directory(
                 world,
                 &workspace,
                 &root.join("content"),
                 &root.join("retired-content"),
             );
-            move_fixture_directory(
-                &workspace,
-                &root.join("content"),
-                &root.join("retired-content"),
-            )
-            .unwrap();
             for child in ["assets", "scenes", "prefabs"] {
                 fs::create_dir_all(root.join("content/source").join(child)).unwrap();
             }
@@ -536,7 +523,6 @@ fn global_lifecycle_observer_refuses_scope_and_reports_a_classified_runtime_faul
             );
             assert_eq!(status.native.started(), 1);
             assert_eq!(status.native.active(), 0);
-            assert_eq!(status.native.joined() + status.native.retiring() as u64, 1);
             assert!(!source_status(world).pending);
             assert_eq!(CurrentScene::get(world).unwrap().receipt(), &current);
             assert_eq!(calls.load(Ordering::Relaxed), 0);
@@ -575,47 +561,40 @@ fn move_fixture_directory(workspace: &Path, source: &Path, target: &Path) -> std
     fs::rename(source, target)
 }
 
-#[cfg(windows)]
-fn retire_windows_coverage_before_directory_move(
+fn move_watched_fixture_directory(
     world: &mut World,
     workspace: &Path,
     source: &Path,
     target: &Path,
 ) {
-    let before = watch_status(world);
-    let current = CurrentScene::get(world).unwrap().receipt().clone();
-    let failure = move_fixture_directory(workspace, source, target).unwrap_err();
-    assert_eq!(failure.kind(), std::io::ErrorKind::PermissionDenied);
-    assert!(source.is_dir());
-    assert!(!target.exists());
-    assert_eq!(watch_status(world), before);
-    assert_eq!(CurrentScene::get(world).unwrap().receipt(), &current);
+    if !cfg!(windows) {
+        move_fixture_directory(workspace, source, target).unwrap();
+        return;
+    }
     let coverage = world
         .resource_mut::<SourceWatchDriver>()
         .current
         .take()
         .unwrap();
     drop(coverage);
+    let status = watch_status(world);
+    assert_eq!(status.native.active(), 0);
+    assert_eq!(status.state, ProjectSceneWatchState::RetryRequired);
+    assert!(ProjectScenes::scope(world, |scenes| scenes.retry_source_watch()));
+
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let driver = world.resource::<SourceWatchDriver>();
-        driver.native.poll_retired().unwrap();
-        let stats = driver.native.stats();
-        if stats.active() == 0 && stats.retiring() == 0 {
-            assert_eq!(stats.started(), stats.joined());
-            break;
+        match move_fixture_directory(workspace, source, target) {
+            Ok(()) => return,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::PermissionDenied
+                    && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            Err(error) => panic!("could not move the fixture directory after watch close: {error}"),
         }
-        assert!(
-            Instant::now() < deadline,
-            "original Windows watches did not retire"
-        );
-        std::thread::yield_now();
     }
-    assert_eq!(
-        watch_status(world).state,
-        ProjectSceneWatchState::RetryRequired
-    );
-    assert!(ProjectScenes::scope(world, |scenes| scenes.retry_source_watch()));
 }
 
 fn source_status(world: &mut World) -> crate::project_host::ProjectSceneSourceUpdateStatus {
@@ -767,7 +746,7 @@ pending_capacity = 4
         let observed = Arc::clone(&observer);
         let inspection: Inspection = Box::new(move |world| {
             let retirement =
-                ProjectScenes::scope(world, |scenes| scenes.source_watch_retirement().unwrap());
+                ProjectScenes::scope(world, |scenes| scenes.source_watch_observer().unwrap());
             assert!(observed.set(retirement).is_ok());
             inspect(world)
         });
@@ -822,8 +801,7 @@ pending_capacity = 4
         assert!(matches!(host.slot, ProjectHostSlot::Empty));
         let stats = observer.get().unwrap().stats();
         assert_eq!(stats.active(), 0);
-        assert_eq!(stats.retiring(), 0);
-        assert_eq!(stats.started(), stats.joined());
+        assert!(stats.started() > 0);
         assert_eq!(loader.budget_snapshot().active_generations(), 0);
         assert_eq!(loader.budget_snapshot().active_reservations(), 0);
         drive

@@ -155,7 +155,6 @@ impl HeadlessSession {
                 RuntimeClosePolicy::default(),
                 recipe,
                 None,
-                None,
                 Vec::new(),
             ),
             Inputs::Processed(base) => {

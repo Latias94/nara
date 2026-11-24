@@ -62,16 +62,10 @@ pub enum WgpuRenderProgramError {
     PolicyCapacity,
     #[error("policy validation or construction panicked")]
     PolicyPanicked,
-    #[error("the candidate's pinned history basis is no longer current")]
-    StaleHistory,
-    #[error("the original history capture has already published")]
-    HistoryAlreadyConsumed,
-    #[error("history metadata is at capacity")]
-    HistoryCapacity,
+    #[error("the render candidate belongs to another Host, device epoch or producer")]
+    StaleCandidate,
     #[error("pending render candidates retain the available metadata capacity")]
     CandidateCapacity,
-    #[error("the history declaration or complete output binding is invalid")]
-    HistoryDeclaration,
     #[error(transparent)]
     PolicyRequirements(#[from] crate::WgpuDeviceRequirementsError),
     #[error("the resource has a different native kind")]

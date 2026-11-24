@@ -349,7 +349,7 @@ impl UiEntityRecipe {
     }
 }
 
-/// Canonical preflight result consumed by the root Host and `nara_tooling` transaction owner.
+/// Canonical result of preflighting an authored UI composition.
 #[derive(Debug, Clone, PartialEq)]
 pub enum UiPreparedStructure {
     Create {

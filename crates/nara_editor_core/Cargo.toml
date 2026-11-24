@@ -1,0 +1,12 @@
+[package]
+name = "nara_editor_core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+nara_asset.workspace = true
+nara_identity.workspace = true
+nara_reflect.workspace = true

@@ -16,8 +16,6 @@
 //! window identifiers. Session wake tickets are allocated by this physical pump and never reused:
 //! even a late old proxy wake cannot drain another session's mailbox or request a frame.
 
-#[cfg(feature = "accessibility")]
-mod accessibility;
 mod keyboard_continuation;
 mod maintenance_wake;
 #[cfg(all(test, target_os = "windows"))]
@@ -27,19 +25,8 @@ mod window_mode;
 pub use keyboard_continuation::{WinitInputActivation, WinitKeyboardContinuationError};
 pub use maintenance_wake::WinitMaintenanceWake;
 
-#[cfg(feature = "accessibility")]
-pub use accessibility::{
-    WinitAccessibilityActionRequest, WinitAccessibilityEndpointRetirement, WinitAccessibilityError,
-    WinitAccessibilityPublisher, WinitAccessibilityPublisherId, WinitAccessibilityReceipt,
-    WinitAccessibilityRetirementReceipt, WinitAccessibilitySuspension,
-    WinitAccessibilitySuspensionReceipt, WinitAccessibilityUpdate,
-};
-
 #[doc(hidden)]
 pub mod __private {
-    #[cfg(feature = "platform-accessibility")]
-    pub use super::accessibility::__private::*;
-
     use super::{AppExit, AppRunError, BackendWindowHandles, Instant, RuntimeInstance, WindowId};
 
     /// Local presentation custody supplied by the concrete desktop assembly.
@@ -73,9 +60,6 @@ pub mod __private {
 
 use __private::{__WinitPresentationDriver, __WinitPresentationProgress};
 use maintenance_wake::MaintenanceWakeState;
-
-#[cfg(feature = "platform-accessibility")]
-use accessibility::WinitPlatformAccessibilitySession;
 
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
@@ -150,8 +134,6 @@ enum WinitShutdownState {
 #[derive(Debug)]
 enum WinitUserEvent {
     MaintenanceWake(SessionWakeId),
-    #[cfg(feature = "platform-accessibility")]
-    AccessibilityWake(SessionWakeId),
     #[cfg(all(test, target_os = "windows"))]
     NativeTest(native_tests::NativeTestEvent),
 }
@@ -1018,10 +1000,6 @@ struct WinitApp {
     event_proxy: Option<EventLoopProxy<WinitUserEvent>>,
     session_wake_id: Option<SessionWakeId>,
     maintenance_wake: Option<Arc<MaintenanceWakeState>>,
-    #[cfg(feature = "platform-accessibility")]
-    accessibility_activation: accessibility::__private::WinitAccessibilityActivation,
-    #[cfg(feature = "platform-accessibility")]
-    accessibility_sessions: HashMap<WindowId, WinitPlatformAccessibilitySession>,
 }
 
 #[derive(Debug)]
@@ -1129,31 +1107,16 @@ impl WinitApp {
         control_flow: WinitControlFlow,
         native_retirement_budget: Duration,
     ) -> Self {
-        let mut primary_failure = None;
-        #[cfg(feature = "platform-accessibility")]
-        let accessibility_activation =
-            match accessibility::__private::capture_winit_accessibility_activation(runtime.world())
-            {
-                accessibility::__private::WinitAccessibilityActivation::Partial(error) => {
-                    primary_failure = Some(AppRunError::runner(format!(
-                        "Winit accessibility contribution is partial: {error}"
-                    )));
-                    accessibility::__private::WinitAccessibilityActivation::Disabled
-                }
-                activation => activation,
-            };
-        let backend_windows = runtime
-            .world()
-            .get_resource::<BackendWindowHandles>()
-            .cloned()
-            .unwrap_or_else(|| {
-                primary_failure.get_or_insert_with(|| {
-                    AppRunError::runner("backend window authority is missing")
-                });
+        let (backend_windows, primary_failure) =
+            match runtime.world().get_resource::<BackendWindowHandles>() {
+                Some(handles) => (handles.clone(), None),
                 // No native target exists at construction. This private empty authority cannot
                 // replace a registered authority or establish presentation retirement.
-                BackendWindowHandles::default()
-            });
+                None => (
+                    BackendWindowHandles::default(),
+                    Some(AppRunError::runner("backend window authority is missing")),
+                ),
+            };
         Self {
             runtime,
             presentation,
@@ -1188,10 +1151,6 @@ impl WinitApp {
             event_proxy: None,
             session_wake_id: None,
             maintenance_wake: None,
-            #[cfg(feature = "platform-accessibility")]
-            accessibility_activation,
-            #[cfg(feature = "platform-accessibility")]
-            accessibility_sessions: HashMap::new(),
         }
     }
 
@@ -1266,12 +1225,6 @@ impl WinitApp {
             .with_visible(self.initial_visibility)
             .with_active(self.initial_visibility)
             .with_fullscreen(initial_fullscreen);
-        #[cfg(feature = "platform-accessibility")]
-        let attributes = if self.accessibility_activation.is_enabled() {
-            attributes.with_visible(false)
-        } else {
-            attributes
-        };
 
         let platform_window = event_loop.create_window(attributes).map_err(|error| {
             AppRunError::runner(format!("failed to create native window: {error}"))
@@ -1291,26 +1244,6 @@ impl WinitApp {
             )
             .map_err(|_| AppRunError::runner("native window target is already registered"))?;
         self.owned_window_ids.insert(window_id);
-        #[cfg(feature = "platform-accessibility")]
-        if self.accessibility_activation.is_enabled() {
-            let event_proxy = self
-                .event_proxy
-                .as_ref()
-                .cloned()
-                .ok_or_else(|| AppRunError::runner("winit event proxy is unavailable"))?;
-            let session = WinitPlatformAccessibilitySession::new(
-                event_loop,
-                &platform_window,
-                // The platform adapter uses this argument only for wake routing. Logical
-                // WindowId values can repeat across Apps; this pump-owned ticket cannot.
-                self.session_wake_id.ok_or_else(|| {
-                    AppRunError::runner("winit session wake identity is unavailable")
-                })?,
-                event_proxy,
-            );
-            self.accessibility_sessions.insert(window_id, session);
-            platform_window.set_visible(self.initial_visibility);
-        }
         self.input_gate = WinitInputGate::reset_for_focus(platform_window.has_focus());
         self.connect_window_input(window_id)?;
         self.with_driver_scope(|scope| {
@@ -1408,12 +1341,6 @@ impl WinitApp {
             return self.begin_shutdown_transition(now);
         }
 
-        #[cfg(feature = "platform-accessibility")]
-        if let Err(error) = self.synchronize_platform_accessibility() {
-            self.record_primary_failure(error);
-            return self.begin_shutdown_transition(now);
-        }
-
         if self.control_flow == WinitControlFlow::Poll {
             for window in self.platform_windows.values() {
                 window.request_redraw();
@@ -1473,80 +1400,6 @@ impl WinitApp {
         }
     }
 
-    #[cfg(feature = "platform-accessibility")]
-    fn synchronize_platform_accessibility(&mut self) -> Result<(), AppRunError> {
-        if !self.accessibility_activation.is_enabled() {
-            return Ok(());
-        }
-        let outcome = self
-            .runtime
-            .with_driver_scope(accessibility::__private::take_winit_accessibility_updates)
-            .map_err(runtime_scope_error)?;
-        let updates = outcome
-            .output
-            .map_err(|_| AppRunError::runner("runtime accessibility extraction failed"))?;
-        for update in updates {
-            let window_id = update.window_id();
-            let session = self
-                .accessibility_sessions
-                .get_mut(&window_id)
-                .ok_or_else(|| {
-                    AppRunError::runner(format!(
-                        "native accessibility update targets unavailable window {}",
-                        window_id.get()
-                    ))
-                })?;
-            session.apply_update(update).map_err(|error| {
-                AppRunError::runner(format!(
-                    "failed to publish native accessibility state: {error}"
-                ))
-            })?;
-        }
-        if let Some(fault) = outcome.post_operation_fault {
-            return Err(runtime_fault_error(&fault));
-        }
-        Ok(())
-    }
-
-    #[cfg(feature = "platform-accessibility")]
-    fn process_accessibility_window_event(
-        &mut self,
-        winit_window_id: WinitWindowId,
-        event: &WinitWindowEvent,
-    ) {
-        if !self.accessibility_activation.is_enabled() {
-            return;
-        }
-        let Some(window_id) = self.nara_windows_by_winit.get(&winit_window_id).copied() else {
-            return;
-        };
-        let Some(window) = self.platform_windows.get(&window_id) else {
-            return;
-        };
-        let Some(session) = self.accessibility_sessions.get_mut(&window_id) else {
-            return;
-        };
-        session.process_window_event(window, event);
-    }
-
-    #[cfg(feature = "platform-accessibility")]
-    fn handle_accessibility_wake(&mut self, window_id: WindowId) -> Result<(), AppRunError> {
-        if !self.accessibility_activation.is_enabled() {
-            return Ok(());
-        }
-        let Some(session) = self.accessibility_sessions.get(&window_id) else {
-            return Ok(());
-        };
-        let batch = session.drain_inputs().map_err(|error| {
-            AppRunError::runner(format!(
-                "failed to drain native accessibility input: {error}"
-            ))
-        })?;
-        self.with_driver_scope(|scope| {
-            accessibility::__private::queue_winit_accessibility_inputs(scope, batch)
-        })
-    }
-
     fn handle_maintenance_wake(&mut self, wake_id: SessionWakeId) -> bool {
         if !self.is_healthy_live() || self.session_wake_id != Some(wake_id) {
             return false;
@@ -1562,22 +1415,6 @@ impl WinitApp {
         }
     }
 
-    #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
-    fn handle_session_wake(&mut self, wake_id: SessionWakeId) -> Result<bool, AppRunError> {
-        if self.shutdown.is_started() || self.session_wake_id != Some(wake_id) {
-            return Ok(false);
-        }
-        #[cfg(feature = "platform-accessibility")]
-        {
-            let Some(window_id) = self.platform_windows.keys().copied().next() else {
-                return Ok(false);
-            };
-            self.handle_accessibility_wake(window_id)?;
-        }
-        self.request_frame();
-        Ok(true)
-    }
-
     fn handle_window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -1587,8 +1424,6 @@ impl WinitApp {
         if self.nara_windows_by_winit.contains_key(&winit_window_id) {
             self.paused_frame_complete = false;
         }
-        #[cfg(feature = "platform-accessibility")]
-        self.process_accessibility_window_event(winit_window_id, &event);
         if matches!(&event, WinitWindowEvent::Destroyed) {
             let directive = self.handle_destroyed_window(winit_window_id, Instant::now())?;
             apply_event_loop_directive(event_loop, directive);
@@ -1962,8 +1797,6 @@ impl WinitApp {
         }
         self.platform_windows.remove(&window_id);
         self.nara_windows_by_winit.remove(&winit_window_id);
-        #[cfg(feature = "platform-accessibility")]
-        self.accessibility_sessions.remove(&window_id);
 
         if self.shutdown.is_started() {
             Ok(self.poll_native_shutdown_transition(now))
@@ -2101,8 +1934,6 @@ impl WinitApp {
         let mut released = true;
         for window_id in self.owned_window_ids.iter().copied().collect::<Vec<_>>() {
             if self.backend_windows.release_provider(window_id).is_ok() {
-                #[cfg(feature = "platform-accessibility")]
-                self.accessibility_sessions.remove(&window_id);
                 // On Windows the last Arc Drop posts a destruction message. The Winit mapping
                 // deliberately survives this point until that message has actually been pumped.
                 self.platform_windows.remove(&window_id);
@@ -2336,12 +2167,6 @@ impl ApplicationHandler<WinitUserEvent> for WinitApp {
         match event {
             WinitUserEvent::MaintenanceWake(wake_id) => {
                 self.handle_maintenance_wake(wake_id);
-            }
-            #[cfg(feature = "platform-accessibility")]
-            WinitUserEvent::AccessibilityWake(wake_id) => {
-                if let Err(error) = self.handle_session_wake(wake_id) {
-                    self.fail(_event_loop, error);
-                }
             }
             #[cfg(all(test, target_os = "windows"))]
             WinitUserEvent::NativeTest(event) => {

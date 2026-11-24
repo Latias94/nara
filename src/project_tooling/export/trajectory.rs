@@ -62,16 +62,33 @@ fn missing_startup_scene_diagnostic_preserves_the_selected_profile() {
         for directory in ["assets", "scenes", "prefabs", "schema"] {
             fs::create_dir(root.path().join(directory)).unwrap();
         }
-        let manifest = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/runtime-runner/renamed-root/project/nara.toml"
-        ))
-        .replace("startup.scene.json", "missing.scene.json");
+        let manifest = r#"schema_version = 1
+[project]
+source_universe = "796b54db-7d94-51a0-9ca8-a19d46ce7b50"
+native_document_identity = "project_location"
+name = "Startup Scene Repair"
+stable_id = "startup-scene-repair"
+version = "0.1.0"
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+[authoring]
+state = "ready"
+schema_bundle = "schema/authoring.bundle.json"
+[startup]
+default_scene = "missing.scene.json"
+[runtime]
+preset = "local-headless"
+fixed_timestep_seconds = 0.02
+[capabilities]
+requested = ["runtime-2d"]
+"#;
         let manifest = match &profile {
             Some(profile) => format!(
                 "{manifest}\n[profiles.{profile}.startup]\ndefault_scene = \"missing.scene.json\"\n"
             ),
-            None => manifest,
+            None => manifest.to_owned(),
         };
         fs::write(root.path().join("nara.toml"), manifest).unwrap();
         let capability = host_fs::readable_directory(root.path()).unwrap();

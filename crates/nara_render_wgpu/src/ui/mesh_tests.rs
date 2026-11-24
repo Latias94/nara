@@ -261,7 +261,7 @@ fn fractional_geometry_adds_the_viewport_origin_exactly_once() {
 }
 
 #[test]
-fn viewport_clipping_keeps_source_facts_and_both_quad_oracles_refuse_mesh() {
+fn viewport_clipping_keeps_original_mesh_facts() {
     let packet = packet();
     let clipped_mesh = lower_ui_packets(
         &[Arc::clone(&packet)],
@@ -297,33 +297,6 @@ fn viewport_clipping_keeps_source_facts_and_both_quad_oracles_refuse_mesh() {
     assert!(Arc::ptr_eq(
         &lowered.packet_facts[0].original_packet,
         &packet
-    ));
-    assert_eq!(
-        lowered.require_quad_only(),
-        Err(WgpuUiPacketError::LegacyMeshUnsupported)
-    );
-    assert_eq!(
-        collect_ui_quad_batches(
-            &[Arc::clone(&packet)],
-            RenderTarget::PrimaryWindow,
-            None,
-            viewport
-        )
-        .unwrap_err(),
-        WgpuUiPacketError::LegacyMeshUnsupported
-    );
-    let payload = crate::frame::LegacyWgpuFramePayload {
-        ui_packets: vec![packet],
-        ..Default::default()
-    };
-    assert!(matches!(
-        payload.lower_draw(
-            RenderTarget::PrimaryWindow,
-            viewport,
-            None,
-            crate::view_uniform::WgpuViewUniform::manual(viewport),
-        ),
-        Err(WgpuRenderError::UiPacketInvariant { .. })
     ));
 }
 

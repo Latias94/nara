@@ -6,15 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-accesskit = { workspace = true, optional = true }
-accesskit_winit = { workspace = true, optional = true }
 nara_app.workspace = true
 nara_core.workspace = true
 nara_ecs.workspace = true
 nara_input.workspace = true
-nara_ui_kernel = { workspace = true, optional = true }
 nara_window = { workspace = true, features = ["runtime"] }
-thiserror = { workspace = true, optional = true }
 winit.workspace = true
 
 [target.'cfg(windows)'.dependencies]
@@ -36,12 +32,3 @@ windows-sys = { workspace = true, features = [
     "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging",
 ] }
-
-[features]
-default = []
-accessibility = [
-    "dep:accesskit",
-    "dep:nara_ui_kernel",
-    "dep:thiserror",
-]
-platform-accessibility = ["accessibility", "dep:accesskit_winit"]

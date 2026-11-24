@@ -128,8 +128,3 @@ impl Drop for AllocationFailureGuard {
 
 #[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 mod tests;
-
-#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
-pub(crate) fn take_test_batches() -> Option<Vec<crate::quad::WgpuQuadBatch>> {
-    tests::take_batches()
-}

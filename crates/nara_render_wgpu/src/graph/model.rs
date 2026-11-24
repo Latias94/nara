@@ -346,7 +346,7 @@ pub(crate) enum Initialization {
     /// A whole-buffer clear through COPY_DST, independent of allocator contents.
     Zero,
     /// Copy the whole predecessor into distinct storage before the operation runs. The old
-    /// version remains immutable and can still be read, exported or retained as history.
+    /// version remains immutable and can still be read, exported or retained.
     Preserve(ResourceVersion),
 }
 
@@ -791,7 +791,7 @@ impl GraphBuilder {
         Ok(())
     }
 
-    /// The complete publication intent of this candidate, without publication/history effects.
+    /// The complete publication intent of this candidate, before it has been published.
     /// Replacements validate in full before changing the previous group; an empty group rejects.
     #[cfg(test)]
     pub(crate) fn set_output_group(

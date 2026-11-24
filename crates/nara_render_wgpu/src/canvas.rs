@@ -4,50 +4,12 @@ mod program;
 
 pub(crate) use program::{CanvasCompositeCapture, CanvasCompositeFeature};
 
-#[cfg(test)]
-use std::sync::Arc;
-
 use nara_render::WorldCanvasFrame;
-#[cfg(test)]
-use nara_render::{Extent2d, RenderFrameSourceGeneration};
 
 use crate::{WgpuRenderError, allocation::checked_resource as checked};
 
 pub(crate) const WORLD_CANVAS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const CANVAS_MAPPING_BYTES: u64 = 16;
-
-// The old mutable raster remains only as an independent native comparison oracle.
-#[cfg(test)]
-#[derive(Debug, Default)]
-pub(crate) struct WorldCanvasCache {
-    resources: Option<Arc<WorldCanvasResources>>,
-}
-
-#[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CanvasKey {
-    extent: Extent2d,
-    destination_format: wgpu::TextureFormat,
-    source: RenderFrameSourceGeneration,
-    device_epoch: u64,
-}
-
-#[cfg(test)]
-#[derive(Debug)]
-struct WorldCanvasResources {
-    key: CanvasKey,
-    _texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    composite: Arc<CanvasCompositePipeline>,
-}
-
-#[cfg(test)]
-#[derive(Debug)]
-pub(crate) struct PreparedWorldCanvas {
-    resources: Arc<WorldCanvasResources>,
-    mapping: CanvasCompositeMapping,
-    pub(crate) world_view_count: usize,
-}
 
 /// Shared native program; the owner supplies both source and destination textures.
 #[derive(Debug)]
@@ -62,100 +24,6 @@ struct CanvasCompositeMapping {
     frame: WorldCanvasFrame,
     buffer: wgpu::Buffer,
     binding: wgpu::BindGroup,
-}
-
-#[cfg(test)]
-impl WorldCanvasCache {
-    pub(crate) fn clear(&mut self) {
-        self.resources = None;
-    }
-
-    pub(crate) fn logical_bytes(&self) -> u64 {
-        self.resources.as_ref().map_or(0, |resources| {
-            u64::from(resources.key.extent.width) * u64::from(resources.key.extent.height) * 4
-        })
-    }
-
-    pub(crate) fn prepare(
-        &mut self,
-        device: &wgpu::Device,
-        device_epoch: u64,
-        source: RenderFrameSourceGeneration,
-        destination_format: wgpu::TextureFormat,
-        frame: WorldCanvasFrame,
-        world_view_count: usize,
-    ) -> Result<PreparedWorldCanvas, WgpuRenderError> {
-        let key = CanvasKey {
-            extent: frame.extent(),
-            destination_format,
-            source,
-            device_epoch,
-        };
-        let resources = match self
-            .resources
-            .as_ref()
-            .filter(|resources| resources.key == key)
-        {
-            Some(resources) => Arc::clone(resources),
-            None => Arc::new(WorldCanvasResources::create(device, key)?),
-        };
-        let mapping = resources
-            .composite
-            .prepare_mapping(device, &resources.view, frame)?;
-        // The target and its frame binding must both succeed before replacing the retained
-        // allocation, including a late mapping-buffer or binding allocation failure.
-        self.resources = Some(Arc::clone(&resources));
-        Ok(PreparedWorldCanvas {
-            resources,
-            mapping,
-            world_view_count,
-        })
-    }
-}
-
-#[cfg(test)]
-impl WorldCanvasResources {
-    fn create(device: &wgpu::Device, key: CanvasKey) -> Result<Self, WgpuRenderError> {
-        let maximum = device.limits().max_texture_dimension_2d;
-        if key.extent.is_empty() || key.extent.width > maximum || key.extent.height > maximum {
-            return Err(WgpuRenderError::ContentRejected {
-                message: format!(
-                    "world canvas {:?} exceeds device extent {maximum}",
-                    key.extent
-                ),
-            });
-        }
-        let texture = checked(device, "nara_world_canvas_texture", || {
-            device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("nara_world_canvas_texture"),
-                size: wgpu::Extent3d {
-                    width: key.extent.width,
-                    height: key.extent.height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: WORLD_CANVAS_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            })
-        })?;
-        let view = checked(device, "nara_world_canvas_view", || {
-            texture.create_view(&wgpu::TextureViewDescriptor::default())
-        })?;
-        let composite = Arc::new(CanvasCompositePipeline::create(
-            device,
-            key.destination_format,
-        )?);
-        Ok(Self {
-            key,
-            _texture: texture,
-            view,
-            composite,
-        })
-    }
 }
 
 impl CanvasCompositePipeline {
@@ -340,29 +208,4 @@ impl CanvasCompositePipeline {
 }
 
 #[cfg(test)]
-impl PreparedWorldCanvas {
-    pub(crate) fn view(&self) -> &wgpu::TextureView {
-        &self.resources.view
-    }
-
-    pub(crate) fn encode_composite(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        destination: &wgpu::TextureView,
-    ) {
-        self.resources.composite.encode_composite(
-            &self.mapping,
-            encoder,
-            destination,
-            wgpu::LoadOp::Clear(crate::stock_policy::premultiplied_clear_color(
-                self.mapping.frame.bar_color(),
-            )),
-        );
-    }
-}
-
-#[cfg(test)]
 mod program_tests;
-
-#[cfg(test)]
-mod tests;

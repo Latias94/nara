@@ -1,11 +1,16 @@
 use std::{fs, path::PathBuf, time::Instant};
 
 use nara_app::{App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
-use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, RuntimeAssetCodec, StableAssetId};
+use nara_asset::{
+    AssetProductRef, AssetRef, AssetServer, Assets, ImportedProductId, RuntimeAssetCodec,
+    StableAssetId,
+};
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_fs::ContentDigest;
 use nara_identity::{EntityLookup, SceneEntityId, WorldIdentityDomain};
-use nara_image::{ImageColorSpace, ImageDomain, ImageExtent, ImageFormat, ImageRuntimeCodec};
+use nara_image::{
+    ImageAsset, ImageColorSpace, ImageDomain, ImageExtent, ImageFormat, ImageRuntimeCodec,
+};
 use nara_project::{ProductCapability, ProjectPath, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{ComponentTypeId, ComponentValue, encode_asset_reference_value};
 use nara_scene::{

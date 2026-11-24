@@ -230,10 +230,10 @@ impl ProjectScenes<'_> {
         self.source_watch.as_deref().map(|driver| driver.status())
     }
 
-    /// Retains read-only original-worker join counts through Runtime close and World retention.
+    /// Retains live watcher handle counts through Runtime close.
     #[cfg(all(feature = "runtime-2d", feature = "asset-watch"))]
     #[must_use]
-    pub fn source_watch_retirement(&self) -> Option<nara_asset_watch::AssetWatchRuntimeObserver> {
+    pub fn source_watch_observer(&self) -> Option<nara_asset_watch::AssetWatchRuntimeObserver> {
         self.source_watch
             .as_deref()
             .map(|driver| driver.retirement())

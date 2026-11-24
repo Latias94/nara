@@ -10,7 +10,7 @@ print to the console. No physics, audio or runtime UI package is required.
 
 ## Run
 
-From this directory, with the first-party `nara` and `nara-editor` tools available:
+From this directory, with the `nara` CLI available:
 
 ```text
 nara schema . --write
@@ -20,7 +20,6 @@ cargo run --bin headless
 cargo run --bin headless -- --verify-reset
 cargo run --features desktop --bin desktop
 cargo run --features desktop --bin desktop -- --verify-first-present
-nara-editor .
 ```
 
 The ordinary headless demonstration walks right through the same authored level
@@ -53,8 +52,8 @@ with `CARGO_TARGET_DIR` and one build job when working in the repository.
   configured speed. Each fixed tick can collect gems crossed along its walking
   segment. Reset starts a new segment at the restored pose.
 - `assets/textures/token.png` is an original geometric image. Its committed
-  metadata supplies a stable image identity. Inspector image assignment uses
-  `textures/token.png` as its logical asset path.
+  metadata supplies a stable image identity. Sprites refer to it by the logical
+  asset path `textures/token.png`.
 - Runtime held keys, collection state and reset baselines stay in resources.
   Collected authored entities remain alive with transparent sprites. Reset does
   not rewrite project source or reconstruct a second hard-coded level.
@@ -65,32 +64,22 @@ must retain the dependency coordinate selected by its own `nara new` call;
 adjust the nested plugin's Nara coordinate to the same checkout. Do not copy
 these repository-relative paths unchanged into a different directory layout.
 
-The generic Editor reads the explicitly generated schema bundle. Select a gem to
-edit its fractional `Collectible.radius` through the ordinary Inspector, Undo/Redo
-and Save workflow. The player Prefab's `PlayerConfig.speed` is also an authored
-`f32`. These components use version 2 and F64 wire values; the earlier integer
-version is not accepted as the floating schema. Refresh schema after Rust schema
-changes, reopen, and run `nara check .` after saving content.
+Edit a gem's fractional `Collectible.radius` in `scenes/startup.scene.json` or the
+player's `PlayerConfig.speed` in `prefabs/player.prefab.json`. Both fields are `f32` in Rust
+and use F64 wire values in their version-2 records. Refresh the schema bundle after
+Rust schema changes and run `nara check .` after saving content.
 
-Both custom components opt into complete literal creation templates: PlayerConfig
-starts with speed 240 and Collectible with radius 20. The ordinary Scene and Prefab
-Inspector can add or remove these components, with Undo/Redo and Save/Reopen.
-The schema owner advances to catalog generation 2 while retaining the frozen
-generation-1 catalog; this creation-only metadata does not change wire version 2.
-
-The installed Editor handles supported declared scalar data without compiling or
-loading the game. Its first-party native preview omits custom configuration records
-with an explicit reason, while retaining them in source. The separately compiled
-game consumes their native bindings. Unsupported contracts stay protected.
+Both custom components define literal creation templates. `PlayerConfig` starts
+with speed 240 and `Collectible` with radius 20.
+Catalog generation 2 adds these templates and retains the frozen generation-1 catalog.
+The component records still use wire version 2.
 
 ## A lightweight content variant
 
-`variants/fast-player/player.prefab.json` is a normal replacement Prefab with
-speed 300.5 and an adjusted tint. Stop Play, copy it over `prefabs/player.prefab.json`,
-reopen the document, check, and Play again. The game code and native plugin are
-unchanged. Keep the original file in version control to restore the default.
-This demonstrates explicit data replacement; it is not a dynamic plugin ABI,
-mod discovery service or conflict resolver.
+`variants/fast-player/player.prefab.json` supplies speed 300.5 and an adjusted tint.
+Close the game, copy the variant over `prefabs/player.prefab.json`, run `nara check .`,
+and launch the desktop game again. Keep the original file in version control to
+restore the default.
 
 ## Export
 
@@ -106,4 +95,4 @@ part of that closure. This is a source-carrying development/verification
 candidate, not formal release packaging or a complete editable project backup.
 
 Follow the [first-game guide](../../docs/guides/first-2d-game.md) from the engine
-repository for independent creation, editing and supervised Play.
+repository to create, edit, and run an independent copy.

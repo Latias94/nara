@@ -32,10 +32,6 @@ pub use super::runtime::{
     begin_prepared_project_scene_travel, commit_prepared_project_scene,
 };
 
-#[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
-use super::runtime::{
-    EditorProjectOpenError, EditorProjectSession, TrustedCompiledEditorProjectIntent,
-};
 #[cfg(all(
     feature = "runtime-2d",
     feature = "serde",
@@ -108,18 +104,4 @@ pub fn desktop_run_with_probe(
     probe: RuntimeProbe,
 ) -> DesktopRun {
     DesktopRun::new_with_overlay(project_root, intent, probe.into_overlay())
-}
-
-/// Opens one trusted in-process Editor session with a single non-replayable probe overlay.
-#[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
-pub fn open_trusted_compiled_editor_with_probe(
-    project_root: DirectoryCapability,
-    intent: TrustedCompiledEditorProjectIntent,
-    probe: RuntimeProbe,
-) -> Result<EditorProjectSession, EditorProjectOpenError> {
-    EditorProjectSession::open_trusted_compiled_with_overlay(
-        project_root,
-        intent,
-        probe.into_overlay(),
-    )
 }

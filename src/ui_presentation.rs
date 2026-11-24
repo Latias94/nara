@@ -8,8 +8,6 @@ use nara_ui_render::{
     UiPresentationBackendFaultDomain, UiPresentationRuntimeGeneration,
 };
 
-#[cfg(feature = "desktop-winit")]
-mod accessibility;
 mod attempts;
 mod close;
 mod observation;
@@ -21,26 +19,6 @@ use attempts::{UiPresentationAttempt, UiPresentationAttemptLedger};
 #[cfg(feature = "render-wgpu")]
 pub use observation::PresentedUiWgpuFacts;
 pub use observation::{PresentedUiObservation, latest_presented_ui_observation};
-
-#[derive(Clone, Copy, nara_ecs::Resource)]
-struct NativeAccessibilityPresentationPort {
-    publish_presented: fn(&mut World, UiPresentationReceipt) -> Result<(), String>,
-}
-
-impl NativeAccessibilityPresentationPort {
-    fn publish_if_installed(
-        world: &mut World,
-        receipt: UiPresentationReceipt,
-    ) -> Result<(), String> {
-        let Some(publish_presented) = world
-            .get_resource::<Self>()
-            .map(|port| port.publish_presented)
-        else {
-            return Ok(());
-        };
-        publish_presented(world, receipt)
-    }
-}
 
 #[derive(Debug, Default, nara_ecs::Resource)]
 pub(crate) struct UiPresentationBridgeStats {
@@ -99,70 +77,6 @@ impl Plugin for UiPresentationBridgePlugin {
         // and use the concrete post-Host port immediately, before another frame can run.
         app.add_systems(CoreStage::Cleanup, commit_runtime_ui_presentations)?;
         Ok(())
-    }
-}
-
-/// Explicit native Winit accessibility contribution for a desktop UI product.
-///
-/// Compiling the platform adapter only makes the implementation available. This contribution is
-/// the product-owned decision that installs the runtime bridge and permits the Winit runner to
-/// create native accessibility sessions.
-#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-#[derive(Debug, Default, Clone, Copy)]
-pub struct WinitUiAccessibilityContributionPlugin;
-
-#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-pub const WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID: nara_app::PluginId =
-    nara_app::PluginId::new("nara.ui-presentation.winit-accessibility");
-
-#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-const WINIT_UI_ACCESSIBILITY_CONTRIBUTION_REQUIREMENTS: &[nara_app::PluginId] = &[
-    UI_PRESENTATION_BRIDGE_PLUGIN_ID,
-    nara_window::WINDOW_PLUGIN_ID,
-];
-
-#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-const WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PRODUCT_REQUIREMENTS:
-    &[nara_app::PluginProductCapability] = &[
-    nara_app::PluginProductCapability::new("presentation-ui"),
-    nara_app::PluginProductCapability::new("desktop-winit"),
-];
-
-#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-pub const WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
-    nara_app::PluginDeclaration::new(
-        WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID,
-        nara_app::PluginCategory::Platform,
-    )
-    .requires_plugins(WINIT_UI_ACCESSIBILITY_CONTRIBUTION_REQUIREMENTS)
-    .requires_product_capabilities(WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PRODUCT_REQUIREMENTS);
-
-#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-impl Plugin for WinitUiAccessibilityContributionPlugin {
-    fn declaration() -> &'static nara_app::PluginDeclaration {
-        &WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_DECLARATION
-    }
-
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        accessibility::install(app)?;
-        app.insert_resource(NativeAccessibilityPresentationPort {
-            publish_presented: accessibility::publish_presented,
-        })?;
-        match nara_winit::__private::capture_winit_accessibility_activation(app.world()) {
-            nara_winit::__private::WinitAccessibilityActivation::Enabled(_) => Ok(()),
-            nara_winit::__private::WinitAccessibilityActivation::Disabled => {
-                Err(PluginError::SetupFailed {
-                    plugin: WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID,
-                    message: "explicit Winit accessibility contribution did not install its activation marker".to_owned(),
-                })
-            }
-            nara_winit::__private::WinitAccessibilityActivation::Partial(error) => {
-                Err(PluginError::SetupFailed {
-                    plugin: WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID,
-                    message: format!("explicit Winit accessibility contribution is partial: {error}"),
-                })
-            }
-        }
     }
 }
 
@@ -617,9 +531,6 @@ fn commit_presented_attempt(world: &mut World, commit: nara_ui_render::OneShotPr
             .resource_mut::<observation::PresentedUiObservationStore>()
             .publish(staged.commit(receipt)),
         Err(error) => record_bridge_error(world, error),
-    }
-    if let Err(error) = NativeAccessibilityPresentationPort::publish_if_installed(world, receipt) {
-        record_bridge_error(world, error);
     }
 }
 

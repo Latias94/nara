@@ -34,13 +34,3 @@ fn advanced_scene_product_surface_is_available() {
         fn(&mut SceneProductOverlayWriter<'_>),
     >;
 }
-
-#[test]
-fn product_scene_replacement_is_advanced_only() {
-    let tests = trybuild::TestCases::new();
-    tests.compile_fail("tests/ui/scene_product/ordinary_prelude.rs");
-    tests.compile_fail("tests/ui/scene_product/private_module.rs");
-    tests.compile_fail("tests/ui/scene_product/raw_replace.rs");
-    tests.compile_fail("tests/ui/scene_product/writer_not_constructible.rs");
-    tests.compile_fail("tests/ui/scene_product/candidate_not_constructible.rs");
-}

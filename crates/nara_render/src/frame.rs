@@ -16,7 +16,6 @@ pub const MAX_VIEWS_PER_TARGET: usize = 16;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum RenderFrameSourceKind {
     Runtime(RuntimeGeneration),
-    EditorPreview(u64),
     Independent(u64),
 }
 
@@ -38,15 +37,11 @@ impl RenderFrameSourceGeneration {
         Self(RenderFrameSourceKind::Runtime(generation))
     }
 
-    pub(crate) const fn editor(generation: u64) -> Self {
-        Self(RenderFrameSourceKind::EditorPreview(generation))
-    }
-
     #[must_use]
     pub const fn runtime_generation(self) -> Option<RuntimeGeneration> {
         match self.0 {
             RenderFrameSourceKind::Runtime(generation) => Some(generation),
-            RenderFrameSourceKind::EditorPreview(_) | RenderFrameSourceKind::Independent(_) => None,
+            RenderFrameSourceKind::Independent(_) => None,
         }
     }
 }

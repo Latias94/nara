@@ -58,8 +58,6 @@ struct DeviceLossSignal {
 
 #[derive(Debug, Default)]
 struct DeviceWorldPresentations {
-    #[cfg(test)]
-    runtime: Option<nara_render::__private::WorldPresentationRevoker>,
     editor: BTreeMap<WgpuRenderProducerId, nara_render::__private::WorldPresentationRevoker>,
 }
 
@@ -70,10 +68,6 @@ impl DeviceLossSignal {
             .presentations
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        #[cfg(test)]
-        if let Some(presentation) = &presentations.runtime {
-            presentation.invalidate();
-        }
         for presentation in presentations.editor.values() {
             presentation.invalidate();
         }
@@ -81,19 +75,6 @@ impl DeviceLossSignal {
 
     fn is_lost(&self) -> bool {
         self.lost.load(Ordering::Acquire)
-    }
-
-    #[cfg(test)]
-    fn retain_presentation(&self, revoker: nara_render::__private::WorldPresentationRevoker) {
-        let mut presentations = self
-            .presentations
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if self.is_lost() {
-            revoker.invalidate();
-        } else if let Some(previous) = presentations.runtime.replace(revoker) {
-            previous.invalidate();
-        }
     }
 
     fn retain_editor_presentation(
@@ -392,18 +373,6 @@ impl WgpuDeviceOwner {
                 .transpose()
                 .map(|_| ())
                 .map_err(|_| WgpuRenderError::TelemetryCompletionPollFailed)
-        }
-    }
-
-    #[cfg(test)]
-    pub(super) fn retain_presentation(
-        &self,
-        revoker: nara_render::__private::WorldPresentationRevoker,
-    ) {
-        if let Some(loss) = self.loss_signal() {
-            loss.retain_presentation(revoker);
-        } else {
-            revoker.invalidate();
         }
     }
 
@@ -864,7 +833,7 @@ mod tests {
     }
 
     #[test]
-    fn device_loss_revokes_runtime_and_editor_world_before_render_or_registration() {
+    fn device_loss_revokes_world_presentation_before_or_after_registration() {
         use nara_ecs::{World, bevy_ecs::system::SystemState};
         use nara_render::{
             __private::prepare_world_presentation, Color, ExtractedView, ExtractedViews,
@@ -875,9 +844,7 @@ mod tests {
 
         let runtime = nara_app::RuntimeInstance::start(nara_app::App::new()).unwrap();
         let generation = runtime.generation();
-        for (editor, lost_before_registration) in
-            [(false, false), (false, true), (true, false), (true, true)]
-        {
+        for lost_before_registration in [false, true] {
             let mut world = World::new();
             let window = Window {
                 resolution: nara_window::WindowResolution::new(64, 64),
@@ -910,11 +877,7 @@ mod tests {
                 signal.mark_lost();
             }
             let view = WgpuRenderProducerId::new(1);
-            if editor {
-                signal.retain_editor_presentation(view, guard.revoker());
-            } else {
-                signal.retain_presentation(guard.revoker());
-            }
+            signal.retain_editor_presentation(view, guard.revoker());
             guard.mark_presented();
             world.insert_resource(frame);
             let mut parameter = SystemState::<WorldPointer>::new(&mut world);

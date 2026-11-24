@@ -38,8 +38,6 @@ use nara::{
     },
 };
 
-#[cfg(feature = "editor")]
-use nara::project_host::TrustedCompiledEditorProjectIntent;
 #[cfg(feature = "desktop")]
 use nara::project_host::{DesktopRun, DesktopRunIntent};
 
@@ -275,7 +273,7 @@ pub fn project_recipe() -> Result<ProductRecipe, ProductRecipeError> {
         .add_plugin::<ReferenceProjectOutcomePlugin>()
 }
 
-/// Creates the deterministic wave recipe shared by headless, desktop, and editor paths.
+/// Creates the deterministic wave recipe shared by the headless and desktop launch paths.
 pub fn wave_recipe() -> Result<ProductRecipe, ProductRecipeError> {
     ProductRecipe::new()
         .add_contribution(reference_game_contribution()?)?
@@ -406,22 +404,6 @@ pub fn bundled_desktop_run(project_root: DirectoryCapability) -> DesktopRun {
 #[must_use]
 pub fn wave_desktop_intent() -> DesktopRunIntent {
     DesktopRunIntent::new()
-        .with_profile("desktop")
-        .with_recipe(desktop_wave_recipe_or_panic())
-}
-
-/// Creates the Editor Play intent over the same committed wave content closure.
-#[cfg(feature = "editor")]
-#[must_use]
-pub fn wave_editor_intent() -> TrustedCompiledEditorProjectIntent {
-    TrustedCompiledEditorProjectIntent::new().with_recipe(wave_recipe_or_panic())
-}
-
-/// Creates the compiled Editor intent with an embedded desktop Game View.
-#[cfg(feature = "editor")]
-#[must_use]
-pub fn wave_game_view_intent() -> TrustedCompiledEditorProjectIntent {
-    TrustedCompiledEditorProjectIntent::new()
         .with_profile("desktop")
         .with_recipe(desktop_wave_recipe_or_panic())
 }

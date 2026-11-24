@@ -19,7 +19,6 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 #[derive(Default)]
 struct MappingProbe {
-    lineage_calls: AtomicUsize,
     mapping_calls: AtomicUsize,
     validations: AtomicUsize,
     builds: AtomicUsize,
@@ -34,11 +33,6 @@ struct MappingPolicy {
 impl WgpuRenderPolicy for MappingPolicy {
     type Capture = Mat3;
     type Bindings = ();
-
-    fn history_lineage(&self, _: &Self::Capture) -> Option<crate::WgpuHistoryLineage> {
-        self.probe.lineage_calls.fetch_add(1, Ordering::Relaxed);
-        None
-    }
 
     fn world_input_mapping(&self, capture: &Self::Capture) -> Option<WorldInputMapping2d> {
         self.probe.mapping_calls.fetch_add(1, Ordering::Relaxed);
@@ -189,7 +183,6 @@ fn build(
             WgpuRenderProducerId::new(backend_instance_id),
             &Arc::new(AtomicBool::new(false)),
             FORMAT,
-            None,
         )
         .unwrap()
 }
@@ -259,7 +252,6 @@ fn original_policy_and_capture_mapping_is_frozen_across_adaptation_and_reconstru
     }
     assert_eq!(probe.validations.load(Ordering::Relaxed), 8);
     assert_eq!(probe.builds.load(Ordering::Relaxed), 6);
-    assert_eq!(probe.lineage_calls.load(Ordering::Relaxed), 1);
     assert_eq!(probe.mapping_calls.load(Ordering::Relaxed), 1);
     assert!(probe.panic_mapping.load(Ordering::Relaxed));
     assert_eq!(successor_probe.mapping_calls.load(Ordering::Relaxed), 1);
@@ -353,7 +345,6 @@ fn explicitly_unmapped_capture_freezes_absence_without_recalling_source_callback
         drop(instances.commit(&built));
         assert_eq!(retained.world_input_mapping(), None);
     }
-    assert_eq!(probe.lineage_calls.load(Ordering::Relaxed), 1);
     assert_eq!(probe.mapping_calls.load(Ordering::Relaxed), 1);
     assert_eq!(probe.validations.load(Ordering::Relaxed), 5);
     assert_eq!(probe.builds.load(Ordering::Relaxed), 3);

@@ -1,4 +1,4 @@
-# GitHub workflow policy fixtures must be byte-stable across runner platforms.
+# Keep workflow files LF-normalized across platforms.
 .github/workflows/* text eol=lf
 
 # Canonical JSON fixtures and schema catalogs are byte-for-byte protocol evidence.
@@ -19,11 +19,6 @@ reference-game/prefabs/*.json text eol=lf
 reference-game/tests/fixtures/*.json text eol=lf
 reference-game/assets/**/*.meta text eol=lf
 
-# Frozen U9 measurement fixtures are hashed byte-for-byte.
-docs/benchmarks/data/**/*.json text eol=lf
-docs/benchmarks/data/**/*.jsonl text eol=lf
-docs/benchmarks/data/**/*.blake3 text eol=lf
-docs/benchmarks/data/**/*.base64 text eol=lf
 # The pinned upstream Fira license is preserved byte-for-byte, including its source whitespace.
 crates/nara_text/assets/FiraSans-LICENSE.txt -text whitespace=-trailing-space
 # The test font license has explicitly documented LF-normalized provenance.

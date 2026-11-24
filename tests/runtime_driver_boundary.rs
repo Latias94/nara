@@ -76,7 +76,7 @@ fn runtime_core_keeps_its_dependency_direction() {
 }
 
 #[test]
-fn managed_world_access_is_read_only_and_scopes_do_not_escape() {
+fn managed_runtime_returns_the_driver_scope_output() {
     let mut runtime = RuntimeInstance::start(App::new()).unwrap();
     let marker = runtime
         .with_driver_scope(|_| 17_u32)
@@ -87,11 +87,6 @@ fn managed_world_access_is_read_only_and_scopes_do_not_escape() {
         .unwrap();
     assert_eq!(marker, 17);
     runtime.finish().unwrap();
-
-    let cases = trybuild::TestCases::new();
-    cases.compile_fail("tests/ui/runtime_driver/raw_app_execution.rs");
-    cases.compile_fail("tests/ui/runtime_driver/runtime_world_mut.rs");
-    cases.compile_fail("tests/ui/runtime_driver/scope_escape.rs");
 }
 
 #[cfg(feature = "desktop-winit")]

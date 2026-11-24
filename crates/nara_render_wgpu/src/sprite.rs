@@ -541,8 +541,7 @@ mod tests {
                 std::collections::BTreeMap::new(),
             )
             .unwrap();
-        let captured = crate::view_probe::captured_split_frame_with_material(Some(binding));
-        let packet = &captured.topology;
+        let (packet, batches) = crate::view_probe::capture_split_sprite_views(Some(binding));
         let mut builder = WgpuRenderProgramBuilder::new(
             packet.source_generation(),
             packet.frame_index(),
@@ -572,13 +571,7 @@ mod tests {
             })
             .unwrap();
         let lower = |views: &[ExtractedView], time: Option<CapturedRenderTime>| {
-            SpriteCapture::for_views(
-                captured.payload.sprite_batches.as_ref(),
-                views,
-                time,
-                target.clone(),
-            )
-            .unwrap()
+            SpriteCapture::for_views(Some(&batches), views, time, target.clone()).unwrap()
         };
         let original = lower(packet.views(), packet.captured_time());
         assert_eq!(original.batches.len(), 2);

@@ -15,19 +15,9 @@ mod titlebar;
 
 #[derive(Debug)]
 pub(super) enum NativeTestEvent {
-    RetainWindowAndExit {
-        window: Sender<Arc<WinitWindow>>,
-    },
-    ObserveWindow {
-        window: Sender<WinitWindowId>,
-    },
-    ProbeWake {
-        wake_id: SessionWakeId,
-        accepted: Sender<bool>,
-    },
-    ObserveMaintenancePending {
-        pending: Sender<bool>,
-    },
+    RetainWindowAndExit { window: Sender<Arc<WinitWindow>> },
+    ObserveWindow { window: Sender<WinitWindowId> },
+    ObserveMaintenancePending { pending: Sender<bool> },
 }
 
 pub(super) fn handle_event(
@@ -47,14 +37,6 @@ pub(super) fn handle_event(
             if let Some(window) = app.platform_windows.get(&WindowId::PRIMARY) {
                 let _ = sender.send(window.id());
             }
-        }
-        NativeTestEvent::ProbeWake { wake_id, accepted } => {
-            let before = app.frame_requested;
-            let result = app.handle_session_wake(wake_id).unwrap();
-            if !result {
-                assert_eq!(app.frame_requested, before);
-            }
-            let _ = accepted.send(result);
         }
         NativeTestEvent::ObserveMaintenancePending { pending } => {
             let _ = pending.send(

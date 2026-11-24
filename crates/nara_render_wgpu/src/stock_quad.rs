@@ -26,9 +26,6 @@ use crate::{
     },
     view_uniform::VIEW_UNIFORM_BYTES,
 };
-#[cfg(test)]
-use crate::{PreparedSubmitterDraw, frame::WgpuLoweredFrameDraw};
-
 pub(crate) const MAX_CACHED_QUAD_PIPELINES: usize = 64;
 
 /// Shared quad native work. Domain facts and one-shot completion remain in the domain adapter.
@@ -482,40 +479,6 @@ impl StockQuadResources {
         self.textures.logical_texture_bytes()
     }
 
-    /// Private legacy draw adapter for native/unit oracles; production uses `prepare_batches`.
-    #[cfg(test)]
-    pub(crate) fn prepare(
-        &mut self,
-        preparation: &mut crate::preparation::NativePreparation<'_>,
-        check_device: impl Fn() -> Result<(), WgpuRenderError>,
-        view_format: wgpu::TextureFormat,
-        lowered: WgpuLoweredFrameDraw,
-        frame_index: u64,
-    ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
-        let batches = crate::allocation::take_test_batches().unwrap_or(lowered.batches);
-        #[cfg(feature = "stock-ui")]
-        let ui_packets = lowered.ui_packets;
-        let prepared = self.prepare_batches(
-            preparation,
-            check_device,
-            view_format,
-            &batches,
-            frame_index,
-            None,
-        )?;
-        Ok(PreparedSubmitterDraw {
-            pipelines: prepared.pipelines,
-            buffers: prepared.buffers,
-            draw_calls: prepared.draw_calls,
-            sprites: prepared.sprites,
-            #[cfg(feature = "stock-ui")]
-            image_sprites: prepared.image_sprites,
-            #[cfg(feature = "stock-ui")]
-            ui_packets,
-            instance_reservation: prepared.instance_reservation,
-        })
-    }
-
     pub(crate) fn prepare_batches(
         &mut self,
         preparation: &mut crate::preparation::NativePreparation<'_>,
@@ -747,7 +710,7 @@ impl StockQuadResources {
         self.instance_budget.reserve(bytes)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "stock-ui"))]
     pub(crate) fn set_instance_budget_limit(&mut self, maximum: u64) {
         self.instance_budget = InstanceBudget::with_limit(maximum);
     }

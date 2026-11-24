@@ -116,49 +116,6 @@ pub(crate) fn compiled_scene_retained_bytes(
     Ok(total)
 }
 
-/// Charges flat authoring observation storage, including spare hierarchy buffers and source values.
-#[cfg(feature = "serde")]
-pub(crate) fn authoring_scene_observation_retained_bytes(
-    observation: &nara_scene::ExpandedSceneDocument,
-) -> Result<usize, SceneRetentionOverflow> {
-    let mut total = checked_sum([
-        size_of_val(observation),
-        scene_entity_ids_retained_bytes(observation.roots(), observation.roots_capacity())?,
-        checked_product(
-            observation.entities_capacity(),
-            size_of::<nara_scene::ExpandedSceneEntity>(),
-        )?,
-        scene_provenance_retained_bytes(observation.provenance())?,
-    ])?;
-    for entity in observation.entities() {
-        checked_add_to(
-            &mut total,
-            checked_sum([
-                string_retained_bytes(entity.id().as_str())?,
-                scene_entity_ids_retained_bytes(entity.children(), entity.children_capacity())?,
-            ])?,
-        )?;
-        for (component, record) in entity.components() {
-            checked_add_to(
-                &mut total,
-                checked_sum([
-                    size_of_val(component),
-                    size_of_val(record),
-                    BTREE_ENTRY_OVERHEAD,
-                    string_retained_bytes(component.as_str())?,
-                    record
-                        .owner()
-                        .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
-                    component_value_retained_bytes(record.value())?,
-                    record.value_storage_retained_bytes(),
-                    contextual_defaults_retained_bytes(&record.contextual_defaults)?,
-                ])?,
-            )?;
-        }
-    }
-    Ok(total)
-}
-
 #[cfg(feature = "serde")]
 fn runtime_definition_retained_bytes(
     definitions: &nara_scene::SceneComponentBindingsWitness,

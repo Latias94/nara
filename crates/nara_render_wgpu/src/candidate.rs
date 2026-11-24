@@ -18,7 +18,7 @@ std::thread_local! {
 pub(crate) const CANDIDATE_METADATA_RESERVATION: u64 =
     CANDIDATE_PROGRAM_METADATA + CANDIDATE_BINDING_METADATA;
 
-/// Original input, bound instances and exact temporal basis for one publication attempt.
+/// Original input and bound instances for one publication attempt.
 ///
 /// This value is not cloneable and does not borrow its Host. Retryable submission failure returns
 /// the same value. Dropping it cancels unpublished work; resources already touched by a native
@@ -56,7 +56,6 @@ impl WgpuRenderCandidate {
 pub struct WgpuPublishedFrame {
     pub(crate) image: crate::WgpuImageOutput,
     pub(crate) outputs: crate::WgpuProgramOutputs,
-    pub(crate) history: Vec<crate::WgpuHistoryBinding>,
     pub(crate) final_version: crate::graph::ResourceVersion,
 }
 
@@ -94,52 +93,9 @@ impl WgpuPublishedFrame {
         crate::program::require_descriptor::<S>(&storage.descriptor, true)?;
         Ok(crate::WgpuProgramTextureOutput::new(storage))
     }
-
-    /// Selects this publication's exact texture, never the Host's currently latest slot.
-    pub fn history_texture<S: 'static, F: crate::WgpuRenderFeature>(
-        &self,
-        view: nara_render::RenderViewId,
-        feature: &crate::WgpuFeatureDeclaration<F>,
-        slot: u64,
-    ) -> Result<crate::WgpuProgramTextureOutput<S>, crate::WgpuRenderProgramError> {
-        let key = crate::history::HistoryKey {
-            view,
-            feature: feature.id(),
-            slot,
-        };
-        let binding = self
-            .history
-            .iter()
-            .find(|binding| binding.key == key)
-            .ok_or(crate::WgpuRenderProgramError::UnpublishedResource)?;
-        let storage = self.outputs.storage(&binding.version)?;
-        crate::program::require_descriptor::<S>(&storage.descriptor, true)?;
-        Ok(crate::WgpuProgramTextureOutput::new(storage))
-    }
-
-    pub fn history_buffer<S: 'static, F: crate::WgpuRenderFeature>(
-        &self,
-        view: nara_render::RenderViewId,
-        feature: &crate::WgpuFeatureDeclaration<F>,
-        slot: u64,
-    ) -> Result<crate::WgpuProgramBufferOutput<S>, crate::WgpuRenderProgramError> {
-        let key = crate::history::HistoryKey {
-            view,
-            feature: feature.id(),
-            slot,
-        };
-        let binding = self
-            .history
-            .iter()
-            .find(|binding| binding.key == key)
-            .ok_or(crate::WgpuRenderProgramError::UnpublishedResource)?;
-        let storage = self.outputs.storage(&binding.version)?;
-        crate::program::require_descriptor::<S>(&storage.descriptor, false)?;
-        Ok(crate::WgpuProgramBufferOutput::new(storage))
-    }
 }
 
-/// A failed native attempt retains its exact candidate, never a newly prepared history basis.
+/// A failed native attempt retains its exact prepared candidate.
 #[derive(Debug)]
 pub struct WgpuCandidateSubmitFailure {
     pub error: WgpuRenderHostError,
@@ -208,14 +164,14 @@ pub(crate) struct CandidateReservation {
 
 impl CandidateReservation {
     pub(crate) fn finish(&self, built: &BuiltPolicy) -> Result<(), WgpuRenderHostError> {
-        let bytes = built
+        built
             .metadata_bytes
             .checked_add(built.output.program.modeled_metadata_bytes())
             .and_then(|bytes| bytes.checked_add(size_of::<WgpuRenderCandidate>()))
-            .ok_or(crate::WgpuRenderProgramError::HistoryCapacity)?;
-        if bytes as u64 > CANDIDATE_METADATA_RESERVATION {
-            return Err(crate::WgpuRenderProgramError::HistoryCapacity.into());
-        }
+            .filter(|&bytes| bytes as u64 <= CANDIDATE_METADATA_RESERVATION)
+            .ok_or(crate::WgpuRenderProgramError::Graph(
+                crate::GraphError::LimitExceeded(crate::LimitKind::MetadataBytes),
+            ))?;
         // The full conservative preparation envelope remains held while the candidate is live.
         // This is bounded metadata admission, not a claim about allocator or native driver RSS.
         let _ = &self.metadata;

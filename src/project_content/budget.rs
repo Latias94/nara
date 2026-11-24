@@ -700,10 +700,6 @@ pub(super) const CONTENT_LEASE_RETAINED_BYTES: usize =
     size_of::<ProjectContentLeaseInner>() + super::ARC_CONTROL_BLOCK_BYTES;
 
 impl ProjectContentLease {
-    pub(super) fn budget_ticket(&self) -> BudgetTicket {
-        self.inner.host.reserve()
-    }
-
     pub(crate) fn reserve_retained(
         &self,
         retained_bytes: usize,

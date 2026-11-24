@@ -116,7 +116,6 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
         "nara.ui-render",
         "nara.render-wgpu",
         "nara.window",
-        "nara.tooling",
     ] {
         assert!(
             entries

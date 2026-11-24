@@ -8,13 +8,10 @@ It is a development and product-regression fixture, not a finished commercial ga
 
 ## Rust Composition
 
-The checked-in launch entries use the same pure Rust `ProductRecipe` as the reference game's
-headless, desktop, and editor product paths. `wave_recipe()` binds the gameplay plugin and its
-schema provider once; `desktop_wave_recipe()` adds only the desktop presentation plugin. Project
-loading, runtime admission, driving, and bounded shutdown remain owned by Nara's product Hosts.
-The fixture does not assemble plugin definitions, slot edits, or parallel schema-provider lists in
-its normal launch path. The checked-in data-only authoring bundle is generated separately from the
-same trusted provider definitions selected by that product path.
+The headless and desktop launch entries share the same Rust `ProductRecipe`. `wave_recipe()`
+binds the gameplay plugin and its schema provider. `desktop_wave_recipe()` adds the desktop
+presentation plugin. Nara's product hosts load the project, admit and drive the runtime, and
+manage bounded shutdown.
 
 ## Run From Source
 
@@ -43,13 +40,11 @@ See `CONTROLS.md` for the input map.
 - `prefabs/enemy.prefab.json`
 - `prefabs/reference-ui.prefab.json`
 - the referenced image assets and `.meta` records under `assets/`
-- the canonical authoring schema bundle and owner-lineage fixtures under `schema/`
 
 The packaged binaries do not search the current working directory or user home for these files.
-Authoring tools consume the bundle declared by `nara.toml`; they do not compile or load the
-Reference Game crate. The repository generator ingests that manifest and resolves the normal
-`project_recipe()` before projecting its selected trusted providers, so it does not maintain a
-second project-specific provider list.
+The `schema/` directory contains the authoring bundle declared in `nara.toml` and the owner-lineage
+fixtures. The `authoring_bundle` generator loads the manifest and resolves `project_recipe()` to
+project the selected schema providers into the bundle.
 
 Refresh the canonical authoring bundle after changing a persistent provider catalog:
 

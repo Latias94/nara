@@ -74,7 +74,7 @@ impl InstanceBudget {
         (charges.reserved - charges.committed, charges.committed)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "stock-ui"))]
     pub(crate) fn with_limit(maximum: u64) -> Self {
         Self {
             state: Arc::new(BudgetState {

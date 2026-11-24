@@ -56,12 +56,14 @@ Rust sources, Cargo configuration, and Design Kit match the baseline.
 - Retire synthetic boundary fixtures and reverse trybuild tests that assert removed constraints.
   Keep the Dialogue Graph prototype recoverable from the v0 tag. Preserve useful coverage of
   game behavior in `reference-game`, `samples/two-level-game`, and focused crate tests.
-- Move editor authoring out of the root `nara` crate into the editor domain owner. Eliminate the
-  editor feature path from every game target. Keep the remaining production paths buildable at
-  each commit.
+- Remove the v0 editor host and authoring modules from root `nara`. Move reusable headless draft
+  parsing and editing state into `nara_editor_core` and preserve the rest of the prototype in Git.
+  Eliminate the editor feature path from every game target. Keep the game runtime, project CLI,
+  and editor-independent format tests buildable.
 - Reduce CI to format, workspace check and focused tests, reference-game, and portable Wasm core.
-  Add simple checks for WGPU duplicates and runtime dependency direction. Introduce the source
-  checks for private tunnels and abort or leak workarounds alongside the code that clears them.
+  Check WGPU identity, runtime dependency direction, and additions of private tunnels, process
+  aborts, and teardown leak workarounds. Enforce zero remaining instances after the owning runtime
+  and GPU replacements land.
 
 ### Open-GPUI
 
@@ -71,11 +73,47 @@ Rust sources, Cargo configuration, and Design Kit match the baseline.
 - Align manifests and lockfiles with the Nara WGPU pin. Keep `dockspace` and the native docking
   path intact for the editor workflow.
 
-**Exit.** Nara drops more than 40% of the comparable tracked source and passes
-`cargo check --workspace --locked` and focused core tests. Open-GPUI has at most 15 workspace crates
-and fewer than 350,000 comparable source lines. Its Windows `examples/wgpu-native` example builds
-and runs. Report cold CI against the handoff's interim 25-minute estimate and the project's
-15-minute budget.
+**Exit.** Both workspaces resolve with the named obsolete editor and desktop UI code removed.
+Nara passes the locked workspace check, focused core tests, portable Wasm compilation, and the
+reference-game checks. Open-GPUI's Windows `examples/wgpu-native` example builds and runs with the
+same WGPU source and revision. Use the Phase 1 job set to assess the 25-minute cold CI estimate.
+Phase 3 owns the 15-minute cold CI target. The renderer, runtime, platform, and widget changes
+scheduled in Phases 2–4 account for the remaining package and source reductions.
+
+### Phase 1 baseline comparison
+
+Counts cover Rust files tracked in each repository. Project source includes tests and examples.
+Fixture source counts Rust files under `fixtures/` and `.golden.rs` files. Both exclude vendored
+code, documentation, local build outputs, and reference checkouts. Workspace packages include
+examples and tooling listed as members. The `crates/` column counts only members in that directory.
+
+| Repository | Workspace packages | Packages under `crates/` | Project Rust lines | Fixture Rust lines |
+| --- | ---: | ---: | ---: | ---: |
+| Nara | 39 → 38 | 37 → 37 | 1,238,943 → 827,547 | 196,631 → 6 |
+| Open-GPUI | 47 → 28 | 38 → 22 | 1,051,969 → 678,381 | 12,227 → 10,496 |
+
+Nara removed 21 fixture directories and reduced project and fixture Rust lines by 42.4 percent.
+Open-GPUI reduced project and fixture Rust lines by 35.3 percent. Both workspaces and the Nara
+game lockfiles resolve WGPU 30.0.0 at `cddb2f5d80dc0009b2ef6767635140cacf90a007`.
+
+### Phase 1 verification
+
+On Windows 11 with Rust 1.95.0, both workspaces passed their locked all-feature, all-target
+checks. Nara passed the Wasm `runtime-core` check, 1,116 core tests, 715 focused watcher, render,
+window and process tests, 17 two-level continuity tests, 30 reference-game tests with desktop
+enabled, and six CLI and reference-game contract tests. The generated-project test built the
+independent game. The reference game's real Windows window passed `--verify-first-present`.
+
+Open-GPUI passed 82 core utility tests, three independently locked consumer checks, all seven
+native WGPU example smokes, and the Dockspace editor's native and recovery smokes. The native
+runs used an NVIDIA GeForce RTX 4090. The Linux and macOS jobs remain part of hosted verification.
+
+On November 25, 2026, the Nara CI commands passed locally on Windows 11 with an i9-13900KF,
+Rust 1.95.0, one Cargo build job, and an empty Cargo target directory per job. The commands reused
+the downloaded registry and Git sources. Formatting took 47 seconds, the workspace job took
+9 minutes 18 seconds, the reference-game job took 6 minutes 3 seconds, and the Wasm check took
+1 minute 53 seconds. The serial total was 18 minutes. GitHub-hosted timing, including the Linux
+job and runner setup, remains to be measured.
 
 ## Phase 2 — Unify GPU and desktop platform integration
 

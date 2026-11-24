@@ -3,11 +3,9 @@
 use super::*;
 use crate::{
     AccessRole, GraphLimits, TextureAlpha, TextureInterpretation, TextureTransfer,
-    WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureEncodeContext,
-    WgpuFeaturePrepareContext, WgpuHistoryLineage, WgpuHistoryTexture, WgpuHistoryView,
     WgpuPolicyBindingContext, WgpuPolicyBuildContext, WgpuPolicyDefinition, WgpuPolicyFrameFacts,
-    WgpuPolicyProgram, WgpuProgramTextureDescriptor, WgpuRenderFeature, WgpuRenderPolicy,
-    WgpuRenderProgramBuilder, WgpuRenderProgramError,
+    WgpuPolicyProgram, WgpuProgramTextureDescriptor, WgpuRenderPolicy, WgpuRenderProgramBuilder,
+    WgpuRenderProgramError,
 };
 use nara_core::Mat3;
 use nara_ecs::Entity;
@@ -15,60 +13,23 @@ use nara_render::{
     Color, ExtractedView, ExtractedViews, RenderImage2d, RenderTarget, RenderViewId, ViewLoadOp,
     ViewMapping2d, ViewportRect, build_image_render_frame_packet,
 };
-use std::sync::{Mutex, atomic::AtomicUsize};
+use std::sync::atomic::AtomicUsize;
 
 struct FinalColor;
-struct HistoryIdentity;
-
-impl WgpuRenderFeature for HistoryIdentity {
-    type Capture = ();
-    type State = ();
-    type Prepared = ();
-    type Report = ();
-
-    fn create_state(
-        &self,
-        _: &mut WgpuFeaturePrepareContext<'_>,
-    ) -> Result<(), WgpuRenderProgramError> {
-        panic!("a history identity must not execute a native Feature")
-    }
-
-    fn prepare(
-        &self,
-        _: &mut (),
-        _: &(),
-        _: &mut WgpuFeaturePrepareContext<'_>,
-    ) -> Result<(), WgpuRenderProgramError> {
-        unreachable!("the policy only initializes its graph-local final texture")
-    }
-
-    fn encode(
-        &self,
-        _: &(),
-        _: &mut WgpuFeatureEncodeContext<'_>,
-    ) -> Result<(), WgpuRenderProgramError> {
-        unreachable!("the policy only initializes its graph-local final texture")
-    }
-}
 
 #[derive(Default)]
 struct CaptureProbe {
     panic_on_binding_drop: AtomicBool,
     binding_drops: AtomicUsize,
-    predecessors: Mutex<Vec<Option<u64>>>,
 }
 
 struct ClearCapture {
-    lineage: WgpuHistoryLineage,
-    view: WgpuHistoryView,
-    effect: WgpuFeatureDeclaration<HistoryIdentity>,
     extra_usage: wgpu::TextureUsages,
     color: wgpu::Color,
     probe: Arc<CaptureProbe>,
 }
 
 struct ClearBindings {
-    history: WgpuHistoryTexture<FinalColor>,
     probe: Arc<CaptureProbe>,
 }
 
@@ -91,37 +52,22 @@ impl WgpuRenderPolicy for ClearPolicy {
     type Capture = ClearCapture;
     type Bindings = ClearBindings;
 
-    fn history_lineage(&self, capture: &ClearCapture) -> Option<WgpuHistoryLineage> {
-        Some(capture.lineage.clone())
-    }
-
     fn bind(
         &self,
         capture: &ClearCapture,
-        context: &mut WgpuPolicyBindingContext<'_>,
+        _: &mut WgpuPolicyBindingContext<'_>,
     ) -> Result<ClearBindings, WgpuRenderProgramError> {
         Ok(ClearBindings {
-            history: context.history_texture(
-                &capture.view,
-                &capture.effect,
-                0,
-                final_descriptor(capture.extra_usage),
-            )?,
             probe: Arc::clone(&capture.probe),
         })
     }
 
     fn build(
         &self,
-        bindings: &ClearBindings,
+        _: &ClearBindings,
         capture: &ClearCapture,
         context: WgpuPolicyBuildContext<'_>,
     ) -> Result<WgpuPolicyProgram, WgpuRenderProgramError> {
-        capture.probe.predecessors.lock().unwrap().push(
-            context
-                .previous_texture(&bindings.history)?
-                .map(|previous| previous.frame_index()),
-        );
         let mut builder = WgpuRenderProgramBuilder::new(
             context.packet().source_generation(),
             context.packet().frame_index(),
@@ -129,12 +75,11 @@ impl WgpuRenderPolicy for ClearPolicy {
         )?;
         let texture = builder.texture::<FinalColor>(final_descriptor(capture.extra_usage))?;
         builder.initialize(0, &[texture.clear(capture.color, AccessRole::Attachment)])?;
-        Ok(WgpuPolicyProgram::new(
+        WgpuPolicyProgram::new(
             builder.finish(&[texture.output()])?,
             &texture,
             WgpuPolicyFrameFacts::default(),
-        )?
-        .with_history(vec![bindings.history.bind(&texture)]))
+        )
     }
 }
 
@@ -175,9 +120,8 @@ fn image_target() -> RenderImagePacket {
 
 struct Fixture {
     installation: crate::WgpuPolicyInstallation<ClearPolicy>,
-    lineage: WgpuHistoryLineage,
-    view: WgpuHistoryView,
-    effect: WgpuFeatureDeclaration<HistoryIdentity>,
+    source: RenderFrameSourceGeneration,
+    view: RenderViewId,
     target: RenderImagePacket,
     extra_usage: wgpu::TextureUsages,
 }
@@ -186,10 +130,8 @@ impl Fixture {
     fn new(extra_usage: wgpu::TextureUsages) -> Self {
         Self {
             installation: WgpuPolicyDefinition::new(ClearPolicy).install().unwrap(),
-            lineage: WgpuHistoryLineage::new(RenderFrameSourceGeneration::try_acquire().unwrap())
-                .unwrap(),
-            view: WgpuHistoryView::new(RenderViewId::try_acquire().unwrap()),
-            effect: WgpuFeatureDefinition::new(HistoryIdentity).declare(),
+            source: RenderFrameSourceGeneration::try_acquire().unwrap(),
+            view: RenderViewId::try_acquire().unwrap(),
             target: image_target(),
             extra_usage,
         }
@@ -199,7 +141,7 @@ impl Fixture {
         let viewport = ViewportRect::new(0, 0, 2, 2).unwrap();
         let mut views = ExtractedViews::default();
         views.push(ExtractedView {
-            id: self.view.id(),
+            id: self.view,
             camera_entity: Entity::PLACEHOLDER,
             target: RenderTarget::Image(self.target.image()),
             viewport,
@@ -207,19 +149,11 @@ impl Fixture {
             order: 0,
             load: ViewLoadOp::Clear(Color::BLACK),
         });
-        let packet = build_image_render_frame_packet(
-            self.lineage.source_generation(),
-            frame,
-            &views,
-            self.target,
-        )
-        .unwrap()
-        .unwrap();
+        let packet = build_image_render_frame_packet(self.source, frame, &views, self.target)
+            .unwrap()
+            .unwrap();
         let probe = Arc::new(CaptureProbe::default());
         let capture = Arc::new(ClearCapture {
-            lineage: self.lineage.clone(),
-            view: self.view.clone(),
-            effect: self.effect.clone(),
             extra_usage: self.extra_usage,
             color,
             probe: Arc::clone(&probe),
@@ -229,7 +163,7 @@ impl Fixture {
 
     fn activate(&self, host: &mut WgpuRenderHost, producer: &WgpuRenderProducer) {
         let reservation = host
-            .reserve_image_target(producer, self.lineage.source_generation(), self.target)
+            .reserve_image_target(producer, self.source, self.target)
             .unwrap();
         host.activate_image_target(producer, reservation).unwrap();
     }
@@ -302,7 +236,6 @@ fn native_published_output_survives_old_binding_drop_panic_without_reusing_its_i
     let candidate_a = host.prepare(&producer, &input_a).unwrap();
     let published_a = host.submit_candidate(&producer, candidate_a).unwrap();
     assert!(!published_a.outputs().cleanup_panicked());
-    assert_eq!(*probe_a.predecessors.lock().unwrap(), [None]);
     drop(input_a);
     drain_prefix(published_a.outputs().submitted_prefix());
     drop(published_a);
@@ -322,9 +255,8 @@ fn native_published_output_survives_old_binding_drop_panic_without_reusing_its_i
         .unwrap()
         .0
         .clone();
-    let (input_b, probe_b) = fixture.input(2, wgpu::Color::GREEN);
+    let (input_b, _) = fixture.input(2, wgpu::Color::GREEN);
     let candidate_b = host.prepare(&producer, &input_b).unwrap();
-    assert_eq!(*probe_b.predecessors.lock().unwrap(), [Some(1)]);
     probe_a.panic_on_binding_drop.store(true, Ordering::SeqCst);
     let result = host.submit_candidate(&producer, candidate_b);
     // Disarm before asserting so a failed regression cannot panic again during Host teardown.
@@ -348,11 +280,6 @@ fn native_published_output_survives_old_binding_drop_panic_without_reusing_its_i
     );
     assert_eq!(published_b.image().0.texture(), &initial_texture);
     let final_b = published_b.final_texture::<FinalColor>().unwrap();
-    let history_b = published_b
-        .history_texture::<FinalColor, _>(fixture.view.id(), &fixture.effect, 0)
-        .unwrap();
-    assert!(Arc::ptr_eq(&final_b.storage, &history_b.storage));
-    assert_eq!(history_b.frame_index(), 2);
     assert_eq!(read_pixel(&mut host, published_b.image()), [0, 255, 0, 255]);
     assert!(matches!(
         host.prepare(&producer, &input_b).unwrap_err(),
@@ -378,9 +305,8 @@ fn native_published_output_survives_old_binding_drop_panic_without_reusing_its_i
         Err(WgpuRenderProgramError::ResourceSemantic)
     ));
 
-    let (input_c, probe_c) = fixture.input(3, wgpu::Color::BLUE);
+    let (input_c, _) = fixture.input(3, wgpu::Color::BLUE);
     let candidate_c = host.prepare(&producer, &input_c).unwrap();
-    assert_eq!(*probe_c.predecessors.lock().unwrap(), [Some(2)]);
     let published_c = host.submit_candidate(&producer, candidate_c).unwrap();
     assert!(!published_c.outputs().cleanup_panicked());
     assert_eq!(host.cleanup_fault_count(), 1);
@@ -393,7 +319,6 @@ fn native_published_output_survives_old_binding_drop_panic_without_reusing_its_i
     assert_eq!(read_pixel(&mut host, &image_b), [0, 255, 0, 255]);
     assert_eq!(image_texture_b.frame_index(), 2);
     assert_eq!(image_b.descriptor(), original_descriptor);
-    assert_eq!(history_b.frame_index(), 2);
     assert_eq!(probe_a.binding_drops.load(Ordering::SeqCst), 1);
 }
 
@@ -426,13 +351,12 @@ fn native_final_storage_usage_replaces_incompatible_initial_storage_on_the_first
             .contains(wgpu::TextureUsages::STORAGE_BINDING)
     );
 
-    let (first_input, first_probe) = fixture.input(1, wgpu::Color::RED);
+    let (first_input, _) = fixture.input(1, wgpu::Color::RED);
     let first_candidate = host.prepare(&producer, &first_input).unwrap();
     let first = host
         .submit_candidate(&producer, first_candidate)
         .expect("a legal storage-capable final descriptor must succeed on the fresh target");
     assert!(!first.outputs().cleanup_panicked());
-    assert_eq!(*first_probe.predecessors.lock().unwrap(), [None]);
     assert!(
         host.views[&producer.id()]
             .target
@@ -455,9 +379,8 @@ fn native_final_storage_usage_replaces_incompatible_initial_storage_on_the_first
         Some(1)
     );
 
-    let (second_input, second_probe) = fixture.input(2, wgpu::Color::BLUE);
+    let (second_input, _) = fixture.input(2, wgpu::Color::BLUE);
     let second_candidate = host.prepare(&producer, &second_input).unwrap();
-    assert_eq!(*second_probe.predecessors.lock().unwrap(), [Some(1)]);
     let second = host.submit_candidate(&producer, second_candidate).unwrap();
     assert!(!second.outputs().cleanup_panicked());
     assert!(second.image().0.texture().usage().contains(required_usage));

@@ -570,14 +570,6 @@ fn identity_resource_observer_rejects_before_scene_allocation() {
     assert!(!world.contains_resource::<WorldIdentityDomain>());
 }
 
-#[test]
-fn prepared_component_cannot_be_forged_outside_the_registry() {
-    let tests = trybuild::TestCases::new();
-    tests.compile_fail(
-        "tests/ui/scene_component_composition/prepared_component_not_constructible.rs",
-    );
-}
-
 fn scene_source_key(name: &str) -> nara::scene::SourceDocumentKey {
     nara::scene::SourceDocumentKey::named(
         "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),

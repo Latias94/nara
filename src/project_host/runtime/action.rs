@@ -34,17 +34,14 @@ use super::super::{ProductSupervisedDesktopSession, SupervisedDesktopProductIden
 #[cfg(feature = "runtime-2d")]
 use super::super::{
     StartupContentClosureReceipt,
-    check::{
-        ProjectSourceCheckError, check_project_source_with_host_policy,
-        check_project_source_with_overlay,
-    },
+    check::{ProjectSourceCheckError, check_project_source_with_overlay},
 };
 use super::{
     CleanupDriveOutcome, HostFault, ProjectHost, RuntimeStartAttempt, runtime_plan_selected_report,
     single_error,
 };
 #[cfg(feature = "runtime-2d")]
-use super::{RuntimeHostPolicyContribution, RuntimePluginOverlay, runtime_plan_failure_report};
+use super::{RuntimePluginOverlay, runtime_plan_failure_report};
 #[cfg(feature = "runtime-2d")]
 use crate::ProductRecipe;
 
@@ -556,7 +553,6 @@ impl DesktopRun {
                     execution.cleanup_policy,
                     recipe,
                     overlay,
-                    None,
                     Vec::new(),
                 );
                 (prepared, execution, verification)
@@ -1101,7 +1097,6 @@ fn prepare_start<O>(
                 cleanup_policy,
                 recipe,
                 overlay,
-                None,
                 commands,
             )?;
             Ok(PreparedStart {
@@ -1144,25 +1139,14 @@ fn prepare_project_start(
     cleanup_policy: RuntimeClosePolicy,
     recipe: ProductRecipe,
     overlay: Option<RuntimePluginOverlay>,
-    host_policy: Option<RuntimeHostPolicyContribution>,
     commands: Vec<GameplayCommandSubmission>,
 ) -> Result<PreparedProjectStart, PreparedProjectStartError> {
-    let checked = match host_policy {
-        Some(host_policy) => check_project_source_with_host_policy(
-            project_root,
-            profile.as_deref(),
-            recipe,
-            overlay,
-            host_policy,
-        ),
-        None => {
-            check_project_source_with_overlay(project_root, profile.as_deref(), recipe, overlay)
-        }
-    }
-    .map_err(|error| PreparedProjectStartError {
-        fault: project_source_check_fault(error),
-        startup_content_closure: None,
-    })?;
+    let checked =
+        check_project_source_with_overlay(project_root, profile.as_deref(), recipe, overlay)
+            .map_err(|error| PreparedProjectStartError {
+                fault: project_source_check_fault(error),
+                startup_content_closure: None,
+            })?;
     let (candidate, plan, snapshot, loader) = checked.into_delivery_parts();
     let plan_diagnostics = runtime_plan_selected_report(plan.configuration_plan());
     let startup_content_closure = snapshot

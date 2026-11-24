@@ -22,8 +22,6 @@ pub enum RenderFramePacketError {
     ImageTargetMismatch,
     #[error("an image render target must have a non-zero physical extent")]
     ImageTargetHasZeroExtent,
-    #[error("an Editor preview render packet must target an image")]
-    EditorPreviewRequiresImageTarget,
     #[error("image adaptation requires an original window render target")]
     ImageAdaptationRequiresWindowTarget,
     #[error("the image extent {image:?} does not match captured physical window extent {window:?}")]

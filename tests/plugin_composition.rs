@@ -39,7 +39,6 @@ use nara::{
     feature = "runtime-2d",
     feature = "runtime-ui",
     feature = "presentation-ui",
-    feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -187,7 +186,6 @@ const WGPU_STOCK_UI_PLUGIN_ID: PluginId = PluginId::new("nara.render-wgpu.stock-
     feature = "runtime-2d",
     feature = "runtime-ui",
     feature = "presentation-ui",
-    feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -196,7 +194,6 @@ const TEST_ORDERING_PLUGIN_ID: PluginId = PluginId::new("test.ordering-plugin");
     feature = "runtime-2d",
     feature = "runtime-ui",
     feature = "presentation-ui",
-    feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -231,7 +228,6 @@ const TEST_UNKNOWN_ANY_PRODUCT_PLUGIN_DECLARATION: PluginDeclaration =
     feature = "runtime-2d",
     feature = "runtime-ui",
     feature = "presentation-ui",
-    feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -241,7 +237,6 @@ const TEST_ORDERING_PLUGIN_DECLARATION: PluginDeclaration =
     feature = "runtime-2d",
     feature = "runtime-ui",
     feature = "presentation-ui",
-    feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -480,7 +475,6 @@ impl Plugin for UnknownAnyProductCapabilityPlugin {
     feature = "runtime-2d",
     feature = "runtime-ui",
     feature = "presentation-ui",
-    feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -491,7 +485,6 @@ struct OrderingPlugin;
     feature = "runtime-2d",
     feature = "runtime-ui",
     feature = "presentation-ui",
-    feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -509,7 +502,6 @@ impl Plugin for OrderingPlugin {
     feature = "runtime-2d",
     feature = "runtime-ui",
     feature = "presentation-ui",
-    feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -520,7 +512,6 @@ struct AfterOrderingPlugin;
     feature = "runtime-2d",
     feature = "runtime-ui",
     feature = "presentation-ui",
-    feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -2399,23 +2390,16 @@ fn desktop_project_configures_the_existing_window_plugin_slot() {
     assert_eq!(windows[0].mode, WindowMode::BorderlessFullscreen);
     assert_eq!(windows[0].present_mode, PresentMode::Mailbox);
     assert!(!windows[0].resizable);
-    #[cfg(feature = "presentation-ui")]
-    assert!(
-        !plan.plugin_plan().entries().iter().any(|entry| {
-            entry.plugin_id() == nara::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID
-        })
-    );
 }
 
 #[cfg(all(
     feature = "runtime-ui",
     feature = "presentation-ui",
-    feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
 #[test]
-fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling() {
+fn requested_product_profile_selects_ui_window_and_wgpu() {
     use nara::{
         render::RENDER_SCHEMA_PROVIDER_ID,
         render_wgpu::{
@@ -2444,11 +2428,6 @@ fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling(
         assert!(plan.required_capabilities().contains(capability));
     }
     let entries = plan.plugin_plan().entries();
-    assert!(
-        !entries
-            .iter()
-            .any(|entry| entry.plugin_id() == PluginId::new("nara.tooling"))
-    );
     for plugin in [
         UI_PLUGIN_ID,
         UI_RENDER_PLUGIN_ID,
@@ -2457,7 +2436,6 @@ fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling(
         WGPU_STOCK_POLICY_PLUGIN_ID,
         WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
         nara::render_wgpu::WGPU_STOCK_UI_PLUGIN_ID,
-        nara::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID,
     ] {
         assert_eq!(
             entries
@@ -2470,7 +2448,7 @@ fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling(
     assert!(
         entries
             .iter()
-            .all(|entry| { entry.plugin_id() != nara::render_wgpu::WGPU_STOCK_SPRITE_PLUGIN_ID })
+            .all(|entry| entry.plugin_id() != WGPU_STOCK_SPRITE_PLUGIN_ID)
     );
     assert!(
         plan.schema_validation()
@@ -2572,7 +2550,7 @@ requested = ["runtime-2d", "presentation-2d", "render-wgpu"]
     assert!(
         entries
             .iter()
-            .all(|entry| entry.plugin_id() != nara::render_wgpu::WGPU_STOCK_UI_PLUGIN_ID)
+            .all(|entry| entry.plugin_id() != WGPU_STOCK_UI_PLUGIN_ID)
     );
     for plugin in [
         nara::render_wgpu::WGPU_STOCK_CAPTURE_PLUGIN_ID,
@@ -2628,58 +2606,6 @@ requested = ["runtime-ui", "presentation-ui"]
                 .any(|entry| entry.plugin_id() == plugin)
         );
     }
-    #[cfg(feature = "desktop-winit")]
-    assert!(
-        plan.plugin_plan().entries().iter().all(|entry| {
-            entry.plugin_id() != nara::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID
-        })
-    );
-}
-
-#[cfg(all(
-    feature = "runtime-ui",
-    feature = "presentation-ui",
-    feature = "desktop-winit"
-))]
-#[test]
-fn desktop_presentation_ui_profile_installs_winit_accessibility_once() {
-    let manifest = TestManifest::new(
-        r#"
-schema_version = 1
-
-[project]
-source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
-native_document_identity = 'project_location'
-name = "Desktop Presentation UI Composition"
-
-[authoring]
-state = "ready"
-
-[runtime]
-preset = "minimal"
-
-[capabilities]
-requested = ["runtime-ui", "presentation-ui", "desktop-winit"]
-"#,
-    );
-    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
-    let plan = resolve_runtime_plan(
-        &candidate,
-        project_runtime_plugins(&candidate),
-        built_in_schema_providers(),
-    )
-    .unwrap();
-
-    assert_eq!(
-        plan.plugin_plan()
-            .entries()
-            .iter()
-            .filter(|entry| {
-                entry.plugin_id() == nara::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID
-            })
-            .count(),
-        1
-    );
 }
 
 #[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
@@ -2726,7 +2652,7 @@ requested = ["runtime-ui", "presentation-ui", "render-wgpu"]
     assert!(
         entries
             .iter()
-            .all(|entry| { entry.plugin_id() != nara::render_wgpu::WGPU_STOCK_SPRITE_PLUGIN_ID })
+            .all(|entry| entry.plugin_id() != WGPU_STOCK_SPRITE_PLUGIN_ID)
     );
 }
 
@@ -2809,7 +2735,7 @@ fn direct_app_selects_the_sprite_wgpu_contribution_explicitly() {
     );
     assert!(
         app.installed_plugins()
-            .all(|plugin| plugin.id != nara::render_wgpu::WGPU_STOCK_UI_PLUGIN_ID)
+            .all(|plugin| plugin.id != WGPU_STOCK_UI_PLUGIN_ID)
     );
     app.seal().unwrap();
 }
@@ -2836,32 +2762,7 @@ fn direct_app_selects_the_ui_wgpu_contribution_explicitly() {
     );
     assert!(
         app.installed_plugins()
-            .all(|plugin| { plugin.id != nara::render_wgpu::WGPU_STOCK_SPRITE_PLUGIN_ID })
-    );
-    app.seal().unwrap();
-}
-
-#[cfg(all(
-    feature = "runtime-ui",
-    feature = "presentation-ui",
-    feature = "desktop-winit"
-))]
-#[test]
-fn direct_app_selects_the_winit_accessibility_contribution_explicitly() {
-    let mut app = nara::app::App::new();
-    app.add_plugins((
-        nara::RuntimeUiPlugins,
-        nara::PresentationUiPlugins,
-        nara::DesktopWinitPlugins,
-        nara::WinitUiAccessibilityContributionPlugin,
-    ))
-    .unwrap();
-
-    assert_eq!(
-        app.installed_plugins()
-            .filter(|plugin| { plugin.id == nara::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID })
-            .count(),
-        1
+            .all(|plugin| plugin.id != WGPU_STOCK_SPRITE_PLUGIN_ID)
     );
     app.seal().unwrap();
 }
@@ -2918,52 +2819,10 @@ requested = ["render-wgpu"]
     }));
 }
 
-#[cfg(feature = "tooling")]
-#[test]
-fn editor_profile_keeps_tooling_out_of_the_runtime_plan() {
-    let manifest = TestManifest::new(
-        r#"
-schema_version = 1
-
-[project]
-source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
-native_document_identity = 'project_location'
-name = "Host-Owned Editor Profile"
-
-[authoring]
-state = "ready"
-
-[profiles.editor]
-"#,
-    );
-    let candidate = ingest_project_manifest(&manifest.capability(), Some("editor")).unwrap();
-
-    assert!(
-        candidate
-            .normalized_capabilities()
-            .iter()
-            .all(|capability| !capability.as_str().starts_with("tooling"))
-    );
-    let plan = resolve_runtime_plan(
-        &candidate,
-        project_runtime_plugins(&candidate),
-        built_in_schema_providers(),
-    )
-    .unwrap();
-    assert!(
-        !plan
-            .plugin_plan()
-            .entries()
-            .iter()
-            .any(|entry| entry.plugin_id() == PluginId::new("nara.tooling"))
-    );
-}
-
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
     feature = "presentation-ui",
-    feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -3256,7 +3115,6 @@ resizable = false
 #[cfg(all(
     feature = "runtime-ui",
     feature = "presentation-ui",
-    feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]

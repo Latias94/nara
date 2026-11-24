@@ -88,7 +88,7 @@ impl ControlService {
             coalesced_hints: watch.coalesced_hints,
             native_wake_delivery_failures: watch.native_wake_delivery_failures,
             watcher_started: watch.watcher_started,
-            watcher_joined: watch.watcher_joined,
+            watcher_closed: watch.watcher_closed,
             counters_saturated: self.counters_saturated || watch.counters_saturated,
         }
     }
@@ -149,7 +149,8 @@ fn run() -> Result<(), String> {
         )
     }))
     .unwrap_or_else(|_| Err("continuity panicked; retaining original physical cleanup".into()));
-    let _ = catch_unwind(AssertUnwindSafe(|| watch.poll_close()));
+    let watch_cleanup = catch_unwind(AssertUnwindSafe(|| watch.close()))
+        .unwrap_or_else(|_| Err("original request watcher close panicked".into()));
     let cleanup = if game.is_closed() {
         Ok(Reply::Closed { failed: false })
     } else {
@@ -158,19 +159,16 @@ fn run() -> Result<(), String> {
         }))
         .unwrap_or_else(|_| Err("original physical close panicked".into()))
     };
-    let watch_cleanup = catch_unwind(AssertUnwindSafe(|| {
-        close_watch(&mut watch, Instant::now() + OPERATION_TIMEOUT)
-    }))
-    .unwrap_or_else(|_| Err("original request watcher close panicked".into()));
-    if !game.is_closed() || !watch.snapshot().watcher_joined {
-        std::mem::forget((game, watch));
-        return Err(format!(
-            "{result:?}; original physical cleanup remains retained until process exit: game={cleanup:?}; watcher={watch_cleanup:?}"
-        ));
+    if !game.is_closed() {
+        eprintln!(
+            "continuity: {result:?}; terminating the game process after incomplete cleanup: game={cleanup:?}; watcher={watch_cleanup:?}"
+        );
+        // The supervising process reaps the child after a failed retirement.
+        std::process::exit(1);
     }
-    if !matches!(watch_cleanup, Ok(true)) {
+    if let Err(error) = watch_cleanup {
         return Err(format!(
-            "{result:?}; original request watcher close failed: {watch_cleanup:?}"
+            "{result:?}; original request watcher close failed: {error}"
         ));
     }
     match cleanup {
@@ -251,28 +249,11 @@ fn serve(
             previous_request = request.request;
             validate_command(&request.command)?;
             closing = matches!(&request.command, Command::Close);
-            if closing {
-                let _ = watch.poll_close();
-            }
+            let watch_close = if closing { watch.close() } else { Ok(()) };
             let result = game.execute(request.command, deadline);
-            if closing {
-                let joined = close_watch(watch, deadline);
-                match (result, joined) {
-                    (Ok(Reply::Closed { failed }), Ok(true)) => Ok(Reply::Closed { failed }),
-                    (
-                        Ok(Reply::Closed { .. } | Reply::AudioClosed { .. } | Reply::Closing),
-                        Ok(false),
-                    ) => Ok(Reply::Closing),
-                    (result, Ok(true)) => result,
-                    (result, Err(error)) => {
-                        Err(format!("{result:?}; request watcher close failed: {error}"))
-                    }
-                    (result, Ok(false)) => Err(format!(
-                        "{result:?}; request watcher cleanup remains pending"
-                    )),
-                }
-            } else {
-                result
+            match watch_close {
+                Ok(()) => result,
+                Err(error) => Err(format!("{result:?}; request watcher close failed: {error}")),
             }
         });
         let close_result = if closing {
@@ -301,26 +282,6 @@ fn serve(
         if let Some(result) = close_result {
             return result;
         }
-    }
-}
-
-fn close_watch(watch: &mut RequestWatch, deadline: Instant) -> Result<bool, String> {
-    let mut failure = None;
-    loop {
-        match watch.poll_close() {
-            Ok(true) => return failure.map_or(Ok(true), Err),
-            Ok(false) => {}
-            Err(error) => {
-                failure.get_or_insert(error);
-                if watch.snapshot().watcher_joined {
-                    return Err(failure.expect("the original watcher failure was retained"));
-                }
-            }
-        }
-        if Instant::now() >= deadline {
-            return failure.map_or(Ok(false), Err);
-        }
-        thread::sleep(POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())));
     }
 }
 

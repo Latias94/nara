@@ -185,7 +185,7 @@ fn plugin_rejects_a_different_scope_for_the_same_native_directory() {
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 #[test]
-fn rescan_receipt_refuses_a_rebound_scope_and_retires_its_native_callback() {
+fn rescan_receipt_refuses_a_rebound_scope_and_releases_its_watcher() {
     let root = temp_root();
     fs::create_dir_all(&root).unwrap();
     let bound = scoped_root(&root, "content/first/images");
@@ -193,6 +193,7 @@ fn rescan_receipt_refuses_a_rebound_scope_and_retires_its_native_callback() {
     install_asset_prerequisites(&mut app);
     app.add_plugin(AssetWatchPlugin::new(&root, bound.scope().clone()))
         .unwrap();
+    let lifecycle = app.world().resource::<AssetWatchRuntime>().clone();
     app.world()
         .resource::<AssetWatchEventQueue>()
         .sender()
@@ -202,14 +203,14 @@ fn rescan_receipt_refuses_a_rebound_scope_and_retires_its_native_callback() {
     let world = app.world_mut().unwrap();
     poll.run(world);
     let receipt = AssetWatchRescan::begin(world, AssetWatchQueueLimits::default()).unwrap();
-    let callback = rescan_callback_lifetime(world);
+    assert_eq!(lifecycle.stats().active(), 1);
     let sender = rescan_sender(world);
     world.insert_resource(scoped_root(&root, "content/second/images"));
     assert_eq!(
         receipt.complete(world),
         Err(AssetWatchError::RescanRequired)
     );
-    assert_callback_retired(callback);
+    assert_eq!(lifecycle.stats().active(), 0);
     assert!(
         world
             .resource::<AssetWatchRuntimeStatus>()
@@ -235,7 +236,7 @@ fn running_watcher_refuses_to_reinterpret_queued_events_after_scope_rebinding() 
     install_asset_prerequisites(&mut app);
     app.add_plugin(AssetWatchPlugin::new(&root, bound.scope().clone()))
         .unwrap();
-    let callback = app.world().resource::<AssetWatcher>().callback_lifetime();
+    let lifecycle = app.world().resource::<AssetWatchRuntime>().clone();
     app.world()
         .resource::<AssetWatchEventQueue>()
         .sender()
@@ -253,7 +254,7 @@ fn running_watcher_refuses_to_reinterpret_queued_events_after_scope_rebinding() 
             .requires_rescan()
     );
     assert!(!world.resource::<AssetWatcher>().is_running());
-    assert_callback_retired(callback);
+    assert_eq!(lifecycle.stats().active(), 0);
     poll.run(world);
     assert_eq!(watch_pressure_value(world, "translation-failures"), Some(1));
     drop(app);
@@ -302,7 +303,7 @@ fn canonical_prefix_bytes_remain_subject_to_downstream_change_admission() {
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 #[test]
-fn native_file_observation_maps_the_selected_scope_or_requires_complete_reconciliation() {
+fn native_source_and_sidecar_writes_map_the_selected_scope() {
     let root = temp_root();
     fs::create_dir_all(root.join("textures")).unwrap();
     let source = root.join("textures/player.png");
@@ -315,10 +316,10 @@ fn native_file_observation_maps_the_selected_scope_or_requires_complete_reconcil
     app.add_plugin(AssetWatchPlugin::new(&root, bound.scope().clone()))
         .unwrap();
     assert_eq!(app.world().resource::<AssetSourceRoot>(), &bound);
-    let callback = app.world().resource::<AssetWatcher>().callback_lifetime();
+    let lifecycle = app.world().resource::<AssetWatchRuntime>().clone();
     let mut poll = nara_ecs::schedule::Schedule::default();
     poll.add_systems(drain_asset_watch_events);
-    'observations: for (file, kind) in [
+    for (file, kind) in [
         (&source, AssetSourceChangeKind::Modified),
         (&sidecar, AssetSourceChangeKind::MetaModified),
     ] {
@@ -327,14 +328,11 @@ fn native_file_observation_maps_the_selected_scope_or_requires_complete_reconcil
         loop {
             let world = app.world_mut().unwrap();
             poll.run(world);
-            if world
-                .resource::<AssetWatchRuntimeStatus>()
-                .requires_rescan()
-            {
-                assert!(!world.resource::<AssetWatcher>().is_running());
-                assert!(world.resource::<AssetSourceChanges>().is_empty());
-                break 'observations;
-            }
+            assert!(
+                !world
+                    .resource::<AssetWatchRuntimeStatus>()
+                    .requires_rescan()
+            );
             let changes = world.resource_mut::<AssetSourceChanges>().drain_coalesced();
             if changes.iter().any(|change| {
                 change.path().as_str() == "packages/selected/image-sources/textures/player.png"
@@ -354,6 +352,6 @@ fn native_file_observation_maps_the_selected_scope_or_requires_complete_reconcil
         .unwrap()
         .finish()
         .unwrap();
-    assert_callback_retired(callback);
+    assert_eq!(lifecycle.stats().active(), 0);
     remove_temp_root(&root);
 }

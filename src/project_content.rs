@@ -46,9 +46,9 @@ use nara_reflect::{
 };
 use nara_scene::{
     CompiledSceneCandidate, CompiledSceneComponent, CompiledSceneDocument, CompiledSceneEntity,
-    PrefabDocument, PrefabDocumentCandidate, PrefabSourceResolver, ResolvedPrefabSource,
-    SceneComponentBindings, SceneComponentBindingsWitness, SceneDocument, SceneDocumentCandidate,
-    SceneEntityProvenanceMap, SceneFormatError, SourceDocumentKey, SourceDocumentKind,
+    PrefabDocument, PrefabDocumentCandidate, ResolvedPrefabSource, SceneComponentBindings,
+    SceneComponentBindingsWitness, SceneDocument, SceneDocumentCandidate, SceneEntityProvenanceMap,
+    SceneFormatError, SourceDocumentKey, SourceDocumentKind,
 };
 use nara_tilemap::{
     TileSetSource, TileSetSourceFileLimits, TilemapMembershipError, tilemap_membership_work_bytes,
@@ -89,36 +89,11 @@ pub use delivery::ProjectContentDeliveryReceipt;
 pub(crate) use delivery::{DeliverySnapshotPhase, DeliveryVisitError};
 #[cfg(feature = "project-tooling")]
 pub(crate) use delivery_assets::DeliveryAssetDefinition;
-#[cfg(feature = "tooling")]
-pub(crate) use domains::{EditorSourceValidation, validate_editor_source};
-pub(crate) use domains::{ProjectAssetDomains, validate_asset_domain_kind};
+pub(crate) use domains::ProjectAssetDomains;
 pub use input::ProjectInputContent;
 use scenes::pending_scene_source_work_bytes;
 pub(crate) use source_observations::{ProjectSceneLoadAttempt, ProjectSourceObservations};
 use source_readiness::SourceReadiness;
-
-/// Computes the canonical Runtime startup-content digest from already admitted logical members.
-///
-/// The closure builder remains the sole owner of digest framing and ordering. Callers must
-/// provide only members that belong to the Runtime content closure; manifest and schema-bundle
-/// facts are intentionally excluded from this digest by the builder's invariant.
-pub(crate) fn startup_content_digest_from_members(
-    manifest_digest: ContentDigest,
-    members: impl IntoIterator<
-        Item = (
-            ProjectContentMemberKind,
-            nara_project::ProjectPath,
-            ContentDigest,
-        ),
-    >,
-) -> Result<ContentDigest, ProjectContentError> {
-    let mut builder = ProjectContentClosureBuilder::new(manifest_digest)?;
-    for (kind, path, digest) in members {
-        builder.insert_project_path(kind, path, digest)?;
-    }
-    let framed_bytes = builder.content_digest_framed_bytes()?;
-    builder.content_digest(framed_bytes)
-}
 
 // nara_fs relative traversal retains at most one intermediate handle while opening the next, and
 // bounded reads clone the opened file for the reader. Reserve both slots before either operation.
@@ -588,257 +563,6 @@ impl ProjectContentSnapshot {
             Arc::clone(&self.inner.schema_authority),
         )
     }
-
-    pub(crate) fn prepare_editor_startup_scene(
-        &self,
-        source_key: &SourceDocumentKey,
-        document: &SceneDocument,
-        bindings: &SceneComponentBindings,
-    ) -> Result<SceneSource, ProjectContentError> {
-        if !self.shares_component_bindings(bindings) {
-            return Err(ProjectContentError::single(
-                ProjectContentErrorKind::SchemaMismatch,
-                "project.content.schema-mismatch",
-                "Editor startup Scene bindings do not match the admitted content",
-            ));
-        }
-        let resolver = SnapshotPrefabResolver {
-            prefabs: self.prefabs(),
-            database: self.inner.sources.database(),
-            scope: &self.inner.sources.prefab_scope,
-            authoring_basis: None,
-        };
-        let expansion = match bindings.try_compile_scene_with_loader(
-            document,
-            nara_scene::SceneCompilationOptions::default(),
-            Some(self.asset_resolution()),
-            |source, _| Ok::<_, std::convert::Infallible>(resolver.resolve_prefab(source)),
-        ) {
-            Ok(report) => report,
-            Err(error) => match error {},
-        };
-        let nara_scene::SceneCompilationReport {
-            candidate,
-            diagnostics,
-            ..
-        } = expansion;
-        let compiled = candidate.ok_or_else(|| {
-            map_scene_diagnostics(ProjectContentErrorKind::SceneCompilation, diagnostics)
-        })?;
-        let diagnostics = bindings.validate_compiled_scene(
-            &compiled,
-            Some(self.asset_resolution()),
-            ComponentValueMaterializationLimits::default(),
-        );
-        if diagnostics.has_errors() {
-            return Err(map_scene_diagnostics(
-                ProjectContentErrorKind::ScenePublication,
-                diagnostics,
-            ));
-        }
-        self.validate_editor_product_selections(&compiled, bindings)?;
-        let retained_bytes = editor_startup_scene_retained_bytes(&compiled, source_key)?;
-        let lease = self
-            .inner
-            ._runtime_lease
-            .reserve_retained(retained_bytes)
-            .map_err(ProjectContentError::budget)?;
-        let compiled_candidate = compiled.bind_source(source_key.clone());
-        Ok(SceneSource::from_project_content(
-            Arc::new(compiled_candidate),
-            Arc::clone(&self.inner.sources),
-            None,
-            lease,
-            self.inner._generation_lease.clone(),
-            retained_bytes,
-            Arc::clone(&self.inner.schema_authority),
-        ))
-    }
-
-    fn validate_editor_product_selections(
-        &self,
-        document: &CompiledSceneDocument,
-        bindings: &SceneComponentBindings,
-    ) -> Result<(), ProjectContentError> {
-        let mut budget = self.inner._runtime_lease.budget_ticket();
-        let mut required = RequiredAssetProducts::default();
-        for entity in document.entities() {
-            for (component, value) in entity.components() {
-                let schema = bindings.schema(component).ok_or_else(|| {
-                    ProjectContentError::single(
-                        ProjectContentErrorKind::AssetReference,
-                        "project.content.asset-reference-invalid",
-                        "Editor Scene component has no admitted asset-reference schema",
-                    )
-                })?;
-                let (references, work_bytes) =
-                    collect_effective_asset_references(schema, value, &mut budget)?;
-                for reference in references {
-                    budget
-                        .add(ProjectContentBudgetKind::DependencyEdges, 1)
-                        .map_err(ProjectContentError::budget)?;
-                    let resolution = self.asset_resolution();
-                    let resolution_work =
-                        resolution
-                            .resolution_work_bytes(reference.asset_ref())
-                            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
-                    budget
-                        .add(ProjectContentBudgetKind::WorkBytes, resolution_work)
-                        .map_err(ProjectContentError::budget)?;
-                    let source = resolution.resolve_ref(reference.asset_ref()).map_err(|_| {
-                        ProjectContentError::single(
-                            ProjectContentErrorKind::AssetReference,
-                            "project.content.asset-reference-unresolved",
-                            "Editor Scene asset source is outside the admitted content",
-                        )
-                    })?;
-                    budget.subtract(ProjectContentBudgetKind::WorkBytes, resolution_work);
-                    if self.inner.domain_authority.supports(source.source_kind()) {
-                        if reference.demand() == AssetReferenceDemand::Immediate {
-                            require_asset_product(
-                                &mut required,
-                                &mut budget,
-                                required_product(reference.asset_ref(), source)?,
-                            )?;
-                        }
-                        // Deferred identity does not claim membership in the current decoded
-                        // collection. Strict validation or the later request checks the actual
-                        // imported selection. Intrinsically primary-only owners still reject
-                        // auxiliary selections below.
-                    } else if !reference.asset_ref().is_primary() {
-                        return Err(unsupported_product_selection(reference.asset_ref()));
-                    }
-                    if reference.demand() == AssetReferenceDemand::Immediate {
-                        let prepared = match source.source_kind() {
-                            AssetSourceKind::Scene => {
-                                self.inner.sources.scenes.selected.path == *source.path()
-                                    || self
-                                        .scene_dependencies()
-                                        .iter()
-                                        .any(|scene| scene.path() == source.path())
-                            }
-                            AssetSourceKind::Image => self
-                                .images()
-                                .iter()
-                                .any(|image| image.path() == source.path()),
-                            AssetSourceKind::Other(kind) if kind == "tileset" => self
-                                .tilesets()
-                                .iter()
-                                .any(|tileset| tileset.path() == source.path()),
-                            // Concrete domain membership is checked below against the actual
-                            // selected collection, independently of mere source resolution.
-                            kind if self.inner.domain_authority.supports(kind) => true,
-                            _ => false,
-                        };
-                        if !prepared {
-                            return Err(ProjectContentError::with_identifier(
-                                ProjectContentErrorKind::AssetReference,
-                                "project.content.asset-not-prepared",
-                                "Editor Immediate reference requires a new content capture",
-                                "asset",
-                                source.path().as_str(),
-                            ));
-                        }
-                    }
-                }
-                budget.subtract(ProjectContentBudgetKind::WorkBytes, work_bytes);
-            }
-        }
-        self.inner
-            .domain_assets
-            .validate_source_product_selections(&mut required)
-    }
-
-    #[cfg(feature = "presentation-2d")]
-    pub(crate) fn compile_editor_preview_scene(
-        &self,
-        source_key: &SourceDocumentKey,
-        document: &SceneDocument,
-        basis: &nara_scene::AuthoringSchemaBasis,
-        registry: &nara_reflect::ComponentRegistrySnapshot,
-    ) -> Result<
-        (
-            CompiledSceneCandidate,
-            Vec<nara_scene::__private::AuthoringPreviewOmission>,
-        ),
-        DiagnosticReport,
-    > {
-        let resolver = SnapshotPrefabResolver {
-            prefabs: self.prefabs(),
-            database: self.inner.sources.database(),
-            scope: &self.inner.sources.prefab_scope,
-            authoring_basis: Some(basis),
-        };
-        let expansion = match nara_scene::__private::try_compile_authoring_scene_with_loader(
-            document,
-            basis,
-            nara_scene::SceneCompilationOptions::default(),
-            Some(self.asset_resolution()),
-            |source, _| Ok::<_, std::convert::Infallible>(resolver.resolve_prefab(source)),
-        ) {
-            Ok(report) => report,
-            Err(error) => match error {},
-        };
-        let preview = expansion.into_native_preview_for(registry)?;
-        Ok((
-            preview.candidate.bind_source(source_key.clone()),
-            preview.omissions,
-        ))
-    }
-}
-
-struct SnapshotPrefabResolver<'a> {
-    prefabs: &'a [ProjectPrefabContent],
-    database: &'a ProjectAssetDatabase,
-    scope: &'a AssetPathScope,
-    authoring_basis: Option<&'a nara_scene::AuthoringSchemaBasis>,
-}
-
-impl PrefabSourceResolver for SnapshotPrefabResolver<'_> {
-    fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource> {
-        if !source.is_primary() {
-            return None;
-        }
-        self.prefabs
-            .iter()
-            .find(|prefab| match source {
-                AssetRef::Path(path) => {
-                    self.scope.relative_path(prefab.path()) == Some(path.as_str())
-                }
-                AssetRef::StableId(id) => {
-                    self.database
-                        .record_for_stable_id(*id)
-                        .is_some_and(|record| {
-                            record.source_kind() == &AssetSourceKind::Prefab
-                                && record.path() == prefab.path()
-                        })
-                }
-                AssetRef::Product(product) => self
-                    .database
-                    .record_for_stable_id(product.source())
-                    .is_some_and(|record| {
-                        record.source_kind() == &AssetSourceKind::Prefab
-                            && record.path() == prefab.path()
-                    }),
-            })
-            .and_then(|prefab| {
-                let source = match self.authoring_basis {
-                    Some(basis) => ResolvedPrefabSource::bound_authoring_source(
-                        Arc::clone(&prefab.document),
-                        basis.clone(),
-                        prefab.source.clone(),
-                    ),
-                    None => ResolvedPrefabSource::bound(
-                        Arc::clone(&prefab.document),
-                        prefab.source.clone(),
-                    ),
-                };
-                match self.database.record_for_path(prefab.path()) {
-                    Some(record) => source.with_source_asset(record).ok(),
-                    None => Some(source),
-                }
-            })
-    }
 }
 
 impl fmt::Debug for ProjectContentSnapshot {
@@ -1212,47 +936,6 @@ impl ProjectContentLoader {
             None,
             Some(expected_startup_scene_digest),
             BTreeMap::new(),
-            Some(agreement),
-        )
-    }
-
-    pub(crate) fn load_with_expected_prefab_digests_and_runtime_agreement<'source>(
-        &self,
-        candidate: &ProjectSettingsCandidate,
-        plan: &RuntimePlan,
-        expected_sources: impl IntoIterator<Item = (&'source AssetPath, ContentDigest)>,
-        agreement: PreparedRuntimeSchemaAgreement,
-    ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        let mut expectation_budget = self.budget_host.reserve();
-        let mut expected_prefabs = BTreeMap::new();
-        for (path, digest) in expected_sources {
-            let root = &candidate.settings().paths.prefabs;
-            let work = checked_plan_sum(
-                ProjectContentBudgetKind::WorkBytes,
-                [
-                    size_of::<(AssetSourcePath, ContentDigest)>(),
-                    BTREE_ENTRY_OVERHEAD,
-                    root.as_str().len(),
-                    1,
-                    path.as_str()
-                        .len()
-                        .checked_add(STRING_ALLOCATION_OVERHEAD)
-                        .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?,
-                ],
-            )?;
-            expectation_budget
-                .add(ProjectContentBudgetKind::WorkBytes, work)
-                .map_err(ProjectContentError::budget)?;
-            let canonical = AssetSourcePath::new(format!("{}/{}", root.as_str(), path.as_str()))
-                .map_err(|_| catalogue::identity_conflict(path))?;
-            expected_prefabs.insert(canonical, digest);
-        }
-        self.load_inner(
-            candidate,
-            plan,
-            None,
-            None,
-            expected_prefabs,
             Some(agreement),
         )
     }
@@ -4051,23 +3734,6 @@ pub(crate) fn startup_scene_retained_bytes(
         .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
-fn editor_startup_scene_retained_bytes(
-    document: &CompiledSceneDocument,
-    source: &SourceDocumentKey,
-) -> Result<usize, ProjectContentError> {
-    checked_plan_sum(
-        ProjectContentBudgetKind::RetainedBytes,
-        [
-            size_of::<CompiledSceneCandidate>(),
-            source.retained_bytes(),
-            compiled_scene_retained_bytes(document)?,
-            ARC_CONTROL_BLOCK_BYTES,
-            size_of::<Arc<CompiledSceneCandidate>>(),
-            SNAPSHOT_LEASE_OVERHEAD,
-        ],
-    )
-}
-
 fn scene_retained_bytes(document: &SceneDocument) -> Result<usize, ProjectContentError> {
     crate::scene_retention::scene_retained_bytes(document)
         .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
@@ -4674,40 +4340,6 @@ mod tests {
             independent.composition_fingerprint(),
         );
         assert!(!snapshot.shares_component_bindings(&independent));
-        let baseline = loader
-            .budget_snapshot()
-            .active(ProjectContentBudgetKind::RetainedBytes);
-        let source = snapshot
-            .prepare_editor_startup_scene(
-                snapshot.selected_scene_source_key(),
-                snapshot.scene(),
-                &shared,
-            )
-            .unwrap();
-        assert_eq!(
-            loader
-                .budget_snapshot()
-                .active(ProjectContentBudgetKind::RetainedBytes),
-            baseline + source.retained_bytes(),
-        );
-        drop(source);
-        assert_eq!(
-            snapshot
-                .prepare_editor_startup_scene(
-                    snapshot.selected_scene_source_key(),
-                    snapshot.scene(),
-                    &independent,
-                )
-                .unwrap_err()
-                .kind(),
-            ProjectContentErrorKind::SchemaMismatch,
-        );
-        assert_eq!(
-            loader
-                .budget_snapshot()
-                .active(ProjectContentBudgetKind::RetainedBytes),
-            baseline,
-        );
         let metadata_bytes = component_bindings_witness_retained_bytes(bindings).unwrap();
         assert!(metadata_bytes > 0);
         assert!(
@@ -5390,16 +5022,7 @@ mod tests {
                         SceneEntityId::new("prefab-prefab").unwrap()
                     ),])
         );
-        let rebound = snapshot
-            .prepare_editor_startup_scene(
-                snapshot.selected_scene_source_key(),
-                snapshot.scene(),
-                plan.schema_validation().bindings(),
-            )
-            .unwrap();
-        assert_eq!(rebound.document(), snapshot.compiled_scene());
-        assert_eq!(rebound.source_content_stamp(), None);
-        drop((rebound, snapshot));
+        drop(snapshot);
         assert_eq!(loader.budget_snapshot().active_reservations(), 0);
     }
 

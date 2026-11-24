@@ -9,11 +9,7 @@ The commands below use PowerShell on Windows. The Rust sources and Cargo workspa
 are portable; Unix shells use their own environment assignment and executable
 spelling. Native platform acceptance is recorded separately from compilation.
 
-The ordinary Editor uses Dear ImGui with the same data-only Open, document history,
-saved-source Play and export owners. Use Workspace to manage docked panels; native
-detachment is enabled only by a supported backend profile. Windows/DX12 has native
-workflow evidence; Linux/X11 and macOS release support remain unverified, and Wayland
-uses in-window docking. Full native accessibility is not yet provided.
+Use the `nara` CLI and edit the scene and prefab source files in your text editor.
 
 ## Build the tools and create a project
 
@@ -28,9 +24,7 @@ $engine = (Get-Location).Path
 $env:CARGO_BUILD_JOBS = '1'
 $env:CARGO_TARGET_DIR = Join-Path $engine 'target'
 cargo build --bin nara --no-default-features --features project-workflow-cli --locked
-cargo build -p nara-editor --locked
 $nara = Join-Path $env:CARGO_TARGET_DIR 'debug/nara.exe'
-$editor = Join-Path $env:CARGO_TARGET_DIR 'debug/nara-editor.exe'
 $games = Join-Path (Split-Path $engine -Parent) 'my-games'
 New-Item -ItemType Directory -Path $games -Force | Out-Null
 & $nara new desktop-2d/v1 collect-game --parent $games --local-checkout $engine
@@ -212,8 +206,7 @@ remain alive, so reset does not destroy and reconstruct persistent entities.
 The generated README's Cook command remains usable after these additions. Its Player has no
 scripted collection input and runs a finite headless baseline; the source `headless` demonstration
 above separately proves win/reset. A cooked baseline does not establish interactive desktop
-distribution. Keep the entire three-file installation together when relocating it. See the
-[Cooked Player guide](cooked-player-delivery.md) for preparation and publication boundaries.
+distribution. Keep the entire three-file installation together when relocating it.
 
 ## Select an optional pixel world
 
@@ -235,7 +228,7 @@ that profile's patch. A profile cannot both clear and replace the canvas.
 Direct App consumers can use `RenderPlugin { world_canvas: Some(WorldCanvas::new(320, 180).unwrap()) }`;
 repeatable product groups configure their Render slot with
 `nara::render::plugin(Some(WorldCanvas::new(320, 180).unwrap()))`. Project consumers use the
-manifest so Check, managed Play and exported executables share one setting.
+manifest so Check and exported executables share one setting.
 
 Use `nara::render::WorldPointer` as a system parameter for world picking:
 
@@ -256,99 +249,31 @@ The conversion uses the last successfully presented camera. Bars and maximum edg
 resize, canvas changes and backend retirement require a matching new presentation. Respect the
 input route's UI disposition before applying gameplay actions.
 
-## Edit in the ordinary Editor
-
-```powershell
-& $editor $game --profile desktop
-```
-
-Open does not compile or execute the game's Rust. The Editor reads nara.toml, the
-declared schema bundle and project content. After changing Rust schema, run the
-explicit schema write command and reopen the project.
+## Edit and verify game content
 
 `PersistentComponent` supports bool, String, f32/f64 and fixed-width integers up to
 64 bits. Narrow numeric domains travel with the schema, so an f32 field rejects a
-finite value outside its range before publishing an edit. The collection game's
+finite value outside its range during validation. The collection game's
 speed and radius use f32; their version-2 records use F64 wire values. Changing a
 field's wire kind requires an explicit schema version and authored-content update.
 
-1. Select `main-camera`. Change Camera2d's `viewport_height`, press Apply, then
-   Undo and Redo. Save, close and reopen; the saved value must remain.
-2. Select `gem-right`. Change the custom Collectible `radius` from 14.0 to 30.5,
-   Apply, Undo and Redo. Save and reopen; the accepted fractional value remains.
-   The generic Editor edits this declared scalar through its exact schema adapter.
-   Its first-party native preview omits custom configuration without a native
-   binding and keeps the source record intact. External Play uses the compiled
-   game and consumes the saved radius. Unsupported records remain protected.
-3. In the Project sidebar, select `textures/token.png` under assets. Import it
-   with sRGB, then explicitly Reimport after changing its import recipe. Invalid
-   image input reports failure while retaining eligible last-good pixels. Desired import settings
-   remain separate from the running attempt and those pixels: after a rejected, failed or
-   superseded metadata reload, a later source edit uses the current desired recipe or re-admits
-   unresolved metadata rather than reverting to the old pixels' settings. Correct invalid metadata
-   before retrying; source removal or identity mismatch revokes its authority.
-4. A Sprite image field accepts `textures/token.png` or `stable_id:<UUID>` and
-   applies through the same document revision transaction. The initial player
-   Prefab is supplied as source; this walkthrough does not require a visual Prefab
-   creator.
-5. Save before Play. Play builds and starts a supervised external game window;
-   Running requires the child's accepted first presentation. Focus that window
-   and use WASD, collect all three gems, then press R. Stop closes the owned child.
+In `scenes/startup.scene.json`, find `gem-right` and change the `radius` value of
+`collect-game.Collectible` from `14.0` to `30.5`. Keep the `f64` wire type and the
+component version. Save the file, validate it, and run the game with the edited data:
 
-Run `nara check $game` after saving. A valid schema describes the supported data
-shape; strict Check and the compiled game still own runtime admission. The bounded
-headless demonstration reaches victory earlier with the larger right gem radius
-and reports a lower final player x. This gives an observable data-edit result
-without relying only on successful process startup.
+```powershell
+& $nara check $game
+cargo run --manifest-path "$game/Cargo.toml" --locked --features desktop --bin desktop
+```
 
-To change gameplay, Stop, edit `gameplay-plugin/src/lib.rs`, save and Play again.
-Restart deliberately reuses the current executable generation. A deliberate
-`compile_error!("learning the build loop");` in desktop.rs should yield compiler
-diagnostics while authoring remains usable. Remove it and use Stop then Play.
-The ordinary external lane does not supply Pause or Step.
-
-### Arrange an ordinary Scene or Prefab
-
-Use `+ Root` or `+ Child` to insert an empty entity, then add components whose schema provides a
-creation template. Use `Order` to declare First, Last, Before or After, and `Parent` to select
-another parent or the root. The source list shows each declaration's desired placement; record
-order is not the expanded hierarchy. Invalid final parent or sibling relationships are refused.
-Deleting a source-local branch preserves the remaining local sibling order, including placements
-that previously referred to the removed sibling. Repair that needs an inherited child sequence
-requires its actual source context; the local command refuses that case.
-Reparenting retains authored local component values; it does not
-compensate a world-space transform. Add the appropriate Transform2d components when constructing
-a runtime transform chain, and run Check before Play.
-
-These operations work without loading the game's Rust, including in a Degraded document containing
-unavailable records. Moving such an entity preserves its component identities, values and
-references. Undo/Redo restores the exact document order and parent relationships. Save captures
-the current revision; if editing continues while Save is pending, its completion acknowledges
-only that captured revision and leaves newer working changes dirty.
-Explicit Reopen can discard those newer moves and restore the exact source previously admitted
-by that file Host, including a validated candidate after uncertain publication. Externally changed
-source retains the stricter unavailable-record preservation checks; a conservative refusal keeps
-the working document and source binding intact.
-
-`Remove Entity` asks for confirmation and removes the selected entity's whole subtree in one Undo
-step. Ordinary deletion requires a Complete document with no Prefab instance anchors. A remaining
-component's local reference to a removed entity rejects the operation, including references supplied
-by schema defaults. Unavailable records prevent this reference proof, even when the selected entity
-itself is empty. The Editor explains that limit rather than guessing which references may break.
-An ordinary Prefab source uses the same rules; specialized UI Prefabs retain their domain-specific
-structural controls. A Scene containing an instance of another Prefab can still be rearranged,
-but its source-closure deletion is outside this workflow.
-
-Try this first in a newly generated desktop starter or an ordinary source without Prefab anchors:
-create two Transform2d-bearing roots and a child; move the child between them, reorder the roots,
-remove a subtree, then Undo/Redo. Save and Reopen to verify the accepted hierarchy, then Check and
-Play. The collection game's supplied Player Prefab instance means its main Scene may require
-editing the separate Prefab source instead of deleting instances through this finite policy.
+Walk right with D. The final gem is now collected from farther away. Restore the original
+radius before rerunning the headless demonstration, which checks the sample's exact win tick.
+After changing Rust schema, run `nara schema $game --write` and validate the updated source again.
 
 ## Try a content variant
 
-With Play stopped, replace `prefabs/player.prefab.json` with
-`variants/fast-player/player.prefab.json`, reopen and Check, then Play. The player
+After closing the game, replace `prefabs/player.prefab.json` with
+`variants/fast-player/player.prefab.json`, run Check, then launch the desktop game again. The player
 changes tint and moves faster without changing the plugin. Restore the original
 Prefab from your own version control when done.
 
@@ -372,8 +297,7 @@ An authored Door can retain the destination's primary `AssetProductRef` and pass
 `ProjectScenes`. The preparation worker resolves its actual Scene metadata and checks that its
 source is startup or a declared Scene root. A Required reference also captures the destination
 document as data, including finite A-to-B-to-A references; that membership alone grants no travel.
-Only the requested Scene is instantiated. See the [hosted Scene workflow](rust-product-recipes.md#strict-tools-use-the-compiled-project)
-for observing preparation and explicitly committing the prepared result.
+Observe preparation and explicitly commit the prepared result to instantiate the selected Scene.
 
 ## Export and run independently
 
@@ -395,61 +319,9 @@ executable checks its own startup agreement. Extra sources that neither delivery
 are outside the package. A published candidate that fails product acceptance remains
 available for inspection and Export reports the failure.
 
-## What to measure
+## Measure iteration time
 
-Record the engine revision, platform, lockfile, features, build profile, cache state
-and monotonic wall time for first project build, data Save through the next READY,
-and Rust save through rebuild/READY. Observe the changed value or behavior as well:
-process startup alone does not prove a gameplay edit became visible. Keep command
-timings separate from intervals that include human interaction. Do not label shared
-target runs cold, infer percentiles from one observation, or infer Linux/macOS
-release acceptance from Windows results.
-
-The [committed-source acceptance record](../knowledge/engineering/verification/2026-10/2026-10-16T025031Z-first-author-workflow-u1-u6-closes-with-clean-committed-external-products-and-measured-iteration-7a2024c6678b43a48a069406d6eb729d.md)
-records one Windows 11 observation at engine revision `78faa7c`, Rust 1.99.0,
-one Cargo job, incremental compilation disabled, and an existing shared target:
-
-| Interval | Observed time |
-|---|---:|
-| First external starter Check, including compiled tooling | 56.939 s |
-| First starter desktop build/run through first presentation | 64.266 s |
-| Authored speed save through changed headless outcome | 0.113 s |
-| Rust movement expression save through changed headless outcome | 7.843 s |
-| First ordinary Editor Play through READY | 67.229 s |
-| Repaired ordinary Editor Play through READY | 7.553 s |
-
-The data edit changed the observed final player x from 108.0 to 110.4; the Rust
-edit changed it to 108.8. These command/result intervals are distinct from
-save-to-visible-pixel interaction latency. The linked record includes exact
-source/lockfile identity, features, profile, export, review and platform limits.
-They are individual cached observations, not cold builds or percentile estimates.
-
-The subsequent [Dear Editor committed-source acceptance](../knowledge/engineering/verification/2026-10/2026-10-17T102351Z-editor-foundation-u9-and-u1-u8-close-with-selected-dear-frontend-and-exact-external-products-b68c3a9f938a49b7ba63779f2849d0d9.md)
-uses source `f4ffdd18`, Rust 1.95.0, Windows/DX12 and one job with the shared cache.
-The same publicly created game passes Scene/Prefab creation/composition, compiler
-failure/repair and exported-product execution. Its saved speed edit changes the
-final player x `108 -> 110.4`; after restoring speed, its radius edit yields
-`108 -> 92`. First/repaired Play READY take 113.829s/17.331s.
-The first explicit Windows release cohort takes 12m49s to build; public Export
-including both product acceptances takes 785.812s. These are separate cached
-observations, not directly comparable cold-build timings or percentiles. The
-record names the exact lock, features, platform and limitations.
-
-An explicit integration check is available for a **fresh disposable external copy**.
-It first creates empty Scene and Prefab entities, adds/edits/removes a custom
-component, and verifies Undo/Redo and Save/Reopen through the ordinary document
-owners. It restores these disposable source fixtures after closing that proof.
-It then edits the Player Prefab speed, custom radius and camera, assigns an
-imported image, rejects an out-of-f32-range edit, and exercises Undo/Redo,
-Save/Reopen and real native game children. Strict compiled gameplay observes the
-saved speed and radius changes. It also temporarily injects a compiler error
-before restoring the Rust source:
-
-```powershell
-$env:NARA_AUTHOR_WORKFLOW_PROJECT = $game
-cargo nextest run -p nara-editor --test first_game_workflow --run-ignored only --test-threads 1 --nocapture
-```
-
-This action-driven check proves custom data editing, persistence, runtime agreement,
-supervision and READY. It does not claim to click the native Editor controls or play
-the game through keyboard input.
+Record the engine revision, platform, lockfile, features, build profile, and cache state.
+Measure the first project build, a saved content change through the next observed game result,
+and a Rust change through rebuild and the next result. Record the changed behavior alongside
+its time. A run that reused the engine target is a cached observation.

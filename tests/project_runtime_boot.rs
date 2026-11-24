@@ -14,10 +14,6 @@ mod profile_font_boot;
 #[path = "support/profile_font_product.rs"]
 mod profile_font_product;
 
-#[cfg(all(feature = "presentation-ui", feature = "tooling"))]
-#[path = "support/profile_font_editor_play.rs"]
-mod profile_font_editor_play;
-
 #[cfg(all(
     feature = "presentation-ui",
     feature = "project-workflow-cli",
@@ -814,31 +810,6 @@ fn headless_run_publishes_file_backed_tilesets_after_image_dependencies() {
             prepared_pixels: vec![24, 120, 220, 255],
         })
     );
-    drop(run);
-
-    #[cfg(feature = "tooling")]
-    {
-        use nara::project_host::{
-            EditorProjectCloseProgress, EditorProjectSession, TrustedCompiledEditorProjectIntent,
-        };
-
-        let mut editor = EditorProjectSession::open_trusted_compiled(
-            project.root_capability(),
-            TrustedCompiledEditorProjectIntent::new(),
-        )
-        .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !matches!(
-            editor.advance_close(),
-            EditorProjectCloseProgress::Complete(_)
-        ) {
-            assert!(
-                Instant::now() < deadline,
-                "Editor TileSet runtime must retire"
-            );
-            std::thread::yield_now();
-        }
-    }
 }
 
 #[test]

@@ -698,35 +698,3 @@ fn configured_window_requires_exactly_one_runtime_target() {
     assert!(configured_primary_window(&multiple).is_err());
     finish_unit_app(platform_app(multiple));
 }
-
-#[cfg(feature = "platform-accessibility")]
-#[test]
-fn platform_accessibility_activation_is_captured_without_borrowing_runtime() {
-    let state = platform_app(start_runtime(window_app()));
-    assert!(!state.accessibility_activation.is_enabled());
-    assert!(state.accessibility_sessions.is_empty());
-    finish_unit_app(state);
-    let mut app = window_app();
-    accessibility::__private::install_winit_accessibility_contribution(&mut app).unwrap();
-    let state = platform_app(start_runtime(app));
-    assert!(state.accessibility_activation.is_enabled());
-    assert!(state.accessibility_sessions.is_empty());
-    finish_unit_app(state);
-}
-
-#[cfg(feature = "platform-accessibility")]
-#[test]
-fn partial_platform_accessibility_contribution_retains_runtime_for_close() {
-    let mut app = window_app();
-    accessibility::__private::install_partial_winit_accessibility_contribution(&mut app).unwrap();
-    let state = platform_app(start_runtime(app));
-    assert!(
-        state
-            .failure()
-            .unwrap()
-            .to_string()
-            .contains("Winit accessibility contribution is partial")
-    );
-    assert!(state.owned_window_ids.is_empty());
-    finish_unit_app(state);
-}

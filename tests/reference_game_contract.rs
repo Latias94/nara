@@ -37,8 +37,14 @@ fn reference_game_uses_the_root_facade_for_production_engine_code() {
             .collect::<Vec<_>>(),
         ["runtime-2d", "runtime-ui", "serde", "project-tooling"]
     );
+    let features = manifest["features"].as_table().unwrap();
     assert_eq!(
-        manifest["features"]["desktop"]
+        features.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["default", "desktop"]
+    );
+    assert!(features["default"].as_array().unwrap().is_empty());
+    assert_eq!(
+        features["desktop"]
             .as_array()
             .unwrap()
             .iter()
@@ -51,7 +57,15 @@ fn reference_game_uses_the_root_facade_for_production_engine_code() {
             "nara/render-wgpu",
         ]
     );
-    assert!(!manifest_source.contains("[patch"));
+
+    let root_manifest = toml::from_str::<toml::Value>(include_str!("../Cargo.toml")).unwrap();
+    let patches = manifest["patch"]["crates-io"].as_table().unwrap();
+    assert_eq!(
+        patches.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["wgpu", "winit"]
+    );
+    assert_eq!(patches["wgpu"], root_manifest["patch"]["crates-io"]["wgpu"]);
+    assert_eq!(patches["winit"]["path"].as_str(), Some("../vendor/winit"));
     assert!(!manifest_source.contains("workspace = true"));
     assert!(root.join("Cargo.lock").is_file());
 }

@@ -13,8 +13,6 @@ use std::sync::Arc;
 
 use super::*;
 use crate::{PresentationUiPlugins, RuntimeUiPlugins};
-#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-use std::time::Duration;
 
 #[path = "test_driver.rs"]
 mod driver;
@@ -264,11 +262,6 @@ fn bridge_mirrors_and_retires_explicit_host_surface_routes() {
     let mut app = App::new();
     app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
         .expect("runtime and presentation UI products should install");
-    assert!(
-        !app.world()
-            .contains_resource::<NativeAccessibilityPresentationPort>(),
-        "a compiled desktop adapter must not install native accessibility without the explicit contribution",
-    );
     install_fake_backend(&mut app, FakeBackendMode::Present);
     let surface_id = UiSurfaceId::new(7).expect("test surface should be non-zero");
     let root = install_test_surface_and_root(&mut app, surface_id.get(), 1);
@@ -298,38 +291,17 @@ fn bridge_mirrors_and_retires_explicit_host_surface_routes() {
     assert_eq!(compile.rejected_packets, 1);
 }
 
-#[derive(Default, Resource)]
-struct AccessibilityPublicationWitness(usize);
-
-fn witness_accessibility_publication(
-    world: &mut World,
-    _receipt: UiPresentationReceipt,
-) -> Result<(), String> {
-    world.resource_mut::<AccessibilityPublicationWitness>().0 += 1;
-    Ok(())
-}
-
 #[test]
-fn accepted_pixels_after_input_loss_do_not_publish_interaction_observation_or_accessibility() {
+fn accepted_pixels_after_input_loss_do_not_publish_interaction_or_observation() {
     let mut app = App::new();
     app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
         .unwrap();
-    app.init_resource::<AccessibilityPublicationWitness>()
-        .unwrap();
-    app.insert_resource(NativeAccessibilityPresentationPort {
-        publish_presented: witness_accessibility_publication,
-    })
-    .unwrap();
     install_fake_backend(&mut app, FakeBackendMode::Present);
     install_test_surface_and_root(&mut app, 31, 1);
     let mut app = BridgeRuntime::start(app);
     app.update().unwrap();
     let before = latest_presented_ui_observation(app.world()).unwrap();
     let receipt = before.receipt();
-    assert_eq!(
-        app.world().resource::<AccessibilityPublicationWitness>().0,
-        1
-    );
     app.set_backend_mode(FakeBackendMode::HoldAcceptance);
     app.update().unwrap();
     assert_eq!(
@@ -351,10 +323,6 @@ fn accepted_pixels_after_input_loss_do_not_publish_interaction_observation_or_ac
             .receipt(),
         receipt
     );
-    assert_eq!(
-        app.world().resource::<AccessibilityPublicationWitness>().0,
-        1
-    );
     assert!(
         app.world()
             .resource::<UiPresentationAttemptLedger>()
@@ -370,116 +338,21 @@ fn accepted_pixels_after_input_loss_do_not_publish_interaction_observation_or_ac
 
 #[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
 #[test]
-fn explicit_winit_accessibility_contribution_installs_the_private_presentation_port() {
-    let mut app = App::new();
-    app.add_plugins((
-        RuntimeUiPlugins,
-        PresentationUiPlugins,
-        crate::DesktopWinitPlugins,
-        WinitUiAccessibilityContributionPlugin,
-    ))
-    .expect("the explicit native accessibility contribution should install");
-
-    assert!(
-        app.world()
-            .contains_resource::<NativeAccessibilityPresentationPort>()
-    );
-    assert!(
-        nara_winit::__private::capture_winit_accessibility_activation(app.world()).is_enabled()
-    );
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-#[test]
-fn explicit_winit_accessibility_publication_uses_the_exact_presented_receipt() {
-    let mut app = App::new();
-    app.add_plugins((
-        RuntimeUiPlugins,
-        PresentationUiPlugins,
-        crate::DesktopWinitPlugins,
-        WinitUiAccessibilityContributionPlugin,
-    ))
-    .expect("the explicit native accessibility contribution should install");
-    install_fake_backend(&mut app, FakeBackendMode::Present);
-    install_test_surface_and_root(&mut app, 71, nara_window::WindowId::PRIMARY.get());
-
-    let mut runtime =
-        nara_app::RuntimeInstance::start(app).expect("the focused test runtime should start");
-
-    runtime
-        .drive(Duration::ZERO)
-        .expect("the explicit contribution should publish one presented UI frame");
-    let receipt = runtime
-        .world()
-        .resource::<UiPresentationBridgeStats>()
-        .last_presented_receipt
-        .expect("the fake backend should commit one exact presentation receipt");
-    let updates = runtime
-        .with_driver_scope(nara_winit::__private::take_winit_accessibility_updates)
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
-        })
-        .expect("the managed runtime should grant its platform driver scope")
-        .expect("the explicit contribution should install the platform update port");
-    let mut presentations = updates.into_iter().filter_map(|update| match update {
-        nara_winit::__private::WinitAccessibilityPlatformUpdate::Present {
-            window_id,
-            snapshot,
-        } => Some((window_id, snapshot)),
-        _ => None,
-    });
-    let (window_id, snapshot) = presentations
-        .next()
-        .expect("the platform adapter should receive one presented semantic snapshot");
-    assert!(
-        presentations.next().is_none(),
-        "one committed UI packet must publish exactly one platform presentation"
-    );
-    assert_eq!(window_id, nara_window::WindowId::PRIMARY);
-    assert_eq!(snapshot.surface_id(), receipt.surface_id());
-    assert_eq!(snapshot.frame_revision(), receipt.frame_revision());
-    assert_eq!(
-        snapshot.route().slot_generation(),
-        receipt.slot_generation()
-    );
-    assert_eq!(snapshot.route().route_revision(), receipt.route_revision());
-    assert_eq!(
-        snapshot.route().geometry_generation(),
-        receipt.geometry_generation()
-    );
-    assert_eq!(snapshot.presentation_epoch(), receipt.presentation_epoch());
-
-    runtime
-        .finish()
-        .expect("the focused test runtime should close cleanly");
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-#[test]
-fn compiled_desktop_ui_without_contribution_drives_without_platform_state() {
+fn desktop_ui_product_layers_drive_and_present_a_frame() {
     let mut app = App::new();
     app.add_plugins((
         RuntimeUiPlugins,
         PresentationUiPlugins,
         crate::DesktopWinitPlugins,
     ))
-    .expect("desktop UI product layers should install without native accessibility");
+    .expect("desktop UI product layers should install");
     install_fake_backend(&mut app, FakeBackendMode::Present);
     install_test_surface_and_root(&mut app, 70, 1);
 
     let mut app = BridgeRuntime::start(app);
     app.update()
-        .expect("a compiled but unrequested accessibility adapter must not affect the UI frame");
+        .expect("the desktop UI product should drive one frame");
 
-    assert!(
-        !app.world()
-            .contains_resource::<NativeAccessibilityPresentationPort>()
-    );
-    assert_eq!(
-        nara_winit::__private::capture_winit_accessibility_activation(app.world()),
-        nara_winit::__private::WinitAccessibilityActivation::Disabled
-    );
     assert_eq!(
         app.world()
             .resource::<UiPresentationBridgeStats>()

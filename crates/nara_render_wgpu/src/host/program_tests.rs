@@ -182,7 +182,7 @@ struct Color;
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
 fn native_ordered_sprite_views_have_one_writer_and_keep_whole_attachment_clears() {
     use crate::sprite::{SpriteCapture, SpriteFeature};
-    let captured = crate::view_probe::captured_split_frame();
+    let (packet, batches) = crate::view_probe::capture_split_sprite_views(None);
     let mut host = WgpuRenderHost::offscreen();
     let producer = host.create_producer().unwrap();
     let instance = host
@@ -191,13 +191,13 @@ fn native_ordered_sprite_views_have_one_writer_and_keep_whole_attachment_clears(
             &WgpuFeatureDefinition::new(SpriteFeature::<Color>::new()),
         )
         .unwrap();
-    let source = captured.topology.source_generation();
+    let source = packet.source_generation();
     let mut description = descriptor();
     description.native.size.width = 64;
     description.native.size.height = 64;
     host.begin_frame(1).unwrap();
     for frame in 1..=3 {
-        let mut views = captured.topology.views().to_vec();
+        let mut views = packet.views().to_vec();
         if frame > 1 {
             views[1].load = nara_render::ViewLoadOp::Clear(nara_core::Color::rgb(0.0, 0.0, 1.0));
         }
@@ -205,9 +205,9 @@ fn native_ordered_sprite_views_have_one_writer_and_keep_whole_attachment_clears(
             WgpuRenderProgramBuilder::new(source, frame, GraphLimits::default()).unwrap();
         let target = builder.texture::<Color>(description.clone()).unwrap();
         let capture = SpriteCapture::for_views(
-            (frame < 3).then_some(captured.payload.sprite_batches.as_ref().unwrap()),
+            (frame < 3).then_some(&batches),
             &views,
-            captured.topology.captured_time(),
+            packet.captured_time(),
             target.clone(),
         )
         .unwrap();

@@ -10,7 +10,7 @@ pub use crate::command::SemanticCommand;
 use crate::resume::ResumeState;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 pub const MAX_IDENTITY_BYTES: usize = 128;
 pub const MAX_STEP_COMMANDS: usize = 8;
@@ -155,7 +155,8 @@ pub struct ControlServiceObservation {
     pub coalesced_hints: u64,
     pub native_wake_delivery_failures: u64,
     pub watcher_started: bool,
-    pub watcher_joined: bool,
+    /// Notification delivery has stopped and the `notify` watcher handle has been released.
+    pub watcher_closed: bool,
     pub counters_saturated: bool,
 }
 
@@ -231,7 +232,7 @@ mod tests {
 
     #[test]
     fn game_audio_placement_and_commands_have_explicit_wire_values() {
-        assert_eq!(PROTOCOL_VERSION, 7);
+        assert_eq!(PROTOCOL_VERSION, 8);
         assert_eq!(
             DevelopmentPlacement::default(),
             DevelopmentPlacement::SourceHeadless

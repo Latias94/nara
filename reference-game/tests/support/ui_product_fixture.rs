@@ -30,7 +30,7 @@ use nara_reference_game::{
     WaveRunGeneration, WaveSnapshot, bundled_wave_commands,
 };
 use nara_render::RenderTarget;
-use nara_ui_kernel::{UiPaintPrimitive, UiRouteStamp};
+use nara_ui_kernel::UiPaintPrimitive;
 use nara_ui_render::{
     UiGlyphAtlasPageKey, UiPacketPrimitive, UiPacketRect, UiPaintPacketIdentity, UiPreparedImages,
     UiPresentationPlanner,
@@ -253,16 +253,6 @@ pub struct RetryActivationOutcome {
     pub ui_action_trace_overflowed: bool,
     pub retry_batches: Vec<usize>,
     pub retry_trace_overflowed: bool,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct WinitAccessibilityMappingOutcome {
-    pub status: WaveRetryStatus,
-    pub retry_batches: Vec<usize>,
-    pub source_route: UiRouteStamp,
-    pub published_route: UiRouteStamp,
-    pub mapped_route: UiRouteStamp,
-    pub retry_was_published_focused: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -515,47 +505,6 @@ fn activate_retry_to_pending(runtime: &mut RuntimeInstance) {
 
 pub fn exercise_fractional_pointer_retry_activation() -> RetryActivationOutcome {
     exercise_retry_activation_at(FRACTIONAL_INPUT_TARGET, RetryActivation::Pointer)
-}
-
-pub fn exercise_winit_accessibility_mapping_canary() -> WinitAccessibilityMappingOutcome {
-    let mut runtime = product_runtime(
-        CANONICAL_UI_TARGET,
-        component_presenter_plugin(),
-        bundled_wave_commands(),
-    );
-    drive_to_terminal(&mut runtime);
-    let platform = interaction::map_winit_retry_accessibility_action(&runtime);
-    runtime
-        .with_driver_scope(|scope| {
-            presenter::queue_component_accessibility_input(scope, platform.input)
-        })
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
-        })
-        .unwrap()
-        .unwrap();
-    runtime
-        .drive(Duration::ZERO)
-        .expect("the platform accessibility activation frame should drive");
-    drive_fixed(&mut runtime);
-
-    let status = runtime.world().resource::<WaveRetryStatus>().clone();
-    let retry_batches = runtime
-        .world()
-        .resource::<presenter::ComponentRetryCommandTrace>()
-        .batches()
-        .to_vec();
-    let outcome = WinitAccessibilityMappingOutcome {
-        status,
-        retry_batches,
-        source_route: platform.source_route,
-        published_route: platform.published_route,
-        mapped_route: platform.mapped_route,
-        retry_was_published_focused: platform.retry_was_published_focused,
-    };
-    stop_runtime(runtime);
-    outcome
 }
 
 fn exercise_retry_activation_at(

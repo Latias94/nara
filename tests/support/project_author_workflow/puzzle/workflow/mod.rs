@@ -21,7 +21,6 @@ use super::super::{
     workspace::read_toml,
 };
 
-pub(super) mod editor;
 pub(super) mod source;
 
 const PROJECT_SLUG: &str = "nara";

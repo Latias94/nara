@@ -245,7 +245,7 @@ impl PlatformProcess {
         self.output
             .push_loss(
                 SupervisedProcessStream::Stderr,
-                b"[nara-editor: test output loss]\n".to_vec(),
+                b"[nara: test output loss]\n".to_vec(),
             )
             .expect("the test loss marker is accepted");
     }
@@ -1205,7 +1205,7 @@ fn record_cancelled_stream(
     output.push_loss(
         stream,
         format!(
-            "[nara-editor: {name} capture was cancelled before EOF; remaining bytes were not retained]\n"
+            "[nara: {name} capture was cancelled before EOF; remaining bytes were not retained]\n"
         )
         .into_bytes(),
     )

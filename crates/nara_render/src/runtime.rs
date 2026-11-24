@@ -38,81 +38,12 @@ use nara_window::{PrimaryWindowId, Window, WindowId};
 
 #[doc(hidden)]
 pub mod __private {
-    use crate::frame::build_render_frame_packet_for_source;
     pub use crate::frame::build_window_overlay_frame_packet;
     pub use crate::world_pointer::{
         PresentedWorldFrame, WorldPresentationGuard, WorldPresentationRevoker,
         prepare_world_presentation,
     };
-    use std::sync::atomic::{AtomicU64, Ordering};
-
     use nara_ecs::SystemSet;
-
-    use crate::{
-        Extent2d, ExtractedViews, RenderFramePacket, RenderFramePacketError,
-        RenderFrameSourceGeneration, RenderFrameTarget, RenderImage2d, RenderImagePacket,
-    };
-    use nara_asset::Handle;
-
-    static NEXT_EDITOR_RENDER_GENERATION: AtomicU64 = AtomicU64::new(1);
-
-    /// Process-local identity for one private Editor preview producer.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    pub struct EditorRenderGeneration(u64);
-
-    impl EditorRenderGeneration {
-        pub fn try_acquire() -> Option<Self> {
-            NEXT_EDITOR_RENDER_GENERATION
-                .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                    current.checked_add(1)
-                })
-                .ok()
-                .map(Self)
-        }
-    }
-
-    /// Captures one private Editor preview image without pretending it is a managed runtime.
-    pub fn build_editor_render_frame_packet(
-        generation: EditorRenderGeneration,
-        frame_index: u64,
-        views: &ExtractedViews,
-        target: RenderImagePacket,
-    ) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
-        let packet = build_render_frame_packet_for_source(
-            RenderFrameSourceGeneration::editor(generation.0),
-            frame_index,
-            None,
-            std::iter::empty(),
-            views,
-            Some(target),
-            None,
-        )?;
-        if packet
-            .as_ref()
-            .is_some_and(|packet| matches!(packet.target(), RenderFrameTarget::Window(_)))
-        {
-            return Err(RenderFramePacketError::EditorPreviewRequiresImageTarget);
-        }
-        Ok(packet)
-    }
-
-    /// Creates the private image-target identity owned by the first-party Editor viewport.
-    #[doc(hidden)]
-    pub fn editor_viewport_image_target(
-        image: Handle<RenderImage2d>,
-        extent: Extent2d,
-    ) -> Result<RenderImagePacket, RenderFramePacketError> {
-        if extent.is_empty() {
-            return Err(RenderFramePacketError::ImageTargetHasZeroExtent);
-        }
-        Ok(RenderImagePacket { image, extent })
-    }
-
-    /// Assembles the closed first-party draw order without exposing topology construction.
-    pub fn assemble_first_party_draws<T>(mut content: Vec<T>, ui: Vec<T>) -> Vec<T> {
-        content.extend(ui);
-        content
-    }
 
     /// Provisional first-party ordering boundary after camera extraction completes.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
@@ -1306,9 +1237,7 @@ mod tests {
     fn split_image_uses_explicit_physical_extent_and_rejects_mixed_targets() {
         let generation = test_runtime_generation();
         let image = nara_asset::allocate_anonymous_handle().unwrap();
-        let target =
-            __private::editor_viewport_image_target(image, Extent2d::new(320, 180).unwrap())
-                .unwrap();
+        let target = RenderImagePacket::new(image, Extent2d::new(320, 180).unwrap()).unwrap();
         let mut views = ExtractedViews::default();
         views.push(ExtractedView {
             target: RenderTarget::Image(image),
@@ -1323,8 +1252,8 @@ mod tests {
             load: ViewLoadOp::Load,
             ..test_extracted_view()
         });
-        let packet = __private::build_editor_render_frame_packet(
-            __private::EditorRenderGeneration::try_acquire().unwrap(),
+        let packet = crate::build_image_render_frame_packet(
+            crate::RenderFrameSourceGeneration::try_acquire().unwrap(),
             1,
             &views,
             target,

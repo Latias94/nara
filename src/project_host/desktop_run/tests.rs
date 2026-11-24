@@ -25,7 +25,7 @@ fn code_first_startup_observation_begins_without_source_or_runtime_spans() {
             enabled.then(DesktopStartupTimings::default)
         );
         assert_eq!(run.runtime_generation(), Some(generation));
-        let DesktopRunState::FreshRuntime { mut runtime, .. } = run.state else {
+        let DesktopRunState::FreshRuntime { runtime, .. } = run.state else {
             panic!("construction must retain the original unexecuted Runtime");
         };
         assert_eq!(runtime.generation(), generation);

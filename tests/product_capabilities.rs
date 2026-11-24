@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::{Path, PathBuf},
+    path::Path,
     process::Command,
 };
 
@@ -104,7 +104,6 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
         "asset-watch",
         "default",
         "desktop-winit",
-        "editor-work-observation",
         "parallel-executor",
         "presentation-2d",
         "presentation-ui",
@@ -120,7 +119,6 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
         "runtime-window",
         "scene-work-observation",
         "serde",
-        "tooling",
     ];
     assert_eq!(
         features.keys().map(String::as_str).collect::<Vec<_>>(),
@@ -173,7 +171,6 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
             "dep:nara_ui_render",
             "nara_image/render-prepare",
             "nara_render_wgpu?/stock-ui",
-            "nara_winit?/platform-accessibility",
         ]
     );
     assert_eq!(
@@ -255,7 +252,6 @@ fn examples_and_optional_tests_declare_their_capability_ceiling() {
         targets["scene_prefab_roundtrip"],
         ["presentation-2d", "serde"]
     );
-    assert_eq!(targets["scene_file_workspace"], ["tooling", "serde"]);
     assert_eq!(targets["product_capabilities"], ["runtime-core"]);
     assert_eq!(targets["project_composition"], ["runtime-core"]);
     assert_eq!(
@@ -267,17 +263,8 @@ fn examples_and_optional_tests_declare_their_capability_ceiling() {
         ["runtime-core", "serde"]
     );
     assert_eq!(targets["scene_authoring_session"], ["runtime-core"]);
-    assert_eq!(targets["scene_inspector"], ["tooling"]);
     assert_eq!(targets["scene_patch_transactions"], ["runtime-core"]);
-    for target in [
-        "editor_persistence",
-        "scene_play_mode",
-        "workspace_play_runtime",
-    ] {
-        assert_eq!(targets[target], ["tooling", "runtime-2d", "serde"]);
-    }
     assert_eq!(targets["scene_sprite_serialization"], ["runtime-2d"]);
-    assert_eq!(targets["stable_runtime_identity"], ["tooling"]);
 }
 
 #[test]
@@ -430,11 +417,6 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             ),
         ),
         (
-            "tooling",
-            vec!["--no-default-features", "--features", "tooling"],
-            with_packages(&runtime_core, &["nara_tooling"]),
-        ),
-        (
             "asset-watch",
             vec!["--no-default-features", "--features", "asset-watch"],
             with_packages(&runtime_core, &["nara_asset_watch"]),
@@ -468,7 +450,6 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
                     "nara_sprite_render",
                     "nara_tilemap",
                     "nara_text",
-                    "nara_tooling",
                     "nara_ui",
                     "nara_ui_kernel",
                     "nara_ui_render",
@@ -486,263 +467,12 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             expected,
             "unexpected internal package graph for {name}\n{tree}"
         );
-        for editor_package in [
-            "nara-editor",
-            "dear-imgui-rs",
-            "dear-imgui-wgpu",
-            "dear-imgui-winit",
-        ] {
+        for editor_package in ["nara_editor", "nara_editor_core", "gpui"] {
             assert_not_present(&tree, editor_package);
         }
         if !matches!(name, "desktop-winit" | "render-wgpu" | "all-features") {
             assert_not_present(&tree, "winit");
             assert_not_present(&tree, "wgpu");
-        }
-    }
-}
-
-#[test]
-fn independently_locked_presentation_2d_consumer_has_an_exact_boundary() {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("product-slices")
-        .join("presentation-2d")
-        .join("Cargo.toml");
-    let features = cargo_tree_for_manifest(
-        &manifest,
-        "nara-presentation-2d-fixture",
-        &["-e", "features"],
-    );
-
-    for package in [
-        "nara_image",
-        "nara_material",
-        "nara_render",
-        "nara_sprite",
-        "nara_sprite_render",
-        "nara_tilemap",
-    ] {
-        assert_present(&features, package);
-    }
-    for package in [
-        "nara_render_wgpu",
-        "nara_tooling",
-        "nara_ui",
-        "nara_ui_render",
-    ] {
-        assert_not_present(&features, package);
-    }
-
-    assert!(
-        features
-            .lines()
-            .any(|line| line.starts_with("nara_image feature \"render-prepare\"")),
-        "presentation-2d must opt image preparation into the independently locked consumer\n{features}"
-    );
-}
-
-#[test]
-fn independently_locked_presentation_ui_consumer_has_an_exact_boundary() {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("product-slices")
-        .join("presentation-ui")
-        .join("Cargo.toml");
-    let features = cargo_tree_for_manifest(
-        &manifest,
-        "nara-presentation-ui-fixture",
-        &["-e", "features"],
-    );
-
-    for package in [
-        "nara_image",
-        "nara_render",
-        "nara_text",
-        "nara_ui",
-        "nara_ui_kernel",
-        "nara_ui_render",
-        "nara_ui_widgets",
-    ] {
-        assert_present(&features, package);
-    }
-    for package in [
-        "nara_render_wgpu",
-        "nara_sprite",
-        "nara_sprite_render",
-        "nara_tilemap",
-        "nara_tooling",
-    ] {
-        assert_not_present(&features, package);
-    }
-
-    assert!(
-        features
-            .lines()
-            .any(|line| line.starts_with("nara_image feature \"render-prepare\"")),
-        "presentation-ui must opt image preparation into the independently locked consumer\n{features}"
-    );
-}
-
-#[test]
-fn independently_locked_ui_module_consumer_has_a_neutral_dependency_closure() {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("ui-module-consumer")
-        .join("Cargo.toml");
-    let tree = cargo_tree_for_manifest(
-        &manifest,
-        "nara-ui-module-consumer",
-        &["-e", "normal,build", "--target", "all"],
-    );
-
-    for package in ["nara_text", "nara_ui_kernel", "nara_ui_widgets"] {
-        assert_present(&tree, package);
-    }
-    for package in [
-        "nara",
-        "nara_app",
-        "nara_ecs",
-        "bevy_ecs",
-        "nara_scene",
-        "nara_project",
-        "nara_ui",
-        "nara-editor",
-        "dear-imgui-rs",
-        "dear-imgui-sys",
-        "dear-imgui-wgpu",
-        "dear-imgui-winit",
-        "nara_render_wgpu",
-        "nara_winit",
-        "wgpu",
-        "winit",
-    ] {
-        assert_not_present(&tree, package);
-    }
-}
-
-#[test]
-fn independent_ui_presentation_library_has_no_runtime_dependency() {
-    let manifest =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ui-module-consumer/Cargo.toml");
-    for features in [
-        "presentation",
-        "presentation,nara_asset/serde,nara_image/serde,nara_render/serde",
-    ] {
-        let tree = cargo_tree_for_manifest(
-            &manifest,
-            "nara-ui-module-consumer",
-            &[
-                "--features",
-                features,
-                "-e",
-                "normal,build",
-                "--target",
-                "all",
-            ],
-        );
-        for package in [
-            "nara_asset",
-            "nara_identity",
-            "nara_diagnostic",
-            "nara_image",
-            "nara_render",
-            "nara_text",
-            "nara_ui_kernel",
-            "nara_ui_widgets",
-            "nara_ui_render",
-            "nara_window",
-        ] {
-            assert_present(&tree, package);
-        }
-        for package in [
-            "nara",
-            "nara_app",
-            "nara_ecs",
-            "bevy_ecs",
-            "bevy_app",
-            "nara_tasks",
-            "nara_fs",
-            "nara_scene",
-            "nara_project",
-            "nara_ui",
-            "nara-editor",
-            "nara_render_wgpu",
-            "nara_winit",
-            "raw-window-handle",
-            "dear-imgui-rs",
-            "dear-imgui-sys",
-            "dear-imgui-wgpu",
-            "dear-imgui-winit",
-            "wgpu",
-            "winit",
-        ] {
-            assert_not_present(&tree, package);
-        }
-    }
-}
-
-#[test]
-fn independent_native_ui_presenter_has_no_dear_or_runtime_ui_adapter_dependency() {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/render-output-consumer/Cargo.toml");
-    // This consumer's executable uses its dev graph. Include those edges rather than checking
-    // only the smaller offscreen library's normal dependency closure.
-    let tree = cargo_tree_for_manifest(
-        &manifest,
-        "nara-render-output-consumer",
-        &["-e", "normal,build,dev", "--target", "all"],
-    );
-    for package in [
-        "nara_text",
-        "nara_ui_kernel",
-        "nara_ui_widgets",
-        "nara_ui_render",
-        "nara_render_wgpu",
-        "winit",
-    ] {
-        assert_present(&tree, package);
-    }
-    for package in [
-        "nara-editor",
-        "nara_ui",
-        "dear-imgui-rs",
-        "dear-imgui-sys",
-        "dear-imgui-wgpu",
-        "dear-imgui-winit",
-    ] {
-        assert_not_present(&tree, package);
-    }
-}
-
-#[test]
-fn independently_locked_editor_panel_host_excludes_the_reference_toolkit() {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/editor-ui-host-consumer/Cargo.toml");
-    for native in [false, true] {
-        let mut arguments = vec!["-e", "normal,build", "--target", "all"];
-        if native {
-            arguments.extend(["--features", "native"]);
-        }
-        let tree = cargo_tree_for_manifest(&manifest, "nara-editor-ui-host-consumer", &arguments);
-        for package in [
-            "nara-editor",
-            "nara_text",
-            "nara_ui_kernel",
-            "nara_ui_widgets",
-        ] {
-            assert_present(&tree, package);
-        }
-        assert!(
-            !tree.lines().any(|line| line.starts_with("dear-")),
-            "the independent Editor panel Host must exclude every Dear package (native={native})\n{tree}"
-        );
-        if native {
-            for package in ["nara_ui_render", "nara_render_wgpu", "winit", "wgpu"] {
-                assert_present(&tree, package);
-            }
         }
     }
 }
@@ -760,153 +490,9 @@ fn game_ui_adapter_dependency_closure_excludes_editor_frontends() {
     );
 
     assert_present(&tree, "nara_ui");
-    for package in [
-        "nara-editor",
-        "dear-imgui-rs",
-        "dear-imgui-sys",
-        "dear-imgui-wgpu",
-        "dear-imgui-winit",
-    ] {
+    for package in ["nara_editor", "nara_editor_core", "gpui"] {
         assert_not_present(&tree, package);
     }
-}
-
-#[test]
-fn public_prelude_is_gameplay_first() {
-    check_public_prelude_fixture("gameplay-pass", true, None);
-    check_public_prelude_fixture("recipe-pass", true, None);
-    check_public_prelude_fixture("one-shot-direct-pass", true, None);
-    check_public_prelude_fixture("explicit-surfaces-pass", true, None);
-    check_public_prelude_fixture("render-product-pass", true, None);
-    check_public_prelude_fixture("recipe-one-shot-fail", false, None);
-    check_public_prelude_fixture("hierarchy-construction-fail", false, None);
-    check_public_prelude_fixture("hierarchy-children-mutation-fail", false, None);
-    check_public_prelude_fixture("hierarchy-retirement-path-fail", false, None);
-    check_public_prelude_fixture(
-        "hierarchy-set-fail",
-        false,
-        Some(PublicPreludeFailure::Private("HierarchySet")),
-    );
-    check_public_prelude_fixture(
-        "scene-hierarchy-path-fail",
-        false,
-        Some(PublicPreludeFailure::Missing("Parent")),
-    );
-    check_public_prelude_fixture(
-        "identity-internal-path-fail",
-        false,
-        Some(PublicPreludeFailure::Missing("__private")),
-    );
-    check_public_prelude_fixture(
-        "identity-prepared-method-fail",
-        false,
-        Some(PublicPreludeFailure::Private(
-            "prepare_exact_scene_instance_replacement",
-        )),
-    );
-    check_public_prelude_fixture(
-        "render-topology-fail",
-        false,
-        Some(PublicPreludeFailure::MentionsAll(&[
-            "RenderPassDependency",
-            "RenderPassDependencyError",
-            "RenderPassNodeId",
-            "RenderPassPlan",
-            "RenderPassStep",
-            "RenderPassStepLabel",
-            "RenderPhaseInput",
-            "RenderPhaseLabel",
-            "build_render_pass_plan",
-            "render_phase_order",
-        ])),
-    );
-    check_public_prelude_fixture(
-        "render-frame-plan-fail",
-        false,
-        Some(PublicPreludeFailure::Method("pass_plan")),
-    );
-    check_public_prelude_fixture(
-        "render-frame-phases-fail",
-        false,
-        Some(PublicPreludeFailure::ArgumentCount {
-            expected: 5,
-            actual: 6,
-        }),
-    );
-    check_public_prelude_fixture(
-        "ui-pipeline-fail",
-        false,
-        Some(PublicPreludeFailure::MentionsAll(&[
-            "ExtractedUiItem",
-            "ExtractedUiItems",
-            "ExtractedUiMaterial",
-            "QueuedUiItem",
-            "QueuedUiItems",
-            "UiBatch",
-            "UiBatches",
-            "UiClipRect",
-            "UiColorKey",
-            "UiInstance",
-            "UiMaterialKey",
-            "UiRenderStats",
-            "UiTextureRect",
-            "build_ui_batches",
-            "compare_queued_ui_items",
-            "extract_ui",
-            "material_key",
-            "queue_ui",
-            "sort_and_batch_ui",
-            "ui_rect_to_clip_instance",
-        ])),
-    );
-    check_public_prelude_fixture(
-        "ui-prelude-fail",
-        false,
-        Some(PublicPreludeFailure::MentionsAll(&[
-            "UiBatch",
-            "UiBatches",
-            "UiRenderStats",
-            "extract_ui",
-            "queue_ui",
-        ])),
-    );
-    check_public_prelude_fixture(
-        "ui-private-bridge-fail",
-        false,
-        Some(PublicPreludeFailure::Missing("__private")),
-    );
-    check_public_prelude_fixture(
-        "ui-resource-bridge-fail",
-        false,
-        Some(PublicPreludeFailure::Missing("UiBatches")),
-    );
-    check_public_prelude_fixture(
-        "advanced-render-pipeline-fail",
-        false,
-        Some(PublicPreludeFailure::MentionsAll(&[
-            "RenderPhaseLabel",
-            "SpriteBatch",
-            "UiBatch",
-        ])),
-    );
-    for (binary, symbol) in [
-        ("backend-fail", "WindowEvents"),
-        ("tooling-fail", "SceneInspectorState"),
-        ("diagnostic-storage-fail", "RuntimeDiagnostics"),
-        ("queue-lifecycle-fail", "GameplayCommandQueue"),
-        ("project-host-fail", "ProjectSettingsCandidate"),
-    ] {
-        check_public_prelude_fixture(binary, false, Some(PublicPreludeFailure::Missing(symbol)));
-    }
-}
-
-#[derive(Clone, Copy)]
-enum PublicPreludeFailure<'a> {
-    Missing(&'a str),
-    Private(&'a str),
-    Method(&'a str),
-    ArgumentCount { expected: usize, actual: usize },
-    MentionsAll(&'a [&'a str]),
 }
 
 fn cargo_metadata() -> Value {
@@ -998,109 +584,6 @@ fn internal_nara_packages(tree: &str) -> BTreeSet<&str> {
         .filter_map(|line| line.split_whitespace().next())
         .filter(|package| package.starts_with("nara_"))
         .collect()
-}
-
-fn check_public_prelude_fixture(
-    binary: &str,
-    should_succeed: bool,
-    failure: Option<PublicPreludeFailure<'_>>,
-) {
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let manifest = repository
-        .join("tests")
-        .join("fixtures")
-        .join("public-prelude")
-        .join("Cargo.toml");
-    let output = Command::new(env!("CARGO"))
-        .args(["check", "--manifest-path"])
-        .arg(&manifest)
-        .args([
-            "--locked",
-            "--jobs",
-            "1",
-            "--message-format=json",
-            "--bin",
-            binary,
-        ])
-        .current_dir(repository)
-        .env("CARGO_TERM_COLOR", "never")
-        .env("CARGO_TARGET_DIR", public_prelude_target_dir(repository))
-        .output()
-        .unwrap_or_else(|error| panic!("failed to check public prelude fixture {binary}: {error}"));
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let diagnostics = compiler_diagnostic_messages(&output.stdout);
-    assert_eq!(
-        output.status.success(),
-        should_succeed,
-        "unexpected compile result for public prelude fixture {binary}\nstdout:\n{}\nstderr:\n{stderr}",
-        String::from_utf8_lossy(&output.stdout)
-    );
-    if let Some(failure) = failure {
-        match failure {
-            PublicPreludeFailure::Missing(symbol) => assert!(
-                (diagnostics.contains("unresolved import")
-                    || diagnostics.contains("cannot find type"))
-                    && diagnostics.contains(symbol),
-                "{binary} must fail because {symbol} is absent from the ordinary facade\n\
-                 diagnostics:\n{diagnostics}\nstderr:\n{stderr}"
-            ),
-            PublicPreludeFailure::Private(symbol) => assert!(
-                (diagnostics.contains("is private")
-                    || diagnostics.contains("private associated function"))
-                    && diagnostics.contains(symbol),
-                "{binary} must fail because {symbol} is private to its owning crate\n\
-                 diagnostics:\n{diagnostics}\nstderr:\n{stderr}"
-            ),
-            PublicPreludeFailure::Method(symbol) => assert!(
-                diagnostics.contains("no method named") && diagnostics.contains(symbol),
-                "{binary} must fail because method {symbol} is absent\n\
-                 diagnostics:\n{diagnostics}\nstderr:\n{stderr}"
-            ),
-            PublicPreludeFailure::ArgumentCount { expected, actual } => assert!(
-                diagnostics.contains(&format!(
-                    "this function takes {expected} arguments but {actual} arguments were supplied"
-                )),
-                "{binary} must reject the obsolete {actual}-argument call\n\
-                 diagnostics:\n{diagnostics}\nstderr:\n{stderr}"
-            ),
-            PublicPreludeFailure::MentionsAll(symbols) => assert!(
-                symbols.iter().all(|symbol| diagnostics.contains(symbol)),
-                "{binary} must diagnose every removed symbol {symbols:?}\n\
-                 diagnostics:\n{diagnostics}\nstderr:\n{stderr}"
-            ),
-        }
-    }
-}
-
-fn compiler_diagnostic_messages(stdout: &[u8]) -> String {
-    fn collect_messages(diagnostic: &Value, messages: &mut Vec<String>) {
-        if let Some(message) = diagnostic["message"].as_str() {
-            messages.push(message.to_owned());
-        }
-        if let Some(children) = diagnostic["children"].as_array() {
-            for child in children {
-                collect_messages(child, messages);
-            }
-        }
-    }
-
-    let mut messages = Vec::new();
-    for line in String::from_utf8_lossy(stdout).lines() {
-        let Ok(event) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        if event["reason"] == "compiler-message" {
-            collect_messages(&event["message"], &mut messages);
-        }
-    }
-    messages.join("\n")
-}
-
-fn public_prelude_target_dir(repository: &Path) -> PathBuf {
-    std::env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repository.join("target"))
 }
 
 fn assert_present(tree: &str, package: &str) {

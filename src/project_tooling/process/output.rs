@@ -288,7 +288,7 @@ impl ProtocolStdoutCapture {
             self.loss = Some(PlatformOutput {
                 stream: SupervisedProcessStream::Stdout,
                 bytes: format!(
-                    "[nara-editor: protocol stdout exceeded its cumulative {} byte limit; remaining bytes were not retained]\n",
+                    "[nara: protocol stdout exceeded its cumulative {} byte limit; remaining bytes were not retained]\n",
                     self.limit,
                 )
                 .into_bytes(),
@@ -317,10 +317,8 @@ fn dropped_output(stream: SupervisedProcessStream, dropped: u64) -> PlatformOutp
     };
     PlatformOutput {
         stream,
-        bytes: format!(
-            "[nara-editor: dropped {dropped} {stream_name} bytes before log projection]\n"
-        )
-        .into_bytes(),
+        bytes: format!("[nara: dropped {dropped} {stream_name} bytes before log projection]\n")
+            .into_bytes(),
         loss: true,
     }
 }

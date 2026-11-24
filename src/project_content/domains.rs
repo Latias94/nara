@@ -20,34 +20,11 @@ use super::*;
 
 #[cfg(test)]
 mod collection_tests;
-#[cfg(feature = "tooling")]
-mod editor;
-#[cfg(feature = "tooling")]
-pub(crate) use editor::{EditorSourceValidation, validate_editor_source};
 
 fn import_error(error: AssetImportError<ProjectContentError>) -> ProjectContentError {
     match error {
         AssetImportError::Domain(diagnostic) => ProjectContentError::asset_domain(*diagnostic),
         AssetImportError::Source(error) => error,
-    }
-}
-
-impl ProjectDomainAssets {
-    pub(super) fn validate_source_product_selections(
-        &self,
-        required: &mut RequiredAssetProducts,
-    ) -> Result<(), ProjectContentError> {
-        catch_unwind(AssertUnwindSafe(|| {
-            self.validate_product_selections(required)
-                .map_err(missing_product)
-        }))
-        .map_err(|_| {
-            ProjectContentError::single(
-                ProjectContentErrorKind::AssetDomain,
-                "project.content.domain-product-check-panicked",
-                "Prepared asset product membership query panicked",
-            )
-        })?
     }
 }
 
@@ -117,7 +94,7 @@ impl ProjectContentSnapshot {
     }
 }
 
-pub(crate) fn validate_asset_domain_kind(
+fn validate_asset_domain_kind(
     kind: &'static str,
     duplicate: bool,
 ) -> Result<(), crate::ProductRecipeError> {

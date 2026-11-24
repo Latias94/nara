@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(feature = "stock-ui")]
+use crate::frame::WgpuFramePacketSlot;
 use crate::runtime::{
     WgpuRuntimeCapture, WgpuRuntimeConnection, complete_runtime_frame, take_runtime_frame,
 };
@@ -15,12 +17,14 @@ use nara_ecs::{Commands, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_render::Color;
 #[cfg(feature = "stock-ui")]
 use nara_render::RenderFrameState;
+#[cfg(feature = "stock-ui")]
+use nara_render::RenderTarget;
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+use nara_render::ViewportRect;
 use nara_render::{
     Extent2d, ExtractedViews, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
     RenderFrameSkipReason,
 };
-#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-use nara_render::{RenderTarget, ViewportRect};
 #[cfg(feature = "stock-ui")]
 use nara_ui_render::{
     __private::{
@@ -1047,51 +1051,6 @@ fn configured_present_mode_reports_the_exact_wgpu_mode() {
     }
 }
 
-#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-#[test]
-fn legacy_empty_draw_input_has_no_quad_work() {
-    assert!(
-        frame::LegacyWgpuFramePayload::default()
-            .lower_draw(
-                RenderTarget::PrimaryWindow,
-                ViewportRect::new(0, 0, 1, 1).unwrap(),
-                None,
-                crate::view_uniform::WgpuViewUniform::manual(
-                    ViewportRect::new(0, 0, 1, 1).unwrap(),
-                ),
-            )
-            .unwrap()
-            .batches
-            .is_empty()
-    );
-}
-
-#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
-#[test]
-fn closed_first_party_plan_orders_content_before_ui() {
-    let content = WgpuQuadBatch {
-        material: crate::quad::WgpuQuadMaterialKey {
-            texture: crate::quad::WgpuQuadTextureKey::Fallback,
-            sampler: nara_material::SamplerDescriptor::default(),
-            alpha_mode: nara_material::AlphaMode2d::Blend,
-        },
-        texture: crate::quad::WgpuQuadTexture::Fallback,
-        scissor: None,
-        instances: Vec::new(),
-        counts_as_sprites: true,
-        material_extension: None,
-    };
-    let ui = WgpuQuadBatch {
-        counts_as_sprites: false,
-        ..content.clone()
-    };
-
-    let ordered = nara_render::__private::assemble_first_party_draws(vec![content], vec![ui]);
-
-    assert!(ordered[0].counts_as_sprites);
-    assert!(!ordered[1].counts_as_sprites);
-}
-
 #[test]
 fn upload_deferral_skips_one_frame_without_poisoning_the_backend() {
     let mut backend = WgpuRenderBackend::default();
@@ -1677,7 +1636,6 @@ fn build_stock_ui_policy(input: &WgpuRenderInput) -> policy::BuiltPolicy {
             WgpuRenderProducerId::new(1),
             &Arc::new(std::sync::atomic::AtomicBool::new(false)),
             wgpu::TextureFormat::Rgba8UnormSrgb,
-            None,
         )
         .unwrap()
 }

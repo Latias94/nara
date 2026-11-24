@@ -215,30 +215,4 @@ mod tests {
             );
         }
     }
-
-    #[cfg(feature = "runtime")]
-    #[test]
-    fn editor_image_target_retains_the_public_packet_identity_and_validation() {
-        let image = RenderImage2d::allocate_handle().unwrap();
-        let another_image = RenderImage2d::allocate_handle().unwrap();
-        let extent = Extent2d::new(64, 64).unwrap();
-        let initial = crate::__private::editor_viewport_image_target(image, extent).unwrap();
-        let resized =
-            crate::__private::editor_viewport_image_target(image, Extent2d::new(128, 64).unwrap())
-                .unwrap();
-        assert_ne!(image.id(), another_image.id());
-        assert_eq!(initial.image(), resized.image());
-        assert_ne!(initial.extent(), resized.extent());
-        assert_eq!(initial, RenderImagePacket::new(image, extent).unwrap());
-        assert_eq!(
-            crate::__private::editor_viewport_image_target(
-                image,
-                Extent2d {
-                    width: 0,
-                    height: 64,
-                }
-            ),
-            Err(crate::RenderFramePacketError::ImageTargetHasZeroExtent)
-        );
-    }
 }

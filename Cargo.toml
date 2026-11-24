@@ -10,14 +10,9 @@ description = "An open-source game engine written in Rust."
 resolver = "3"
 exclude = [
     "reference-game",
-    "tests/fixtures/module-consumer",
-    "tests/fixtures/behavior-languages",
-    "tests/fixtures/ui-module-consumer",
-    "tests/fixtures/stock-composition-consumer",
     "samples/collect-game",
     "samples/two-level-game",
     "vendor/winit",
-    "vendor/notify",
 ]
 members = [
     "crates/nara_app",
@@ -27,6 +22,7 @@ members = [
     "crates/nara_diagnostic",
     "crates/nara_ecs",
     "crates/nara_ecs_derive",
+    "crates/nara_editor_core",
     "crates/nara_fs",
     "crates/nara_hierarchy",
     "crates/nara_image",
@@ -49,7 +45,6 @@ members = [
     "crates/nara_tilemap",
     "crates/nara_tasks",
     "crates/nara_text",
-    "crates/nara_tooling",
     "crates/nara_transform",
     "crates/nara_ui_kernel",
     "crates/nara_ui_widgets",
@@ -57,7 +52,6 @@ members = [
     "crates/nara_ui_render",
     "crates/nara_window",
     "crates/nara_winit",
-    "editor",
 ]
 
 [workspace.package]
@@ -67,8 +61,6 @@ rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-accesskit = "0.24.1"
-accesskit_winit = "0.33.2"
 nara_app = { path = "crates/nara_app" }
 nara_asset = { path = "crates/nara_asset" }
 nara_asset_watch = { path = "crates/nara_asset_watch" }
@@ -98,7 +90,6 @@ nara_sprite_render = { path = "crates/nara_sprite_render" }
 nara_tilemap = { path = "crates/nara_tilemap" }
 nara_tasks = { path = "crates/nara_tasks" }
 nara_text = { path = "crates/nara_text" }
-nara_tooling = { path = "crates/nara_tooling" }
 nara_transform = { path = "crates/nara_transform" }
 nara_ui_kernel = { path = "crates/nara_ui_kernel" }
 nara_ui_widgets = { path = "crates/nara_ui_widgets" }
@@ -115,9 +106,6 @@ bevy_macro_utils = "=0.20.0"
 bevy_reflect = { version = "0.20", features = ["glam"] }
 blake3 = "1"
 bytemuck = { version = "1", features = ["derive"] }
-dear-imgui-rs = { version = "=0.21.0", features = ["multi-viewport"] }
-dear-imgui-wgpu = { version = "=0.21.0", default-features = false, features = ["wgpu-30", "multi-viewport-winit"] }
-dear-imgui-winit = { version = "=0.21.0", features = ["multi-viewport"] }
 dunce = "1.0.5"
 encase = "=0.12.1"
 glam = { version = "0.33", features = ["serde"] }
@@ -125,7 +113,7 @@ getrandom = { version = "0.3.4", features = ["std"] }
 guillotiere = "=0.7.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
 icu_segmenter = { version = "2.2", default-features = false, features = ["compiled_data"] }
-notify = { version = "=8.2.0", path = "vendor/notify" }
+notify = "=8.2.0"
 naga = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007", features = ["wgsl-in"] }
 parley = { version = "=0.11.0", default-features = false, features = ["std", "complex-scripts"] }
 taffy = { version = "=0.10.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
@@ -148,13 +136,11 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full", "visit"] }
 trybuild = "1.0.118"
-yaml-rust2 = { version = "0.11.0", default-features = false }
 wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
 rustix = "1.1.4"
 windows-sys = "0.61.2"
 
 [patch.crates-io]
-notify = { path = "vendor/notify" }
 wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
 winit = { path = "vendor/winit" }
 
@@ -184,7 +170,6 @@ nara_sprite = { workspace = true, optional = true }
 nara_sprite_render = { workspace = true, optional = true }
 nara_tilemap = { workspace = true, optional = true }
 nara_tasks = { workspace = true, optional = true }
-nara_tooling = { workspace = true, optional = true }
 nara_transform = { workspace = true, optional = true }
 nara_ui = { workspace = true, optional = true }
 nara_ui_render = { workspace = true, optional = true, features = ["runtime"] }
@@ -215,20 +200,15 @@ rustix = { workspace = true, features = ["net"], optional = true }
 nara_tasks = { workspace = true, features = ["test-support"] }
 bevy_ecs.workspace = true
 image.workspace = true
-proc-macro2.workspace = true
 raw-window-handle.workspace = true
 ron.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 static_assertions.workspace = true
-syn.workspace = true
 toml.workspace = true
 tracing.workspace = true
-trybuild.workspace = true
-yaml-rust2.workspace = true
 
 [features]
-editor-work-observation = ["dep:tracing", "nara_scene?/work-observation"]
 scene-work-observation = ["dep:tracing", "nara_scene?/work-observation"]
 default = ["runtime-core", "runtime-input", "runtime-window"]
 parallel-executor = ["runtime-core", "nara_app/parallel-executor"]
@@ -282,9 +262,7 @@ presentation-ui = [
     "dep:nara_ui_render",
     "nara_image/render-prepare",
     "nara_render_wgpu?/stock-ui",
-    "nara_winit?/platform-accessibility",
 ]
-tooling = ["runtime-core", "dep:nara_tooling", "dep:getrandom"]
 asset-watch = ["runtime-core", "dep:nara_asset_watch"]
 desktop-winit = ["runtime-input", "runtime-window", "dep:nara_winit"]
 render-wgpu = ["runtime-window", "dep:nara_render", "dep:nara_render_wgpu"]
@@ -449,11 +427,6 @@ path = "tests/plugin_composition.rs"
 required-features = ["runtime-core"]
 
 [[test]]
-name = "measurement_policy"
-path = "tests/measurement_policy.rs"
-required-features = ["runtime-core", "serde"]
-
-[[test]]
 name = "scene_authoring_session"
 path = "tests/scene_authoring_session.rs"
 required-features = ["runtime-core"]
@@ -464,44 +437,14 @@ path = "tests/scene_component_composition.rs"
 required-features = ["runtime-core"]
 
 [[test]]
-name = "scene_file_workspace"
-path = "tests/scene_file_workspace.rs"
-required-features = ["tooling", "serde"]
-
-[[test]]
-name = "editor_persistence"
-path = "tests/editor_persistence.rs"
-required-features = ["tooling", "runtime-2d", "serde"]
-
-[[test]]
-name = "workspace_play_runtime"
-path = "tests/workspace_play_runtime.rs"
-required-features = ["tooling", "runtime-2d", "serde"]
-
-[[test]]
-name = "scene_inspector"
-path = "tests/scene_inspector.rs"
-required-features = ["tooling"]
-
-[[test]]
 name = "scene_patch_transactions"
 path = "tests/scene_patch_transactions.rs"
 required-features = ["runtime-core"]
 
 [[test]]
-name = "scene_play_mode"
-path = "tests/scene_play_mode.rs"
-required-features = ["tooling", "runtime-2d", "serde"]
-
-[[test]]
 name = "scene_sprite_serialization"
 path = "tests/scene_sprite_serialization.rs"
 required-features = ["runtime-2d"]
-
-[[test]]
-name = "stable_runtime_identity"
-path = "tests/stable_runtime_identity.rs"
-required-features = ["tooling"]
 
 [[test]]
 name = "window_surface_retirement"
