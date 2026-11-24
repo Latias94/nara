@@ -17,7 +17,7 @@ use nara_reflect::{
 };
 
 use super::inputs::{InputFailure, ReferenceResolution, ResolvedReference, authored_clone_bytes};
-use super::{Compiler, NodeId, ScopeId};
+use super::{Compiler, MissingRootInput, NodeId, ScopeId};
 use crate::prefab::overlay::properties::PropertyReferenceReplacement;
 use crate::prefab::{PrefabReferenceRemapError, SceneCompilationWorkingSet};
 use crate::provenance::provenance_string_bytes;
@@ -337,6 +337,7 @@ where
         &mut self,
         programs: &mut ReferencePrograms,
         reference_destination: Option<ScopeId>,
+        missing_root_input: MissingRootInput,
     ) -> Result<bool, SceneCompilationFailure> {
         // Do not reject a stale leaf before another surviving leaf has had a chance to
         // open a scope and trigger structural/program recomposition.
@@ -420,6 +421,10 @@ where
                                 declaring_scope,
                                 destination_owns_route,
                             } => (reference, declaring_scope, destination_owns_route),
+                            ReferenceResolution::Invalid {
+                                input: Some((0, InputFailure::MissingArgument)),
+                                ..
+                            } if missing_root_input == MissingRootInput::Defer => continue,
                             ReferenceResolution::Invalid { reason, input } => {
                                 return Err(self.reference_target_failure(
                                     *node, component, path, origin, reason, input,

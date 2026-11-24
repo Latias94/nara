@@ -176,13 +176,21 @@ impl SelectedPrefabBasis {
         editor: &EditorProjectSession,
         destination: EditorDocumentId,
     ) -> bool {
+        self.apply_inputs_are_saved_except(editor, &[destination])
+    }
+
+    pub(super) fn apply_inputs_are_saved_except(
+        &self,
+        editor: &EditorProjectSession,
+        replacements: &[EditorDocumentId],
+    ) -> bool {
         std::iter::once(&self.root)
             .chain(
                 self.participants
                     .iter()
                     .filter_map(|participant| participant.selected.as_ref()),
             )
-            .filter(|source| source.document != destination)
+            .filter(|source| !replacements.contains(&source.document))
             .all(|source| {
                 editor.workspace.document_is_dirty(source.document) == Some(false)
                     && source.has_confirmed_checkpoint(editor)

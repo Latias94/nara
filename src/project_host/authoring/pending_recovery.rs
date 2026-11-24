@@ -26,6 +26,7 @@ const HEADER_TEXT_COPIES: usize = 16;
 pub enum PendingAuthoringRecoveryKind {
     AuthoredSchemaUpgrade,
     PrefabExtraction,
+    PrefabComponentApply,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,6 +309,9 @@ fn classify(
         match header.kind().as_str() {
             "authored_upgrade_recovery" => Ok(PendingAuthoringRecoveryKind::AuthoredSchemaUpgrade),
             "prefab_extraction_recovery" => Ok(PendingAuthoringRecoveryKind::PrefabExtraction),
+            "prefab_component_apply_recovery" => {
+                Ok(PendingAuthoringRecoveryKind::PrefabComponentApply)
+            }
             _ => Err(PendingAuthoringRecoveryInspectionError {
                 detail: InspectionFailure::UnsupportedKind,
             }),

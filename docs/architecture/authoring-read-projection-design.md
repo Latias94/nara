@@ -714,7 +714,7 @@ and disk round trips in both source kinds. The independent panel cases qualify s
 through the shared authoring and persistence APIs. Scene correctness Clippy and the
 no-default-features library also pass. The root workspace and independent panel pass formatting.
 
-##### Open design for applying complete component declarations
+##### Apply a complete component declaration to its source
 
 The existing compiler requires an absent lower-layer record for Add and a present record for
 Replace and Suppress. Saving an Add to the destination while its containing declaration is
@@ -734,7 +734,7 @@ from the Prefab declaration that would be edited. The view borrows the location 
 admitted snapshot and preserves the existing bounded query.
 [Selected declaration observation](../../crates/nara_scene/src/prefab/inspection.rs)
 
-Use the same presence rules for the planned component Apply. Scene prepares a pair against the
+Component Apply uses the same presence rules. Scene prepares a pair against the
 original working copies and the common Schema. For Replace and Suppress, locate the physical
 lower record. For Add, require an explicit writable destination facet, and prove both the
 merged lower program and the selected storage slot are empty. An overlay origin identifies its
@@ -816,8 +816,8 @@ Suppress requires the merged entity to survive with the component absent.
 The compiler requires one captured allocation for the destination identity across request
 aliases. Declaration copying, both candidate preparations and both compilers share one
 work allowance. A loader restriction carries through subsequent stages. The containing
-candidate uses the same exact Revert with source preparation limits. The forthcoming
-history checkpoint does not require an ordinary Undo entry to fit.
+candidate uses the same exact Revert with source preparation limits. The new history
+checkpoint does not require an ordinary Undo entry to fit.
 [Pair preparation](../../crates/nara_scene/src/authoring/prefab_declarations/component_apply.rs)
 
 On Windows x64 with Rust 1.95.0, the initial selection passes 28/28 nextest cases
@@ -835,8 +835,66 @@ The independently locked registered-panel selection passes 33/33 in release
 structured property Apply and exact Revert through ordinary panel and Host workflows.
 Scene correctness Clippy, its no-default-features library check and root formatting pass.
 
-Project Review, closed-dependent validation, paired history checkpoints, disk publication
-and fresh-process recovery remain open.
+###### Project Review and paired publication
+
+Project Review borrows the original bytes, fixed outputs, two document bases and both edits.
+It resolves the selected declaration from the original inspection. Each configuration composes
+the two visible replacements and the saved sources that depend on them, including transitive
+dependants. Project Review shares the selected configuration's catalogue between pair preparation
+and saved composition. The complete inventory guards publication and recovery. Closed sources
+and open guard documents use their saved bytes. Either selected working copy can contribute its
+existing unsaved edits to the reviewed replacement. Each output retains its original file
+encoding. Standalone Prefab composition checks surviving references and defers unbound,
+declared root Inputs to the actual instance. The Scene compiler resolves the supplied arguments.
+
+Confirm requires idle Play and persistence custody. It fences competing writes and runs the
+finite package, Pending and source publication steps through the existing Task and file owners.
+Document Close returns `Busy` while publication is fenced. A failed writer with outstanding
+temporary files returns the publisher to the Host's file custody for cleanup during session Close.
+Both live document histories receive a new saved checkpoint after the original Project switches
+back to Ready. The two persistence Hosts bind the actual accepted leaves and the Workspace
+binds the exact checkpoints before that switch. Other documents retain their histories.
+
+A fresh recovery consumes the same authenticated Pending inspection used to classify the package
+kind. It compares both actual source bytes to the fixed original and replacement bytes, verifies
+the guards and saved composition, and reviews the same pair. An already-current output is
+observed as the same physical file. A third source state or changed guard refuses recovery.
+Finishing publishes the original Ready manifest bytes. This is recoverable publication across
+two existing files under the Project Ready boundary. Direct filesystem readers can observe the
+intermediate pair while the project is Pending.
+[Project Review and live publication](../../src/project_host/authoring/project/prefab_component_apply.rs) ·
+[Saved recovery](../../src/project_host/authoring/project/prefab_component_apply/resume.rs)
+
+###### November 24 paired publication qualification
+
+Windows x64 with Rust 1.95.0 passes 241/241 selected Scene tests in
+`af78af83-16b2-4e37-99af-2bb3afe31a80`. The saved Prefab cases reject a surviving
+reference to a suppressed target and defer only declared external root Inputs. The shared
+399/399 run `09e28d65-2305-41b6-8917-a30648b9f510` also covers Scene, Tooling, source inventory
+and recovery. Project Review accepts a pair beside an unrelated configuration error and refuses
+an Add conflict reached through an intermediate Prefab. Publication tests cover guard drift,
+JSON and RON output, and return of the actual publisher for cleanup after allowance exhaustion.
+
+The independently locked release selection passes 39/39 in
+`3746f39d-fb2d-4b65-90c9-41b38335d780`. The registered panel cases exercise Add, Replace
+and Suppress in non-active Scene and Prefab tabs. They check Review, the companion instance's
+inheritance, the Close fence, and new per-document Undo checkpoints. A producer
+process exits after the first accepted output. Normal Check and headless Play refuse the Pending
+generation. After refusing third bytes and guard drift, a separate recovery process writes just
+the second source. The first file keeps its native object, modification time and exact bytes.
+The ordinary Browser opens both sources after Ready, and Check accepts the saved project using
+the same recipe that refused Pending. The fixture keeps its generated runtime owner catalogues
+alongside the panel's authored components.
+[Registered panel cases](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/component_apply.rs) ·
+[Independent process case](../../tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prefab_effective_inspection/component_apply_process.rs)
+
+The shared Windows/DX12 complete-conversion test passes in
+`4f63f136-2bdd-4e0b-90c8-018b9e9b054b`. It exercises actual native Review, exact conversion,
+Undo/Redo, Save and Reopen in Scene and Prefab. The registered panel selection qualifies the
+new paired Apply controls independently.
+
+Affected library correctness Clippy, the minimal Scene library, and the independently locked
+extraction recovery companion compile check pass. Root and registered-panel format checks pass.
 
 ##### Effective field verification
 

@@ -70,6 +70,11 @@ impl<P> std::fmt::Debug for RecoveryStoragePrepareFailure<P> {
 }
 
 impl RecoveryStorageHost {
+    #[cfg(feature = "tooling")]
+    pub(super) fn ready_file(&self) -> &FileCapability {
+        &self.ready_file
+    }
+
     #[cfg(test)]
     pub(super) fn test_ready_observation(&self) -> (&FileCapability, &[u8]) {
         (&self.ready_file, &self.ready_bytes)
@@ -383,6 +388,11 @@ impl<P: RecoveryPackageData> PreparedRecoveryStorage<P> {
         self.publisher.retry_cleanup()
     }
 
+    #[cfg(feature = "tooling")]
+    pub(super) fn into_cleanup_publisher(self) -> Option<FilePublicationHost> {
+        self.publisher.has_cleanup().then_some(self.publisher)
+    }
+
     /// Ends an unpublished package attempt only after its actual cleanup and uncertainty have
     /// ended. The enclosing operation settles its retained reservations after these owners drop.
     pub(super) fn release_unpublished(self) -> Result<Arc<P>, Self> {
@@ -621,6 +631,11 @@ impl<P: RecoveryPackageData> BoundRecoveryPending<P> {
     }
     pub(super) fn retry_cleanup(&mut self) -> bool {
         self.publisher.retry_cleanup()
+    }
+
+    #[cfg(feature = "tooling")]
+    pub(super) fn into_cleanup_publisher(self) -> Option<FilePublicationHost> {
+        self.publisher.has_cleanup().then_some(self.publisher)
     }
 
     /// Releases only this clean publisher. The concrete operation separately owns its fence
@@ -905,6 +920,18 @@ pub(super) struct PendingRecoveryStorage<P> {
 impl<P: RecoveryPackageData> PendingRecoveryStorage<P> {
     pub(super) fn observed(&self) -> &ObservedPendingRecoveryStorage<P> {
         &self.observed
+    }
+    #[cfg(feature = "tooling")]
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        ObservedPendingRecoveryStorage<P>,
+        [FilePublicationEvidence; 2],
+    ) {
+        (
+            self.observed,
+            [self.recovery_publication, self.pending_publication],
+        )
     }
     pub(super) fn capability(&self) -> &FileCapability {
         self.observed.capability()

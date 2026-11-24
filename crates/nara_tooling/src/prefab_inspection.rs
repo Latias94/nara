@@ -3,8 +3,9 @@
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{ComponentPropertyPath, ComponentTypeId};
 use nara_scene::{
-    AuthoringPrefabPropertyClaimKind, PrefabComponentEdit, PrefabDeclarationLimits,
-    PrefabEntityTarget, PrefabPropertyIntent, SceneAuthoringRevision, SceneEntityId,
+    AuthoringPrefabComponentOverrideKind, AuthoringPrefabPropertyClaimKind, PrefabComponentEdit,
+    PrefabDeclarationLimits, PrefabEntityTarget, PrefabPropertyIntent, SceneAuthoringRevision,
+    SceneEntityId, ScenePatchDocument, SourceDocumentKey,
 };
 
 use crate::{
@@ -61,6 +62,7 @@ pub enum EditorPrefabInspectionPhase {
     Review,
     AwaitingDestinationSave,
     Validating,
+    PublishingComponentApply,
     Cancelling,
     Terminal,
 }
@@ -70,7 +72,11 @@ impl EditorPrefabInspectionPhase {
     pub const fn work_pending(self) -> bool {
         matches!(
             self,
-            Self::Inspecting | Self::PreparingEdit | Self::Validating | Self::Cancelling
+            Self::Inspecting
+                | Self::PreparingEdit
+                | Self::Validating
+                | Self::PublishingComponentApply
+                | Self::Cancelling
         )
     }
 }
@@ -100,6 +106,7 @@ pub enum EditorPrefabInspectionRejection {
     InvalidDestination,
     ApplySourceSaveRequired,
     DestinationSaveRequired,
+    PublicationFailed,
 }
 
 /// The destination working revision used by the first step of Apply.
@@ -120,6 +127,25 @@ pub struct EditorPrefabApplyReview<'a> {
     pub containing: &'a PreparedEditorDocumentEdit,
     pub destination: &'a EditorDocumentQueryBasis,
     pub destination_edit: Option<&'a PreparedEditorDocumentEdit>,
+}
+
+/// One existing source replaced by a reviewed component Apply.
+#[derive(Debug, Clone, Copy)]
+pub struct EditorPrefabComponentApplyFileReview<'a> {
+    pub basis: &'a EditorDocumentQueryBasis,
+    pub source: &'a SourceDocumentKey,
+    pub project_path: &'a str,
+    pub original_bytes: &'a [u8],
+    pub output_bytes: &'a [u8],
+    pub patch: &'a ScenePatchDocument,
+}
+
+/// Confirming the pair publishes both files and starts a new history checkpoint in both tabs.
+/// The containing source is listed first, followed by the destination Prefab.
+#[derive(Debug, Clone, Copy)]
+pub struct EditorPrefabComponentApplyReview<'a> {
+    pub kind: AuthoringPrefabComponentOverrideKind,
+    pub files: [EditorPrefabComponentApplyFileReview<'a>; 2],
 }
 
 /// Terminal result retained by the Host for acknowledgment.
@@ -158,6 +184,18 @@ pub enum EditorPrefabInspectionResult {
         failure: Option<EditorPrefabInspectionRejection>,
         diagnostics: DiagnosticReport,
     },
+    ComponentApplied {
+        inspection: EditorPrefabInspectionId,
+        document: EditorDocumentId,
+        revision: SceneAuthoringRevision,
+        destination: EditorPrefabApplyDestination,
+        kind: AuthoringPrefabComponentOverrideKind,
+    },
+    /// Publication may have crossed Pending. Close this session and recover the saved pair.
+    ComponentApplyRecoveryRequired {
+        inspection: EditorPrefabInspectionId,
+        diagnostics: DiagnosticReport,
+    },
     Failed {
         inspection: EditorPrefabInspectionId,
         reason: EditorPrefabInspectionRejection,
@@ -171,6 +209,8 @@ pub struct EditorPrefabInspectionView {
     pub phase: EditorPrefabInspectionPhase,
     pub result: Option<EditorPrefabInspectionResult>,
     pub apply_destination: Option<EditorPrefabApplyDestination>,
+    /// Source outputs accepted by an in-progress component Apply.
+    pub component_apply_published: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -213,7 +253,17 @@ pub enum EditorPrefabInspectionAction {
         destination: EditorDocumentQueryBasis,
         limits: PrefabDeclarationLimits,
     },
-    /// Applies the reviewed edit. For Apply this first edits the destination working copy.
+    /// Reviews promotion of one whole-component declaration into a direct Prefab record.
+    /// The destination route is relative to the containing source, including its first hop.
+    PrepareComponentApply {
+        inspection: EditorPrefabInspectionId,
+        address: EditorPrefabComponentAddress,
+        destination: EditorDocumentQueryBasis,
+        destination_route: PrefabEntityTarget,
+        limits: PrefabDeclarationLimits,
+    },
+    /// Applies the reviewed edit. Property Apply first edits the destination working copy.
+    /// Component Apply publishes both replacements through the project's recovery boundary.
     Commit {
         inspection: EditorPrefabInspectionId,
     },

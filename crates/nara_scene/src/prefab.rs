@@ -996,6 +996,10 @@ impl AuthoringSceneCompilationReport {
         self.usage.checked_work_bytes()
     }
 
+    pub const fn reference_work(&self) -> (usize, usize) {
+        self.reference_work
+    }
+
     /// Tightens the original allowance before a consuming Native projection. Actual accumulated
     /// work remains charged; consumption refuses if that work already exceeds the new limit.
     pub fn restrict_working_bytes(&mut self, limit: ByteLimit) {
@@ -1130,6 +1134,52 @@ where
     })
 }
 
+/// The composition and surviving-reference outcome for one saved Prefab.
+#[cfg(feature = "serde")]
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct AuthoringSavedPrefabValidationReport {
+    pub diagnostics: DiagnosticReport,
+    pub failure: Option<SceneCompilationFailure>,
+    pub work_bytes: Option<usize>,
+    pub reference_work: (usize, usize),
+}
+
+/// Checks a saved Prefab's layout, component programs, and surviving references under
+/// the captured Schema and loader. A declared Input reached at the standalone root
+/// is deferred until an actual instance supplies its arguments.
+#[cfg(feature = "serde")]
+#[doc(hidden)]
+pub fn try_validate_authoring_saved_prefab_with_loader<F, E>(
+    document: &PrefabDocument,
+    basis: &crate::AuthoringSchemaBasis,
+    options: SceneCompilationOptions,
+    mut loader: F,
+) -> Result<AuthoringSavedPrefabValidationReport, E>
+where
+    F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+{
+    let mut context = SceneCompilationContext::new(
+        SchemaAuthority::Authoring(basis),
+        &mut loader,
+        options,
+        None,
+    );
+    let failure = overlay::compile::validate_saved_prefab(&mut context, document).err();
+    if let Some(failure) = &failure {
+        context.push_expansion_failure(failure);
+    }
+    if let Some(error) = context.load_error {
+        return Err(error);
+    }
+    Ok(AuthoringSavedPrefabValidationReport {
+        diagnostics: context.diagnostics,
+        failure,
+        work_bytes: context.usage.checked_work_bytes(),
+        reference_work: context.reference_work,
+    })
+}
+
 /// An actual containing source, borrowed without a Scene-shaped surrogate.
 #[cfg(feature = "serde")]
 #[derive(Debug, Clone, Copy)]
@@ -1190,6 +1240,7 @@ pub(crate) struct SelectedInstanceCompilation {
     pub(crate) omissions: Vec<AuthoringSceneCompilationOmission>,
     pub(crate) asset_references: Vec<nara_reflect::DeclaredAssetReference>,
     pub(crate) work_bytes: Option<usize>,
+    pub(crate) reference_work: (usize, usize),
     pub(crate) budget_failed: bool,
 }
 
@@ -1359,6 +1410,7 @@ where
         omissions: context.omissions,
         asset_references: context.asset_references,
         work_bytes,
+        reference_work: context.reference_work,
         budget_failed: context.budget_failed,
     })
 }

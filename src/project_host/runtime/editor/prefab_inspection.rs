@@ -50,7 +50,9 @@ use super::{
 };
 
 mod apply;
+mod component_apply;
 use apply::{ApplyRequest, PreparedApply, StartedApply};
+use component_apply::{PreparedComponentApply, PublishingComponentApply};
 
 const INSPECTION_DOMAIN: TaskDomainKey = TaskDomainKey::new(0x7072_6662_696e_7370);
 
@@ -106,6 +108,10 @@ enum InspectionWork {
         basis: InspectionBasis,
         task: TaskHandle<Result<VerifiedEdit, Failure>>,
     },
+    ComponentApply {
+        basis: InspectionBasis,
+        task: TaskHandle<Result<Box<PreparedComponentApply>, Failure>>,
+    },
 }
 
 impl InspectionWork {
@@ -113,6 +119,7 @@ impl InspectionWork {
         match self {
             Self::Read(work) => work.task.cancel(),
             Self::Verify { task, .. } => task.cancel(),
+            Self::ComponentApply { task, .. } => task.cancel(),
         };
     }
 
@@ -120,6 +127,7 @@ impl InspectionWork {
         match self {
             Self::Read(work) => work.task.return_observer(),
             Self::Verify { task, .. } => task.return_observer(),
+            Self::ComponentApply { task, .. } => task.return_observer(),
         }
         .state()
     }
@@ -143,6 +151,7 @@ enum InspectionReview {
         effective: Option<AuthoringPrefabInstanceSnapshot>,
     },
     Apply(Box<PreparedApply>),
+    ComponentApply(Box<PreparedComponentApply>),
 }
 
 struct InspectionRevert {
@@ -175,6 +184,7 @@ enum State {
     },
     AwaitingDestinationSave(Box<StartedApply>),
     FinishingApply(Box<StartedApply>),
+    PublishingComponentApply(Box<PublishingComponentApply>),
     Cancelling(InspectionWork),
     Terminal(Terminal),
 }
@@ -184,13 +194,15 @@ impl State {
         match self {
             Self::Idle => Phase::Idle,
             Self::Working(InspectionWork::Read(_)) => Phase::Inspecting,
-            Self::Working(InspectionWork::Verify { .. }) | Self::PreparingEdit { .. } => {
-                Phase::PreparingEdit
-            }
+            Self::Working(
+                InspectionWork::Verify { .. } | InspectionWork::ComponentApply { .. },
+            )
+            | Self::PreparingEdit { .. } => Phase::PreparingEdit,
             Self::Ready { .. } => Phase::Ready,
             Self::Review { .. } => Phase::Review,
             Self::AwaitingDestinationSave(_) => Phase::AwaitingDestinationSave,
             Self::Validating { .. } | Self::FinishingApply(_) => Phase::Validating,
+            Self::PublishingComponentApply(_) => Phase::PublishingComponentApply,
             Self::Cancelling(_) => Phase::Cancelling,
             Self::Terminal(_) => Phase::Terminal,
         }
@@ -202,6 +214,7 @@ pub(super) struct EditorPrefabInspectionHost {
     sequence: u64,
     inspection: Option<EditorPrefabInspectionId>,
     state: State,
+    component_apply_fenced: bool,
     #[cfg(test)]
     pub(super) next_inspect_gate: Option<Box<dyn FnOnce() + Send>>,
 }
@@ -221,6 +234,10 @@ impl EditorPrefabInspectionHost {
                 }
                 _ => None,
             },
+            component_apply_published: match &self.state {
+                State::PublishingComponentApply(work) => Some(work.published()),
+                _ => None,
+            },
         }
     }
 
@@ -229,7 +246,15 @@ impl EditorPrefabInspectionHost {
     }
 
     pub(super) const fn reclamation_blocked(&self) -> bool {
-        !matches!(self.state, State::Idle | State::Terminal(_))
+        self.component_apply_fenced || !matches!(self.state, State::Idle | State::Terminal(_))
+    }
+
+    pub(super) const fn writes_fenced(&self) -> bool {
+        self.component_apply_fenced
+    }
+
+    pub(super) const fn component_apply_draining(&self) -> bool {
+        self.component_apply_fenced && self.work_pending()
     }
 
     pub(super) fn cancel(&mut self) {
@@ -238,6 +263,11 @@ impl EditorPrefabInspectionHost {
                 work.cancel();
                 State::Cancelling(work)
             }
+            state @ (State::PublishingComponentApply(_)
+            | State::Validating {
+                edit: InspectionReview::ComponentApply(_),
+                ..
+            }) => state,
             State::Ready { .. }
             | State::PreparingEdit { .. }
             | State::Review { .. }
@@ -379,6 +409,7 @@ impl EditorProjectSession {
             | Action::PreparePropertyWrite { inspection, .. }
             | Action::PrepareComponentEdit { inspection, .. }
             | Action::PrepareApply { inspection, .. }
+            | Action::PrepareComponentApply { inspection, .. }
             | Action::Commit { inspection }
             | Action::FinishApply { inspection }
             | Action::Cancel { inspection }
@@ -408,20 +439,31 @@ impl EditorProjectSession {
                     limits,
                     ..
                 } => self.start_prefab_inspection_apply(&address, destination, limits),
+                Action::PrepareComponentApply {
+                    address,
+                    destination,
+                    destination_route,
+                    limits,
+                    ..
+                } => self.start_component_apply(address, destination, destination_route, limits),
                 Action::Commit { .. } => self.start_prefab_inspection_commit(),
                 Action::FinishApply { .. } => self.start_finish_prefab_apply(),
                 Action::Cancel { .. } => {
-                    if matches!(
-                        self.prefab_inspection.state,
-                        State::Terminal(_) | State::Cancelling(_)
-                    ) {
+                    if self.prefab_inspection.writes_fenced()
+                        || matches!(
+                            self.prefab_inspection.state,
+                            State::Terminal(_) | State::Cancelling(_)
+                        )
+                    {
                         return Err(Rejection::WrongPhase);
                     }
                     self.prefab_inspection.cancel();
                     Ok(())
                 }
                 Action::Acknowledge { .. } => {
-                    if !matches!(self.prefab_inspection.state, State::Terminal(_)) {
+                    if self.prefab_inspection.writes_fenced()
+                        || !matches!(self.prefab_inspection.state, State::Terminal(_))
+                    {
                         return Err(Rejection::WrongPhase);
                     }
                     self.prefab_inspection.state = State::Idle;
@@ -679,10 +721,17 @@ impl EditorProjectSession {
         if let InspectionReview::Apply(apply) = edit {
             apply.require_confirmed_inputs(self, basis)?;
         }
+        let is_component_apply = if let InspectionReview::ComponentApply(apply) = edit {
+            self.require_component_apply_confirmation(apply)?;
+            true
+        } else {
+            false
+        };
         let State::Review { basis, edit } = mem::take(&mut self.prefab_inspection.state) else {
             unreachable!();
         };
         self.prefab_inspection.state = State::Validating { basis, edit };
+        self.prefab_inspection.component_apply_fenced = is_component_apply;
         Ok(())
     }
 
@@ -697,11 +746,14 @@ impl EditorProjectSession {
         let outcome = self.advance_prefab_inspection_state(state);
         self.prefab_inspection.state = match outcome {
             Ok(state) => state,
-            Err(failure) => State::Terminal(Terminal::Failed {
-                inspection: self.prefab_inspection.id(),
-                reason: failure.reason,
-                diagnostics: failure.diagnostics,
-            }),
+            Err(failure) => {
+                self.prefab_inspection.component_apply_fenced = false;
+                State::Terminal(Terminal::Failed {
+                    inspection: self.prefab_inspection.id(),
+                    reason: failure.reason,
+                    diagnostics: failure.diagnostics,
+                })
+            }
         };
     }
 
@@ -753,6 +805,11 @@ impl EditorProjectSession {
                 self.revalidate_prefab_inspection_sources(&basis)?;
                 self.publish_prefab_apply_destination(basis, *edit)
             }
+            State::Validating {
+                edit: InspectionReview::ComponentApply(edit),
+                ..
+            } => self.confirm_component_apply(*edit),
+            State::PublishingComponentApply(work) => Ok(self.advance_component_apply(work)),
             State::FinishingApply(apply) => {
                 let destination = apply.destination();
                 Ok(self.finish_prefab_apply(*apply).unwrap_or_else(|failure| {
@@ -929,6 +986,18 @@ impl EditorProjectSession {
                     apply.require_confirmed_inputs(self, &basis)?;
                 }
                 Ok(State::Review { basis, edit })
+            }
+            InspectionWork::ComponentApply { basis, mut task } => {
+                self.check_prefab_inspection_basis(&basis)?;
+                let Some(TaskTerminal::Completed(result)) = task.try_take() else {
+                    return Err(Rejection::PreparationFailed.into());
+                };
+                let edit = result?;
+                edit.validate_workspace(self)?;
+                Ok(State::Review {
+                    basis,
+                    edit: InspectionReview::ComponentApply(edit),
+                })
             }
         }
     }

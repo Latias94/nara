@@ -444,6 +444,13 @@ Rules:
   pin in place. After Finish the containing document owns its Revert, history and ordinary Save.
   A fresh inspection can resume from the saved destination and still-present pin. This workflow
   has the ordinary per-file Save and document-history guarantees.
+- Selected whole-component Apply reviews the containing Revert and direct Prefab write as
+  one pair. Add, Replace and Suppress use the Project Pending/Ready publication boundary.
+  Each source keeps its original encoding. Both actual persistence leaves and both exact
+  document checkpoints bind before Ready. Successful publication installs the pair as new
+  saved history checkpoints in the original Workspace. Authenticated recovery observes an
+  already-current file and refuses a third file state or a changed guard.
+  [Paired component Apply](../authoring-read-projection-design.md#project-review-and-paired-publication)
 - A successful save is proven by a non-cloneable, workspace-bound persistence checkpoint plus a
   consumed filesystem replacement receipt bound to the prior/candidate identity, captured
   revision, content-state identity, exact Scene snapshot, canonical content digest,

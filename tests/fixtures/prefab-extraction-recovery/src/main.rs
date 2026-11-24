@@ -414,6 +414,14 @@ fn run(options: Options) -> ExitCode {
             });
             return emit(&report, 2);
         }
+        PendingAuthoringRecoveryKind::PrefabComponentApply => {
+            report["refusal"] = json!("WrongKind");
+            report["failure"] = json!({
+                "stage": "dispatch", "kind": "WrongKind", "observed_kind": "prefab-component-apply",
+                "message": "the authenticated operation requires the component Apply recovery consumer",
+            });
+            return emit(&report, 2);
+        }
     }
     let mut recovery =
         match PrefabExtractionRecovery::inspect(inspection, SceneCompilationLimits::default()) {

@@ -237,25 +237,10 @@ fn admit_lookup(
     budget: &mut AuthoringProjectAdmissionBudget,
     work: &mut PrefabExtractionWork,
 ) -> Result<(), PrefabExtractionProjectError> {
-    let Some(resolved) = catalogue.resolve_prefab(&reference, budget)? else {
-        return Ok(());
-    };
-    let bytes = checked_sum([
-        resolved.path.as_str().len(),
-        resolved.binding.directory().as_str().len(),
-        1,
-    ])?;
-    budget.charge_source_bytes(0, 0, bytes, bytes)?;
-    let result = (|| {
-        let actual_path = resolved.binding.scope().resolve(&resolved.path);
-        if &actual_path != expected_path {
-            return Err(PrefabExtractionProjectError::Destination);
-        }
-        push(bindings, &reference, key, work)
-    })();
-    budget.reconcile_retained_reservation(bytes, 0)?;
-    resolved.release(budget)?;
-    result
+    if catalogue.admits_prefab_alias(&reference, expected_path, budget)? {
+        push(bindings, &reference, key, work)?;
+    }
+    Ok(())
 }
 
 fn push(

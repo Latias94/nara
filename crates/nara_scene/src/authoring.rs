@@ -43,8 +43,11 @@ mod prefab_declarations;
 #[cfg(feature = "serde")]
 #[doc(hidden)]
 pub use prefab_declarations::{
-    PrefabComponentApplyPreparationError, PrefabComponentApplyRequest, PrefabComponentApplySource,
+    BoundPrefabComponentApply, CapturedPrefabComponentApplySources,
+    PrefabComponentApplyBindFailure, PrefabComponentApplyPreparationError,
+    PrefabComponentApplyRequest, PrefabComponentApplySource, PrefabComponentApplySourceMut,
     PrefabComponentPropertyClaims, PrefabPropertyClaims, PreparedPrefabComponentApply,
+    bind_prepared_prefab_component_apply, capture_prefab_component_apply_sources,
     try_prepare_prefab_component_apply_with_loader,
 };
 #[cfg(feature = "serde")]

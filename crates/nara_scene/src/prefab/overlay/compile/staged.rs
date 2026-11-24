@@ -7,6 +7,7 @@ use nara_asset::AssetRef;
 use nara_identity::ReferenceInputId;
 use nara_reflect::ComponentTypeId;
 
+use self::reference_program::ReferencePrograms;
 use super::*;
 use crate::SceneComponentRecord;
 use crate::prefab::SceneCompilationWorkingSet;
@@ -21,15 +22,25 @@ mod inputs;
 mod inspection;
 mod output;
 mod reference_program;
+#[cfg(feature = "serde")]
+mod saved_validation;
 mod values;
 
 #[cfg(feature = "serde")]
 pub(crate) use extraction::SourceCutMembership;
 #[cfg(feature = "serde")]
 pub(super) use extraction::capture_source_cut;
+#[cfg(feature = "serde")]
+pub(super) use saved_validation::validate_saved_source;
 
 type NodeId = usize;
 type ScopeId = usize;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MissingRootInput {
+    Reject,
+    Defer,
+}
 
 /// Locates a declaration in an immutable input, never in a growing arena allocation.
 #[derive(Debug, Clone)]
@@ -248,55 +259,70 @@ where
     #[cfg(feature = "work-observation")]
     let _work_span = tracing::info_span!(target: "nara::scene::work", "scene_expand").entered();
     let mut compiler = Compiler::start(context, source, selected_anchor)?;
-    let mut scanned = 0;
-    let mut layout = compiler.close_structure(&mut scanned)?;
-    let baseline = compiler.context.usage;
-    let source_upgrade_required = compiler.context.source_upgrade_required;
-    // Reference intent follows the effective leaves, including every property suffix.
-    // A newly entered scope invalidates this unpublished value/visibility candidate.
-    loop {
-        compiler.compose_programs()?;
+    let (layout, references, reference_destination) =
+        compiler.close_value_programs(MissingRootInput::Reject)?;
+    #[cfg(not(feature = "serde"))]
+    let _ = reference_destination;
+    compiler.materialize(
+        layout,
+        references,
         #[cfg(feature = "serde")]
-        let reference_destination = source
-            .component_apply
-            .map(|scope| compiler.component_apply_destination(scope))
-            .transpose()?;
-        #[cfg(not(feature = "serde"))]
-        let reference_destination = None;
-        let mut references = compiler.materialize_components(&mut layout)?;
-        let references_closed = {
-            #[cfg(feature = "work-observation")]
-            let _work_span =
-                tracing::info_span!(target: "nara::scene::work", "scene_reference_closure")
-                    .entered();
-            compiler.close_reference_demands(&mut references, reference_destination)?
-                && compiler.close_source_reference_demands(reference_destination)?
-        };
-        if references_closed {
-            return compiler.materialize(
-                layout,
-                references,
-                #[cfg(feature = "serde")]
-                reference_destination,
-            );
-        }
-
-        drop(references);
-        drop(layout);
-        // Release only the discarded materialization. Source acquisition, structural
-        // allocations and all normalization scratch remain cumulatively admitted.
-        compiler.context.usage.materialized_components = baseline.materialized_components;
-        compiler.context.usage.materialized_value_nodes = baseline.materialized_value_nodes;
-        compiler.context.usage.materialized_value_bytes = baseline.materialized_value_bytes;
-        compiler.context.source_upgrade_required = source_upgrade_required;
-        layout = compiler.close_structure(&mut scanned)?;
-    }
+        reference_destination,
+    )
 }
 
 impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
 where
     F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
+    fn close_value_programs(
+        &mut self,
+        missing_root_input: MissingRootInput,
+    ) -> Result<(SceneDraft, ReferencePrograms, Option<ScopeId>), SceneCompilationFailure> {
+        let mut scanned = 0;
+        let mut layout = self.close_structure(&mut scanned)?;
+        let baseline = self.context.usage;
+        let source_upgrade_required = self.context.source_upgrade_required;
+        // Reference intent follows the effective leaves, including every property suffix.
+        // A newly entered scope invalidates this unpublished value/visibility candidate.
+        loop {
+            self.compose_programs()?;
+            #[cfg(feature = "serde")]
+            let reference_destination = self
+                .root
+                .component_apply
+                .map(|scope| self.component_apply_destination(scope))
+                .transpose()?;
+            #[cfg(not(feature = "serde"))]
+            let reference_destination = None;
+            let mut references = self.materialize_components(&mut layout)?;
+            let references_closed = {
+                #[cfg(feature = "work-observation")]
+                let _work_span =
+                    tracing::info_span!(target: "nara::scene::work", "scene_reference_closure")
+                        .entered();
+                self.close_reference_demands(
+                    &mut references,
+                    reference_destination,
+                    missing_root_input,
+                )? && self.close_source_reference_demands(reference_destination)?
+            };
+            if references_closed {
+                return Ok((layout, references, reference_destination));
+            }
+
+            drop(references);
+            drop(layout);
+            // Release only the discarded materialization. Source acquisition, structural
+            // allocations and all normalization scratch remain cumulatively admitted.
+            self.context.usage.materialized_components = baseline.materialized_components;
+            self.context.usage.materialized_value_nodes = baseline.materialized_value_nodes;
+            self.context.usage.materialized_value_bytes = baseline.materialized_value_bytes;
+            self.context.source_upgrade_required = source_upgrade_required;
+            layout = self.close_structure(&mut scanned)?;
+        }
+    }
+
     fn start(
         context: &'context mut SceneCompilationContext<'owner, F, E>,
         source: SourceTopology<'root>,

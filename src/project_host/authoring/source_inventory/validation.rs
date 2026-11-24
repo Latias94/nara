@@ -140,6 +140,61 @@ impl SourceInventory {
         complete_open_sources: &[OpenSource<'_>],
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<(), SourceInventoryError> {
+        self.validate_admitted_observations_impl(input, complete_open_sources, &[], budget)
+    }
+
+    /// Reobserves exactly two existing participant leaves using continuously retained replacements.
+    /// The Pending owner supplies the original authority and keeps every other fact unchanged.
+    pub(in crate::project_host::authoring) fn validate_admitted_replacements(
+        &self,
+        input: SourceInventoryInput<'_>,
+        replacements: [(&str, &FileCapability, ContentDigest); 2],
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), SourceInventoryError> {
+        with_temporary_storage(budget, |budget| {
+            let [first, second] = replacements;
+            let paths = sum(first.0.len(), second.0.len())?;
+            let comparison = self.participants.keys().try_fold(0usize, |work, path| {
+                sum(work, sum(product(path.len(), 2)?, paths)?)
+            })?;
+            budget.charge_source_bytes(
+                0,
+                0,
+                sum(paths, product(comparison, 3)?)?,
+                sum(paths, 2 * size_of::<SourceFileFact>())?,
+            )?;
+            if first.0 == second.0 {
+                return Err(SourceInventoryError::MembershipChanged);
+            }
+            let fact = |(path, file, digest): (&str, &FileCapability, ContentDigest)| {
+                let original = self
+                    .participant(path)
+                    .ok_or(SourceInventoryError::MembershipChanged)?
+                    .file();
+                if file.parent_identity() != original.parent_identity
+                    || digest.length() > self.scene_limits.encoded_bytes().get() as u64
+                {
+                    return Err(SourceInventoryError::SourceChanged);
+                }
+                Ok(SourceFileFact {
+                    path: path.to_owned(),
+                    identity: file.identity(),
+                    parent_identity: file.parent_identity(),
+                    digest,
+                })
+            };
+            let accepted = [fact(first)?, fact(second)?];
+            self.validate_admitted_observations_impl(input, &[], &accepted, budget)
+        })
+    }
+
+    fn validate_admitted_observations_impl(
+        &self,
+        input: SourceInventoryInput<'_>,
+        complete_open_sources: &[OpenSource<'_>],
+        replacements: &[SourceFileFact],
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), SourceInventoryError> {
         self.validate_manifest_observation(
             input.root.identity(),
             input.manifest_identity,
@@ -157,6 +212,11 @@ impl SourceInventory {
         {
             return Err(SourceInventoryError::MembershipChanged);
         }
+        let participants = || {
+            self.participants
+                .values()
+                .map(|source| current_participant(&source.file, replacements))
+        };
         with_temporary_storage(budget, |budget| {
             let root = input.root;
             let manifest = SourceInventoryManifest::parse(input.manifest_bytes, budget)?;
@@ -171,10 +231,7 @@ impl SourceInventory {
             }
             // Known external members and metadata source spellings participate in the same
             // alias/case checks as newly enumerated entries. Their original custody stays live.
-            for fact in self
-                .participants
-                .values()
-                .map(|source| &source.file)
+            for fact in participants()
                 .chain(self.metadata.values().map(|metadata| &metadata.file))
                 .chain(self.file_observations.values().filter_map(
                     |observation| match observation {
@@ -273,7 +330,9 @@ impl SourceInventory {
                         return Err(SourceInventoryError::MembershipChanged);
                     }
                 } else if let Some(participant) = self.participants.get(path) {
-                    if participant.file.identity != entry.identity {
+                    if current_participant(&participant.file, replacements).identity
+                        != entry.identity
+                    {
                         return Err(SourceInventoryError::MembershipChanged);
                     }
                 } else if source_file_kind(
@@ -309,16 +368,23 @@ impl SourceInventory {
                 &root,
                 &capture.roots,
                 &self.custody,
-                self.participants
-                    .values()
-                    .map(|source| &source.file)
-                    .chain(self.metadata.values().map(|metadata| &metadata.file)),
+                participants().chain(self.metadata.values().map(|metadata| &metadata.file)),
                 &self.missing_sidecars,
                 &self.file_observations,
                 capture.budget,
             )
         })
     }
+}
+
+fn current_participant<'a>(
+    source: &'a SourceFileFact,
+    replacements: &'a [SourceFileFact],
+) -> &'a SourceFileFact {
+    replacements
+        .iter()
+        .find(|accepted| accepted.path == source.path)
+        .unwrap_or(source)
 }
 
 pub(super) fn source_file_kind(

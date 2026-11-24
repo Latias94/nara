@@ -20,11 +20,12 @@ use nara_scene::{
 use super::{
     EditorDocumentId, EditorDocumentKind, EditorDocumentSlot, EditorDocumentSourceBinding,
     EditorPersistenceAuthority, EditorWorkspace, EditorWorkspaceCommandReport,
-    EditorWorkspacePersistenceIdentity, WorkspaceDocumentContext, workspace_error_report,
+    EditorWorkspacePersistenceIdentity, WorkspaceDocumentContext,
+    persistence_checkpoint::{BoundSavedFields, WorkspaceSavedInput},
+    workspace_error_report,
 };
 
 mod persistence;
-use persistence::{BoundSavedFields, WorkspaceSavedInput};
 #[doc(hidden)]
 pub use persistence::{
     EditorPrefabExtractionDisposition, EditorWorkspaceExtractionCheckpointFailure,

@@ -152,6 +152,15 @@ impl EditorPanelContext<'_, '_> {
         self.application.prefab_apply_review(inspection)
     }
 
+    /// Borrows both reviewed source replacements for the selected component Apply.
+    pub fn prefab_component_apply_review(
+        &self,
+        inspection: EditorPrefabInspectionId,
+    ) -> Result<nara::tooling::EditorPrefabComponentApplyReview<'_>, EditorPrefabInspectionRejection>
+    {
+        self.application.prefab_component_apply_review(inspection)
+    }
+
     /// Prepares Revert of a discovered claim without rebinding its source slot.
     pub fn prepare_prefab_property_revert(
         &self,

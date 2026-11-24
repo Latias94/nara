@@ -104,6 +104,7 @@ pub use prefab_conversion::{
 };
 pub use prefab_inspection::{
     EditorPrefabApplyDestination, EditorPrefabApplyReview, EditorPrefabComponentAddress,
+    EditorPrefabComponentApplyFileReview, EditorPrefabComponentApplyReview,
     EditorPrefabComponentEditKind, EditorPrefabInspectionAction, EditorPrefabInspectionId,
     EditorPrefabInspectionOutcome, EditorPrefabInspectionPhase, EditorPrefabInspectionRejection,
     EditorPrefabInspectionResult, EditorPrefabInspectionView, EditorPrefabPropertyAddress,
@@ -171,11 +172,14 @@ pub use workspace::{
     EditorWorkspaceExtractionCheckpointFailure, EditorWorkspaceExtractionEncodingFailure,
     EditorWorkspaceExtractionPersistenceBindFailure, EditorWorkspaceExtractionPersistenceCommit,
     EditorWorkspaceExtractionPersistencePrepareFailure, EditorWorkspaceExtractionSaveFailure,
-    EditorWorkspaceExtractionSavedGenerationFailure, EditorWorkspacePrefabExtractionInput,
-    EditorWorkspacePrefabExtractionSourceBindFailure, EditorWorkspacePrefabExtractionSourceCommit,
+    EditorWorkspaceExtractionSavedGenerationFailure,
+    EditorWorkspacePrefabComponentApplyBindFailure, EditorWorkspacePrefabComponentApplyCommit,
+    EditorWorkspacePrefabComponentApplyInput, EditorWorkspacePrefabComponentApplyPrepareFailure,
+    EditorWorkspacePrefabExtractionInput, EditorWorkspacePrefabExtractionSourceBindFailure,
+    EditorWorkspacePrefabExtractionSourceCommit,
     EditorWorkspacePrefabExtractionSourcePrepareFailure,
     EditorWorkspaceSchemaReclassificationCommit, EditorWorkspaceSchemaReclassificationRequest,
     EncodedEditorPersistenceCheckpoint, PreparedEditorWorkspaceAuthoredSchemaUpgrade,
     PreparedEditorWorkspaceExtractionPersistence, PreparedEditorWorkspaceExtractionSources,
-    PreparedEditorWorkspacePrefabExtraction,
+    PreparedEditorWorkspacePrefabComponentApply, PreparedEditorWorkspacePrefabExtraction,
 };

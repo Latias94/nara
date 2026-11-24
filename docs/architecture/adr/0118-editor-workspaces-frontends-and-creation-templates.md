@@ -596,6 +596,13 @@ inherited component, or revert its local declaration. It can display the origina
 declarations from the retained candidate and consume the explicit `ComponentEdited` result.
 [Whole-component override contract](../authoring-read-projection-design.md#whole-component-overrides)
 
+The same panel can review a complete declaration promoted to its owning Prefab with
+`PrepareComponentApply`. The preview exposes both exact file replacements and their patches.
+The Host owns confirmation, Pending publication and installation of both history checkpoints.
+Panels observe the bounded source progress and distinguish completion from an operation that
+requires recovery. Property Apply uses its own ordinary Save and Finish control.
+[Component Apply contract](../authoring-read-projection-design.md#project-review-and-paired-publication)
+
 Source-built panels may borrow finite, read-only preparation access during paint. The existing
 Session may also return a bounded selector-directed property observation through that read-only
 borrow, without action/result multi-frame choreography just to read a scalar. Empty selector steps

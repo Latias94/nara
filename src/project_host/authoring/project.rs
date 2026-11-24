@@ -47,6 +47,22 @@ mod capture;
 use capture::source_observations::SourceObservations;
 mod catalogue;
 #[cfg(any(feature = "tooling", feature = "project-tooling"))]
+mod prefab_component_apply;
+#[cfg(feature = "tooling")]
+pub(crate) use prefab_component_apply::{
+    ComponentApplyLiveError, ComponentApplyLivePublication, ComponentApplyPersistenceDestination,
+    ComponentApplyProjectReview, ComponentApplyProjectReviewError,
+    ComponentApplySavedGenerationError,
+};
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+pub use prefab_component_apply::{
+    PrefabComponentApplyRecovery, PrefabComponentApplyRecoveryError,
+    PrefabComponentApplyRecoveryErrorKind, PrefabComponentApplyRecoveryInspectionFailure,
+    PrefabComponentApplyRecoveryOutput, PrefabComponentApplyRecoveryPhase,
+    PrefabComponentApplyRecoveryReceipt, PrefabComponentApplyRecoveryReview,
+    PrefabComponentApplyRecoveryView,
+};
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
 mod prefab_extraction;
 #[cfg(any(feature = "tooling", feature = "project-tooling"))]
 use super::source_decode::{SourceDecodeError, SourceTree, decode_source, release_tree};

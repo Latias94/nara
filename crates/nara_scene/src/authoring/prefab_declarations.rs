@@ -21,8 +21,11 @@ mod component_apply;
 mod component_write;
 mod property_write;
 pub use component_apply::{
-    PrefabComponentApplyPreparationError, PrefabComponentApplyRequest, PrefabComponentApplySource,
-    PreparedPrefabComponentApply, try_prepare_prefab_component_apply_with_loader,
+    BoundPrefabComponentApply, CapturedPrefabComponentApplySources,
+    PrefabComponentApplyBindFailure, PrefabComponentApplyPreparationError,
+    PrefabComponentApplyRequest, PrefabComponentApplySource, PrefabComponentApplySourceMut,
+    PreparedPrefabComponentApply, bind_prepared_prefab_component_apply,
+    capture_prefab_component_apply_sources, try_prepare_prefab_component_apply_with_loader,
 };
 pub(crate) use property_write::admit_property_write;
 

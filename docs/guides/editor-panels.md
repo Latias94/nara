@@ -1431,3 +1431,28 @@ A refused destination Save leaves the operation waiting and the containing pin i
 in place. Start a fresh inspection after reconciling the affected sources. If the destination is
 already saved with the promoted value, a fresh Apply can reuse it without another history entry.
 [Apply contract](../architecture/authoring-read-projection-design.md#apply-an-instance-property-to-its-source)
+
+## Apply A Complete Prefab Component To Its Source
+
+Keep the containing document and destination Prefab open. Inspect the containing occurrence,
+then use `PrepareComponentApply` with the exact component address, the destination document
+basis and the direct destination facet's route relative to the containing document. The route
+includes the first instance hop. A bound root can expose several facets, so choose the facet
+that owns the lower record for Replace or Suppress. Add needs an empty slot on the stated
+destination facet.
+
+Borrow `prefab_component_apply_review` on the same inspection. The containing source appears
+first. Review shows each source's original bytes, fixed output bytes and exact patch.
+The two outputs include any existing unsaved edits in those tabs. Other dependencies from the
+selected occurrence must be saved. A conflicting closed dependent can refuse the pair before
+publication starts.
+
+Submit `Commit` for the reviewed inspection. Play and competing persistence work must be idle.
+`PublishingComponentApply` reports accepted source outputs, and `ComponentApplied` reports both
+saved revisions. This operation creates a new history checkpoint in both tabs. Each tab can
+start ordinary editing and Undo from that checkpoint. `Cancel` is available before confirmation.
+If publication returns `ComponentApplyRecoveryRequired`, close the original session and use
+`nara::project_host::PrefabComponentApplyRecovery` on the Pending project in a fresh session.
+Inspect the two outputs, confirm, and advance through the accepted Ready receipt before
+reopening the project for ordinary work.
+[Project publication and recovery contract](../architecture/authoring-read-projection-design.md#project-review-and-paired-publication)

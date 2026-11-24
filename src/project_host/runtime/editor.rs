@@ -1138,6 +1138,13 @@ impl EditorProjectSession {
         self.advance_prefab_conversion();
         self.prefab_inspection.cancel();
         self.advance_prefab_inspection();
+        if self.prefab_inspection.component_apply_draining() {
+            return EditorProjectCloseProgress::Incomplete {
+                task_shutdown: self.session_task_shutdown(&TaskShutdownReport::default()),
+                file_cleanup_pending: true,
+                play_cleanup_pending: self.supervised_play_retirement_pending(),
+            };
+        }
         #[cfg(test)]
         if let Some(gate) = self.next_close_poll_gate.take() {
             gate(self);
@@ -3035,7 +3042,12 @@ impl EditorProjectSession {
         &mut self,
         intent: EditorWorkspaceIntent,
     ) -> EditorWorkspaceIntentRequestResult {
-        if self.authored_schema_upgrade.writes_fenced() || self.prefab_extraction.writes_fenced() {
+        if self.authored_schema_upgrade.writes_fenced()
+            || self.prefab_extraction.writes_fenced()
+            || self.prefab_inspection.component_apply_draining()
+            || (self.prefab_inspection.writes_fenced()
+                && matches!(intent, EditorWorkspaceIntent::CloseDocument { .. }))
+        {
             return EditorWorkspaceIntentRequestResult::Rejected(
                 EditorWorkspaceIntentRejection::Busy,
             );

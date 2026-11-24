@@ -1117,6 +1117,19 @@ impl EditorApplication {
             .prefab_apply_review(inspection)
     }
 
+    /// Borrows both reviewed source replacements for the selected component Apply.
+    pub fn prefab_component_apply_review(
+        &self,
+        inspection: nara::tooling::EditorPrefabInspectionId,
+    ) -> Result<
+        nara::tooling::EditorPrefabComponentApplyReview<'_>,
+        nara::tooling::EditorPrefabInspectionRejection,
+    > {
+        self.authoring_query_session()
+            .map_err(prefab_inspection_query_rejection)?
+            .prefab_component_apply_review(inspection)
+    }
+
     /// Prepares Revert of the selected claim at its original document basis and instance path.
     pub fn prepare_prefab_property_revert(
         &self,

@@ -109,6 +109,23 @@ where
 }
 
 #[cfg(feature = "serde")]
+pub(crate) fn validate_saved_prefab<F, E>(
+    context: &mut SceneCompilationContext<'_, F, E>,
+    document: &crate::PrefabDocument,
+) -> Result<(), SceneCompilationFailure>
+where
+    F: FnMut(
+        &nara_asset::AssetRef,
+        &mut crate::prefab::SceneCompilationWorkingSet,
+    ) -> Result<Option<ResolvedPrefabSource>, E>,
+{
+    staged::validate_saved_source(
+        context,
+        source_topology(crate::prefab::SourceDocumentInput::Prefab(document), None),
+    )
+}
+
+#[cfg(feature = "serde")]
 pub(crate) fn capture_source_cut<F, E>(
     context: &mut SceneCompilationContext<'_, F, E>,
     source: crate::prefab::SourceDocumentInput<'_>,

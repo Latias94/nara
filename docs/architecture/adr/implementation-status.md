@@ -4469,8 +4469,8 @@ effective component is absent and preserves ownership beneath Suppress and Repla
 instance patch checks exact prior value bits and supplies the actual replaced declaration to its
 inverse. The [qualification](../authoring-read-projection-design.md#november-23-whole-component-qualification)
 covers independent non-active Scene and Prefab workflows and refusal when a newly demanded
-dependency changes after Review. Editing the owning base through complete component Apply and
-preserving distinct nested override layers during outer unpack remain open.
+dependency changes after Review. Preserving distinct nested override layers during outer
+unpack remains open.
 
 The [lower-record observation](../authoring-read-projection-design.md#lower-record-and-mixed-generation-qualification)
 reports the physical source of a component beneath a selected declaration, including Suppress
@@ -4482,7 +4482,14 @@ The [Scene-side component Apply pair](../authoring-read-projection-design.md#sce
 prepares the exact containing Revert and direct destination edit for Add, Replace and
 Suppress. The compiler checks the merged contributor, effective value and the endpoint of
 each moved reference, including shadowed contextual defaults. Scene library tests pass
-866/866. Project publication, history checkpoints and recovery remain open.
+866/866 for the original candidate slice. The
+[Project publication successor](../authoring-read-projection-design.md#project-review-and-paired-publication)
+reviews both exact files against saved dependants, fences writes through Pending, and installs
+both saved history checkpoints after Ready. A fresh process accepts already-current files by
+observation and recovers the remaining fixed output. The
+[paired publication qualification](../authoring-read-projection-design.md#november-24-paired-publication-qualification)
+covers the independent registered-panel workflow, real process interruption, and ordinary
+project startup after recovery on Windows.
 
 The [contextual defaults and nested Input qualification](../authoring-read-projection-design.md#november-23-contextual-defaults-and-nested-input-apply)
 covers both Scene and Prefab consumers of complete Set and property Apply. Schema admission

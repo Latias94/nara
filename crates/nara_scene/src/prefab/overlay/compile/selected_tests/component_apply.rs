@@ -4,11 +4,13 @@ use nara_reflect::__private::component_values_exactly_match;
 use super::*;
 use crate::{
     __private::{
-        PrefabComponentApplyPreparationError, PrefabComponentApplyRequest,
-        PrefabComponentApplySource, PreparedPrefabComponentApply,
-        try_prepare_prefab_component_apply_with_loader,
+        CapturedPrefabComponentApplySources, PrefabComponentApplyPreparationError,
+        PrefabComponentApplyRequest, PrefabComponentApplySource, PrefabComponentApplySourceMut,
+        PreparedPrefabComponentApply, bind_prepared_prefab_component_apply,
+        capture_prefab_component_apply_sources, try_prepare_prefab_component_apply_with_loader,
     },
-    PrefabAuthoringSession, PrefabDocumentCandidate, PrefabReferenceArguments, ScenePatchOperation,
+    PrefabAuthoringSession, PrefabDocumentCandidate, PrefabReferenceArguments, SceneFileEncoding,
+    ScenePatchDocument, ScenePatchOperation,
 };
 
 fn prefab_session(
@@ -46,6 +48,30 @@ fn suppression() -> PrefabComponentIntent {
     }
 }
 
+fn capture_apply(
+    containing: PrefabComponentApplySource<'_>,
+    destination: &PrefabAuthoringSession,
+    destination_key: &SourceDocumentKey,
+) -> CapturedPrefabComponentApplySources {
+    let containing_key = match containing {
+        PrefabComponentApplySource::Scene(_) => SourceDocumentKey::named(
+            "862aa6e4-e568-408a-abd4-69e7d7d5a53a".parse().unwrap(),
+            "containing-scene",
+            SourceDocumentKind::Scene,
+        )
+        .unwrap(),
+        PrefabComponentApplySource::Prefab(_) => key("containing"),
+    };
+    capture_prefab_component_apply_sources(
+        containing,
+        &containing_key,
+        destination,
+        destination_key,
+        |_| Ok(()),
+    )
+    .unwrap()
+}
+
 fn read_apply(
     containing: PrefabComponentApplySource<'_>,
     destination: &PrefabAuthoringSession,
@@ -54,36 +80,29 @@ fn read_apply(
     basis: &AuthoringSchemaBasis,
     sources: &[(&str, Arc<PrefabDocument>)],
 ) -> Result<PreparedPrefabComponentApply, PrefabComponentApplyPreparationError<Infallible>> {
-    let (inspection, revision) = match containing {
-        PrefabComponentApplySource::Scene(session) => (
-            inspect(
-                PrefabInspectionInput::WorkingScene(&session.shared_document(), session.revision()),
-                basis,
-                sources,
-            ),
-            session.revision(),
+    let inspection = match containing {
+        PrefabComponentApplySource::Scene(session) => inspect(
+            PrefabInspectionInput::WorkingScene(&session.shared_document(), session.revision()),
+            basis,
+            sources,
         ),
-        PrefabComponentApplySource::Prefab(session) => (
-            inspect(
-                PrefabInspectionInput::WorkingPrefab(
-                    &session.shared_document(),
-                    session.revision(),
-                ),
-                basis,
-                sources,
-            ),
-            session.revision(),
+        PrefabComponentApplySource::Prefab(session) => inspect(
+            PrefabInspectionInput::WorkingPrefab(&session.shared_document(), session.revision()),
+            basis,
+            sources,
         ),
     };
+    let (name, _) = sources
+        .iter()
+        .find(|(_, document)| std::ptr::eq(document.as_ref(), destination.document()))
+        .unwrap();
+    let captured = capture_apply(containing, destination, &key(name));
     try_prepare_prefab_component_apply_with_loader(
         PrefabComponentApplyRequest {
-            containing,
-            containing_revision: revision,
+            sources: &captured,
             inspection: &inspection,
             selected,
             destination_route,
-            destination,
-            destination_revision: destination.revision(),
             component: &component(),
             declaration_limits: Default::default(),
             compilation: Default::default(),
@@ -431,16 +450,18 @@ fn whole_component_apply_rejects_a_destination_key_loaded_from_two_allocations()
         load,
     )
     .unwrap();
+    let captured = capture_apply(
+        PrefabComponentApplySource::Scene(&session),
+        &destination,
+        &key("base"),
+    );
     let mut loaded_alias = false;
     let result = try_prepare_prefab_component_apply_with_loader(
         PrefabComponentApplyRequest {
-            containing: PrefabComponentApplySource::Scene(&session),
-            containing_revision: revision,
+            sources: &captured,
             inspection: &inspection,
             selected: &route,
             destination_route: &route,
-            destination: &destination,
-            destination_revision: destination.revision(),
             component: &component(),
             declaration_limits: Default::default(),
             compilation: Default::default(),
@@ -478,15 +499,17 @@ fn whole_component_apply_refuses_a_record_over_the_work_budget_before_loading() 
         &[("base", destination.shared_document())],
     );
     let route = mount_target(PrefabEntityOrigin::SourceEntity(id("base-root")));
+    let captured = capture_apply(
+        PrefabComponentApplySource::Scene(&session),
+        &destination,
+        &key("base"),
+    );
     let result = try_prepare_prefab_component_apply_with_loader(
         PrefabComponentApplyRequest {
-            containing: PrefabComponentApplySource::Scene(&session),
-            containing_revision: revision,
+            sources: &captured,
             inspection: &inspection,
             selected: &route,
             destination_route: &route,
-            destination: &destination,
-            destination_revision: destination.revision(),
             component: &component(),
             declaration_limits: Default::default(),
             compilation: SceneCompilationOptions::default().with_limits(
@@ -529,17 +552,19 @@ fn whole_component_apply_keeps_the_loader_limit_without_requiring_an_undo_entry(
         &[("base", destination.shared_document())],
     );
     let route = mount_target(PrefabEntityOrigin::SourceEntity(id("base-root")));
+    let captured = capture_apply(
+        PrefabComponentApplySource::Scene(&session),
+        &destination,
+        &key("base"),
+    );
     let loader_limit = ByteLimit::new(2 * 1024 * 1024).unwrap();
     let mut calls = 0;
     let prepared = try_prepare_prefab_component_apply_with_loader(
         PrefabComponentApplyRequest {
-            containing: PrefabComponentApplySource::Scene(&session),
-            containing_revision: revision,
+            sources: &captured,
             inspection: &inspection,
             selected: &route,
             destination_route: &route,
-            destination: &destination,
-            destination_revision: destination.revision(),
             component: &component(),
             declaration_limits: Default::default(),
             compilation: Default::default(),
@@ -552,7 +577,7 @@ fn whole_component_apply_keeps_the_loader_limit_without_requiring_an_undo_entry(
             }
             calls += 1;
             Ok::<_, Infallible>(Some(ResolvedPrefabSource::bound_authoring_source(
-                destination.shared_document(),
+                captured.shared_destination(),
                 basis.clone(),
                 key("base"),
             )))
@@ -562,4 +587,162 @@ fn whole_component_apply_keeps_the_loader_limit_without_requiring_an_undo_entry(
     assert_eq!(calls, 2);
     assert_eq!(prepared.containing_revision(), revision);
     assert_eq!(session.history_usage().records, 0);
+    assert_ne!(prepared.containing_future_revision(), revision);
+    assert_ne!(
+        prepared.destination_future_revision(),
+        destination.revision()
+    );
+}
+
+#[test]
+fn whole_component_apply_binding_is_reversible_and_installs_the_same_checkpoints() {
+    let basis = edit_basis();
+    let intent = set(PrefabComponentSetMode::Add, owned_record(offset(4.0)));
+    let spare =
+        SceneEntityRecord::new(id("spare")).with_component(component(), owned_record(offset(1.0)));
+    let scene = SceneDocument::from_ordered_roots(
+        containing_document(intent)
+            .entities
+            .into_iter()
+            .chain([spare.clone()]),
+    );
+    let base = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("base-root")), spare]);
+    let mut session = source_session(&scene, &basis);
+    let mut destination = prefab_session("base", &base, &basis);
+    for value in [2.0, 3.0] {
+        let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
+            entity: id("spare"),
+            component: component(),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("offset"),
+            value: ComponentValue::f64(value).unwrap(),
+        }]);
+        assert!(session.apply_authoring_patch(&patch).applied);
+        assert!(destination.apply_authoring_patch(&patch).applied);
+    }
+    assert!(session.undo_authoring().applied);
+    assert!(destination.undo_authoring().applied);
+    let containing_history = session.history_status();
+    let destination_history = destination.history_status();
+    assert_eq!(containing_history.undo_depth, 1);
+    assert_eq!(containing_history.redo_depth, 1);
+    assert_eq!(destination_history, containing_history);
+    let containing_content_state = session.content_state();
+    let destination_content_state = destination.content_state();
+    let captured = capture_apply(
+        PrefabComponentApplySource::Scene(&session),
+        &destination,
+        &key("base"),
+    );
+    let original_scene = captured.shared_containing_scene().unwrap();
+    let original_destination = captured.shared_destination();
+    let inspection = inspect(
+        PrefabInspectionInput::WorkingScene(&original_scene, captured.containing_revision()),
+        &basis,
+        &[("base", Arc::clone(&original_destination))],
+    );
+    let address = mount_target(PrefabEntityOrigin::SourceEntity(id("base-root")));
+    let prepared = try_prepare_prefab_component_apply_with_loader(
+        PrefabComponentApplyRequest {
+            sources: &captured,
+            inspection: &inspection,
+            selected: &address,
+            destination_route: &address,
+            component: &component(),
+            declaration_limits: Default::default(),
+            compilation: Default::default(),
+        },
+        |_, _| {
+            Ok::<_, Infallible>(Some(ResolvedPrefabSource::bound_authoring_source(
+                captured.shared_destination(),
+                captured.schema_basis(),
+                captured.destination_key().clone(),
+            )))
+        },
+    )
+    .unwrap();
+    assert!(captured.owns_prepared(&prepared));
+    let identical_capture = capture_apply(
+        PrefabComponentApplySource::Scene(&session),
+        &destination,
+        &key("base"),
+    );
+    assert!(!identical_capture.owns_prepared(&prepared));
+    assert_eq!(
+        prepared.containing_file_encoding(),
+        Some(SceneFileEncoding::Json)
+    );
+    assert_eq!(
+        prepared.destination_file_encoding(),
+        Some(SceneFileEncoding::Ron)
+    );
+    let future_scene = prepared.shared_containing_scene().unwrap();
+    let future_destination = prepared.shared_destination();
+    let future_revisions = (
+        prepared.containing_future_revision(),
+        prepared.destination_future_revision(),
+    );
+    let future_states = (
+        prepared.containing_content_state(),
+        prepared.destination_content_state(),
+    );
+
+    let mut replacement = prefab_session("base", destination.document(), &basis);
+    assert_eq!(destination.document(), replacement.document());
+    let failure = bind_prepared_prefab_component_apply(
+        PrefabComponentApplySourceMut::Scene(&mut session),
+        &mut replacement,
+        prepared,
+    )
+    .unwrap_err();
+    assert!(!failure.report().applied);
+    let (prepared, _) = failure.into_parts();
+    let prepared = bind_prepared_prefab_component_apply(
+        PrefabComponentApplySourceMut::Scene(&mut session),
+        &mut destination,
+        prepared,
+    )
+    .unwrap()
+    .into_prepared();
+    assert!(captured.owns_prepared(&prepared));
+    assert_eq!(prepared.containing_future_revision(), future_revisions.0);
+    assert_eq!(prepared.destination_future_revision(), future_revisions.1);
+    assert_eq!(prepared.containing_content_state(), future_states.0);
+    assert_eq!(prepared.destination_content_state(), future_states.1);
+    assert_eq!(session.revision(), captured.containing_revision());
+    assert_eq!(destination.revision(), captured.destination_revision());
+    assert_eq!(session.content_state(), containing_content_state);
+    assert_eq!(destination.content_state(), destination_content_state);
+    assert_eq!(session.history_status(), containing_history);
+    assert_eq!(destination.history_status(), destination_history);
+    assert!(Arc::ptr_eq(&original_scene, &session.shared_document()));
+    assert!(Arc::ptr_eq(
+        &original_destination,
+        &destination.shared_document()
+    ));
+
+    let (containing, destination) = bind_prepared_prefab_component_apply(
+        PrefabComponentApplySourceMut::Scene(&mut session),
+        &mut destination,
+        prepared,
+    )
+    .unwrap()
+    .commit();
+    let PrefabComponentApplySourceMut::Scene(session) = containing else {
+        panic!("commit must return the installed Scene session")
+    };
+    assert!(Arc::ptr_eq(&future_scene, &session.shared_document()));
+    assert!(Arc::ptr_eq(
+        &future_destination,
+        &destination.shared_document()
+    ));
+    assert_eq!(session.revision(), future_revisions.0);
+    assert_eq!(destination.revision(), future_revisions.1);
+    assert_eq!(session.content_state(), future_states.0);
+    assert_eq!(destination.content_state(), future_states.1);
+    assert_eq!(session.history_usage().records, 0);
+    assert_eq!(destination.history_usage().records, 0);
+    assert!(session.is_live_dirty());
+    assert!(session.acknowledge_source_saved(future_states.0));
+    assert!(destination.acknowledge_source_saved(future_states.1));
 }

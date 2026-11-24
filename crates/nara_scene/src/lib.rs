@@ -199,6 +199,18 @@ pub mod __private {
         validate_authored_upgrade_prefab_transition, validate_authored_upgrade_scene_transition,
     };
     pub use crate::authoring::{
+        BoundPrefabComponentApply, CapturedPrefabComponentApplySources,
+        PrefabComponentApplyBindFailure, PrefabComponentApplyPreparationError,
+        PrefabComponentApplyRequest, PrefabComponentApplySource, PrefabComponentApplySourceMut,
+        PrefabSchemaReclassificationCommit, PrefabSchemaReclassificationRequest,
+        PreparedPrefabComponentApply, PreparedPrefabSchemaSource, PreparedSceneSchemaSource,
+        RetainedSchemaReclassificationSource, SceneSchemaReclassificationCommit,
+        SceneSchemaReclassificationRequest, bind_prepared_prefab_component_apply,
+        borrow_prepared_prefab_schema_source, borrow_prepared_scene_schema_source,
+        capture_prefab_component_apply_sources, require_schema_reclassification_successor,
+        try_prepare_prefab_component_apply_with_loader,
+    };
+    pub use crate::authoring::{
         EncodedPrefabExtractionSource, PrefabExtractionDestination, PrefabExtractionFailure,
         PrefabExtractionRequest, PrefabExtractionSavedGeneration,
         PrefabExtractionSavedGenerationError, PrefabExtractionSourceBindFailure,
@@ -206,16 +218,6 @@ pub mod __private {
         PrefabExtractionStoredAdmissionFailure, PrefabExtractionUsage, PrefabExtractionWork,
         PrefabSourceExtractionInput, PreparedPrefabExtraction, PreparedPrefabExtractionSource,
         PreparedSceneExtractionSource, SceneExtractionSourceCommit, SceneSourceExtractionInput,
-    };
-    pub use crate::authoring::{
-        PrefabComponentApplyPreparationError, PrefabComponentApplyRequest,
-        PrefabComponentApplySource, PrefabSchemaReclassificationCommit,
-        PrefabSchemaReclassificationRequest, PreparedPrefabComponentApply,
-        PreparedPrefabSchemaSource, PreparedSceneSchemaSource,
-        RetainedSchemaReclassificationSource, SceneSchemaReclassificationCommit,
-        SceneSchemaReclassificationRequest, borrow_prepared_prefab_schema_source,
-        borrow_prepared_scene_schema_source, require_schema_reclassification_successor,
-        try_prepare_prefab_component_apply_with_loader,
     };
     pub use crate::authoring_decode::schema_upgrade::AuthoredFieldUpgrade;
     pub use crate::authoring_decode::{
@@ -232,8 +234,8 @@ pub mod __private {
     pub use crate::format::{canonical_prefab_source_matches, canonical_scene_source_matches};
     pub use crate::occurrence::scene_instance_retired;
     pub use crate::prefab::extraction::{
-        CapturedExtractionSource, PrefabExtractionAssets, PrefabExtractionBinding,
-        PrefabExtractionEnvironment,
+        CapturedExtractionSource, ComponentApplySourceFootprint, PrefabExtractionAssets,
+        PrefabExtractionBinding, PrefabExtractionEnvironment, classify_component_apply_dependants,
     };
     pub use crate::prefab::inspection::{
         AuthoringPrefabComponentEditError, AuthoringPrefabComponentOverrideKind,
@@ -243,9 +245,9 @@ pub mod __private {
         try_inspect_authoring_prefab_instance_with_loader,
     };
     pub use crate::prefab::{
-        AuthoringNativePreview, AuthoringSceneCompilationOmission,
-        AuthoringSceneCompilationOmissionReason, AuthoringSceneCompilationParts,
-        AuthoringSceneCompilationReport, SourceDocumentInput,
-        try_compile_authoring_scene_with_loader,
+        AuthoringNativePreview, AuthoringSavedPrefabValidationReport,
+        AuthoringSceneCompilationOmission, AuthoringSceneCompilationOmissionReason,
+        AuthoringSceneCompilationParts, AuthoringSceneCompilationReport, SourceDocumentInput,
+        try_compile_authoring_scene_with_loader, try_validate_authoring_saved_prefab_with_loader,
     };
 }

@@ -671,17 +671,21 @@ candidate and validates any newly demanded sources before Commit. This is editin
 containing layer. The [qualification](../architecture/authoring-read-projection-design.md#november-23-whole-component-qualification)
 records independent registered-panel workflows and the Scene and Host evidence.
 [Outer unpack with retained nested links](2026-10-27-prefab-conversion-plan.md#outcome-and-scope)
-and [complete component Apply across sources](../architecture/authoring-read-projection-design.md#open-design-for-applying-complete-component-declarations)
-retain separate design and acceptance requirements. The
+retains separate design and acceptance requirements. The
 [lower-record observation and mixed-generation proof](../architecture/authoring-read-projection-design.md#lower-record-and-mixed-generation-qualification)
 identifies the physical destination beneath a selected declaration, including a suppressed or
 root-bound record. It also demonstrates that a destination-first Save can invalidate an
-unconsumed Add or Suppress. The planned component Apply uses joint publication under the
+unconsumed Add or Suppress. Complete component Apply uses joint publication under the
 original Project Pending owner and an explicit history checkpoint for its two replacements.
 The [Scene-side pair preparation](../architecture/authoring-read-projection-design.md#scene-side-component-apply-preparation)
 validates the complete candidate values, exact merged contributor and destination-owned
-references for Add, Replace and Suppress. Project Review, publication and the complete
-recoverable consumer remain open.
+references for Add, Replace and Suppress. The
+[Project Review and publication](../architecture/authoring-read-projection-design.md#project-review-and-paired-publication)
+compose the affected saved dependants, bind two new saved history checkpoints, and recover the
+exact output pair after an interrupted publication. The
+[qualification](../architecture/authoring-read-projection-design.md#november-24-paired-publication-qualification)
+records the independent panel and fresh-process recovery, including Check and Play's Pending
+refusal and ordinary reopening after Ready.
 
 The [contextual default and nested Input corrections](../architecture/authoring-read-projection-design.md#november-23-contextual-defaults-and-nested-input-apply)
 share the exact Schema admission with ordinary component construction and preserve the full

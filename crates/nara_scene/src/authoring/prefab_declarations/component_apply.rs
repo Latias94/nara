@@ -1,24 +1,23 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    mem::size_of,
     sync::Arc,
 };
 
 use nara_asset::AssetRef;
-use nara_core::ByteLimit;
+use nara_core::{ByteLimit, ItemLimit};
 use nara_identity::{AuthoredEntityReference, EntityReference};
 use nara_reflect::{__private::component_values_exactly_match, ComponentValueRef};
 
 use super::*;
 use crate::{
-    AuthoringEntityView, AuthoringPrefabComponentOverrideKind, AuthoringPrefabInstanceSnapshot,
-    AuthoringPrefabRecordOrigin, AuthoringReadError, PrefabComponentSetMode,
-    PrefabDeclarationSource, PrefabDocument, PrefabEntityOrigin, ResolvedPrefabSource,
-    SceneCompilationFailureKind, SceneCompilationOptions, SceneCompilationWorkingSet,
-    SceneComponentRecord, SourceDocumentKey,
+    AuthoringPrefabComponentOverrideKind, AuthoringPrefabInstanceSnapshot,
+    AuthoringPrefabRecordOrigin, PrefabComponentSetMode, PrefabDeclarationSource, PrefabDocument,
+    PrefabEntityOrigin, ResolvedPrefabSource, SceneCompilationFailureKind, SceneCompilationOptions,
+    SceneCompilationWorkingSet, SceneComponentRecord, SourceDocumentKey,
     authoring_decode::{
-        AuthoringDocumentState, PreparedPrefabAuthoringPatch, PreparedSceneAuthoringPatch,
-        prepare_prefab_authoring_patch_with_admission, prepare_prefab_component_apply_patch,
-        prepare_scene_authoring_patch_with_admission,
+        PreparedPrefabAuthoringPatch, prepare_prefab_authoring_patch_with_admission,
+        prepare_prefab_component_apply_patch, prepare_scene_authoring_patch_with_admission,
     },
     prefab::{
         ComponentApplyScope, SelectedInstanceCompilation, SelectedInstanceConsumer,
@@ -31,45 +30,27 @@ use crate::{
     },
 };
 
-#[derive(Clone, Copy)]
-pub enum PrefabComponentApplySource<'a> {
-    Scene(&'a SceneAuthoringSession),
-    Prefab(&'a PrefabAuthoringSession),
-}
+mod capture;
+mod checkpoint;
 
-impl<'a> PrefabComponentApplySource<'a> {
-    fn capture(
-        self,
-    ) -> (
-        SourceDocumentInput<'a>,
-        Option<&'a AuthoringDocumentState>,
-        SceneAuthoringRevision,
-    ) {
-        match self {
-            Self::Scene(session) => (
-                SourceDocumentInput::Scene(session.document()),
-                session.authority.published(),
-                session.revision(),
-            ),
-            Self::Prefab(session) => (
-                SourceDocumentInput::Prefab(session.document()),
-                session.authority.published(),
-                session.revision(),
-            ),
-        }
-    }
-}
+use capture::CapturedContaining;
+pub use capture::{
+    CapturedPrefabComponentApplySources, PrefabComponentApplySource,
+    capture_prefab_component_apply_sources,
+};
+pub use checkpoint::{
+    BoundPrefabComponentApply, PrefabComponentApplyBindFailure, PrefabComponentApplySourceMut,
+    PreparedPrefabComponentApply, bind_prepared_prefab_component_apply,
+};
+use checkpoint::{ContainingCandidate, PreparedSource, checkpoint_storage_bytes};
 
 /// Both entity routes are relative to the containing source. The destination route selects a
-/// direct source facet in the supplied Prefab session, including when a bound root has aliases.
+/// direct source facet in the captured destination, including when a bound root has aliases.
 pub struct PrefabComponentApplyRequest<'a> {
-    pub containing: PrefabComponentApplySource<'a>,
-    pub containing_revision: SceneAuthoringRevision,
+    pub sources: &'a CapturedPrefabComponentApplySources,
     pub inspection: &'a AuthoringPrefabInstanceSnapshot,
     pub selected: &'a PrefabEntityTarget,
     pub destination_route: &'a PrefabEntityTarget,
-    pub destination: &'a PrefabAuthoringSession,
-    pub destination_revision: SceneAuthoringRevision,
     pub component: &'a ComponentTypeId,
     pub declaration_limits: PrefabDeclarationLimits,
     pub compilation: SceneCompilationOptions,
@@ -93,82 +74,9 @@ impl<E> From<ScenePatchReport> for PrefabComponentApplyPreparationError<E> {
     }
 }
 
-#[derive(Debug)]
-enum ContainingCandidate {
-    Scene(PreparedSceneAuthoringPatch),
-    Prefab(PreparedPrefabAuthoringPatch),
-}
-
-impl ContainingCandidate {
-    fn document(&self) -> SourceDocumentInput<'_> {
-        match self {
-            Self::Scene(candidate) => SourceDocumentInput::Scene(&candidate.document),
-            Self::Prefab(candidate) => SourceDocumentInput::Prefab(&candidate.document),
-        }
-    }
-}
-
-/// Jointly verified candidates. Neither edit can be consumed as an independent history entry.
-#[derive(Debug)]
-pub struct PreparedPrefabComponentApply {
-    containing: ContainingCandidate,
-    destination: Arc<PrefabDocument>,
-    destination_state: AuthoringDocumentState,
-    destination_patch: ScenePatchDocument,
-    destination_inverse: ScenePatchDocument,
-    containing_revision: SceneAuthoringRevision,
-    destination_revision: SceneAuthoringRevision,
-    kind: AuthoringPrefabComponentOverrideKind,
-}
-
-impl PreparedPrefabComponentApply {
-    pub fn containing_document(&self) -> SourceDocumentInput<'_> {
-        self.containing.document()
-    }
-
-    pub fn containing_patch(&self) -> &ScenePatchDocument {
-        match &self.containing {
-            ContainingCandidate::Scene(candidate) => &candidate.patch,
-            ContainingCandidate::Prefab(candidate) => &candidate.patch,
-        }
-    }
-
-    pub fn destination_document(&self) -> &PrefabDocument {
-        &self.destination
-    }
-
-    pub fn destination_entity(
-        &self,
-        entity: &SceneEntityId,
-    ) -> Result<AuthoringEntityView<'_>, AuthoringReadError> {
-        self.destination_state
-            .entity_view(&self.destination.entities, entity)
-    }
-
-    pub const fn destination_patch(&self) -> &ScenePatchDocument {
-        &self.destination_patch
-    }
-
-    pub const fn destination_inverse(&self) -> &ScenePatchDocument {
-        &self.destination_inverse
-    }
-
-    pub const fn containing_revision(&self) -> SceneAuthoringRevision {
-        self.containing_revision
-    }
-
-    pub const fn destination_revision(&self) -> SceneAuthoringRevision {
-        self.destination_revision
-    }
-
-    pub const fn kind(&self) -> AuthoringPrefabComponentOverrideKind {
-        self.kind
-    }
-}
-
-/// Prepares an exact selected-layer Revert and one direct destination edit. The loader must
-/// retain the captured source generation across both passes. Disk and dependent validation
-/// belong to the project publication owner.
+/// Prepares an exact selected-layer Revert, one direct destination edit, and both history
+/// checkpoints. The loader must retain the captured source generation across both passes.
+/// Disk and dependent validation belong to the project publication owner.
 pub fn try_prepare_prefab_component_apply_with_loader<F, E>(
     request: PrefabComponentApplyRequest<'_>,
     loader: F,
@@ -179,24 +87,13 @@ where
     use PrefabComponentApplyPreparationError as Error;
 
     let basis = request.inspection.schema_basis();
-    let (source, containing_state, containing_revision) = request.containing.capture();
-    let containing_state = containing_state.ok_or(Error::StaleBasis)?;
-    let destination_document = request.destination.document();
-    let destination_state = request
-        .destination
-        .authority
-        .published()
-        .ok_or(Error::StaleBasis)?;
-    if containing_revision != request.containing_revision
-        || request.destination.revision() != request.destination_revision
-        || destination_state.schema_basis() != *basis
-        || containing_state.schema_basis() != *basis
-    {
+    let sources = request.sources;
+    if sources.schema_basis() != *basis {
         return Err(Error::StaleBasis);
     }
-    if containing_state.source() == destination_state.source() {
-        return Err(Error::InvalidDestination);
-    }
+    let source = sources.containing_document();
+    let destination_document = sources.destination.document.as_ref();
+    let destination_state = &sources.destination.state;
     let route = request.destination_route;
     if route.through.len() > request.declaration_limits.max_depth()
         || route
@@ -210,12 +107,15 @@ where
     else {
         return Err(Error::InvalidDestination);
     };
-    let destination_key = &hop.expected_base;
+    let destination_key = sources.destination_key();
+    if &hop.expected_base != destination_key {
+        return Err(Error::InvalidDestination);
+    }
     let (anchor, declaration_index, intent, cost) = request
         .inspection
         .component_apply_declaration(
             source,
-            request.containing_revision,
+            sources.containing_revision(),
             request.selected,
             request.component,
             request.declaration_limits,
@@ -272,7 +172,8 @@ where
         destination_key,
         destination_document,
         queries: queries.into_iter().collect(),
-        reference_work,
+        initial_reference_work: reference_work,
+        reference_work: (0, 0),
         remaining: work,
         loader,
     };
@@ -300,33 +201,28 @@ where
         },
     )
     .map_err(PrefabDeclarationError::report)?;
-    let mut admit = |_, bytes| {
-        spend(&mut compiler.remaining, bytes).ok_or_else(|| {
-            history_error_report(
-                "scene.authoring-prefab-component-apply-work-limit",
-                "Component Apply exceeds its preparation work allowance",
-            )
-        })
-    };
-    let containing = match source {
-        SourceDocumentInput::Scene(document) => {
-            ContainingCandidate::Scene(prepare_scene_authoring_patch_with_admission(
-                document,
-                containing_state,
+    let mut admit = |_, bytes| spend(&mut compiler.remaining, bytes).ok_or_else(work_limit_report);
+    let containing = match &sources.containing {
+        CapturedContaining::Scene(source) => ContainingCandidate::Scene(
+            source,
+            prepare_scene_authoring_patch_with_admission(
+                &source.document,
+                &source.state,
                 &revert,
                 false,
                 &mut admit,
-            )?)
-        }
-        SourceDocumentInput::Prefab(document) => {
-            ContainingCandidate::Prefab(prepare_prefab_authoring_patch_with_admission(
-                document,
-                containing_state,
+            )?,
+        ),
+        CapturedContaining::Prefab(source) => ContainingCandidate::Prefab(
+            source,
+            prepare_prefab_authoring_patch_with_admission(
+                &source.document,
+                &source.state,
                 &revert,
                 false,
                 &mut admit,
-            )?)
-        }
+            )?,
+        ),
     };
     let PreparedPrefabAuthoringPatch {
         document,
@@ -339,6 +235,11 @@ where
         &ScenePatchDocument::new([operation]),
         &mut admit,
     )?;
+    spend(
+        &mut compiler.remaining,
+        size_of::<PrefabDocument>().checked_add(2 * size_of::<usize>()),
+    )
+    .ok_or(Error::WorkLimit)?;
     let destination = Arc::new(document);
     let (candidate, candidate_proof) = compiler.compile(
         containing.document(),
@@ -362,21 +263,38 @@ where
         return Err(Error::CandidateChanged);
     }
     let destination_inverse = report.inverse.ok_or(Error::CandidateChanged)?;
-    Ok(PreparedPrefabComponentApply {
-        containing,
-        destination,
-        destination_state: state,
-        destination_patch: patch,
+    spend(
+        &mut compiler.remaining,
+        checkpoint_storage_bytes(source, sources.containing_key(), destination_key),
+    )
+    .ok_or(Error::WorkLimit)?;
+    Ok(PreparedPrefabComponentApply::new(
+        containing.into_prepared(sources.containing_key()),
+        PreparedSource::new(
+            &sources.destination,
+            destination_key,
+            destination,
+            state,
+            patch,
+        ),
         destination_inverse,
-        containing_revision,
-        destination_revision: request.destination_revision,
         kind,
-    })
+        Arc::clone(&sources.identity),
+        compiler.remaining,
+        compiler.reference_work,
+    ))
 }
 
 fn spend(remaining: &mut usize, bytes: Option<usize>) -> Option<()> {
     *remaining = remaining.checked_sub(bytes?)?;
     Some(())
+}
+
+fn work_limit_report() -> ScenePatchReport {
+    history_error_report(
+        "scene.authoring-prefab-component-apply-work-limit",
+        "Component Apply exceeds its preparation work allowance",
+    )
 }
 
 type ReferenceProof = BTreeMap<AuthoredEntityReference, EntityReference>;
@@ -388,6 +306,7 @@ struct PairCompiler<'a, F> {
     destination_key: &'a SourceDocumentKey,
     destination_document: &'a PrefabDocument,
     queries: Vec<AuthoredEntityReference>,
+    initial_reference_work: (usize, usize),
     reference_work: (usize, usize),
     remaining: usize,
     loader: F,
@@ -413,12 +332,26 @@ where
             .ok_or(Error::WorkLimit)?;
         let mut alias_changed = false;
         let mut exhausted = false;
+        let limits = self.options.limits;
+        let remaining_nodes = limits
+            .reference_work_nodes()
+            .get()
+            .saturating_sub(self.reference_work.0);
+        let remaining_bytes = limits
+            .reference_work_bytes()
+            .get()
+            .saturating_sub(self.reference_work.1);
+        let limits = limits
+            .with_working_bytes(limit)
+            .with_reference_work_nodes(ItemLimit::new(remaining_nodes).ok_or(Error::WorkLimit)?)
+            .with_reference_work_bytes(ByteLimit::new(remaining_bytes).ok_or(Error::WorkLimit)?);
         let SelectedInstanceCompilation {
             inspection,
             component_apply_references,
             diagnostics,
             failure,
             work_bytes,
+            reference_work,
             ..
         } = try_compile_selected_authoring_instance_with_loader(
             source,
@@ -426,11 +359,10 @@ where
             SelectedInstanceConsumer::ComponentApply {
                 scope,
                 reference_queries: &self.queries,
-                initial_reference_work: self.reference_work,
+                initial_reference_work: std::mem::take(&mut self.initial_reference_work),
             },
             self.basis,
-            self.options
-                .with_limits(self.options.limits.with_working_bytes(limit)),
+            self.options.with_limits(limits),
             None,
             |asset, working| {
                 if exhausted || alias_changed {
@@ -482,6 +414,16 @@ where
         self.options.limits = self.options.limits.with_working_bytes(total);
         self.remaining = total.get().checked_sub(retained).ok_or(Error::WorkLimit)?;
         spend(&mut self.remaining, work_bytes).ok_or(Error::WorkLimit)?;
+        self.reference_work.0 = self
+            .reference_work
+            .0
+            .checked_add(reference_work.0)
+            .ok_or(Error::WorkLimit)?;
+        self.reference_work.1 = self
+            .reference_work
+            .1
+            .checked_add(reference_work.1)
+            .ok_or(Error::WorkLimit)?;
         if component_apply_references.len() != self.queries.len() {
             return Err(Error::NonPortableReference);
         }

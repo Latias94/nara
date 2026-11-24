@@ -8,13 +8,77 @@ use std::{convert::Infallible, error::Error, fmt};
 use nara_core::ByteLimit;
 use nara_fs::{ContentDigest, FileCapability, FsError, ReplaceReceipt};
 use nara_scene::{
-    SceneFileEncoding, SceneFileEncodingAdmissionError, SceneFileLimits, SceneFormatError,
+    SceneAuthoringContentState, SceneAuthoringRevision, SceneFileEncoding,
+    SceneFileEncodingAdmissionError, SceneFileLimits, SceneFormatError,
 };
 
 use super::{
-    EditorDocumentDigest, EditorExtensionDocumentError, EditorPersistenceCheckpoint,
-    EditorPersistenceCommit, EditorPersistenceContent,
+    EditorDocumentDigest, EditorDocumentSlot, EditorExtensionDocumentError,
+    EditorExternalReloadState, EditorPersistenceCheckpoint, EditorPersistenceCommit,
+    EditorPersistenceContent,
 };
+
+/// Captured before worker dispatch. A later Save or reload change makes late binding stale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct WorkspaceSavedInput {
+    revision: SceneAuthoringRevision,
+    content_state: SceneAuthoringContentState,
+    digest: Option<EditorDocumentDigest>,
+    reload: EditorExternalReloadState,
+}
+
+impl WorkspaceSavedInput {
+    pub(super) fn capture(slot: &EditorDocumentSlot) -> Option<Self> {
+        Some(match slot {
+            EditorDocumentSlot::Scene(slot) => Self {
+                revision: slot.saved_revision,
+                content_state: slot.saved_content_state,
+                digest: slot.saved_digest,
+                reload: slot.external_reload,
+            },
+            EditorDocumentSlot::Prefab(slot) => Self {
+                revision: slot.saved_revision,
+                content_state: slot.saved_content_state,
+                digest: slot.saved_digest,
+                reload: slot.external_reload,
+            },
+            EditorDocumentSlot::Extension(_) => return None,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct BoundSavedFields<'w> {
+    revision: &'w mut SceneAuthoringRevision,
+    content_state: &'w mut SceneAuthoringContentState,
+    digest: &'w mut Option<EditorDocumentDigest>,
+    reload: &'w mut EditorExternalReloadState,
+}
+
+impl<'w> BoundSavedFields<'w> {
+    pub(super) fn new(
+        revision: &'w mut SceneAuthoringRevision,
+        content_state: &'w mut SceneAuthoringContentState,
+        digest: &'w mut Option<EditorDocumentDigest>,
+        reload: &'w mut EditorExternalReloadState,
+    ) -> Self {
+        Self {
+            revision,
+            content_state,
+            digest,
+            reload,
+        }
+    }
+
+    pub(super) fn commit(self, commit: &EditorPersistenceCommit) {
+        *self.revision = commit.checkpoint.revision;
+        *self.content_state = commit.checkpoint.content_state;
+        *self.digest = Some(commit.digest);
+        if *self.reload != EditorExternalReloadState::Conflict {
+            *self.reload = EditorExternalReloadState::Clean;
+        }
+    }
+}
 
 /// Frozen codec output associated with the exact move-only source capture that produced it.
 /// No arbitrary bytes or caller-provided digest can be attached to a checkpoint.

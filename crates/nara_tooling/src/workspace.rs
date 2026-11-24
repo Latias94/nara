@@ -43,6 +43,7 @@ mod authoring_query;
 mod construction;
 mod extension;
 mod persistence_checkpoint;
+mod prefab_component_apply;
 mod prefab_conversion;
 mod prefab_declarations;
 mod prefab_extraction;
@@ -66,6 +67,12 @@ pub use persistence_checkpoint::{
     EditorPersistenceEncodingError, EditorPersistenceEncodingFailure,
     EditorPersistenceObservationFailure, EditorPersistencePublicationFailure,
     EncodedEditorPersistenceCheckpoint,
+};
+#[doc(hidden)]
+pub use prefab_component_apply::{
+    EditorWorkspacePrefabComponentApplyBindFailure, EditorWorkspacePrefabComponentApplyCommit,
+    EditorWorkspacePrefabComponentApplyInput, EditorWorkspacePrefabComponentApplyPrepareFailure,
+    PreparedEditorWorkspacePrefabComponentApply,
 };
 pub use prefab_conversion::{
     CommittedEditorPrefabConversion, EditorPrefabConversionCommitError,

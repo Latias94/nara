@@ -8,6 +8,33 @@ use super::*;
 mod tests;
 
 impl ReferenceCatalogue {
+    pub(in crate::project_host::authoring::project) fn admits_prefab_alias(
+        &mut self,
+        reference: &AssetRef,
+        expected: &AssetSourcePath,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<bool, AuthoringProjectSourceAdmissionError> {
+        let Some(resolved) = self.resolve_prefab(reference, budget)? else {
+            return Ok(false);
+        };
+        let result = (|| {
+            let bytes = checked_sum([
+                resolved.path.as_str().len(),
+                resolved.binding.directory().as_str().len(),
+                1,
+            ])?;
+            budget.charge_source_bytes(0, 0, bytes, bytes)?;
+            let matches = &resolved.binding.scope().resolve(&resolved.path) == expected;
+            budget.reconcile_retained_reservation(bytes, 0)?;
+            if !matches {
+                return Err(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch);
+            }
+            Ok(true)
+        })();
+        resolved.release(budget)?;
+        result
+    }
+
     /// Retains only this actual configuration's catalogue-visible metadata. Resolution uses the
     /// existing scope/kind rules; neither construction nor subsequent lookups enumerate disk.
     /// The caller keeps the inventory's original native custody and operation allowance alive.

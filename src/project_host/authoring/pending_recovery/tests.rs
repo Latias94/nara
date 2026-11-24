@@ -123,7 +123,7 @@ fn hostile_headers(text_bytes: usize) -> impl Iterator<Item = Vec<u8>> {
 }
 
 #[test]
-fn actual_authenticated_headers_dispatch_both_known_kinds_without_decoding_payload_or_writing() {
+fn actual_authenticated_headers_dispatch_known_kinds_without_decoding_payload_or_writing() {
     for (kind, expected) in [
         (
             "authored_upgrade_recovery",
@@ -132,6 +132,10 @@ fn actual_authenticated_headers_dispatch_both_known_kinds_without_decoding_paylo
         (
             "prefab_extraction_recovery",
             PendingAuthoringRecoveryKind::PrefabExtraction,
+        ),
+        (
+            "prefab_component_apply_recovery",
+            PendingAuthoringRecoveryKind::PrefabComponentApply,
         ),
     ] {
         let fixture = Fixture::new(&package(kind));

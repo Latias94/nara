@@ -13,10 +13,11 @@ use nara_scene::{
 };
 
 use super::*;
+#[cfg(test)]
+use crate::workspace::{EditorDocumentDigest, EditorExternalReloadState};
 use crate::workspace::{
-    EditorDocumentDigest, EditorExternalReloadState, EditorPersistenceCaptureIdentity,
-    EditorPersistenceCheckpoint, EditorPersistenceCommit, EditorPersistenceContent,
-    EditorPersistenceEncodingError, EncodedEditorPersistenceCheckpoint,
+    EditorPersistenceCaptureIdentity, EditorPersistenceCheckpoint, EditorPersistenceCommit,
+    EditorPersistenceContent, EditorPersistenceEncodingError, EncodedEditorPersistenceCheckpoint,
 };
 
 /// Review's explicit authority for one captured open document.
@@ -1147,68 +1148,6 @@ impl EditorPersistenceAuthority {
                     report,
                 })
             }
-        }
-    }
-}
-
-/// Captured before worker dispatch; ordinary saves or reload changes make late binding stale.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct WorkspaceSavedInput {
-    revision: SceneAuthoringRevision,
-    content_state: SceneAuthoringContentState,
-    digest: Option<EditorDocumentDigest>,
-    reload: EditorExternalReloadState,
-}
-
-impl WorkspaceSavedInput {
-    pub(super) fn capture(slot: &EditorDocumentSlot) -> Option<Self> {
-        Some(match slot {
-            EditorDocumentSlot::Scene(slot) => Self {
-                revision: slot.saved_revision,
-                content_state: slot.saved_content_state,
-                digest: slot.saved_digest,
-                reload: slot.external_reload,
-            },
-            EditorDocumentSlot::Prefab(slot) => Self {
-                revision: slot.saved_revision,
-                content_state: slot.saved_content_state,
-                digest: slot.saved_digest,
-                reload: slot.external_reload,
-            },
-            EditorDocumentSlot::Extension(_) => return None,
-        })
-    }
-}
-
-#[derive(Debug)]
-pub(super) struct BoundSavedFields<'w> {
-    revision: &'w mut SceneAuthoringRevision,
-    content_state: &'w mut SceneAuthoringContentState,
-    digest: &'w mut Option<EditorDocumentDigest>,
-    reload: &'w mut EditorExternalReloadState,
-}
-
-impl<'w> BoundSavedFields<'w> {
-    pub(super) fn new(
-        revision: &'w mut SceneAuthoringRevision,
-        content_state: &'w mut SceneAuthoringContentState,
-        digest: &'w mut Option<EditorDocumentDigest>,
-        reload: &'w mut EditorExternalReloadState,
-    ) -> Self {
-        Self {
-            revision,
-            content_state,
-            digest,
-            reload,
-        }
-    }
-
-    fn commit(self, commit: &EditorPersistenceCommit) {
-        *self.revision = commit.checkpoint.revision;
-        *self.content_state = commit.checkpoint.content_state;
-        *self.digest = Some(commit.digest);
-        if *self.reload != EditorExternalReloadState::Conflict {
-            *self.reload = EditorExternalReloadState::Clean;
         }
     }
 }
