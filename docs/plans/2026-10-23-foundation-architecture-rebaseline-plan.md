@@ -2440,6 +2440,11 @@ ties the manifest's replacement eligibility to the PRIMARY created by that Input
 An embedded App can supply an empty map from another World and preserve its code configuration
 through Startup. Source and cooked acquisition use the same receiver.
 
+The [distinct ISO physical key](2026-10-30-input-definition-and-source-admission-plan.md#distinct-iso-physical-key)
+preserves Backquote and the extra ISO position as separate inputs through Winit and Action Maps.
+Windows input and native message regressions pass, and the changed Winit backend cross-checks
+for macOS arm64. Physical macOS keyboard execution remains open.
+
 The [endpoint admission review](../research/2026-10-30-input-endpoint-admission-and-retirement-review.md)
 traces historical empty rows, live cross-frame memberships and platform-observed cancellation
 that can clear ingress state without admitting terminal events. Its
