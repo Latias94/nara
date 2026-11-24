@@ -1,11 +1,12 @@
 # Nara
 
 Nara is an open-source game engine written in Rust. It is under active pre-1.0 development and is
-currently validated through a small 2D reference game rather than a stable general-purpose SDK.
+validated through a small 2D reference game. APIs and project formats are expected to change.
 
-Rust is the complete first-party game-authoring language. Nara uses `bevy_ecs` as its simulation
-substrate while keeping project documents, product Hosts, native backends, and editor state outside
-the runtime `World`.
+Rust is the complete first-party game-authoring language, with `bevy_ecs` as the simulation substrate.
+The v2 refactor develops the standalone game runtime and desktop editor as separate products.
+See the [strategy](STRATEGY.md), [architecture](docs/architecture/overview.md), and
+[v2 master plan](docs/plans/v2-refactor-master-plan.md).
 
 ## Current Product Slice
 
@@ -17,9 +18,6 @@ The repository currently includes:
 - a deterministic 2D reference game with sprites, input, HUD, Save/Play authoring evidence, and
   bounded diagnostics;
 - an independent `reference-game` workspace and public-API consumer fixtures under `tests/fixtures/`.
-
-The engine is not yet a complete Godot- or Unity-level game-development product. Packaging,
-hosted cross-platform evidence, editor delivery, and additional real games are still active work.
 
 ## Requirements
 
@@ -60,8 +58,10 @@ For cross-level travel and game-owned checkpoint saves, see the independent
 - `src/`: the integrated product facade and Project Host
 - `reference-game/`: the first complete headless and desktop game tracer
 - `tests/fixtures/`: test data and independent consumer projects; see the [fixture guide](tests/fixtures/README.md)
-- `docs/architecture/`: architecture decisions, implementation status, and open questions
-- `docs/plans/`: execution plans and verification contracts
+- [`docs/architecture/`](docs/architecture/overview.md) contains the v2 architecture and accepted ADRs.
+- [`docs/plans/`](docs/plans/v2-refactor-master-plan.md) contains the active roadmap and phase gates.
+
+The `legacy/v0-imgui-reference` tag contains the previous editor, guides, and architecture records.
 
 ## License
 

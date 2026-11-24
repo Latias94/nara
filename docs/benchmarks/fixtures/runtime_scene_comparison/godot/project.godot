@@ -1,7 +1,0 @@
-config_version=5
-
-[application]
-config/name="Runtime Scene Comparison"
-
-[rendering]
-renderer/rendering_method="gl_compatibility"

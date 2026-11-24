@@ -1,124 +1,37 @@
----
-name: Nara
-last_updated: 2026-10-23
----
+# Nara strategy
 
-# Nara Strategy
+Nara is an open-source game engine for teams building complete games in Rust. The first production
+proof is a 2D desktop game that authors can edit, play, debug, and export using one integrated
+workflow. Rust is the complete first-party authoring language. Data and visual workflows serve artists
+and designers working in the same project.
 
-## Target problem
+## Product direction
 
-Game developers and studios that want to build in Rust face a tradeoff: mature
-engines provide integrated production workflows but do not treat Rust as a
-first-class authoring language, while Rust engines often leave editor workflows,
-iteration, debugging, packaging, and delivery integration to each game team. The
-resulting infrastructure work competes directly with finishing the game.
+- Grow the engine from complete games. Use `reference-game` to prove public APIs end to end and
+  `samples/two-level-game` to prove scene travel, audio, and persistence.
+- Deliver a standalone editor with multi-window docking, a live scene viewport, schema-driven
+  authoring, and supervised Play for an external Rust project.
+- Keep shipping games small and independent of editor infrastructure. Use one lean desktop runner
+  for games and let the editor own its own windowing and user interface.
+- Design for growth to the breadth of Bevy and Godot. Keep the core independent of scene dimension,
+  and let real projects drive adoption of 3D, networking, scripting, and additional targets.
+- Develop for Windows, Linux, and macOS. Ground each release claim in evidence from the platform.
 
-## Our approach
+## Measures
 
-Develop Nara from complete games outward as a Rust-first integrated product built
-from explicit, composable modules. Public Rust APIs must support the whole game
-production path, while the default module combination prioritizes a coherent
-experience. Stable extension seams allow modules, backends, editor tools, and
-optional scripting adapters without requiring a second official author language.
-The integrated Editor also targets installable tools and optional gameplay-language
-workflows that do not require rebuilding the Editor. Rust-complete does not mean
-Rust-exclusive. Execution placement, compatibility and activation effects are explicit
-per contribution. Generalize when a complete game, a named target-author workflow,
-safety evidence or focused external evidence creates pressure; bounded experiments
-may challenge an existing architecture before the full product path exists.
+- **Edit-to-result latency** measures the median and 95th percentile for data saves, logic edits, and
+  structural Rust changes in the reference game. Record the reload or rebuild path with each result.
+- **Public API coverage** measures how much of the reference game and editor workflow uses public APIs.
+- **Authoring and delivery** exercise editing, Undo, persistence, supervised Play, and a clean-machine
+  launch of an exported game.
+- **Runtime cost** tracks 99th-percentile frame time, memory, and steady-state GPU allocations on
+  identified hardware.
+- **Build cost** tracks cold and warm CI time, workspace package count, and maintained source size.
 
-## Who it's for
+The first production proof focuses on 2D desktop. A second official authoring language, native
+dynamic ABI, universal scripting host, package registry, and marketplace can wait for a concrete
+consumer. Data reload and incremental Rust rebuild with process restart cover the initial iteration
+workflow.
 
-**Primary during Trial:** Rust game developers and studios taking a complete PC
-game from prototype to release. They are hiring Nara for Rust control together
-with an integrated editor, runtime, tooling, and delivery path. A team may include
-artists, designers, and other contributors who work through visual and data
-workflows; Nara is not limited to teams in which every contributor is a programmer.
-Extension and optional-language trials also serve tool/package authors and gameplay
-authors evaluating prebuilt Hosts. They do not make a second language a prerequisite
-for Rust projects or broaden an unqualified platform release claim.
-
-## Key metrics
-
-- **Rust edit-to-result latency** - P50 and P95 for representative data, function
-  body, and structural Rust changes in the reference game, reported separately by
-  the iteration path used.
-- **Public production coverage** - Percentage of the reference game built through
-  public Rust, project, editor, and tooling APIs without engine-private hooks.
-- **Release reproducibility** - Clean-machine Windows/Linux export and headless
-  replay acceptance rate.
-- **Module integration quality** - Success rate and completion time for adding,
-  replacing, or independently consuming a supported module through documented
-  contracts.
-- **Programmable authoring** - Engine-private changes, author-visible concepts and
-  Editor rebuild/restart requirements for an independent semantic tool, including
-  preview, exact result, Undo and persistence rather than panel registration alone.
-- **Runtime tail budget** - Frame-time P99, memory, and service-boundary overhead
-  on target hardware.
-
-## Tracks
-
-### Reference-game proof
-
-Use a small general-purpose 2D consumer as Nara's cross-cutting production fixture
-and source of measured evidence. Existing genre examples are lightweight consumers,
-not requirements for the core. Desktop design targets Windows, Linux, and macOS;
-each release claim needs its native platform evidence. Steam publication is outside
-this proof.
-
-_Why it serves the approach:_ It prevents architecture completeness from becoming
-a substitute for a finished game.
-
-### Rust production experience
-
-Make Rust gameplay, project data, editing, iteration, debugging, and export one
-coherent production path. Treat compile and reload latency as measured product
-work rather than an unavoidable implementation detail.
-
-_Why it serves the approach:_ This is where runtime quality becomes usable game
-production rather than engine infrastructure.
-
-### Integrated modular platform
-
-Preserve a robust Rust and `bevy_ecs` substrate with explicit ownership, service,
-performance, and headless boundaries. Keep modules independently understandable,
-replaceable where their contracts allow it, with explicit source/data migration when contracts
-differ, and usable without importing the entire product, while making the first-party default
-combination work as one engine.
-
-_Why it serves the approach:_ Product coherence and ecosystem extensibility share
-the same deliberate boundaries instead of competing architecture goals.
-
-### Delivery and ecosystem
-
-Make public APIs, documentation, standalone export, Cargo/Git/local package use,
-installable contribution lifecycle, and external-developer validation part of the
-production path. Preserve toolchain authority over source dependency graphs; a
-product Package is not a new Cargo/NuGet resolver or a universal execution Host.
-
-_Why it serves the approach:_ A game that only works inside the engine repository
-does not prove a usable engine.
-
-## Not working on
-
-- A mandatory second author language, a universal language-neutral behavior host,
-  a universal Wasm boundary, or a stable native dynamic ABI before evidence
-  requires them. A scripting adapter such as Luau may be an optional package.
-- A custom package registry, marketplace, signing system, or ecosystem governance
-  layer before Cargo, Git, and local packages expose a concrete product gap.
-- A promise that every Rust edit can hot-reload in place. Nara will measure and
-  combine data reload, compatible code patching, incremental rebuild, isolated
-  runtime restart, and explicit state restoration.
-- High-end 3D, networking/rollback, browser, mobile, or console support in the
-  first production proof.
-- Horizontal crate and ADR expansion without a named product workflow, safety,
-  independent-consumer or platform requirement. This does not prohibit focused
-  extension, representation or execution experiments before full product support.
-
-## Marketing
-
-**One-liner:** Nara is an open-source game engine written in Rust.
-
-**Key message:** Nara is in early development. APIs and project formats are
-expected to change. Technical direction belongs in feature and architecture
-documentation rather than in the identity statement.
+The [architecture overview](docs/architecture/overview.md) owns product boundaries. The
+[v2 master plan](docs/plans/v2-refactor-master-plan.md) owns delivery order and phase verification.
