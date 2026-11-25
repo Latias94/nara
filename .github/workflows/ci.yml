@@ -46,13 +46,8 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: 0
           persist-credentials: false
       - run: rustup toolchain install 1.95.0 --profile minimal
-      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
-        with:
-          tool: nextest@0.9.138
-          fallback: none
       - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
         with:
           python-version: 3.13.5
@@ -64,13 +59,31 @@ jobs:
       - name: Resolve a single WGPU package
         run: cargo tree --locked --workspace --all-features --invert wgpu --depth 1
       - run: cargo check --workspace --locked --all-features
+
+  engine-tests:
+    name: Core engine tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install 1.95.0 --profile minimal
+      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: nextest@0.9.138
+          fallback: none
       - name: Test core engine crates
         run: >-
           cargo nextest run --locked -p nara_app -p nara_asset -p nara_editor_core
           -p nara_input -p nara_scene -p nara_core -p nara_audio -p nara_physics2d -p nara_project
           --lib --bin nara --test vfs --test filesystem_contract --test path_contract
           --test mock_audio --test fixed_physics
-          --features nara_app/tasks,nara_asset/hot-reload,nara_core/fs-capabilities,nara_input/serde,nara_scene/serde
+          --features nara_app/tasks,nara_asset/hot-reload,nara_asset/pack,nara_core/fs-capabilities,nara_input/serde,nara_scene/runtime-catalog
           --no-tests fail
 
   reference-game:
