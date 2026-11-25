@@ -5,11 +5,11 @@ use nara_asset::{AssetId, AssetMutationBaseline, AssetStates, Assets, Handle};
 use nara_asset::{AssetRecord, AssetRef, AssetSourceKind, SourceHash};
 use nara_ecs::World;
 use nara_render::image::ImageAsset;
+#[cfg(feature = "project-source")]
+use nara_render::tilemap::TileSetAssets;
 use nara_render::tilemap::{
     TileSet, TileSetAssetError, TileSetContentReceipt, TileSetPublicationInput,
 };
-#[cfg(feature = "project-source")]
-use nara_render::tilemap::TileSetAssets;
 use nara_scene::advanced::SceneAssetReservations;
 
 use super::{

@@ -28,10 +28,10 @@ use super::{
     side_room::{self, Room, Rooms},
     storage::Storage,
 };
-#[cfg(any(feature = "development", feature = "cook"))]
-use crate::resume::LevelContentStamp;
 #[cfg(feature = "local-player")]
 use crate::command::CommandSource;
+#[cfg(any(feature = "development", feature = "cook"))]
+use crate::resume::LevelContentStamp;
 use crate::{
     command::{
         CommandKey, CommandSchedule, GameCommand, SERVER_COMMAND_SOURCE, SemanticCommand,

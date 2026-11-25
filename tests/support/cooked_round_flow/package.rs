@@ -2,12 +2,12 @@ use std::{fs, path::Path};
 
 use nara::{
     fs::ContentDigest,
-    scene::runtime_configuration::RuntimeConfiguration,
     project_tooling::host_fs,
     runtime_content::{
         RuntimeContentBase, RuntimeContentCatalog, RuntimeContentCatalogLimits,
         RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentTarget,
     },
+    scene::runtime_configuration::RuntimeConfiguration,
 };
 use serde_json::{Value, json};
 use two_level_game::{

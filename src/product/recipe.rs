@@ -7,13 +7,13 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(feature = "render-wgpu")]
+use nara_app::PluginSlot;
 use nara_app::{
     App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
     PluginDefinitionKey, PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginId,
     PluginPlanEntry, PluginPreflightContext, PluginSchemaProviderId,
 };
-#[cfg(feature = "render-wgpu")]
-use nara_app::PluginSlot;
 use nara_reflect::{
     ComponentSchemaOwnerSnapshot, ComponentSchemaProviderDefinition,
     PersistentComponentSchemaOwnerId,

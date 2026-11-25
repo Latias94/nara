@@ -21,6 +21,8 @@ use nara::{
 };
 
 use super::{GamePhase, Progress, Session, fail, player, side_room, travel};
+#[cfg(any(feature = "development", feature = "cook"))]
+use crate::resume::{LevelContentStamp, ResumeCompatibility, decode_resume, encode_resume};
 use crate::{
     command::{CommandSchedule, CommandSource, CommandSubmitError, GameCommand, ScheduledCommand},
     levels::LevelId,
@@ -30,8 +32,6 @@ use crate::{
     },
     save::io::SaveIoError,
 };
-#[cfg(any(feature = "development", feature = "cook"))]
-use crate::resume::{LevelContentStamp, ResumeCompatibility, decode_resume, encode_resume};
 
 #[cfg(all(feature = "desktop", any(feature = "development", feature = "cook")))]
 pub use capture::capture_desktop_resume;

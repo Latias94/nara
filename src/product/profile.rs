@@ -72,12 +72,9 @@ impl PluginGroup for ProjectProfilePlugins {
 
     fn build(self) -> PluginGroupBuilder {
         let task_plugin = nara_app::tasks::plugin(self.task_config);
-        let product_group_includes_minimal = self
-            .capabilities
-            .contains(ProductCapability::Runtime2d)
-            || self
-                .capabilities
-                .contains(ProductCapability::RuntimeUi);
+        let product_group_includes_minimal =
+            self.capabilities.contains(ProductCapability::Runtime2d)
+                || self.capabilities.contains(ProductCapability::RuntimeUi);
         let builder = PluginGroupBuilder::new().add_slot(
             PluginSlot::required(SLOT_RUNTIME_TIME, super::runtime_time::PLUGIN_ID),
             self.time_definition,
@@ -95,10 +92,7 @@ impl PluginGroup for ProjectProfilePlugins {
         };
 
         #[cfg(feature = "runtime-2d")]
-        let builder = if self
-            .capabilities
-            .contains(ProductCapability::Runtime2d)
-        {
+        let builder = if self.capabilities.contains(ProductCapability::Runtime2d) {
             builder.add_edited_group(
                 super::Runtime2dPlugins
                     .edit()
@@ -109,10 +103,7 @@ impl PluginGroup for ProjectProfilePlugins {
         };
 
         #[cfg(feature = "runtime-ui")]
-        let builder = if self
-            .capabilities
-            .contains(ProductCapability::RuntimeUi)
-        {
+        let builder = if self.capabilities.contains(ProductCapability::RuntimeUi) {
             let builder = builder.add_edited_group(
                 super::RuntimeUiPlugins
                     .edit()
@@ -170,10 +161,7 @@ impl PluginGroup for ProjectProfilePlugins {
         };
 
         #[cfg(feature = "desktop-winit")]
-        let builder = if self
-            .capabilities
-            .contains(ProductCapability::DesktopWinit)
-        {
+        let builder = if self.capabilities.contains(ProductCapability::DesktopWinit) {
             builder.add_edited_group(
                 super::DesktopWinitPlugins
                     .edit()
@@ -184,17 +172,11 @@ impl PluginGroup for ProjectProfilePlugins {
         };
 
         #[cfg(feature = "render-wgpu")]
-        let builder = if self
-            .capabilities
-            .contains(ProductCapability::RenderWgpu)
-        {
+        let builder = if self.capabilities.contains(ProductCapability::RenderWgpu) {
             let backend = super::WgpuBackendPlugins
                 .edit()
                 .configure_slot(super::SLOT_RENDER, self.render_definition.clone());
-            let backend = if self
-                .capabilities
-                .contains(ProductCapability::DesktopWinit)
-            {
+            let backend = if self.capabilities.contains(ProductCapability::DesktopWinit) {
                 backend
             } else {
                 backend.disable_slot(super::SLOT_WGPU_WINDOW_PRESENTATION)

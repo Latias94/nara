@@ -1926,11 +1926,11 @@ mod tests {
     use nara::{
         asset::{AssetProductRef, ImportedProductId, StableAssetId},
         fs::ContentDigest,
-        scene::runtime_configuration::RuntimeConfiguration,
         runtime_content::{
             RuntimeContentCatalog, RuntimeContentCatalogDefinition, RuntimeContentCatalogLimits,
             RuntimeContentMember, RuntimeContentMemberKind, RuntimeContentTarget,
         },
+        scene::runtime_configuration::RuntimeConfiguration,
         scene::{SourceDocumentKey, SourceDocumentKind},
     };
 
