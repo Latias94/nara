@@ -21,6 +21,8 @@ mod effective;
 #[cfg(feature = "cargo-build")]
 pub mod host_fs;
 mod manifest;
+#[cfg(feature = "manifest-source")]
+pub mod manifest_source;
 mod path;
 #[cfg(all(
     feature = "workflow",

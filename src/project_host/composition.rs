@@ -6,7 +6,7 @@ use std::{
 };
 
 #[cfg(feature = "project-source")]
-use crate::fs::{ContentDigest, FileIdentity};
+use crate::fs::ContentDigest;
 use nara_app::{
     EditedPluginGroup, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginId, PluginPlan,
     PluginPlanError, PluginProductCapability, PluginSchemaProviderId,
@@ -15,6 +15,8 @@ use nara_app::{
 use nara_app::{Plugin, PluginDefinition};
 #[cfg(feature = "runtime-input")]
 use nara_input::INPUT_PLUGIN_ID;
+#[cfg(feature = "project-source")]
+pub use nara_project::manifest_source::ProjectSettingsLineage;
 #[cfg(feature = "project-source")]
 use nara_project::{EffectiveProjectSettings, ProjectPath, SourceRuntimeProjection};
 use nara_reflect::provider::ResolvedComponentSchemaProvider;
@@ -87,32 +89,6 @@ pub(super) fn validate_runtime_capabilities(
     settings: &EffectiveRuntimeConfiguration,
 ) -> Result<RuntimeCapabilityAdmission, RuntimeCapabilityError> {
     admit_runtime_capabilities(settings, compiled_product_capabilities().capabilities())
-}
-
-/// Opaque identity of one authorized project root, manifest byte sequence, and selected profile.
-#[cfg(feature = "project-source")]
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ProjectSettingsLineage {
-    pub(super) settings_digest: [u8; 32],
-    pub(super) project_root_identity: Option<FileIdentity>,
-}
-
-#[cfg(feature = "project-source")]
-impl fmt::Debug for ProjectSettingsLineage {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("ProjectSettingsLineage(..)")
-    }
-}
-
-#[cfg(feature = "project-source")]
-impl ProjectSettingsLineage {
-    pub(crate) const fn settings_digest(self) -> [u8; 32] {
-        self.settings_digest
-    }
-
-    pub(crate) const fn project_root_identity(self) -> Option<FileIdentity> {
-        self.project_root_identity
-    }
 }
 
 /// An immutable settings candidate whose product capability request fits this binary.

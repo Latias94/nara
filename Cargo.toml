@@ -221,6 +221,7 @@ project-source = [
     "runtime-2d",
     "serde",
     "dep:nara_project",
+    "nara_project/manifest-source",
 ]
 project-workflow = [
     "project-source",

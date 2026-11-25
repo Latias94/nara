@@ -44,13 +44,14 @@ windows-sys = { workspace = true, optional = true, features = [
 
 [features]
 default = ["workflow"]
+manifest-source = ["nara_core/fs-capabilities"]
 cargo-build = ["cargo-facts", "dep:blake3"]
-cargo-facts = ["nara_core/fs-capabilities"]
+cargo-facts = ["manifest-source"]
 player-package = ["cargo-build", "dep:getrandom", "dep:nara_asset", "nara_scene/runtime-catalog"]
 product-process = [
     "dep:rustix",
     "dep:windows-sys",
-    "nara_core/fs-capabilities",
+    "manifest-source",
     "windows-sys/Win32_Globalization",
     "windows-sys/Win32_Security_Cryptography",
     "windows-sys/Win32_Storage_FileSystem",

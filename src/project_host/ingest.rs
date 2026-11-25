@@ -1,21 +1,14 @@
-use std::{fmt, io::Read};
+use std::fmt;
 
-use crate::fs::{
-    ContentDigest, FileCapability, FileIdentity, FsError, FsOperation, PathValidationError,
-};
-use nara_core::diagnostic::{
-    DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
-    PublicDiagnosticIdentifier, ReportDiagnostic as Diagnostic, SafeSummary,
-};
-use nara_project::{
-    DEFAULT_MANIFEST_BYTE_LIMIT, EffectiveProjectSettings, ProjectManifest, ProjectProfileError,
+use crate::fs::{ContentDigest, FileCapability, FileIdentity, FsError};
+use nara_core::diagnostic::DiagnosticReport;
+use nara_project::manifest_source::{
+    ProjectManifestSource, ProjectManifestSourceError, ProjectManifestSourceErrorKind,
 };
 
 use super::composition::{
-    ProjectSettingsCandidate, ProjectSettingsLineage, RuntimeCapabilityErrorKind,
-    validate_runtime_capabilities,
+    ProjectSettingsCandidate, RuntimeCapabilityErrorKind, validate_runtime_capabilities,
 };
-use crate::project_diagnostic_ids::{fs_operation_id, io_error_kind_id};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectCandidateErrorKind {
@@ -53,17 +46,37 @@ impl ProjectCandidateError {
     /// `FileCapability` exists into the project-manifest diagnostic contract.
     #[must_use]
     pub fn from_manifest_authority(error: FsError) -> Self {
-        project_fs_error(error)
+        ProjectManifestSourceError::from_manifest_authority(error).into()
     }
 
     fn new(kind: ProjectCandidateErrorKind, diagnostics: DiagnosticReport) -> Self {
         Self { kind, diagnostics }
     }
+}
 
-    fn single(kind: ProjectCandidateErrorKind, diagnostic: Diagnostic) -> Self {
-        let mut diagnostics = DiagnosticReport::default();
-        diagnostics.push(diagnostic);
-        Self::new(kind, diagnostics)
+impl From<ProjectManifestSourceError> for ProjectCandidateError {
+    fn from(error: ProjectManifestSourceError) -> Self {
+        let kind = match error.kind() {
+            ProjectManifestSourceErrorKind::HostIo => ProjectCandidateErrorKind::HostIo,
+            ProjectManifestSourceErrorKind::HostAuthorityUnsupported => {
+                ProjectCandidateErrorKind::HostAuthorityUnsupported
+            }
+            ProjectManifestSourceErrorKind::HostAuthorityUnproven => {
+                ProjectCandidateErrorKind::HostAuthorityUnproven
+            }
+            ProjectManifestSourceErrorKind::HostAuthorityRejected => {
+                ProjectCandidateErrorKind::HostAuthorityRejected
+            }
+            ProjectManifestSourceErrorKind::ManifestTooLarge => {
+                ProjectCandidateErrorKind::ManifestTooLarge
+            }
+            ProjectManifestSourceErrorKind::Manifest => ProjectCandidateErrorKind::Manifest,
+            ProjectManifestSourceErrorKind::Profile => ProjectCandidateErrorKind::Profile,
+            ProjectManifestSourceErrorKind::RuntimeConfiguration => {
+                ProjectCandidateErrorKind::RuntimeConfiguration
+            }
+        };
+        ProjectCandidateError::new(kind, error.into_diagnostics())
     }
 }
 
@@ -118,7 +131,7 @@ pub fn ingest_project_manifest(
     manifest: &FileCapability,
     profile: Option<&str>,
 ) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
-    ingest_project_manifest_inner(manifest, profile, None)
+    candidate_from_source(ProjectManifestSource::from_file(manifest, profile)?)
 }
 
 pub(crate) fn ingest_project_manifest_with_expected_digest(
@@ -126,32 +139,11 @@ pub(crate) fn ingest_project_manifest_with_expected_digest(
     profile: Option<&str>,
     expected_digest: ContentDigest,
 ) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
-    ingest_project_manifest_inner(manifest, profile, Some(expected_digest))
-}
-
-fn ingest_project_manifest_inner(
-    manifest: &FileCapability,
-    profile: Option<&str>,
-    expected_digest: Option<ContentDigest>,
-) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
-    let project_root_identity = manifest.parent_identity();
-    let bytes = read_manifest_bytes(manifest)?;
-    let manifest_digest = ContentDigest::of_bytes(&bytes);
-    if expected_digest.is_some_and(|expected| manifest_digest != expected) {
-        return Err(ProjectCandidateError::single(
-            ProjectCandidateErrorKind::HostAuthorityRejected,
-            diagnostic(
-                "project.manifest.source-changed",
-                "Project manifest bytes do not match the prepared source digest",
-            ),
-        ));
-    }
-    ingest_project_manifest_bytes_with_digest(
-        &bytes,
+    candidate_from_source(ProjectManifestSource::from_file_with_expected_digest(
+        manifest,
         profile,
-        project_root_identity,
-        manifest_digest,
-    )
+        expected_digest,
+    )?)
 }
 
 pub(crate) fn ingest_project_manifest_bytes(
@@ -159,94 +151,25 @@ pub(crate) fn ingest_project_manifest_bytes(
     profile: Option<&str>,
     project_root_identity: FileIdentity,
 ) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
-    let manifest_digest = ContentDigest::of_bytes(bytes);
-    ingest_project_manifest_bytes_with_digest(
+    candidate_from_source(ProjectManifestSource::from_bytes(
         bytes,
         profile,
         Some(project_root_identity),
-        manifest_digest,
-    )
-}
-
-fn ingest_project_manifest_bytes_with_digest(
-    bytes: &[u8],
-    profile: Option<&str>,
-    project_root_identity: Option<FileIdentity>,
-    manifest_digest: ContentDigest,
-) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
-    let settings = resolve_manifest_profile(bytes, profile)?;
-    let lineage = project_settings_lineage(
-        manifest_digest,
-        settings.profile_name.as_deref(),
-        project_root_identity,
-    );
-    validate_product_request(settings, lineage, manifest_digest)
+    )?)
 }
 
 #[cfg(feature = "project-tooling")]
 pub(crate) fn read_manifest_profile(
     manifest: &FileCapability,
     profile: Option<&str>,
-) -> Result<EffectiveProjectSettings, ProjectCandidateError> {
-    resolve_manifest_profile(&read_manifest_bytes(manifest)?, profile)
+) -> Result<nara_project::EffectiveProjectSettings, ProjectCandidateError> {
+    ProjectManifestSource::read_profile(manifest, profile).map_err(Into::into)
 }
 
-fn resolve_manifest_profile(
-    bytes: &[u8],
-    profile: Option<&str>,
-) -> Result<EffectiveProjectSettings, ProjectCandidateError> {
-    let load = ProjectManifest::parse_toml_bytes(bytes);
-    if load.has_errors() || load.manifest.is_none() {
-        return Err(ProjectCandidateError::new(
-            ProjectCandidateErrorKind::Manifest,
-            load.diagnostics,
-        ));
-    }
-    let manifest = load
-        .manifest
-        .expect("a successful project manifest load contains a manifest");
-
-    manifest
-        .resolve_profile(profile)
-        .map_err(project_profile_error)
-}
-
-fn read_manifest_bytes(manifest: &FileCapability) -> Result<Vec<u8>, ProjectCandidateError> {
-    let limit = usize::try_from(DEFAULT_MANIFEST_BYTE_LIMIT)
-        .expect("the project manifest byte limit fits usize on supported targets");
-    let mut reader = manifest
-        .reader()
-        .map_err(ProjectCandidateError::from_manifest_authority)?;
-    let mut bytes = Vec::with_capacity(limit.min(8 * 1024));
-    let mut buffer = [0_u8; 8 * 1024];
-
-    loop {
-        let remaining = limit.saturating_sub(bytes.len());
-        let read_limit = buffer.len().min(remaining.saturating_add(1));
-        let read = reader
-            .read(&mut buffer[..read_limit])
-            .map_err(project_io_error)?;
-        if read == 0 {
-            return Ok(bytes);
-        }
-        if read > remaining {
-            return Err(manifest_too_large_error(limit.saturating_add(1), limit));
-        }
-        bytes.extend_from_slice(&buffer[..read]);
-    }
-}
-
-fn validate_product_request(
-    settings: EffectiveProjectSettings,
-    lineage: ProjectSettingsLineage,
-    manifest_digest: ContentDigest,
+fn candidate_from_source(
+    source: ProjectManifestSource,
 ) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
-    let source_runtime_projection = settings.source_runtime_projection().map_err(|error| {
-        ProjectCandidateError::new(
-            ProjectCandidateErrorKind::RuntimeConfiguration,
-            error.diagnostics().clone(),
-        )
-    })?;
+    let (lineage, manifest_digest, settings, source_runtime_projection) = source.into_parts();
     let admission =
         validate_runtime_capabilities(source_runtime_projection.runtime()).map_err(|error| {
             let kind = match error.kind() {
@@ -269,208 +192,4 @@ fn validate_product_request(
         source_runtime_projection,
         capabilities: admission,
     })
-}
-
-fn project_settings_lineage(
-    manifest: ContentDigest,
-    profile: Option<&str>,
-    project_root_identity: Option<crate::fs::FileIdentity>,
-) -> ProjectSettingsLineage {
-    let profile = profile.map(|profile| ContentDigest::of_bytes(profile.as_bytes()));
-    let mut framed = Vec::with_capacity(96);
-    framed.extend_from_slice(b"nara.project-settings-lineage.v1\0");
-    framed.extend_from_slice(&manifest.length().to_le_bytes());
-    framed.extend_from_slice(manifest.as_bytes());
-    match profile {
-        Some(profile) => {
-            framed.push(1);
-            framed.extend_from_slice(&profile.length().to_le_bytes());
-            framed.extend_from_slice(profile.as_bytes());
-        }
-        None => framed.push(0),
-    }
-    ProjectSettingsLineage {
-        settings_digest: *ContentDigest::of_bytes(&framed).as_bytes(),
-        project_root_identity,
-    }
-}
-
-fn project_profile_error(error: ProjectProfileError) -> ProjectCandidateError {
-    match error {
-        ProjectProfileError::InvalidManifest { diagnostics }
-        | ProjectProfileError::UnknownProfile { diagnostics, .. } => {
-            ProjectCandidateError::new(ProjectCandidateErrorKind::Profile, *diagnostics)
-        }
-        _ => ProjectCandidateError::single(
-            ProjectCandidateErrorKind::Profile,
-            diagnostic(
-                "project.profile.lowering",
-                "Project profile could not be lowered into runtime settings",
-            ),
-        ),
-    }
-}
-
-fn project_fs_error(error: FsError) -> ProjectCandidateError {
-    match error {
-        FsError::Path(error) => authority_rejection(path_rejection_id(error)),
-        FsError::Unsupported { operation, .. } => authority_error(
-            ProjectCandidateErrorKind::HostAuthorityUnsupported,
-            "project.manifest.authority-unsupported",
-            "Project manifest authority is unsupported",
-            operation,
-        ),
-        FsError::Unproven { operation, .. } => authority_error(
-            ProjectCandidateErrorKind::HostAuthorityUnproven,
-            "project.manifest.authority-unproven",
-            "Project manifest authority cannot prove the required invariant",
-            operation,
-        ),
-        FsError::Io { operation, source } => host_io_error(operation, source.kind()),
-        FsError::ByteLimitExceeded { limit } => manifest_too_large_error(
-            usize::try_from(limit).unwrap_or(usize::MAX),
-            usize::try_from(DEFAULT_MANIFEST_BYTE_LIMIT).unwrap_or(usize::MAX),
-        ),
-        FsError::ReadOnlyCapability { operation } | FsError::AlreadyExists { operation } => {
-            authority_error(
-                ProjectCandidateErrorKind::HostAuthorityRejected,
-                "project.manifest.authority-rejected",
-                "Project manifest authority was rejected",
-                operation,
-            )
-        }
-        FsError::NotDirectory => authority_rejection("not-directory"),
-        FsError::NotRegularFile => authority_rejection("not-regular-file"),
-        FsError::ReparsePoint { .. } => authority_rejection("reparse-point"),
-        FsError::SymbolicLinkTraversal => authority_rejection("symbolic-link"),
-        FsError::CrossVolume => authority_rejection("cross-volume"),
-        FsError::MultipleLinks { .. } => authority_rejection("multiple-links"),
-        FsError::IdentityUnavailable => authority_rejection("identity-unavailable"),
-        FsError::CapabilitySessionExhausted => authority_rejection("capability-session-exhausted"),
-        FsError::IdentityMismatch { .. } => authority_rejection("identity-mismatch"),
-        FsError::TemporaryParentMismatch => authority_rejection("temporary-parent-mismatch"),
-        FsError::TargetStateMismatch => authority_rejection("target-state-mismatch"),
-        FsError::LockContended => authority_rejection("lock-contended"),
-        FsError::DigestMismatch { .. } => authority_rejection("digest-mismatch"),
-        _ => authority_rejection("unclassified-filesystem-rejection"),
-    }
-}
-
-fn path_rejection_id(error: PathValidationError) -> &'static str {
-    match error {
-        PathValidationError::Empty => "empty-relative-path",
-        PathValidationError::AbsoluteOrPrefixed => "absolute-or-prefixed-path",
-        PathValidationError::CurrentDirectory => "current-directory-component",
-        PathValidationError::ParentTraversal => "parent-traversal",
-        PathValidationError::EmptyComponent => "empty-path-component",
-        PathValidationError::ForbiddenCharacter => "forbidden-path-character",
-        PathValidationError::ReservedDeviceName => "reserved-device-name",
-        PathValidationError::ComponentTooLong => "path-component-too-long",
-        PathValidationError::PathTooLong => "relative-path-too-long",
-    }
-}
-
-fn project_io_error(source: std::io::Error) -> ProjectCandidateError {
-    host_io_error(FsOperation::Read, source.kind())
-}
-
-fn host_io_error(operation: FsOperation, kind: std::io::ErrorKind) -> ProjectCandidateError {
-    let diagnostic = diagnostic(
-        "project.manifest.host-io",
-        "Project manifest host I/O failed",
-    );
-    let diagnostic = with_public_identifier(diagnostic, "operation", fs_operation_id(operation));
-    let diagnostic = with_public_identifier(diagnostic, "io_kind", io_error_kind_id(kind));
-    ProjectCandidateError::single(
-        ProjectCandidateErrorKind::HostIo,
-        with_sensitive(diagnostic, "manifest_source"),
-    )
-}
-
-fn authority_error(
-    kind: ProjectCandidateErrorKind,
-    code: &'static str,
-    summary: &'static str,
-    operation: FsOperation,
-) -> ProjectCandidateError {
-    let diagnostic = with_public_identifier(
-        diagnostic(code, summary),
-        "operation",
-        fs_operation_id(operation),
-    );
-    ProjectCandidateError::single(kind, with_sensitive(diagnostic, "manifest_source"))
-}
-
-fn authority_rejection(reason: &'static str) -> ProjectCandidateError {
-    let diagnostic = with_public_identifier(
-        diagnostic(
-            "project.manifest.authority-rejected",
-            "Project manifest authority was rejected",
-        ),
-        "reason",
-        reason,
-    );
-    ProjectCandidateError::single(
-        ProjectCandidateErrorKind::HostAuthorityRejected,
-        with_sensitive(diagnostic, "manifest_source"),
-    )
-}
-
-fn manifest_too_large_error(actual: usize, limit: usize) -> ProjectCandidateError {
-    let diagnostic = diagnostic(
-        "project.manifest.too-large",
-        "Project manifest exceeds its byte limit",
-    );
-    let diagnostic = with_public_u64(
-        diagnostic,
-        "actual",
-        u64::try_from(actual).unwrap_or(u64::MAX),
-    );
-    let diagnostic = with_public_u64(
-        diagnostic,
-        "limit",
-        u64::try_from(limit).unwrap_or(u64::MAX),
-    );
-    ProjectCandidateError::single(ProjectCandidateErrorKind::ManifestTooLarge, diagnostic)
-}
-
-fn diagnostic(code: &'static str, summary: &'static str) -> Diagnostic {
-    Diagnostic::error(
-        DiagnosticCode::new(code).expect("project host diagnostic codes are engine-owned"),
-        SafeSummary::new(summary).expect("project host summaries are engine-owned"),
-    )
-}
-
-fn with_public_identifier(
-    diagnostic: Diagnostic,
-    key: &'static str,
-    value: &'static str,
-) -> Diagnostic {
-    let field = DiagnosticField::public_identifier(
-        field_key(key),
-        PublicDiagnosticIdentifier::new(value)
-            .expect("project host identifiers are engine-owned literals"),
-    );
-    attach_field(diagnostic, field)
-}
-
-fn with_public_u64(diagnostic: Diagnostic, key: &'static str, value: u64) -> Diagnostic {
-    attach_field(
-        diagnostic,
-        DiagnosticField::public_u64(field_key(key), value),
-    )
-}
-
-fn with_sensitive(diagnostic: Diagnostic, key: &'static str) -> Diagnostic {
-    attach_field(diagnostic, DiagnosticField::sensitive(field_key(key)))
-}
-
-fn field_key(key: &'static str) -> DiagnosticFieldKey {
-    DiagnosticFieldKey::new(key).expect("project host field keys are engine-owned")
-}
-
-fn attach_field(diagnostic: Diagnostic, field: DiagnosticField) -> Diagnostic {
-    diagnostic
-        .try_with_field(field)
-        .expect("project host diagnostics use unique bounded fields")
 }
