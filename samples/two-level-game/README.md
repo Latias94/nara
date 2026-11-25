@@ -227,6 +227,9 @@ On Windows, pass a fully qualified path such as `D:\GameSaves\checkpoint.json`. 
 does not choose the process working directory or silently create an arbitrary save parent. Omit
 `--save` for a session without persistence; K/L then report the absent application slot.
 
+Refresh the project's Schema cache with `nara schema samples/two-level-game --trusted` from the
+repository root. The exporter resolves the same game recipe as headless Play.
+
 To refresh the saved authoring bundle from this product's native schema providers, call
 `nara::project_tooling::invoke_project_tool` with `ProjectToolRequest::Schema { write: true, .. }`.
 

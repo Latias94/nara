@@ -3,6 +3,7 @@ name = "two-level-game"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
+default-run = "headless"
 publish = false
 
 [package.metadata.nara]
@@ -64,6 +65,11 @@ path = "src/lib.rs"
 [[bin]]
 name = "headless"
 path = "src/bin/headless.rs"
+required-features = ["development"]
+
+[[bin]]
+name = "nara_schema"
+path = "src/bin/nara_schema.rs"
 required-features = ["development"]
 
 [[bin]]
