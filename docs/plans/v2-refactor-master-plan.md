@@ -144,18 +144,17 @@ and Open-GPUI project Rust source moved from 678,381 to 668,470 lines. The works
 
 On Windows 11 with a GeForce RTX 4090 and DX12, the release shared-viewport example presented
 animated sprites and 480 tile cells in two peer native windows. A two-second sample on a 144 Hz
-display recorded 284 viewport submissions at 141.8 FPS and zero Inspector submissions. The viewport
+display recorded 291 viewport submissions at 144.5 FPS and zero Inspector submissions. The viewport
 replayed the same GPUI scene after each image update. The native smoke also verified resize,
 paused refresh, and shared-queue completion. A resource-pressure run reproduced a deferred
 texture allocation and verified that the viewport keeps its previous image and resumes after
 resize. [Example and measurement procedure](../../examples/shared-viewport/README.md)
 
 PIX exported 12 warmed-up Mode A frames with zero in-frame texture or buffer creations and zero
-texture copies in the application commands. The symbolized release timing trace recorded zero
-DX12 surface-acquisition wait stacks. Forcing WGPU's `Wait` option produced four such stacks on
-the same executable. The default trace recorded two driver-internal wait samples, one under
-command recording and one under present. The reason for each wait remains unresolved within the
-driver.
+texture copies in the application commands. The symbolized release timing trace found no GPU wait
+stacks in steady-state frame work. Forcing WGPU's DX12 `Wait` option on the same executable
+produced 83 surface-acquisition wait samples. Frame rate counts native submissions. Scanout is
+paced by the compositor.
 
 Windows manual testing exercised Microsoft Pinyin composition and candidate commit, and a viewport
 move from 150% to 125% DPI updated its physical render extent. During later automated retesting,
