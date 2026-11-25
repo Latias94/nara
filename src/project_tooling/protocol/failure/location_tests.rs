@@ -3,6 +3,7 @@ use nara_core::diagnostic::{
     DiagnosticCode, DiagnosticReportSettings, ReportDiagnostic as Diagnostic, SafeDisplayText,
     SafeSummary,
 };
+use std::{fs, path::PathBuf};
 
 fn failure() -> ProjectToolFailure {
     ProjectToolFailure::classified(
@@ -219,4 +220,116 @@ fn maximum_locations_and_summaries_still_fit_the_complete_failure_envelope() {
         .unwrap()
         .unwrap_err();
     assert_eq!(decoded, failure);
+}
+
+#[test]
+fn missing_startup_scene_diagnostic_preserves_the_selected_profile() {
+    use crate::{
+        ProductRecipe,
+        fs::RelativePath,
+        project_host::{ingest_project_manifest, resolve_product_recipe},
+        project_tooling::{ProjectToolRequest, execute, host_fs, protocol},
+    };
+
+    struct Project(PathBuf);
+    impl Drop for Project {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    let mut nonce = [0; 8];
+    getrandom::fill(&mut nonce).unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "nara-missing-startup-{:016x}",
+        u64::from_ne_bytes(nonce)
+    ));
+    fs::create_dir(&path).unwrap();
+    let project = Project(path);
+    for directory in ["assets", "scenes", "prefabs", "schema"] {
+        fs::create_dir(project.0.join(directory)).unwrap();
+    }
+    let base = r#"schema_version = 1
+[project]
+source_universe = "796b54db-7d94-51a0-9ca8-a19d46ce7b50"
+native_document_identity = "project_location"
+name = "Startup Scene Repair"
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+[authoring]
+state = "ready"
+schema_bundle = "schema/authoring.bundle.json"
+[startup]
+default_scene = "missing.scene.json"
+[runtime]
+preset = "local-headless"
+[capabilities]
+requested = ["runtime-2d"]
+"#;
+    for profile in [None, Some("tools".to_owned()), Some("a".repeat(128))] {
+        let manifest = match &profile {
+            Some(profile) => format!(
+                "{base}\n[profiles.{profile}.startup]\ndefault_scene = \"missing.scene.json\"\n"
+            ),
+            None => base.to_owned(),
+        };
+        fs::write(project.0.join("nara.toml"), manifest).unwrap();
+        let root = host_fs::readable_directory(&project.0).unwrap();
+        let manifest = root
+            .open_file(&RelativePath::new("nara.toml").unwrap())
+            .unwrap();
+        let candidate = ingest_project_manifest(&manifest, profile.as_deref()).unwrap();
+        let plan = resolve_product_recipe(&candidate, ProductRecipe::new()).unwrap();
+        let schema = plan
+            .schema_validation()
+            .authoring_schema_bundle()
+            .to_json_string()
+            .unwrap();
+        fs::write(project.0.join("schema/authoring.bundle.json"), schema).unwrap();
+
+        let error = execute(
+            ProjectToolRequest::Check {
+                project: project.0.clone(),
+                profile: profile.clone(),
+            },
+            ProductRecipe::new(),
+        )
+        .unwrap_err();
+        let response = protocol::encode_response("check", Err(error)).unwrap();
+        let bytes = serde_json::to_vec(&response).unwrap();
+        let failure = protocol::decode_response(&bytes, "check")
+            .unwrap()
+            .unwrap_err();
+        let hint = failure.repair_hint().unwrap();
+        assert_eq!(hint.scene(), Some("missing.scene.json"));
+        assert_eq!(hint.scenes_root(), Some("scenes"));
+        assert_eq!(hint.profile_selected(), profile.is_some());
+        let display = failure.to_string();
+        assert!(
+            display.contains("startup Scene `missing.scene.json` is missing"),
+            "{display}"
+        );
+        match profile.as_deref() {
+            Some("tools") => {
+                assert_eq!(hint.profile(), Some("tools"));
+                assert_eq!(failure.loss().withheld_repair_fields, 0);
+                assert!(display.contains("for profile `tools`"));
+            }
+            Some(withheld) => {
+                assert_eq!(hint.profile(), None);
+                assert_eq!(failure.loss().withheld_repair_fields, 1);
+                assert!(display.contains("for the selected profile"));
+                assert!(!display.contains(withheld));
+                assert!(!String::from_utf8_lossy(&bytes).contains(withheld));
+            }
+            None => {
+                assert_eq!(hint.profile(), None);
+                assert_eq!(failure.loss().withheld_repair_fields, 0);
+                assert!(!display.contains("for profile"));
+                assert!(!display.contains("for the selected profile"));
+            }
+        }
+    }
 }

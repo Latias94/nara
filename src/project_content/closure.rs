@@ -204,10 +204,8 @@ impl ProjectContentClosureReceipt {
     /// Returns the exact ordered runtime-directory and source-member plan admitted by this load.
     ///
     /// Unlike [`Self::content_digest`], this digest includes the manifest, authoring schema bundle,
-    /// runtime directory paths, and every member kind/path/digest tuple. Product and export
-    /// adapters use it to compare the executable's admitted startup observations with the startup
-    /// portion of the independently validated delivery plan. It does not attest bodies needed
-    /// only by Deferred references or physical file incarnation across processes or copied exports.
+    /// runtime directory paths, and every member kind/path/digest tuple. It covers the admitted
+    /// startup closure. Deferred bodies and physical file incarnations require their own checks.
     #[doc(hidden)]
     #[must_use]
     pub fn closure_plan_digest(&self) -> ContentDigest {
@@ -338,14 +336,6 @@ impl StartupContentClosureReceipt {
 
     pub(crate) fn project_root(&self) -> DirectoryCapability {
         self.content.project_root()
-    }
-
-    pub(crate) fn has_runtime_schema_agreement(&self) -> bool {
-        self.content.has_runtime_schema_agreement()
-    }
-
-    pub(crate) fn runtime_schema_bundle_digest(&self) -> Option<ContentDigest> {
-        self.content.runtime_schema_bundle_digest()
     }
 }
 

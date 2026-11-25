@@ -66,33 +66,16 @@ pub use composition::{
 #[cfg(feature = "project-tooling")]
 pub(crate) use ingest::read_manifest_profile;
 pub use ingest::{ProjectCandidateError, ProjectCandidateErrorKind, ingest_project_manifest};
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
-pub use product_launch::HeadlessProductRun;
 #[cfg(all(
     feature = "runtime-2d",
     feature = "serde",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
-pub use product_launch::{DesktopProductLaunch, DesktopProductLaunchError};
-#[cfg(feature = "runtime-core")]
+pub use product_launch::DesktopProductLaunch;
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub use product_launch::HeadlessProductRun;
 #[doc(hidden)]
-pub use product_launch::{
-    MAX_SUPERVISED_DESKTOP_EXECUTABLE_BYTES, MAX_SUPERVISED_DESKTOP_LAUNCH_CONTEXT_BYTES,
-    MAX_SUPERVISED_DESKTOP_READY_ATTESTATION_BYTES, ProductSupervisedDesktopBootstrapError,
-    ProductSupervisedDesktopLaunchCandidate, ProductSupervisedDesktopReadyAdvance,
-    ProductSupervisedDesktopReadyPublication, ProductSupervisedDesktopSession,
-    SUPERVISED_DESKTOP_LAUNCH_CONTEXT_VERSION, SUPERVISED_DESKTOP_READY_ATTESTATION_VERSION,
-    SUPERVISED_DESKTOP_READY_WRITE_TIMEOUT, SupervisedDesktopGenerationId,
-    SupervisedDesktopLaunchContext, SupervisedDesktopProductIdentity,
-    SupervisedDesktopReadyAttestation, SupervisedDesktopRuntimeClosureFacts,
-    SupervisedDesktopSessionNonce, SupervisedDesktopWireError,
-    supervised_desktop_ready_frame_length,
-};
-#[doc(hidden)]
-pub use product_launch::{
-    ProductProjectRootError, ProductProjectRootSource, resolve_product_project_root,
-};
 pub use product_launch::{open_explicit_product_project_root, open_product_project_root};
 #[cfg(feature = "serde")]
 mod runtime_pack;

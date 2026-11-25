@@ -10,7 +10,6 @@ use nara::{
     app::{App, FixedTime, RuntimeCandidateRetirementState},
     diagnostic::{DiagnosticReport, DiagnosticSeverity},
     project_host::load_project_app,
-    project_tooling::{ProductObservationTarget, record_product_observation},
 };
 use nara_reference_game::{ReferenceProductObservation, WaveSnapshot, bundled_wave_recipe};
 
@@ -67,7 +66,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let (mut app, closure) = match load_project_app(root, None, recipe) {
+    let (mut app, _) = match load_project_app(root, None, recipe) {
         Ok(loaded) => loaded,
         Err(error) => {
             emit_diagnostics(error.diagnostics());
@@ -83,13 +82,6 @@ fn main() -> ExitCode {
     let Ok(observation) = outcome else {
         return ExitCode::FAILURE;
     };
-    if let Err(error) = record_product_observation(ProductObservationTarget::Headless, &closure) {
-        emit_static_error(
-            "reference-game.product-observation.failed",
-            &error.to_string(),
-        );
-        return ExitCode::FAILURE;
-    }
     if let Err(error) = marker.verify_success() {
         let summary = error.to_string();
         emit_static_error(error.code(), &summary);

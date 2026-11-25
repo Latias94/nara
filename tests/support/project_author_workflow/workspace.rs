@@ -6,14 +6,11 @@ use std::{
 use nara::{
     asset::{AssetMeta, AssetMetaIdentity, AssetPath, AssetSourceKind, StableAssetId},
     project::{NativeDocumentIdentity, ProjectManifest},
-    project_workflow::ProjectStarter,
 };
 
-use crate::authored_project::create_authored_project;
+use crate::authored_project::{AuthoredFixture, create_authored_project};
 
 const PROJECT_SLUG: &str = "collect-game";
-const TEMPLATE_README: &str = include_str!("../../../starters/desktop-2d/v1/README.md");
-const GUIDE: &str = include_str!("../../../docs/guides/first-2d-game.md");
 
 pub struct Project {
     pub root: PathBuf,
@@ -27,8 +24,7 @@ pub struct Project {
 
 impl Project {
     pub fn create(checkout: &Path, parent: &Path) -> Self {
-        let root =
-            create_authored_project(checkout, parent, PROJECT_SLUG, ProjectStarter::Desktop2dV1);
+        let root = create_authored_project(checkout, parent, PROJECT_SLUG, AuthoredFixture::Basic);
         assert!(!root.starts_with(checkout));
         let generated_cargo = read_toml(&root.join("Cargo.toml"));
         let generated_entries = ["build.rs", "src/bin/cook.rs", "src/bin/player.rs"]
@@ -57,38 +53,19 @@ impl Project {
     }
 
     pub fn add_first_system(&self) {
-        let readme = TEMPLATE_README.replace("\r\n", "\n");
-        let (snippet, instructions) = readme
-            .split_once("### Your first fixed-step system")
-            .unwrap()
-            .1
-            .split_once("```rust\n")
-            .unwrap()
-            .1
-            .split_once("\n```")
-            .unwrap();
-        fs::write(self.root.join("src/first_step.rs"), snippet).unwrap();
-        let library = self.root.join("src/lib.rs");
-        let source = fs::read_to_string(&library).unwrap().replace("\r\n", "\n");
-        let recipe = instructions
-            .split_once("```rust\n")
-            .unwrap()
-            .1
-            .split_once("\n```")
-            .unwrap()
-            .0;
-        let start = source.find("pub fn product_recipe()").unwrap();
-        let end = start + source[start..].find("\n}\n").unwrap() + 2;
         fs::write(
-            library,
-            format!(
-                "mod first_step;\n{}{}{}",
-                &source[..start],
-                recipe,
-                &source[end..]
-            ),
+            self.root.join("src/first_step.rs"),
+            include_bytes!("../authored_project/first_step.rs"),
         )
         .unwrap();
+        let library = self.root.join("src/lib.rs");
+        let source = fs::read_to_string(&library).unwrap();
+        let source = source.replacen(
+            "nara::ProductRecipe::new()",
+            "nara::ProductRecipe::new()\n        .add_plugin::<first_step::FirstStepPlugin>()?",
+            1,
+        );
+        fs::write(library, format!("mod first_step;\n{source}")).unwrap();
         self.assert_identity();
     }
 
@@ -137,7 +114,7 @@ impl Project {
             .unwrap();
         let plugin = self.root.join("gameplay-plugin/Cargo.toml");
         let mut plugin_cargo = read_toml(&plugin);
-        plugin_cargo["dependencies"]["nara"]["path"] = format!("../{engine}").into();
+        plugin_cargo["dependencies"]["nara"]["path"] = engine.into();
         fs::write(plugin, toml::to_string_pretty(&plugin_cargo).unwrap()).unwrap();
 
         let metadata = AssetMeta::new(
@@ -153,24 +130,19 @@ impl Project {
             metadata.to_json_string().unwrap(),
         )
         .unwrap();
-        let guide = GUIDE.replace("\r\n", "\n");
-        let guide_recipe = guide
-            .split_once("### Keep one product recipe")
-            .unwrap()
-            .1
-            .split_once("```rust\n")
-            .unwrap()
-            .1
-            .split_once("\n```")
-            .unwrap()
-            .0;
+        let recipe = include_str!("../authored_project/collect_recipe.rs");
         let library = self.root.join("src/lib.rs");
         let source = fs::read_to_string(&library).unwrap().replace("\r\n", "\n");
         let start = source.find("pub fn product_recipe()").unwrap();
         let end = start + source[start..].find("\n}\n").unwrap() + 2;
         fs::write(
             library,
-            format!("{}{}{}", &source[..start], guide_recipe, &source[end..]),
+            format!(
+                "{}{}{}",
+                &source[..start],
+                recipe.trim_end(),
+                &source[end..]
+            ),
         )
         .unwrap();
 
@@ -178,17 +150,8 @@ impl Project {
         let source = fs::read_to_string(&cooker).unwrap();
         let marker = "project_rust_input_inventory(&project)?,";
         assert_eq!(source.matches(marker).count(), 1);
-        let replacement = guide
-            .split_once("### Declare the local plugin's Cook inputs")
-            .unwrap()
-            .1
-            .split_once("```rust,ignore\n")
-            .unwrap()
-            .1
-            .split_once("\n```")
-            .unwrap()
-            .0;
-        fs::write(cooker, source.replacen(marker, replacement, 1)).unwrap();
+        let inputs = include_str!("../authored_project/collect_cook_inputs.rs.in");
+        fs::write(cooker, source.replacen(marker, inputs.trim_end(), 1)).unwrap();
         self.assert_identity();
         self.assert_generated_entries();
     }

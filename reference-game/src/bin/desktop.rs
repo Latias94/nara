@@ -10,25 +10,19 @@ use nara::{
     app::AppExit,
     diagnostic::{DiagnosticReport, DiagnosticSeverity},
     fs::DirectoryCapability,
-    project_host::{
-        DesktopRun, DesktopRunOutcome, ProductSupervisedDesktopLaunchCandidate,
-        ProductSupervisedDesktopSession, StartupContentClosureReceipt,
-        SupervisedDesktopProductIdentity, load_project_app,
-    },
-    project_tooling::{ProductObservationTarget, record_product_observation},
+    project_host::{DesktopRun, DesktopRunOutcome, load_project_app},
 };
 use nara_reference_game::{desktop_wave_recipe, wave_desktop_intent};
 
 mod desktop_candidate_smoke;
 mod support;
 use desktop_candidate_smoke::candidate_smoke_run;
-use support::project_root::{open_explicit_project_root, open_project_root};
+use support::project_root::open_project_root;
 
 const CLEANUP_DEADLINE: Duration = Duration::from_secs(5);
 const CANDIDATE_SMOKE_ARGUMENT: &str = "--candidate-smoke";
 const VERIFY_FIRST_PRESENT_ARGUMENT: &str = "--verify-first-present";
 const CANDIDATE_SMOKE_SUCCESS: &str = "desktop_candidate_smoke: ok";
-const DESKTOP_BINARY_TARGET: &str = "desktop";
 const UI_OBSERVATION_ENV: &str = "NARA_REFERENCE_UI_OBSERVATION";
 
 fn main() -> ExitCode {
@@ -39,25 +33,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let supervised_candidate =
-        match ProductSupervisedDesktopLaunchCandidate::read_from_inherited_bootstrap() {
-            Ok(candidate) => candidate,
-            Err(_) => {
-                let diagnostic = supervised_bootstrap_diagnostic();
-                emit_static_error(&diagnostic.code, &diagnostic.summary);
-                return ExitCode::FAILURE;
-            }
-        };
-    if supervised_candidate.is_some() && !mode.accepts_supervised_activation() {
-        let diagnostic = supervised_mode_diagnostic();
-        emit_static_error(&diagnostic.code, &diagnostic.summary);
-        return ExitCode::FAILURE;
-    }
-    let project_root = match supervised_candidate.as_ref() {
-        Some(candidate) => open_explicit_project_root(candidate.context().project_root()),
-        None => open_project_root(),
-    };
-    let project_root = match project_root {
+    let project_root = match open_project_root() {
         Ok(project_root) => project_root,
         Err(error) => {
             let diagnostic = first_error_diagnostic(error.diagnostics());
@@ -65,35 +41,24 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let (mut run, observation) = if let Some(candidate) = supervised_candidate {
-        let session = match candidate.verify_project_source(&project_root) {
-            Ok(session) => session,
-            Err(_) => return emit_failure(supervised_source_diagnostic()),
-        };
-        match supervised_desktop_run(project_root, session) {
-            Ok(run) => (run, None),
-            Err(diagnostic) => return emit_failure(diagnostic),
+    let (mut run, observation) = match mode {
+        DesktopMode::Interactive => {
+            return match run_interactive_app(project_root) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(diagnostic) => emit_failure(diagnostic),
+            };
         }
-    } else {
-        match mode {
-            DesktopMode::Interactive => {
-                return match run_interactive_app(project_root) {
-                    Ok(()) => ExitCode::SUCCESS,
-                    Err(diagnostic) => emit_failure(diagnostic),
-                };
-            }
-            DesktopMode::CandidateSmoke => {
-                let (run, observation) = candidate_smoke_run(project_root);
-                (run, Some(observation))
-            }
-            DesktopMode::VerifyFirstPresent => (
-                DesktopRun::new(
-                    project_root,
-                    wave_desktop_intent().with_first_present_verification(),
-                ),
-                None,
+        DesktopMode::CandidateSmoke => {
+            let (run, observation) = candidate_smoke_run(project_root);
+            (run, Some(observation))
+        }
+        DesktopMode::VerifyFirstPresent => (
+            DesktopRun::new(
+                project_root,
+                wave_desktop_intent().with_first_present_verification(),
             ),
-        }
+            None,
+        ),
     };
     let exit = drive_desktop_process(
         || {
@@ -108,10 +73,12 @@ fn main() -> ExitCode {
                             .to_owned(),
                     });
                 }
-                if let Err(diagnostic) =
-                    record_desktop_product_observation(report.startup_content_closure())
-                {
-                    return DesktopProcessStep::Failed(diagnostic);
+                if report.startup_content_closure().is_none() {
+                    return DesktopProcessStep::Failed(ProcessDiagnostic {
+                        code: "reference-game.desktop.startup-closure-missing".to_owned(),
+                        summary: "Desktop run completed without its admitted startup closure"
+                            .to_owned(),
+                    });
                 }
             }
             lower_run_report(&report)
@@ -193,10 +160,6 @@ impl DesktopMode {
             ) => false,
         }
     }
-
-    const fn accepts_supervised_activation(self) -> bool {
-        matches!(self, Self::Interactive)
-    }
 }
 
 fn run_interactive_app(project_root: DirectoryCapability) -> Result<(), ProcessDiagnostic> {
@@ -204,7 +167,7 @@ fn run_interactive_app(project_root: DirectoryCapability) -> Result<(), ProcessD
         code: "project.run.composition-invalid".to_owned(),
         summary: "Reference desktop wave recipe could not be composed".to_owned(),
     })?;
-    let (mut app, closure) = load_project_app(project_root, Some("desktop"), recipe)
+    let (mut app, _) = load_project_app(project_root, Some("desktop"), recipe)
         .map_err(|error| first_error_diagnostic(error.diagnostics()))?;
     app.run().map_err(|error| {
         let (code, summary) = error.runtime_fault_detail().map_or(
@@ -219,38 +182,7 @@ fn run_interactive_app(project_root: DirectoryCapability) -> Result<(), ProcessD
             summary: summary.to_owned(),
         }
     })?;
-    record_desktop_product_observation(Some(&closure))
-}
-
-fn supervised_desktop_run(
-    project_root: DirectoryCapability,
-    session: ProductSupervisedDesktopSession,
-) -> Result<DesktopRun, ProcessDiagnostic> {
-    let profile = session.context().profile_name().to_owned();
-    let product_identity = SupervisedDesktopProductIdentity::from_cargo_product(
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION"),
-        DESKTOP_BINARY_TARGET,
-    )
-    .map_err(|_| product_identity_diagnostic())?;
-    let intent = wave_desktop_intent()
-        .with_profile(profile)
-        .with_supervised_desktop_activation(session, product_identity);
-    Ok(DesktopRun::new(project_root, intent))
-}
-
-fn record_desktop_product_observation(
-    closure: Option<&StartupContentClosureReceipt>,
-) -> Result<(), ProcessDiagnostic> {
-    closure
-        .ok_or_else(|| {
-            io::Error::other("desktop run completed without its admitted startup closure")
-        })
-        .and_then(|closure| record_product_observation(ProductObservationTarget::Desktop, closure))
-        .map_err(|error| ProcessDiagnostic {
-            code: "reference-game.product-observation.failed".to_owned(),
-            summary: error.to_string(),
-        })
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -314,34 +246,6 @@ fn generic_failure_diagnostic() -> ProcessDiagnostic {
     ProcessDiagnostic {
         code: "reference-game.desktop.failed".to_owned(),
         summary: "Desktop product action failed".to_owned(),
-    }
-}
-
-fn supervised_bootstrap_diagnostic() -> ProcessDiagnostic {
-    ProcessDiagnostic {
-        code: "reference-game.desktop.supervised-bootstrap-invalid".to_owned(),
-        summary: "Supervised desktop launch context could not be admitted".to_owned(),
-    }
-}
-
-fn supervised_mode_diagnostic() -> ProcessDiagnostic {
-    ProcessDiagnostic {
-        code: "reference-game.desktop.supervised-mode-invalid".to_owned(),
-        summary: "Supervised desktop launch is available only in interactive mode".to_owned(),
-    }
-}
-
-fn supervised_source_diagnostic() -> ProcessDiagnostic {
-    ProcessDiagnostic {
-        code: "reference-game.desktop.supervised-source-invalid".to_owned(),
-        summary: "Supervised desktop source facts could not be revalidated".to_owned(),
-    }
-}
-
-fn product_identity_diagnostic() -> ProcessDiagnostic {
-    ProcessDiagnostic {
-        code: "reference-game.desktop.product-identity-invalid".to_owned(),
-        summary: "Compiled desktop product identity is invalid".to_owned(),
     }
 }
 
@@ -464,9 +368,6 @@ mod tests {
             DesktopMode::Interactive
                 .accepts_completion(DesktopProcessExit::Success(AppExit::Requested))
         );
-        assert!(DesktopMode::Interactive.accepts_supervised_activation());
-        assert!(!DesktopMode::CandidateSmoke.accepts_supervised_activation());
-        assert!(!DesktopMode::VerifyFirstPresent.accepts_supervised_activation());
     }
 
     fn diagnostic(code: &str, summary: &str) -> ProcessDiagnostic {

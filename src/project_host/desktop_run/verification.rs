@@ -4,19 +4,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::fs::DirectoryCapability;
 use nara_app::{AppExit, RuntimeGeneration};
 
-use super::super::{
-    ProductSupervisedDesktopReadyAdvance, ProductSupervisedDesktopReadyPublication,
-    ProductSupervisedDesktopSession, StartupContentClosureReceipt,
-    SupervisedDesktopProductIdentity, SupervisedDesktopRuntimeClosureFacts,
-    SupervisedDesktopWireError,
-};
+use super::super::StartupContentClosureReceipt;
 
-pub(in crate::project_host) const DEFAULT_FIRST_PRESENT_TIMEOUT: Duration = Duration::from_secs(10);
-
-const READY_PUBLICATION_POLL_INTERVAL: Duration = Duration::from_millis(2);
+const FIRST_PRESENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Product-level proof that one checked startup closure reached the real desktop presentation path.
 ///
@@ -56,131 +48,60 @@ impl fmt::Debug for DesktopPresentationVerificationReceipt {
     }
 }
 
-#[derive(Debug)]
-pub(in crate::project_host) enum DesktopFirstPresentRequest {
-    VerificationCanary,
-    SupervisedActivation {
-        session: ProductSupervisedDesktopSession,
-        product_identity: SupervisedDesktopProductIdentity,
-    },
-}
-
-impl DesktopFirstPresentRequest {
-    pub(in crate::project_host) const fn label(&self) -> &'static str {
-        match self {
-            Self::VerificationCanary => "verification-canary",
-            Self::SupervisedActivation { .. } => "supervised-activation",
-        }
-    }
-
-    pub(in crate::project_host) fn is_bound_to_project_root(
-        &self,
-        project_root: &DirectoryCapability,
-    ) -> bool {
-        match self {
-            Self::VerificationCanary => true,
-            Self::SupervisedActivation { session, .. } => {
-                session.is_bound_to_project_root(project_root)
-            }
-        }
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct DesktopFirstPresentVerification {
-    shared: Arc<Mutex<DesktopFirstPresentState>>,
+    outcome: Arc<Mutex<DesktopFirstPresentOutcome>>,
 }
 
 impl DesktopFirstPresentVerification {
-    pub(in crate::project_host) fn new(request: DesktopFirstPresentRequest) -> Self {
+    pub(in crate::project_host) fn new() -> Self {
+        let deadline = Instant::now()
+            .checked_add(FIRST_PRESENT_TIMEOUT)
+            .expect("the bounded first-present timeout fits in Instant");
         Self {
-            shared: Arc::new(Mutex::new(DesktopFirstPresentState::Unarmed(request))),
+            outcome: Arc::new(Mutex::new(DesktopFirstPresentOutcome::Awaiting {
+                deadline,
+            })),
         }
     }
 
-    /// Advances only presentation verification and READY I/O, including idle maintenance.
+    /// Observes presentation or schedules an idle wake at the verification deadline.
     pub(crate) fn observe(
         &self,
         runtime_generation: RuntimeGeneration,
         presented: Option<nara_render::gpu::execution::WgpuPresentedFrameReceipt>,
         now: Instant,
     ) -> DesktopFirstPresentProgress {
-        let exit = match advance(&self.shared, runtime_generation, presented, now) {
-            DesktopFirstPresentAction::None => None,
-            DesktopFirstPresentAction::RequestSuccess => Some(AppExit::Success),
-            DesktopFirstPresentAction::RequestExit => Some(AppExit::Requested),
-        };
-        let next_wake = match &*lock(&self.shared) {
-            DesktopFirstPresentState::Awaiting { deadline, .. } => Some(*deadline),
-            DesktopFirstPresentState::Publishing { publication, .. } => Some(
-                now.checked_add(READY_PUBLICATION_POLL_INTERVAL)
-                    .unwrap_or(now)
-                    .min(publication.deadline()),
-            ),
-            _ => None,
+        let mut outcome = self.lock_outcome();
+        let (exit, next_wake) = if let DesktopFirstPresentOutcome::Awaiting { deadline } = *outcome
+        {
+            let exact_presentation =
+                presented.filter(|receipt| receipt.runtime_generation() == runtime_generation);
+            match first_present_decision(deadline, now, exact_presentation) {
+                DesktopFirstPresentDecision::Await => (None, Some(deadline)),
+                DesktopFirstPresentDecision::Accept(receipt) => {
+                    *outcome = DesktopFirstPresentOutcome::Accepted(receipt);
+                    (Some(AppExit::Success), None)
+                }
+                DesktopFirstPresentDecision::TimedOut => {
+                    *outcome = DesktopFirstPresentOutcome::TimedOut;
+                    (Some(AppExit::Requested), None)
+                }
+            }
+        } else {
+            (None, None)
         };
         DesktopFirstPresentProgress { exit, next_wake }
     }
 
-    pub(in crate::project_host) fn arm(
-        &self,
-        startup_content_closure: &StartupContentClosureReceipt,
-    ) -> Result<(), SupervisedDesktopWireError> {
-        let deadline = Instant::now()
-            .checked_add(DEFAULT_FIRST_PRESENT_TIMEOUT)
-            .expect("the bounded first-present timeout fits in Instant");
-        let mut state = lock(&self.shared);
-        let current = std::mem::replace(&mut *state, DesktopFirstPresentState::Transitioning);
-        let DesktopFirstPresentState::Unarmed(request) = current else {
-            *state = current;
-            return Err(SupervisedDesktopWireError::InvalidField(
-                "first-present activation state",
-            ));
-        };
-        let behavior = match request {
-            DesktopFirstPresentRequest::VerificationCanary => {
-                DesktopFirstPresentBehavior::ExitAfterAcceptedPresentation
-            }
-            DesktopFirstPresentRequest::SupervisedActivation {
-                session,
-                product_identity,
-            } => {
-                let runtime_closure = match runtime_closure_facts(startup_content_closure) {
-                    Ok(runtime_closure) => runtime_closure,
-                    Err(error) => {
-                        *state = DesktopFirstPresentState::Failed(
-                            DesktopFirstPresentFailure::RuntimeClosure,
-                        );
-                        return Err(error);
-                    }
-                };
-                DesktopFirstPresentBehavior::PublishSupervisedReady {
-                    session,
-                    product_identity,
-                    runtime_closure,
-                }
-            }
-        };
-        *state = DesktopFirstPresentState::Awaiting { deadline, behavior };
-        Ok(())
+    pub(in crate::project_host) fn outcome(&self) -> DesktopFirstPresentOutcome {
+        *self.lock_outcome()
     }
 
-    pub(in crate::project_host) fn outcome(&self) -> DesktopFirstPresentOutcome {
-        match &*lock(&self.shared) {
-            DesktopFirstPresentState::Unarmed(_) => DesktopFirstPresentOutcome::Unarmed,
-            DesktopFirstPresentState::Awaiting { .. } => DesktopFirstPresentOutcome::Awaiting,
-            DesktopFirstPresentState::Publishing { .. } => DesktopFirstPresentOutcome::Publishing,
-            DesktopFirstPresentState::Accepted(receipt) => {
-                DesktopFirstPresentOutcome::Accepted(*receipt)
-            }
-            DesktopFirstPresentState::TimedOut => DesktopFirstPresentOutcome::TimedOut,
-            DesktopFirstPresentState::Failed(failure) => {
-                DesktopFirstPresentOutcome::Failed(*failure)
-            }
-            DesktopFirstPresentState::Transitioning => {
-                DesktopFirstPresentOutcome::Failed(DesktopFirstPresentFailure::ReadyPublication)
-            }
-        }
+    fn lock_outcome(&self) -> MutexGuard<'_, DesktopFirstPresentOutcome> {
+        self.outcome
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -190,69 +111,10 @@ pub(crate) struct DesktopFirstPresentProgress {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::project_host) enum DesktopFirstPresentFailure {
-    RuntimeClosure,
-    ReadyPublication,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::project_host) enum DesktopFirstPresentOutcome {
-    Unarmed,
-    Awaiting,
-    Publishing,
+    Awaiting { deadline: Instant },
     Accepted(nara_render::gpu::execution::WgpuPresentedFrameReceipt),
     TimedOut,
-    Failed(DesktopFirstPresentFailure),
-}
-
-enum DesktopFirstPresentBehavior {
-    ExitAfterAcceptedPresentation,
-    PublishSupervisedReady {
-        session: ProductSupervisedDesktopSession,
-        product_identity: SupervisedDesktopProductIdentity,
-        runtime_closure: SupervisedDesktopRuntimeClosureFacts,
-    },
-}
-
-enum DesktopFirstPresentState {
-    Unarmed(DesktopFirstPresentRequest),
-    Awaiting {
-        deadline: Instant,
-        behavior: DesktopFirstPresentBehavior,
-    },
-    Publishing {
-        presented: nara_render::gpu::execution::WgpuPresentedFrameReceipt,
-        publication: ProductSupervisedDesktopReadyPublication,
-    },
-    Accepted(nara_render::gpu::execution::WgpuPresentedFrameReceipt),
-    TimedOut,
-    Failed(DesktopFirstPresentFailure),
-    Transitioning,
-}
-
-fn runtime_closure_facts(
-    receipt: &StartupContentClosureReceipt,
-) -> Result<SupervisedDesktopRuntimeClosureFacts, SupervisedDesktopWireError> {
-    let authoring_bundle_digest =
-        receipt
-            .runtime_schema_bundle_digest()
-            .ok_or(SupervisedDesktopWireError::InvalidField(
-                "runtime authoring bundle digest",
-            ))?;
-    SupervisedDesktopRuntimeClosureFacts::new(
-        receipt.manifest_digest(),
-        authoring_bundle_digest,
-        receipt.schema_fingerprint().to_hex(),
-        receipt.content_digest(),
-        receipt.closure_plan_digest(),
-    )
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DesktopFirstPresentAction {
-    None,
-    RequestSuccess,
-    RequestExit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -274,98 +136,6 @@ fn first_present_decision<T>(
     } else {
         DesktopFirstPresentDecision::Await
     }
-}
-
-fn advance(
-    shared: &Arc<Mutex<DesktopFirstPresentState>>,
-    runtime_generation: RuntimeGeneration,
-    presented: Option<nara_render::gpu::execution::WgpuPresentedFrameReceipt>,
-    now: Instant,
-) -> DesktopFirstPresentAction {
-    let mut state = lock(shared);
-    let current = std::mem::replace(&mut *state, DesktopFirstPresentState::Transitioning);
-    let (next, action) = match current {
-        DesktopFirstPresentState::Awaiting { deadline, behavior } => {
-            let exact_presentation =
-                presented.filter(|presented| presented.runtime_generation() == runtime_generation);
-            match first_present_decision(deadline, now, exact_presentation) {
-                DesktopFirstPresentDecision::TimedOut => (
-                    DesktopFirstPresentState::TimedOut,
-                    DesktopFirstPresentAction::RequestExit,
-                ),
-                DesktopFirstPresentDecision::Accept(presented) => match behavior {
-                    DesktopFirstPresentBehavior::ExitAfterAcceptedPresentation => (
-                        DesktopFirstPresentState::Accepted(presented),
-                        DesktopFirstPresentAction::RequestSuccess,
-                    ),
-                    DesktopFirstPresentBehavior::PublishSupervisedReady {
-                        session,
-                        product_identity,
-                        runtime_closure,
-                    } => match session.begin_ready(product_identity, runtime_closure, now) {
-                        Ok(mut publication) => match publication.advance(now) {
-                            Ok(ProductSupervisedDesktopReadyAdvance::Published) => (
-                                DesktopFirstPresentState::Accepted(presented),
-                                DesktopFirstPresentAction::None,
-                            ),
-                            Ok(ProductSupervisedDesktopReadyAdvance::Pending) => (
-                                DesktopFirstPresentState::Publishing {
-                                    presented,
-                                    publication,
-                                },
-                                DesktopFirstPresentAction::None,
-                            ),
-                            Err(_) => (
-                                DesktopFirstPresentState::Failed(
-                                    DesktopFirstPresentFailure::ReadyPublication,
-                                ),
-                                DesktopFirstPresentAction::RequestExit,
-                            ),
-                        },
-                        Err(_) => (
-                            DesktopFirstPresentState::Failed(
-                                DesktopFirstPresentFailure::ReadyPublication,
-                            ),
-                            DesktopFirstPresentAction::RequestExit,
-                        ),
-                    },
-                },
-                DesktopFirstPresentDecision::Await => (
-                    DesktopFirstPresentState::Awaiting { deadline, behavior },
-                    DesktopFirstPresentAction::None,
-                ),
-            }
-        }
-        DesktopFirstPresentState::Publishing {
-            presented,
-            mut publication,
-        } => match publication.advance(now) {
-            Ok(ProductSupervisedDesktopReadyAdvance::Published) => (
-                DesktopFirstPresentState::Accepted(presented),
-                DesktopFirstPresentAction::None,
-            ),
-            Ok(ProductSupervisedDesktopReadyAdvance::Pending) => (
-                DesktopFirstPresentState::Publishing {
-                    presented,
-                    publication,
-                },
-                DesktopFirstPresentAction::None,
-            ),
-            Err(_) => (
-                DesktopFirstPresentState::Failed(DesktopFirstPresentFailure::ReadyPublication),
-                DesktopFirstPresentAction::RequestExit,
-            ),
-        },
-        other => (other, DesktopFirstPresentAction::None),
-    };
-    *state = next;
-    action
-}
-
-fn lock(shared: &Arc<Mutex<DesktopFirstPresentState>>) -> MutexGuard<'_, DesktopFirstPresentState> {
-    shared
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[cfg(test)]
@@ -394,35 +164,13 @@ mod tests {
     }
 
     #[test]
-    fn timeout_requests_normal_exit_without_forging_acceptance() {
-        let shared = Arc::new(Mutex::new(DesktopFirstPresentState::Awaiting {
-            deadline: Instant::now(),
-            behavior: DesktopFirstPresentBehavior::ExitAfterAcceptedPresentation,
-        }));
-
-        assert_eq!(
-            advance(&shared, runtime_generation(), None, Instant::now()),
-            DesktopFirstPresentAction::RequestExit
-        );
-        assert!(matches!(
-            &*lock(&shared),
-            DesktopFirstPresentState::TimedOut
-        ));
-        assert_eq!(
-            advance(&shared, runtime_generation(), None, Instant::now()),
-            DesktopFirstPresentAction::None
-        );
-    }
-
-    #[test]
     fn idle_post_host_maintenance_wakes_at_deadline_and_exits_once() {
         let now = Instant::now();
         let deadline = now + Duration::from_secs(1);
         let generation = runtime_generation();
         let verification = DesktopFirstPresentVerification {
-            shared: Arc::new(Mutex::new(DesktopFirstPresentState::Awaiting {
+            outcome: Arc::new(Mutex::new(DesktopFirstPresentOutcome::Awaiting {
                 deadline,
-                behavior: DesktopFirstPresentBehavior::ExitAfterAcceptedPresentation,
             })),
         };
 
@@ -432,6 +180,7 @@ mod tests {
         let timed_out = verification.observe(generation, None, deadline);
         assert_eq!(timed_out.exit, Some(AppExit::Requested));
         assert_eq!(timed_out.next_wake, None);
+        assert_eq!(verification.outcome(), DesktopFirstPresentOutcome::TimedOut);
         let settled = verification.observe(generation, None, deadline);
         assert_eq!(settled.exit, None);
         assert_eq!(settled.next_wake, None);
@@ -458,28 +207,5 @@ mod tests {
             first_present_decision(deadline, after_deadline, Some(())),
             DesktopFirstPresentDecision::TimedOut
         );
-    }
-
-    #[test]
-    fn unarmed_verification_cannot_request_exit() {
-        let shared = Arc::new(Mutex::new(DesktopFirstPresentState::Unarmed(
-            DesktopFirstPresentRequest::VerificationCanary,
-        )));
-
-        assert_eq!(
-            advance(&shared, runtime_generation(), None, Instant::now()),
-            DesktopFirstPresentAction::None
-        );
-        assert!(matches!(
-            &*lock(&shared),
-            DesktopFirstPresentState::Unarmed(_)
-        ));
-    }
-
-    #[test]
-    fn supervised_activation_has_a_distinct_non_canary_mode() {
-        let canary = DesktopFirstPresentRequest::VerificationCanary;
-
-        assert_eq!(canary.label(), "verification-canary");
     }
 }

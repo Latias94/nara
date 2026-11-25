@@ -76,8 +76,7 @@ fn run(frames: NonZeroU32) -> Result<(), String> {
     .map_err(|error| error.to_string())?;
     let delta = base.plan().settings().runtime().fixed_time().timestep();
     let options = HeadlessRunOptions::frames(frames, delta);
-    let mut run =
-        HeadlessRun::<RuntimeFrameStatus>::from_runtime_content(base, options);
+    let mut run = HeadlessRun::<RuntimeFrameStatus>::from_runtime_content(base, options);
     let mut reported = false;
     loop {
         let report = run.execute_bounded();

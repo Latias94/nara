@@ -445,10 +445,43 @@ fn runtime_agreement_accepts_a_bundle_superset_and_rejects_divergence_or_unbound
 ))]
 #[test]
 fn typed_missing_startup_scene_issue_drives_one_explicit_repair() {
+    use nara::{
+        advanced_prelude::CurrentScene,
+        project_host::{HeadlessSession, HeadlessSessionClose},
+    };
+
     let project = TestProject::with_prefab_startup();
+    let marker = scene_id("repair");
+    let scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(marker.clone())]);
+    project.write_scene_source(&scene);
+    project.use_stable_native_identity();
+    let stable_id =
+        nara::asset::StableAssetId::parse_str("f12228c8-740f-4a2c-9ec1-bac91b72bf14").unwrap();
+    project.write_scene_meta(stable_id);
+    let boot = || {
+        let mut session = HeadlessSession::new(project.root_capability(), ProductRecipe::new());
+        session.start().unwrap();
+        session
+            .observe(|world| {
+                let current = CurrentScene::get(world).unwrap();
+                assert_eq!(current.source().roots(), std::slice::from_ref(&marker));
+            })
+            .unwrap();
+        let startup = session.startup_content_closure().unwrap().clone();
+        assert_eq!(session.close(), HeadlessSessionClose::Complete);
+        startup
+    };
+    let before = boot();
+
     fs::rename(
         project.path().join("scenes/startup.scene.json"),
         project.path().join("scenes/recovered.scene.json"),
+    )
+    .unwrap();
+    project.write_scene_meta_path("recovered.scene.json", stable_id);
+    fs::rename(
+        project.path().join("scenes/startup.scene.json.meta"),
+        project.path().join("scenes/recovered.scene.json.meta"),
     )
     .unwrap();
 
@@ -484,6 +517,19 @@ fn typed_missing_startup_scene_issue_drives_one_explicit_repair() {
     assert_eq!(
         receipt.startup_content().manifest_digest(),
         receipt.publication().manifest_digest()
+    );
+    assert_eq!(
+        receipt.publication().previous_manifest_digest(),
+        before.manifest_digest()
+    );
+    let after = boot();
+    assert_eq!(
+        after.content_closure().selected_scene_path().as_str(),
+        "recovered.scene.json"
+    );
+    assert_eq!(
+        after.content_digest(),
+        receipt.startup_content().content_digest()
     );
     let manifest = fs::read(project.path().join("nara.toml")).unwrap();
     let load = nara::project::ProjectManifest::parse_toml_bytes(&manifest);

@@ -7,7 +7,7 @@ use nara_core::diagnostic::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::project_workflow::{ProjectCheckError, ProjectExportBinaryTarget};
+use crate::project_workflow::ProjectCheckError;
 
 #[cfg(test)]
 mod location_tests;
@@ -30,8 +30,6 @@ pub enum ProjectToolFailureStage {
     ProjectAdmission,
     ContentAdmission,
     Schema,
-    ExportPreparation,
-    Publication,
     Acceptance,
     Repair,
 }
@@ -219,44 +217,6 @@ impl ProjectToolFailure {
                 profile,
                 profile_selected: issue.profile().is_some(),
             });
-        }
-        failure
-    }
-
-    pub(in crate::project_tooling) fn from_export_publication(
-        operation: &str,
-        orphaned: bool,
-        delivery: Option<(ProjectExportBinaryTarget, Option<&ProjectCheckError>)>,
-    ) -> Self {
-        let (code, summary) = if orphaned {
-            (
-                "project.tool.export-orphaned",
-                "Export left an orphaned candidate requiring cleanup",
-            )
-        } else {
-            (
-                "project.tool.export-rejected",
-                "Export publication was rejected",
-            )
-        };
-        let mut failure = Self::classified(
-            operation,
-            ProjectToolFailureStage::Publication,
-            code,
-            summary,
-        );
-        if let Some((target, check)) = delivery {
-            failure.summary.push_str(match target {
-                ProjectExportBinaryTarget::Headless => {
-                    ". Delivery verification failed for the staged default profile"
-                }
-                ProjectExportBinaryTarget::Desktop => {
-                    ". Delivery verification failed for the staged desktop profile"
-                }
-            });
-            if let Some(content) = check.and_then(ProjectCheckError::content_error) {
-                failure.project_report(content.diagnostics());
-            }
         }
         failure
     }

@@ -1,0 +1,44 @@
+[package]
+name = "nara-project-{universe}"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+build = "build.rs"
+
+[package.metadata.nara]
+project-tool-protocol = 1
+
+[workspace]
+resolver = "3"
+
+[dependencies]
+nara = {{ path = {nara_path}, default-features = false, features = ["runtime-2d", "serde", "project-tooling"] }}
+
+[features]
+default = []
+desktop = ["nara/presentation-2d", "nara/desktop-winit", "nara/render-wgpu"{gamepad_feature}]
+
+[lib]
+name = "nara_game"
+path = "src/lib.rs"
+
+[[bin]]
+name = "headless"
+path = "src/bin/headless.rs"
+
+[[bin]]
+name = "desktop"
+path = "src/bin/desktop.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "cook"
+path = "src/bin/cook.rs"
+
+[[bin]]
+name = "player"
+path = "src/bin/player.rs"
+
+[patch.crates-io]
+winit = {{ path = {winit_path} }}

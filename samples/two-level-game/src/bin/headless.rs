@@ -80,15 +80,8 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             }
-            let Some(closure) = report.startup_content_closure() else {
+            if report.startup_content_closure().is_none() {
                 eprintln!("missing startup evidence");
-                return ExitCode::FAILURE;
-            };
-            if let Err(error) = two_level_game::record_product_observation(
-                two_level_game::ProductObservationTarget::Headless,
-                closure,
-            ) {
-                eprintln!("product observation: {error}");
                 return ExitCode::FAILURE;
             }
             println!(

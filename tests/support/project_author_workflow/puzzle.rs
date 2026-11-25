@@ -8,11 +8,10 @@ use workflow::{Project, source};
 
 const SCENE: &str = "scenes/startup.scene.json";
 const DESKTOP_UNSUPPORTED_KEY: char = 'é';
-const RETAINED_STARTER_FILES: [&str; 9] = [
+const RETAINED_PROJECT_FILES: [&str; 8] = [
     "nara.toml",
     "Cargo.toml",
     "Cargo.lock",
-    "README.md",
     "scenes/startup.scene.json.meta",
     "build.rs",
     "src/bin/desktop.rs",
@@ -50,7 +49,7 @@ pub fn accept() {
     );
     fs::remove_file(probe_path).unwrap();
 
-    let starter_files = snapshot(&project.root, RETAINED_STARTER_FILES);
+    let project_files = snapshot(&project.root, RETAINED_PROJECT_FILES);
     let initial_input = fs::read(project.root.join(source::INPUT_MAP)).unwrap();
     source::assert_default_directions(&initial_input);
     let initial_schema = fs::read(project.root.join(source::SCHEMA)).unwrap();
@@ -124,8 +123,8 @@ pub fn accept() {
     super::check(&project.root, None).unwrap();
     assert_eq!(snapshot(&project.root, PUZZLE_FILES), puzzle_files);
     assert_eq!(
-        snapshot(&project.root, RETAINED_STARTER_FILES),
-        starter_files
+        snapshot(&project.root, RETAINED_PROJECT_FILES),
+        project_files
     );
 
     fs::write(
@@ -196,15 +195,8 @@ pub fn accept_native() {
     source::assert_puzzle_schema(&project.root);
     assert_eq!(fs::read(desktop_entry).unwrap(), generated);
     verify_first_present(&mut project, "puzzle-desktop");
-    let exported = project.export_candidate();
-    for path in [SCENE, source::INPUT_MAP, source::SCHEMA] {
-        assert_eq!(
-            fs::read(exported.join("project").join(path)).unwrap(),
-            fs::read(project.root.join(path)).unwrap(),
-        );
-    }
     println!(
-        "DESKTOP_2D_V2_NATIVE_OK starter_first_present=true puzzle_first_present=true source_export_observations=2 physical_input_tested=false"
+        "DESKTOP_2D_V2_NATIVE_OK starter_first_present=true puzzle_first_present=true physical_input_tested=false"
     );
 }
 
@@ -240,7 +232,9 @@ fn assert_desktop_keyboard_check(project: &Project) {
 }
 
 fn snapshot<const N: usize>(root: &Path, files: [&str; N]) -> [Vec<u8>; N] {
-    files.map(|file| fs::read(root.join(file)).unwrap())
+    files.map(|file| {
+        fs::read(root.join(file)).unwrap_or_else(|error| panic!("{file}: {error}"))
+    })
 }
 
 fn run_source(project: &mut Project, executable: &Path, input: &str) -> Output {

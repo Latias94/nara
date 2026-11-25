@@ -344,7 +344,6 @@ struct CapturedExecutableInner {
     digest: ContentDigest,
     provenance: CargoBuildProvenance,
     diagnostics: CargoDiagnostics,
-    original: FileCapability,
     original_path: PathBuf,
     retained_bytes: usize,
 }
@@ -396,7 +395,6 @@ impl CapturedCargoExecutable {
             digest,
             provenance,
             diagnostics: CargoDiagnostics::default(),
-            original,
             original_path: path.to_path_buf(),
         }))
     }
@@ -424,19 +422,6 @@ impl CapturedCargoExecutable {
 
     pub(crate) fn original_path(&self) -> &Path {
         &self.0.original_path
-    }
-
-    pub(crate) fn shared_bytes(&self) -> Arc<[u8]> {
-        Arc::clone(&self.0.bytes)
-    }
-
-    pub(crate) fn verify_original(&self) -> Result<(), CargoBuildFailure> {
-        let current = host_fs::readable_file(&self.0.original_path)?;
-        if !current.same_object(&self.0.original)? {
-            return Err(CargoBuildFailure::Stale);
-        }
-        current.verify_digest(self.0.digest, self.0.digest.length())?;
-        Ok(())
     }
 }
 
@@ -889,7 +874,6 @@ fn build_executable_inner(
         digest,
         provenance,
         diagnostics: observed.diagnostics().clone(),
-        original,
         original_path,
         retained_bytes,
     })))

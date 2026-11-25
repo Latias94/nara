@@ -46,9 +46,7 @@ pub use startup::{DesktopStartupPhase, DesktopStartupTimings};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use verification::DesktopPresentationVerificationReceipt;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-use verification::{
-    DesktopFirstPresentFailure, DesktopFirstPresentOutcome, DesktopFirstPresentVerification,
-};
+use verification::{DesktopFirstPresentOutcome, DesktopFirstPresentVerification};
 
 /// Desktop execution policy. Native retirement has its own finite drive budget.
 #[derive(Debug)]
@@ -529,40 +527,10 @@ impl DesktopRun {
                     ));
                     terminal = PendingDesktopTerminal::Failed;
                 }
-                DesktopFirstPresentOutcome::Awaiting => {
+                DesktopFirstPresentOutcome::Awaiting { .. } => {
                     self.diagnostics.extend(single_error(
                         "project.desktop.presentation-missing",
                         "Desktop runner exited before the first presentation was verified",
-                    ));
-                    terminal = PendingDesktopTerminal::Failed;
-                }
-                DesktopFirstPresentOutcome::Unarmed => {
-                    self.diagnostics.extend(single_error(
-                        "project.desktop.presentation-unarmed",
-                        "Desktop first-presentation verification was not armed",
-                    ));
-                    terminal = PendingDesktopTerminal::Failed;
-                }
-                DesktopFirstPresentOutcome::Publishing => {
-                    self.diagnostics.extend(single_error(
-                        "project.desktop.supervised-ready-incomplete",
-                        "Desktop runner exited before supervised READY publication completed",
-                    ));
-                    terminal = PendingDesktopTerminal::Failed;
-                }
-                DesktopFirstPresentOutcome::Failed(DesktopFirstPresentFailure::RuntimeClosure) => {
-                    self.diagnostics.extend(single_error(
-                        "project.desktop.supervised-runtime-closure-invalid",
-                        "Desktop supervised activation did not publish a strict Runtime closure",
-                    ));
-                    terminal = PendingDesktopTerminal::Failed;
-                }
-                DesktopFirstPresentOutcome::Failed(
-                    DesktopFirstPresentFailure::ReadyPublication,
-                ) => {
-                    self.diagnostics.extend(single_error(
-                        "project.desktop.supervised-ready-failed",
-                        "Desktop supervised READY publication failed closed",
                     ));
                     terminal = PendingDesktopTerminal::Failed;
                 }

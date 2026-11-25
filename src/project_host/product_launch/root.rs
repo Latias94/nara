@@ -96,19 +96,17 @@ fn host_directory(path: &Path) -> io::Result<File> {
 
 /// Explicit product-root sources accepted by Nara product entry points.
 ///
-/// Development and supervised launches carry an explicit absolute root. Packaged products may
-/// derive the sibling `project` directory from an executable installed under `bin` or `tools`.
+/// Development launches supply an explicit absolute root. Packaged products may derive the sibling
+/// `project` directory from an executable installed under `bin` or `tools`.
 /// No variant consults the current working directory.
-#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProductProjectRootSource<'a> {
+enum ProductProjectRootSource<'a> {
     Explicit(&'a Path),
     PackagedExecutable(&'a Path),
 }
 
 /// Resolves a product root without consulting the current working directory.
-#[doc(hidden)]
-pub fn resolve_product_project_root(
+fn resolve_product_project_root(
     source: ProductProjectRootSource<'_>,
 ) -> Result<PathBuf, ProductProjectRootError> {
     match source {
@@ -137,9 +135,8 @@ pub fn resolve_product_project_root(
     }
 }
 
-#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProductProjectRootError {
+enum ProductProjectRootError {
     PathMustBeAbsolute,
     PathContainsTraversal,
     ExecutableHasNoDirectory,
@@ -165,7 +162,7 @@ impl fmt::Display for ProductProjectRootError {
 
 impl Error for ProductProjectRootError {}
 
-pub(super) fn validate_absolute_path(
+fn validate_absolute_path(
     path: &Path,
     allow_root: bool,
 ) -> Result<PathBuf, ProductProjectRootError> {

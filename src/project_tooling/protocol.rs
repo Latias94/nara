@@ -41,16 +41,12 @@ fn parse_selected(
     let operation = arguments.next().ok_or("missing project tool operation")?;
     let mut project = None;
     let mut profile = None;
-    let mut parent = None;
-    let mut destination = None;
     let mut replacement = None;
-    let mut count = 0;
     while let Some(flag) = arguments.next() {
-        count += 1;
         let value = arguments
             .next()
             .ok_or("missing project tool option value")?;
-        if count > 5 || value.len() > MAX_ARGUMENT_BYTES {
+        if value.len() > MAX_ARGUMENT_BYTES {
             return Err("project tool request exceeds its bounded size");
         }
         match flag.to_str() {
@@ -58,8 +54,6 @@ fn parse_selected(
             Some("--profile") if profile.is_none() => {
                 profile = Some(value.into_string().map_err(|_| "profile must be Unicode")?)
             }
-            Some("--parent") if parent.is_none() => parent = Some(PathBuf::from(value)),
-            Some("--destination") if destination.is_none() => destination = Some(value),
             Some("--replacement") if replacement.is_none() => {
                 replacement = Some(
                     value
@@ -74,34 +68,21 @@ fn parse_selected(
         .filter(|path| path.is_absolute())
         .ok_or("project tool requires an explicit absolute project root")?;
     match operation.to_str() {
-        Some("check") if parent.is_none() && destination.is_none() && replacement.is_none() => {
+        Some("check") if replacement.is_none() => {
             Ok(ProjectToolRequest::Check { project, profile })
         }
-        Some("schema-check" | "schema-write")
-            if parent.is_none() && destination.is_none() && replacement.is_none() =>
-        {
+        Some("schema-check" | "schema-write") if replacement.is_none() => {
             Ok(ProjectToolRequest::Schema {
                 project,
                 profile,
                 write: operation.to_str() == Some("schema-write"),
             })
         }
-        Some("export") if profile.is_none() && replacement.is_none() => {
-            Ok(ProjectToolRequest::Export {
-                project,
-                parent: parent
-                    .filter(|path| path.is_absolute())
-                    .ok_or("export requires an explicit absolute parent")?,
-                destination: destination.ok_or("export requires a destination name")?,
-            })
-        }
-        Some("repair-startup-scene") if parent.is_none() && destination.is_none() => {
-            Ok(ProjectToolRequest::RepairStartupScene {
-                project,
-                profile,
-                replacement: replacement.ok_or("repair requires a replacement Scene")?,
-            })
-        }
+        Some("repair-startup-scene") => Ok(ProjectToolRequest::RepairStartupScene {
+            project,
+            profile,
+            replacement: replacement.ok_or("repair requires a replacement Scene")?,
+        }),
         _ => Err("unsupported project tool operation or options"),
     }
 }
@@ -117,12 +98,6 @@ pub(super) fn encode_response(
         }
         Ok(ProjectToolSummary::Schema { written }) => {
             json!({"version":1,"operation":operation,"success":true,"written":written})
-        }
-        Ok(ProjectToolSummary::Exported {
-            content_members,
-            product_observations,
-        }) => {
-            json!({"version":1,"operation":operation,"success":true,"content_members":content_members,"product_observations":product_observations})
         }
         Ok(ProjectToolSummary::Repaired { replacement }) => {
             json!({"version":1,"operation":operation,"success":true,"replacement":replacement})
@@ -154,7 +129,6 @@ struct RawResponse {
     operation: String,
     success: bool,
     content_members: Option<u64>,
-    product_observations: Option<u64>,
     written: Option<bool>,
     replacement: Option<String>,
     failure: Option<failure::RawFailure>,
@@ -174,7 +148,6 @@ pub(super) fn decode_response(
     if !value.success {
         if bytes.len() > failure::MAX_FAILURE_BYTES
             || value.content_members.is_some()
-            || value.product_observations.is_some()
             || value.written.is_some()
             || value.replacement.is_some()
         {
@@ -189,22 +162,11 @@ pub(super) fn decode_response(
         return Err("project tool success also reported a failure");
     }
     let fields_match = match operation {
-        "check" => {
-            value.product_observations.is_none()
-                && value.written.is_none()
-                && value.replacement.is_none()
-        }
+        "check" => value.written.is_none() && value.replacement.is_none(),
         "schema-check" | "schema-write" => {
-            value.content_members.is_none()
-                && value.product_observations.is_none()
-                && value.replacement.is_none()
+            value.content_members.is_none() && value.replacement.is_none()
         }
-        "export" => value.written.is_none() && value.replacement.is_none(),
-        "repair-startup-scene" => {
-            value.content_members.is_none()
-                && value.product_observations.is_none()
-                && value.written.is_none()
-        }
+        "repair-startup-scene" => value.content_members.is_none() && value.written.is_none(),
         _ => false,
     };
     if !fields_match {
@@ -225,14 +187,6 @@ pub(super) fn decode_response(
                 .written
                 .filter(|written| operation == "schema-write" || !*written)
                 .ok_or("invalid project tool schema publication outcome")?,
-        },
-        "export" => ProjectToolSummary::Exported {
-            content_members: count()?,
-            product_observations: value
-                .product_observations
-                .filter(|value| *value == 2)
-                .ok_or("invalid project tool product count")?
-                as usize,
         },
         "repair-startup-scene" => ProjectToolSummary::Repaired {
             replacement: value
@@ -329,7 +283,7 @@ mod tests {
             assert!(!error.contains("NARA_PRIVATE_SOURCE_CANARY"));
         }
         let mut response = encode_response("check", Err(ToolError::recipe(()))).unwrap();
-        assert!(decode_response(&serde_json::to_vec(&response).unwrap(), "export").is_err());
+        assert!(decode_response(&serde_json::to_vec(&response).unwrap(), "schema-check").is_err());
         response["failure"].as_object_mut().unwrap().remove("loss");
         assert!(decode_response(&serde_json::to_vec(&response).unwrap(), "check").is_err());
         let mut response = encode_response("check", Err(ToolError::recipe(()))).unwrap();
@@ -374,7 +328,7 @@ mod tests {
     #[test]
     fn unsupported_operations_and_schema_mutation_claims_are_rejected() {
         let project = std::env::current_dir().unwrap();
-        for operation in ["schema", "schema-delete", "run-untrusted"] {
+        for operation in ["export", "schema", "schema-delete", "run-untrusted"] {
             assert!(
                 parse_request([
                     OsString::from(TOOL_ARGUMENT),

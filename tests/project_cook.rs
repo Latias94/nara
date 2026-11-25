@@ -6,13 +6,15 @@
     )
 ))]
 
+#[path = "support/authored_project.rs"]
+mod authored_project;
 #[path = "support/project_content_fixture.rs"]
 mod content_fixture;
 #[path = "support/project_cook/mod.rs"]
 mod project_cook;
 
 #[test]
-#[ignore = "runs serial offline Rust 1.95.0 nested Cargo, generated-project Cook and a relocated source-free Player"]
+#[ignore = "runs serial offline Rust 1.95.0 nested Cargo, authored-project Cook and a relocated source-free Player"]
 fn generated_project_cooks_custom_game_and_runs_after_relocation() {
     project_cook::accept();
 }

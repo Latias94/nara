@@ -9,18 +9,13 @@ use nara::{
         AssetMeta, AssetMetaIdentity, AssetMetaIdentityCandidate, AssetPath, AssetRef,
         AssetSourceKind, StableAssetId,
     },
-    fs::RelativePath,
     project::{NativeDocumentIdentity, ProjectManifest},
-    project_tooling::host_fs,
-    project_workflow::{
-        LocalDependencyRelation, NaraDependencySource, ProjectCreationOutcome,
-        ProjectCreationRequest, ProjectSlug, ProjectStarter, prepare_desktop_2d_project,
-    },
     reflect::{ComponentSchemaVersion, ComponentTypeId, PersistentComponentProvider},
     scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord},
 };
 
 use super::game::{self, AuthoredScore};
+use crate::authored_project::{AuthoredFixture, create_authored_project};
 use crate::content_fixture::{identity_transform_record, image_meta, scene_id, sprite_value};
 
 const PROJECT_SLUG: &str = "independent-cooked-game";
@@ -37,38 +32,7 @@ impl Project {
     pub fn create(checkout: &Path, owned: &Path) -> Self {
         let games = owned.join("games with spaces");
         fs::create_dir(&games).unwrap();
-        let ancestor = host_fs::writable_directory(checkout).unwrap();
-        let coordinate = games
-            .strip_prefix(checkout)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .replace('\\', "/");
-        let relative = RelativePath::new(coordinate).unwrap();
-        let parent = ancestor.open_directory(&relative).unwrap();
-        let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
-            ProjectStarter::Desktop2dV1,
-            parent,
-            ProjectSlug::new(PROJECT_SLUG).unwrap(),
-            NaraDependencySource::local(LocalDependencyRelation::new(
-                ancestor,
-                None,
-                Some(relative),
-            )),
-        ))
-        .unwrap();
-        let outcome = prepared.publish();
-        let ProjectCreationOutcome::Created(receipt) = outcome else {
-            panic!("the real starter must publish and admit the independent project: {outcome:?}");
-        };
-        let root = games.join(PROJECT_SLUG).canonicalize().unwrap();
-        assert!(
-            receipt
-                .project_root()
-                .same_object(&host_fs::readable_directory(&root).unwrap())
-                .unwrap()
-        );
-        drop(receipt);
+        let root = create_authored_project(checkout, &games, PROJECT_SLUG, AuthoredFixture::Basic);
         let cargo: toml::Value =
             toml::from_str(&fs::read_to_string(root.join("Cargo.toml")).unwrap()).unwrap();
         let cargo_package_name = cargo["package"]["name"].as_str().unwrap().to_owned();

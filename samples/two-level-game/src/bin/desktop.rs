@@ -65,23 +65,14 @@ fn main() -> ExitCode {
     } else {
         recipe
     };
-    let launch = DesktopProductLaunch::from_cargo_product(
-        env!("CARGO_MANIFEST_DIR"),
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION"),
-        "desktop",
-        recipe,
-    );
-    let launch = match launch {
-        Ok(launch) if verify => launch.with_first_present_verification(),
-        Ok(launch) => launch,
-        Err(error) => {
-            eprintln!("{error}");
-            return ExitCode::FAILURE;
-        }
+    let launch = DesktopProductLaunch::new(env!("CARGO_MANIFEST_DIR"), recipe);
+    let launch = if verify {
+        launch.with_first_present_verification()
+    } else {
+        launch
     };
     let launch = if play_flow {
-        launch.with_standalone_profile("play-flow")
+        launch.with_profile("play-flow")
     } else {
         launch
     };
@@ -98,15 +89,8 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     if verify {
-        let Some(closure) = report.startup_content_closure() else {
+        if report.startup_content_closure().is_none() {
             eprintln!("missing startup evidence");
-            return ExitCode::FAILURE;
-        };
-        if let Err(error) = two_level_game::record_product_observation(
-            two_level_game::ProductObservationTarget::Desktop,
-            closure,
-        ) {
-            eprintln!("product observation: {error}");
             return ExitCode::FAILURE;
         }
         println!("two_level_desktop: ok first_present_verified=true");

@@ -17,11 +17,10 @@ const OVERSIZED_ID: &str = concat!(
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
     "b",
 );
-const OPERATIONS: [&str; 5] = [
+const OPERATIONS: [&str; 4] = [
     "check",
     "schema-check",
     "schema-write",
-    "export",
     "repair-startup-scene",
 ];
 
@@ -455,13 +454,6 @@ fn normal_success_shapes_and_operation_association_remain_canonical_protocol_one
         ),
         ("schema-write", ProjectToolSummary::Schema { written: true }),
         (
-            "export",
-            ProjectToolSummary::Exported {
-                content_members: 3,
-                product_observations: 2,
-            },
-        ),
-        (
             "repair-startup-scene",
             ProjectToolSummary::Repaired {
                 replacement: "level.scene".to_owned(),
@@ -474,7 +466,7 @@ fn normal_success_shapes_and_operation_association_remain_canonical_protocol_one
         assert_eq!(response["version"], 1);
         assert_eq!(decode_response(&bytes, operation), Ok(Ok(summary)));
         let other = if operation == "check" {
-            "export"
+            "schema-check"
         } else {
             "check"
         };

@@ -20,12 +20,11 @@ use nara::{
         ProjectToolFailure, ProjectToolInvocationError, ProjectToolRequest, ProjectToolSummary,
         cargo_build::CargoBuildFailure, invoke_project_tool,
     },
-    project_workflow::ProjectStarter,
 };
 
 #[path = "support/authored_project.rs"]
 mod authored_project;
-use authored_project::create_authored_project;
+use authored_project::{AuthoredFixture, create_authored_project};
 
 static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
 
@@ -46,7 +45,7 @@ fn compiled_project_tools_follow_selected_profile_capabilities() {
         checkout,
         parent.path(),
         "profile-selection",
-        ProjectStarter::Desktop2dV2,
+        AuthoredFixture::Actions,
     );
     let manifest_path = project.join("nara.toml");
     let mut manifest = read_manifest(&project);
@@ -151,7 +150,7 @@ fn compiled_project_tools_follow_selected_profile_capabilities() {
 
 #[test]
 #[ignore = "builds a real legacy headless binary and exercises compiled-tool bootstrap failures"]
-fn legacy_tool_entry_and_failed_bootstrap_never_launch_or_publish() {
+fn legacy_tool_entry_and_failed_bootstrap_never_launch_gameplay() {
     let checkout = Path::new(env!("CARGO_MANIFEST_DIR"));
     let root = TestRoot::new(&std::env::temp_dir(), "legacy-entry");
     let project = root.path();
@@ -172,12 +171,10 @@ fn legacy_tool_entry_and_failed_bootstrap_never_launch_or_publish() {
             .unwrap(),
     );
 
-    let destination = "must-stay-absent";
     let invoke = || {
-        invoke_project_tool(ProjectToolRequest::Export {
+        invoke_project_tool(ProjectToolRequest::Check {
             project: project.to_path_buf(),
-            parent: project.to_path_buf(),
-            destination: destination.into(),
+            profile: None,
         })
     };
     for protocol in [None, Some(2), Some(999)] {
@@ -191,7 +188,6 @@ fn legacy_tool_entry_and_failed_bootstrap_never_launch_or_publish() {
         };
         assert!(message.contains("project-tool-protocol = 1"), "{message}");
         assert!(!project.join("gameplay.txt").exists());
-        assert!(!project.join(destination).exists());
     }
     fs::write(
         project.join("Cargo.toml"),
@@ -219,15 +215,13 @@ fn legacy_tool_entry_and_failed_bootstrap_never_launch_or_publish() {
         "{diagnostics:?}"
     );
     assert!(!project.join("gameplay.txt").exists());
-    assert!(!project.join(destination).exists());
 }
 
 #[test]
-fn generated_project_is_an_independent_cargo_product() {
+fn authored_fixture_is_an_independent_cargo_product() {
     let checkout = Path::new(env!("CARGO_MANIFEST_DIR"));
     let parent = TestRoot::new(checkout.parent().unwrap(), "independent");
-    let project =
-        create_authored_project(checkout, parent.path(), "nara", ProjectStarter::Desktop2dV1);
+    let project = create_authored_project(checkout, parent.path(), "nara", AuthoredFixture::Basic);
     let manifest = read_manifest(&project);
     assert_eq!(manifest.project.name, "nara");
     assert_eq!(manifest.project.stable_id.as_deref(), Some("nara"));

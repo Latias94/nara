@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, convert::Infallible, fmt, mem::size_of, sync::Arc};
 
-use crate::fs::{ContentDigest, DirectoryCapability, FileIdentity};
+use crate::fs::{ContentDigest, FileIdentity};
 use nara_asset::{AssetSourcePath, StableAssetId};
 use nara_project::ProjectPath;
 use nara_reflect::SchemaCompositionFingerprint;
@@ -115,14 +115,6 @@ impl ProjectContentDeliveryReceipt {
     #[must_use]
     pub fn schema_fingerprint(&self) -> SchemaCompositionFingerprint {
         self.inner.startup.schema_fingerprint()
-    }
-
-    pub(crate) fn project_root(&self) -> DirectoryCapability {
-        self.inner.startup.project_root()
-    }
-
-    pub(crate) fn runtime_directories(&self) -> &[ProjectPath] {
-        self.inner.startup.runtime_directories()
     }
 
     pub(crate) fn reserve_consumer_retained(

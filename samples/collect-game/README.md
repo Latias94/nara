@@ -80,16 +80,4 @@ Close the game, copy the variant over `prefabs/player.prefab.json`, run `nara ch
 and launch the desktop game again. Keep the original file in version control to
 restore the default.
 
-## Export
-
-For a source-carrying candidate, call `nara::project_tooling::invoke_project_tool` with
-`ProjectToolRequest::Export`. Choose an existing output parent and a new destination name.
-Run the published `bin/headless` and
-`bin/desktop --verify-first-present` from an unrelated working directory; add
-`.exe` on Windows. Both resolve the sibling `project/` content tree. The image,
-player Prefab and scene are in the startup closure. The inactive variant is not
-part of that closure. This is a source-carrying development/verification
-candidate, not formal release packaging or a complete editable project backup.
-
-Follow the [first-game guide](../../docs/guides/first-2d-game.md) from the engine
-repository to create, edit, and run an independent copy.
+Follow the [first-game guide](../../docs/guides/first-2d-game.md) to start a new code-first game.

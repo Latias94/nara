@@ -43,6 +43,3 @@ pub use gameplay::{
 #[cfg(feature = "local-player")]
 pub use gameplay::{configured_recipe, cooked_recipe, flow, input, product_recipe};
 pub use host::{open_explicit_project_root, open_project_root};
-#[cfg(feature = "development")]
-#[doc(hidden)]
-pub use nara::project_tooling::{ProductObservationTarget, record_product_observation};

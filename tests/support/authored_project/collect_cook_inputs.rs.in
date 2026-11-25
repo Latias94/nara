@@ -1,0 +1,7 @@
+project_rust_input_inventory(&project)?.into_iter().chain([
+    "gameplay-plugin/Cargo.toml",
+    "gameplay-plugin/src/lib.rs",
+    "gameplay-plugin/src/input.rs",
+    "gameplay-plugin/src/walking.rs",
+    "gameplay-plugin/schema/component-schema-generation-1.json",
+].into_iter().map(|path| RelativePath::new(path).expect("fixed local plugin input"))),

@@ -44,7 +44,7 @@ def check_rust_sources():
     )
     files = subprocess.check_output(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--",
-         "src", "crates", "examples", "reference-game", "samples", "starters", "tests"],
+         "src", "crates", "examples", "reference-game", "samples", "tests"],
         encoding="utf-8",
     ).split("\0")
     for path in sorted(set(files)):

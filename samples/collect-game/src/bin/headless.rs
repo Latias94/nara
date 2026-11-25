@@ -63,15 +63,8 @@ fn main() -> ExitCode {
                 eprintln!("unexpected collection-game outcome: {outcome:?}");
                 return ExitCode::FAILURE;
             }
-            let Some(closure) = report.startup_content_closure() else {
+            if report.startup_content_closure().is_none() {
                 eprintln!("headless run completed without startup-content evidence");
-                return ExitCode::FAILURE;
-            };
-            if let Err(error) = nara_game::record_product_observation(
-                nara_game::ProductObservationTarget::Headless,
-                closure,
-            ) {
-                eprintln!("failed to record headless product observation: {error}");
                 return ExitCode::FAILURE;
             }
             println!(

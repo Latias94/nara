@@ -1476,26 +1476,5 @@ exact-tick API intentionally omits ordinary gameplay frame stages. This finite s
 neither is a gameplay performance guarantee or an interrupt of a blocked synchronous operation.
 Travel, fresh-process save/restore and retained-source Retry pass the sample's 24-test Windows
 cohort. The November 13 release-mode CPU/headless cohort passes 32/32, including both marker
-recovery trajectories and the original save/travel controls. The earlier release export
-separately passes both startup product observations and the same three
-travel/save/restore operations from an unrelated directory. This does not qualify other platforms
-or a complete interactive desktop control trajectory.
-
-## Source-Carrying Development Export
-
-For a development candidate, call `nara::project_tooling::invoke_project_tool` with
-`ProjectToolRequest::Export`. Choose an existing output parent and a new destination name.
-For a source-free installation, use the [cooked Player workflow](#source-free-cooked-player).
-
-The destination must be absent. Run `bin/headless --verify-travel` and the two checkpoint commands
-from an unrelated directory; use `.exe` on Windows. `bin/desktop --verify-first-present` verifies
-actual first presentation through the ordinary shutdown path. Both declared level sources and their
-Images/metadata are delivered in the sibling `project/` tree. This is a source-carrying development
-candidate, with checkpoint location still chosen by the application, rather than a full project backup.
-
-Export uses the existing protocol-2 headless/desktop targets. It checks every declared Scene for
-the base Headless settings and again for the `desktop` profile. The sibling `project/` tree carries
-the union of both complete deliveries, including profile-specific files for Cavern. Each executable
-still has its own startup agreement. If the packaged tree exists, it is the executable's source
-authority. The five-file build-input observation covers the selected entry sources and manifests.
-Cargo compiles gameplay modules through its ordinary dependency graph.
+recovery trajectories and the original save/travel controls. For a standalone installation, follow
+the [cooked Player workflow](#source-free-cooked-player).

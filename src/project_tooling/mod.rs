@@ -1,7 +1,7 @@
 //! Native adapters for tools hosted by a compiled project's existing headless executable.
 //!
-//! The native adapter discovers and builds that executable. Strict content admission, export build
-//! agreement, and publication stay in the project process with its own typed product recipe.
+//! The native adapter builds that executable. Strict content admission, Schema refresh, and
+//! startup Scene repair run in the project process with its typed product recipe.
 
 use std::{
     ffi::OsString,
@@ -12,27 +12,20 @@ use std::{
 
 use crate::{
     ProductRecipe,
-    project_workflow::{
-        ProjectCheckRequest, ProjectExportMemberKind, ProjectExportOrphan, ProjectExportRejection,
-        check_project,
-    },
+    project_workflow::{ProjectCheckRequest, check_project},
 };
 use thiserror::Error;
 
 mod bootstrap;
 pub mod cargo_build;
-mod export;
 pub mod host_fs;
 pub mod player_package;
 pub mod process;
-mod product_observation;
 pub mod project_cook;
 mod protocol;
 mod schema;
 
 pub use bootstrap::{ProjectToolInvocationError, invoke_project_tool};
-#[doc(hidden)]
-pub use product_observation::{ProductObservationTarget, record_product_observation};
 pub use protocol::{
     ProjectToolDiagnostic, ProjectToolDiagnosticLoss, ProjectToolFailure, ProjectToolFailureStage,
     ProjectToolRepairHint,
@@ -49,11 +42,6 @@ pub enum ProjectToolRequest {
         profile: Option<String>,
         write: bool,
     },
-    Export {
-        project: PathBuf,
-        parent: PathBuf,
-        destination: OsString,
-    },
     RepairStartupScene {
         project: PathBuf,
         profile: Option<String>,
@@ -66,7 +54,6 @@ impl ProjectToolRequest {
         match self {
             Self::Check { project, .. }
             | Self::Schema { project, .. }
-            | Self::Export { project, .. }
             | Self::RepairStartupScene { project, .. } => project,
         }
     }
@@ -76,7 +63,6 @@ impl ProjectToolRequest {
             Self::Check { profile, .. }
             | Self::Schema { profile, .. }
             | Self::RepairStartupScene { profile, .. } => profile.as_deref(),
-            Self::Export { .. } => None,
         }
     }
 
@@ -85,7 +71,6 @@ impl ProjectToolRequest {
             Self::Check { .. } => "check",
             Self::Schema { write: false, .. } => "schema-check",
             Self::Schema { write: true, .. } => "schema-write",
-            Self::Export { .. } => "export",
             Self::RepairStartupScene { .. } => "repair-startup-scene",
         }
     }
@@ -94,19 +79,9 @@ impl ProjectToolRequest {
 /// Bounded observations for display. This value carries no filesystem or publication authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectToolSummary {
-    Checked {
-        content_members: usize,
-    },
-    Schema {
-        written: bool,
-    },
-    Exported {
-        content_members: usize,
-        product_observations: usize,
-    },
-    Repaired {
-        replacement: String,
-    },
+    Checked { content_members: usize },
+    Schema { written: bool },
+    Repaired { replacement: String },
 }
 
 /// Runs explicit project tool mode before argument parsing or gameplay startup.
@@ -158,12 +133,6 @@ enum ToolError {
     Directory(#[from] host_fs::HostDirectoryError),
     #[error(transparent)]
     Check(#[from] crate::project_workflow::ProjectCheckError),
-    #[error(transparent)]
-    Export(#[from] export::ExportCommandError),
-    #[error(transparent)]
-    ExportRejected(Box<ProjectExportRejection>),
-    #[error(transparent)]
-    ExportOrphaned(Box<ProjectExportOrphan>),
     #[error("startup Scene repair failed")]
     Repair(crate::project_workflow::ProjectStartupSceneRepairError),
     #[error("the manifest was published but repair acceptance could not be established")]
@@ -204,31 +173,10 @@ impl ToolError {
                 "The selected project directory is unavailable",
             ),
             Self::Schema(error) => return ProjectToolFailure::from_schema(operation, *error),
-            Self::Check(error) | Self::Export(export::ExportCommandError::ProjectCheck(error)) => {
-                return ProjectToolFailure::from_check(operation, error);
-            }
+            Self::Check(error) => return ProjectToolFailure::from_check(operation, error),
             Self::Repair(error) => return ProjectToolFailure::from_repair(operation, error),
             Self::RepairPublished(outcome) => {
                 return ProjectToolFailure::from_repair_postcheck(operation, outcome.error());
-            }
-            Self::Export(_) => (
-                Stage::ExportPreparation,
-                "project.tool.export-preparation-failed",
-                "Export preparation failed before publication",
-            ),
-            Self::ExportRejected(rejection) => {
-                return ProjectToolFailure::from_export_publication(
-                    operation,
-                    false,
-                    rejection.staged_delivery_failure(),
-                );
-            }
-            Self::ExportOrphaned(orphan) => {
-                return ProjectToolFailure::from_export_publication(
-                    operation,
-                    true,
-                    orphan.staged_delivery_failure(),
-                );
             }
             Self::Operation {
                 stage,
@@ -245,13 +193,6 @@ pub(crate) fn test_schema_failure_protocol_roundtrip(
     error: crate::project_host::schema::SchemaRefreshError,
 ) -> ProjectToolFailure {
     test_failure_protocol_roundtrip("schema-write", ToolError::Schema(error))
-}
-
-#[cfg(test)]
-pub(crate) fn test_export_orphan_protocol_roundtrip(
-    orphan: ProjectExportOrphan,
-) -> ProjectToolFailure {
-    test_failure_protocol_roundtrip("export", ToolError::ExportOrphaned(Box::new(orphan)))
 }
 
 #[cfg(test)]
@@ -285,54 +226,6 @@ fn execute(
             profile,
             write,
         } => schema::execute(project, profile, write, recipe),
-        ProjectToolRequest::Export {
-            project,
-            parent,
-            destination,
-        } => {
-            match export::execute(
-                export::ExportArguments {
-                    project,
-                    parent,
-                    destination,
-                },
-                recipe,
-            )? {
-                export::ExportCommandOutcome::Accepted {
-                    receipt,
-                    acceptance,
-                } => Ok(ProjectToolSummary::Exported {
-                    content_members: receipt
-                        .plan()
-                        .members()
-                        .iter()
-                        .filter(|member| {
-                            matches!(member.kind(), ProjectExportMemberKind::Content(_))
-                        })
-                        .count(),
-                    product_observations: acceptance.products().len(),
-                }),
-                export::ExportCommandOutcome::Rejected(rejection) => {
-                    Err(ToolError::ExportRejected(Box::new(rejection)))
-                }
-                export::ExportCommandOutcome::Orphaned(orphan) => {
-                    Err(ToolError::ExportOrphaned(Box::new(orphan)))
-                }
-                export::ExportCommandOutcome::Unresolved(_unresolved) => Err(ToolError::operation(
-                    ProjectToolFailureStage::Publication,
-                    "project.tool.export-unresolved",
-                    "Export publication has an unresolved outcome",
-                )),
-                export::ExportCommandOutcome::PublishedButUnaccepted {
-                    receipt: _receipt,
-                    error: _error,
-                } => Err(ToolError::operation(
-                    ProjectToolFailureStage::Acceptance,
-                    "project.tool.export-published-unaccepted",
-                    "The export candidate was published but acceptance failed",
-                )),
-            }
-        }
         ProjectToolRequest::RepairStartupScene {
             project,
             profile,

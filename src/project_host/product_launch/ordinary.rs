@@ -1,19 +1,13 @@
-//! Ordinary desktop launch owns bootstrap, source authority and process cleanup policy.
+//! Ordinary desktop launch owns source selection and process cleanup policy.
 
 use std::{
-    error::Error,
-    fmt,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
 use crate::fs::FsError;
 
-use super::{
-    PRODUCT_CLEANUP_TIMEOUT, ProductSupervisedDesktopBootstrapError,
-    ProductSupervisedDesktopLaunchCandidate, SupervisedDesktopProductIdentity,
-    SupervisedDesktopWireError, open_explicit_product_project_root, open_product_project_root,
-};
+use super::{PRODUCT_CLEANUP_TIMEOUT, open_product_project_root};
 use crate::{
     ProductRecipe,
     project_host::{DesktopRun, DesktopRunIntent, DesktopRunOutcome, DesktopRunReport},
@@ -21,57 +15,35 @@ use crate::{
 
 /// The ordinary process entrypoint for one Cargo desktop product.
 ///
-/// Game code supplies its development root, Cargo identity and recipe. This owner selects packaged
-/// or supervised source, verifies inherited source facts, drives the first-party desktop Host and
-/// completes retained cleanup. Use [`DesktopRun`] directly for an embedded Host that owns its own
-/// event-loop or incomplete-cleanup policy.
+/// The launch uses the packaged project or opens the game's development root. It drives the
+/// desktop host and completes retained cleanup.
+/// Use [`DesktopRun`] directly when an embedded Host owns its event loop or cleanup policy.
 #[derive(Debug)]
 pub struct DesktopProductLaunch {
     development_root: PathBuf,
-    identity: SupervisedDesktopProductIdentity,
     recipe: ProductRecipe,
-    standalone_profile: String,
+    profile: String,
     verify_first_present: bool,
 }
 
 impl DesktopProductLaunch {
-    /// Binds the product identity shared by Cargo delivery and supervised Editor Play.
-    pub fn from_cargo_product(
-        development_root: impl AsRef<Path>,
-        package_name: &str,
-        package_version: &str,
-        binary_target_name: &str,
-        recipe: ProductRecipe,
-    ) -> Result<Self, DesktopProductLaunchError> {
-        let identity = SupervisedDesktopProductIdentity::from_cargo_product(
-            package_name,
-            package_version,
-            binary_target_name,
-        )
-        .map_err(DesktopProductLaunchError::ProductIdentity)?;
-        Ok(Self {
+    pub fn new(development_root: impl AsRef<Path>, recipe: ProductRecipe) -> Self {
+        Self {
             development_root: development_root.as_ref().to_path_buf(),
-            identity,
             recipe,
-            standalone_profile: "desktop".into(),
+            profile: "desktop".into(),
             verify_first_present: false,
-        })
+        }
     }
 
     /// Selects the manifest profile for a standalone launch, defaulting to `desktop`.
-    ///
-    /// An inherited supervised launch retains its original Host-selected profile and source
-    /// agreement. This setting does not override that authority or the Cargo binary identity.
     #[must_use]
-    pub fn with_standalone_profile(mut self, profile: impl Into<String>) -> Self {
-        self.standalone_profile = profile.into();
+    pub fn with_profile(mut self, profile: impl Into<String>) -> Self {
+        self.profile = profile.into();
         self
     }
 
     /// Requests bounded first-presentation verification for a standalone verification run.
-    ///
-    /// Supervised Editor Play already has its own first-presentation attestation and rejects this
-    /// additional mode before opening source or starting the runtime.
     #[must_use]
     pub fn with_first_present_verification(mut self) -> Self {
         self.verify_first_present = true;
@@ -83,45 +55,18 @@ impl DesktopProductLaunch {
     /// The report includes pending participants and any cleanup failure. An embedded host that
     /// needs to retain ownership for later retries can continue driving a [`DesktopRun`]. The
     /// deadline is checked between cleanup drives, so callbacks must return promptly.
-    pub fn run(self) -> Result<DesktopRunReport, DesktopProductLaunchError> {
-        let candidate = ProductSupervisedDesktopLaunchCandidate::read_from_inherited_bootstrap()
-            .map_err(DesktopProductLaunchError::SupervisedBootstrap)?;
-        Ok(finish_product_run(
-            self.prepare(candidate)?,
-            PRODUCT_CLEANUP_TIMEOUT,
-        ))
+    pub fn run(self) -> Result<DesktopRunReport, FsError> {
+        Ok(finish_product_run(self.prepare()?, PRODUCT_CLEANUP_TIMEOUT))
     }
 
-    fn prepare(
-        self,
-        candidate: Option<ProductSupervisedDesktopLaunchCandidate>,
-    ) -> Result<DesktopRun, DesktopProductLaunchError> {
-        if self.verify_first_present && candidate.is_some() {
-            return Err(DesktopProductLaunchError::ConflictingPresentationModes);
-        }
-        let project_root = match candidate.as_ref() {
-            Some(candidate) => {
-                open_explicit_product_project_root(candidate.context().project_root())
-            }
-            None => open_product_project_root(&self.development_root),
-        }
-        .map_err(DesktopProductLaunchError::ProjectSource)?;
-        let session = candidate
-            .map(|candidate| candidate.verify_project_source(&project_root))
-            .transpose()
-            .map_err(DesktopProductLaunchError::SupervisedBootstrap)?;
-        let profile = session
-            .as_ref()
-            .map(|session| session.context().profile_name())
-            .unwrap_or(&self.standalone_profile);
-        let intent = DesktopRunIntent::new()
-            .with_profile(profile)
+    fn prepare(self) -> Result<DesktopRun, FsError> {
+        let project_root = open_product_project_root(&self.development_root)?;
+        let mut intent = DesktopRunIntent::new()
+            .with_profile(self.profile)
             .with_recipe(self.recipe);
-        let intent = match session {
-            Some(session) => intent.with_supervised_desktop_activation(session, self.identity),
-            None if self.verify_first_present => intent.with_first_present_verification(),
-            None => intent,
-        };
+        if self.verify_first_present {
+            intent = intent.with_first_present_verification();
+        }
         Ok(DesktopRun::new(project_root, intent))
     }
 }
@@ -143,43 +88,6 @@ fn finish_product_run(mut run: DesktopRun, cleanup_timeout: Duration) -> Desktop
             return run.report_after_cleanup_deadline();
         }
         std::thread::sleep(Duration::from_millis(1).min(deadline.saturating_duration_since(now)));
-    }
-}
-
-/// Failure before an ordinary desktop runtime is created.
-#[derive(Debug)]
-pub enum DesktopProductLaunchError {
-    ProductIdentity(SupervisedDesktopWireError),
-    ProjectSource(FsError),
-    SupervisedBootstrap(ProductSupervisedDesktopBootstrapError),
-    ConflictingPresentationModes,
-}
-
-impl fmt::Display for DesktopProductLaunchError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ProductIdentity(source) => {
-                write!(formatter, "desktop product identity: {source}")
-            }
-            Self::ProjectSource(source) => write!(formatter, "desktop product source: {source}"),
-            Self::SupervisedBootstrap(source) => {
-                write!(formatter, "supervised desktop launch: {source}")
-            }
-            Self::ConflictingPresentationModes => formatter.write_str(
-                "first-presentation verification cannot be combined with supervised desktop launch",
-            ),
-        }
-    }
-}
-
-impl Error for DesktopProductLaunchError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::ProductIdentity(source) => Some(source),
-            Self::ProjectSource(source) => Some(source),
-            Self::SupervisedBootstrap(source) => Some(source),
-            Self::ConflictingPresentationModes => None,
-        }
     }
 }
 
@@ -261,39 +169,16 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_product_rejects_invalid_cargo_identity_before_source_open() {
-        let error = DesktopProductLaunch::from_cargo_product(
-            "not-an-absolute-root",
-            "invalid package",
-            "0.1.0",
-            "desktop",
-            ProductRecipe::new(),
-        )
-        .unwrap_err();
-        assert!(matches!(
-            error,
-            DesktopProductLaunchError::ProductIdentity(_)
-        ));
-    }
-
-    #[test]
     fn ordinary_product_rejects_missing_development_source_without_runtime_start() {
         let root = std::env::temp_dir().join(format!(
             "nara-missing-desktop-product-{}",
             std::process::id()
         ));
-        let launch = DesktopProductLaunch::from_cargo_product(
-            root,
-            "game",
-            "0.1.0",
-            "desktop",
-            ProductRecipe::new(),
-        )
-        .unwrap();
-        assert!(matches!(
-            launch.prepare(None),
-            Err(DesktopProductLaunchError::ProjectSource(_))
-        ));
+        let launch = DesktopProductLaunch::new(root, ProductRecipe::new());
+        let error = launch.prepare().err().expect("source must be missing");
+        assert!(
+            matches!(error, FsError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound)
+        );
     }
 
     #[test]
@@ -356,10 +241,8 @@ requested = ["runtime-2d"]
                 ProductRecipe::new().add_plugin::<StartupFailurePlugin<false>>()
             }
             .unwrap();
-            let launch =
-                DesktopProductLaunch::from_cargo_product(&root, "game", "0.1.0", "desktop", recipe)
-                    .unwrap();
-            let report = finish_product_run(launch.prepare(None).unwrap(), Duration::ZERO);
+            let launch = DesktopProductLaunch::new(&root, recipe);
+            let report = finish_product_run(launch.prepare().unwrap(), Duration::ZERO);
             assert_eq!(report.outcome(), DesktopRunOutcome::CleanupIncomplete);
             let diagnostics = format!("{:#?}", report.diagnostics());
             assert!(

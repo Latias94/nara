@@ -21,15 +21,8 @@ use nara_window::winit::WinitControlFlow;
 ))]
 use super::super::desktop_run::{
     DesktopRun, DesktopRunOptions, DesktopRunState, DesktopStartupObservation, DesktopStartupPhase,
-    PendingDesktopTerminal, StartupTimer,
-    verification::{DesktopFirstPresentRequest, DesktopFirstPresentVerification},
+    PendingDesktopTerminal, StartupTimer, verification::DesktopFirstPresentVerification,
 };
-#[cfg(all(
-    feature = "runtime-2d",
-    feature = "desktop-winit",
-    feature = "render-wgpu"
-))]
-use super::super::{ProductSupervisedDesktopSession, SupervisedDesktopProductIdentity};
 #[cfg(feature = "runtime-2d")]
 use super::super::{
     StartupContentClosureReceipt,
@@ -283,7 +276,7 @@ pub struct DesktopRunIntent {
     profile: Option<String>,
     recipe: ProductRecipe,
     execution: DesktopRunOptions,
-    first_present: Option<DesktopFirstPresentRequest>,
+    verify_first_present: bool,
 }
 
 #[cfg(all(
@@ -298,13 +291,7 @@ impl fmt::Debug for DesktopRunIntent {
             .field("profile_present", &self.profile.is_some())
             .field("execution", &self.execution)
             .field("recipe", &self.recipe)
-            .field(
-                "first_present_mode",
-                &self
-                    .first_present
-                    .as_ref()
-                    .map(DesktopFirstPresentRequest::label),
-            )
+            .field("verify_first_present", &self.verify_first_present)
             .finish_non_exhaustive()
     }
 }
@@ -332,7 +319,7 @@ impl DesktopRunIntent {
             profile: None,
             recipe: ProductRecipe::new(),
             execution: DesktopRunOptions::new(),
-            first_present: None,
+            verify_first_present: false,
         }
     }
 
@@ -374,23 +361,7 @@ impl DesktopRunIntent {
     /// remain unchanged.
     #[must_use]
     pub fn with_first_present_verification(mut self) -> Self {
-        self.first_present = Some(DesktopFirstPresentRequest::VerificationCanary);
-        self
-    }
-
-    /// Publishes one supervised READY attestation after Runtime startup and the first exact
-    /// presentation, then keeps the interactive desktop product running.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn with_supervised_desktop_activation(
-        mut self,
-        session: ProductSupervisedDesktopSession,
-        product_identity: SupervisedDesktopProductIdentity,
-    ) -> Self {
-        self.first_present = Some(DesktopFirstPresentRequest::SupervisedActivation {
-            session,
-            product_identity,
-        });
+        self.verify_first_present = true;
         self
     }
 }
@@ -413,8 +384,6 @@ impl DesktopRun {
     }
 
     /// Runs an admitted processed base through the same desktop Runtime and close owner.
-    ///
-    /// Source-supervised activation and its source-closure attestation remain source operations.
     #[must_use]
     pub fn from_runtime_content(
         base: crate::runtime_content::RuntimeContentBase,
@@ -522,7 +491,7 @@ impl DesktopRun {
         mode: crate::project_host::desktop_run::DesktopDriveMode,
     ) -> DesktopRunState {
         let preparation = StartupTimer::start(&self.startup_timings);
-        let (prepared, execution, verification) = match inputs {
+        let (prepared, execution, verify_first_present) = match inputs {
             DesktopRunInputs::Source {
                 project_root,
                 intent,
@@ -532,23 +501,8 @@ impl DesktopRun {
                     profile,
                     recipe,
                     execution,
-                    first_present,
+                    verify_first_present,
                 } = intent;
-                if first_present
-                    .as_ref()
-                    .is_some_and(|request| !request.is_bound_to_project_root(&project_root))
-                {
-                    preparation.finish(
-                        &mut self.startup_timings,
-                        DesktopStartupPhase::ContentPreparation,
-                    );
-                    self.diagnostics.extend(single_error(
-                        "project.desktop.supervised-project-root-mismatch",
-                        "Desktop supervised activation was verified against another project capability",
-                    ));
-                    return DesktopRunState::Failed;
-                }
-                let verification = first_present.map(DesktopFirstPresentVerification::new);
                 let prepared = prepare_project_start(
                     project_root,
                     profile,
@@ -556,12 +510,12 @@ impl DesktopRun {
                     recipe,
                     overlay,
                 );
-                (prepared, execution, verification)
+                (prepared, execution, verify_first_present)
             }
             DesktopRunInputs::Processed { base, execution } => (
                 prepare_runtime_content_start(base, execution.cleanup_policy),
                 execution,
-                None,
+                false,
             ),
         };
         preparation.finish(
@@ -598,20 +552,7 @@ impl DesktopRun {
                 return desktop_state_after_failure(host);
             }
         }
-        if let Some(verification) = verification.as_ref() {
-            let startup_content_closure = self
-                .startup_content_closure
-                .as_ref()
-                .expect("desktop activation starts only after project checking succeeds");
-            if verification.arm(startup_content_closure).is_err() {
-                self.diagnostics.extend(single_error(
-                    "project.desktop.supervised-runtime-closure-invalid",
-                    "Desktop supervised activation could not derive its strict Runtime closure",
-                ));
-                host.retire_running();
-                return desktop_state_after_failure(host);
-            }
-        }
+        let verification = verify_first_present.then(DesktopFirstPresentVerification::new);
 
         match host.take_desktop_runtime() {
             Ok((runtime, context)) => {

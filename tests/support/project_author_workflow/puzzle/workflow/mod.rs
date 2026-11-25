@@ -12,10 +12,10 @@ use nara::{
         process::SupervisedProcessCommand,
         project_cook::project_rust_input_inventory,
     },
-    project_workflow::{ProjectStarter, cargo::CargoBuildSelection},
+    project_workflow::cargo::CargoBuildSelection,
 };
 
-use crate::authored_project::create_authored_project;
+use crate::authored_project::{AuthoredFixture, create_authored_project};
 
 use super::super::{
     command,
@@ -27,8 +27,6 @@ pub(super) mod source;
 
 const PROJECT_SLUG: &str = "nara";
 const COOKED_DELIVERY_NAME: &str = "push-box";
-#[cfg(target_os = "windows")]
-const EXPORT_DESTINATION: &str = "push-box-candidate";
 const BUILD_TIMEOUT: Duration = Duration::from_secs(900);
 const RUN_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -62,12 +60,8 @@ impl Project {
         let mut custody = Custody::create(checkout.parent().unwrap());
         let parent = custody.directory("independent author");
         let tools = CargoBuildTools::discover_in(&checkout).unwrap();
-        let root = create_authored_project(
-            &checkout,
-            &parent,
-            PROJECT_SLUG,
-            ProjectStarter::Desktop2dV2,
-        );
+        let root =
+            create_authored_project(&checkout, &parent, PROJECT_SLUG, AuthoredFixture::Actions);
         assert!(root.starts_with(&custody.root) && !root.starts_with(&checkout));
         let cargo = read_toml(&root.join("Cargo.toml"));
         let cargo_package_name = cargo["package"]["name"].as_str().unwrap().to_owned();
@@ -198,29 +192,5 @@ impl Project {
         output.assert_success();
         assert!(fs::read_dir(&self.cwd).unwrap().next().is_none());
         output
-    }
-
-    #[cfg(target_os = "windows")]
-    pub(super) fn export_candidate(&self) -> PathBuf {
-        use nara::project_tooling::{ProjectToolRequest, ProjectToolSummary, invoke_project_tool};
-
-        let parent = self.custody.directory("source export output");
-        let summary = invoke_project_tool(ProjectToolRequest::Export {
-            project: self.root.clone(),
-            parent: parent.clone(),
-            destination: EXPORT_DESTINATION.into(),
-        })
-        .unwrap();
-        assert!(
-            matches!(
-                summary,
-                ProjectToolSummary::Exported {
-                    product_observations: 2,
-                    ..
-                }
-            ),
-            "{summary:?}"
-        );
-        parent.join(EXPORT_DESTINATION)
     }
 }

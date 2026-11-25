@@ -1,14 +1,11 @@
 use std::{
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Output},
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use nara::{
-    project_tooling::{ProjectToolRequest, ProjectToolSummary, invoke_project_tool},
-    project_workflow::ProjectStarter,
-};
+use nara::project_tooling::{ProjectToolRequest, ProjectToolSummary, invoke_project_tool};
 
 use super::profile_font_product::{
     PROFILE_FONT_NATIVE_PROOF, PROFILE_FONT_PROOF, WORLD_CANVAS_NATIVE_PROOF, profile_font_recipe,
@@ -20,8 +17,8 @@ mod authored_project;
 static NEXT_TRAJECTORY: AtomicU64 = AtomicU64::new(1);
 
 #[test]
-#[ignore = "builds and exports one independent UI product and executes its real native desktop first-presentation canary"]
-fn fixed_world_canvas_and_font_recipe_survive_check_export_and_native_restart() {
+#[ignore = "builds one independent UI product and executes its real native first-presentation canary"]
+fn fixed_world_canvas_and_font_recipe_survive_check_and_native_restart() {
     let checkout = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sequence = NEXT_TRAJECTORY.fetch_add(1, Ordering::Relaxed);
     let parent = checkout.join("target").join(format!(
@@ -33,7 +30,7 @@ fn fixed_world_canvas_and_font_recipe_survive_check_export_and_native_restart() 
         checkout,
         &parent,
         "font-profile",
-        ProjectStarter::Desktop2dV1,
+        authored_project::AuthoredFixture::Basic,
     );
 
     let cargo_path = project.join("Cargo.toml");
@@ -118,59 +115,69 @@ fn fixed_world_canvas_and_font_recipe_survive_check_export_and_native_restart() 
         "{checked:?}"
     );
 
-    let exported = invoke_project_tool(ProjectToolRequest::Export {
-        project,
-        parent: parent.clone(),
-        destination: "font-candidate".into(),
-    })
-    .unwrap();
-    assert!(
-        matches!(
-            exported,
-            ProjectToolSummary::Exported {
-                product_observations: 2,
-                ..
-            }
-        ),
-        "{exported:?}"
+    let built = successful(
+        Command::new(env!("CARGO"))
+            .current_dir(&project)
+            .args([
+                "build",
+                "--locked",
+                "--no-default-features",
+                "--features",
+                "desktop",
+                "--bin",
+                "headless",
+                "--bin",
+                "desktop",
+                "--message-format=json",
+                "--target-dir",
+            ])
+            .arg(checkout.join("target"))
+            .output()
+            .unwrap(),
+        "source product build",
     );
-
-    // These binaries resolve their sibling exported project, including its saved UI profile.
-    // Their shared fixture asserts actual shaping and rasterization before reporting success.
-    let packaged = parent.join("font-candidate");
+    let artifacts = built
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|message| message["reason"] == "compiler-artifact")
+        .collect::<Vec<_>>();
+    let executable = |target: &str| {
+        let mut paths = artifacts.iter().filter_map(|message| {
+            (message["target"]["name"] == target)
+                .then(|| message["executable"].as_str())
+                .flatten()
+        });
+        let path = PathBuf::from(paths.next().expect("Cargo reports the selected executable"));
+        assert!(path.is_absolute() && paths.next().is_none());
+        path
+    };
+    let headless = executable("headless");
+    let desktop = executable("desktop");
     let unrelated = parent.join("unrelated-cwd");
     fs::create_dir(&unrelated).unwrap();
-    for (label, target, arguments, success) in [
-        (
-            "headless",
-            "headless",
-            Vec::<&str>::new(),
-            "starter_headless: ok",
-        ),
+    for (label, executable, arguments, success) in [
+        ("headless", &headless, &[][..], "starter_headless: ok"),
         (
             "desktop",
-            "desktop",
-            vec!["--verify-first-present"],
+            &desktop,
+            &["--verify-first-present"],
             "starter_desktop: ok first_present_verified=true",
         ),
         (
             "desktop restart",
-            "desktop",
-            vec!["--verify-first-present"],
+            &desktop,
+            &["--verify-first-present"],
             "starter_desktop: ok first_present_verified=true",
         ),
     ] {
-        let executable = packaged
-            .join("bin")
-            .join(format!("{target}{}", std::env::consts::EXE_SUFFIX));
         let mut run = Command::new(executable);
         run.current_dir(&unrelated).args(arguments);
         let output = successful(run.output().unwrap(), label);
         assert!(
             output.contains(PROFILE_FONT_PROOF),
-            "{target} did not prove its selected font: {output}"
+            "{label} did not prove its selected font: {output}"
         );
-        if target == "desktop" {
+        if executable == &desktop {
             assert!(
                 output.contains(WORLD_CANVAS_NATIVE_PROOF),
                 "{label} omitted the canvas/picking proof: {output}"
@@ -184,8 +191,8 @@ fn fixed_world_canvas_and_font_recipe_survive_check_export_and_native_restart() 
     }
     assert!(fs::read_dir(&unrelated).unwrap().next().is_none());
     println!(
-        "profile_font_native: compiled_check=true exported_startup=true native_first_present=true artifact={}",
-        packaged.display()
+        "profile_font_native: compiled_check=true headless_startup=true native_first_present=true project={}",
+        project.display()
     );
 }
 

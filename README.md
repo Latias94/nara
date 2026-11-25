@@ -68,7 +68,8 @@ cargo run --locked -p nara_project --bin nara -- play ../my-game --trusted
 ```
 
 Use `--trusted` for projects whose Rust and Cargo build code you trust to run. Follow the generated
-README for the project layout and [examples](examples/) for game code.
+README for the project layout and [the first-game guide](docs/guides/first-2d-game.md) for edits
+to the starter.
 
 For cross-level travel and game-owned checkpoint saves, see the independent
 [`samples/two-level-game`](samples/two-level-game/README.md) consumer.

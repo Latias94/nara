@@ -4,6 +4,7 @@ use std::{
     process::{Command, ExitStatus},
 };
 
+use nara_project::{ProductCapability, ProductCapabilitySet};
 use thiserror::Error;
 
 use super::cargo_build::{
@@ -11,15 +12,19 @@ use super::cargo_build::{
 };
 use super::{ProjectToolFailure, ProjectToolRequest, ProjectToolSummary, host_fs, protocol};
 use crate::project_host::read_manifest_profile;
-use crate::project_workflow::STARTER_DESKTOP_CAPABILITIES;
 use crate::project_workflow::cargo::{
     CargoBuildDecoder, CargoBuildInvocation, CargoBuildSelection, CargoCompilerDiagnostic,
     CargoMetadataFacts,
 };
 
+const DESKTOP_CAPABILITIES: ProductCapabilitySet = ProductCapabilitySet::EMPTY
+    .with(ProductCapability::Presentation2d)
+    .with(ProductCapability::DesktopWinit)
+    .with(ProductCapability::RenderWgpu);
+
 #[derive(Debug, Error)]
 pub enum ProjectToolInvocationError {
-    #[error("failed to resolve the explicit project or export directory")]
+    #[error("failed to resolve the explicit project directory")]
     Resolve(#[source] io::Error),
     #[error("{0}{details}", details = bootstrap_failure_details(.0))]
     ProcessOwner(#[from] CargoBuildFailure),
@@ -83,15 +88,9 @@ pub fn invoke_project_tool(
         | ProjectToolRequest::RepairStartupScene { project, .. } => {
             *project = fs::canonicalize(&project).map_err(ProjectToolInvocationError::Resolve)?;
         }
-        ProjectToolRequest::Export {
-            project, parent, ..
-        } => {
-            *project = fs::canonicalize(&project).map_err(ProjectToolInvocationError::Resolve)?;
-            *parent = fs::canonicalize(&parent).map_err(ProjectToolInvocationError::Resolve)?;
-        }
     }
-    let desktop_if_declared = matches!(request, ProjectToolRequest::Export { .. })
-        || profile_requests_desktop_tool(request.project(), request.profile()).unwrap_or(false);
+    let desktop_if_declared =
+        profile_requests_desktop_tool(request.project(), request.profile()).unwrap_or(false);
     let executable = build_headless(request.project(), desktop_if_declared)?;
     let mut command = Command::new(executable);
     command
@@ -108,17 +107,6 @@ pub fn invoke_project_tool(
             if let Some(profile) = profile {
                 command.arg("--profile").arg(profile);
             }
-        }
-        ProjectToolRequest::Export {
-            parent,
-            destination,
-            ..
-        } => {
-            command
-                .arg("--parent")
-                .arg(parent)
-                .arg("--destination")
-                .arg(destination);
         }
         ProjectToolRequest::RepairStartupScene {
             profile,
@@ -200,11 +188,7 @@ fn profile_requests_desktop_tool(project: &Path, profile: Option<&str>) -> Optio
     let requested = read_manifest_profile(&manifest, profile)
         .ok()?
         .requested_capabilities;
-    Some(
-        !requested
-            .intersection(STARTER_DESKTOP_CAPABILITIES)
-            .is_empty(),
-    )
+    Some(!requested.intersection(DESKTOP_CAPABILITIES).is_empty())
 }
 
 fn build_headless(

@@ -33,6 +33,9 @@ use project_content_fixture::{
 const SECOND_SCENE: &str = "second.scene.json";
 const SECOND_IMAGE: &str = "textures/second.png";
 
+#[path = "project_content_delivery/source_graph.rs"]
+mod source_graph;
+
 #[test]
 fn stable_scene_roots_cannot_claim_the_same_source_identity() {
     let project = TestProject::with_prefab_startup();
@@ -490,6 +493,103 @@ fn project_wide_scene_roots_use_the_selected_profiles_effective_scenes_directory
         selected.startup_content_closure().unwrap().content_digest(),
         delivery.startup_content().content_digest()
     );
+}
+
+#[test]
+fn profiles_resolve_distinct_later_scene_images_with_equal_startup_content() {
+    let project = TestProject::with_prefab_startup();
+    project.write_scene_source(&SceneDocument::default());
+    declare_scenes(&project, &[SECOND_SCENE]);
+    let flag = "flag.png";
+    let second = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("flag"))
+        .with_component(
+            ComponentTypeId::new("nara.transform.Transform2d"),
+            identity_transform_record(),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.sprite.Sprite"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                sprite_value(&AssetRef::path(flag).unwrap()),
+            ),
+        )]);
+    fs::write(
+        project.path().join("scenes").join(SECOND_SCENE),
+        second.to_json_string().unwrap(),
+    )
+    .unwrap();
+    let manifest = project.path().join("nara.toml");
+    let source = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        format!("{source}\n[profiles.alternate.paths]\nassets = 'prefabs'\nprefabs = 'assets'\n"),
+    )
+    .unwrap();
+
+    let sources = [
+        (
+            None,
+            "assets",
+            "f12228c8-740f-4a2c-9ec1-bac91b72bf11",
+            [255, 0, 0, 255],
+        ),
+        (
+            Some("alternate"),
+            "prefabs",
+            "f12228c8-740f-4a2c-9ec1-bac91b72bf12",
+            [0, 0, 255, 255],
+        ),
+    ];
+    for (_, directory, stable_id, pixels) in sources {
+        let path = project.path().join(directory);
+        image::RgbaImage::from_pixel(1, 1, image::Rgba(pixels))
+            .save(path.join(flag))
+            .unwrap();
+        fs::write(
+            path.join("flag.png.meta"),
+            image_meta(stable_id, flag).to_json_string().unwrap(),
+        )
+        .unwrap();
+    }
+
+    let root = project.root_capability();
+    let manifest = root
+        .open_file(&RelativePath::new("nara.toml").unwrap())
+        .unwrap();
+    let loader = ProjectContentLoader::new(root.share()).unwrap();
+    let scene = ProjectPath::new(SECOND_SCENE).unwrap();
+    let [base, alternate] = sources.map(|(profile, directory, _, pixels)| {
+        let candidate = ingest_project_manifest(&manifest, profile).unwrap();
+        let plan = resolve_product_recipe(&candidate, ProductRecipe::new()).unwrap();
+        let snapshot = loader.load_scene(&candidate, &plan, &scene).unwrap();
+        assert_eq!(snapshot.images().len(), 1);
+        assert_eq!(snapshot.images()[0].image().pixels(), &pixels);
+        let mut request = ProjectCheckRequest::new(root.share(), ProductRecipe::new());
+        if let Some(profile) = profile {
+            request = request.with_profile(profile);
+        }
+        let delivery = check_project(request).unwrap();
+        let image = format!("{directory}/{flag}");
+        assert!(
+            delivery
+                .members()
+                .iter()
+                .any(|member| member.path().as_str() == image)
+        );
+        assert!(
+            !delivery
+                .startup_content()
+                .members()
+                .iter()
+                .any(|member| member.path().as_str() == image)
+        );
+        delivery
+    });
+    assert_eq!(
+        base.startup_content().content_digest(),
+        alternate.startup_content().content_digest()
+    );
+    assert_ne!(base.delivery_digest(), alternate.delivery_digest());
 }
 
 #[test]
