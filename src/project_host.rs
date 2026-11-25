@@ -23,9 +23,6 @@ pub use nara_window::winit::{
 };
 
 #[cfg(feature = "project-tooling")]
-mod file_publication;
-
-#[cfg(feature = "project-tooling")]
 pub(crate) mod schema;
 
 #[cfg(feature = "project-source")]
