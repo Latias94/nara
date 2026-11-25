@@ -706,6 +706,20 @@ fn independently_opened_writers_use_the_same_real_lock_and_reopen_the_current_in
 
 #[test]
 fn temporary_publication_failure_and_post_index_uncertainty_retain_cleanup_custody() {
+    fn check_cleanup(root: &TestRoot, mut failure: TemporaryFileFailure) {
+        let temporary_name = failure.cleanup().unwrap().name().clone();
+        assert!(root.child(&temporary_name).exists());
+        if cfg!(windows) {
+            assert!(failure.retry_cleanup());
+            assert!(!root.child(&temporary_name).exists());
+        } else {
+            // Linux has no unlink-by-handle operation for this capability.
+            assert!(!failure.retry_cleanup());
+            assert_eq!(failure.cleanup().unwrap().name(), &temporary_name);
+            assert!(root.child(&temporary_name).exists());
+        }
+    }
+
     let root = TestRoot::new();
     let store = root.store();
     let target = component("occupied.fixture").unwrap();
@@ -713,13 +727,10 @@ fn temporary_publication_failure_and_post_index_uncertainty_retain_cleanup_custo
     let error = store
         .publish(&target, b"candidate", ExpectedTarget::Missing)
         .unwrap_err();
-    let ArtifactBuildError::Temporary(mut failure) = error else {
+    let ArtifactBuildError::Temporary(failure) = error else {
         panic!("temporary publication lost its failure owner");
     };
-    let temporary_name = failure.cleanup().unwrap().name().clone();
-    assert!(root.child(&temporary_name).exists());
-    assert!(failure.retry_cleanup());
-    assert!(!root.child(&temporary_name).exists());
+    check_cleanup(&root, failure);
 
     let temporary = store
         .root
@@ -743,11 +754,10 @@ fn temporary_publication_failure_and_post_index_uncertainty_retain_cleanup_custo
     let ArtifactBuildError::Uncertain { receipt, cause } = error else {
         panic!("post-index failure lost publication evidence");
     };
-    let ArtifactBuildError::Temporary(mut failure) = *cause else {
+    let ArtifactBuildError::Temporary(failure) = *cause else {
         panic!("post-index failure lost cleanup custody");
     };
-    assert!(failure.cleanup().is_some());
-    assert!(failure.retry_cleanup());
+    check_cleanup(&root, failure);
     assert_eq!(
         receipt.group().member_bytes("primary"),
         Some(b"one".as_slice())

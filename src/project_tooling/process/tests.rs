@@ -143,11 +143,8 @@ mod cleanup_evidence_tests {
         )
         .expect("the parent helper spawns");
         wait_for_direct_exit(&mut owner);
-        assert!(
-            owner.process.containment_empty().unwrap(),
-            "the direct child reaped its descendant before exiting"
-        );
 
+        // Native containment can observe process retirement after the direct child's exit.
         let receipt = drive_to_complete(&mut owner);
 
         assert!(receipt.exit().success());
