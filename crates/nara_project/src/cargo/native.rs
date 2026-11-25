@@ -25,8 +25,10 @@ use super::{
 use crate::host_fs::{self, HostDirectoryError, HostFileError};
 
 mod bootstrap;
+mod inputs;
 mod tools;
 pub use bootstrap::{ProjectToolBootstrapError, run_project_tool};
+pub use inputs::{CargoInputsSnapshot, project_rust_input_inventory};
 pub use tools::CargoBuildTools;
 
 /// Finite logical bounds for one build and its escaped captured result.
@@ -68,6 +70,7 @@ pub struct CargoBuildRequest {
     selection: CargoBuildSelection,
     tools: CargoBuildTools,
     inputs: Vec<RelativePath>,
+    project_inputs: Option<CargoInputsSnapshot>,
     limits: CargoBuildLimits,
     target_directory: Option<PathBuf>,
     generated_rust_input: Option<GeneratedRustInput>,
@@ -125,6 +128,7 @@ impl CargoBuildRequest {
             selection,
             tools,
             inputs: admitted,
+            project_inputs: None,
             limits,
             target_directory: None,
             generated_rust_input: None,
@@ -411,6 +415,8 @@ pub enum CargoBuildFailure {
     MissingDeclaredInput,
     #[error("the build inventory repeats a declared input")]
     DuplicateDeclaredInput,
+    #[error("the Rust input inventory contains a linked, unavailable or unportable entry")]
+    InvalidRustInventory,
     #[error("generated Rust input requires a canonical name and nonempty NUL-free UTF-8 source")]
     InvalidGeneratedRustInput,
     #[error("the build exceeded its {0} limit")]
@@ -582,12 +588,26 @@ fn build_executable_inner(
     control: &mut impl FnMut(CargoBuildPoint) -> Result<(), CargoBuildFailure>,
     lease: &TargetBuildLease,
 ) -> Result<CapturedCargoExecutable, CargoBuildFailure> {
-    let root = host_fs::readable_directory(&request.workspace)?;
-    let inputs = capture_inputs(&root, request)?;
+    let workspace_root;
+    let observed;
+    let (root, inputs) = if let Some(snapshot) = &request.project_inputs {
+        snapshot.build_inputs(request)?
+    } else {
+        workspace_root = host_fs::readable_directory(&request.workspace)?;
+        observed = capture_inputs(&workspace_root, request)?;
+        (&workspace_root, observed.as_slice())
+    };
+    let revalidate = || match &request.project_inputs {
+        Some(snapshot) => snapshot.verify(),
+        None => {
+            verify_input_root(root, &request.workspace)?;
+            revalidate_inputs(root, inputs)
+        }
+    };
     let generated_metadata = request
         .generated_rust_input()
         .map_or(0, |input| input.path.len());
-    let input_work = input_allocation(&inputs)?
+    let input_work = input_allocation(inputs)?
         .checked_add(generated_metadata)
         .ok_or(CargoBuildFailure::Limit("generated input metadata"))?;
     let request_work = input_work
@@ -614,7 +634,7 @@ fn build_executable_inner(
     )?;
     let toolchain = tools.facts().clone();
     control(CargoBuildPoint::BeforeMetadata)?;
-    revalidate_inputs(&root, request, &inputs)?;
+    revalidate()?;
     tools.verify(&request.tools)?;
     let manifest = request
         .workspace
@@ -683,7 +703,7 @@ fn build_executable_inner(
         .ok_or(CargoBuildFailure::Limit("build work"))?;
     drop(metadata);
     control(CargoBuildPoint::BeforeBuild)?;
-    revalidate_inputs(&root, request, &inputs)?;
+    revalidate()?;
     lease.verify()?;
     tools.verify(&request.tools)?;
     let mut build = command(request, request.tools.cargo_path());
@@ -758,7 +778,7 @@ fn build_executable_inner(
         return Err(CargoBuildFailure::EmptyExecutable);
     }
     control(CargoBuildPoint::AfterBuild)?;
-    revalidate_inputs(&root, request, &inputs)?;
+    revalidate()?;
     lease.verify()?;
     tools.verify(&request.tools)?;
     let length = usize::try_from(digest.length())
@@ -812,6 +832,9 @@ fn build_executable_inner(
         "retained executable",
     )?;
     control(CargoBuildPoint::BeforeCapture)?;
+    if request.project_inputs.is_some() {
+        revalidate()?;
+    }
     tools.verify(&request.tools)?;
     let bytes = original.read_to_end_bounded(digest.length())?;
     if ContentDigest::of_bytes(&bytes) != digest {
@@ -829,7 +852,7 @@ fn build_executable_inner(
     };
     provenance.digest = provenance_digest(&provenance, digest)?;
     control(CargoBuildPoint::BeforeReturn)?;
-    revalidate_inputs(&root, request, &inputs)?;
+    revalidate()?;
     let current = host_fs::readable_file(&original_path)?;
     if !current.same_object(&original)? {
         return Err(CargoBuildFailure::Stale);
@@ -873,10 +896,7 @@ fn feature_arguments(command: &mut Command, selection: &CargoBuildSelection) {
     }
 }
 
-fn capture_inputs(
-    root: &DirectoryCapability,
-    request: &CargoBuildRequest,
-) -> Result<Vec<ObservedInput>, CargoBuildFailure> {
+fn check_input_work(request: &CargoBuildRequest) -> Result<(), CargoBuildFailure> {
     let work = request.inputs.iter().try_fold(0_usize, |bytes, path| {
         path.components()
             .iter()
@@ -898,20 +918,30 @@ fn capture_inputs(
         work.and_then(|bytes| bytes.checked_add(generated_work)),
         request.limits.work_bytes,
         "declared input work",
-    )?;
+    )
+}
+
+fn capture_inputs(
+    root: &DirectoryCapability,
+    request: &CargoBuildRequest,
+) -> Result<Vec<ObservedInput>, CargoBuildFailure> {
+    check_input_work(request)?;
     let mut observed = Vec::with_capacity(request.inputs.len());
     let mut bytes = request
         .generated_rust_input()
         .map_or(0, |input| input.digest.length());
+    let limit = request.limits.input_bytes.get() as u64;
     for path in &request.inputs {
         let file = root.open_file_exact(path)?;
-        let digest = file.digest(request.limits.input_bytes.get() as u64)?;
-        bytes = bytes
-            .checked_add(digest.length())
-            .ok_or(CargoBuildFailure::Limit("declared input bytes"))?;
-        if bytes > request.limits.input_bytes.get() as u64 {
-            return Err(CargoBuildFailure::Limit("declared input bytes"));
-        }
+        let digest = file
+            .digest(limit.saturating_sub(bytes))
+            .map_err(|error| match error {
+                FsError::ByteLimitExceeded { .. } => {
+                    CargoBuildFailure::Limit("declared input bytes")
+                }
+                error => error.into(),
+            })?;
+        bytes = charge_input_bytes(bytes, digest, limit)?;
         observed.push(ObservedInput {
             file,
             fact: CargoDeclaredInput {
@@ -923,18 +953,35 @@ fn capture_inputs(
     Ok(observed)
 }
 
-fn revalidate_inputs(
+fn charge_input_bytes(
+    bytes: u64,
+    digest: ContentDigest,
+    limit: u64,
+) -> Result<u64, CargoBuildFailure> {
+    bytes
+        .checked_add(digest.length())
+        .filter(|bytes| *bytes <= limit)
+        .ok_or(CargoBuildFailure::Limit("declared input bytes"))
+}
+
+fn verify_input_root(
     root: &DirectoryCapability,
-    request: &CargoBuildRequest,
-    inputs: &[ObservedInput],
+    workspace: &Path,
 ) -> Result<(), CargoBuildFailure> {
-    let current_root = host_fs::readable_directory(&request.workspace)?;
+    let current_root = host_fs::readable_directory(workspace)?;
     if !current_root.same_object(root)? {
         return Err(CargoBuildFailure::Stale);
     }
+    Ok(())
+}
+
+fn revalidate_inputs(
+    root: &DirectoryCapability,
+    inputs: &[ObservedInput],
+) -> Result<(), CargoBuildFailure> {
     for input in inputs {
         let path = RelativePath::new(&input.fact.path).map_err(|_| CargoBuildFailure::Stale)?;
-        let current = current_root.open_file_exact(&path)?;
+        let current = root.open_file_exact(&path)?;
         if !current.same_object(&input.file)? {
             return Err(CargoBuildFailure::Stale);
         }

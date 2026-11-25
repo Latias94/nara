@@ -40,8 +40,11 @@ pub const PLAYER_PACKAGE_MANIFEST_FILE: &str = "package.json";
 // four-observation/name/relative-path metadata and the small streaming/publication records.
 const PUBLICATION_WORK_BYTES: usize = 64 * 1024 + size_of::<blake3::Hasher>() + 4096;
 
+mod cook;
 #[cfg(test)]
 mod tests;
+
+pub use cook::{CookedPackPublicationError, CookedPackStagingError, publish_cooked_pack};
 
 /// Logical owner memory bounds and an independent limit on the complete staged disk payload.
 ///
@@ -423,9 +426,9 @@ impl PreparedPlayerPackage {
         if let Err(error) = checkpoint(&mut control, PlayerPackagePoint::BeforeStaging) {
             return PlayerPackageOutcome::BeforeStaging(error);
         }
-        let staging_name = match staging_name() {
+        let staging_name = match staging_name(".nara-player-") {
             Ok(name) => name,
-            Err(error) => return PlayerPackageOutcome::BeforeStaging(error),
+            Err(error) => return PlayerPackageOutcome::BeforeStaging(error.into()),
         };
         let transaction = match parent.begin_directory_publication(destination, &staging_name) {
             Ok(transaction) => transaction,
@@ -529,14 +532,8 @@ impl PreparedPlayerPackage {
                 .open_file(&path)?
                 .verify_digest(digest, digest.length())?;
         }
-        match staging.sync() {
-            Ok(_)
-            | Err(FsError::Unsupported {
-                operation: FsOperation::SyncDirectory,
-                ..
-            }) => Ok(()),
-            Err(error) => Err(error.into()),
-        }
+        sync_staged_directory(&staging)?;
+        Ok(())
     }
 }
 
@@ -910,15 +907,26 @@ fn write_member(
     Ok(())
 }
 
-fn staging_name() -> Result<RelativeComponent, PlayerPackageError> {
+fn staging_name(prefix: &str) -> Result<RelativeComponent, getrandom::Error> {
     let mut random = [0_u8; 16];
     getrandom::fill(&mut random)?;
-    let mut text = String::with_capacity(45);
-    text.push_str(".nara-player-");
+    let mut text = String::with_capacity(prefix.len() + 2 * random.len());
+    text.push_str(prefix);
     for byte in random {
         write!(text, "{byte:02x}").expect("writing staging name to String");
     }
     Ok(RelativeComponent::new(text).expect("generated staging name"))
+}
+
+fn sync_staged_directory(staging: &DirectoryCapability) -> Result<(), FsError> {
+    match staging.sync() {
+        Ok(_)
+        | Err(FsError::Unsupported {
+            operation: FsOperation::SyncDirectory,
+            ..
+        }) => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 fn sum(values: &[usize]) -> Result<usize, PlayerPackageError> {

@@ -37,7 +37,7 @@ impl Drop for Root {
     }
 }
 
-fn generated_request(root: &Root, limits: CargoBuildLimits) -> CargoBuildRequest {
+fn write_rust_project(root: &Root) {
     fs::create_dir_all(root.0.join("src")).unwrap();
     for (path, bytes) in [
         ("Cargo.toml", "manifest"),
@@ -46,6 +46,10 @@ fn generated_request(root: &Root, limits: CargoBuildLimits) -> CargoBuildRequest
     ] {
         fs::write(root.0.join(path), bytes).unwrap();
     }
+}
+
+fn generated_request(root: &Root, limits: CargoBuildLimits) -> CargoBuildRequest {
+    write_rust_project(root);
     CargoBuildRequest::new(
         &root.0,
         RelativePath::new("Cargo.toml").unwrap(),
@@ -63,6 +67,66 @@ fn generated_request(root: &Root, limits: CargoBuildLimits) -> CargoBuildRequest
         limits,
     )
     .unwrap()
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn default_inventory_selects_only_rust_and_root_cargo_inputs() {
+    let root = Root::new();
+    write_rust_project(&root);
+    fs::create_dir(root.0.join("src/nested")).unwrap();
+    fs::write(root.0.join("build.rs"), "fn main() {}").unwrap();
+    fs::write(root.0.join("src/nested/module.rs"), "pub struct Value;").unwrap();
+    fs::write(root.0.join("src/nested/notes.txt"), "not a Rust input").unwrap();
+    fs::write(root.0.join("extra.rs"), "requires explicit selection").unwrap();
+    let inventory = project_rust_input_inventory(&root.0).unwrap();
+    assert_eq!(
+        inventory,
+        [
+            "Cargo.lock",
+            "Cargo.toml",
+            "build.rs",
+            "src/main.rs",
+            "src/nested/module.rs"
+        ]
+        .map(|name| RelativePath::new(name).unwrap())
+    );
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn inventory_refuses_multiple_links_and_excessive_depth() {
+    let root = Root::new();
+    write_rust_project(&root);
+    let alias = root.0.join("main-alias.rs");
+    fs::hard_link(root.0.join("src/main.rs"), &alias).unwrap();
+    assert!(matches!(
+        project_rust_input_inventory(&root.0),
+        Err(CargoBuildFailure::InvalidRustInventory)
+    ));
+    fs::remove_file(alias).unwrap();
+    let mut path = root.0.join("src");
+    for _ in 0..32 {
+        path.push("d");
+        fs::create_dir(&path).unwrap();
+    }
+    assert!(matches!(
+        project_rust_input_inventory(&root.0),
+        Err(CargoBuildFailure::Limit("Rust input path or depth"))
+    ));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn inventory_refuses_symlinked_files_and_directories() {
+    let root = Root::new();
+    write_rust_project(&root);
+    let link = root.0.join("src/linked.rs");
+    std::os::unix::fs::symlink(root.0.join("src/main.rs"), &link).unwrap();
+    assert!(project_rust_input_inventory(&root.0).is_err());
+    fs::remove_file(link).unwrap();
+    std::os::unix::fs::symlink(&root.0, root.0.join("src/escape")).unwrap();
+    assert!(project_rust_input_inventory(&root.0).is_err());
 }
 
 #[test]
@@ -196,6 +260,37 @@ fn generated_rust_input_limits_include_source_files_and_parent_transport_work() 
     assert!(matches!(
         generated_request(&root, limits).with_generated_rust_input(name, source),
         Err(CargoBuildFailure::Limit("declared input count"))
+    ));
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn captured_project_inputs_share_the_generated_input_byte_limit() {
+    let root = Root::new();
+    let capability = host_fs::readable_directory(&root.0).unwrap();
+    let mut limits = CargoBuildLimits::default();
+    let source = b"const VALUE: u8 = 1;";
+    let file_bytes = {
+        let request = generated_request(&root, limits);
+        request
+            .inputs
+            .iter()
+            .map(|path| {
+                fs::metadata(root.0.join(input_spelling(path).unwrap()))
+                    .unwrap()
+                    .len() as usize
+            })
+            .sum::<usize>()
+    };
+    limits.input_bytes = ByteLimit::new(file_bytes + source.len() - 1).unwrap();
+    let mut request = generated_request(&root, limits);
+    request.capture_project_rust_inputs(&capability).unwrap();
+    let request = request
+        .with_generated_rust_input("generated.rs", source)
+        .unwrap();
+    assert!(matches!(
+        build_executable(&request, |_| panic!("input limits precede Cargo")),
+        Err(CargoBuildFailure::Limit("declared input bytes"))
     ));
 }
 

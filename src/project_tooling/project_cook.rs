@@ -19,9 +19,19 @@ use crate::{
 pub use content::{
     ProjectCookContext, prepare_project_cooked_content, prepare_project_server_content,
 };
-pub use package::{
-    PreparedProjectPlayerPackage, ProjectCookSourceSelection, project_rust_input_inventory,
-};
+pub use package::{PreparedProjectPlayerPackage, ProjectCookSourceSelection};
+
+/// Enumerates the project's default Rust inputs for an explicit Player Cargo request.
+pub fn project_rust_input_inventory(
+    project: &std::path::Path,
+) -> Result<Vec<crate::fs::RelativePath>, ProjectCookError> {
+    use super::cargo_build::{self, CargoBuildFailure};
+
+    cargo_build::project_rust_input_inventory(project).map_err(|error| match error {
+        CargoBuildFailure::Filesystem(error) => error.into(),
+        error => error.into(),
+    })
+}
 
 /// Explicit project, executable recipe, target and existing build-store selection.
 ///

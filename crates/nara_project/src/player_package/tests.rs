@@ -11,6 +11,94 @@ fn content() -> (CapturedPack, RuntimeContentExpectation) {
 }
 
 #[test]
+fn cooked_pack_rejects_an_unrelated_expectation_before_source_check() {
+    let (pack, expected) = content();
+    let expected = RuntimeContentExpectation::new(
+        ContentDigest::of_bytes(b"different catalog"),
+        expected.target().clone(),
+    );
+    let output = tempfile::tempdir().unwrap();
+    let parent = crate::host_fs::writable_directory(output.path()).unwrap();
+    let destination = RelativeComponent::new("Cooked").unwrap();
+    let result = publish_cooked_pack(
+        &pack,
+        &expected,
+        &parent,
+        &destination,
+        || -> Result<(), io::Error> {
+            panic!("catalog rejection must precede source checks");
+        },
+    );
+    assert!(matches!(
+        result,
+        Err(CookedPackPublicationError::CatalogMismatch)
+    ));
+    assert_eq!(output.path().read_dir().unwrap().count(), 0);
+}
+
+#[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
+#[test]
+fn cooked_pack_publishes_original_bytes_without_replacing_an_existing_destination() {
+    let (pack, expected) = content();
+    let output = tempfile::tempdir().unwrap();
+    let parent = crate::host_fs::writable_directory(output.path()).unwrap();
+    let destination = RelativeComponent::new("Cooked").unwrap();
+    let mut checks = 0;
+    publish_cooked_pack(&pack, &expected, &parent, &destination, || {
+        checks += 1;
+        Ok::<(), io::Error>(())
+    })
+    .unwrap();
+    assert_eq!(checks, 2);
+    let mut encoded = Vec::new();
+    pack.write(&mut encoded).unwrap();
+    let path = output.path().join("Cooked").join(PLAYER_PACK_FILE);
+    assert_eq!(std::fs::read(&path).unwrap(), encoded);
+    assert!(
+        publish_cooked_pack(&pack, &expected, &parent, &destination, || {
+            Ok::<(), io::Error>(())
+        })
+        .is_err()
+    );
+    assert_eq!(std::fs::read(path).unwrap(), encoded);
+    assert_eq!(output.path().read_dir().unwrap().count(), 1);
+}
+
+#[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
+#[test]
+fn cooked_pack_keeps_staging_evidence_after_the_second_source_check_fails() {
+    let (pack, expected) = content();
+    let output = tempfile::tempdir().unwrap();
+    let parent = crate::host_fs::writable_directory(output.path()).unwrap();
+    let destination = RelativeComponent::new("Cooked").unwrap();
+    let mut checks = 0;
+    let result = publish_cooked_pack(&pack, &expected, &parent, &destination, || {
+        checks += 1;
+        if checks == 1 {
+            Ok(())
+        } else {
+            Err(io::Error::other("source changed after writing the pack"))
+        }
+    });
+    let Err(CookedPackPublicationError::Orphaned {
+        cause: Some(CookedPackStagingError::Selection(_)),
+        publication,
+    }) = result
+    else {
+        panic!("expected the original staged pack, got {result:?}");
+    };
+    assert_eq!(checks, 2);
+    assert!(!output.path().join("Cooked").exists());
+    let staged_pack = output
+        .path()
+        .join(publication.staging_name().to_str().unwrap())
+        .join(PLAYER_PACK_FILE);
+    let mut encoded = Vec::new();
+    pack.write(&mut encoded).unwrap();
+    assert_eq!(std::fs::read(staged_pack).unwrap(), encoded);
+}
+
+#[test]
 fn generated_rust_input_preserves_independent_facts_in_the_canonical_golden() {
     let expected = RuntimeContentExpectation::new(
         ContentDigest::from_parts(123, [7; 32]),

@@ -1,5 +1,6 @@
 use std::{
     fs,
+    path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -15,7 +16,10 @@ use crate::{
         ProjectContentBudgetKind, ProjectContentLimits, ProjectContentLoader,
         ingest_project_manifest, resolve_product_recipe,
     },
-    project_tooling::cargo_build::{CargoBuildLimits, CargoBuildTools},
+    project_tooling::{
+        cargo_build::{CargoBuildFailure, CargoBuildLimits, CargoBuildTools},
+        project_cook::project_rust_input_inventory,
+    },
     project_workflow::cargo::CargoBuildSelection,
     scene::SceneDocument,
 };
@@ -373,24 +377,6 @@ fn source_metadata_uses_original_retained_budget_without_claiming_a_generation()
 }
 
 #[test]
-fn default_inventory_selects_only_rust_and_root_cargo_inputs() {
-    let fixture = Fixture::new();
-    fixture.write("build.rs", "fn main() {}");
-    fixture.write("assets/compiler.wgsl", "shader");
-    let inventory = project_rust_input_inventory(&fixture.project).unwrap();
-    let mut expected = [
-        "Cargo.toml",
-        "Cargo.lock",
-        "build.rs",
-        "src/main.rs",
-        "src/nested/module.rs",
-    ]
-    .map(|name| relative(name).unwrap());
-    expected.sort_unstable_by(compare_paths);
-    assert_eq!(inventory, expected);
-}
-
-#[test]
 fn declared_code_keeps_extra_inputs_and_detects_default_set_changes() {
     let fixture = Fixture::new();
     fixture.write("assets/compiler.wgsl", "shader");
@@ -398,13 +384,31 @@ fn declared_code_keeps_extra_inputs_and_detects_default_set_changes() {
     let source = ProjectCookSourceSelection::capture(&root, receipt, Vec::new(), None).unwrap();
     let mut inputs = project_rust_input_inventory(&fixture.project).unwrap();
     inputs.push(relative("assets/compiler.wgsl").unwrap());
-    let request = fixture.request(inputs);
-    let code = ProjectCodeSelection::capture(&source, &request).unwrap();
+    let mut request = fixture.request(inputs);
+    let code = ProjectCodeSelection::capture(&source, &mut request).unwrap();
+    drop(request);
     code.verify(&source).unwrap();
 
     fixture.write("assets/compiler.wgsl", "change");
-    assert!(code.verify(&source).is_err());
+    code.inputs.verify_file_set().unwrap();
+    assert!(matches!(
+        code.verify(&source),
+        Err(ProjectCookError::Cargo(CargoBuildFailure::Stale))
+    ));
     fixture.write("assets/compiler.wgsl", "shader");
+    code.verify(&source).unwrap();
+
+    let extra = fixture.project.join("assets/compiler.wgsl");
+    let original = fixture.project.join("assets/compiler.original");
+    fs::rename(&extra, &original).unwrap();
+    fixture.write("assets/compiler.wgsl", "shader");
+    code.inputs.verify_file_set().unwrap();
+    assert!(matches!(
+        code.verify(&source),
+        Err(ProjectCookError::Cargo(CargoBuildFailure::Stale))
+    ));
+    fs::remove_file(&extra).unwrap();
+    fs::rename(original, extra).unwrap();
     code.verify(&source).unwrap();
 
     fixture.write("src/added.rs", "pub struct Added;");
@@ -430,8 +434,8 @@ fn undeclared_rust_file_rejects_without_inferring_dependency_inputs() {
     let inputs = ["Cargo.toml", "Cargo.lock", "src/main.rs"]
         .map(|name| relative(name).unwrap())
         .to_vec();
-    let request = fixture.request(inputs);
-    let error = ProjectCodeSelection::capture(&source, &request)
+    let mut request = fixture.request(inputs);
+    let error = ProjectCodeSelection::capture(&source, &mut request)
         .err()
         .unwrap();
     assert!(
@@ -441,41 +445,4 @@ fn undeclared_rust_file_rejects_without_inferring_dependency_inputs() {
         ),
         "{error:?}"
     );
-}
-
-#[test]
-fn inventory_refuses_multiple_links_and_excessive_depth() {
-    let fixture = Fixture::new();
-    fs::hard_link(
-        fixture.project.join("src/main.rs"),
-        fixture.parent.join("main-alias.rs"),
-    )
-    .unwrap();
-    assert!(project_rust_input_inventory(&fixture.project).is_err());
-    fs::remove_file(fixture.parent.join("main-alias.rs")).unwrap();
-    let mut path = fixture.project.join("src");
-    for _ in 0..MAX_RUST_DEPTH {
-        path.push("d");
-        fs::create_dir(&path).unwrap();
-    }
-    assert!(project_rust_input_inventory(&fixture.project).is_err());
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn inventory_refuses_symlinked_files_and_directories() {
-    let fixture = Fixture::new();
-    std::os::unix::fs::symlink(
-        fixture.project.join("src/main.rs"),
-        fixture.project.join("src/linked.rs"),
-    )
-    .unwrap();
-    assert!(project_rust_input_inventory(&fixture.project).is_err());
-    fs::remove_file(fixture.project.join("src/linked.rs")).unwrap();
-    std::os::unix::fs::symlink(
-        fixture.project.join("assets"),
-        fixture.project.join("src/escape"),
-    )
-    .unwrap();
-    assert!(project_rust_input_inventory(&fixture.project).is_err());
 }

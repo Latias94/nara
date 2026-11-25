@@ -1,15 +1,10 @@
 //! Retained source and declared-code fences around the original Player package owners.
 
-use std::{
-    cmp::Ordering,
-    io,
-    mem::size_of,
-    path::{Path, PathBuf},
-};
+use std::{cmp::Ordering, io, mem::size_of, path::Path};
 
 use crate::fs::{
-    ContentDigest, DirectoryCapability, DirectoryEnumerationLimits, FileIdentity, FileKind,
-    FsError, FsOperation, RelativeComponent, RelativePath,
+    ContentDigest, DirectoryCapability, FileIdentity, FsError, FsOperation, RelativeComponent,
+    RelativePath,
 };
 
 use super::{PreparedProjectCook, ProjectCookError};
@@ -18,22 +13,16 @@ use crate::{
     project_content::{CookedProductSources, ProjectContentLease},
     project_host::ProjectContentDeliveryReceipt,
     project_tooling::{
-        cargo_build::{CargoBuildFailure, CargoBuildRequest},
+        cargo_build::{CargoBuildRequest, CargoInputsSnapshot},
         host_fs::{self, HostDirectoryError},
         player_package::{
             GeneratedPlayerBootstrap, PlayerPackageControlFailure, PlayerPackageLimits,
-            PlayerPackageOutcome, PreparedPlayerPackage, build_player_package,
+            PlayerPackageOutcome, PlayerPackagePoint, PreparedPlayerPackage, build_player_package,
         },
     },
 };
 
 const BOOTSTRAP_INPUT: &str = "player-bootstrap.rs";
-const MAX_RUST_FILES: usize = 4096;
-const MAX_RUST_DEPTH: usize = 32;
-const MAX_RUST_ENTRIES: usize = 16_384;
-const MAX_RUST_PATH_BYTES: usize = 4096;
-const MAX_RUST_METADATA_BYTES: usize = 64 * 1024 * 1024;
-const ENUMERATION_BATCH: usize = 32;
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
@@ -231,243 +220,34 @@ fn normalize_source_facts(
     Ok(())
 }
 
-/// Enumerates the finite default Rust inputs without resolving Cargo dependencies.
-///
-/// Includes root `Cargo.toml` and `Cargo.lock`, optional root `build.rs`, and regular Rust files
-/// below an optional `src/`. Other compiler inputs belong in the caller's explicit Cargo inventory.
-/// Traversal rejects linked or unportable children and bounds files, entries, depth and path work.
-pub fn project_rust_input_inventory(project: &Path) -> Result<Vec<RelativePath>, ProjectCookError> {
-    let root = open_project_root(project)?;
-    rust_inventory(&root, None)
-}
-
-fn rust_inventory(
-    root: &DirectoryCapability,
-    declared: Option<&[&RelativePath]>,
-) -> Result<Vec<RelativePath>, ProjectCookError> {
-    let file_limit = declared.map_or(MAX_RUST_FILES, |paths| paths.len().min(MAX_RUST_FILES));
-    let mut inventory = RustInventory {
-        files: Vec::with_capacity(file_limit),
-        declared,
-        file_limit,
-        entries: 0,
-        metadata_bytes: 0,
-    };
-    for name in ["Cargo.toml", "Cargo.lock"] {
-        let path = relative(name)?;
-        root.open_file_exact(&path)?;
-        inventory.push(path)?;
-    }
-    let build = relative("build.rs")?;
-    match root.open_file_exact(&build) {
-        Ok(_) => inventory.push(build)?,
-        Err(error) if missing(&error) => {}
-        Err(error) => return Err(error.into()),
-    }
-    let source = relative("src")?;
-    match root.open_directory_exact(&source) {
-        Ok(directory) => inventory.visit(&directory, &source)?,
-        Err(error) if missing(&error) => {}
-        Err(error) => return Err(error.into()),
-    }
-    inventory.files.sort_unstable_by(compare_paths);
-    Ok(inventory.files)
-}
-
-struct RustInventory<'a> {
-    files: Vec<RelativePath>,
-    declared: Option<&'a [&'a RelativePath]>,
-    file_limit: usize,
-    entries: usize,
-    metadata_bytes: usize,
-}
-
-impl RustInventory<'_> {
-    fn push(&mut self, path: RelativePath) -> Result<(), ProjectCookError> {
-        if self.declared.is_some_and(|declared| {
-            declared
-                .binary_search_by(|selected| compare_paths(selected, &path))
-                .is_err()
-        }) {
-            return Err(CargoBuildFailure::MissingDeclaredInput.into());
-        }
-        if self.files.len() >= self.file_limit {
-            return Err(ProjectCookError::Invalid(
-                "Rust input inventory exceeded its finite file limit".into(),
-            ));
-        }
-        self.charge(relative_metadata(&path)?)?;
-        self.files.push(path);
-        Ok(())
-    }
-
-    fn visit(
-        &mut self,
-        directory: &DirectoryCapability,
-        prefix: &RelativePath,
-    ) -> Result<(), ProjectCookError> {
-        if prefix.len() > MAX_RUST_DEPTH {
-            return Err(ProjectCookError::Invalid(
-                "Rust input inventory exceeded its finite depth limit".into(),
-            ));
-        }
-        let remaining = MAX_RUST_ENTRIES.saturating_sub(self.entries);
-        let mut session = directory
-            .begin_child_enumeration(DirectoryEnumerationLimits::new(remaining, 1024, 1))?;
-        loop {
-            let batch = session.next_batch(ENUMERATION_BATCH)?;
-            if !batch.rejected_entry_facts().is_empty() {
-                return Err(ProjectCookError::Invalid(
-                    "Rust input inventory contains a linked, unavailable or unportable entry"
-                        .into(),
-                ));
-            }
-            self.entries = add(self.entries, batch.entries().len())?;
-            if self.entries > MAX_RUST_ENTRIES {
-                return Err(ProjectCookError::Invalid(
-                    "Rust input inventory exceeded its finite entry limit".into(),
-                ));
-            }
-            for entry in batch.entries() {
-                let name = entry.name().to_str().ok_or_else(|| {
-                    ProjectCookError::Invalid("Rust input names require portable UTF-8".into())
-                })?;
-                self.charge(add(
-                    multiply(name.len(), 2)?,
-                    size_of::<RelativeComponent>(),
-                )?)?;
-                if entry.kind() == FileKind::Regular && !name.ends_with(".rs") {
-                    continue;
-                }
-                let path_bytes = add(add(relative_name_bytes(prefix)?, 1)?, name.len())?;
-                if path_bytes > MAX_RUST_PATH_BYTES || prefix.len() >= MAX_RUST_DEPTH {
-                    return Err(ProjectCookError::Invalid(
-                        "Rust input inventory exceeded its finite path or depth limit".into(),
-                    ));
-                }
-                self.charge(add(
-                    multiply(path_bytes, 2)?,
-                    multiply(prefix.len() + 1, size_of::<RelativeComponent>())?,
-                )?)?;
-                let path = RelativePath::from_components(
-                    prefix
-                        .components()
-                        .iter()
-                        .cloned()
-                        .chain(std::iter::once(entry.name().clone())),
-                )
-                .map_err(FsError::from)?;
-                match entry.kind() {
-                    FileKind::Regular => {
-                        let file = directory.open_child_file(entry.name())?;
-                        if entry.identity() != Some(file.identity()) {
-                            return Err(FsError::CapabilityIdentityDrift {
-                                operation: FsOperation::OpenFile,
-                            }
-                            .into());
-                        }
-                        self.push(path)?;
-                    }
-                    FileKind::Directory => {
-                        let child = directory.open_child_directory(entry.name())?;
-                        if entry.identity() != Some(child.identity()) {
-                            return Err(FsError::CapabilityIdentityDrift {
-                                operation: FsOperation::OpenDirectory,
-                            }
-                            .into());
-                        }
-                        self.visit(&child, &path)?;
-                    }
-                    FileKind::Other => return Err(FsError::NotRegularFile.into()),
-                }
-            }
-            if batch.is_complete() {
-                break;
-            }
-        }
-        Ok(())
-    }
-
-    fn charge(&mut self, bytes: usize) -> Result<(), ProjectCookError> {
-        self.metadata_bytes = add(self.metadata_bytes, bytes)?;
-        if self.metadata_bytes > MAX_RUST_METADATA_BYTES {
-            return Err(ProjectCookError::Invalid(
-                "Rust input inventory exceeded its finite name and metadata allowance".into(),
-            ));
-        }
-        Ok(())
-    }
-}
-
 struct ProjectCodeSelection {
-    project: PathBuf,
-    files: Vec<SelectedFile>,
-    rust_inputs: Vec<RelativePath>,
+    inputs: CargoInputsSnapshot,
     _lease: ProjectContentLease,
 }
 
 impl ProjectCodeSelection {
     fn capture(
         source: &ProjectCookSourceSelection,
-        request: &CargoBuildRequest,
+        request: &mut CargoBuildRequest,
     ) -> Result<Self, ProjectCookError> {
         source.verify_project_root(request.workspace())?;
-        let declared = request.declared_input_paths();
-        let mut retained = add(
-            size_of::<Self>(),
-            multiply(request.workspace().as_os_str().len(), 2)?,
+        let retained = add(
+            request.project_rust_input_retained_bytes()?,
+            size_of::<ProjectContentLease>(),
         )?;
-        for path in declared {
-            retained = add(
-                retained,
-                add(
-                    multiply(relative_metadata(path)?, 3)?,
-                    size_of::<SelectedFile>() + size_of::<&RelativePath>(),
-                )?,
-            )?;
-        }
         let lease = source
             .receipt
             .reserve_consumer_retained(retained)
             .map_err(ProjectCookError::Source)?;
-        let mut ordered: Vec<_> = declared.iter().collect();
-        ordered.sort_unstable_by(|left, right| compare_paths(left, right));
-        let rust_inputs = rust_inventory(&source.root, Some(&ordered))?;
-        let mut files = Vec::with_capacity(declared.len());
-        let mut total = 0_u64;
-        let limit = request.limits().input_bytes.get() as u64;
-        for path in declared {
-            let file = source.root.open_file_exact(path)?;
-            let digest = file.digest(limit.saturating_sub(total))?;
-            total = total
-                .checked_add(digest.length())
-                .ok_or(CargoBuildFailure::Limit("declared input bytes"))?;
-            files.push(SelectedFile {
-                path: path.clone(),
-                present: Some((file.identity(), digest)),
-            });
-        }
         Ok(Self {
-            project: request.workspace().to_owned(),
-            files,
-            rust_inputs,
+            inputs: request.capture_project_rust_inputs(&source.root)?,
             _lease: lease,
         })
     }
 
     fn verify(&self, source: &ProjectCookSourceSelection) -> Result<(), ProjectCookError> {
-        source.verify(&self.project)?;
-        let expected: Vec<_> = self.rust_inputs.iter().collect();
-        let current = rust_inventory(&source.root, Some(&expected))?;
-        if current != self.rust_inputs {
-            return Err(ProjectCookError::Invalid(
-                "the project's Rust input set changed".into(),
-            ));
-        }
-        for file in &self.files {
-            file.verify(&source.root)?;
-        }
-        source.verify_project_root(&self.project)
+        source.verify(self.inputs.workspace())?;
+        Ok(self.inputs.verify()?)
     }
 }
 
@@ -478,19 +258,28 @@ impl PreparedProjectCook {
     /// additional compiler inputs. Source and code facts remain retained through publication.
     pub fn build_player(
         self,
-        request: CargoBuildRequest,
+        mut request: CargoBuildRequest,
         limits: PlayerPackageLimits,
     ) -> Result<PreparedProjectPlayerPackage, ProjectCookError> {
         let Self { content, selection } = self;
         selection.verify(request.workspace())?;
-        let code = ProjectCodeSelection::capture(&selection, &request)?;
+        let code = ProjectCodeSelection::capture(&selection, &mut request)?;
         let (pack, expected) = content.into_pack();
         let bootstrap = GeneratedPlayerBootstrap::new(&pack, &expected, BOOTSTRAP_INPUT, limits)?;
         let request = request.with_generated_rust_input(bootstrap.name(), bootstrap.bytes())?;
-        let package = build_player_package(pack, &expected, bootstrap, &request, limits, |_| {
-            code.verify(&selection)
-                .map_err(|_| PlayerPackageControlFailure::SelectionChanged)
-        })?;
+        let package =
+            build_player_package(pack, &expected, bootstrap, &request, limits, |point| {
+                selection
+                    .verify(request.workspace())
+                    .and_then(|()| match point {
+                        PlayerPackagePoint::BeforeBuild | PlayerPackagePoint::AfterBuild => code
+                            .inputs
+                            .verify_file_set()
+                            .map_err(ProjectCookError::from),
+                        _ => Ok(()),
+                    })
+                    .map_err(|_| PlayerPackageControlFailure::SelectionChanged)
+            })?;
         code.verify(&selection)?;
         Ok(PreparedProjectPlayerPackage {
             package,
@@ -565,27 +354,6 @@ fn source_fact_metadata(name: &str) -> Result<usize, ProjectCookError> {
             multiply(name.len(), 2)?,
         )?,
     )
-}
-
-fn relative_metadata(path: &RelativePath) -> Result<usize, ProjectCookError> {
-    add(
-        size_of::<RelativePath>(),
-        add(
-            multiply(path.len(), size_of::<RelativeComponent>())?,
-            multiply(relative_name_bytes(path)?, 2)?,
-        )?,
-    )
-}
-
-fn relative_name_bytes(path: &RelativePath) -> Result<usize, ProjectCookError> {
-    path.components()
-        .iter()
-        .try_fold(path.len().saturating_sub(1), |bytes, component| {
-            let name = component.to_str().ok_or_else(|| {
-                ProjectCookError::Invalid("project inputs require portable UTF-8 paths".into())
-            })?;
-            add(bytes, name.len())
-        })
 }
 
 fn compare_paths(left: &RelativePath, right: &RelativePath) -> Ordering {

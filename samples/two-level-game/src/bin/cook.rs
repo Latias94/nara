@@ -6,28 +6,23 @@ mod content;
 mod input;
 
 use std::{
-    hash::{BuildHasher, RandomState},
     io::{self, Write},
-    path::Path,
     process::ExitCode,
     time::{Duration, Instant},
 };
 
 use nara::{
-    fs::{
-        DirectoryCapability, DirectoryPublicationOutcome, FsError, FsOperation, RelativeComponent,
-        RelativePath,
-    },
+    fs::{FsError, RelativeComponent, RelativePath},
     project::delivery::{CookerReceipt, DELIVERY_RECEIPT_PREFIX, DeliveryOperation},
     project_tooling::{
         cargo_build::{CargoBuildFailure, CargoBuildLimits, CargoBuildRequest, CargoBuildTools},
         host_fs,
         player_package::{
-            PLAYER_PACK_FILE, PlayerPackageError, PlayerPackageLimits, PlayerPackageOutcome,
+            PlayerPackageError, PlayerPackageLimits, PlayerPackageOutcome, publish_cooked_pack,
         },
-        project_cook::{PreparedProjectCook, ProjectCookError, project_rust_input_inventory},
+        project_cook::{ProjectCookError, project_rust_input_inventory},
     },
-    project_workflow::{cargo::CargoBuildSelection, cooked_content::PreparedRuntimeContent},
+    project_workflow::cargo::CargoBuildSelection,
 };
 
 fn main() -> ExitCode {
@@ -83,7 +78,20 @@ fn run(options: input::Options) -> Result<(), String> {
     let prepared = content::prepare_for_player(&root, &cache, &options.target, options.selection)
         .map_err(build_failure)?;
     if options.operation == Some(DeliveryOperation::Cook) {
-        publish_pack(prepared, &project, &parent, &output, &destination)?;
+        let (content, source) = prepared.into_parts();
+        publish_cooked_pack(
+            content.pack(),
+            content.expectation(),
+            &parent,
+            &destination,
+            || source.verify(&project),
+        )
+        .map_err(|error| {
+            if let Some(orphan) = error.orphan() {
+                report_orphan(&output, orphan);
+            }
+            error.to_string()
+        })?;
         return report_publication(None, None);
     }
     let limits = PlayerPackageLimits::default();
@@ -163,68 +171,6 @@ fn run(options: input::Options) -> Result<(), String> {
             }
             Err(format!("publication could not begin: {error:?}"))
         }
-    }
-}
-
-fn publish_pack(
-    prepared: PreparedProjectCook,
-    project: &Path,
-    parent: &DirectoryCapability,
-    output: &Path,
-    destination: &RelativeComponent,
-) -> Result<(), String> {
-    let (content, source) = prepared.into_parts();
-    source.verify(project).map_err(build_failure)?;
-    let nonce = RandomState::new().hash_one(destination);
-    let staging_name = RelativeComponent::new(format!(".nara-cook-{nonce:016x}"))
-        .map_err(|error| error.to_string())?;
-    let transaction = parent
-        .begin_directory_publication(destination, &staging_name)
-        .map_err(|error| {
-            if let Some(orphan) = error.orphan() {
-                report_orphan(output, orphan);
-            }
-            error.to_string()
-        })?;
-    let error = stage_pack(&transaction.staging_directory(), &content)
-        .map_err(|error| error.to_string())
-        .and_then(|()| source.verify(project).map_err(build_failure))
-        .err();
-    let outcome = if error.is_some() {
-        transaction.abort()
-    } else {
-        transaction.publish()
-    };
-    match outcome {
-        DirectoryPublicationOutcome::Published(_) => Ok(()),
-        DirectoryPublicationOutcome::RejectedClean(publication) => Err(format!(
-            "pack publication rejected: {error:?}; {publication:?}"
-        )),
-        DirectoryPublicationOutcome::Orphaned(publication) => {
-            report_orphan(output, &publication);
-            Err(format!(
-                "pack publication retained a recoverable orphan: {error:?}; {publication:?}"
-            ))
-        }
-    }
-}
-
-fn stage_pack(
-    staging: &DirectoryCapability,
-    content: &PreparedRuntimeContent,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let name = RelativeComponent::new(PLAYER_PACK_FILE)?;
-    let mut file = staging.create_child_file(&name)?;
-    content.pack().write(&mut file.writer()?)?;
-    file.sync()?;
-    drop(file);
-    match staging.sync() {
-        Ok(_)
-        | Err(FsError::Unsupported {
-            operation: FsOperation::SyncDirectory,
-            ..
-        }) => Ok(()),
-        Err(error) => Err(error.into()),
     }
 }
 
