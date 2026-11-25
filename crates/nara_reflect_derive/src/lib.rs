@@ -326,13 +326,13 @@ fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
                 #authoring_initial
             }
 
-            fn __decode_persistent_component(
+            fn decode_persistent_component(
                 value: #support::ComponentValueRef<'_>,
             ) -> Result<Self, #support::ComponentCodecError> {
                 Ok(Self { #(#field_decoders),* })
             }
 
-            fn __encode_persistent_component(
+            fn encode_persistent_component(
                 &self,
             ) -> Result<#support::ComponentValue, #support::ComponentCodecError> {
                 Ok(#component_encoder)

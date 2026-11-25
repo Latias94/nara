@@ -51,7 +51,7 @@ fn persistent_vec2_declares_one_closed_numeric_shape_and_keeps_xy_wire_encoding(
     assert_eq!(shape("waypoints"), &ComponentValueShape::list(vector));
 
     let expected = motion_path();
-    let encoded = expected.__encode_persistent_component().unwrap();
+    let encoded = expected.encode_persistent_component().unwrap();
     assert_eq!(
         encoded.field("position").unwrap(),
         &ComponentValue::map([
@@ -78,7 +78,7 @@ fn persistent_vec2_declares_one_closed_numeric_shape_and_keeps_xy_wire_encoding(
 #[test]
 fn persistent_vec2_and_vector_items_reject_missing_extra_and_out_of_domain_members() {
     let schema = MotionPath::persistent_component_schema();
-    let original = motion_path().__encode_persistent_component().unwrap();
+    let original = motion_path().encode_persistent_component().unwrap();
     for invalid in [
         ComponentValue::map([("x", ComponentValue::f64(1.0).unwrap())]),
         ComponentValue::map([
@@ -106,7 +106,7 @@ fn persistent_vec2_and_vector_items_reject_missing_extra_and_out_of_domain_membe
                 .replace_path(&ComponentFieldPath::from_fields([field]), replacement)
                 .unwrap();
             assert!(validate_component_value(&schema, &candidate).is_err());
-            assert!(MotionPath::__decode_persistent_component((&candidate).into()).is_err());
+            assert!(MotionPath::decode_persistent_component((&candidate).into()).is_err());
         }
     }
 }
@@ -143,8 +143,8 @@ fn adopting_closed_vectors_requires_both_an_owner_successor_and_explicit_migrati
     registry
         .register_native_component_with_codec::<MotionPath, _, _>(
             &id,
-            MotionPath::__decode_persistent_component,
-            MotionPath::__encode_persistent_component,
+            MotionPath::decode_persistent_component,
+            MotionPath::encode_persistent_component,
         )
         .unwrap();
     let candidate_before = registry.catalog_candidate().clone();
@@ -164,7 +164,7 @@ fn adopting_closed_vectors_requires_both_an_owner_successor_and_explicit_migrati
         )
         .unwrap();
     let registry = registry.freeze().unwrap();
-    let original = motion_path().__encode_persistent_component().unwrap();
+    let original = motion_path().encode_persistent_component().unwrap();
     let migrated = registry
         .migrate_component_value(&id, ComponentSchemaVersion::ONE, &original)
         .unwrap();

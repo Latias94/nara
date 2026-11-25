@@ -41,7 +41,7 @@ fn saved_opaque_vec2_predecessor_migrates_explicitly_and_reopens_as_current() {
     let record = &session.document().entities[0].components[&id];
     assert_eq!(record.version, ComponentSchemaVersion::new(2).unwrap());
     assert_eq!(
-        InitialVelocity2d::__decode_persistent_component(record.value().into())
+        InitialVelocity2d::decode_persistent_component(record.value().into())
             .unwrap()
             .velocity,
         Vec2::new(1.5, -2.0)
@@ -133,7 +133,7 @@ fn strict_check_admits_saved_vec2_predecessor_without_rewriting_source() {
         .components()[&id];
     assert_eq!(migrated.version(), ComponentSchemaVersion::new(2).unwrap());
     assert_eq!(
-        InitialVelocity2d::__decode_persistent_component(migrated.value())
+        InitialVelocity2d::decode_persistent_component(migrated.value())
             .unwrap()
             .velocity,
         Vec2::new(1.5, -2.0)

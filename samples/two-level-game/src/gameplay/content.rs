@@ -288,7 +288,7 @@ pub(crate) fn decode<T: PersistentComponentProvider>(
     if record.version() != schema.version() {
         return Err("gameplay component version is not current".into());
     }
-    T::__decode_persistent_component(record.value())
+    T::decode_persistent_component(record.value())
         .map(Some)
         .map_err(|error| error.to_string())
 }

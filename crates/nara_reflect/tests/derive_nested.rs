@@ -160,7 +160,7 @@ fn generated_nested_codecs_keep_required_presence_and_leaf_validation() {
         weights: Vec::new(),
         fallback: Some(7),
     };
-    let empty_encoded = empty.__encode_persistent_component().unwrap();
+    let empty_encoded = empty.encode_persistent_component().unwrap();
     assert_eq!(
         empty_encoded.field("fallback").unwrap(),
         &ComponentValue::I64(7)
@@ -175,17 +175,17 @@ fn generated_nested_codecs_keep_required_presence_and_leaf_validation() {
     );
     validate_component_value(&schema, &empty_encoded).unwrap();
     assert_eq!(
-        NestedReferenceProbe::__decode_persistent_component((&empty_encoded).into()).unwrap(),
+        NestedReferenceProbe::decode_persistent_component((&empty_encoded).into()).unwrap(),
         empty
     );
-    let original = nested_probe().__encode_persistent_component().unwrap();
+    let original = nested_probe().encode_persistent_component().unwrap();
     let ComponentValue::Map(mut missing) = original.clone() else {
         panic!("generated component must encode a map");
     };
     missing.remove("fallback");
     let missing = ComponentValue::Map(missing);
     assert!(validate_component_value(&schema, &missing).is_err());
-    assert!(NestedReferenceProbe::__decode_persistent_component((&missing).into()).is_err());
+    assert!(NestedReferenceProbe::decode_persistent_component((&missing).into()).is_err());
 
     for (field, invalid) in [
         (
@@ -208,7 +208,7 @@ fn generated_nested_codecs_keep_required_presence_and_leaf_validation() {
             "schema accepted invalid nested field {field}"
         );
         assert!(
-            NestedReferenceProbe::__decode_persistent_component((&candidate).into()).is_err(),
+            NestedReferenceProbe::decode_persistent_component((&candidate).into()).is_err(),
             "native codec accepted invalid nested field {field}"
         );
     }
@@ -287,10 +287,10 @@ fn generated_nested_math_composes_closed_axes_through_maps_lists_and_optional() 
         vectors: BTreeMap::from([("route".into(), vec![Some(Vec2::new(0.5, -2.0)), None])]),
     };
     let schema = NestedMath::persistent_component_schema();
-    let value = expected.__encode_persistent_component().unwrap();
+    let value = expected.encode_persistent_component().unwrap();
     validate_component_value(&schema, &value).unwrap();
     assert_eq!(
-        NestedMath::__decode_persistent_component((&value).into()).unwrap(),
+        NestedMath::decode_persistent_component((&value).into()).unwrap(),
         expected
     );
     let ComponentValueShape::Map { value: list } = schema.fields()[0].shape() else {
@@ -330,5 +330,5 @@ fn generated_nested_math_composes_closed_axes_through_maps_lists_and_optional() 
         )]),
     )]);
     assert!(validate_component_value(&schema, &invalid).is_err());
-    assert!(NestedMath::__decode_persistent_component((&invalid).into()).is_err());
+    assert!(NestedMath::decode_persistent_component((&invalid).into()).is_err());
 }

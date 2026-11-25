@@ -35,7 +35,7 @@ fn vector_data_authoring_requires_matching_catalog_and_complete_closed_values() 
         origin: Vec2::ZERO,
         route: vec![Vec2::ONE],
     }
-    .__encode_persistent_component()
+    .encode_persistent_component()
     .unwrap();
     let document = |value| {
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(

@@ -18,13 +18,14 @@ pub trait PersistentComponentProvider: Component + Sized + 'static {
 
     fn persistent_component_schema() -> ComponentSchema;
 
-    #[doc(hidden)]
-    fn __decode_persistent_component(
+    /// Decodes the current component's stored fields without applying them to a world.
+    /// Resolve the record's schema version before calling this codec.
+    fn decode_persistent_component(
         value: ComponentValueRef<'_>,
     ) -> Result<Self, ComponentCodecError>;
 
-    #[doc(hidden)]
-    fn __encode_persistent_component(&self) -> Result<ComponentValue, ComponentCodecError>;
+    /// Encodes the current component's persisted fields.
+    fn encode_persistent_component(&self) -> Result<ComponentValue, ComponentCodecError>;
 }
 
 #[doc(hidden)]

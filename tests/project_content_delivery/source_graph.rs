@@ -123,7 +123,7 @@ fn strict_check_follows_deferred_scenes_and_reads_the_final_importers_raw_input(
             FutureTarget {
                 target: AssetRef::Product(target),
             }
-            .__encode_persistent_component()
+            .encode_persistent_component()
             .unwrap(),
         )
     };
@@ -360,9 +360,7 @@ fn product(suffix: u64) -> AssetProductRef {
 fn source_scene(source: AssetRef) -> SceneDocument {
     component_scene(
         "test.delivery.SourceText",
-        SourceText { source }
-            .__encode_persistent_component()
-            .unwrap(),
+        SourceText { source }.encode_persistent_component().unwrap(),
     )
 }
 

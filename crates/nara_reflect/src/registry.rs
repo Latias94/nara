@@ -1618,8 +1618,8 @@ impl ComponentRegistryBuilder {
     {
         self.register_persistent_component_with_codec::<T, _, _>(
             T::persistent_component_schema(),
-            T::__decode_persistent_component,
-            T::__encode_persistent_component,
+            T::decode_persistent_component,
+            T::encode_persistent_component,
         )
     }
 

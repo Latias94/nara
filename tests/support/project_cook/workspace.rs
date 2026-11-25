@@ -119,7 +119,7 @@ impl Project {
                     SceneComponentRecord::new(
                         ComponentSchemaVersion::ONE,
                         AuthoredScore { value }
-                            .__encode_persistent_component()
+                            .encode_persistent_component()
                             .unwrap(),
                     ),
                 );

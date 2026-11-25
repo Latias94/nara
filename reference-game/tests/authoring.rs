@@ -167,8 +167,8 @@ where
     registry
         .register_native_component_with_codec::<T, _, _>(
             &id,
-            T::__decode_persistent_component,
-            T::__encode_persistent_component,
+            T::decode_persistent_component,
+            T::encode_persistent_component,
         )
         .map(|_| ())
 }

@@ -317,7 +317,7 @@ where
     if record.version() != schema.version() {
         return Err(ReferenceSimulationError::InvalidAuthoredConfiguration);
     }
-    T::__decode_persistent_component(record.value())
+    T::decode_persistent_component(record.value())
         .map(Some)
         .map_err(|_| ReferenceSimulationError::InvalidAuthoredConfiguration)
 }
