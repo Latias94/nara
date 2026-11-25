@@ -232,9 +232,7 @@ fn assert_desktop_keyboard_check(project: &Project) {
 }
 
 fn snapshot<const N: usize>(root: &Path, files: [&str; N]) -> [Vec<u8>; N] {
-    files.map(|file| {
-        fs::read(root.join(file)).unwrap_or_else(|error| panic!("{file}: {error}"))
-    })
+    files.map(|file| fs::read(root.join(file)).unwrap_or_else(|error| panic!("{file}: {error}")))
 }
 
 fn run_source(project: &mut Project, executable: &Path, input: &str) -> Output {

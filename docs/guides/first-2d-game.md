@@ -66,9 +66,7 @@ Run `nara check` to validate the selected map. Gameplay systems read its actions
 - Run [the compact code-first example](../../examples/first_game.rs) to see fixed-step movement,
   sprite animation, a tilemap, collision audio, and a HUD together. Its build command is in the
   [repository README](../../README.md#build-and-test).
-- Edit a gem's pickup radius in `scenes/startup.scene.json` or the player's speed in
-  `prefabs/player.prefab.json` in [Collect Game](../../samples/collect-game/README.md). Run the
-  sample's headless and desktop commands to see how its authored files and gameplay plugin fit
-  together.
+- Play [First Wave](../../reference-game/README.md) to see a complete game with authored scenes,
+  prefabs, and HUD. Its headless command runs the same gameplay systems as the desktop build.
 - Follow [the two-level game's delivery workflow](../../samples/two-level-game/README.md#source-free-cooked-player)
   to cook and export a project using a project-owned `cook` target.

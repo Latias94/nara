@@ -11,7 +11,6 @@ resolver = "3"
 exclude = [
     "examples/shared-viewport",
     "reference-game",
-    "samples/collect-game",
     "samples/two-level-game",
     "vendor/winit",
 ]

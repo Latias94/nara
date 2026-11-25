@@ -76,6 +76,23 @@ fn existing_project_is_never_overwritten() {
 }
 
 #[test]
+fn projects_with_the_same_name_get_distinct_source_universes() {
+    let temp = tempfile::tempdir().unwrap();
+    let checkout = temp.path().join("engine");
+    local_checkout(&checkout);
+    let [first, second] = ["first", "second"].map(|directory| {
+        let project = temp.path().join(directory);
+        create_project(&project, "my-game", &checkout).unwrap();
+        let bytes = fs::read(project.join("nara.toml")).unwrap();
+        let manifest = ProjectManifest::parse_toml_bytes(&bytes);
+        assert!(!manifest.has_errors(), "{manifest:?}");
+        manifest.manifest.unwrap().project
+    });
+    assert_eq!(first.name, second.name);
+    assert_ne!(first.source_universe, second.source_universe);
+}
+
+#[test]
 fn check_compiles_the_selected_ron_action_map_without_cargo() {
     let temp = tempfile::tempdir().unwrap();
     let checkout = temp.path().join("engine");

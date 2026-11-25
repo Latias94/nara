@@ -26,7 +26,6 @@ def check_wgpu():
     for path in (
         "Cargo.lock",
         "reference-game/Cargo.lock",
-        "samples/collect-game/Cargo.lock",
         "samples/two-level-game/Cargo.lock",
         "examples/shared-viewport/Cargo.lock",
     ):

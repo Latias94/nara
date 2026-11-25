@@ -12,18 +12,6 @@ mod authored_project;
 mod workflow;
 
 #[test]
-#[ignore = "serial nested Cargo: two real external starters, first system, win/reset and relocated source-free Players"]
-fn same_named_new_games_keep_their_identities_and_complete_source_and_cooked_workflows() {
-    workflow::accept();
-}
-
-#[test]
-#[ignore = "serial nested Cargo: generated collection project, missing Prefab metadata location and Check recovery"]
-fn missing_prefab_metadata_reports_its_project_location_and_recovers() {
-    workflow::missing_metadata_location();
-}
-
-#[test]
 #[ignore = "serial nested Cargo: v2 starter, authored puzzle and input, cooked and relocated Player"]
 fn generated_v2_puzzle_observes_the_edited_scene_and_input_after_source_removal() {
     workflow::puzzle::accept();

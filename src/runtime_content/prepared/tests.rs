@@ -943,6 +943,33 @@ fn retained_pack_rejects_bad_header_extent_and_catalog_before_domain_decode() {
 }
 
 #[test]
+fn valid_pack_from_another_build_cannot_replace_the_expected_pack() {
+    let original = Fixture::new();
+    let foreign = Fixture::with_startup_entity(false, &[], |_, mut entity| {
+        entity.id = SceneEntityId::new("foreign-entity").unwrap();
+        entity
+    });
+    let foreign_path = foreign.write_pack();
+    foreign.open_pack(&foreign_path, content_limits()).unwrap();
+    let directory = open_explicit_product_project_root(&foreign.root).unwrap();
+    let file = directory
+        .open_file(&RelativePath::new(foreign_path.file_name().unwrap().to_str().unwrap()).unwrap())
+        .unwrap();
+
+    reset_observations();
+    assert!(matches!(
+        RuntimeContentBase::open_pack(
+            file,
+            &original.expected,
+            original.recipes[0].clone(),
+            content_limits(),
+        ),
+        Err(RuntimeContentError::InvalidPackHeader | RuntimeContentError::CatalogDigestMismatch)
+    ));
+    assert!(decoded().is_empty());
+}
+
+#[test]
 fn retained_pack_partial_sink_failure_releases_selected_raw_work_without_decoding() {
     struct RefusingSink {
         remaining: usize,
