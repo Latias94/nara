@@ -1,6 +1,12 @@
 //! Concrete Runtime formats, independent of authoring source acquisition.
 
-use std::{error::Error, fmt};
+use std::{
+    any::Any,
+    error::Error,
+    fmt,
+    mem::size_of,
+    panic::{AssertUnwindSafe, catch_unwind},
+};
 
 use nara_core::ByteLimit;
 use nara_core::diagnostic::ReportDiagnostic as Diagnostic;
@@ -161,6 +167,111 @@ pub trait RuntimeAssetCodec<P: Send + Sync + 'static>: Send + Sync + 'static {
     /// residency remain separate Host obligations.
     #[must_use]
     fn contains_runtime_product(product: &P, reference: AssetProductRef) -> bool;
+}
+
+/// A failure while decoding or validating an asset from a verified Runtime member.
+#[derive(Debug)]
+pub enum AssetRuntimeDecodeError<E> {
+    Codec(AssetRuntimeError),
+    ProductIdentityMismatch,
+    Dependency(E),
+    RetainedBytes {
+        required: usize,
+        limit: usize,
+    },
+    /// The original unwind payload, for callers with an enclosing acquisition boundary.
+    Panicked(Box<dyn Any + Send>),
+}
+
+impl<E> fmt::Display for AssetRuntimeDecodeError<E> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Codec(error) => fmt::Display::fmt(error, formatter),
+            Self::ProductIdentityMismatch => {
+                formatter.write_str("the decoded Runtime asset does not contain a declared product")
+            }
+            Self::Dependency(_) => {
+                formatter.write_str("the Runtime asset dependencies were rejected")
+            }
+            Self::RetainedBytes { required, limit } => write!(
+                formatter,
+                "the decoded Runtime asset requires {required} retained bytes but only {limit} are covered"
+            ),
+            Self::Panicked(_) => {
+                formatter.write_str("the Runtime asset decode or validation panicked")
+            }
+        }
+    }
+}
+
+impl<E: Error + 'static> Error for AssetRuntimeDecodeError<E> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Codec(error) => Some(error),
+            Self::Dependency(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+/// Decodes and validates a verified member, returning its CPU product and retained byte count.
+///
+/// Supply every product mapped to the member and the retained limit admitted before decode.
+/// The encoded owner is released after decode. Both membership checks run before any dependency
+/// visits. `finish_dependencies` consumes the caller's inventory to check it against the declared
+/// dependencies before the codec measures retained bytes.
+pub fn decode_runtime_asset<D, C, E, Inventory>(
+    encoded: impl AsRef<[u8]>,
+    products: &[AssetProductRef],
+    retained_limit: ByteLimit,
+    dependencies: Inventory,
+    mut visit_dependency: impl FnMut(
+        &mut Inventory,
+        AssetProductRef,
+        AssetReferenceDemand,
+    ) -> Result<(), E>,
+    finish_dependencies: impl FnOnce(Inventory) -> Result<(), E>,
+) -> Result<(D::Product, usize), AssetRuntimeDecodeError<E>>
+where
+    D: AssetDomain,
+    C: RuntimeAssetCodec<D::Product>,
+{
+    catch_unwind(AssertUnwindSafe(move || {
+        let mut dependencies = dependencies;
+        let encoded = encoded;
+        let value = C::decode_runtime(encoded.as_ref()).map_err(AssetRuntimeDecodeError::Codec)?;
+        drop(encoded);
+
+        for &reference in products {
+            if !D::contains_product(&value, reference.product())
+                || !C::contains_runtime_product(&value, reference)
+            {
+                return Err(AssetRuntimeDecodeError::ProductIdentityMismatch);
+            }
+        }
+        C::visit_runtime_dependencies(&value, |product, demand| {
+            visit_dependency(&mut dependencies, product, demand)
+        })
+        .map_err(AssetRuntimeDecodeError::Dependency)?;
+        finish_dependencies(dependencies).map_err(AssetRuntimeDecodeError::Dependency)?;
+
+        let retained = C::runtime_retained_bytes(&value).map_err(AssetRuntimeDecodeError::Codec)?;
+        let inline = size_of::<D::Product>();
+        if retained < inline {
+            return Err(AssetRuntimeDecodeError::RetainedBytes {
+                required: inline,
+                limit: retained,
+            });
+        }
+        if retained > retained_limit.get() {
+            return Err(AssetRuntimeDecodeError::RetainedBytes {
+                required: retained,
+                limit: retained_limit.get(),
+            });
+        }
+        Ok((value, retained))
+    }))
+    .unwrap_or_else(|payload| Err(AssetRuntimeDecodeError::Panicked(payload)))
 }
 
 #[cfg(test)]

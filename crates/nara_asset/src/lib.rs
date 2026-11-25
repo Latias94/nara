@@ -78,7 +78,10 @@ pub use reload::{
     SourceReloadDrainError, SourceReloadRegistrationError, register_image_reload_consumer,
     register_source_reload_consumer,
 };
-pub use runtime_codec::{AssetDomain, AssetRuntimeError, AssetRuntimeLimits, RuntimeAssetCodec};
+pub use runtime_codec::{
+    AssetDomain, AssetRuntimeDecodeError, AssetRuntimeError, AssetRuntimeLimits, RuntimeAssetCodec,
+    decode_runtime_asset,
+};
 pub use server::{AssetError, AssetServer};
 pub use source_changes::{
     AssetSourceChange, AssetSourceChangeAdmissionError, AssetSourceChangeKind,

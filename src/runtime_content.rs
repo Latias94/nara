@@ -41,7 +41,7 @@ use std::{
     error::Error,
     fmt,
     mem::size_of,
-    panic::{AssertUnwindSafe, catch_unwind},
+    panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     sync::Arc,
 };
 
@@ -49,8 +49,8 @@ use crate::fs::{ContentDigest, FileCapability, FsError};
 #[cfg(feature = "project-workflow")]
 use nara_asset::pack::CapturedPack;
 use nara_asset::{
-    AssetDomain, AssetProductRef, AssetRef, AssetReferenceDemand, AssetRuntimeError,
-    RuntimeAssetCodec,
+    AssetDomain, AssetProductRef, AssetRef, AssetReferenceDemand, AssetRuntimeDecodeError,
+    AssetRuntimeError, RuntimeAssetCodec, decode_runtime_asset,
 };
 use nara_core::ByteLimit;
 use nara_reflect::{
@@ -582,33 +582,27 @@ impl RuntimeContentBase {
                 .inner
                 .budget
                 .reserve(promised, limits.work_bytes().get())?;
-            let mut dependencies = DependencyInventory::new(self, member)?;
+            let dependencies = DependencyInventory::new(self, member)?;
             let encoded = self.encoded_member(index)?;
-            let value = C::decode_runtime(encoded.as_ref()).map_err(RuntimeContentError::Asset)?;
-            drop(encoded);
-            for reference in member.products() {
-                if !D::contains_product(&value, reference.product())
-                    || !C::contains_runtime_product(&value, *reference)
-                {
-                    return Err(RuntimeContentError::ProductIdentityMismatch);
+            let (value, product_retained) = decode_runtime_asset::<D, C, _, _>(
+                encoded,
+                member.products(),
+                limits.retained_bytes(),
+                dependencies,
+                DependencyInventory::observe,
+                DependencyInventory::finish,
+            )
+            .map_err(|error| match error {
+                AssetRuntimeDecodeError::Codec(error) => RuntimeContentError::Asset(error),
+                AssetRuntimeDecodeError::ProductIdentityMismatch => {
+                    RuntimeContentError::ProductIdentityMismatch
                 }
-            }
-            C::visit_runtime_dependencies(&value, |product, demand| {
-                dependencies.observe(product, demand)
+                AssetRuntimeDecodeError::Dependency(error) => error,
+                AssetRuntimeDecodeError::RetainedBytes { required, limit } => {
+                    budget_error(RuntimeContentBudgetKind::RetainedBytes, required, limit)
+                }
+                AssetRuntimeDecodeError::Panicked(payload) => resume_unwind(payload),
             })?;
-            dependencies.finish()?;
-            let product_retained =
-                C::runtime_retained_bytes(&value).map_err(RuntimeContentError::Asset)?;
-            check(
-                RuntimeContentBudgetKind::RetainedBytes,
-                size_of::<D::Product>(),
-                product_retained,
-            )?;
-            check(
-                RuntimeContentBudgetKind::RetainedBytes,
-                product_retained,
-                limits.retained_bytes().get(),
-            )?;
             let retained = checked_add(
                 RuntimeContentBudgetKind::RetainedBytes,
                 product_retained,
