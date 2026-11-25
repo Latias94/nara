@@ -1,21 +1,16 @@
 //! Exact encoded ownership, independent of the original executable plan and decoded residency.
 
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::Write;
 
-use crate::fs::{ContentDigest, FileCapability, FsError, FsOperation};
+use nara_asset::pack::{self, Pack, PackError};
+
+use crate::fs::{FileCapability, FsError, FsOperation};
 
 use super::{DecodeLease, RuntimeContentBase, RuntimeContentCatalog, RuntimeContentError};
 
-const MAGIC: &[u8; 8] = b"NARAPACK";
-const VERSION: u32 = 1;
-const HEADER_BYTES: u64 = 20;
-
 pub(super) enum EncodedBacking {
     Captured(Box<[Vec<u8>]>),
-    Pack {
-        file: FileCapability,
-        offsets: Box<[u64]>,
-    },
+    Pack(Pack),
 }
 
 pub(super) enum EncodedMember<'a> {
@@ -39,17 +34,15 @@ impl RuntimeContentBase {
     /// This uses the original admitted catalog bytes and member extents. It does not allocate a
     /// pack, decode products or grant directory publication authority.
     pub fn pack_encoded_bytes(&self) -> Result<u64, RuntimeContentError> {
-        self.inner.catalog.members().iter().try_fold(
-            HEADER_BYTES
-                .checked_add(self.inner.catalog_bytes.len() as u64)
-                .ok_or(RuntimeContentError::PackExtentMismatch)?,
-            |total, member| {
-                total
-                    .checked_add(member.digest().length())
-                    .filter(|length| *length <= i64::MAX as u64)
-                    .ok_or(RuntimeContentError::PackExtentMismatch)
-            },
+        pack::encoded_bytes(
+            self.inner.catalog_bytes.len(),
+            self.inner
+                .catalog
+                .members()
+                .iter()
+                .map(|member| member.digest().length()),
         )
+        .map_err(pack_error)
     }
 
     pub(super) fn encoded_member(
@@ -58,20 +51,13 @@ impl RuntimeContentBase {
     ) -> Result<EncodedMember<'_>, RuntimeContentError> {
         match &self.inner.backing {
             EncodedBacking::Captured(members) => Ok(EncodedMember::Captured(&members[index])),
-            EncodedBacking::Pack { file, offsets } => {
+            EncodedBacking::Pack(pack) => {
                 let digest = self.inner.catalog.members()[index].digest();
                 // Catalogue admission already checked this conversion and the per-member cap.
                 let length =
                     usize::try_from(digest.length()).expect("admitted member length fits the host");
                 let work = self.inner.budget.reserve(0, length)?;
-                let mut reader = file.reader().map_err(RuntimeContentError::Host)?;
-                reader
-                    .seek(SeekFrom::Start(offsets[index]))
-                    .map_err(read_error)?;
-                let bytes = read_exact_bytes(&mut reader, length)?;
-                if ContentDigest::of_bytes(&bytes) != digest {
-                    return Err(RuntimeContentError::MemberDigestMismatch);
-                }
+                let bytes = pack.read_member(index, digest).map_err(pack_error)?;
                 Ok(EncodedMember::Read { bytes, _work: work })
             }
         }
@@ -86,19 +72,15 @@ impl RuntimeContentBase {
         &self,
         output: &mut (impl Write + ?Sized),
     ) -> Result<(), RuntimeContentError> {
-        output.write_all(MAGIC).map_err(write_error)?;
-        output
-            .write_all(&VERSION.to_le_bytes())
-            .map_err(write_error)?;
-        output
-            .write_all(&(self.inner.catalog_bytes.len() as u64).to_le_bytes())
-            .map_err(write_error)?;
-        output
-            .write_all(&self.inner.catalog_bytes)
-            .map_err(write_error)?;
+        pack::write_catalog(output, &self.inner.catalog_bytes).map_err(pack_error)?;
         for index in 0..self.inner.catalog.members().len() {
             let encoded = self.encoded_member(index)?;
-            output.write_all(encoded.as_ref()).map_err(write_error)?;
+            output.write_all(encoded.as_ref()).map_err(|source| {
+                RuntimeContentError::Host(FsError::Io {
+                    operation: FsOperation::Write,
+                    source,
+                })
+            })?;
         }
         Ok(())
     }
@@ -109,16 +91,7 @@ pub(super) fn read_catalog(
     file: &FileCapability,
     expected_length: usize,
 ) -> Result<Vec<u8>, RuntimeContentError> {
-    let mut reader = file.reader().map_err(RuntimeContentError::Host)?;
-    let mut header = [0_u8; HEADER_BYTES as usize];
-    reader.read_exact(&mut header).map_err(read_error)?;
-    if &header[..8] != MAGIC
-        || header[8..12] != VERSION.to_le_bytes()
-        || header[12..20] != (expected_length as u64).to_le_bytes()
-    {
-        return Err(RuntimeContentError::InvalidPackHeader);
-    }
-    read_exact_bytes(&mut reader, expected_length)
+    pack::read_catalog(file, expected_length).map_err(pack_error)
 }
 
 /// Called only after admission of the complete extent-index allocation.
@@ -127,54 +100,23 @@ pub(super) fn open_pack(
     catalog: &RuntimeContentCatalog,
     catalog_length: usize,
 ) -> Result<EncodedBacking, RuntimeContentError> {
-    let mut offset = HEADER_BYTES
-        .checked_add(catalog_length as u64)
-        .ok_or(RuntimeContentError::PackExtentMismatch)?;
-    let mut offsets = Vec::with_capacity(catalog.members().len());
-    for member in catalog.members() {
-        offsets.push(offset);
-        offset = offset
-            .checked_add(member.digest().length())
-            .filter(|end| *end <= i64::MAX as u64)
-            .ok_or(RuntimeContentError::PackExtentMismatch)?;
-    }
-    let actual_length = file
-        .reader()
-        .map_err(RuntimeContentError::Host)?
-        .seek(SeekFrom::End(0))
-        .map_err(read_error)?;
-    if actual_length != offset {
-        return Err(RuntimeContentError::PackExtentMismatch);
-    }
-    Ok(EncodedBacking::Pack {
+    Pack::open(
         file,
-        offsets: offsets.into_boxed_slice(),
-    })
+        catalog_length,
+        catalog
+            .members()
+            .iter()
+            .map(|member| member.digest().length()),
+    )
+    .map(EncodedBacking::Pack)
+    .map_err(pack_error)
 }
 
-fn read_exact_bytes(reader: &mut impl Read, length: usize) -> Result<Vec<u8>, RuntimeContentError> {
-    let mut bytes = Vec::new();
-    bytes.try_reserve_exact(length).map_err(|_| {
-        read_error(std::io::Error::new(
-            std::io::ErrorKind::OutOfMemory,
-            "bounded Runtime pack member allocation failed",
-        ))
-    })?;
-    bytes.resize(length, 0);
-    reader.read_exact(&mut bytes).map_err(read_error)?;
-    Ok(bytes)
-}
-
-fn read_error(source: std::io::Error) -> RuntimeContentError {
-    RuntimeContentError::Host(FsError::Io {
-        operation: FsOperation::Read,
-        source,
-    })
-}
-
-fn write_error(source: std::io::Error) -> RuntimeContentError {
-    RuntimeContentError::Host(FsError::Io {
-        operation: FsOperation::Write,
-        source,
-    })
+fn pack_error(error: PackError) -> RuntimeContentError {
+    match error {
+        PackError::Io(error) => RuntimeContentError::Host(error),
+        PackError::InvalidHeader => RuntimeContentError::InvalidPackHeader,
+        PackError::ExtentMismatch => RuntimeContentError::PackExtentMismatch,
+        PackError::MemberDigestMismatch => RuntimeContentError::MemberDigestMismatch,
+    }
 }

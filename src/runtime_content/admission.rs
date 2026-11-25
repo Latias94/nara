@@ -2,6 +2,7 @@
 
 use std::{mem::size_of, sync::Arc};
 
+use nara_asset::pack::Pack;
 use nara_core::ByteLimit;
 
 use super::{
@@ -152,23 +153,19 @@ impl AdmittedCatalog {
 
     /// Admit the complete backing before its member table or any payload allocation.
     pub(super) fn retained_bytes(&self, captured: bool) -> Result<usize, RuntimeContentError> {
-        let table_entry = if captured {
-            size_of::<Vec<u8>>()
+        let member_count = self.catalog.members().len();
+        let table = if captured {
+            member_count.checked_mul(size_of::<Vec<u8>>())
         } else {
-            size_of::<u64>()
-        };
-        let table = self
-            .catalog
-            .members()
-            .len()
-            .checked_mul(table_entry)
-            .ok_or_else(|| {
-                budget_error(
-                    RuntimeContentBudgetKind::RetainedBytes,
-                    usize::MAX,
-                    self.limits.retained_bytes.get(),
-                )
-            })?;
+            Pack::index_bytes(member_count)
+        }
+        .ok_or_else(|| {
+            budget_error(
+                RuntimeContentBudgetKind::RetainedBytes,
+                usize::MAX,
+                self.limits.retained_bytes.get(),
+            )
+        })?;
         let encoded = if captured {
             self.declared_encoded
         } else {

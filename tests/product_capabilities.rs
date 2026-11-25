@@ -179,6 +179,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
             "dep:blake3",
             "dep:rustix",
             "dep:windows-sys",
+            "nara_asset/pack",
             "nara_core/fs-capabilities",
             "nara_scene/runtime-configuration",
         ],

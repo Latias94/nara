@@ -1,0 +1,239 @@
+//! Wire I/O for NARAPACK v1, the cooked delivery format retained in Phase 3.
+//!
+//! A pack stores a fixed header, opaque catalog bytes, then concatenated members in catalog order.
+//! The caller owns catalog admission, executable selection, expected digests, and allocation limits.
+
+use std::{
+    io::{self, Read, Seek, SeekFrom, Write},
+    mem::size_of,
+};
+
+use nara_core::vfs::capabilities::{ContentDigest, FileCapability, FsError, FsOperation};
+
+const MAGIC: &[u8; 8] = b"NARAPACK";
+const VERSION: u32 = 1;
+const HEADER_BYTES: u64 = 20;
+
+/// Failures while reading or writing the version-one wire layout.
+#[derive(Debug, thiserror::Error)]
+pub enum PackError {
+    #[error(transparent)]
+    Io(#[from] FsError),
+    #[error("pack header differs from version one or the expected catalog length")]
+    InvalidHeader,
+    #[error("pack extent differs from the declared layout")]
+    ExtentMismatch,
+    #[error("pack member differs from the expected digest")]
+    MemberDigestMismatch,
+}
+
+/// One held file capability and its exact ordered member layout.
+pub struct Pack {
+    file: FileCapability,
+    members_start: u64,
+    member_ends: Box<[u64]>,
+}
+
+impl Pack {
+    /// Returns the heap bytes used by the index, excluding the inline size of `Pack`.
+    #[must_use]
+    pub fn index_bytes(member_count: usize) -> Option<usize> {
+        member_count.checked_mul(size_of::<u64>())
+    }
+
+    /// Indexes the held file after the caller admits the catalog and its index storage.
+    ///
+    /// Supply the same file used by [`read_catalog`] and the lengths in catalog order. The file
+    /// must match the entire declared extent. The index retains only the ordered end offsets.
+    pub fn open(
+        file: FileCapability,
+        catalog_length: usize,
+        member_lengths: impl ExactSizeIterator<Item = u64>,
+    ) -> Result<Self, PackError> {
+        let members_start = advance(HEADER_BYTES, catalog_length as u64)?;
+        let mut end = members_start;
+        let mut member_ends = Vec::new();
+        member_ends
+            .try_reserve_exact(member_lengths.len())
+            .map_err(|_| allocation_error("bounded Runtime pack index allocation failed"))?;
+        for length in member_lengths {
+            end = advance(end, length)?;
+            member_ends.push(end);
+        }
+        let actual_length = file.reader()?.seek(SeekFrom::End(0)).map_err(read_error)?;
+        if actual_length != end {
+            return Err(PackError::ExtentMismatch);
+        }
+        Ok(Self {
+            file,
+            members_start,
+            member_ends: member_ends.into_boxed_slice(),
+        })
+    }
+
+    /// Reads one member from the held file and checks the caller's digest before returning bytes.
+    ///
+    /// The supplied digest length must equal the indexed member length. Callers admit the
+    /// temporary allocation before reading. Each call uses an independent positional cursor.
+    pub fn read_member(&self, index: usize, expected: ContentDigest) -> Result<Vec<u8>, PackError> {
+        let end = *self
+            .member_ends
+            .get(index)
+            .ok_or(PackError::ExtentMismatch)?;
+        let start = if index == 0 {
+            self.members_start
+        } else {
+            self.member_ends[index - 1]
+        };
+        let length = end - start;
+        if expected.length() != length {
+            return Err(PackError::ExtentMismatch);
+        }
+        let length = usize::try_from(length).map_err(|_| PackError::ExtentMismatch)?;
+        let mut reader = self.file.reader()?;
+        reader.seek(SeekFrom::Start(start)).map_err(read_error)?;
+        let bytes = read_exact_bytes(&mut reader, length)?;
+        if ContentDigest::of_bytes(&bytes) != expected {
+            return Err(PackError::MemberDigestMismatch);
+        }
+        Ok(bytes)
+    }
+}
+
+/// Computes the complete pack extent in bytes without allocating an index.
+pub fn encoded_bytes(
+    catalog_length: usize,
+    member_lengths: impl IntoIterator<Item = u64>,
+) -> Result<u64, PackError> {
+    member_lengths
+        .into_iter()
+        .try_fold(advance(HEADER_BYTES, catalog_length as u64)?, advance)
+}
+
+/// Reads the header and the independently bounded catalog bytes from the start of the file.
+pub fn read_catalog(file: &FileCapability, expected_length: usize) -> Result<Vec<u8>, PackError> {
+    let mut reader = file.reader()?;
+    let mut header = [0_u8; HEADER_BYTES as usize];
+    reader.read_exact(&mut header).map_err(read_error)?;
+    if &header[..8] != MAGIC
+        || header[8..12] != VERSION.to_le_bytes()
+        || header[12..20] != (expected_length as u64).to_le_bytes()
+    {
+        return Err(PackError::InvalidHeader);
+    }
+    read_exact_bytes(&mut reader, expected_length)
+}
+
+/// Writes the header and opaque catalog at the stream's current position.
+///
+/// The caller appends the member bytes in catalog order. A failed write can leave partial bytes.
+pub fn write_catalog(output: &mut (impl Write + ?Sized), catalog: &[u8]) -> Result<(), PackError> {
+    let write_error = |source| FsError::Io {
+        operation: FsOperation::Write,
+        source,
+    };
+    output.write_all(MAGIC).map_err(write_error)?;
+    output
+        .write_all(&VERSION.to_le_bytes())
+        .map_err(write_error)?;
+    output
+        .write_all(&(catalog.len() as u64).to_le_bytes())
+        .map_err(write_error)?;
+    output.write_all(catalog).map_err(write_error)?;
+    Ok(())
+}
+
+fn advance(start: u64, length: u64) -> Result<u64, PackError> {
+    start
+        .checked_add(length)
+        .filter(|end| *end <= i64::MAX as u64)
+        .ok_or(PackError::ExtentMismatch)
+}
+
+fn read_exact_bytes(reader: &mut impl Read, length: usize) -> Result<Vec<u8>, PackError> {
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(length)
+        .map_err(|_| allocation_error("bounded Runtime pack member allocation failed"))?;
+    bytes.resize(length, 0);
+    reader.read_exact(&mut bytes).map_err(read_error)?;
+    Ok(bytes)
+}
+
+fn allocation_error(message: &'static str) -> PackError {
+    read_error(io::Error::new(io::ErrorKind::OutOfMemory, message))
+}
+
+fn read_error(source: io::Error) -> PackError {
+    FsError::Io {
+        operation: FsOperation::Read,
+        source,
+    }
+    .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encoded_extent_stops_at_the_signed_native_offset_limit() {
+        let maximum = i64::MAX as u64;
+        let member_length = maximum - 23;
+        assert_eq!(encoded_bytes(3, [member_length, 0]).unwrap(), maximum);
+        assert!(matches!(
+            encoded_bytes(3, [member_length, 1]),
+            Err(PackError::ExtentMismatch)
+        ));
+        assert!(matches!(
+            encoded_bytes(3, [u64::MAX]),
+            Err(PackError::ExtentMismatch)
+        ));
+    }
+
+    #[test]
+    #[cfg(any(windows, unix))]
+    fn member_reads_authenticate_exact_indexed_extents() {
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        use nara_core::vfs::capabilities::TrustMode;
+
+        let mut bytes = Vec::new();
+        write_catalog(&mut bytes, b"cat").unwrap();
+        bytes.extend_from_slice(b"redblue");
+        assert_eq!(bytes, b"NARAPACK\x01\0\0\0\x03\0\0\0\0\0\0\0catredblue");
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("nara_pack_{}_{stamp}", std::process::id()));
+        let mut handle = fs::File::create_new(&path).unwrap();
+        handle.write_all(&bytes).unwrap();
+        let file = FileCapability::from_host_handle(handle, TrustMode::TrustedLocal, 0).unwrap();
+        let catalog = read_catalog(&file, 3).unwrap();
+        let pack = Pack::open(file, catalog.len(), [0, 3, 4, 0].into_iter()).unwrap();
+        let empty = pack.read_member(0, ContentDigest::of_bytes(b""));
+        let first = pack.read_member(1, ContentDigest::of_bytes(b"red"));
+        let second = pack.read_member(2, ContentDigest::of_bytes(b"blue"));
+        let last = pack.read_member(3, ContentDigest::of_bytes(b""));
+        let short = pack.read_member(1, ContentDigest::of_bytes(b"re"));
+        let long = pack.read_member(1, ContentDigest::of_bytes(b"redblue"));
+        let wrong = pack.read_member(1, ContentDigest::of_bytes(b"tan"));
+        let missing = pack.read_member(4, ContentDigest::of_bytes(b""));
+        drop(pack);
+        fs::remove_file(path).unwrap();
+
+        assert_eq!(catalog, b"cat");
+        assert!(empty.unwrap().is_empty());
+        assert_eq!(first.unwrap(), b"red");
+        assert_eq!(second.unwrap(), b"blue");
+        assert!(last.unwrap().is_empty());
+        assert!(matches!(short, Err(PackError::ExtentMismatch)));
+        assert!(matches!(long, Err(PackError::ExtentMismatch)));
+        assert!(matches!(wrong, Err(PackError::MemberDigestMismatch)));
+        assert!(matches!(missing, Err(PackError::ExtentMismatch)));
+    }
+}

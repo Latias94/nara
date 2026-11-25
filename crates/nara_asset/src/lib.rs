@@ -3,6 +3,7 @@
 //! Asset values, storage, source data, and Runtime codecs are available without App or ECS
 //! dependencies. The `runtime` feature enables ECS resources, reload services, and App plugins.
 //! The independent `serde` feature enables source formats without runtime integration.
+//! The `pack` feature enables wire I/O for cooked delivery.
 //! The `hot-reload` feature adds native source watching.
 
 #[cfg(feature = "serde")]
@@ -15,6 +16,8 @@ pub mod image;
 #[cfg(feature = "serde")]
 mod import;
 mod import_recipe;
+#[cfg(feature = "pack")]
+pub mod pack;
 mod product_identity;
 mod reference;
 #[cfg(feature = "runtime")]

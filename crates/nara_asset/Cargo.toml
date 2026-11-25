@@ -25,5 +25,6 @@ serde_json.workspace = true
 [features]
 default = []
 hot-reload = ["runtime", "dep:notify", "nara_app/diagnostics"]
+pack = ["nara_core/fs-capabilities", "dep:thiserror"]
 runtime = ["dep:bevy_ecs", "dep:nara_app", "dep:nara_ecs", "dep:thiserror"]
 serde = ["dep:serde", "dep:serde_json", "nara_core/serde"]
