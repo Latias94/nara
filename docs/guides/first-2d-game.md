@@ -59,7 +59,9 @@ action_map = "input/default.actions.ron"
 ```
 
 Run `nara check` to validate the selected map. Gameplay systems read its actions through
-`Res<ActionState>`, for example `actions.button("jump")`.
+`Res<ActionState>`, for example `actions.button("jump")`. A source-hosted development run using
+`ProjectSceneWatchPlugin` applies valid edits to the selected map at the next input update. A
+replacement ends actions held by the previous map. Keep the `source` UUID when editing bindings.
 
 ## Explore the supplied games
 

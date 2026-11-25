@@ -12,7 +12,9 @@
 - Put W3C physical key codes, text, mouse, wheel, touch, and lightweight `ActionMap` in `nara_input`.
   Offer optional `gilrs` gamepad support. Remove `nara_gameplay` and its untyped command queues.
   Use RON for authored action maps. `nara check` compiles the selected file with the same input
-  rules as the source runner. The existing cooked input wire format remains JSON.
+  rules as the source runner. Development source watching replaces a valid selected map before
+  input resolution and retains the last valid map on rejection. The existing cooked input wire
+  format remains JSON.
 - Put ECS playback, mixer, bus, spatial, and meter types under `nara_audio`. Use `kira` internally
   with a headless mock backend and keep `kira` types out of public APIs and scene data.
 - Grow `nara_physics2d` from `nara_rapier2d`. Synchronize transforms and collision events in

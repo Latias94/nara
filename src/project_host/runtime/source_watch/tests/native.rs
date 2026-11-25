@@ -236,6 +236,116 @@ fn source_host_binds_one_worker_before_initial_rescan_and_preserves_current_scen
 }
 
 #[test]
+fn watched_action_map_updates_the_primary_bindings_without_replacing_the_scene() {
+    use nara_input::{ActionMaps, InputBinding, InputSeatId, KeyCode, startup_action_map_bindings};
+
+    use crate::project_host::ProjectSceneRequestState;
+
+    let project = ProjectFixture::new();
+    let manifest = project.root.join("nara.toml");
+    let mut settings = fs::read_to_string(&manifest).unwrap();
+    settings.push_str("\n[input]\naction_map = 'input/default.actions.ron'\n");
+    fs::write(manifest, settings).unwrap();
+    const SOURCE_ID: &str = "b23d8f3a-9770-5c1a-bf4d-81fb93171257";
+    let source = r#"(
+        kind: "action_map",
+        format_version: 1,
+        engine_min_version: "0.1.0",
+        generator: (name: "fixture", version: "0.1.0"),
+        payload: (
+            source: "b23d8f3a-9770-5c1a-bf4d-81fb93171257",
+            contexts: [(context: "gameplay", enabled: true)],
+            bindings: [(action: "jump", input: Key(Space), context: "gameplay")],
+        ),
+    )"#;
+    let path = project.root.join("input/default.actions.ron");
+    fs::create_dir(path.parent().unwrap()).unwrap();
+    fs::write(&path, source).unwrap();
+
+    project
+        .with_hosted_world(move |world| {
+            let scene = CurrentScene::get(world).unwrap().receipt().clone();
+            world.resource_mut::<SourceWatchDriver>().rescan_pending = false;
+            let installed_key = |world: &World| {
+                world
+                    .resource::<ActionMaps>()
+                    .get(InputSeatId::PRIMARY)
+                    .unwrap()
+                    .bindings()[0]
+                    .input
+            };
+            assert_eq!(installed_key(world), InputBinding::Key(KeyCode::Space));
+
+            for (edited, expected) in [
+                (
+                    source.replace("Key(Space)", "Key(UnknownKey)"),
+                    KeyCode::Space,
+                ),
+                (source.replace("Key(Space)", "Key(Enter)"), KeyCode::Enter),
+                (
+                    source.replace(SOURCE_ID, "b23d8f3a-9770-5c1a-bf4d-81fb93171258"),
+                    KeyCode::Enter,
+                ),
+            ] {
+                fs::write(&path, edited).unwrap();
+                let sender = world
+                    .resource::<SourceWatchDriver>()
+                    .current
+                    .as_ref()
+                    .unwrap()
+                    .queue
+                    .sender();
+                let result = sender.try_send(AssetWatchEvent::modified(&path));
+                assert!(
+                    result.is_ok() || matches!(result, Err(AssetWatchQueueSendError::Full { .. }))
+                );
+                poll_source_watch(world).unwrap();
+                assert!(
+                    input_reload::poll(world),
+                    "the file change must start an I/O task"
+                );
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while input_reload::poll(world) {
+                    assert!(Instant::now() < deadline, "input reload did not finish");
+                    std::thread::yield_now();
+                }
+                assert_eq!(installed_key(world), InputBinding::Key(expected));
+                assert_eq!(CurrentScene::get(world).unwrap().receipt(), &scene);
+            }
+            assert_eq!(
+                startup_action_map_bindings(world)
+                    .unwrap()
+                    .definition()
+                    .bindings()[0]
+                    .input,
+                InputBinding::Key(KeyCode::Space),
+            );
+            fs::write(&path, source.replace("Key(Space)", "Key(Enter)")).unwrap();
+            let request = ProjectScenes::scope(world, |scenes| {
+                scenes.request(nara_project::ProjectPath::new("startup.scene.json").unwrap())
+            })
+            .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                poll_project_scene_requests(world);
+                match ProjectScenes::scope(world, |scenes| scenes.state(request)).unwrap() {
+                    ProjectSceneRequestState::Ready => break,
+                    ProjectSceneRequestState::Preparing => {
+                        assert!(
+                            Instant::now() < deadline,
+                            "scene preparation did not finish"
+                        );
+                        std::thread::yield_now();
+                    }
+                    state => panic!("host did not retain the reloaded input: {state:?}"),
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
 fn deterministic_queue_overflow_replaces_coverage_before_source_rescan() {
     assert_loss_replaces_before_rescan(Loss::Overflow);
 }

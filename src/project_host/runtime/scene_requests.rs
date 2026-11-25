@@ -2,6 +2,8 @@
 
 mod api;
 pub(crate) mod domains;
+#[cfg(all(feature = "project-source", feature = "asset-watch"))]
+pub(super) mod input_reload;
 mod preparation;
 #[cfg(feature = "project-source")]
 mod source_updates;
@@ -142,6 +144,8 @@ struct RequestOwner {
     slot: Option<Slot>,
     #[cfg(feature = "project-source")]
     source_updates: Option<source_updates::SourceUpdates>,
+    #[cfg(all(feature = "project-source", feature = "asset-watch"))]
+    input_reload: input_reload::InputReload,
     #[cfg(test)]
     gate: Option<preparation::TestGate>,
 }
@@ -442,6 +446,8 @@ fn install_request_owner(
         slot: None,
         #[cfg(feature = "project-source")]
         source_updates,
+        #[cfg(all(feature = "project-source", feature = "asset-watch"))]
+        input_reload: input_reload::InputReload::default(),
         #[cfg(test)]
         gate: None,
     });
@@ -462,14 +468,24 @@ pub(super) fn hold_next_preparation(
 /// The exclusive TaskUpdate poll is inert in runtimes without a project request owner.
 pub(crate) fn poll_project_scene_requests(world: &mut World) {
     #[cfg(feature = "project-source")]
-    if world.get_resource::<RequestOwner>().is_some_and(|owner| {
-        owner.slot.is_none()
-            && !owner.closing.load(Ordering::Acquire)
-            && owner
-                .source_updates
-                .as_ref()
-                .is_some_and(|updates| updates.status().pending)
-    }) && !super::content_residency::has_active_project_scene_addition(world)
+    let input_reload_pending = {
+        #[cfg(feature = "asset-watch")]
+        let pending = input_reload::poll(world);
+        #[cfg(not(feature = "asset-watch"))]
+        let pending = false;
+        pending
+    };
+    #[cfg(feature = "project-source")]
+    if !input_reload_pending
+        && world.get_resource::<RequestOwner>().is_some_and(|owner| {
+            owner.slot.is_none()
+                && !owner.closing.load(Ordering::Acquire)
+                && owner
+                    .source_updates
+                    .as_ref()
+                    .is_some_and(|updates| updates.status().pending)
+        })
+        && !super::content_residency::has_active_project_scene_addition(world)
     {
         ProjectScenes::scope(world, |scenes| scenes.start_source_update());
     }
@@ -842,6 +858,8 @@ impl RuntimeCloseParticipant for CloseParticipant {
             let owner = {
                 let owner = owner.into_inner();
                 owner.source_updates = None;
+                #[cfg(feature = "asset-watch")]
+                owner.input_reload.cancel();
                 owner
             };
             if let Some(Slot::Preparing { preparation, .. }) = &owner.slot {

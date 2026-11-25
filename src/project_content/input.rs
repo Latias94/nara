@@ -86,6 +86,34 @@ impl ProjectInputContent {
 }
 
 impl ProjectContentLoader {
+    #[cfg(feature = "asset-watch")]
+    pub(crate) fn reload_selected_input(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        previous: &ProjectInputContent,
+    ) -> Result<Option<ProjectInputContent>, ProjectContentError> {
+        let readiness = self.validate_inputs(candidate, plan)?;
+        let mut context = LoadContext::new(
+            self,
+            plan.schema_validation(),
+            &plan.asset_domains,
+            None,
+            BTreeMap::new(),
+            candidate.manifest_digest(),
+            None,
+            None,
+            false,
+            None,
+        )?;
+        context.add_budget(ProjectContentBudgetKind::OpenHandles, 1)?;
+        context.bind_source_roots(candidate)?;
+        let reloaded = context.load_input_selected(candidate, InputSelection::Reload(previous))?;
+        drop(context);
+        readiness.revalidate_observed(self, candidate, None)?;
+        Ok(reloaded.filter(|input| !input.shares_owner_with(previous)))
+    }
+
     /// Scene travel verifies the captured global selection and shares its original compiled owner.
     pub(crate) fn load_scene_observed_reusing_input(
         &self,
@@ -175,14 +203,45 @@ impl ProjectContentLoader {
     }
 }
 
+#[derive(Clone, Copy)]
+enum InputSelection<'a> {
+    Capture,
+    Reuse(&'a ProjectInputContent),
+    #[cfg(feature = "asset-watch")]
+    Reload(&'a ProjectInputContent),
+}
+
+impl<'a> InputSelection<'a> {
+    fn previous(self) -> Option<&'a ProjectInputContent> {
+        match self {
+            Self::Capture => None,
+            Self::Reuse(previous) => Some(previous),
+            #[cfg(feature = "asset-watch")]
+            Self::Reload(previous) => Some(previous),
+        }
+    }
+}
+
 impl LoadContext<'_> {
     pub(super) fn load_input(
         &mut self,
         candidate: &ProjectSettingsCandidate,
         reuse: Option<&ProjectInputContent>,
     ) -> Result<Option<ProjectInputContent>, ProjectContentError> {
+        self.load_input_selected(
+            candidate,
+            reuse.map_or(InputSelection::Capture, InputSelection::Reuse),
+        )
+    }
+
+    fn load_input_selected(
+        &mut self,
+        candidate: &ProjectSettingsCandidate,
+        selection: InputSelection<'_>,
+    ) -> Result<Option<ProjectInputContent>, ProjectContentError> {
+        let previous = selection.previous();
         let Some(selected) = candidate.input_requirement() else {
-            return if reuse.is_some() {
+            return if previous.is_some() {
                 Err(input_changed())
             } else {
                 Ok(None)
@@ -195,22 +254,28 @@ impl LoadContext<'_> {
         let (bytes, digest) =
             self.read_native_file(&root, selected.as_str(), limits.encoded_bytes().get())?;
         let encoded = bytes.len();
-        if let Some(original) = reuse {
-            if original.path().as_str() != selected.as_str() || original.source_digest() != digest {
+        if let Some(original) = previous {
+            if original.path().as_str() != selected.as_str()
+                || (matches!(selection, InputSelection::Reuse(_))
+                    && original.source_digest() != digest)
+            {
                 return Err(input_changed());
             }
-            drop(bytes);
-            self.subtract_budget(ProjectContentBudgetKind::EncodedBytes, encoded);
-            let metadata = self.admit_input_identity(original.product(), original.path())?;
-            if metadata != original.inner.metadata_digest {
-                return Err(input_changed());
+            if original.source_digest() == digest {
+                drop(bytes);
+                self.subtract_budget(ProjectContentBudgetKind::EncodedBytes, encoded);
+                let metadata =
+                    self.input_metadata(selection, original.product(), original.path())?;
+                if metadata != original.inner.metadata_digest {
+                    return Err(input_changed());
+                }
+                self.record_project_member(
+                    ProjectContentMemberKind::InputActionMap,
+                    selected.as_str(),
+                    digest,
+                )?;
+                return Ok(Some(original.clone()));
             }
-            self.record_project_member(
-                ProjectContentMemberKind::InputActionMap,
-                selected.as_str(),
-                digest,
-            )?;
-            return Ok(Some(original.clone()));
         }
 
         let decode_work = limits
@@ -249,7 +314,7 @@ impl LoadContext<'_> {
                 .map_err(|error| unsupported_keyboard_binding(selected.as_str(), error))?;
         }
         let path = AssetSourcePath::new(selected.as_str()).map_err(|_| invalid_input())?;
-        let metadata_digest = self.admit_input_identity(product, &path)?;
+        let metadata_digest = self.input_metadata(selection, product, &path)?;
         self.record_project_member(
             ProjectContentMemberKind::InputActionMap,
             selected.as_str(),
@@ -275,6 +340,33 @@ impl LoadContext<'_> {
                 _lease: lease,
             }),
         }))
+    }
+
+    fn input_metadata(
+        &mut self,
+        selection: InputSelection<'_>,
+        product: AssetProductRef,
+        path: &AssetSourcePath,
+    ) -> Result<Option<ContentDigest>, ProjectContentError> {
+        match selection {
+            #[cfg(feature = "asset-watch")]
+            InputSelection::Reload(previous) => {
+                if product != previous.product() {
+                    return Err(input_changed());
+                }
+                let record = AssetRecord::new(
+                    product.source(),
+                    path.clone(),
+                    AssetSourceKind::Other("input-action-map".to_owned()),
+                );
+                let digest = self.validate_input_sidecar(&record)?;
+                if digest != previous.metadata_digest() {
+                    return Err(input_changed());
+                }
+                Ok(digest)
+            }
+            _ => self.admit_input_identity(product, path),
+        }
     }
 
     fn admit_input_identity(

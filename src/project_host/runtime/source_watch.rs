@@ -16,7 +16,10 @@ use nara_asset::watch::{
 use nara_asset::{AssetPathScope, AssetSourceChangeKind, AssetSourceRoot};
 use nara_ecs::{Mut, Res, Resource, World, schedule::IntoScheduleConfigs};
 
-use super::{HostFault, ProjectScenes, scene_requests::poll_project_scene_requests};
+use super::{
+    HostFault, ProjectScenes,
+    scene_requests::{input_reload, poll_project_scene_requests},
+};
 use crate::{
     ProductConfiguration,
     project_host::{
@@ -271,6 +274,9 @@ impl SourceWatchDriver {
                 match AssetWatchTranslator.translate_event(root, event) {
                     Ok(changes) => {
                         for change in changes {
+                            if input_reload::queue(world, Some(&change)) {
+                                continue;
+                            }
                             if change.kind() == AssetSourceChangeKind::MetaModified
                                 || change.raw_metadata_changed()
                             {
@@ -293,6 +299,7 @@ impl SourceWatchDriver {
         if self.rescan_pending && self.current.is_some() {
             match ProjectScenes::scope(world, |scenes| scenes.request_source_rescan()) {
                 Ok(()) => {
+                    input_reload::queue(world, None);
                     self.rescan_pending = false;
                     self.error = None;
                 }
