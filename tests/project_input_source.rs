@@ -38,7 +38,7 @@ fn primary_product(id: &str) -> AssetProductRef {
     .unwrap()
 }
 
-fn action_map_json(product: AssetProductRef, key: KeyCode) -> String {
+fn action_map(product: AssetProductRef, key: KeyCode) -> ActionMapFileCandidate {
     let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
     builder
         .declare_context(ActionContext::gameplay(), true)
@@ -52,10 +52,11 @@ fn action_map_json(product: AssetProductRef, key: KeyCode) -> String {
     ] {
         builder.bind(binding).unwrap();
     }
-    ActionMapFileCandidate::new(product, builder.compile().unwrap())
-        .unwrap()
-        .to_json_string()
-        .unwrap()
+    ActionMapFileCandidate::new(product, builder.compile().unwrap()).unwrap()
+}
+
+fn action_map_json(product: AssetProductRef, key: KeyCode) -> String {
+    action_map(product, key).to_json_string().unwrap()
 }
 
 fn write_project_file(project: &TestProject, path: &str, bytes: &[u8]) {
@@ -221,10 +222,16 @@ fn selected_input_captures_real_project_relative_bytes_without_a_sidecar() {
         "assets/input/player.actions.json",
         INPUT_PATH,
         "input/玩家 actions.json",
+        "input/player.actions.ron",
     ] {
         let project = TestProject::with_prefab_startup();
         let product = primary_product(INPUT_ID);
-        let bytes = action_map_json(product, KeyCode::Space).into_bytes();
+        let candidate = action_map(product, KeyCode::Space);
+        let bytes = if path.ends_with(".ron") {
+            candidate.to_ron_string().unwrap().into_bytes()
+        } else {
+            candidate.to_json_string().unwrap().into_bytes()
+        };
         write_project_file(&project, path, &bytes);
         select_input(&project, path);
         assert!(!project.path().join(format!("{path}.meta")).exists());

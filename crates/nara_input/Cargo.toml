@@ -11,6 +11,7 @@ nara_app.workspace = true
 nara_asset = { workspace = true, optional = true }
 nara_core.workspace = true
 nara_ecs.workspace = true
+ron = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
@@ -23,4 +24,4 @@ serde_json.workspace = true
 [features]
 default = []
 gamepad = ["dep:gilrs"]
-serde = ["dep:serde", "dep:serde_json", "dep:nara_asset", "nara_asset/serde", "nara_core/serde"]
+serde = ["dep:ron", "dep:serde", "dep:serde_json", "dep:nara_asset", "nara_asset/serde", "nara_core/serde"]

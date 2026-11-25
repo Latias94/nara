@@ -1671,6 +1671,7 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "ron",
  "serde",
  "serde_json",
 ]

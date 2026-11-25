@@ -235,7 +235,7 @@ impl LoadContext<'_> {
                 )?,
             )
             .map_err(ProjectContentError::budget)?;
-        let file = ActionMapFileCandidate::decode_json_bytes_with_limits(&bytes, limits)
+        let file = ActionMapFileCandidate::decode_source_bytes(selected.as_str(), &bytes, limits)
             .map_err(|_| invalid_input())?;
         drop(bytes);
         self.subtract_budget(ProjectContentBudgetKind::EncodedBytes, encoded);

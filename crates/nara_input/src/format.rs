@@ -1,4 +1,4 @@
-//! Strict, bounded action-map JSON files. Runtime state is never persisted.
+//! Bounded authored action maps and the JSON wire format shared with cooked input.
 
 use std::{
     error::Error,
@@ -29,6 +29,8 @@ use crate::{
     AxisDirection, InputBinding, MAX_ACTION_BINDINGS, MAX_ACTION_CONTEXTS,
     MAX_ACTION_IDENTIFIER_BYTES,
 };
+
+mod ron_source;
 
 pub const ACTION_MAP_FORMAT_KIND: &str = "action_map";
 const ENGINE_MIN_VERSION: &str = "0.1.0";
@@ -92,16 +94,14 @@ impl ActionMapFileLimits {
     }
 
     /// Conservative byte reservation before decoding, including an externally held encoded
-    /// buffer, JSON scratch, structural keys, compiler work and the completed definition.
+    /// buffer, format scratch, structural keys, compiler work and the completed definition.
     ///
-    /// This bounds requested storage, not allocator metadata or process RSS. Decoding uses no
-    /// intermediate domain collections. World-local state needs its own admission using the
-    /// compiled definition's `runtime_state_bytes()`. `None` means reservation arithmetic
-    /// overflowed; a Host must refuse that reservation rather than treating it as zero.
+    /// This bounds requested storage, not allocator metadata or process RSS. World-local state
+    /// needs its own admission using the compiled definition's `runtime_state_bytes()`.
+    /// `None` means the reservation arithmetic overflowed.
     #[must_use]
     pub fn predecode_work_bytes(self) -> Option<usize> {
-        // Each node receives room for a sparse String-keyed B-tree node and visitor metadata.
-        // Strings are charged separately; no domain Vec coexists with the compiler's tables.
+        // Each node receives room for structural map keys, visitor metadata and source records.
         let node_bytes = 16_usize.checked_mul(size_of::<String>() + size_of::<usize>())?;
         let key_storage = self.shape.nodes().get().checked_mul(node_bytes)?;
         let structural_strings = self.shape.total_string_bytes().get().checked_mul(2)?;
@@ -194,10 +194,7 @@ pub(super) fn decode_action_map(
     limits: ActionMapFileLimits,
     admitted_kind: &str,
 ) -> Result<(AssetProductRef, ActionMapDefinition), ActionMapFileError> {
-    let contract = PersistentFileContract::canonical_v1(
-        FormatKind::new(admitted_kind).map_err(ActionMapFileError::FormatKind)?,
-        engine_version(env!("CARGO_PKG_VERSION"))?,
-    );
+    let contract = action_map_contract(admitted_kind)?;
     let envelope = decode_persistent_file_with_preflight(
         input,
         limits.encoded_bytes(),
@@ -224,7 +221,19 @@ pub(super) fn decode_action_map(
             Ok(envelope.map_payload(|product| (product, definition)))
         },
     )
-    .map_err(|error| match error {
+    .map_err(map_decode_error)?;
+    Ok(envelope.into_payload())
+}
+
+fn action_map_contract(admitted_kind: &str) -> Result<PersistentFileContract, ActionMapFileError> {
+    Ok(PersistentFileContract::canonical_v1(
+        FormatKind::new(admitted_kind).map_err(ActionMapFileError::FormatKind)?,
+        engine_version(env!("CARGO_PKG_VERSION"))?,
+    ))
+}
+
+fn map_decode_error(error: PersistentFileDecodeError<ActionMapFileError>) -> ActionMapFileError {
+    match error {
         PersistentFileDecodeError::EncodedBytesExceeded { observed, maximum } => {
             ActionMapFileError::EncodedBytesExceeded { observed, maximum }
         }
@@ -232,8 +241,7 @@ pub(super) fn decode_action_map(
         | PersistentFileDecodeError::Header(error)
         | PersistentFileDecodeError::Payload(error) => error,
         PersistentFileDecodeError::Contract(error) => ActionMapFileError::Contract(error),
-    })?;
-    Ok(envelope.into_payload())
+    }
 }
 
 pub(super) fn encode_action_map(
@@ -382,14 +390,16 @@ pub(super) fn action_map_nodes(definition: &ActionMapDefinition) -> usize {
     nodes
 }
 
-/// Concrete failures survive the serde visitor boundary; only JSON grammar errors use serde's
-/// syntax-specific error type.
+/// A failure to read, validate, or write an action-map file.
 #[derive(Debug)]
 pub enum ActionMapFileError {
     EncodedBytesExceeded { observed: usize, maximum: usize },
     Shape(SerdeShapeError),
     Contract(PersistentFileContractError),
     JsonParse(serde_json::Error),
+    RonParse(ron::error::SpannedError),
+    SourceId(nara_asset::AssetProductIdentityError),
+    UnsupportedSourceExtension,
     PrimaryProductRequired { product: AssetProductRef },
     ContextLimitExceeded { maximum: usize },
     BindingLimitExceeded { maximum: usize },
@@ -400,6 +410,7 @@ pub enum ActionMapFileError {
     EngineVersion(EngineVersionParseError),
     Generator(FormatGeneratorError),
     Encode(serde_json::Error),
+    RonEncode(ron::Error),
     EncodedUtf8(FromUtf8Error),
 }
 
@@ -413,6 +424,13 @@ impl Display for ActionMapFileError {
             Self::Shape(error) => write!(formatter, "action-map shape is invalid: {error}"),
             Self::Contract(error) => Display::fmt(error, formatter),
             Self::JsonParse(error) => write!(formatter, "invalid action-map JSON: {error}"),
+            Self::RonParse(error) => write!(formatter, "invalid action-map RON: {error}"),
+            Self::SourceId(error) => {
+                write!(formatter, "invalid action-map source identity: {error}")
+            }
+            Self::UnsupportedSourceExtension => {
+                formatter.write_str("action-map source needs a .ron or .json extension")
+            }
             Self::PrimaryProductRequired { product } => write!(
                 formatter,
                 "action map requires an intrinsic primary Product, found {product}"
@@ -433,6 +451,7 @@ impl Display for ActionMapFileError {
             Self::EngineVersion(error) => Display::fmt(error, formatter),
             Self::Generator(error) => Display::fmt(error, formatter),
             Self::Encode(error) => write!(formatter, "action-map encoding failed: {error}"),
+            Self::RonEncode(error) => write!(formatter, "action-map RON encoding failed: {error}"),
             Self::EncodedUtf8(error) => {
                 write!(formatter, "action-map output is not UTF-8: {error}")
             }
@@ -446,6 +465,9 @@ impl Error for ActionMapFileError {
             Self::Shape(error) => Some(error),
             Self::Contract(error) => Some(error),
             Self::JsonParse(error) | Self::Encode(error) => Some(error),
+            Self::RonParse(error) => Some(error),
+            Self::RonEncode(error) => Some(error),
+            Self::SourceId(error) => Some(error),
             Self::Identifier(error) => Some(error),
             Self::Definition(error) => Some(error),
             Self::FormatKind(error) => Some(error),
@@ -453,6 +475,7 @@ impl Error for ActionMapFileError {
             Self::Generator(error) => Some(error),
             Self::EncodedUtf8(error) => Some(error),
             Self::EncodedBytesExceeded { .. }
+            | Self::UnsupportedSourceExtension
             | Self::PrimaryProductRequired { .. }
             | Self::ContextLimitExceeded { .. }
             | Self::BindingLimitExceeded { .. }

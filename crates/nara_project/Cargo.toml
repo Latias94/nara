@@ -20,6 +20,7 @@ tempfile = "3.27"
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
 ctrlc = { version = "3.5", optional = true }
+nara_input = { workspace = true, optional = true, features = ["serde"] }
 nara_reflect = { workspace = true, optional = true, features = ["serde"] }
 uuid = { workspace = true, optional = true, features = ["v4"] }
 
@@ -37,7 +38,7 @@ windows-sys = { workspace = true, optional = true, features = [
 
 [features]
 default = ["workflow"]
-workflow = ["dep:ctrlc", "dep:libc", "dep:nara_reflect", "dep:uuid", "dep:windows-sys"]
+workflow = ["dep:ctrlc", "dep:libc", "dep:nara_input", "dep:nara_reflect", "dep:uuid", "dep:windows-sys"]
 
 [[bin]]
 name = "nara"

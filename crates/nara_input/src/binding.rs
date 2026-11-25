@@ -40,6 +40,7 @@ pub enum ActionTransform {
 /// One physical contribution to a typed action in a declared context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct ActionBinding {
     pub action: ActionId,
     pub input: InputBinding,

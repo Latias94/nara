@@ -2139,6 +2139,7 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "ron",
  "serde",
  "serde_json",
 ]
@@ -2175,6 +2176,7 @@ dependencies = [
  "nara_app",
  "nara_core",
  "nara_ecs",
+ "nara_input",
  "nara_reflect",
  "nara_scene",
  "serde",

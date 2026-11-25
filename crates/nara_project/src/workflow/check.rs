@@ -8,6 +8,7 @@ use std::{
 
 use nara_core::diagnostic::DiagnosticReport;
 use nara_core::vfs::{AssetPath, DirAssetSource};
+use nara_input::{ActionMapFileCandidate, ActionMapFileLimits};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleLimits, ComponentSchema, ComponentTypeId,
     PersistentComponentSchemaOwnerId, collect_declared_asset_references_from_schema,
@@ -52,8 +53,8 @@ pub enum ProjectCheckError {
     },
 }
 
-/// Validates the manifest, optional Schema files, declared Scene roots, and their direct
-/// path-based asset references without invoking Cargo or loading native code.
+/// Validates the manifest, selected action map, optional Schema files, declared Scene roots, and
+/// their direct path-based asset references without invoking Cargo or loading native code.
 /// Path-based Prefab sources are checked recursively.
 /// Unavailable Schema, stable asset IDs, and Prefab overrides are left for runtime admission.
 pub fn check_project(
@@ -157,7 +158,11 @@ pub fn check_project(
         check.entities(&path, &prefab.entities)?;
     }
     if let Some(path) = &settings.input.action_map {
-        drop(files.open(path.as_str())?);
+        let path = path.as_str();
+        let limits = ActionMapFileLimits::default();
+        let bytes = files.read(path, limits.encoded_bytes().get() as u64)?;
+        ActionMapFileCandidate::decode_source_bytes(path, &bytes, limits)
+            .map_err(|source| invalid_source(path, source))?;
     }
     check.report.scenes = scenes.len();
     check.report.prefabs = check.prefabs.len();

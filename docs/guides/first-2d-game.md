@@ -33,6 +33,34 @@ The first command builds the exporter and updates `.nara/schema_cache.json`. The
 cache. Keep the generated `Cargo.lock` after the first build so later builds use the same dependency
 versions.
 
+## Author an action map
+
+A source-hosted game can select `input/default.actions.ron` with `[input]` in `nara.toml`.
+Use physical key names such as `KeyW`, `Space`, or `ArrowLeft`. Each binding names an action and
+its context. The file's `source` UUID identifies the map across edits.
+
+```toml
+[input]
+action_map = "input/default.actions.ron"
+```
+
+```ron
+(
+    kind: "action_map",
+    format_version: 1,
+    engine_min_version: "0.1.0",
+    generator: (name: "my-game", version: "0.1.0"),
+    payload: (
+        source: "b23d8f3a-9770-5c1a-bf4d-81fb93171257",
+        contexts: [(context: "gameplay", enabled: true)],
+        bindings: [(action: "jump", input: Key(Space), context: "gameplay")],
+    ),
+)
+```
+
+Run `nara check` to validate the selected map. Gameplay systems read its actions through
+`Res<ActionState>`, for example `actions.button("jump")`.
+
 ## Explore the supplied games
 
 - Run [the compact code-first example](../../examples/first_game.rs) to see fixed-step movement,

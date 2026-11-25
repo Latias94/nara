@@ -76,6 +76,44 @@ fn existing_project_is_never_overwritten() {
 }
 
 #[test]
+fn check_compiles_the_selected_ron_action_map_without_cargo() {
+    let temp = tempfile::tempdir().unwrap();
+    let checkout = temp.path().join("engine");
+    let project = temp.path().join("my-game");
+    local_checkout(&checkout);
+    create_project(&project, "my-game", &checkout).unwrap();
+
+    let selected = "input/default.actions.ron";
+    let manifest = project.join("nara.toml");
+    let source = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        manifest,
+        format!("{source}\n[input]\naction_map = '{selected}'\n"),
+    )
+    .unwrap();
+    fs::create_dir(project.join("input")).unwrap();
+    let path = project.join(selected);
+    let map = r#"(
+        kind: "action_map",
+        format_version: 1,
+        engine_min_version: "0.1.0",
+        generator: (name: "fixture", version: "0.1.0"),
+        payload: (
+            source: "b23d8f3a-9770-5c1a-bf4d-81fb93171257",
+            contexts: [(context: "gameplay", enabled: true)],
+            bindings: [(action: "jump", input: Key(Space), context: "gameplay")],
+        ),
+    )"#;
+    fs::write(&path, map).unwrap();
+    super::check_project(&project, None).unwrap();
+    fs::write(path, map.replace("Key(Space)", "Key(UnknownKey)")).unwrap();
+    assert!(matches!(
+        super::check_project(&project, None),
+        Err(super::ProjectCheckError::Source { path, .. }) if path == selected
+    ));
+}
+
+#[test]
 fn untrusted_schema_refresh_stops_before_building() {
     let temp = tempfile::tempdir().unwrap();
     let request = BuildRequest::new(temp.path(), "my-game", SCHEMA_BINARY);
