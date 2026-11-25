@@ -196,7 +196,6 @@ impl ProjectionFixture {
                 SceneIdentityCommit::Projection(self.projection.instance()),
                 None,
                 reservations,
-                &SceneNativeRetirementClaims::default(),
             )
             .unwrap_or_else(|report| panic!("preparation failed: {:?}", report.diagnostics))
     }
@@ -904,7 +903,6 @@ fn initial_detached_candidate_rejects_empty_installed_domain_replacement_or_remo
                 SceneIdentityCommit::Projection(projection.instance()),
                 None,
                 reservations,
-                &SceneNativeRetirementClaims::default(),
             )
             .unwrap_or_else(|report| panic!("preparation failed: {:?}", report.diagnostics));
         let candidate = prepared.identity_tokens[&scene_id("root")];

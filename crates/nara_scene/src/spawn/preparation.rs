@@ -50,7 +50,6 @@ pub(super) struct UnboundScenePublication {
     pub(super) prepared_occurrence: PreparedSceneOccurrence,
     pub(super) provenance: SceneEntityProvenanceMap,
     pub(super) target: ScenePublicationTarget,
-    pub(super) claims: SceneNativeRetirementClaims,
     pub(super) diagnostics: DiagnosticReport,
 }
 
@@ -298,7 +297,6 @@ pub(super) fn prepare_ordinary_scene(
         target,
         None,
         reservations,
-        &SceneNativeRetirementClaims::default(),
         ComponentValueMaterializationLimits::default(),
     )?;
     unbound.definition.validate(world)?;
@@ -491,7 +489,6 @@ impl SceneComponentBindings {
                 target,
                 None,
                 reservations,
-                &SceneNativeRetirementClaims::default(),
                 limits,
             )?;
         unbound.definition.validate(world)?;
@@ -609,7 +606,6 @@ impl UnboundScenePublication {
             world,
             self.target.as_borrowed(),
             self.prepared_product.as_ref(),
-            &self.claims,
             std::mem::take(&mut self.diagnostics),
         )?;
         nara_ecs::identity::domain::validate_registered_identity_support_topology(world, [])
@@ -687,7 +683,6 @@ impl UnboundScenePublication {
             prepared_occurrence,
             provenance,
             target,
-            claims,
             mut diagnostics,
         } = self;
         let commit = target.as_borrowed();
@@ -1012,13 +1007,12 @@ impl UnboundScenePublication {
         }
 
         if prepared_identity.replaces_instance()
-            && validate_scene_entity_retirement_admission(
+            && validate_scene_entity_retirement(
                 world,
                 &scene_retirements,
                 prepared_hierarchy_retirement
                     .as_ref()
                     .expect("prepared scene replacement requires hierarchy retirement"),
-                claims.component_ids(),
             )
             .is_err()
         {
@@ -1110,7 +1104,6 @@ impl UnboundScenePublication {
             spawned_by_id,
             provenance,
             occurrence: prepared_occurrence,
-            claims,
             diagnostics,
         })
     }
@@ -1170,7 +1163,6 @@ mod tests {
                 SceneIdentityCommit::Register,
                 None,
                 reservations,
-                &SceneNativeRetirementClaims::default(),
                 ComponentValueMaterializationLimits::default(),
             )
             .err()

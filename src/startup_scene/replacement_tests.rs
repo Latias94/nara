@@ -283,13 +283,12 @@ fn replacement_rejects_equivalent_owner_catalog_with_another_admission_basis() {
         let stats = world.resource::<WorldIdentityDomain>().stats();
         let next = mixed_source("b", false);
         let assets = nara_scene::advanced::SceneAssetReservations::from_world(world);
-        let result = foreign.stage_scene_replacement_with_claims(
+        let result = foreign.stage_scene_replacement(
             world,
             next.compiled_scene().unwrap(),
             None,
             &current,
             assets,
-            &nara_scene::advanced::SceneNativeRetirementClaims::default(),
             limits(),
             &[],
             |_| panic!("another owner admission cannot configure product state"),

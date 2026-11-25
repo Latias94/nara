@@ -42,7 +42,7 @@ impl PreparedSceneEntityRetirement {
         entities: &[Entity],
         hierarchy: &PreparedSceneHierarchyRetirement,
     ) -> Result<Self, LifecycleFreeDespawnError> {
-        validate_retirement_despawn(world, entities, hierarchy.affected_entities())?;
+        validate_scene_entity_retirement(world, entities, hierarchy)?;
         Ok(Self {
             entities: entities.to_vec(),
         })
@@ -64,18 +64,12 @@ impl PreparedSceneEntityRetirement {
     }
 }
 
-pub(crate) fn validate_scene_entity_retirement_admission(
+pub(crate) fn validate_scene_entity_retirement(
     world: &World,
     entities: &[Entity],
     hierarchy: &PreparedSceneHierarchyRetirement,
-    claimed_component_ids: &[nara_ecs::bevy_ecs::component::ComponentId],
 ) -> Result<(), LifecycleFreeDespawnError> {
-    crate::hierarchy::validate_retirement_despawn_with_claimed_components(
-        world,
-        entities,
-        hierarchy.affected_entities(),
-        claimed_component_ids,
-    )
+    validate_retirement_despawn(world, entities, hierarchy.affected_entities())
 }
 
 pub(crate) fn prepare_scene_hierarchy_retirement(

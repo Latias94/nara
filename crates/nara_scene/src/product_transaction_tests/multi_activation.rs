@@ -1,5 +1,6 @@
 use super::*;
 use crate::hierarchy::Children;
+use crate::spawn::stage_expanded_scene_replacement;
 use nara_asset::AssetRef;
 use nara_core::ByteLimit;
 use nara_ecs::identity::EntityReference;
@@ -527,14 +528,13 @@ fn staged_replacement_promotes_surviving_children_added_after_staging() {
         .entity();
     let reservations = SceneAssetReservations::from_world(&fixture.base.world);
     let extra_instance = extra.instance.unwrap();
-    let staged = stage_expanded_scene_replacement_with_claims(
+    let staged = stage_expanded_scene_replacement(
         &mut fixture.base.world,
         &fixture.base.registry,
         &fixture.base.replacement,
         None,
         &fixture.base.current,
         reservations,
-        &SceneNativeRetirementClaims::default(),
         transaction_limits(1, 1),
         &[SceneProductRetirement::Instance(&extra_instance)],
         |overlay| {
@@ -627,14 +627,13 @@ fn retained_multi_activation_replacement_rejects_resource_aba_without_retirement
     ];
     let original_entities = fixture.base.entity_ids();
     let reservations = SceneAssetReservations::from_world(&fixture.base.world);
-    let staged = stage_expanded_scene_replacement_with_claims(
+    let staged = stage_expanded_scene_replacement(
         &mut fixture.base.world,
         &fixture.base.registry,
         &fixture.base.replacement,
         None,
         &fixture.base.current,
         reservations,
-        &SceneNativeRetirementClaims::default(),
         transaction_limits(1, 5),
         &selections,
         |overlay| {
@@ -661,14 +660,13 @@ fn retained_replacement_rejects_ended_additional_receipt_after_slot_reuse() {
     let mut fixture = MultiActivationFixture::new();
     let selections = [SceneProductRetirement::Instance(&fixture.markers[0])];
     let reservations = SceneAssetReservations::from_world(&fixture.base.world);
-    let staged = stage_expanded_scene_replacement_with_claims(
+    let staged = stage_expanded_scene_replacement(
         &mut fixture.base.world,
         &fixture.base.registry,
         &fixture.base.replacement,
         None,
         &fixture.base.current,
         reservations,
-        &SceneNativeRetirementClaims::default(),
         transaction_limits(1, 2),
         &selections,
         |overlay| {

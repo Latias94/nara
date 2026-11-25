@@ -4,7 +4,6 @@ use nara_ecs::{
     transaction::{
         LifecycleFreeDespawnError, PersistentLifecycleEvent,
         validate_entity_despawn_with_allowed_component_hooks,
-        validate_entity_despawn_with_claimed_component_hooks,
         validate_registered_component_metadata, validate_registered_component_observers,
         validate_resource_insertion, validate_resource_scope,
     },
@@ -240,20 +239,6 @@ pub(crate) fn validate_hierarchy_retirement_despawn(
     entities: &[Entity],
     affected_entities: &[Entity],
 ) -> Result<(), LifecycleFreeDespawnError> {
-    validate_hierarchy_retirement_despawn_with_claimed_components(
-        world,
-        entities,
-        affected_entities,
-        &[],
-    )
-}
-
-pub(crate) fn validate_hierarchy_retirement_despawn_with_claimed_components(
-    world: &World,
-    entities: &[Entity],
-    affected_entities: &[Entity],
-    claimed_component_ids: &[nara_ecs::bevy_ecs::component::ComponentId],
-) -> Result<(), LifecycleFreeDespawnError> {
     let hierarchy_component_ids = validate_hierarchy_component_metadata(world)
         .map_err(|_| LifecycleFreeDespawnError::LifecycleWork)?;
 
@@ -266,13 +251,6 @@ pub(crate) fn validate_hierarchy_retirement_despawn_with_claimed_components(
             .map_err(|_| LifecycleFreeDespawnError::LifecycleWork)?;
     }
 
-    let claimed_component_ids = claimed_component_ids
-        .iter()
-        .copied()
-        .filter(|component_id| !hierarchy_component_ids.contains(component_id))
-        .collect::<Vec<_>>();
-    let mut admission_component_ids = hierarchy_component_ids.to_vec();
-    admission_component_ids.extend(claimed_component_ids.iter().copied());
     let mut unique = EntityHashSet::default();
     for entity in entities.iter().copied() {
         if !unique.insert(entity) {
@@ -281,21 +259,12 @@ pub(crate) fn validate_hierarchy_retirement_despawn_with_claimed_components(
         let entity_ref = world
             .get_entity(entity)
             .map_err(|_| LifecycleFreeDespawnError::EntityMissing)?;
-        if claimed_component_ids.is_empty() {
-            validate_entity_despawn_with_allowed_component_hooks(
-                world,
-                entity,
-                entity_ref.archetype().components(),
-                &hierarchy_component_ids,
-            )
-        } else {
-            validate_entity_despawn_with_claimed_component_hooks(
-                world,
-                entity,
-                entity_ref.archetype().components(),
-                &admission_component_ids,
-            )
-        }
+        validate_entity_despawn_with_allowed_component_hooks(
+            world,
+            entity,
+            entity_ref.archetype().components(),
+            &hierarchy_component_ids,
+        )
         .map_err(|_| LifecycleFreeDespawnError::LifecycleWork)?;
     }
     Ok(())

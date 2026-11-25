@@ -31,7 +31,6 @@ use nara_ecs::identity::{
 };
 use nara_ecs::{
     Component, Entity, World,
-    bevy_ecs::component::ComponentId,
     transaction::{
         LifecycleFreeInsertionPlan, PersistentComponentMetadataError,
         prepare_lifecycle_free_despawn, validate_registered_persistent_component_apply,
@@ -65,7 +64,7 @@ use crate::{
     runtime_hierarchy::{
         PreparedSceneEntityRetirement, build_scene_hierarchy_operations,
         combine_scene_hierarchy_operations, prepare_scene_hierarchy_retirement,
-        validate_scene_entity_retirement_admission,
+        validate_scene_entity_retirement,
     },
     validation::{PreparedScene as PreflightScene, preflight_compiled_scene_with_context},
 };
@@ -139,47 +138,6 @@ pub struct SceneSpawnReport {
     /// Structured diagnostics emitted while preparing or committing the operation.
     pub diagnostics: DiagnosticReport,
     retired_entities: usize,
-}
-
-/// Runtime component identities explicitly owned by native domains during Scene retirement.
-///
-/// Claims are an admission fact for one bounded retirement attempt. They do not authorize a
-/// permanent lifecycle-hook whitelist: after domain owners have removed their components, the
-/// ordinary strict Scene retirement validation runs again before any identity or entity commit.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct SceneNativeRetirementClaims {
-    component_ids: Vec<ComponentId>,
-}
-
-impl SceneNativeRetirementClaims {
-    /// Creates claims from exact component identities registered in the target World.
-    #[must_use]
-    pub fn from_component_ids(component_ids: impl IntoIterator<Item = ComponentId>) -> Self {
-        let mut claims = Self::default();
-        for component_id in component_ids {
-            claims.insert(component_id);
-        }
-        claims
-    }
-
-    /// Adds one exact runtime component identity, retaining first-registration order.
-    pub fn insert(&mut self, component_id: ComponentId) {
-        if !self.component_ids.contains(&component_id) {
-            self.component_ids.push(component_id);
-        }
-    }
-
-    /// Returns the exact claimed component identities.
-    #[must_use]
-    pub fn component_ids(&self) -> &[ComponentId] {
-        &self.component_ids
-    }
-
-    /// Returns whether this claim set contains the component identity.
-    #[must_use]
-    pub fn contains(&self, component_id: ComponentId) -> bool {
-        self.component_ids.contains(&component_id)
-    }
 }
 
 impl SceneSpawnReport {
@@ -398,7 +356,6 @@ impl SceneSpawner {
             commit,
             product,
             reservations,
-            &SceneNativeRetirementClaims::default(),
         ) {
             Ok(prepared) => preparation::finish_scene_publication(world, prepared),
             Err(report) => report,
@@ -415,7 +372,6 @@ impl SceneSpawner {
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
         reservations: SceneAssetReservations,
-        claims: &SceneNativeRetirementClaims,
     ) -> Result<PreparedScenePublication, SceneSpawnReport> {
         let definition = preparation::ScenePreparationDefinition::capture(world, registry)?;
         if !matches!(commit, SceneIdentityCommit::Projection(_)) {
@@ -431,7 +387,6 @@ impl SceneSpawner {
             commit,
             product,
             reservations,
-            claims,
             ComponentValueMaterializationLimits::default(),
         )?
         .bind(world)
@@ -448,7 +403,6 @@ impl SceneSpawner {
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
         reservations: SceneAssetReservations,
-        claims: &SceneNativeRetirementClaims,
         value_limits: ComponentValueMaterializationLimits,
     ) -> Result<UnboundScenePublication, SceneSpawnReport> {
         #[cfg(feature = "work-observation")]
@@ -574,13 +528,8 @@ impl SceneSpawner {
             },
             None => None,
         };
-        diagnostics = validate_scene_predecessor(
-            world,
-            commit,
-            prepared_product.as_ref(),
-            claims,
-            diagnostics,
-        )?;
+        diagnostics =
+            validate_scene_predecessor(world, commit, prepared_product.as_ref(), diagnostics)?;
         let has_targets = !preflight.entities.is_empty();
         let has_persistent_components = preflight
             .entities
@@ -724,7 +673,6 @@ impl SceneSpawner {
             prepared_occurrence,
             provenance: provenance.clone(),
             target: preparation::ScenePublicationTarget::from_borrowed(commit),
-            claims: claims.clone(),
             diagnostics,
         })
     }
@@ -817,22 +765,14 @@ where
     )
 }
 
-/// Stages a complete replacement on allocated World targets before native-domain retirement.
-///
-/// Every native/data value and product write is prepared before this call returns. No codec or
-/// product callback crosses the staging boundary. The returned [`StagedSceneReplacement`] owns
-/// actual allocated target entities and requires explicit `discard(world)` if abandoned before
-/// native retirement; dropping it performs no World cleanup. A failed commit returns the same
-/// token and targets for retry without rerunning codecs or the callback.
-#[doc(hidden)]
-pub fn stage_expanded_scene_replacement_with_claims<F>(
+#[cfg(test)]
+pub(crate) fn stage_expanded_scene_replacement<F>(
     world: &mut World,
     registry: &ComponentRegistrySnapshot,
     candidate: &CompiledSceneCandidate,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
     reservations: SceneAssetReservations,
-    claims: &SceneNativeRetirementClaims,
     limits: SceneProductTransactionLimits,
     additional_retirements: &[SceneProductRetirement<'_>],
     configure: F,
@@ -858,28 +798,23 @@ where
                 configure: Box::new(configure),
             }),
             reservations,
-            claims,
         )
         .map(StagedSceneReplacement)
 }
 
 impl SceneComponentBindings {
-    /// Stages a complete native/data replacement before product-owned native retirement starts.
+    /// Prepares a compiled Scene replacement with the receiving World's asset reservations.
     ///
-    /// The returned [`StagedSceneReplacement`] owns actual allocated World targets, native/data
-    /// values and product writes. Abandoning it before native retirement requires explicit
-    /// `discard(world)`; dropping it performs no World cleanup. Failed commit returns the same
-    /// token and targets for retry without rerunning codecs or the callback. Data definitions
-    /// retain the same exact World and managed authority as ordinary mixed preparation.
-    #[doc(hidden)]
-    pub fn stage_scene_replacement_with_claims<F>(
+    /// The returned [`StagedSceneReplacement`] owns allocated World targets and prepared values.
+    /// Call `discard(world)` to abandon it. A failed commit returns the original candidate and
+    /// targets so a retry can reuse them.
+    pub fn stage_scene_replacement<F>(
         &self,
         world: &mut World,
         candidate: &CompiledSceneCandidate,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         current: &SpawnedSceneInstance,
         reservations: SceneAssetReservations,
-        claims: &SceneNativeRetirementClaims,
         limits: SceneProductTransactionLimits,
         additional_retirements: &[SceneProductRetirement<'_>],
         configure: F,
@@ -887,13 +822,12 @@ impl SceneComponentBindings {
     where
         F: FnOnce(&mut SceneProductOverlayWriter<'_>),
     {
-        self.stage_selected_scene_replacement_with_claims(
+        self.stage_selected_scene_replacement(
             world,
             SceneMaterializationInput::Compiled(candidate),
             asset_resolution,
             current,
             reservations,
-            claims,
             SceneProductTransactionInput {
                 limits,
                 additional_retirements,
@@ -902,23 +836,16 @@ impl SceneComponentBindings {
         )
     }
 
-    /// Stages a processed native/data replacement before native-domain retirement starts.
+    /// Prepares a cooked Scene replacement with the receiving World's asset reservations.
     ///
-    /// Product identities use the content owner's exact receiving asset reservations. The
-    /// returned [`StagedSceneReplacement`] owns actual allocated World targets and requires
-    /// explicit `discard(world)` if abandoned before native retirement. Dropping it performs no
-    /// World cleanup. Failed commit returns the same token and targets for retry without
-    /// rerunning codecs or the callback, or consulting authoring sources. Exact World, definition
-    /// and native-retirement guards remain shared with source-backed replacement.
+    /// Uses the same commit and discard contract as [`Self::stage_scene_replacement`].
     #[cfg(feature = "serde")]
-    #[doc(hidden)]
-    pub fn stage_runtime_scene_replacement_with_claims<F>(
+    pub fn stage_runtime_scene_replacement<F>(
         &self,
         world: &mut World,
         candidate: &crate::runtime_scene::RuntimeSceneCandidate,
         current: &SpawnedSceneInstance,
         reservations: SceneAssetReservations,
-        claims: &SceneNativeRetirementClaims,
         limits: SceneProductTransactionLimits,
         additional_retirements: &[SceneProductRetirement<'_>],
         configure: F,
@@ -926,13 +853,12 @@ impl SceneComponentBindings {
     where
         F: FnOnce(&mut SceneProductOverlayWriter<'_>),
     {
-        self.stage_selected_scene_replacement_with_claims(
+        self.stage_selected_scene_replacement(
             world,
             SceneMaterializationInput::Runtime(candidate),
             None,
             current,
             reservations,
-            claims,
             SceneProductTransactionInput {
                 limits,
                 additional_retirements,
@@ -941,14 +867,13 @@ impl SceneComponentBindings {
         )
     }
 
-    fn stage_selected_scene_replacement_with_claims(
+    fn stage_selected_scene_replacement(
         &self,
         world: &mut World,
         candidate: SceneMaterializationInput<'_>,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         current: &SpawnedSceneInstance,
         reservations: SceneAssetReservations,
-        claims: &SceneNativeRetirementClaims,
         product: SceneProductTransactionInput<'_>,
     ) -> Result<StagedSceneReplacement, SceneSpawnReport> {
         let occurrence = occurrence_for_instance(world, current)
@@ -970,7 +895,6 @@ impl SceneComponentBindings {
                 SceneIdentityCommit::Replace(current),
                 Some(product),
                 reservations,
-                claims,
                 ComponentValueMaterializationLimits::default(),
             )?
             .bind(world)
@@ -982,7 +906,6 @@ fn validate_scene_predecessor(
     world: &World,
     commit: SceneIdentityCommit<'_>,
     prepared_product: Option<&PreparedSceneProductTransaction>,
-    claims: &SceneNativeRetirementClaims,
     mut diagnostics: DiagnosticReport,
 ) -> Result<DiagnosticReport, SceneSpawnReport> {
     #[cfg(feature = "work-observation")]
@@ -1047,13 +970,7 @@ fn validate_scene_predecessor(
         }
         let hierarchy = prepare_scene_hierarchy_retirement(world, &all_entities);
         if !hierarchy.as_ref().is_ok_and(|hierarchy| {
-            validate_scene_entity_retirement_admission(
-                world,
-                &old_entities,
-                hierarchy,
-                claims.component_ids(),
-            )
-            .is_ok()
+            validate_scene_entity_retirement(world, &old_entities, hierarchy).is_ok()
         }) {
             diagnostics.push(diagnostic_error(
                 "scene.identity-replacement-ineligible",
@@ -1798,19 +1715,6 @@ pub fn spawn_scene(
 #[cfg(test)]
 mod provenance_admission_tests {
     use super::*;
-    use nara_ecs::Component;
-
-    #[derive(Component)]
-    struct ClaimedRuntimeState;
-
-    #[test]
-    fn native_retirement_claims_are_exact_and_deduplicated() {
-        let mut world = World::new();
-        let component_id = world.register_component::<ClaimedRuntimeState>();
-        let claims = SceneNativeRetirementClaims::from_component_ids([component_id, component_id]);
-        assert_eq!(claims.component_ids(), &[component_id]);
-        assert!(claims.contains(component_id));
-    }
 
     #[test]
     fn prepared_registration_rejects_intervening_domain_or_allocator_publication() {
@@ -1854,7 +1758,6 @@ mod provenance_admission_tests {
                     SceneIdentityCommit::Register,
                     None,
                     reservations,
-                    &SceneNativeRetirementClaims::default(),
                 )
                 .unwrap_or_else(|report| panic!("{:?}", report.diagnostics));
             let intervening = spawn_scene(

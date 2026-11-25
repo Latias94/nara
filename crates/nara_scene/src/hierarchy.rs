@@ -41,7 +41,6 @@ pub(crate) use writer::{
     PreparedHierarchyBatch, hierarchy_retirement_operations as retirement_operations,
     prepare_hierarchy_batch as prepare_construction_batch, validate_fresh_construction_topology,
     validate_hierarchy_retirement_despawn as validate_retirement_despawn,
-    validate_hierarchy_retirement_despawn_with_claimed_components as validate_retirement_despawn_with_claimed_components,
 };
 
 /// Flushes deferred hierarchy commands before checking a scene transaction's live baseline.

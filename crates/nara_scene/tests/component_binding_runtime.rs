@@ -389,19 +389,18 @@ fn exercise_managed_preparation(world: &mut World) {
         None,
     );
     let assets = nara_scene::advanced::SceneAssetReservations::from_world(world);
-    let result = nara_scene::advanced::stage_expanded_scene_replacement_with_claims(
+    let report = nara_scene::advanced::replace_expanded_scene_with_product_and_reservations(
         world,
         &foreign_native,
         &empty,
         None,
         &current,
         assets,
-        &nara_scene::advanced::SceneNativeRetirementClaims::default(),
         nara_scene::advanced::SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE),
         &[],
         |_| {},
     );
-    assert!(result.is_err());
+    assert!(report.diagnostics.has_errors());
     assert_eq!(resolve(world, &current), old_entity);
 }
 
@@ -433,7 +432,7 @@ fn record_native_retirement(mut world: DeferredWorld<'_>, _: HookContext) {
 }
 
 #[test]
-fn mixed_claimed_replacement_retains_candidate_until_native_owner_finishes() {
+fn mixed_replacement_rejects_retirement_hooks_before_staging() {
     let bindings = bindings();
     let mut world = World::new();
     world.init_resource::<NativeRetirements>();
@@ -450,34 +449,23 @@ fn mixed_claimed_replacement_retains_candidate_until_native_owner_finishes() {
     );
     let old = resolve(&world, &current);
     world.entity_mut(old).insert(NativeRetirementState);
-    let claims = nara_scene::advanced::SceneNativeRetirementClaims::from_component_ids([world
-        .component_id::<NativeRetirementState>()
-        .unwrap()]);
-    let assets = nara_scene::advanced::SceneAssetReservations::from_world(&world);
-    let prepared = bindings
-        .stage_scene_replacement_with_claims(
-            &mut world,
-            &candidate(&bindings, ComponentValue::U64(19)),
-            None,
-            &current,
-            assets,
-            &claims,
-            nara_scene::advanced::SceneProductTransactionLimits::new(
-                ItemLimit::ONE,
-                ItemLimit::ONE,
-            ),
-            &[],
-            |_| {},
-        )
-        .unwrap();
-    let (prepared, report) = prepared.commit(&mut world).unwrap_err();
-    assert!(report.diagnostics.has_errors());
+    let next = candidate(&bindings, ComponentValue::U64(19));
+    let limits =
+        nara_scene::advanced::SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE);
+    let stage = |world: &mut World| {
+        let assets = nara_scene::advanced::SceneAssetReservations::from_world(world);
+        bindings.stage_scene_replacement(world, &next, None, &current, assets, limits, &[], |_| {})
+    };
+    let before = world.entity_count();
+    assert!(stage(&mut world).is_err());
+    assert_eq!(world.entity_count(), before);
     assert_eq!(resolve(&world, &current), old);
     assert_eq!(world.resource::<NativeRetirements>().0, 0);
     world.entity_mut(old).remove::<NativeRetirementState>();
     assert_eq!(world.resource::<NativeRetirements>().0, 1);
-    let replacement = succeeded(prepared.commit(&mut world).unwrap_or_else(|_| {
-        panic!("completed native retirement should allow the retained candidate")
+    let prepared = stage(&mut world).unwrap();
+    let replacement = succeeded(prepared.commit(&mut world).unwrap_or_else(|(_, report)| {
+        panic!("replacement failed after removing the lifecycle component: {report:?}")
     }));
     assert!(world.get_entity(old).is_err());
     let entity = resolve(&world, &replacement);

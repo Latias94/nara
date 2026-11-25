@@ -3,15 +3,13 @@
 use std::borrow::Cow;
 
 use nara_ecs::Mut;
-use nara_scene::advanced::SceneNativeRetirementClaims;
 
 use super::*;
 
-pub(super) struct StagedProjectSceneReplacement {
+pub(super) struct StagedProjectSceneReplacement<'content> {
     scene: Option<StagedSceneReplacement>,
-    expected: SpawnedSceneInstance,
-    additions_revision: u64,
-    content: PreparedSceneContent,
+    expected: &'content SpawnedSceneInstance,
+    content: &'content PreparedSceneContent,
     #[cfg(feature = "runtime-2d")]
     staged_server: AssetServer,
     #[cfg(feature = "runtime-2d")]
@@ -19,11 +17,11 @@ pub(super) struct StagedProjectSceneReplacement {
     catalog: PreparedCatalog,
 }
 
-impl StagedProjectSceneReplacement {
+impl<'content> StagedProjectSceneReplacement<'content> {
     pub(super) fn stage<F>(
         world: &mut World,
-        expected: &SpawnedSceneInstance,
-        content: &PreparedSceneContent,
+        expected: &'content SpawnedSceneInstance,
+        content: &'content PreparedSceneContent,
         limits: SceneProductTransactionLimits,
         additional_retirements: &[SceneProductRetirement<'_>],
         configure: F,
@@ -46,7 +44,6 @@ impl StagedProjectSceneReplacement {
             )));
         }
         world.resource_scope(|world, current: Mut<ProjectSceneResidency>| {
-            let additions_revision = current.additions.revision;
             let scene_retirements =
                 scene_retirements(world, &current, limits, additional_retirements)
                     .map_err(rejected)?;
@@ -69,24 +66,22 @@ impl StagedProjectSceneReplacement {
             let scene = match content {
                 #[cfg(feature = "project-source")]
                 PreparedSceneContent::Source(snapshot) => component_bindings
-                    .stage_scene_replacement_with_claims(
+                    .stage_scene_replacement(
                         world,
                         snapshot.compiled_candidate(),
                         Some(snapshot.asset_resolution()),
                         expected,
                         bindings,
-                        &SceneNativeRetirementClaims::default(),
                         limits,
                         &scene_retirements,
                         configure,
                     ),
                 PreparedSceneContent::Processed(content) => component_bindings
-                    .stage_runtime_scene_replacement_with_claims(
+                    .stage_runtime_scene_replacement(
                         world,
                         content.scene.candidate(),
                         expected,
                         bindings,
-                        &SceneNativeRetirementClaims::default(),
                         limits,
                         &scene_retirements,
                         configure,
@@ -94,9 +89,8 @@ impl StagedProjectSceneReplacement {
             }?;
             Ok(Self {
                 scene: Some(scene),
-                expected: expected.clone(),
-                additions_revision,
-                content: content.clone(),
+                expected,
+                content,
                 #[cfg(feature = "runtime-2d")]
                 staged_server,
                 #[cfg(feature = "runtime-2d")]
@@ -107,7 +101,7 @@ impl StagedProjectSceneReplacement {
     }
 
     fn validate_content(&self, world: &World) -> Result<(), SceneSpawnReport> {
-        let bindings = current_scene_bindings(world, &self.expected)?;
+        let bindings = current_scene_bindings(world, self.expected)?;
         if !self.content.shares_component_bindings(&bindings) {
             return Err(rejected(failure(
                 "project.scene.schema-mismatch",
@@ -117,19 +111,13 @@ impl StagedProjectSceneReplacement {
         validate_resources(
             world,
             #[cfg(feature = "runtime-2d")]
-            (&self.content).into(),
+            self.content.into(),
         )
         .map_err(rejected)?;
         let residency = world.resource::<ProjectSceneResidency>();
-        if residency.additions.revision != self.additions_revision {
-            return Err(rejected(failure(
-                "project.scene.additions-changed",
-                "Active project Scene additions changed after travel preparation",
-            )));
-        }
         residency
             .authority
-            .validate((&self.content).into())
+            .validate(self.content.into())
             .map_err(rejected)?;
         self.catalog.validate(world).map_err(rejected)?;
         #[cfg(feature = "runtime-2d")]

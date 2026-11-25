@@ -4,8 +4,8 @@ use nara_ecs::{Mut, World};
 use nara_scene::{
     SceneComponentBindings, SceneSpawnReport,
     advanced::{
-        SceneAssetReservations, SceneNativeRetirementClaims, SceneProductOverlayWriter,
-        SceneProductRetirement, SceneProductTransactionLimits,
+        SceneAssetReservations, SceneProductOverlayWriter, SceneProductRetirement,
+        SceneProductTransactionLimits,
     },
     scene_component_bindings, validate_scene_component_bindings_authority,
 };
@@ -127,30 +127,26 @@ where
         }
         let assets = SceneAssetReservations::from_world(world);
         let prepared = match &source.candidate {
-            RetainedSceneCandidate::Compiled(candidate) => bindings
-                .stage_scene_replacement_with_claims(
-                    world,
-                    candidate,
-                    source.asset_resolution(),
-                    &owner.receipt,
-                    assets,
-                    &SceneNativeRetirementClaims::default(),
-                    limits,
-                    additional_retirements,
-                    configure,
-                ),
+            RetainedSceneCandidate::Compiled(candidate) => bindings.stage_scene_replacement(
+                world,
+                candidate,
+                source.asset_resolution(),
+                &owner.receipt,
+                assets,
+                limits,
+                additional_retirements,
+                configure,
+            ),
             #[cfg(feature = "serde")]
-            RetainedSceneCandidate::Runtime(candidate) => bindings
-                .stage_runtime_scene_replacement_with_claims(
-                    world,
-                    candidate,
-                    &owner.receipt,
-                    assets,
-                    &SceneNativeRetirementClaims::default(),
-                    limits,
-                    additional_retirements,
-                    configure,
-                ),
+            RetainedSceneCandidate::Runtime(candidate) => bindings.stage_runtime_scene_replacement(
+                world,
+                candidate,
+                &owner.receipt,
+                assets,
+                limits,
+                additional_retirements,
+                configure,
+            ),
         };
         let prepared = match prepared {
             Ok(prepared) => prepared,

@@ -20,7 +20,6 @@ pub use validation::{
     PersistentComponentMetadataError, PersistentLifecycleEvent, PersistentObserverScope,
     SceneComponentRequirements, register_persistent_component, validate_entity_despawn,
     validate_entity_despawn_with_allowed_component_hooks,
-    validate_entity_despawn_with_claimed_component_hooks,
     validate_entity_despawn_with_non_linked_relationship,
     validate_non_linked_relationship_insertion, validate_non_linked_relationship_teardown,
     validate_persistent_component_registration, validate_registered_component_metadata,

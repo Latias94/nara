@@ -6,22 +6,11 @@ use nara_reflect::persistent_apply::PreparedComponentApplyBatch;
 use super::*;
 use crate::product_transaction::PreparedSceneProductResources;
 
-/// Replacement with allocated World targets and prepared native/data and product values.
+/// Replacement with allocated World targets and prepared Scene and product values.
 ///
-/// Staging has already allocated actual target entities in the originating World and bound the
-/// prepared values to them. The replacement activation remains unpublished until [`Self::commit`].
-/// This differs from ordinary [`PreparedScene`], which retains unbound values before allocation.
-///
-/// A failed commit returns the same token with the same allocated targets and prepared values;
-/// retry never reruns codecs or the product configuration callback. The owner must retain this
-/// token after native effects begin. Before native retirement begins, abandoning the replacement
-/// requires an explicit [`Self::discard`] with the originating World. Runtime Stop may instead
-/// destroy the owning World after native-domain shutdown.
-///
-/// Dropping this token releases its owned values and private catalogue, but does not despawn the
-/// allocated targets or perform any World cleanup. Allocated process-local identities remain
-/// consumed even when the replacement is discarded.
-#[doc(hidden)]
+/// [`Self::commit`] publishes the replacement. A failed commit returns the original candidate for
+/// retry. Call [`Self::discard`] with the originating World to despawn unpublished targets before
+/// dropping the candidate.
 #[must_use]
 pub struct StagedSceneReplacement(pub(super) PreparedScenePublication);
 
@@ -40,7 +29,6 @@ pub(super) struct PreparedScenePublication {
     pub(super) spawned_by_id: BTreeMap<SceneEntityId, Entity>,
     pub(super) provenance: SceneEntityProvenanceMap,
     pub(super) occurrence: PreparedSceneOccurrence,
-    pub(super) claims: SceneNativeRetirementClaims,
     pub(super) diagnostics: DiagnosticReport,
 }
 
@@ -60,12 +48,7 @@ enum FinalSceneIdentityCommit {
 }
 
 impl StagedSceneReplacement {
-    /// Revalidates all captured World facts before the first native effect.
-    pub fn validate_baseline(&self, world: &mut World) -> Result<(), SceneSpawnReport> {
-        self.0.validate(world, false).map(|_| ())
-    }
-
-    /// Publishes after every native owner has removed its explicitly claimed components.
+    /// Validates the current World and publishes the Scene replacement on success.
     ///
     /// Rejection returns `(self, report)`, preserving the same allocated targets and prepared
     /// values for an explicit retry. Neither codecs nor the product callback run again.
@@ -75,7 +58,7 @@ impl StagedSceneReplacement {
             .map_err(|(prepared, report)| (Self(prepared), report))
     }
 
-    /// Despawns the allocated unpublished targets before native retirement has begun.
+    /// Despawns the allocated unpublished targets.
     ///
     /// Requires the originating World for cleanup. If safe cleanup is rejected, returns the
     /// same token for an explicit retry. Dropping the token alone does not clean up the World.
@@ -95,11 +78,7 @@ impl PreparedScenePublication {
         }
     }
 
-    fn validate(
-        &self,
-        world: &mut World,
-        finalize: bool,
-    ) -> Result<FinalScenePublication, SceneSpawnReport> {
+    fn validate(&self, world: &mut World) -> Result<FinalScenePublication, SceneSpawnReport> {
         self.definition.validate(world)?;
         prepare_mutation_baseline(world);
         let world = &*world;
@@ -246,40 +225,10 @@ impl PreparedScenePublication {
         let hierarchy_operations = if self.expected.is_some() {
             let hierarchy = prepare_scene_hierarchy_retirement(world, &self.retired_entities)
                 .map_err(|_| changed())?;
-            if finalize {
-                if self.scene_retirements.iter().any(|entity| {
-                    world.get_entity(*entity).is_ok_and(|entity| {
-                        self.claims
-                            .component_ids()
-                            .iter()
-                            .any(|component| entity.contains_id(*component))
-                    })
-                }) {
-                    return Err(self.rejection(
-                        "scene.native-retirement-incomplete",
-                        "A native domain retained a claimed component after retirement",
-                    ));
-                }
-                retirement = Some(
-                    PreparedSceneEntityRetirement::prepare(
-                        world,
-                        &self.retired_entities,
-                        &hierarchy,
-                    )
+            retirement = Some(
+                PreparedSceneEntityRetirement::prepare(world, &self.retired_entities, &hierarchy)
                     .map_err(|_| changed())?,
-                );
-            } else {
-                validate_scene_entity_retirement_admission(
-                    world,
-                    &self.scene_retirements,
-                    &hierarchy,
-                    self.claims.component_ids(),
-                )
-                .map_err(|_| changed())?;
-                let additional_entities = self.product_retirements.entities(world);
-                PreparedSceneEntityRetirement::prepare(world, &additional_entities, &hierarchy)
-                    .map_err(|_| changed())?;
-            }
+            );
             replacement_hierarchy_operations = combine_scene_hierarchy_operations(
                 world,
                 &hierarchy,
@@ -312,7 +261,7 @@ impl PreparedScenePublication {
             #[cfg(feature = "work-observation")]
             let _work_span =
                 tracing::info_span!(target: "nara::scene::work", "scene_final_validate").entered();
-            match self.validate(world, true) {
+            match self.validate(world) {
                 Ok(finalization) => finalization,
                 Err(report) => return Err((self, report)),
             }
@@ -703,7 +652,6 @@ mod tests {
         let EntityLookup::Resolved(entity) = receipt.resolve(&world, &id) else {
             panic!("root must resolve")
         };
-        world.entity_mut(entity).insert(NativeState);
         (world, registry, candidate, receipt, entity, id)
     }
 
@@ -717,18 +665,14 @@ mod tests {
         candidate: &CompiledSceneCandidate,
         current: &SpawnedSceneInstance,
     ) -> StagedSceneReplacement {
-        let claims = SceneNativeRetirementClaims::from_component_ids([world
-            .component_id::<NativeState>()
-            .unwrap()]);
         let reservations = SceneAssetReservations::from_world(world);
-        stage_expanded_scene_replacement_with_claims(
+        stage_expanded_scene_replacement(
             world,
             registry,
             candidate,
             None,
             current,
             reservations,
-            &claims,
             limits(),
             &[],
             |overlay| {
@@ -739,44 +683,7 @@ mod tests {
     }
 
     #[test]
-    fn resource_changes_reject_before_native_retirement_and_remain_discardable() {
-        for remove in [false, true] {
-            let (mut world, registry, candidate, current, old, id) = fixture();
-            let prepared = stage_fixture_replacement(&mut world, &registry, &candidate, &current);
-            prepared.validate_baseline(&mut world).unwrap();
-            if remove {
-                world.remove_resource::<ProductValue>().unwrap();
-            } else {
-                world.resource_mut::<ProductValue>().set(7);
-            }
-            let report = prepared.validate_baseline(&mut world).unwrap_err();
-            let expected_code = if remove {
-                "scene.product-resource-missing"
-            } else {
-                "scene.product-resource-changed"
-            };
-            assert!(
-                report
-                    .diagnostics
-                    .iter()
-                    .any(|diagnostic| diagnostic.code().as_str() == expected_code),
-                "{:?}",
-                report.diagnostics
-            );
-            assert_eq!(world.resource::<Removed>().0, 0);
-            assert!(world.get::<NativeState>(old).is_some());
-            assert!(prepared.discard(&mut world).is_ok());
-            assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
-            if remove {
-                assert!(!world.contains_resource::<ProductValue>());
-            } else {
-                assert_eq!(world.resource::<ProductValue>().0, 7);
-            }
-        }
-    }
-
-    #[test]
-    fn resource_changes_during_native_wait_reject_without_any_publication() {
+    fn resource_changes_after_staging_reject_without_publication() {
         for mutation in [
             "same-tick",
             "content-aba",
@@ -792,10 +699,6 @@ mod tests {
             let probe = Arc::new(NativePreparationProbe::default());
             let (registry, candidate) = native_value_candidate(id.clone(), &probe);
             let prepared = stage_fixture_replacement(&mut world, &registry, &candidate, &current);
-            prepared.validate_baseline(&mut world).unwrap();
-            // Model the native owner's completed retirement after the original admission.
-            // The final commit must still compare the original product-resource baseline.
-            world.entity_mut(old).remove::<NativeState>();
             let resource_ticks = world.get_resource_change_ticks::<ProductValue>().unwrap();
             match mutation {
                 "same-tick" => world.resource_mut::<ProductValue>().set(7),
@@ -868,7 +771,7 @@ mod tests {
             assert!(world.get::<SceneEntitySource>(scratch).is_none());
             assert!(world.get::<PreparedNativeValue>(scratch).is_none());
             assert_eq!(prepared.0.spawned_by_id[&id], scratch);
-            assert_eq!(world.resource::<Removed>().0, 1);
+            assert_eq!(world.resource::<Removed>().0, 0);
             match live_resource {
                 Some(baseline) => {
                     assert!(world.resource::<ProductValue>().matches_baseline(&baseline));
@@ -888,25 +791,24 @@ mod tests {
             );
             assert_eq!(probe.runs.load(Ordering::Relaxed), 1);
             assert_eq!(probe.drops.load(Ordering::Relaxed), 0);
+            assert!(prepared.discard(&mut world).is_ok());
+            assert!(world.get_entity(scratch).is_err());
+            assert_eq!(probe.drops.load(Ordering::Relaxed), 1);
         }
     }
 
     #[test]
-    fn baseline_does_not_extend_scene_native_claims_to_additional_retirements() {
+    fn late_hook_on_additional_entity_rejects_replacement() {
         let (mut world, registry, candidate, current, old, id) = fixture();
         let retirement = spawn_identity_entity(&mut world).unwrap();
-        let claims = SceneNativeRetirementClaims::from_component_ids([world
-            .component_id::<NativeState>()
-            .unwrap()]);
         let reservations = SceneAssetReservations::from_world(&world);
-        let prepared = stage_expanded_scene_replacement_with_claims(
+        let prepared = stage_expanded_scene_replacement(
             &mut world,
             &registry,
             &candidate,
             None,
             &current,
             reservations,
-            &claims,
             limits(),
             &[SceneProductRetirement::Entity(retirement)],
             |_| {},
@@ -916,21 +818,20 @@ mod tests {
             world.entity_mut(retirement.entity()).insert(NativeState);
         });
 
-        let report = prepared.validate_baseline(&mut world).unwrap_err();
+        let (prepared, report) = prepared.commit(&mut world).unwrap_err();
         assert!(
             report.diagnostics.iter().any(|diagnostic| {
                 diagnostic.code().as_str() == "scene.prepared-baseline-changed"
             })
         );
         assert_eq!(world.resource::<Removed>().0, 0);
-        assert!(world.get::<NativeState>(old).is_some());
         assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
         assert!(prepared.discard(&mut world).is_ok());
         assert!(world.get::<NativeState>(retirement.entity()).is_some());
     }
 
     #[test]
-    fn additional_instance_native_hooks_never_inherit_primary_claims() {
+    fn hooks_on_additional_scene_instances_reject_replacement() {
         for late_hook in [false, true] {
             let (mut world, registry, candidate, current, old, id) = fixture();
             let additional = spawn_scene(
@@ -948,23 +849,19 @@ mod tests {
             if !late_hook {
                 world.entity_mut(marker).insert(NativeState);
             }
-            let claims = SceneNativeRetirementClaims::from_component_ids([world
-                .component_id::<NativeState>()
-                .unwrap()]);
             let entities = world
                 .iter_entities()
                 .map(|entity| entity.id())
                 .collect::<BTreeSet<_>>();
             let identity = world.resource::<WorldIdentityDomain>().stats();
             let reservations = SceneAssetReservations::from_world(&world);
-            let staged = stage_expanded_scene_replacement_with_claims(
+            let staged = stage_expanded_scene_replacement(
                 &mut world,
                 &registry,
                 &candidate,
                 None,
                 &current,
                 reservations,
-                &claims,
                 limits(),
                 &[SceneProductRetirement::Instance(&additional)],
                 |overlay| {
@@ -976,7 +873,6 @@ mod tests {
                 world.commands().queue(move |world: &mut World| {
                     world.entity_mut(marker).insert(NativeState);
                 });
-                assert!(staged.validate_baseline(&mut world).is_err());
                 let (staged, report) = staged.commit(&mut world).unwrap_err();
                 assert!(report.instance.is_none());
                 assert!(staged.discard(&mut world).is_ok());
@@ -993,7 +889,6 @@ mod tests {
             assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identity);
             assert_eq!(world.resource::<Removed>().0, 0);
             assert_eq!(world.resource::<ProductValue>().0, 1);
-            assert!(world.get::<NativeState>(old).is_some());
             assert!(world.get::<NativeState>(marker).is_some());
             assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
             assert_eq!(
@@ -1117,19 +1012,15 @@ mod tests {
         let probe = Arc::new(NativePreparationProbe::default());
         let (registry, candidate) = native_value_candidate(id.clone(), &probe);
         let calls = Arc::new(AtomicUsize::new(0));
-        let claims = SceneNativeRetirementClaims::from_component_ids([world
-            .component_id::<NativeState>()
-            .unwrap()]);
         let reservations = SceneAssetReservations::from_world(&world);
         let count = Arc::clone(&calls);
-        let prepared = stage_expanded_scene_replacement_with_claims(
+        let prepared = stage_expanded_scene_replacement(
             &mut world,
             &registry,
             &candidate,
             None,
             &current,
             reservations,
-            &claims,
             limits(),
             &[],
             move |overlay| {
@@ -1143,12 +1034,12 @@ mod tests {
         assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
         assert_eq!(probe.runs.load(Ordering::Relaxed), 1);
         assert_eq!(probe.drops.load(Ordering::Relaxed), 0);
-        prepared.validate_baseline(&mut world).unwrap();
         let handle = *probe.handle.get().unwrap();
         assert!(!world.contains_resource::<AssetServer>());
+        world.entity_mut(old).insert(NativeState);
         let (prepared, report) = match prepared.commit(&mut world) {
             Err(failure) => failure,
-            Ok(_) => panic!("native ownership was not retired"),
+            Ok(_) => panic!("replacement must reject a late retirement hook"),
         };
         assert!(report.diagnostics.has_errors());
         assert_eq!(probe.runs.load(Ordering::Relaxed), 1);
@@ -1203,7 +1094,6 @@ mod tests {
                 .resource::<ProductValue>()
                 .matches_baseline(&product_baseline)
         );
-        assert!(world.get::<NativeState>(old).is_some());
         assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
         assert_eq!(world.resource::<Removed>().0, 0);
     }
@@ -1212,18 +1102,14 @@ mod tests {
     fn replacement_revalidates_additional_retirement_identity_before_publication() {
         let (mut world, registry, candidate, current, old, id) = fixture();
         let retirement = spawn_identity_entity(&mut world).unwrap();
-        let claims = SceneNativeRetirementClaims::from_component_ids([world
-            .component_id::<NativeState>()
-            .unwrap()]);
         let reservations = SceneAssetReservations::from_world(&world);
-        let prepared = stage_expanded_scene_replacement_with_claims(
+        let prepared = stage_expanded_scene_replacement(
             &mut world,
             &registry,
             &candidate,
             None,
             &current,
             reservations,
-            &claims,
             limits(),
             &[SceneProductRetirement::Entity(retirement)],
             |_| {},
@@ -1256,40 +1142,35 @@ mod tests {
     }
 
     #[test]
-    fn claims_do_not_admit_global_despawn_observers_or_unclaimed_native_state() {
+    fn lifecycle_work_rejects_replacement_before_candidate_allocation() {
         for global_observer in [false, true] {
             let (mut world, registry, candidate, current, old, id) = fixture();
-            let claims = if global_observer {
+            if global_observer {
                 world.add_observer(|_: On<Despawn<()>>| {});
-                SceneNativeRetirementClaims::from_component_ids([world
-                    .component_id::<NativeState>()
-                    .unwrap()])
             } else {
-                SceneNativeRetirementClaims::default()
-            };
+                world.entity_mut(old).insert(NativeState);
+            }
             world.flush();
-            let count = world.entities().len();
+            let count = world.entity_count();
             let reservations = SceneAssetReservations::from_world(&world);
-            let result = stage_expanded_scene_replacement_with_claims(
+            let result = stage_expanded_scene_replacement(
                 &mut world,
                 &registry,
                 &candidate,
                 None,
                 &current,
                 reservations,
-                &claims,
                 limits(),
                 &[],
                 |_| {},
             );
             assert!(result.is_err());
             assert_eq!(
-                world.entities().len(),
+                world.entity_count(),
                 count,
                 "rejection precedes candidate allocation"
             );
             assert_eq!(world.resource::<Removed>().0, 0);
-            assert!(world.get::<NativeState>(old).is_some());
             assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
         }
     }

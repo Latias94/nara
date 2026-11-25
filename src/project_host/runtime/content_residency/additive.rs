@@ -29,7 +29,6 @@ pub(super) struct Additions {
     pub(super) stock: StockResidency,
     #[cfg(feature = "project-source")]
     pub(super) catalog: Vec<AssetRecord>,
-    pub(super) revision: u64,
 }
 
 pub(super) struct ActiveAddition {
@@ -45,17 +44,6 @@ struct StockUses {
     images: Vec<AssetProductRef>,
     materials: Vec<AssetProductRef>,
     tilesets: Vec<Handle<TileSet>>,
-}
-
-impl Additions {
-    fn next_revision(&self) -> Result<u64, HostFault> {
-        self.revision.checked_add(1).ok_or_else(|| {
-            failure(
-                "project.scene.addition-revision-exhausted",
-                "Project Scene additions cannot admit another revision",
-            )
-        })
-    }
 }
 
 pub(in crate::project_host::runtime) fn admits_processed_addition(
@@ -103,7 +91,6 @@ pub(in crate::project_host::runtime) fn activate_addition(
     let residency = world
         .get_resource::<ProjectSceneResidency>()
         .ok_or_else(|| rejected(resources_missing()))?;
-    let revision = residency.additions.next_revision().map_err(rejected)?;
     let input = ResidencyInput::from(content);
     residency.authority.validate(input).map_err(rejected)?;
     if input
@@ -210,7 +197,6 @@ pub(in crate::project_host::runtime) fn activate_addition(
         stock,
         catalog,
         source: content.scene_source(),
-        revision,
     };
     #[cfg(feature = "runtime-2d")]
     if !candidate.stock.tilesets.inputs.is_empty() {
@@ -242,7 +228,6 @@ pub(super) struct PreparedAddition {
     stock: PreparedStock,
     catalog: PreparedCatalog,
     source: SceneSource,
-    revision: u64,
 }
 
 impl PreparedAddition {
@@ -302,7 +287,6 @@ impl PreparedAddition {
                 _authority: authority,
                 _source: self.source,
             });
-            additions.revision = self.revision;
         }
         Ok(report)
     }
@@ -328,15 +312,11 @@ pub fn unload_project_scene_addition(
         .iter()
         .position(|active| active.receipt == *expected)
         .ok_or_else(addition_mismatch)?;
-    let revision = additions
-        .next_revision()
-        .map_err(|fault| fault.diagnostics)?;
     let prepared = PreparedUnload {
         #[cfg(feature = "runtime-2d")]
         retirement: prepare_retirement(world, additions, index)
             .map_err(|fault| fault.diagnostics)?,
         index,
-        revision,
     };
     #[cfg(feature = "runtime-2d")]
     if !prepared.retirement.tilesets.is_empty() {
@@ -372,7 +352,6 @@ struct PreparedUnload {
     #[cfg(feature = "runtime-2d")]
     retirement: StockRetirement,
     index: usize,
-    revision: u64,
 }
 
 impl PreparedUnload {
@@ -433,7 +412,6 @@ impl PreparedUnload {
         }
         #[cfg(feature = "project-source")]
         additions.catalog.retain(|record| !catalog.contains(record));
-        additions.revision = self.revision;
         Ok(count)
     }
 }

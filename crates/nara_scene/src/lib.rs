@@ -181,9 +181,8 @@ pub mod advanced {
         SceneProductTransactionLimits,
     };
     pub use crate::spawn::{
-        SceneNativeRetirementClaims, StagedSceneReplacement, replace_expanded_scene_with_product,
+        StagedSceneReplacement, replace_expanded_scene_with_product,
         replace_expanded_scene_with_product_and_reservations,
-        stage_expanded_scene_replacement_with_claims,
     };
 }
 pub use scene_components::{
