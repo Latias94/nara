@@ -279,7 +279,7 @@ fn replacement_rejects_equivalent_owner_catalog_with_another_admission_basis() {
         assert!(!installed.same_definitions(&foreign));
         let current = world.resource::<CurrentScene>().receipt().clone();
         let source_view = source_view(world);
-        let entities = world.entities().len();
+        let entities = world.entity_count();
         let stats = world.resource::<WorldIdentityDomain>().stats();
         let next = mixed_source("b", false);
         let assets = nara_scene::advanced::SceneAssetReservations::from_world(world);
@@ -303,7 +303,7 @@ fn replacement_rejects_equivalent_owner_catalog_with_another_admission_basis() {
             source_view.with_document(|scene| scene.roots().to_vec()),
             Some(vec![id("a")])
         );
-        assert_eq!(world.entities().len(), entities);
+        assert_eq!(world.entity_count(), entities);
         assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
         assert_eq!(world.resource::<RunValue>().0, 1);
     });
@@ -314,7 +314,7 @@ fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
     with_current_scene(|world| {
         let first = world.resource::<CurrentScene>().receipt().clone();
         let first_view = source_view(world);
-        let before_entities = world.entities().len();
+        let before_entities = world.entity_count();
         let report = replace_current_scene_with_product(
             world,
             &first,
@@ -331,7 +331,7 @@ fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
         assert_eq!(current.receipt(), &second);
         assert_eq!(current.source().roots(), [id("b")]);
         assert_ne!(first.instance_id(), second.instance_id());
-        assert_eq!(world.entities().len(), before_entities);
+        assert_eq!(world.entity_count(), before_entities);
         assert!(matches!(
             second.resolve(world, &id("b")),
             EntityLookup::Resolved(_)
@@ -380,7 +380,7 @@ fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
         assert_eq!(world.resource::<CurrentScene>().receipt(), &returned);
         assert_eq!(world.resource::<CurrentScene>().source().roots(), [id("a")]);
         assert_eq!(second_view.with_document(|_| ()), None);
-        assert_eq!(world.entities().len(), before_entities);
+        assert_eq!(world.entity_count(), before_entities);
     });
 }
 
@@ -398,7 +398,7 @@ fn stale_and_foreign_expected_receipts_reject_before_product_configuration() {
         );
         let current = replacement.instance.unwrap();
         let view = source_view(world);
-        let entity_count = world.entities().len();
+        let entity_count = world.entity_count();
         let stats = world.resource::<WorldIdentityDomain>().stats();
         let report = restart_current_scene_with_product(world, &original, limits(), &[], |_| {
             panic!("a stale request cannot configure the next Scene");
@@ -426,7 +426,7 @@ fn stale_and_foreign_expected_receipts_reject_before_product_configuration() {
             view.with_document(|scene| scene.roots().to_vec()),
             Some(vec![id("b")])
         );
-        assert_eq!(world.entities().len(), entity_count);
+        assert_eq!(world.entity_count(), entity_count);
         assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
         assert_eq!(world.resource::<RunValue>().0, 1);
     });
@@ -438,7 +438,7 @@ fn rejected_candidate_keeps_the_current_pair_and_product_state() {
         let current = world.resource::<CurrentScene>().receipt().clone();
         let view = source_view(world);
         let stats = world.resource::<WorldIdentityDomain>().stats();
-        let entities = world.entities().len();
+        let entities = world.entity_count();
         let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("b"))
             .with_component(
                 ComponentTypeId::new("test.unavailable"),
@@ -499,7 +499,7 @@ fn rejected_candidate_keeps_the_current_pair_and_product_state() {
             view.with_document(|scene| scene.roots().to_vec()),
             Some(vec![id("a")])
         );
-        assert_eq!(world.entities().len(), entities);
+        assert_eq!(world.entity_count(), entities);
         assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
         assert_eq!(world.resource::<RunValue>().0, 1);
         assert!(matches!(

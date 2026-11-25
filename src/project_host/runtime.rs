@@ -72,10 +72,6 @@ mod scene_requests;
 mod source_watch;
 #[cfg(feature = "project-source")]
 pub use scene_requests::ProjectSceneSourceUpdateStatus;
-pub use scene_requests::domains::{
-    ManagedSceneDomain, ManagedSceneDomainAttempt, ManagedSceneDomainError, ManagedSceneDomainId,
-    ManagedSceneDomainPhase, ManagedSceneDomainPreparation, ManagedSceneDomains,
-};
 pub(crate) use scene_requests::{
     PROJECT_SCENE_REQUEST_CLOSE_OBLIGATION, poll_project_scene_requests,
     register_close_participant as register_project_scene_close_participant,
@@ -83,8 +79,7 @@ pub(crate) use scene_requests::{
 pub use scene_requests::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
     ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
-    activate_prepared_project_scene, begin_prepared_project_scene_travel,
-    commit_prepared_project_scene,
+    activate_prepared_project_scene, commit_prepared_project_scene,
 };
 #[cfg(all(feature = "project-source", feature = "asset-watch"))]
 pub use source_watch::{

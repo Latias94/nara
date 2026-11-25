@@ -38,13 +38,12 @@ use nara_scene::{
 use super::super::super::{CleanupDriveOutcome, ProjectHost};
 use super::{
     Context, Fixture, ProjectSceneRequestError, ProjectSceneRequestState, ProjectScenes,
-    activate_prepared_project_scene, begin_prepared_project_scene_travel,
-    commit_prepared_project_scene, poll_project_scene_requests, pools, processed_configuration,
+    activate_prepared_project_scene, commit_prepared_project_scene, pools, processed_configuration,
     wait_for_request, with_context_world,
 };
 #[cfg(feature = "runtime-2d")]
 use super::{
-    PreparedSceneContent, RequestOwner, Slot, assert_active_budget,
+    PreparedSceneContent, RequestOwner, Slot, assert_active_budget, poll_project_scene_requests,
     preparation::{TestGate, TestPhase},
     with_context_world_and_startup,
 };
@@ -164,7 +163,7 @@ fn additive_cancellation_retains_the_original_slot_until_its_worker_returns() {
 }
 
 #[test]
-fn coordinated_travel_revalidates_and_retires_two_occurrences_of_the_same_deferred_scene() {
+fn travel_retires_two_occurrences_of_the_same_deferred_scene_atomically() {
     let fixture = Fixture::empty();
     let base = processed_base(&fixture);
     let source = crate::startup_scene::SceneSource::from_hosted_runtime_content(
@@ -219,7 +218,15 @@ fn coordinated_travel_revalidates_and_retires_two_occurrences_of_the_same_deferr
             }),
             "scene.product-retirement-limit-exceeded",
         );
-        assert!(ProjectScenes::scope(world, |scenes| scenes.acknowledge(request)));
+        ProjectScenes::scope(world, |scenes| {
+            assert_eq!(
+                scenes.state(request),
+                Some(ProjectSceneRequestState::Rejected(
+                    ProjectSceneRequestError::CommitRejected
+                ))
+            );
+            assert!(scenes.acknowledge(request));
+        });
         assert_eq!(
             original.resolve(world, &deferred),
             EntityLookup::Resolved(first_entity)
@@ -230,28 +237,11 @@ fn coordinated_travel_revalidates_and_retires_two_occurrences_of_the_same_deferr
         );
         assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
 
-        let limits = SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::new(2).unwrap());
-        let request = travel(world);
-        begin_prepared_project_scene_travel(world, request, limits, &[], |_| {}).unwrap();
         assert_eq!(unload_project_scene_addition(world, &original).unwrap(), 1);
-        world.resource_mut::<nara_app::RealTime>().frame += 1;
-        poll_project_scene_requests(world);
-        ProjectScenes::scope(world, |scenes| {
-            assert_eq!(
-                scenes.state(request),
-                Some(ProjectSceneRequestState::Rejected(
-                    ProjectSceneRequestError::CommitRejected
-                ))
-            );
-            assert!(
-                scenes
-                    .diagnostics(request)
-                    .unwrap()
-                    .iter()
-                    .any(|entry| entry.code().as_str() == "project.scene.additions-changed")
-            );
-            assert!(scenes.acknowledge(request));
-        });
+        assert!(matches!(
+            original.resolve(world, &deferred),
+            EntityLookup::Tombstoned(_)
+        ));
         assert_eq!(
             second.resolve(world, &deferred),
             EntityLookup::Resolved(second_entity)
@@ -259,33 +249,15 @@ fn coordinated_travel_revalidates_and_retires_two_occurrences_of_the_same_deferr
         assert_eq!(CurrentScene::get(world).unwrap().receipt(), &primary);
         let fresh = activate(world, "first");
         assert_ne!(fresh.instance_id(), original.instance_id());
+        let EntityLookup::Resolved(fresh_entity) = fresh.resolve(world, &deferred) else {
+            panic!("missing replacement occurrence")
+        };
 
+        let limits = SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::new(2).unwrap());
         let request = travel(world);
-        world
-            .resource_mut::<super::super::domains::ManagedSceneDomains>()
-            .register(Box::new(RetireOnce))
-            .unwrap();
-        begin_prepared_project_scene_travel(world, request, limits, &[], |_| {}).unwrap();
-        world.resource_mut::<nara_app::RealTime>().frame += 1;
-        poll_project_scene_requests(world);
-        ProjectScenes::scope(world, |scenes| {
-            assert_eq!(
-                scenes.state(request),
-                Some(ProjectSceneRequestState::Degraded)
-            );
-        });
-        let error = unload_project_scene_addition(world, &second).unwrap_err();
-        assert!(
-            error
-                .iter()
-                .any(|entry| entry.code().as_str() == "project.scene.additions-retiring")
-        );
-        assert_eq!(
-            second.resolve(world, &deferred),
-            EntityLookup::Resolved(second_entity)
-        );
-        assert!(ProjectScenes::scope(world, |scenes| scenes.retry(request)));
-        poll_project_scene_requests(world);
+        let report = commit_prepared_project_scene(world, request, limits, &[], |_| {});
+        assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+        let committed = report.instance.unwrap();
         ProjectScenes::scope(world, |scenes| {
             assert_eq!(
                 scenes.state(request),
@@ -293,61 +265,17 @@ fn coordinated_travel_revalidates_and_retires_two_occurrences_of_the_same_deferr
             );
             assert!(scenes.acknowledge(request));
         });
-        assert_ne!(CurrentScene::get(world).unwrap().receipt(), &primary);
-        for receipt in [fresh, second] {
+        assert_ne!(committed, primary);
+        assert_eq!(CurrentScene::get(world).unwrap().receipt(), &committed);
+        for (receipt, entity) in [(fresh, fresh_entity), (second, second_entity)] {
             assert!(matches!(
                 receipt.resolve(world, &deferred),
                 EntityLookup::Tombstoned(_)
             ));
+            assert!(world.get_entity(entity).is_err());
             assert!(unload_project_scene_addition(world, &receipt).is_err());
         }
     });
-}
-
-struct RetireOnce;
-impl super::super::domains::ManagedSceneDomain for RetireOnce {
-    fn id(&self) -> super::super::domains::ManagedSceneDomainId {
-        super::super::domains::ManagedSceneDomainId::new("test.concurrent-room-retire")
-    }
-
-    fn prepare(
-        &self,
-        _: &World,
-        _: &super::super::PreparedProjectSceneView<'_>,
-    ) -> Result<
-        super::super::domains::ManagedSceneDomainPreparation,
-        super::super::domains::ManagedSceneDomainError,
-    > {
-        Ok(super::super::domains::ManagedSceneDomainPreparation::new(
-            nara_scene::advanced::SceneNativeRetirementClaims::default(),
-            FailFirstRetirement(false),
-        ))
-    }
-}
-
-struct FailFirstRetirement(bool);
-impl super::super::domains::ManagedSceneDomainAttempt for FailFirstRetirement {
-    fn retire(
-        &mut self,
-        _: &mut World,
-        _: &SpawnedSceneInstance,
-    ) -> Result<(), super::super::domains::ManagedSceneDomainError> {
-        if std::mem::replace(&mut self.0, true) {
-            return Ok(());
-        }
-        Err(super::super::domains::ManagedSceneDomainError::new(
-            nara_core::diagnostic::DiagnosticCode::new("test.concurrent-room-retire-failed")
-                .unwrap(),
-        ))
-    }
-
-    fn reconcile(
-        &mut self,
-        _: &mut World,
-        _: &SpawnedSceneInstance,
-    ) -> Result<(), super::super::domains::ManagedSceneDomainError> {
-        Ok(())
-    }
 }
 
 #[cfg(feature = "runtime-2d")]

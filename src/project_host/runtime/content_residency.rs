@@ -18,7 +18,7 @@ pub(super) use additive::activate_addition;
 pub(crate) use additive::has_active_project_scene_addition;
 pub use additive::unload_project_scene_addition;
 pub use instances::{inspect_current_scene_dependency, instantiate_current_scene_dependency};
-pub(super) use replacement::StagedProjectSceneReplacement;
+use replacement::StagedProjectSceneReplacement;
 
 #[cfg(feature = "project-source")]
 use nara_asset::AssetRecord;
@@ -35,8 +35,8 @@ use nara_render::tilemap::{PreparedTileSetPublications, TileSetAssets};
 use nara_scene::{
     SceneSpawnReport,
     advanced::{
-        SceneAssetReservations, SceneNativeRetirementClaims, SceneProductOverlayWriter,
-        SceneProductRetirement, SceneProductTransactionLimits, StagedSceneReplacement,
+        SceneAssetReservations, SceneProductOverlayWriter, SceneProductRetirement,
+        SceneProductTransactionLimits, StagedSceneReplacement,
     },
 };
 
@@ -312,8 +312,7 @@ impl PreparedResidency {
     }
 }
 
-/// The admitted Host owns this synchronous convenience wrapper. Managed travel retains the same
-/// preparation token while independent native domains retire and reconcile their state.
+/// Stages and publishes the replacement at the same exclusive World boundary.
 pub(super) fn replace_scene<F>(
     world: &mut World,
     expected: &SpawnedSceneInstance,
@@ -329,7 +328,6 @@ where
         world,
         expected,
         content,
-        &SceneNativeRetirementClaims::default(),
         limits,
         additional_retirements,
         configure,

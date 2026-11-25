@@ -1416,24 +1416,6 @@ impl App {
         Ok(self)
     }
 
-    /// Requires an installed owner's readiness before advancing simulation.
-    ///
-    /// Conditions read the World once at frame entry. If any condition returns `false`, the frame
-    /// uses the existing paused policy: real time, tasks, rendering and cleanup advance, while
-    /// virtual/fixed time and PreUpdate/FixedUpdate/Update/PostUpdate remain suspended. Readiness
-    /// restored during that frame takes effect on the next frame. Exact stepping is also refused.
-    ///
-    /// An owner must queue irreversible transitions before the next frame boundary rather than
-    /// changing readiness midway through simulation. Conditions own no mutable World or history.
-    pub fn add_simulation_condition(
-        &mut self,
-        condition: fn(&World) -> bool,
-    ) -> Result<&mut Self, PluginError> {
-        self.ensure_configuration_mutation_allowed()?;
-        self.owner.simulation_conditions.push(condition);
-        Ok(self)
-    }
-
     pub fn init_schedule(
         &mut self,
         schedule: impl ScheduleLabel,
@@ -2135,7 +2117,6 @@ impl runtime::RuntimeOwnerState {
         self.validate_managed_runtime_authority()
             .map_err(|fault| AppRunError::managed_runtime_fault(&fault))?;
 
-        let paused_stages_only = paused_stages_only || !self.simulation_is_ready();
         let frame_started_at = Instant::now();
         let time_frame_plan =
             TimeFramePlan::from_world(&self.world, real_delta, paused_stages_only)?;

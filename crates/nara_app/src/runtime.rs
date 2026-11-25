@@ -1739,7 +1739,6 @@ pub enum RuntimeControlFailure {
     RuntimeFaulted,
     CloseFailed,
     CloseIncomplete,
-    SimulationUnavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1752,7 +1751,6 @@ pub enum RuntimeControlStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeControlRejection {
     Busy,
-    SimulationUnavailable,
     InvalidState {
         state: RuntimeState,
         control: RuntimeControl,
@@ -2340,12 +2338,6 @@ impl RuntimeInstance {
             });
         }
 
-        if control == RuntimeControl::StepFixedTick && !self.owner.simulation_is_ready() {
-            return RuntimeControlRequestResult::Rejected(
-                RuntimeControlRejection::SimulationUnavailable,
-            );
-        }
-
         let Some(next) = self.next_control_ticket.checked_add(1) else {
             return RuntimeControlRequestResult::Rejected(RuntimeControlRejection::TicketExhausted);
         };
@@ -2475,20 +2467,6 @@ impl RuntimeInstance {
                     self.set_control_status(pending.ticket, RuntimeControlStatus::Applied);
                 }
                 RuntimeControl::StepFixedTick => {
-                    if !self.owner.simulation_is_ready() {
-                        self.set_control_status(
-                            pending.ticket,
-                            RuntimeControlStatus::Failed(
-                                RuntimeControlFailure::SimulationUnavailable,
-                            ),
-                        );
-                        let frame = self.drive_app_frame(real_delta, RuntimeFrameMode::Paused)?;
-                        return Ok(RuntimeDriveOutcome {
-                            state: self.state,
-                            frame: Some(frame),
-                            frame_kind: Some(RuntimeFrameKind::FullFrame),
-                        });
-                    }
                     self.state = RuntimeState::Stepping;
                     let frame = self.drive_app_exact_step(real_delta);
                     return match frame {

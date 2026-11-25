@@ -1,17 +1,11 @@
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
-};
+use std::time::Duration;
 
 use nara_app::{
     App, CoreStage, FixedTime, RealTime, RuntimeControl, RuntimeControlFailure,
     RuntimeControlRequestResult, RuntimeControlStatus, RuntimeFaultKind, RuntimeFrameKind,
     RuntimeFrameStatus, RuntimeInstance, RuntimeState,
 };
-use nara_ecs::{ResMut, Resource, World, bevy_ecs::error::BevyError};
+use nara_ecs::{ResMut, Resource, bevy_ecs::error::BevyError};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
 struct Runs {
@@ -122,60 +116,6 @@ fn running_paused_and_exact_step_outcomes_retain_their_original_frame_kind() {
     assert_eq!(exact.frame(), Some(exact_frame));
     assert_eq!(paused.frame_kind(), Some(RuntimeFrameKind::FullFrame));
     assert_eq!(running.frame_kind(), Some(RuntimeFrameKind::FullFrame));
-    runtime.finish().unwrap();
-}
-
-#[derive(Resource)]
-struct SimulationReady(Arc<AtomicBool>);
-
-fn simulation_is_ready(world: &World) -> bool {
-    world
-        .resource::<SimulationReady>()
-        .0
-        .load(Ordering::Acquire)
-}
-
-#[test]
-fn unavailable_admitted_step_returns_a_full_frame_and_keeps_its_failed_control() {
-    let ready = Arc::new(AtomicBool::new(true));
-    let mut app = instrumented_app();
-    app.insert_resource(SimulationReady(Arc::clone(&ready)))
-        .unwrap();
-    app.add_simulation_condition(simulation_is_ready).unwrap();
-    let mut runtime = RuntimeInstance::start(app).unwrap();
-    assert!(matches!(
-        runtime.request_control(RuntimeControl::Pause),
-        RuntimeControlRequestResult::Accepted(_)
-    ));
-    runtime.drive(Duration::ZERO).unwrap();
-
-    let RuntimeControlRequestResult::Accepted(ticket) =
-        runtime.request_control(RuntimeControl::StepFixedTick)
-    else {
-        panic!("a ready paused runtime must accept an exact fixed step");
-    };
-    ready.store(false, Ordering::Release);
-    let outcome = runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
-    assert_eq!(outcome.state(), RuntimeState::Paused);
-    assert_eq!(outcome.frame_kind(), Some(RuntimeFrameKind::FullFrame));
-    assert_eq!(outcome.frame().unwrap().status.fixed_steps, 0);
-    assert_eq!(runtime.world().resource::<FixedTime>().tick(), 0);
-    assert_eq!(
-        *runtime.world().resource::<Runs>(),
-        Runs {
-            tasks: 2,
-            fixed: 0,
-            render: 2,
-            cleanup: 2,
-        }
-    );
-    assert_eq!(
-        runtime.control_status(ticket),
-        Some(RuntimeControlStatus::Failed(
-            RuntimeControlFailure::SimulationUnavailable
-        ))
-    );
-    assert!(runtime.fault().is_none());
     runtime.finish().unwrap();
 }
 

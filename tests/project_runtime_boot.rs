@@ -1025,13 +1025,10 @@ fn product_action_distinguishes_complete_frames_from_exact_fixed_ticks() {
     }
 }
 
-#[derive(Debug, Resource)]
-struct MaintenanceReady(bool);
-
 #[derive(Debug, Default)]
-struct InitiallyPausedPlugin<const REQUIRE_MAINTENANCE: bool>;
+struct InitiallyPausedPlugin;
 
-impl<const REQUIRE_MAINTENANCE: bool> Plugin for InitiallyPausedPlugin<REQUIRE_MAINTENANCE> {
+impl Plugin for InitiallyPausedPlugin {
     fn declaration() -> &'static PluginDeclaration {
         const DECLARATION: PluginDeclaration = PluginDeclaration::new(
             PluginId::new("nara.test.initially-paused-headless"),
@@ -1045,27 +1042,18 @@ impl<const REQUIRE_MAINTENANCE: bool> Plugin for InitiallyPausedPlugin<REQUIRE_M
             StartupStage::Core,
             |mut settings: ResMut<RuntimeTimeSettings>| settings.set_paused(true),
         )?;
-        if REQUIRE_MAINTENANCE {
-            app.insert_resource(MaintenanceReady(false))?
-                .add_simulation_condition(|world| world.resource::<MaintenanceReady>().0)?
-                .add_systems(
-                    CoreStage::TaskUpdate,
-                    |mut ready: ResMut<MaintenanceReady>| {
-                        ready.0 = true;
-                    },
-                )?;
-        }
         Ok(())
     }
 }
 
-fn initially_paused_exact_tick_product<const REQUIRE_MAINTENANCE: bool>() {
+#[test]
+fn initially_paused_exact_tick_product_runs_maintenance_before_stepping() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let recipe = ProductRecipe::new()
         .add_plugin::<FrameStagesPlugin>()
         .unwrap()
-        .add_plugin::<InitiallyPausedPlugin<REQUIRE_MAINTENANCE>>()
+        .add_plugin::<InitiallyPausedPlugin>()
         .unwrap();
     let intent = HeadlessRunIntent::new(NonZeroU32::new(2).unwrap()).with_recipe(recipe);
     let mut run = HeadlessRun::<FrameStages>::new(project.root_capability(), intent);
@@ -1079,23 +1067,13 @@ fn initially_paused_exact_tick_product<const REQUIRE_MAINTENANCE: bool>() {
 }
 
 #[test]
-fn initially_paused_exact_tick_product_runs_maintenance_before_stepping() {
-    initially_paused_exact_tick_product::<false>();
-}
-
-#[test]
-fn initially_paused_exact_tick_product_can_restore_readiness_in_maintenance() {
-    initially_paused_exact_tick_product::<true>();
-}
-
-#[test]
 fn initially_paused_frame_product_runs_only_its_requested_maintenance_frames() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let recipe = ProductRecipe::new()
         .add_plugin::<FrameStagesPlugin>()
         .unwrap()
-        .add_plugin::<InitiallyPausedPlugin<false>>()
+        .add_plugin::<InitiallyPausedPlugin>()
         .unwrap();
     let intent = HeadlessRunIntent::frames(NonZeroU32::new(2).unwrap(), Duration::from_millis(20))
         .with_recipe(recipe);
@@ -1142,7 +1120,7 @@ fn exact_tick_product_honors_exit_from_entry_maintenance_without_stepping() {
             .add_plugin::<MaintenanceExitPlugin>()
             .unwrap();
         if initially_paused {
-            recipe = recipe.add_plugin::<InitiallyPausedPlugin<false>>().unwrap();
+            recipe = recipe.add_plugin::<InitiallyPausedPlugin>().unwrap();
         }
         let intent = HeadlessRunIntent::new(NonZeroU32::new(2).unwrap()).with_recipe(recipe);
         let mut run = HeadlessRun::<FrameStages>::new(project.root_capability(), intent);

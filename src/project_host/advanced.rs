@@ -30,11 +30,7 @@ pub use super::composition::{
     ProjectRuntimePlugins, project_runtime_plugins, resolve_runtime_plan,
 };
 #[cfg(feature = "serde")]
-pub use super::runtime::{
-    ManagedSceneDomain, ManagedSceneDomainAttempt, ManagedSceneDomainError, ManagedSceneDomainId,
-    ManagedSceneDomainPhase, ManagedSceneDomainPreparation, ManagedSceneDomains,
-    begin_prepared_project_scene_travel, commit_prepared_project_scene,
-};
+pub use super::runtime::commit_prepared_project_scene;
 
 #[cfg(all(
     feature = "project-source",

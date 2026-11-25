@@ -48,7 +48,6 @@ pub(crate) struct RuntimeOwnerState {
     pub(crate) runtime_error_handler: Option<ErrorHandler>,
     pub(crate) runtime_fault_bridge: Option<RuntimeFaultBridgeIdentity>,
     pub(crate) runtime_authority_validators: Vec<InstalledRuntimeAuthorityValidator>,
-    pub(crate) simulation_conditions: Vec<fn(&World) -> bool>,
     pub(crate) pending_observers: Vec<Observer>,
     pub(crate) plugin_lifecycle: PluginLifecycleState,
     pub(crate) plugin_failure_report: Option<PluginFailureReport>,
@@ -130,19 +129,12 @@ impl RuntimeOwnerState {
             runtime_error_handler: None,
             runtime_fault_bridge: None,
             runtime_authority_validators: Vec::new(),
-            simulation_conditions: Vec::new(),
             pending_observers: Vec::new(),
             plugin_lifecycle: PluginLifecycleState::Configuring,
             plugin_failure_report: None,
             active_plugin_hook: None,
             started: false,
         }
-    }
-
-    pub(crate) fn simulation_is_ready(&self) -> bool {
-        self.simulation_conditions
-            .iter()
-            .all(|condition| condition(&self.world))
     }
 
     pub(super) fn begin_close(&mut self) {

@@ -364,11 +364,7 @@ pub mod advanced_prelude {
     };
     pub use crate::prelude::*;
     #[cfg(all(feature = "project-runtime", feature = "serde"))]
-    pub use crate::project_host::advanced::{
-        ManagedSceneDomain, ManagedSceneDomainAttempt, ManagedSceneDomainError,
-        ManagedSceneDomainId, ManagedSceneDomainPhase, ManagedSceneDomainPreparation,
-        ManagedSceneDomains, begin_prepared_project_scene_travel, commit_prepared_project_scene,
-    };
+    pub use crate::project_host::advanced::commit_prepared_project_scene;
     pub use nara_app::tasks::{
         OrderedTaskReadySnapshot, OrderedTaskResults, OrderedTaskTerminal, TaskCancellation,
         TaskCancellationReason, TaskCancellationToken, TaskCoalesceKey, TaskCompletionCutoff,

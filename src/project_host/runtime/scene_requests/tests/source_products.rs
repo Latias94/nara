@@ -274,148 +274,136 @@ fn source_product_missing_auxiliary_wrong_kind_and_ambiguity_reject_in_preparati
 }
 
 #[test]
-fn source_product_ready_and_queued_publication_never_rediscover_or_retarget() {
-    for managed in [false, true] {
-        let fixture = Fixture::new();
-        let root = fixture.root.clone();
-        let context = fixture.context();
-        let Context::Source {
-            candidate,
-            plan,
-            loader,
-            ..
-        } = context.as_ref()
-        else {
-            unreachable!()
-        };
-        let snapshot = loader.load(candidate, plan).unwrap();
-        let original_closure = snapshot.content_closure();
-        let original_stamp = snapshot.content_stamp();
-        let source = snapshot.scene_source();
-        with_context_world_and_startup(context, source, Some(snapshot), move |world| {
-            world.insert_resource(pools());
-            write_metadata(
-                &root,
-                "scenes",
-                "second.scene.json",
-                primary(2),
-                AssetSourceKind::Scene,
-            );
-            let expected = CurrentScene::get(world).unwrap().receipt().clone();
-            let original_source = CurrentScene::get(world).unwrap().source_view();
-            assert_eq!(
-                CurrentScene::get(world).unwrap().source_content_stamp(),
-                Some(original_stamp)
-            );
-            assert_eq!(original_closure.stamp(), original_stamp);
-            let request = ProjectScenes::scope(world, |scenes| scenes.request(primary(2))).unwrap();
-            wait_for_request(world, request, ProjectSceneRequestState::Ready);
-            let captured_closure = {
-                let owner = world.resource::<RequestOwner>();
-                let Some(Slot::Ready {
-                    content: PreparedSceneContent::Source(snapshot),
-                    ..
-                }) = owner.slot.as_ref()
-                else {
-                    panic!("source preparation retains its original closure receipt")
-                };
-                snapshot.content_closure()
+fn source_product_commit_uses_the_captured_selection_and_content() {
+    let fixture = Fixture::new();
+    let root = fixture.root.clone();
+    let context = fixture.context();
+    let Context::Source {
+        candidate,
+        plan,
+        loader,
+        ..
+    } = context.as_ref()
+    else {
+        unreachable!()
+    };
+    let snapshot = loader.load(candidate, plan).unwrap();
+    let original_closure = snapshot.content_closure();
+    let original_stamp = snapshot.content_stamp();
+    let source = snapshot.scene_source();
+    with_context_world_and_startup(context, source, Some(snapshot), move |world| {
+        world.insert_resource(pools());
+        write_metadata(
+            &root,
+            "scenes",
+            "second.scene.json",
+            primary(2),
+            AssetSourceKind::Scene,
+        );
+        let expected = CurrentScene::get(world).unwrap().receipt().clone();
+        let original_source = CurrentScene::get(world).unwrap().source_view();
+        assert_eq!(
+            CurrentScene::get(world).unwrap().source_content_stamp(),
+            Some(original_stamp)
+        );
+        assert_eq!(original_closure.stamp(), original_stamp);
+        let request = ProjectScenes::scope(world, |scenes| scenes.request(primary(2))).unwrap();
+        wait_for_request(world, request, ProjectSceneRequestState::Ready);
+        let captured_closure = {
+            let owner = world.resource::<RequestOwner>();
+            let Some(Slot::Ready {
+                content: PreparedSceneContent::Source(snapshot),
+                ..
+            }) = owner.slot.as_ref()
+            else {
+                panic!("source preparation retains its original closure receipt")
             };
-            let prepared_stamp = ProjectScenes::scope(world, |scenes| {
-                scenes
-                    .prepared(request)
-                    .unwrap()
-                    .source_content_stamp()
-                    .unwrap()
-            });
-            assert_eq!(prepared_stamp, captured_closure.stamp());
-            assert_ne!(
-                prepared_stamp.content_digest(),
-                original_stamp.content_digest()
-            );
-            assert_ne!(
-                prepared_stamp.closure_plan_digest(),
-                original_stamp.closure_plan_digest()
-            );
-            if managed {
-                begin_prepared_project_scene_travel(world, request, limits(), &[], |_| {}).unwrap();
-            }
-            // The disk now associates the requested Product with startup and different data.
-            // Neither Ready commit nor the queued native publication may follow that new lookup.
-            write_metadata(
-                &root,
-                "scenes",
-                "second.scene.json",
-                primary(4),
-                AssetSourceKind::Scene,
-            );
-            write_metadata(
-                &root,
-                "scenes",
-                "startup.scene.json",
-                primary(2),
-                AssetSourceKind::Scene,
-            );
-            write_scene(&root, "second.scene.json", "changed-after-capture");
-            write_scene(&root, "startup.scene.json", "retargeted");
-            assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
-            assert_eq!(original_closure.stamp(), original_stamp);
-            assert_eq!(captured_closure.stamp(), prepared_stamp);
+            snapshot.content_closure()
+        };
+        let prepared_stamp = ProjectScenes::scope(world, |scenes| {
+            scenes
+                .prepared(request)
+                .unwrap()
+                .source_content_stamp()
+                .unwrap()
+        });
+        assert_eq!(prepared_stamp, captured_closure.stamp());
+        assert_ne!(
+            prepared_stamp.content_digest(),
+            original_stamp.content_digest()
+        );
+        assert_ne!(
+            prepared_stamp.closure_plan_digest(),
+            original_stamp.closure_plan_digest()
+        );
+        write_metadata(
+            &root,
+            "scenes",
+            "second.scene.json",
+            primary(4),
+            AssetSourceKind::Scene,
+        );
+        write_metadata(
+            &root,
+            "scenes",
+            "startup.scene.json",
+            primary(2),
+            AssetSourceKind::Scene,
+        );
+        write_scene(&root, "second.scene.json", "changed-after-capture");
+        write_scene(&root, "startup.scene.json", "retargeted");
+        assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
+        assert_eq!(original_closure.stamp(), original_stamp);
+        assert_eq!(captured_closure.stamp(), prepared_stamp);
+        assert_eq!(
+            CurrentScene::get(world).unwrap().source_content_stamp(),
+            Some(original_stamp)
+        );
+        ProjectScenes::scope(world, |scenes| {
+            let view = scenes.prepared(request).unwrap();
+            assert_eq!(view.selected_scene_product(), Some(primary(2)));
+            assert_eq!(view.selected_scene_path(), Some(&selected()));
+            assert_eq!(view.source_content_stamp(), Some(prepared_stamp));
             assert_eq!(
-                CurrentScene::get(world).unwrap().source_content_stamp(),
-                Some(original_stamp)
-            );
-            if managed {
-                world.resource_mut::<nara_app::RealTime>().frame += 1;
-                poll_project_scene_requests(world);
-            } else {
-                ProjectScenes::scope(world, |scenes| {
-                    let view = scenes.prepared(request).unwrap();
-                    assert_eq!(view.selected_scene_product(), Some(primary(2)));
-                    assert_eq!(view.selected_scene_path(), Some(&selected()));
-                    assert_eq!(view.source_content_stamp(), Some(prepared_stamp));
-                    assert_eq!(
-                        view.scene().roots(),
-                        [SceneEntityId::new("second").unwrap()]
-                    );
-                });
-                let report = commit_prepared_project_scene(world, request, limits(), &[], |_| {});
-                assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
-                assert!(report.instance.is_some());
-            }
-            ProjectScenes::scope(world, |scenes| {
-                assert_eq!(
-                    scenes.state(request),
-                    Some(ProjectSceneRequestState::Committed)
-                );
-                assert!(scenes.acknowledge(request));
-            });
-            let current = CurrentScene::get(world).unwrap();
-            assert_ne!(current.receipt().instance_id(), expected.instance_id());
-            assert_eq!(current.source_content_stamp(), Some(prepared_stamp));
-            assert_eq!(original_closure.stamp(), original_stamp);
-            assert_eq!(captured_closure.stamp(), prepared_stamp);
-            assert_eq!(original_source.with_document(|_| ()), None);
-            assert_eq!(
-                current.source().roots(),
+                view.scene().roots(),
                 [SceneEntityId::new("second").unwrap()]
             );
-            assert_eq!(
-                world
-                    .resource::<ProjectAssetDatabase>()
-                    .record_for_stable_id(primary(2).source())
-                    .unwrap()
-                    .path()
-                    .as_str(),
-                "scenes/second.scene.json"
-            );
-            let mut access = SystemState::<Res<CurrentScene>>::new(world);
-            assert_eq!(
-                access.get(world).unwrap().source_content_stamp(),
-                Some(prepared_stamp)
-            );
         });
-    }
+        let report = commit_prepared_project_scene(world, request, limits(), &[], |_| {});
+        assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+        assert!(report.instance.is_some());
+        ProjectScenes::scope(world, |scenes| {
+            assert_eq!(
+                scenes.state(request),
+                Some(ProjectSceneRequestState::Committed)
+            );
+            assert!(scenes.acknowledge(request));
+        });
+        let current = CurrentScene::get(world).unwrap();
+        assert_ne!(current.receipt().instance_id(), expected.instance_id());
+        assert_eq!(current.source_content_stamp(), Some(prepared_stamp));
+        assert_eq!(original_closure.stamp(), original_stamp);
+        assert_eq!(captured_closure.stamp(), prepared_stamp);
+        assert_eq!(original_source.with_document(|_| ()), None);
+        assert_eq!(
+            current.source().roots(),
+            [SceneEntityId::new("second").unwrap()]
+        );
+        assert_eq!(
+            world
+                .resource::<ProjectAssetDatabase>()
+                .record_for_stable_id(primary(2).source())
+                .unwrap()
+                .path()
+                .as_str(),
+            "scenes/second.scene.json"
+        );
+        let mut access = SystemState::<Res<CurrentScene>>::new(world);
+        assert_eq!(
+            access.get(world).unwrap().source_content_stamp(),
+            Some(prepared_stamp)
+        );
+    });
 }
 
 #[test]

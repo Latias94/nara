@@ -408,222 +408,178 @@ fn preparing_notices_coalesce_and_cancellation_retains_capture_until_return_and_
 
 #[test]
 fn ready_source_updates_publish_frozen_a_then_prepare_b_only_after_exact_ack() {
-    for managed in [false, true] {
-        let fixture = Fixture::new();
-        let root = fixture.root.clone();
-        fixture.with_world(move |world| {
-            world.insert_resource(pools());
-            let context = Arc::clone(&world.resource::<RequestOwner>().context);
-            let Context::Source { loader, .. } = context.as_ref() else {
-                unreachable!()
-            };
-            let baseline = loader.budget_snapshot();
-            let expected = CurrentScene::get(world).unwrap().receipt().clone();
-            let original_stamp = CurrentScene::get(world)
+    let fixture = Fixture::new();
+    let root = fixture.root.clone();
+    fixture.with_world(move |world| {
+        world.insert_resource(pools());
+        let context = Arc::clone(&world.resource::<RequestOwner>().context);
+        let Context::Source { loader, .. } = context.as_ref() else {
+            unreachable!()
+        };
+        let baseline = loader.budget_snapshot();
+        let expected = CurrentScene::get(world).unwrap().receipt().clone();
+        let original_stamp = CurrentScene::get(world)
+            .unwrap()
+            .source_content_stamp()
+            .unwrap();
+        let original_source = CurrentScene::get(world).unwrap().source_view();
+        write_scene(&root, "startup.scene.json", "frozen-a");
+        ProjectScenes::scope(world, |scenes| {
+            assert!(
+                scenes
+                    .notify_source_change(&modified("scenes/startup.scene.json"))
+                    .unwrap()
+            );
+        });
+        assert_eq!(io_admitted(world), 0);
+        poll_project_scene_requests(world);
+        let request = status(world).request.unwrap();
+        wait_for_request(world, request, ProjectSceneRequestState::Ready);
+        let frozen_stamp = ProjectScenes::scope(world, |scenes| {
+            scenes
+                .prepared(request)
                 .unwrap()
                 .source_content_stamp()
-                .unwrap();
-            let original_source = CurrentScene::get(world).unwrap().source_view();
-            write_scene(&root, "startup.scene.json", "frozen-a");
-            ProjectScenes::scope(world, |scenes| {
-                assert!(
-                    scenes
-                        .notify_source_change(&modified("scenes/startup.scene.json"))
-                        .unwrap()
-                );
-            });
-            assert_eq!(io_admitted(world), 0);
-            poll_project_scene_requests(world);
-            let request = status(world).request.unwrap();
-            wait_for_request(world, request, ProjectSceneRequestState::Ready);
-            let frozen_stamp = ProjectScenes::scope(world, |scenes| {
+                .unwrap()
+        });
+        assert_ne!(frozen_stamp, original_stamp);
+        write_scene(&root, "startup.scene.json", "successor-b");
+        ProjectScenes::scope(world, |scenes| {
+            assert!(
                 scenes
-                    .prepared(request)
+                    .notify_source_change(&modified("scenes/startup.scene.json"))
                     .unwrap()
-                    .source_content_stamp()
-                    .unwrap()
-            });
-            assert_ne!(frozen_stamp, original_stamp);
-            write_scene(&root, "startup.scene.json", "successor-b");
-            if !managed {
-                ProjectScenes::scope(world, |scenes| {
-                    assert!(
-                        scenes
-                            .notify_source_change(&modified("scenes/startup.scene.json"))
-                            .unwrap()
-                    );
-                    assert!(
-                        scenes
-                            .notify_source_change(&modified(
-                                "prefabs/unknown-while-ready.prefab.json"
-                            ))
-                            .unwrap()
-                    );
-                });
-            }
-            for _ in 0..3 {
-                poll_project_scene_requests(world);
-                ProjectScenes::scope(world, |scenes| {
-                    let prepared = scenes.prepared(request).unwrap();
-                    assert_eq!(prepared.scene().roots(), [entity("frozen-a")]);
-                    assert_eq!(prepared.source_content_stamp(), Some(frozen_stamp));
-                    assert_eq!(
-                        prepared.selected_scene(),
-                        &ProjectSceneSelection::Source(startup())
-                    );
-                    assert_eq!(prepared.selected_scene_path(), Some(&startup()));
-                    assert_eq!(prepared.selected_scene_product(), None);
-                    assert_eq!(prepared.expected_instance(), &expected);
-                    assert!(!scenes.acknowledge(request));
-                });
-                assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
-                assert_eq!(
-                    CurrentScene::get(world).unwrap().source_content_stamp(),
-                    Some(original_stamp)
-                );
-                assert_eq!(
-                    loader.budget_snapshot().active_generations(),
-                    baseline.active_generations() + 1
-                );
-                assert_eq!(io_admitted(world), 1);
-                assert_eq!(status(world).pending, !managed);
-            }
-            if managed {
-                begin_prepared_project_scene_travel(world, request, limits(), &[], |_| {}).unwrap();
-                ProjectScenes::scope(world, |scenes| {
-                    assert_eq!(
-                        scenes.state(request),
-                        Some(ProjectSceneRequestState::Retiring)
-                    );
-                    assert!(!scenes.source_update_status().unwrap().pending);
-                    assert!(
-                        scenes
-                            .notify_source_change(&modified(
-                                "prefabs/unknown-while-managed.prefab.json"
-                            ))
-                            .unwrap()
-                    );
-                    assert!(!scenes.acknowledge(request));
-                });
-                poll_project_scene_requests(world);
-                assert_eq!(
-                    status(world),
-                    ProjectSceneSourceUpdateStatus {
-                        request: Some(request),
-                        pending: true,
-                        error: None
-                    }
-                );
-                assert_eq!(io_admitted(world), 1);
-                assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
-                assert_eq!(
-                    CurrentScene::get(world).unwrap().source_content_stamp(),
-                    Some(original_stamp)
-                );
-                world.resource_mut::<nara_app::RealTime>().frame += 1;
-                poll_project_scene_requests(world);
-            } else {
-                commit(world, request);
-            }
-            let committed = CurrentScene::get(world).unwrap().receipt().clone();
-            assert_ne!(committed, expected);
-            assert_eq!(
-                CurrentScene::get(world).unwrap().source().roots(),
-                [entity("frozen-a")]
             );
+            assert!(
+                scenes
+                    .notify_source_change(&modified("prefabs/unknown-while-ready.prefab.json"))
+                    .unwrap()
+            );
+        });
+        for _ in 0..3 {
+            poll_project_scene_requests(world);
+            ProjectScenes::scope(world, |scenes| {
+                let prepared = scenes.prepared(request).unwrap();
+                assert_eq!(prepared.scene().roots(), [entity("frozen-a")]);
+                assert_eq!(prepared.source_content_stamp(), Some(frozen_stamp));
+                assert_eq!(
+                    prepared.selected_scene(),
+                    &ProjectSceneSelection::Source(startup())
+                );
+                assert_eq!(prepared.selected_scene_path(), Some(&startup()));
+                assert_eq!(prepared.selected_scene_product(), None);
+                assert_eq!(prepared.expected_instance(), &expected);
+                assert!(!scenes.acknowledge(request));
+            });
+            assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
             assert_eq!(
                 CurrentScene::get(world).unwrap().source_content_stamp(),
-                Some(frozen_stamp)
+                Some(original_stamp)
             );
-            assert_eq!(original_source.with_document(|_| ()), None);
-            assert_eq!(
-                loader.budget_snapshot().active_generations(),
-                baseline.active_generations()
-            );
-            let frozen_source = CurrentScene::get(world).unwrap().source_view();
-            for _ in 0..3 {
-                poll_project_scene_requests(world);
-                ProjectScenes::scope(world, |scenes| {
-                    assert_eq!(
-                        scenes.state(request),
-                        Some(ProjectSceneRequestState::Committed)
-                    );
-                    assert!(
-                        !scenes
-                            .notify_source_change(&modified(
-                                "prefabs/unknown-after-commit.prefab.json"
-                            ))
-                            .unwrap()
-                    );
-                    assert_eq!(
-                        scenes.request(selected()),
-                        Err(ProjectSceneRequestError::Busy)
-                    );
-                });
-                assert_eq!(
-                    status(world),
-                    ProjectSceneSourceUpdateStatus {
-                        request: Some(request),
-                        pending: true,
-                        error: None
-                    }
-                );
-                assert_eq!(io_admitted(world), 1);
-            }
-            ProjectScenes::scope(world, |scenes| assert!(scenes.acknowledge(request)));
-            assert!(status(world).request.is_none());
-            assert!(status(world).pending);
-            poll_project_scene_requests(world);
-            let successor = status(world).request.unwrap();
-            assert_ne!(successor, request);
-            wait_for_request(world, successor, ProjectSceneRequestState::Ready);
-            let next_stamp = ProjectScenes::scope(world, |scenes| {
-                assert!(!scenes.acknowledge(request));
-                let prepared = scenes.prepared(successor).unwrap();
-                assert_eq!(prepared.expected_instance(), &committed);
-                assert_eq!(prepared.selected_scene_path(), Some(&startup()));
-                assert_eq!(prepared.scene().roots(), [entity("successor-b")]);
-                prepared.source_content_stamp().unwrap()
-            });
-            assert_ne!(next_stamp, frozen_stamp);
-            assert_eq!(CurrentScene::get(world).unwrap().receipt(), &committed);
             assert_eq!(
                 loader.budget_snapshot().active_generations(),
                 baseline.active_generations() + 1
             );
-            commit(world, successor);
-            assert_eq!(
-                CurrentScene::get(world).unwrap().source().roots(),
-                [entity("successor-b")]
-            );
-            assert_eq!(
-                CurrentScene::get(world).unwrap().source_content_stamp(),
-                Some(next_stamp)
-            );
-            assert_eq!(frozen_source.with_document(|_| ()), None);
+            assert_eq!(io_admitted(world), 1);
+            assert!(status(world).pending);
+        }
+        commit(world, request);
+        let committed = CurrentScene::get(world).unwrap().receipt().clone();
+        assert_ne!(committed, expected);
+        assert_eq!(
+            CurrentScene::get(world).unwrap().source().roots(),
+            [entity("frozen-a")]
+        );
+        assert_eq!(
+            CurrentScene::get(world).unwrap().source_content_stamp(),
+            Some(frozen_stamp)
+        );
+        assert_eq!(original_source.with_document(|_| ()), None);
+        assert_eq!(
+            loader.budget_snapshot().active_generations(),
+            baseline.active_generations()
+        );
+        let frozen_source = CurrentScene::get(world).unwrap().source_view();
+        for _ in 0..3 {
+            poll_project_scene_requests(world);
             ProjectScenes::scope(world, |scenes| {
-                assert!(!scenes.acknowledge(request));
-                assert!(scenes.acknowledge(successor));
-            });
-            for _ in 0..3 {
-                poll_project_scene_requests(world);
-                assert_eq!(io_admitted(world), 2);
                 assert_eq!(
-                    status(world),
-                    ProjectSceneSourceUpdateStatus {
-                        request: None,
-                        pending: false,
-                        error: None
-                    }
+                    scenes.state(request),
+                    Some(ProjectSceneRequestState::Committed)
                 );
-            }
+                assert!(
+                    !scenes
+                        .notify_source_change(&modified("prefabs/unknown-after-commit.prefab.json"))
+                        .unwrap()
+                );
+                assert_eq!(
+                    scenes.request(selected()),
+                    Err(ProjectSceneRequestError::Busy)
+                );
+            });
             assert_eq!(
-                loader.budget_snapshot().active_generations(),
-                baseline.active_generations()
+                status(world),
+                ProjectSceneSourceUpdateStatus {
+                    request: Some(request),
+                    pending: true,
+                    error: None
+                }
             );
-            assert_eq!(loader.budget_snapshot().generation_high_water(), 2);
+            assert_eq!(io_admitted(world), 1);
+        }
+        ProjectScenes::scope(world, |scenes| assert!(scenes.acknowledge(request)));
+        assert!(status(world).request.is_none());
+        assert!(status(world).pending);
+        poll_project_scene_requests(world);
+        let successor = status(world).request.unwrap();
+        assert_ne!(successor, request);
+        wait_for_request(world, successor, ProjectSceneRequestState::Ready);
+        let next_stamp = ProjectScenes::scope(world, |scenes| {
+            assert!(!scenes.acknowledge(request));
+            let prepared = scenes.prepared(successor).unwrap();
+            assert_eq!(prepared.expected_instance(), &committed);
+            assert_eq!(prepared.selected_scene_path(), Some(&startup()));
+            assert_eq!(prepared.scene().roots(), [entity("successor-b")]);
+            prepared.source_content_stamp().unwrap()
         });
-    }
+        assert_ne!(next_stamp, frozen_stamp);
+        assert_eq!(CurrentScene::get(world).unwrap().receipt(), &committed);
+        assert_eq!(
+            loader.budget_snapshot().active_generations(),
+            baseline.active_generations() + 1
+        );
+        commit(world, successor);
+        assert_eq!(
+            CurrentScene::get(world).unwrap().source().roots(),
+            [entity("successor-b")]
+        );
+        assert_eq!(
+            CurrentScene::get(world).unwrap().source_content_stamp(),
+            Some(next_stamp)
+        );
+        assert_eq!(frozen_source.with_document(|_| ()), None);
+        ProjectScenes::scope(world, |scenes| {
+            assert!(!scenes.acknowledge(request));
+            assert!(scenes.acknowledge(successor));
+        });
+        for _ in 0..3 {
+            poll_project_scene_requests(world);
+            assert_eq!(io_admitted(world), 2);
+            assert_eq!(
+                status(world),
+                ProjectSceneSourceUpdateStatus {
+                    request: None,
+                    pending: false,
+                    error: None
+                }
+            );
+        }
+        assert_eq!(
+            loader.budget_snapshot().active_generations(),
+            baseline.active_generations()
+        );
+        assert_eq!(loader.budget_snapshot().generation_high_water(), 2);
+    });
 }
 
 #[test]
@@ -1052,159 +1008,144 @@ fn cancelled_and_stale_late_failures_cannot_replace_previous_retry_interest() {
 
 #[test]
 fn explicit_travel_replaces_selected_source_interest_only_at_actual_publication() {
-    for managed in [false, true] {
-        let fixture = Fixture::new();
-        write_prefab(&fixture.root, "old.prefab.json", "old-child");
-        write_prefab(&fixture.root, "new.prefab.json", "new-child");
+    let fixture = Fixture::new();
+    write_prefab(&fixture.root, "old.prefab.json", "old-child");
+    write_prefab(&fixture.root, "new.prefab.json", "new-child");
+    write_scene_with_prefab(
+        &fixture.root,
+        "startup.scene.json",
+        "old-scene",
+        "old.prefab.json",
+    );
+    write_scene_with_prefab(
+        &fixture.root,
+        "second.scene.json",
+        "new-scene",
+        "new.prefab.json",
+    );
+    let root = fixture.root.clone();
+    fixture.with_world(move |world| {
+        world.insert_resource(pools());
+        let expected = CurrentScene::get(world).unwrap().receipt().clone();
+        let original_source = CurrentScene::get(world).unwrap().source_view();
         write_scene_with_prefab(
-            &fixture.root,
+            &root,
             "startup.scene.json",
-            "old-scene",
-            "old.prefab.json",
+            "failed-update",
+            "retry-only.prefab.json",
         );
-        write_scene_with_prefab(
-            &fixture.root,
-            "second.scene.json",
-            "new-scene",
-            "new.prefab.json",
-        );
-        let root = fixture.root.clone();
-        fixture.with_world(move |world| {
-            world.insert_resource(pools());
-            let expected = CurrentScene::get(world).unwrap().receipt().clone();
-            let original_source = CurrentScene::get(world).unwrap().source_view();
-            write_scene_with_prefab(
-                &root,
-                "startup.scene.json",
-                "failed-update",
-                "retry-only.prefab.json",
+        ProjectScenes::scope(world, |scenes| scenes.request_source_rescan()).unwrap();
+        poll_project_scene_requests(world);
+        let failed = status(world).request.unwrap();
+        let error = wait_rejected(world, failed);
+        ProjectScenes::scope(world, |scenes| assert!(scenes.acknowledge(failed)));
+        let request = ProjectScenes::scope(world, |scenes| scenes.request(selected())).unwrap();
+        wait_for_request(world, request, ProjectSceneRequestState::Ready);
+        let captured = ProjectScenes::scope(world, |scenes| {
+            assert!(
+                !scenes
+                    .notify_source_change(&modified("prefabs/new.prefab.json"))
+                    .unwrap()
             );
-            ProjectScenes::scope(world, |scenes| scenes.request_source_rescan()).unwrap();
-            poll_project_scene_requests(world);
-            let failed = status(world).request.unwrap();
-            let error = wait_rejected(world, failed);
-            ProjectScenes::scope(world, |scenes| assert!(scenes.acknowledge(failed)));
-            let request = ProjectScenes::scope(world, |scenes| scenes.request(selected())).unwrap();
-            wait_for_request(world, request, ProjectSceneRequestState::Ready);
-            let captured = ProjectScenes::scope(world, |scenes| {
-                assert!(
-                    !scenes
-                        .notify_source_change(&modified("prefabs/new.prefab.json"))
-                        .unwrap()
-                );
-                assert!(
-                    scenes
-                        .notify_source_change(&modified("prefabs/old.prefab.json"))
-                        .unwrap()
-                );
-                scenes.request_source_rescan().unwrap();
-                let prepared = scenes.prepared(request).unwrap();
-                assert_eq!(prepared.selected_scene_path(), Some(&selected()));
-                prepared.source_content_stamp().unwrap()
-            });
-            assert_eq!(
-                status(world),
-                ProjectSceneSourceUpdateStatus {
-                    request: None,
-                    pending: true,
-                    error: Some(error)
-                }
+            assert!(
+                scenes
+                    .notify_source_change(&modified("prefabs/old.prefab.json"))
+                    .unwrap()
             );
-            if managed {
-                begin_prepared_project_scene_travel(world, request, limits(), &[], |_| {}).unwrap();
-                poll_project_scene_requests(world);
-                assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
-                assert!(status(world).pending);
-                ProjectScenes::scope(world, |scenes| {
-                    assert!(
-                        !scenes
-                            .notify_source_change(&modified("prefabs/new.prefab.json"))
-                            .unwrap()
-                    );
-                });
-                world.resource_mut::<nara_app::RealTime>().frame += 1;
-                poll_project_scene_requests(world);
-            } else {
-                commit(world, request);
-            }
-            assert_ne!(CurrentScene::get(world).unwrap().receipt(), &expected);
-            assert_eq!(
-                CurrentScene::get(world).unwrap().source_content_stamp(),
-                Some(captured)
-            );
-            assert_eq!(
-                CurrentScene::get(world).unwrap().source().roots(),
-                [entity("new-scene")]
-            );
-            assert_eq!(original_source.with_document(|_| ()), None);
-            assert_eq!(
-                status(world),
-                ProjectSceneSourceUpdateStatus {
-                    request: None,
-                    pending: true,
-                    error: None
-                }
-            );
-            poll_project_scene_requests(world);
-            assert_eq!(io_admitted(world), 2);
-            ProjectScenes::scope(world, |scenes| {
-                assert_eq!(
-                    scenes.state(request),
-                    Some(ProjectSceneRequestState::Committed)
-                );
-                assert!(
-                    !scenes
-                        .notify_source_change(&modified("prefabs/old.prefab.json"))
-                        .unwrap()
-                );
-                assert!(
-                    !scenes
-                        .notify_source_change(&modified("prefabs/retry-only.prefab.json"))
-                        .unwrap()
-                );
-                assert!(
-                    !scenes
-                        .notify_source_change(&modified("scenes/startup.scene.json"))
-                        .unwrap()
-                );
-                assert!(scenes.acknowledge(request));
-            });
-            assert_eq!(
-                status(world),
-                ProjectSceneSourceUpdateStatus {
-                    request: None,
-                    pending: true,
-                    error: None
-                }
-            );
-            poll_project_scene_requests(world);
-            let automatic = status(world).request.unwrap();
-            assert_ne!(automatic, request);
-            wait_for_request(world, automatic, ProjectSceneRequestState::Ready);
-            ProjectScenes::scope(world, |scenes| {
-                let prepared = scenes.prepared(automatic).unwrap();
-                assert_eq!(
-                    prepared.selected_scene(),
-                    &ProjectSceneSelection::Source(selected())
-                );
-                assert_eq!(prepared.selected_scene_path(), Some(&selected()));
-                assert_eq!(prepared.scene().roots(), [entity("new-scene")]);
-                assert!(!scenes.acknowledge(request));
-                assert!(scenes.cancel(automatic));
-                assert!(scenes.acknowledge(automatic));
-            });
-            assert_eq!(io_admitted(world), 3);
-            assert!(!status(world).pending);
-            ProjectScenes::scope(world, |scenes| {
-                assert!(
-                    scenes
-                        .notify_source_change(&modified("prefabs/new.prefab.json"))
-                        .unwrap()
-                );
-            });
-            assert!(status(world).pending);
+            scenes.request_source_rescan().unwrap();
+            let prepared = scenes.prepared(request).unwrap();
+            assert_eq!(prepared.selected_scene_path(), Some(&selected()));
+            prepared.source_content_stamp().unwrap()
         });
-    }
+        assert_eq!(
+            status(world),
+            ProjectSceneSourceUpdateStatus {
+                request: None,
+                pending: true,
+                error: Some(error)
+            }
+        );
+        poll_project_scene_requests(world);
+        assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
+        assert!(status(world).pending);
+        commit(world, request);
+        assert_ne!(CurrentScene::get(world).unwrap().receipt(), &expected);
+        assert_eq!(
+            CurrentScene::get(world).unwrap().source_content_stamp(),
+            Some(captured)
+        );
+        assert_eq!(
+            CurrentScene::get(world).unwrap().source().roots(),
+            [entity("new-scene")]
+        );
+        assert_eq!(original_source.with_document(|_| ()), None);
+        assert_eq!(
+            status(world),
+            ProjectSceneSourceUpdateStatus {
+                request: None,
+                pending: true,
+                error: None
+            }
+        );
+        poll_project_scene_requests(world);
+        assert_eq!(io_admitted(world), 2);
+        ProjectScenes::scope(world, |scenes| {
+            assert_eq!(
+                scenes.state(request),
+                Some(ProjectSceneRequestState::Committed)
+            );
+            assert!(
+                !scenes
+                    .notify_source_change(&modified("prefabs/old.prefab.json"))
+                    .unwrap()
+            );
+            assert!(
+                !scenes
+                    .notify_source_change(&modified("prefabs/retry-only.prefab.json"))
+                    .unwrap()
+            );
+            assert!(
+                !scenes
+                    .notify_source_change(&modified("scenes/startup.scene.json"))
+                    .unwrap()
+            );
+            assert!(scenes.acknowledge(request));
+        });
+        assert_eq!(
+            status(world),
+            ProjectSceneSourceUpdateStatus {
+                request: None,
+                pending: true,
+                error: None
+            }
+        );
+        poll_project_scene_requests(world);
+        let automatic = status(world).request.unwrap();
+        assert_ne!(automatic, request);
+        wait_for_request(world, automatic, ProjectSceneRequestState::Ready);
+        ProjectScenes::scope(world, |scenes| {
+            let prepared = scenes.prepared(automatic).unwrap();
+            assert_eq!(
+                prepared.selected_scene(),
+                &ProjectSceneSelection::Source(selected())
+            );
+            assert_eq!(prepared.selected_scene_path(), Some(&selected()));
+            assert_eq!(prepared.scene().roots(), [entity("new-scene")]);
+            assert!(!scenes.acknowledge(request));
+            assert!(scenes.cancel(automatic));
+            assert!(scenes.acknowledge(automatic));
+        });
+        assert_eq!(io_admitted(world), 3);
+        assert!(!status(world).pending);
+        ProjectScenes::scope(world, |scenes| {
+            assert!(
+                scenes
+                    .notify_source_change(&modified("prefabs/new.prefab.json"))
+                    .unwrap()
+            );
+        });
+        assert!(status(world).pending);
+    });
 }
 
 #[test]

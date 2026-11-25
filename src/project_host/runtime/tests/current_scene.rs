@@ -33,7 +33,7 @@ fn inspect_project_scene_restart(world: &mut World) {
     }
     let original = world.resource::<CurrentScene>().receipt().clone();
     let source_pointer = world.resource::<CurrentScene>().source() as *const CompiledSceneDocument;
-    let entity_count = world.entities().len();
+    let entity_count = world.entity_count();
     let limits =
         SceneProductTransactionLimits::new(ItemLimit::new(1).unwrap(), ItemLimit::new(1).unwrap());
     let direct = SceneSource::direct(crate::startup_scene::compile_test_scene(
@@ -56,7 +56,7 @@ fn inspect_project_scene_restart(world: &mut World) {
         "scene.current.project-residency-required"
     ));
     assert_eq!(world.resource::<CurrentScene>().receipt(), &original);
-    assert_eq!(world.entities().len(), entity_count);
+    assert_eq!(world.entity_count(), entity_count);
 
     let restarted = restart_current_scene_with_product(world, &original, limits, &[], |_| {});
     assert!(!restarted.diagnostics.has_errors());
@@ -67,7 +67,7 @@ fn inspect_project_scene_restart(world: &mut World) {
         world.resource::<CurrentScene>().source() as *const CompiledSceneDocument,
         source_pointer
     );
-    assert_eq!(world.entities().len(), entity_count);
+    assert_eq!(world.entity_count(), entity_count);
     for id in receipt.entity_ids() {
         assert!(matches!(
             receipt.resolve(world, id),

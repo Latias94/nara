@@ -30,7 +30,6 @@ pub(super) struct Additions {
     #[cfg(feature = "project-source")]
     pub(super) catalog: Vec<AssetRecord>,
     pub(super) revision: u64,
-    pub(super) retiring: bool,
 }
 
 pub(super) struct ActiveAddition {
@@ -50,12 +49,6 @@ struct StockUses {
 
 impl Additions {
     fn next_revision(&self) -> Result<u64, HostFault> {
-        if self.retiring {
-            return Err(failure(
-                "project.scene.additions-retiring",
-                "Managed travel is retiring the captured project Scene additions",
-            ));
-        }
         self.revision.checked_add(1).ok_or_else(|| {
             failure(
                 "project.scene.addition-revision-exhausted",

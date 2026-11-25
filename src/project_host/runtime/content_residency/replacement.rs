@@ -1,12 +1,13 @@
-//! Owned CPU residency and Scene candidate for managed travel.
+//! Owned CPU residency and Scene candidate for synchronous travel.
 
 use std::borrow::Cow;
 
 use nara_ecs::Mut;
+use nara_scene::advanced::SceneNativeRetirementClaims;
 
 use super::*;
 
-pub(crate) struct StagedProjectSceneReplacement {
+pub(super) struct StagedProjectSceneReplacement {
     scene: Option<StagedSceneReplacement>,
     expected: SpawnedSceneInstance,
     additions_revision: u64,
@@ -19,11 +20,10 @@ pub(crate) struct StagedProjectSceneReplacement {
 }
 
 impl StagedProjectSceneReplacement {
-    pub(crate) fn stage<F>(
+    pub(super) fn stage<F>(
         world: &mut World,
         expected: &SpawnedSceneInstance,
         content: &PreparedSceneContent,
-        claims: &SceneNativeRetirementClaims,
         limits: SceneProductTransactionLimits,
         additional_retirements: &[SceneProductRetirement<'_>],
         configure: F,
@@ -75,7 +75,7 @@ impl StagedProjectSceneReplacement {
                         Some(snapshot.asset_resolution()),
                         expected,
                         bindings,
-                        claims,
+                        &SceneNativeRetirementClaims::default(),
                         limits,
                         &scene_retirements,
                         configure,
@@ -86,7 +86,7 @@ impl StagedProjectSceneReplacement {
                         content.scene.candidate(),
                         expected,
                         bindings,
-                        claims,
+                        &SceneNativeRetirementClaims::default(),
                         limits,
                         &scene_retirements,
                         configure,
@@ -104,33 +104,6 @@ impl StagedProjectSceneReplacement {
                 catalog,
             })
         })
-    }
-
-    pub(crate) fn begin_native_retirement(
-        &self,
-        world: &mut World,
-    ) -> Result<(), SceneSpawnReport> {
-        world.flush();
-        self.validate_content(world)?;
-        self.scene
-            .as_ref()
-            .expect("unpublished replacement retains its Scene candidate")
-            .validate_baseline(world)?;
-        #[cfg(feature = "runtime-2d")]
-        stock::probe_tilesets(
-            world,
-            &self.stock.tilesets,
-            &self.staged_server,
-            &self.catalog,
-        )
-        .map_err(rejected)?;
-        if world.resource::<ProjectSceneResidency>().has_addition() {
-            world
-                .resource_mut::<ProjectSceneResidency>()
-                .additions
-                .retiring = true;
-        }
-        Ok(())
     }
 
     fn validate_content(&self, world: &World) -> Result<(), SceneSpawnReport> {
@@ -164,13 +137,10 @@ impl StagedProjectSceneReplacement {
         Ok(())
     }
 
-    pub(crate) fn commit(
+    pub(super) fn commit(
         self,
         world: &mut World,
     ) -> Result<SceneSpawnReport, (Self, SceneSpawnReport)> {
-        // Domain retirement hooks may defer World writes. Apply them before checking the
-        // publication revisions so a stale asset guard rejects the commit instead of panicking
-        // inside the infallible publication tail.
         world.flush();
         if let Err(report) = self.validate_content(world) {
             return Err((self, report));
@@ -241,7 +211,7 @@ impl StagedProjectSceneReplacement {
         Ok(report)
     }
 
-    pub(crate) fn discard(mut self, world: &mut World) -> Result<(), Self> {
+    pub(super) fn discard(mut self, world: &mut World) -> Result<(), Self> {
         if let Some(scene) = self.scene.take() {
             if let Err(scene) = scene.discard(world) {
                 self.scene = Some(scene);

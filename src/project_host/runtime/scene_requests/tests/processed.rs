@@ -346,7 +346,7 @@ fn processed_failure_uses_runtime_content_error_and_safe_runtime_diagnostics() {
 }
 
 #[test]
-fn processed_managed_travel_publishes_content_and_retains_request_authority() {
+fn processed_travel_publishes_content_and_retains_request_authority() {
     let fixture = ProcessedFixture::new();
     let base = fixture.open(RuntimeContentLimits::default());
     let source = SceneSource::from_hosted_runtime_content(base.acquire_startup_scene().unwrap());
@@ -359,14 +359,10 @@ fn processed_managed_travel_publishes_content_and_retains_request_authority() {
             let request =
                 ProjectScenes::scope(world, |scenes| scenes.request(later_product())).unwrap();
             wait_for_request(world, request, ProjectSceneRequestState::Ready);
-            begin_prepared_project_scene_travel(world, request, limits(), &[], |_| {}).unwrap();
-            assert_eq!(
-                ProjectScenes::scope(world, |scenes| scenes.state(request)),
-                Some(ProjectSceneRequestState::Retiring),
-            );
             assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
-            world.resource_mut::<nara_app::RealTime>().frame += 1;
-            poll_project_scene_requests(world);
+            let report = commit_prepared_project_scene(world, request, limits(), &[], |_| {});
+            assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+            let committed = report.instance.unwrap();
             ProjectScenes::scope(world, |scenes| {
                 assert_eq!(
                     scenes.state(request),
@@ -375,6 +371,7 @@ fn processed_managed_travel_publishes_content_and_retains_request_authority() {
                 assert!(scenes.acknowledge(request));
             });
             let current = world.resource::<CurrentScene>();
+            assert_eq!(current.receipt(), &committed);
             assert_ne!(current.receipt().instance_id(), expected.instance_id());
             assert_eq!(current.source().roots(), [entity("later")]);
             assert!(current.is_content_managed());

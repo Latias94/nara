@@ -97,12 +97,6 @@ pub enum ProjectSceneRequestState {
     /// Interest was revoked, but worker captures have not physically returned.
     Cancelling,
     Ready,
-    /// Native domain retirement is in progress; the old Scene remains retained but gameplay must
-    /// remain suspended until the managed attempt reaches reconciliation.
-    Retiring,
-    /// A native transition could not finish after retirement began. The request retains unpublished
-    /// data or its published receipt and native progress, and may retry only unfinished phases.
-    Degraded,
     Cancelled,
     Rejected(ProjectSceneRequestError),
     Committed,
@@ -252,7 +246,7 @@ impl ProjectScenes<'_> {
 
     /// Records a canonical source observation for the current hosted source Scene.
     ///
-    /// Relevant successful/retry paths queue one successor. During an automatic Preparing/Ready/Managed
+    /// Relevant successful/retry paths queue one successor. During an automatic Preparing/Ready
     /// request, unknown paths conservatively queue a successor before its new dependency cut is
     /// known. No I/O, asset-state mutation, commit or acknowledgement occurs here. The returned
     /// flag reports queued interest, not exclusive consumption of a shared source event.
@@ -272,10 +266,7 @@ impl ProjectScenes<'_> {
             .is_some_and(|request| {
                 owner.slot.as_ref().is_some_and(|slot| {
                     slot.id() == request
-                        && matches!(
-                            slot,
-                            Slot::Preparing { .. } | Slot::Ready { .. } | Slot::Managed(_)
-                        )
+                        && matches!(slot, Slot::Preparing { .. } | Slot::Ready { .. })
                 })
             });
         Ok(owner
@@ -382,7 +373,7 @@ impl ProjectScenes<'_> {
 
     /// Runs a finite Scene request operation while exclusively borrowing the World.
     ///
-    /// The callback receives the same request, inspection, cancellation, retry and acknowledgement
+    /// The callback receives the same request, inspection, cancellation and acknowledgement
     /// interface as a scheduled system. Missing resources remain optional: [`Self::request`] returns
     /// [`ProjectSceneRequestError::Unavailable`] or [`ProjectSceneRequestError::TaskUnavailable`]
     /// according to the existing admission checks, and observations may return `None`.
@@ -440,48 +431,7 @@ impl ProjectScenes<'_> {
         operation(&mut scenes)
     }
 
-    /// Returns the retained participant's progress while a managed travel occupies the slot.
-    #[must_use]
-    pub fn native_domain_phase(
-        &self,
-        request: ProjectSceneRequestId,
-        domain: domains::ManagedSceneDomainId,
-    ) -> Option<domains::ManagedSceneDomainPhase> {
-        match self.owner.as_deref()?.slot.as_ref()? {
-            Slot::Managed(travel) if travel.admission.id == request => travel
-                .attempt
-                .domain_phases()
-                .find_map(|(id, phase)| (id == domain).then_some(phase)),
-            _ => None,
-        }
-    }
-
-    /// Requests another owner-thread attempt at unfinished native phases.
-    /// Completed retirement and reconciliation participants are never replayed.
-    pub fn retry(&mut self, request: ProjectSceneRequestId) -> bool {
-        let Some(owner) = self.owner.as_deref_mut() else {
-            return false;
-        };
-        if owner.closing.load(Ordering::Acquire)
-            || self.generation.as_deref().copied() != Some(request.generation)
-        {
-            return false;
-        }
-        match owner.slot.as_mut() {
-            Some(Slot::Managed(travel))
-                if travel.admission.id == request
-                    && travel.state == ProjectSceneRequestState::Degraded
-                    && !travel.retry_requested =>
-            {
-                travel.retry_requested = true;
-                true
-            }
-            _ => false,
-        }
-    }
-
-    /// Cancels preparation, or queues candidate disposal before native retirement starts.
-    /// Once a domain retirement has begun or the new Scene has published, cancellation is rejected.
+    /// Cancels outstanding preparation or discards ready content for this request.
     pub fn cancel(&mut self, request: ProjectSceneRequestId) -> bool {
         self.owner
             .as_deref_mut()
@@ -577,22 +527,22 @@ impl ProjectScenes<'_> {
     pub fn state(&self, request: ProjectSceneRequestId) -> Option<ProjectSceneRequestState> {
         let owner = self.owner.as_deref()?;
         let slot = owner.slot.as_ref().filter(|slot| slot.id() == request)?;
-        Some(if matches!(slot, Slot::Managed(_)) {
-            slot.state()
-        } else if let Some(admission) = slot.admission()
-            && !owner.matches(
-                admission,
-                self.generation.as_deref().copied(),
-                self.current.as_deref(),
-            )
-        {
-            match slot {
-                Slot::Preparing { .. } => ProjectSceneRequestState::Cancelling,
-                _ => ProjectSceneRequestState::Rejected(ProjectSceneRequestError::Stale),
-            }
-        } else {
-            slot.state()
-        })
+        Some(
+            if let Some(admission) = slot.admission()
+                && !owner.matches(
+                    admission,
+                    self.generation.as_deref().copied(),
+                    self.current.as_deref(),
+                )
+            {
+                match slot {
+                    Slot::Preparing { .. } => ProjectSceneRequestState::Cancelling,
+                    _ => ProjectSceneRequestState::Rejected(ProjectSceneRequestError::Stale),
+                }
+            } else {
+                slot.state()
+            },
+        )
     }
 
     /// Borrows ready content only while its Host, generation and expected receipt still match.
@@ -614,12 +564,10 @@ impl ProjectScenes<'_> {
         .then_some(PreparedProjectSceneView { admission, content })
     }
 
-    /// Safe owner-produced details for exactly this managed or terminal request.
-    /// A successful retry retains publication diagnostics without resolved native failures.
+    /// Safe owner-produced details for exactly this terminal request.
     #[must_use]
     pub fn diagnostics(&self, request: ProjectSceneRequestId) -> Option<&DiagnosticReport> {
         match self.owner.as_deref()?.slot.as_ref()? {
-            Slot::Managed(travel) if travel.admission.id == request => Some(&travel.diagnostics),
             Slot::Terminal {
                 id, diagnostics, ..
             } if *id == request => Some(diagnostics),
@@ -672,15 +620,6 @@ pub fn commit_prepared_project_scene<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
-    if world
-        .get_resource::<domains::ManagedSceneDomains>()
-        .is_some_and(|domains| !domains.is_empty())
-    {
-        return rejected(
-            "project.scene.managed-travel-required",
-            "Installed native domains require begin_prepared_project_scene_travel",
-        );
-    }
     commit_ready_project_scene(world, request, false, |world, admission, content| {
         super::super::content_residency::replace_scene(
             world,
@@ -811,142 +750,6 @@ fn wrong_publication() -> SceneSpawnReport {
         "project.scene.request-purpose-mismatch",
         "Scene request must be published through the operation that admitted it",
     )
-}
-
-/// Prepares the complete candidate and queues managed Scene travel at the next TaskUpdate boundary.
-///
-/// The configuration callback runs once during this call. Native operations begin only after all
-/// World-dependent preparation has succeeded. Observe the request state until Committed; after a
-/// Degraded result, retry unfinished phases with [`ProjectScenes::retry`] or Stop the runtime.
-pub fn begin_prepared_project_scene_travel<F>(
-    world: &mut World,
-    request: ProjectSceneRequestId,
-    limits: SceneProductTransactionLimits,
-    additional_retirements: &[SceneProductRetirement<'_>],
-    configure: F,
-) -> Result<(), SceneSpawnReport>
-where
-    F: FnOnce(&mut SceneProductOverlayWriter<'_>),
-{
-    if !world.contains_resource::<RequestOwner>() {
-        return Err(rejected(
-            "project.scene.request-unavailable",
-            "Project Scene request authority is unavailable",
-        ));
-    }
-    if crate::ecs::transaction::validate_resource_scope::<RequestOwner>(world).is_err() {
-        return Err(rejected(
-            "project.scene.request-lifecycle-unsupported",
-            "Scene request ownership cannot run lifecycle effects during preparation",
-        ));
-    }
-    world.resource_scope(|world, mut owner: nara_ecs::Mut<RequestOwner>| {
-        let Some(slot) = owner.slot.as_ref().filter(|slot| slot.id() == request) else {
-            return Err(rejected(
-                "project.scene.request-mismatch",
-                "Project Scene request identity does not match",
-            ));
-        };
-        if !matches!(slot, Slot::Ready { .. }) {
-            return Err(rejected(
-                "project.scene.request-not-ready",
-                "Project Scene preparation has not returned ready content",
-            ));
-        }
-        if slot
-            .admission()
-            .is_some_and(|admission| admission.purpose.is_additive())
-        {
-            return Err(wrong_publication());
-        }
-        let valid = slot.admission().is_some_and(|admission| {
-            owner.matches(
-                admission,
-                world.get_resource::<RuntimeGeneration>().copied(),
-                world.get_resource::<CurrentScene>(),
-            )
-        });
-        if !valid {
-            owner.reject_stale(request);
-            return Err(rejected(
-                "project.scene.request-stale",
-                "Project Scene request inputs changed before preparation",
-            ));
-        }
-        let Some(Slot::Ready { admission, content }) = owner.slot.take() else {
-            unreachable!()
-        };
-        let prepared = (|| {
-            if !content_matches_admission(&content, &admission) {
-                return Err(rejected(
-                    "project.scene.prepared-input-mismatch",
-                    "Prepared Scene does not match its captured Host authority",
-                ));
-            }
-            let registry = world
-                .get_resource::<domains::ManagedSceneDomains>()
-                .ok_or_else(|| {
-                    rejected(
-                        "project.scene.domains-unavailable",
-                        "Managed Scene domain registry is unavailable",
-                    )
-                })?;
-            let view = PreparedProjectSceneView {
-                admission: &admission,
-                content: &content,
-            };
-            let attempt =
-                ManagedSceneTravelAttempt::prepare(registry, world, &view).map_err(|error| {
-                    rejected_with_code(error.code(), "Native Scene domain preparation was rejected")
-                })?;
-            let candidate = super::super::content_residency::StagedProjectSceneReplacement::stage(
-                world,
-                &admission.expected,
-                &content,
-                &attempt.combined_claims(),
-                limits,
-                additional_retirements,
-                configure,
-            )?;
-            Ok((attempt, candidate))
-        })();
-        match prepared {
-            Ok((attempt, prepared)) => {
-                owner.slot = Some(Slot::Managed(ManagedTravelState {
-                    admission,
-                    attempt,
-                    prepared: Some(prepared),
-                    published: None,
-                    retry_requested: true,
-                    native_started: false,
-                    cancel_requested: false,
-                    cleanup_result: None,
-                    queued_frame: world
-                        .get_resource::<nara_app::RealTime>()
-                        .map_or(0, |time| time.frame),
-                    state: ProjectSceneRequestState::Retiring,
-                    publication_diagnostics: DiagnosticReport::default(),
-                    diagnostics: DiagnosticReport::default(),
-                    #[cfg(feature = "project-source")]
-                    source_closure: match &content {
-                        PreparedSceneContent::Source(snapshot) => Some(snapshot.content_closure()),
-                        PreparedSceneContent::Processed(_) => None,
-                    },
-                }));
-                Ok(())
-            }
-            Err(report) => {
-                owner.slot = Some(Slot::Terminal {
-                    id: request,
-                    state: ProjectSceneRequestState::Rejected(
-                        ProjectSceneRequestError::CommitRejected,
-                    ),
-                    diagnostics: report.diagnostics.clone(),
-                });
-                Err(report)
-            }
-        }
-    })
 }
 
 pub(super) fn content_matches_admission(
