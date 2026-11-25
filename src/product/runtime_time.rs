@@ -4,7 +4,7 @@ use nara_app::{
     App, FixedCatchUpPolicy, FixedTime, Plugin, PluginCategory, PluginDeclaration,
     PluginDefinition, PluginDefinitionId, PluginError, PluginId, RuntimeTimeSettings,
 };
-use nara_project::EffectiveRuntimeSettings;
+use nara_scene::runtime_configuration::EffectiveRuntimeSettings;
 
 pub(super) const PLUGIN_ID: PluginId = PluginId::new("nara.product.runtime-time");
 

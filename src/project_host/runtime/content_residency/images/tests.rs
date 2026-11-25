@@ -1,6 +1,8 @@
 use super::*;
 
-use nara_asset::{AssetSourcePath, StableAssetId};
+#[cfg(feature = "project-source")]
+use nara_asset::AssetSourcePath;
+use nara_asset::{AssetRecord, ImportedProductId, StableAssetId};
 use nara_render::image::{ImageColorSpace, ImageExtent, ImageFormat};
 
 const SOURCE: &str = "aed61cf0-6e45-4078-8793-1fa45c794fd3";
@@ -53,6 +55,7 @@ impl Publications {
                 ImagePublication {
                     handle,
                     product,
+                    #[cfg(feature = "project-source")]
                     record,
                     image,
                     baseline: self.images.prepare_mutation(handle, &self.states).unwrap(),
@@ -111,6 +114,7 @@ fn product_index_preserves_primary_auxiliary_and_enclosing_source() {
 }
 
 #[test]
+#[cfg(feature = "project-source")]
 fn source_publication_keeps_its_actual_canonical_record() {
     let mut values = Publications::default();
     let mut prepared = values.prepare(image(product(SOURCE, true), 1), None);
@@ -143,6 +147,7 @@ fn pathless_publication_keeps_complete_identity_without_source_hashes() {
     let receipts = values.commit(prepared);
     let receipt = &receipts[0];
     assert_eq!(receipt.product, product(SOURCE, true));
+    #[cfg(feature = "project-source")]
     assert!(receipt.record.is_none());
     assert!(values.server.path(receipt.handle.id()).is_none());
     assert!(receipt.matches(&values.server, &values.images, &values.states));

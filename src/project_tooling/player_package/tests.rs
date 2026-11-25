@@ -1,7 +1,7 @@
 use nara_asset::{
     AssetPathScope, AssetProductRef, ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
-use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
+use nara_scene::runtime_configuration::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{RuntimeSceneLimits, SceneDocument, SourceDocumentKey, SourceDocumentKind};
 
 use super::*;

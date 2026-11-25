@@ -9,7 +9,7 @@ use nara_input::{
     ActionMapBuilder, ActionMapDomain, ActionMapLimits, ActionMapRuntimeCodec, ActionMaps,
     InputBinding, InputSeatId,
 };
-use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
+use nara_scene::runtime_configuration::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneLimits, SourceDocumentKey, SourceDocumentKind,
 };

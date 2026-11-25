@@ -1,12 +1,11 @@
 //! Candidate-local material validation shared by source and processed Scene preparation.
 
-use nara_reflect::{
-    ComponentCodecError, ComponentTypeId, ComponentValue, ComponentValueCost, ComponentValueRef,
-};
+use nara_reflect::{ComponentCodecError, ComponentTypeId, ComponentValueRef};
 use nara_render::material::{Material2dAsset, Material2dRecord};
 use nara_scene::CompiledSceneDocument;
 
 use super::{ProjectAssetCollection, ProjectContentError, ProjectContentErrorKind};
+use crate::scene_retention::material_record_work_bytes;
 
 struct SourceMaterialRetention {
     _lease: super::ProjectContentLease,
@@ -83,16 +82,6 @@ pub(super) fn attach_source_material_views(
             *value = value.with_lifetime_owner(std::sync::Arc::clone(owner));
         }
     }
-}
-
-pub(crate) fn material_record_work_bytes(cost: ComponentValueCost) -> Option<usize> {
-    cost.nodes()
-        .checked_mul(
-            std::mem::size_of::<ComponentValue>()
-                .checked_add(crate::scene_retention::BTREE_ENTRY_OVERHEAD)?,
-        )?
-        .checked_add(cost.logical_bytes())?
-        .checked_add(std::mem::size_of::<Material2dRecord>())
 }
 
 pub(crate) fn validate_material_record<'a>(

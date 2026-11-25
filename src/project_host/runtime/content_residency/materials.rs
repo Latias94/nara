@@ -4,11 +4,15 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(any(feature = "project-source", test))]
+use nara_asset::AssetSourceKind;
 use nara_asset::{
     AssetEvents, AssetId, AssetMutationBaseline, AssetProductRef, AssetPublicationRevision,
-    AssetRecord, AssetRef, AssetServer, AssetSlotRevision, AssetSourceKind, AssetStateRevision,
-    AssetStates, Assets, Handle, ImportedProductId, LoadState,
+    AssetRef, AssetServer, AssetSlotRevision, AssetStateRevision, AssetStates, Assets, Handle,
+    LoadState,
 };
+#[cfg(feature = "project-source")]
+use nara_asset::{AssetRecord, ImportedProductId};
 use nara_ecs::World;
 use nara_render::image::ImageAsset;
 use nara_render::material::{Material2dAsset, Material2dDomain, MaterialParameterValue};
@@ -18,9 +22,10 @@ use super::{
     HostFault, ProjectSceneResidency, ResidencyInput, failure, images::ImagePublications,
     resources_missing,
 };
+#[cfg(feature = "project-source")]
+use crate::project_content::{ProjectContentLease, asset_record_retained_bytes};
 use crate::{
     project_assets::ProjectDomainAssets,
-    project_content::{ProjectContentLease, asset_record_retained_bytes},
     runtime_content::{RuntimeContentAsset, RuntimeContentLease},
     scene_retention::{ARC_CONTROL_BLOCK_BYTES, BTREE_ENTRY_OVERHEAD},
 };
@@ -39,6 +44,7 @@ pub(super) struct OwnedMaterial {
 }
 
 struct MaterialIdentity {
+    #[cfg(feature = "project-source")]
     record: Option<AssetRecord>,
     original: Material2dAsset,
     _metadata: Arc<MaterialMetadataLease>,
@@ -67,6 +73,7 @@ impl OwnedMaterial {
             && binding_matches(
                 self.handle,
                 self.product,
+                #[cfg(feature = "project-source")]
                 self.identity.record.as_ref(),
                 server,
             )
@@ -117,10 +124,16 @@ impl MaterialResidency {
 }
 
 enum MaterialMetadataLease {
-    Source { _lease: ProjectContentLease },
-    Processed { _lease: RuntimeContentLease },
+    #[cfg(feature = "project-source")]
+    Source {
+        _lease: ProjectContentLease,
+    },
+    Processed {
+        _lease: RuntimeContentLease,
+    },
 }
 
+#[cfg(feature = "project-source")]
 struct SourceMaterialOwner {
     _domains: ProjectDomainAssets,
     _metadata: Arc<MaterialMetadataLease>,
@@ -181,6 +194,7 @@ impl MaterialPublications {
         }
         let bytes = metadata_bytes(content, change)?;
         let lease = match content {
+            #[cfg(feature = "project-source")]
             ResidencyInput::Source(snapshot) => MaterialMetadataLease::Source {
                 _lease: snapshot
                     .reserve_consumer_retained(bytes)
@@ -265,16 +279,18 @@ impl MaterialPublications {
             .collect::<BTreeMap<_, _>>();
         let mut next_ids = BTreeSet::new();
         let mut insert = |handle: Handle<Material2dAsset>,
-                          record: Option<AssetRecord>,
+                          #[cfg(feature = "project-source")] record: Option<AssetRecord>,
                           original: &Material2dAsset,
                           value: Material2dAsset| {
             let product = value.product();
             if prepared.publish.contains_key(&product) || !next_ids.insert(handle.id()) {
                 return Err(identity_conflict());
             }
-            let ours = old.get(&handle.id()).filter(|material| {
-                material.product == product && (!additive || material.identity.record == record)
-            });
+            let ours = old
+                .get(&handle.id())
+                .filter(|material| material.product == product);
+            #[cfg(feature = "project-source")]
+            let ours = ours.filter(|material| !additive || material.identity.record == record);
             if additive && let Some(material) = ours {
                 if !material.matches(server, values, states)
                     || !same_material(&material.identity.original, original)
@@ -307,6 +323,7 @@ impl MaterialPublications {
                     handle,
                     product,
                     identity: Arc::new(MaterialIdentity {
+                        #[cfg(feature = "project-source")]
                         record,
                         original: original.clone(),
                         _metadata: Arc::clone(&metadata),
@@ -318,7 +335,10 @@ impl MaterialPublications {
             Ok(())
         };
         if let Some(collection) = content.domain_assets().collection::<Material2dDomain>() {
+            #[cfg(not(feature = "project-source"))]
+            let _ = collection;
             match content {
+                #[cfg(feature = "project-source")]
                 ResidencyInput::Source(snapshot) => {
                     if collection.source_records().len() != collection.iter().len() {
                         return Err(identity_conflict());
@@ -395,14 +415,26 @@ impl MaterialPublications {
                             validate_image(images, bindings.staged_server(), handle, *product)?;
                             Ok(*product)
                         })?;
-                        if !binding_matches(handle, product, None, bindings.staged_server()) {
+                        if !binding_matches(
+                            handle,
+                            product,
+                            #[cfg(feature = "project-source")]
+                            None,
+                            bindings.staged_server(),
+                        ) {
                             return Err(identity_conflict());
                         }
                         let value = value.with_lifetime_owner(Arc::new(RuntimeMaterialOwner {
                             _acquired: acquired.clone(),
                             _metadata: Arc::clone(&metadata),
                         }));
-                        insert(handle, None, acquired.product(), value)?;
+                        insert(
+                            handle,
+                            #[cfg(feature = "project-source")]
+                            None,
+                            acquired.product(),
+                            value,
+                        )?;
                     }
                 }
             }
@@ -506,6 +538,7 @@ impl MaterialPublications {
             assert!(binding_matches(
                 item.handle,
                 item.product,
+                #[cfg(feature = "project-source")]
                 item.identity.record.as_ref(),
                 server
             ));
@@ -593,17 +626,24 @@ fn same_parameter(left: MaterialParameterValue, right: MaterialParameterValue) -
 fn binding_matches(
     handle: Handle<Material2dAsset>,
     product: AssetProductRef,
-    record: Option<&AssetRecord>,
+    #[cfg(feature = "project-source")] record: Option<&AssetRecord>,
     server: &AssetServer,
 ) -> bool {
-    server.get_handle::<Material2dAsset>(handle.id()) == Some(handle)
-        && server.product(handle.id()) == Some(product)
-        && record.is_none_or(|record| {
-            record.source_kind() == &material_kind()
-                && product.source() == record.stable_id()
-                && product.product() == ImportedProductId::PRIMARY
-                && server.path(handle.id()) == Some(record.path())
-        })
+    if server.get_handle::<Material2dAsset>(handle.id()) != Some(handle)
+        || server.product(handle.id()) != Some(product)
+    {
+        return false;
+    }
+    #[cfg(feature = "project-source")]
+    if let Some(record) = record
+        && (record.source_kind() != &material_kind()
+            || product.source() != record.stable_id()
+            || product.product() != ImportedProductId::PRIMARY
+            || server.path(handle.id()) != Some(record.path()))
+    {
+        return false;
+    }
+    true
 }
 
 fn metadata_bytes(
@@ -612,18 +652,25 @@ fn metadata_bytes(
 ) -> Result<usize, HostFault> {
     let mut bytes =
         size_of::<MaterialCustody>() + size_of::<MaterialMetadataLease>() + ARC_CONTROL_BLOCK_BYTES;
-    let (source, processed) = match content {
-        ResidencyInput::Source(snapshot) => (
-            snapshot.domain_assets().collection::<Material2dDomain>(),
-            &[][..],
-        ),
-        ResidencyInput::Processed(content) => (None, content.materials.as_slice()),
+    let processed = match content {
+        #[cfg(feature = "project-source")]
+        ResidencyInput::Source(_) => &[],
+        ResidencyInput::Processed(content) => content.materials.as_slice(),
     };
-    for value in source
+    let values = processed.iter().map(RuntimeContentAsset::product);
+    #[cfg(feature = "project-source")]
+    let source = match content {
+        ResidencyInput::Source(snapshot) => {
+            snapshot.domain_assets().collection::<Material2dDomain>()
+        }
+        ResidencyInput::Processed(_) => None,
+    };
+    #[cfg(feature = "project-source")]
+    let values = source
         .into_iter()
         .flat_map(|collection| collection.iter())
-        .chain(processed.iter().map(RuntimeContentAsset::product))
-    {
+        .chain(values);
+    for value in values {
         let canonical_bytes = value
             .canonicalization_retained_bytes()
             .ok_or_else(metadata_overflow)?;
@@ -639,6 +686,7 @@ fn metadata_bytes(
                 + 3 * BTREE_ENTRY_OVERHEAD,
         )?;
         let owner_bytes = match content {
+            #[cfg(feature = "project-source")]
             ResidencyInput::Source(_) => size_of::<SourceMaterialOwner>(),
             ResidencyInput::Processed(_) => size_of::<RuntimeMaterialOwner>(),
         };
@@ -651,6 +699,7 @@ fn metadata_bytes(
                 .ok_or_else(metadata_overflow)?,
         )?;
         match content {
+            #[cfg(feature = "project-source")]
             ResidencyInput::Source(snapshot) => {
                 for reference in value.textures().values() {
                     let work = snapshot
@@ -669,6 +718,7 @@ fn metadata_bytes(
             }
         }
     }
+    #[cfg(feature = "project-source")]
     for record in source
         .into_iter()
         .flat_map(|collection| collection.source_records())
@@ -695,6 +745,7 @@ fn add_bytes(bytes: &mut usize, extra: usize) -> Result<(), HostFault> {
     Ok(())
 }
 
+#[cfg(any(feature = "project-source", test))]
 fn material_kind() -> AssetSourceKind {
     AssetSourceKind::Other(Material2dDomain::SOURCE_KIND.to_owned())
 }

@@ -21,7 +21,7 @@ use nara_core::{
     PersistentFileEnvelope, PersistentFileHeader, SerdeShapeError, SerdeShapeLimits,
     SerdeShapePreflightError, decode_persistent_file_with_preflight, preflight_serde_shape,
 };
-use nara_project::RuntimeConfiguration;
+use nara_scene::runtime_configuration::RuntimeConfiguration;
 use nara_scene::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin};
 use serde::{
     Deserialize, Serialize, Serializer,
@@ -457,7 +457,9 @@ impl RuntimeContentCatalog {
                 .capabilities
                 .requested
                 .len()
-                .checked_mul(size_of::<nara_project::ProductCapability>()),
+                .checked_mul(size_of::<
+                    nara_scene::runtime_configuration::ProductCapability,
+                >()),
         )?;
         add_bytes(
             &mut retained,

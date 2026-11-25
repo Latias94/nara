@@ -1,16 +1,17 @@
 //! Game-owned exact state over the original Headless, command and Scene owners.
 
 mod capture;
-#[cfg(feature = "desktop")]
+#[cfg(all(feature = "desktop", any(feature = "development", feature = "cook")))]
 mod desktop;
 mod processed;
 
-use std::time::Duration;
-use std::{collections::BTreeMap, num::NonZeroU64};
+#[cfg(any(feature = "development", feature = "cook"))]
+use std::collections::BTreeMap;
+use std::{num::NonZeroU64, time::Duration};
 
 #[cfg(feature = "desktop")]
 use nara::project_host::DesktopControlError;
-#[cfg(feature = "local-player")]
+#[cfg(any(feature = "development", feature = "cook"))]
 use nara::{advanced_prelude::CurrentScene, project_host::ProjectSceneContentStamp};
 use nara::{
     app::{FixedTime, RuntimeState, RuntimeTimeContinuation, RuntimeTimeSettings},
@@ -20,26 +21,25 @@ use nara::{
 };
 
 use super::{GamePhase, Progress, Session, fail, player, side_room, travel};
-#[cfg(feature = "local-player")]
-use crate::resume::encode_resume;
 use crate::{
     command::{CommandSchedule, CommandSource, CommandSubmitError, GameCommand, ScheduledCommand},
     levels::LevelId,
     resume::{
-        LevelContentStamp, ResumeCompatibility, ResumeError, ResumeState, RuntimeTimeState,
-        decode_resume,
+        ResumeError, ResumeState, RuntimeTimeState,
         processed::{ProcessedResumeError, ProcessedRooms, decode_processed_resume},
     },
     save::io::SaveIoError,
 };
+#[cfg(any(feature = "development", feature = "cook"))]
+use crate::resume::{LevelContentStamp, ResumeCompatibility, decode_resume, encode_resume};
 
-#[cfg(feature = "desktop")]
+#[cfg(all(feature = "desktop", any(feature = "development", feature = "cook")))]
 pub use capture::capture_desktop_resume;
-#[cfg(feature = "local-player")]
+#[cfg(any(feature = "development", feature = "cook"))]
 pub use capture::capture_resume;
 #[cfg(all(feature = "desktop", feature = "development"))]
 pub(crate) use capture::capture_world;
-#[cfg(feature = "desktop")]
+#[cfg(all(feature = "desktop", any(feature = "development", feature = "cook")))]
 pub use desktop::restore_desktop_resume;
 pub use processed::{
     capture_processed_resume, claim_processed_checkpoint, restore_processed_resume,
@@ -70,6 +70,7 @@ pub enum GameResumeError {
 struct ResumeControl {
     configuration: [u8; 32],
     unsupported: Vec<String>,
+    #[cfg(any(feature = "development", feature = "cook"))]
     levels: BTreeMap<LevelId, LevelContentStamp>,
     pending: Option<ResumeActivation>,
     restored: bool,
@@ -82,6 +83,7 @@ struct ResumeActivation {
 }
 
 enum ResumeContent {
+    #[cfg(any(feature = "development", feature = "cook"))]
     Source(ResumeCompatibility),
     Processed(ProcessedRooms),
 }
@@ -159,7 +161,7 @@ fn supported_service(id: &str, local_player: bool) -> bool {
     }
 }
 
-#[cfg(feature = "local-player")]
+#[cfg(any(feature = "development", feature = "cook"))]
 pub(super) fn stamp(level: LevelId, source: ProjectSceneContentStamp) -> LevelContentStamp {
     LevelContentStamp {
         level,
@@ -168,7 +170,7 @@ pub(super) fn stamp(level: LevelId, source: ProjectSceneContentStamp) -> LevelCo
     }
 }
 
-#[cfg(feature = "local-player")]
+#[cfg(any(feature = "development", feature = "cook"))]
 pub(super) fn remember_current(world: &mut World) {
     if world.resource::<Session>().local_player
         && let Some(source) = CurrentScene::get(world).and_then(|view| view.source_content_stamp())
@@ -180,7 +182,7 @@ pub(super) fn remember_current(world: &mut World) {
     }
 }
 
-#[cfg(feature = "local-player")]
+#[cfg(any(feature = "development", feature = "cook"))]
 pub(super) fn input_capture_eligible(world: &World) -> Result<(), GameResumeError> {
     let baseline = nara::input::startup_action_map_bindings(world)
         .ok_or_else(|| GameResumeError::Ineligible("admitted game input is unavailable".into()))?;
@@ -202,6 +204,7 @@ pub(super) fn input_capture_eligible(world: &World) -> Result<(), GameResumeErro
     Ok(())
 }
 
+#[cfg(any(feature = "development", feature = "cook"))]
 pub(super) fn required_levels(world: &World) -> Vec<LevelId> {
     world
         .resource::<ResumeControl>()
@@ -216,6 +219,7 @@ pub(super) fn required_levels(world: &World) -> Vec<LevelId> {
         .unwrap_or_default()
 }
 
+#[cfg(any(feature = "development", feature = "cook"))]
 pub(super) fn validate_content(
     world: &World,
     source: Option<(LevelContentStamp, [u8; 32])>,
@@ -243,6 +247,7 @@ pub(super) fn validate_content(
     Ok(source.map(|(record, _)| record))
 }
 
+#[cfg(any(feature = "development", feature = "cook"))]
 pub(super) fn commit_content(world: &mut World, stamps: Vec<LevelContentStamp>) {
     world
         .resource_mut::<ResumeControl>()
@@ -330,7 +335,7 @@ pub(super) fn advance_clock(world: &mut World) -> Result<(), String> {
 /// Complete paused maintenance frames until `GameSnapshot::restoring` clears. Then compare
 /// `capture_resume` with the original state before allowing gameplay to continue. This request
 /// does not replace another process, publish a last-good executable or close the incumbent.
-#[cfg(feature = "local-player")]
+#[cfg(any(feature = "development", feature = "cook"))]
 pub fn request_resume(
     session: &mut HeadlessSession,
     state: &ResumeState,
@@ -366,7 +371,7 @@ fn enter_headless_resume(
     Ok(())
 }
 
-#[cfg(feature = "local-player")]
+#[cfg(any(feature = "development", feature = "cook"))]
 fn fresh_candidate(world: &World) -> Result<(), GameResumeError> {
     fresh_runtime(world)?;
     capture::eligible(world)
@@ -419,9 +424,11 @@ pub(super) fn begin_from_command(world: &mut World, encoded: &[u8]) -> Result<()
         );
     }
     let (activation, facts) = if world.resource::<Session>().local_player {
-        let state = decode_resume(encoded).map_err(|error| error.to_string())?;
-        #[cfg(feature = "local-player")]
+        #[cfg(not(any(feature = "development", feature = "cook")))]
+        return Err("resume startup source facts are unavailable".into());
+        #[cfg(any(feature = "development", feature = "cook"))]
         {
+            let state = decode_resume(encoded).map_err(|error| error.to_string())?;
             let current = CurrentScene::get(world)
                 .and_then(|current| current.source_content_stamp())
                 .ok_or("resume startup source facts are unavailable")?;
@@ -432,16 +439,16 @@ pub(super) fn begin_from_command(world: &mut World, encoded: &[u8]) -> Result<()
             {
                 return Err("resume startup content is incompatible".into());
             }
+            let source = state.compatibility.clone();
+            let facts = (source.schema, source.configuration);
+            (
+                ResumeActivation {
+                    game: state.with_compatibility(()),
+                    content: ResumeContent::Source(source),
+                },
+                facts,
+            )
         }
-        let source = state.compatibility.clone();
-        let facts = (source.schema, source.configuration);
-        (
-            ResumeActivation {
-                game: state.with_compatibility(()),
-                content: ResumeContent::Source(source),
-            },
-            facts,
-        )
     } else {
         let state = decode_processed_resume(encoded).map_err(|error| error.to_string())?;
         if !state.pending.is_empty()
@@ -517,6 +524,7 @@ pub(super) fn finish(world: &mut World) {
         return;
     }
     let ready = match &activation.content {
+        #[cfg(any(feature = "development", feature = "cook"))]
         ResumeContent::Source(source) => {
             if world
                 .resource::<ResumeControl>()

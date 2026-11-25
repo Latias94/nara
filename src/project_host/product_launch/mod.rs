@@ -1,22 +1,20 @@
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 mod headless;
 #[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
 mod ordinary;
 mod root;
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 const PRODUCT_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 pub use headless::HeadlessProductRun;
 #[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]

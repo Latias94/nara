@@ -1,14 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use nara_asset::{
-    AssetId, AssetMutationBaseline, AssetRecord, AssetRef, AssetSourceKind, AssetStates, Assets,
-    Handle, SourceHash,
-};
+use nara_asset::{AssetId, AssetMutationBaseline, AssetStates, Assets, Handle};
+#[cfg(feature = "project-source")]
+use nara_asset::{AssetRecord, AssetRef, AssetSourceKind, SourceHash};
 use nara_ecs::World;
 use nara_render::image::ImageAsset;
 use nara_render::tilemap::{
-    TileSet, TileSetAssetError, TileSetAssets, TileSetContentReceipt, TileSetPublicationInput,
+    TileSet, TileSetAssetError, TileSetContentReceipt, TileSetPublicationInput,
 };
+#[cfg(feature = "project-source")]
+use nara_render::tilemap::TileSetAssets;
 use nara_scene::advanced::SceneAssetReservations;
 
 use super::{
@@ -100,6 +101,7 @@ pub(super) fn prepare(
         Ok(())
     };
     match content {
+        #[cfg(feature = "project-source")]
         ResidencyInput::Source(snapshot) => {
             for content in snapshot.tilesets() {
                 let handle = bindings
@@ -190,6 +192,7 @@ pub(super) fn prepare(
     Ok(changes)
 }
 
+#[cfg(feature = "project-source")]
 fn tileset_kind() -> AssetSourceKind {
     AssetSourceKind::Other(String::from("tileset"))
 }

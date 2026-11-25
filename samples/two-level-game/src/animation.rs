@@ -145,6 +145,7 @@ impl PreparedAnimation {
             .region
     }
 
+    #[cfg(any(feature = "development", feature = "cook"))]
     pub(crate) fn matches(&self, component: &ExplorerAnimation) -> bool {
         self.reference == component.clips
     }

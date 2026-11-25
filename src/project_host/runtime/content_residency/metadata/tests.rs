@@ -7,7 +7,9 @@ use std::{
 use crate::fs::ContentDigest;
 use nara_asset::{Assets, ImportedProductId, ProjectAssetDatabase, StableAssetId};
 use nara_ecs::identity::SceneEntityId;
-use nara_project::{RuntimeConfiguration, RuntimePreset};
+#[cfg(feature = "runtime-2d")]
+use nara_scene::runtime_configuration::ProductCapability;
+use nara_scene::runtime_configuration::{RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneLimits, SceneDocument, SceneEntityRecord, SourceDocumentKey,
     SourceDocumentKind,
@@ -46,7 +48,7 @@ impl Fixture {
         configuration.runtime.preset = RuntimePreset::LocalHeadless;
         #[cfg(feature = "runtime-2d")]
         {
-            configuration.capabilities.requested = vec![nara_project::ProductCapability::Runtime2d];
+            configuration.capabilities.requested = vec![ProductCapability::Runtime2d];
         }
         let plan =
             resolve_runtime_configuration(&configuration.resolve().unwrap(), ProductRecipe::new())

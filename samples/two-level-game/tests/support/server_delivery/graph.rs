@@ -16,6 +16,7 @@ const FORBIDDEN_PACKAGES: &[&str] = &[
     "nara_image",
     "nara_input",
     "nara_material",
+    "nara_project",
     "nara_render",
     "nara_sprite",
     "nara_tilemap",
@@ -124,6 +125,7 @@ pub(super) fn audit(
         let features = features
             .trim_end_matches(" (*)")
             .split(',')
+            .filter(|feature| !feature.is_empty())
             .collect::<BTreeSet<_>>();
         packages.insert(package);
         assert!(
@@ -144,7 +146,7 @@ pub(super) fn audit(
         if package == "nara" {
             assert_eq!(
                 features,
-                BTreeSet::from(["runtime-core", "serde"]),
+                BTreeSet::from(["project-runtime", "runtime-core", "serde"]),
                 "{line}"
             );
         }

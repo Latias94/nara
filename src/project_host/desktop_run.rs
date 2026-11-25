@@ -16,20 +16,19 @@ use nara_window::winit::{
 mod control;
 mod poll;
 mod startup;
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 pub(crate) mod verification;
 
+#[cfg(feature = "project-source")]
+use super::StartupContentClosureReceipt;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+use super::runtime::{DesktopRunInputs, DesktopRuntimeContext, ProjectHost};
+#[cfg(feature = "project-source")]
 use super::runtime_diagnostics::cleanup_incomplete_report;
 use super::runtime_diagnostics::{
     append_plugin_shutdown_diagnostics, attach_identifier, cleanup_failed_report,
     runtime_fault_diagnostic, runtime_fault_kind_id, runtime_fault_report, single_diagnostic,
     single_error,
-};
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
-use super::{
-    StartupContentClosureReceipt,
-    runtime::{DesktopRunInputs, DesktopRuntimeContext, ProjectHost},
 };
 pub use crate::desktop_presentation::{
     DesktopPresentationControl, DesktopPresentationObservation, DesktopTelemetrySealOutcome,
@@ -43,9 +42,9 @@ pub(super) use poll::DesktopDriveMode;
 pub use poll::DesktopRunProgress;
 pub(in crate::project_host) use startup::{DesktopStartupObservation, StartupTimer};
 pub use startup::{DesktopStartupPhase, DesktopStartupTimings};
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 pub use verification::DesktopPresentationVerificationReceipt;
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 use verification::{DesktopFirstPresentOutcome, DesktopFirstPresentVerification};
 
 /// Desktop execution policy. Native retirement has its own finite drive budget.
@@ -178,9 +177,9 @@ pub enum DesktopRunOutcome {
 pub struct DesktopRunReport {
     outcome: DesktopRunOutcome,
     diagnostics: DiagnosticReport,
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     startup_content_closure: Option<StartupContentClosureReceipt>,
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     presentation_verification: Option<DesktopPresentationVerificationReceipt>,
     telemetry_seal: Option<DesktopTelemetrySealReport>,
 }
@@ -201,7 +200,7 @@ impl DesktopRunReport {
     /// Runtime startup, presentation, shutdown, or cleanup may still have failed. `None` means the
     /// manifest, product composition, or startup content check itself did not publish a closure.
     #[must_use]
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub const fn startup_content_closure(&self) -> Option<&StartupContentClosureReceipt> {
         self.startup_content_closure.as_ref()
     }
@@ -209,7 +208,7 @@ impl DesktopRunReport {
     /// Returns the first-party desktop presentation proof when verification was requested and
     /// accepted before shutdown.
     #[must_use]
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub const fn presentation_verification(
         &self,
     ) -> Option<&DesktopPresentationVerificationReceipt> {
@@ -226,9 +225,9 @@ impl DesktopRunReport {
 pub struct DesktopRun {
     pub(super) state: DesktopRunState,
     pub(super) diagnostics: DiagnosticReport,
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub(super) startup_content_closure: Option<StartupContentClosureReceipt>,
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub(super) presentation_verification: Option<DesktopPresentationVerificationReceipt>,
     pub(super) telemetry_seal: Option<DesktopTelemetrySealReport>,
     pub(super) event_loop: Option<WinitEventLoop>,
@@ -243,7 +242,7 @@ impl fmt::Debug for DesktopRun {
             .field("state", &self.state.label())
             .field("retains_event_loop", &self.event_loop.is_some())
             .field("diagnostics", &self.diagnostics);
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         debug
             .field(
                 "startup_content_closure_present",
@@ -275,9 +274,9 @@ impl DesktopRun {
         Self {
             state: DesktopRunState::FreshRuntime { runtime, execution },
             diagnostics: DiagnosticReport::default(),
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             startup_content_closure: None,
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             presentation_verification: None,
             telemetry_seal: None,
             event_loop,
@@ -328,7 +327,7 @@ impl DesktopRun {
                 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
                 None,
                 execution,
-                #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+                #[cfg(feature = "project-source")]
                 None,
                 mode,
             ),
@@ -366,9 +365,7 @@ impl DesktopRun {
             DesktopRuntimeContext,
         >,
         execution: DesktopRunOptions,
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))] verification: Option<
-            DesktopFirstPresentVerification,
-        >,
+        #[cfg(feature = "project-source")] verification: Option<DesktopFirstPresentVerification>,
         mode: DesktopDriveMode,
     ) -> DesktopRunState {
         let construction = StartupTimer::start(&self.startup_timings);
@@ -385,7 +382,7 @@ impl DesktopRun {
         let driver = DesktopPresentationDriver::new(
             &runtime,
             execution.presentation,
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             verification.clone(),
             reports.clone(),
         );
@@ -410,7 +407,7 @@ impl DesktopRun {
             startup_failed,
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             _context: context,
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             verification,
             reports,
         })
@@ -454,7 +451,7 @@ impl DesktopRun {
             startup_failed,
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             _context,
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             verification,
             reports,
         } = native;
@@ -467,7 +464,7 @@ impl DesktopRun {
                     startup_failed,
                     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
                     _context,
-                    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+                    #[cfg(feature = "project-source")]
                     verification,
                     reports,
                 }));
@@ -506,7 +503,7 @@ impl DesktopRun {
             ));
             terminal = PendingDesktopTerminal::Failed;
         }
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         if let Some(verification) = verification {
             match verification.outcome() {
                 DesktopFirstPresentOutcome::Accepted(presented_frame) => {
@@ -544,7 +541,7 @@ impl DesktopRun {
         terminal.finish()
     }
 
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub(super) fn report_after_cleanup_deadline(&self) -> DesktopRunReport {
         let mut diagnostics = DiagnosticReport::default();
         self.append_startup_cleanup_diagnostics(&mut diagnostics);
@@ -581,9 +578,9 @@ impl DesktopRun {
         DesktopRunReport {
             outcome,
             diagnostics: self.diagnostics.clone(),
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             startup_content_closure: self.startup_content_closure.clone(),
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             presentation_verification: self.presentation_verification.clone(),
             telemetry_seal: self.telemetry_seal.clone(),
         }
@@ -614,7 +611,7 @@ pub(super) struct DesktopNativeRun {
     startup_failed: bool,
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     _context: Option<DesktopRuntimeContext>,
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     verification: Option<DesktopFirstPresentVerification>,
     reports: DesktopPresentationReports,
 }

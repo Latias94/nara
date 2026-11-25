@@ -71,13 +71,23 @@ pub(super) fn accept(
         assert_progress(&marked["state"], MEADOW, 10, &[1]);
         assert_eq!(player(&marked["state"]), at_pickup);
         assert_eq!(incumbent.admit(&request("save")), original_tick + 1);
-        let boundary = incumbent.observe();
-        assert_eq!(boundary["state"], marked["state"], "{boundary}");
-        assert_eq!(boundary["state"]["saves"], 1, "{boundary}");
-        assert_eq!(boundary["checkpoint_pending"], false, "{boundary}");
-        assert_eq!(boundary["commands"]["retained"], 1, "{boundary}");
-        assert_eq!(boundary["time"]["fixed_debt_nanos"], 0, "{boundary}");
+        let before_capture = incumbent.observe();
+        assert_eq!(before_capture["state"], marked["state"], "{before_capture}");
+        assert_eq!(before_capture["state"]["saves"], 1, "{before_capture}");
+        assert_eq!(
+            before_capture["checkpoint_pending"], false,
+            "{before_capture}"
+        );
+        assert_eq!(
+            before_capture["commands"]["retained"], 1,
+            "{before_capture}"
+        );
+        assert_eq!(
+            before_capture["time"]["fixed_debt_nanos"], 0,
+            "{before_capture}"
+        );
         let (captured, bytes) = capture(&mut incumbent);
+        let boundary = incumbent.observe_after_capture_maintenance(before_capture);
         assert_eq!(
             captured.pending,
             [PendingServerCommand {
@@ -147,6 +157,7 @@ pub(super) fn accept(
             bytes,
             "checkpoint resume bytes changed"
         );
+        assert_eq!(candidate.observe(), staged);
         assert_eq!(incumbent.observe(), boundary);
         assert_eq!(read_checkpoint(&directory, &name), original);
 

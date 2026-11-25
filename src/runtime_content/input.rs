@@ -130,7 +130,7 @@ impl RuntimeContentBase {
     pub(super) fn uses_stock_keyboard(&self) -> bool {
         self.plan()
             .normalized_capabilities()
-            .contains(nara_project::ProductCapability::DesktopWinit)
+            .contains(nara_scene::runtime_configuration::ProductCapability::DesktopWinit)
     }
 }
 

@@ -1,14 +1,20 @@
 use std::{fmt, num::NonZeroU32, time::Duration};
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(all(
+    feature = "project-source",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
+use super::super::desktop_run::verification::DesktopFirstPresentVerification;
+#[cfg(feature = "project-source")]
 use crate::fs::DirectoryCapability;
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use nara_app::RuntimeCloseEvidence;
 use nara_app::RuntimeClosePolicy;
 use nara_core::diagnostic::DiagnosticReport;
 use nara_ecs::Resource;
 #[cfg(all(
-    feature = "runtime-2d",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -21,9 +27,9 @@ use nara_window::winit::WinitControlFlow;
 ))]
 use super::super::desktop_run::{
     DesktopRun, DesktopRunOptions, DesktopRunState, DesktopStartupObservation, DesktopStartupPhase,
-    PendingDesktopTerminal, StartupTimer, verification::DesktopFirstPresentVerification,
+    PendingDesktopTerminal, StartupTimer,
 };
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use super::super::{
     StartupContentClosureReceipt,
     check::{ProjectSourceCheckError, check_project_source_with_overlay},
@@ -32,12 +38,12 @@ use super::{
     CleanupDriveOutcome, HostFault, ProjectHost, RuntimeStartAttempt, runtime_plan_selected_report,
     single_error,
 };
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use super::{
     RuntimePluginOverlay, RuntimeStartContent, install_source_scene_context, materialize_runtime,
     runtime_plan_failure_report,
 };
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use crate::ProductRecipe;
 
 type TerminalPredicate<O> = Box<dyn Fn(&O) -> bool + Send + 'static>;
@@ -135,14 +141,14 @@ impl<O> HeadlessRunOptions<O> {
 ///
 /// The recipe is the complete Rust product-composition input. Candidate, publication, and cleanup
 /// choreography remain private to the root Host.
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 pub struct HeadlessRunIntent<O> {
     profile: Option<String>,
     recipe: ProductRecipe,
     execution: HeadlessRunOptions<O>,
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 impl<O> fmt::Debug for HeadlessRunIntent<O> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -154,7 +160,7 @@ impl<O> fmt::Debug for HeadlessRunIntent<O> {
     }
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 impl<O> HeadlessRunIntent<O> {
     /// Runs exactly this many fixed transactions, without normal gameplay frame stages.
     ///
@@ -234,7 +240,7 @@ pub enum HeadlessRunOutcome<O> {
 pub struct HeadlessRunReport<O> {
     outcome: HeadlessRunOutcome<O>,
     diagnostics: DiagnosticReport,
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
@@ -254,7 +260,7 @@ impl<O> HeadlessRunReport<O> {
     /// Runtime startup, execution, shutdown, or cleanup may still have failed. `None` means the
     /// manifest, product composition, or startup content check itself did not publish a closure,
     /// or that this run selected an already admitted processed Runtime base.
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     #[must_use]
     pub const fn startup_content_closure(&self) -> Option<&StartupContentClosureReceipt> {
         self.startup_content_closure.as_ref()
@@ -267,7 +273,7 @@ impl<O> HeadlessRunReport<O> {
 }
 
 #[cfg(all(
-    feature = "runtime-2d",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -280,7 +286,7 @@ pub struct DesktopRunIntent {
 }
 
 #[cfg(all(
-    feature = "runtime-2d",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -297,7 +303,7 @@ impl fmt::Debug for DesktopRunIntent {
 }
 
 #[cfg(all(
-    feature = "runtime-2d",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -308,7 +314,7 @@ impl Default for DesktopRunIntent {
 }
 
 #[cfg(all(
-    feature = "runtime-2d",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -373,11 +379,13 @@ impl DesktopRunIntent {
 ))]
 impl DesktopRun {
     /// Creates the ordinary desktop product action from one recipe.
+    #[cfg(feature = "project-source")]
     #[must_use]
     pub fn from_recipe(project_root: DirectoryCapability, recipe: ProductRecipe) -> Self {
         Self::new(project_root, DesktopRunIntent::new().with_recipe(recipe))
     }
 
+    #[cfg(feature = "project-source")]
     #[must_use]
     pub fn new(project_root: DirectoryCapability, intent: DesktopRunIntent) -> Self {
         Self::new_inner(project_root, intent, None)
@@ -396,7 +404,9 @@ impl DesktopRun {
         Self {
             state: DesktopRunState::Fresh(DesktopRunInputs::Processed { base, execution }),
             diagnostics: DiagnosticReport::default(),
+            #[cfg(feature = "project-source")]
             startup_content_closure: None,
+            #[cfg(feature = "project-source")]
             presentation_verification: None,
             telemetry_seal: None,
             event_loop,
@@ -405,6 +415,7 @@ impl DesktopRun {
         }
     }
 
+    #[cfg(feature = "project-source")]
     fn new_inner(
         project_root: DirectoryCapability,
         mut intent: DesktopRunIntent,
@@ -431,6 +442,7 @@ impl DesktopRun {
         }
     }
 
+    #[cfg(feature = "project-source")]
     pub(crate) fn new_with_overlay(
         project_root: DirectoryCapability,
         intent: DesktopRunIntent,
@@ -491,7 +503,8 @@ impl DesktopRun {
         mode: crate::project_host::desktop_run::DesktopDriveMode,
     ) -> DesktopRunState {
         let preparation = StartupTimer::start(&self.startup_timings);
-        let (prepared, execution, verify_first_present) = match inputs {
+        let (prepared, execution, _verify_first_present) = match inputs {
+            #[cfg(feature = "project-source")]
             DesktopRunInputs::Source {
                 project_root,
                 intent,
@@ -526,16 +539,23 @@ impl DesktopRun {
             mut host,
             mut attempt,
             plan_diagnostics,
+            #[cfg(feature = "project-source")]
             startup_content_closure,
         } = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
-                self.startup_content_closure = error.startup_content_closure;
+                #[cfg(feature = "project-source")]
+                {
+                    self.startup_content_closure = error.startup_content_closure;
+                }
                 self.diagnostics.extend(error.fault.diagnostics);
                 return DesktopRunState::Failed;
             }
         };
-        self.startup_content_closure = startup_content_closure;
+        #[cfg(feature = "project-source")]
+        {
+            self.startup_content_closure = startup_content_closure;
+        }
         self.diagnostics.extend(plan_diagnostics);
         let startup = StartupTimer::start(&self.startup_timings);
         let completed = host.complete_start(&mut attempt);
@@ -552,12 +572,18 @@ impl DesktopRun {
                 return desktop_state_after_failure(host);
             }
         }
-        let verification = verify_first_present.then(DesktopFirstPresentVerification::new);
+        #[cfg(feature = "project-source")]
+        let verification = _verify_first_present.then(DesktopFirstPresentVerification::new);
 
         match host.take_desktop_runtime() {
-            Ok((runtime, context)) => {
-                self.start_native(runtime, Some(context), execution, verification, mode)
-            }
+            Ok((runtime, context)) => self.start_native(
+                runtime,
+                Some(context),
+                execution,
+                #[cfg(feature = "project-source")]
+                verification,
+                mode,
+            ),
             Err(fault) => {
                 self.diagnostics.extend(fault.diagnostics);
                 desktop_state_after_failure(host)
@@ -565,6 +591,7 @@ impl DesktopRun {
         }
     }
 
+    #[cfg(feature = "project-source")]
     pub(in crate::project_host) fn append_startup_cleanup_diagnostics(
         &self,
         diagnostics: &mut DiagnosticReport,
@@ -589,6 +616,7 @@ impl DesktopRun {
     feature = "render-wgpu"
 ))]
 pub(in crate::project_host) enum DesktopRunInputs {
+    #[cfg(feature = "project-source")]
     Source {
         project_root: DirectoryCapability,
         intent: DesktopRunIntent,
@@ -627,7 +655,7 @@ where
 {
     state: HeadlessRunState<O>,
     diagnostics: DiagnosticReport,
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
@@ -640,7 +668,7 @@ where
         debug
             .field("state", &self.state.label())
             .field("diagnostics", &self.diagnostics);
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         debug.field(
             "startup_content_closure_present",
             &self.startup_content_closure.is_some(),
@@ -654,7 +682,7 @@ where
     O: Resource + Clone,
 {
     /// Creates the ordinary bounded headless product action from one recipe.
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     #[must_use]
     pub fn from_recipe(
         project_root: DirectoryCapability,
@@ -668,7 +696,7 @@ where
     }
 
     /// Creates a bounded headless run from the project and its startup configuration.
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     #[must_use]
     pub fn new(project_root: DirectoryCapability, intent: HeadlessRunIntent<O>) -> Self {
         Self::new_inner(project_root, intent, None)
@@ -686,12 +714,12 @@ where
         Self {
             state: HeadlessRunState::Fresh(HeadlessRunInputs::Processed { base, execution }),
             diagnostics: DiagnosticReport::default(),
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             startup_content_closure: None,
         }
     }
 
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn new_inner(
         project_root: DirectoryCapability,
         intent: HeadlessRunIntent<O>,
@@ -708,7 +736,7 @@ where
         }
     }
 
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     pub(crate) fn new_with_overlay(
         project_root: DirectoryCapability,
         intent: HeadlessRunIntent<O>,
@@ -758,12 +786,12 @@ where
             drive,
             terminal_predicate,
             plan_diagnostics,
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             startup_content_closure,
         } = match prepare_start(inputs) {
             Ok(prepared) => prepared,
             Err(error) => {
-                #[cfg(feature = "runtime-2d")]
+                #[cfg(feature = "project-source")]
                 {
                     self.startup_content_closure = error.startup_content_closure;
                 }
@@ -771,7 +799,7 @@ where
                 return HeadlessRunState::Failed;
             }
         };
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         {
             self.startup_content_closure = startup_content_closure;
         }
@@ -887,12 +915,12 @@ where
         HeadlessRunReport {
             outcome,
             diagnostics: self.diagnostics.clone(),
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             startup_content_closure: self.startup_content_closure.clone(),
         }
     }
 
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     pub(in crate::project_host) fn report_after_cleanup_deadline(&self) -> HeadlessRunReport<O> {
         let mut diagnostics = DiagnosticReport::default();
         if let HeadlessRunState::Cleaning { host, .. } = &self.state
@@ -911,7 +939,7 @@ where
 }
 
 enum HeadlessRunInputs<O> {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     Source {
         project_root: DirectoryCapability,
         intent: HeadlessRunIntent<O>,
@@ -929,7 +957,7 @@ struct PreparedStart<O> {
     drive: HeadlessDrive,
     terminal_predicate: Option<TerminalPredicate<O>>,
     plan_diagnostics: DiagnosticReport,
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
@@ -937,13 +965,13 @@ struct PreparedProjectStart {
     host: ProjectHost,
     attempt: RuntimeStartAttempt,
     plan_diagnostics: DiagnosticReport,
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
 struct PreparedProjectStartError {
     fault: HostFault,
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
@@ -999,7 +1027,7 @@ fn prepare_start<O>(
     inputs: HeadlessRunInputs<O>,
 ) -> Result<PreparedStart<O>, PreparedProjectStartError> {
     match inputs {
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         HeadlessRunInputs::Source {
             project_root,
             intent,
@@ -1039,14 +1067,14 @@ fn prepare_start<O>(
                 drive,
                 terminal_predicate,
                 plan_diagnostics: prepared.plan_diagnostics,
-                #[cfg(feature = "runtime-2d")]
+                #[cfg(feature = "project-source")]
                 startup_content_closure: None,
             })
         }
     }
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 fn prepare_project_start(
     project_root: DirectoryCapability,
     profile: Option<String>,
@@ -1082,21 +1110,21 @@ fn prepare_project_start(
 }
 
 /// Failure to configure a source-backed App before startup.
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 #[derive(Debug, thiserror::Error)]
 #[error("could not load the project App")]
 pub struct ProjectAppLoadError {
     diagnostics: DiagnosticReport,
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 impl ProjectAppLoadError {
     pub const fn diagnostics(&self) -> &DiagnosticReport {
         &self.diagnostics
     }
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 impl From<HostFault> for ProjectAppLoadError {
     fn from(fault: HostFault) -> Self {
         Self {
@@ -1109,7 +1137,7 @@ impl From<HostFault> for ProjectAppLoadError {
 ///
 /// Drive the returned App normally. A desktop profile installs the Winit runner when its
 /// selected capabilities include Winit and WGPU. The receipt describes the loaded source data.
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 pub fn load_project_app(
     project_root: DirectoryCapability,
     profile: Option<&str>,
@@ -1174,7 +1202,7 @@ pub fn load_project_app(
     Ok((app, startup))
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 fn project_app_startup_error(fault: HostFault) -> nara_ecs::bevy_ecs::error::BevyError {
     let detail = fault
         .diagnostics
@@ -1204,19 +1232,19 @@ fn prepare_runtime_content_start(
         .begin_processed_start(base)
         .map_err(|fault| PreparedProjectStartError {
             fault,
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             startup_content_closure: None,
         })?;
     Ok(PreparedProjectStart {
         host,
         attempt,
         plan_diagnostics,
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         startup_content_closure: None,
     })
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 fn project_source_check_fault(error: ProjectSourceCheckError) -> HostFault {
     let diagnostics = match error {
         ProjectSourceCheckError::Manifest(error) => error.diagnostics().clone(),

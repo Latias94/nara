@@ -1,20 +1,19 @@
-use nara_app::tasks::TaskPoolConfig;
-use nara_app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeSettings};
 use nara_core::SourceUniverseId;
-use nara_core::diagnostic::RuntimeDiagnosticsSettings;
 use nara_ecs::Resource;
+use nara_scene::runtime_configuration::enforce_runtime_preset_invariants;
 
 use crate::authoring::ProjectAuthoringState;
-use crate::capability::{ProductCapabilitySet, RuntimePreset};
 use crate::content::EffectiveProjectContentSettings;
 use crate::manifest::ProjectManifest;
 use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
-use crate::render::EffectiveRenderSettings;
 use crate::sections::{
-    NativeDocumentIdentity, ProjectPathsManifest, ProjectPresentMode, ProjectProfileKind,
-    ProjectStartupManifest, ProjectUiManifest, ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest,
-    ProjectWindowMode,
+    NativeDocumentIdentity, ProjectPathsManifest, ProjectProfileKind, ProjectStartupManifest,
+};
+use crate::{
+    EffectiveDiagnosticsSettings, EffectiveRenderSettings, EffectiveRuntimeSettings,
+    EffectiveTaskSettings, EffectiveUiSettings, EffectiveWindowSettings, ProductCapabilitySet,
+    RuntimePreset,
 };
 
 #[derive(Debug, Clone, PartialEq, Resource)]
@@ -55,7 +54,7 @@ impl EffectiveProjectSettings {
             },
             profile_name: None,
             runtime_preset: manifest.runtime.preset,
-            requested_capabilities: manifest.capabilities.lower(),
+            requested_capabilities: (&manifest.capabilities).into(),
             paths: EffectiveProjectPaths::from_manifest(manifest.paths.clone())?,
             authoring_state: manifest.authoring.state.clone(),
             authoring_schema_bundle: manifest
@@ -68,12 +67,12 @@ impl EffectiveProjectSettings {
             content: EffectiveProjectContentSettings::from_manifest(&manifest.content)?,
             startup: EffectiveStartupSettings::from_manifest(manifest.startup.clone())?,
             runtime: manifest.runtime.lower()?,
-            tasks: manifest.tasks.lower()?,
+            tasks: manifest.tasks.try_into()?,
             render: manifest.render.into(),
-            ui: EffectiveUiSettings::from_manifest(manifest.ui.clone()),
-            window: manifest.window.clone().lower(),
+            ui: manifest.ui.clone().into(),
+            window: manifest.window.clone().into(),
             input: manifest.input.clone().lower()?,
-            diagnostics: manifest.diagnostics.lower()?,
+            diagnostics: manifest.diagnostics.try_into()?,
             execution: EffectiveProjectExecutionSettings::default(),
         })
     }
@@ -102,17 +101,6 @@ impl EffectiveProjectSettings {
 
     pub(crate) fn enforce_product_invariants(&mut self) {
         enforce_runtime_preset_invariants(self.runtime_preset, &mut self.runtime, &mut self.window);
-    }
-}
-
-pub(crate) fn enforce_runtime_preset_invariants(
-    preset: RuntimePreset,
-    runtime: &mut EffectiveRuntimeSettings,
-    window: &mut EffectiveWindowSettings,
-) {
-    if preset == RuntimePreset::Server {
-        window.enabled = false;
-        runtime.force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
     }
 }
 
@@ -148,55 +136,6 @@ impl ProjectExecutionContract {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EffectiveProjectExecutionSettings {
     pub contract: Option<ProjectExecutionContract>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EffectiveUiSettings {
-    pub primary_surface: Option<EffectivePrimaryUiSurface>,
-}
-
-impl EffectiveUiSettings {
-    pub(crate) fn from_manifest(ui: ProjectUiManifest) -> Self {
-        Self {
-            primary_surface: ui.primary_surface.map(EffectivePrimaryUiSurface::from),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EffectivePrimaryUiSurface {
-    pub logical_width: u32,
-    pub logical_height: u32,
-    pub safe_area: EffectiveUiSafeArea,
-}
-
-impl From<ProjectUiSurfaceManifest> for EffectivePrimaryUiSurface {
-    fn from(surface: ProjectUiSurfaceManifest) -> Self {
-        Self {
-            logical_width: surface.logical_width,
-            logical_height: surface.logical_height,
-            safe_area: surface.safe_area.into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct EffectiveUiSafeArea {
-    pub left: u32,
-    pub top: u32,
-    pub right: u32,
-    pub bottom: u32,
-}
-
-impl From<ProjectUiSafeAreaManifest> for EffectiveUiSafeArea {
-    fn from(safe_area: ProjectUiSafeAreaManifest) -> Self {
-        Self {
-            left: safe_area.left,
-            top: safe_area.top,
-            right: safe_area.right,
-            bottom: safe_area.bottom,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -253,63 +192,7 @@ impl EffectiveStartupSettings {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct EffectiveRuntimeSettings {
-    runtime_time: RuntimeTimeSettings,
-    fixed_time: FixedTime,
-}
-
-impl EffectiveRuntimeSettings {
-    pub(crate) const fn new(runtime_time: RuntimeTimeSettings, fixed_time: FixedTime) -> Self {
-        Self {
-            runtime_time,
-            fixed_time,
-        }
-    }
-
-    #[must_use]
-    pub const fn runtime_time_settings(&self) -> RuntimeTimeSettings {
-        self.runtime_time
-    }
-
-    #[must_use]
-    pub const fn fixed_time(&self) -> FixedTime {
-        self.fixed_time
-    }
-
-    pub(crate) fn replace(&mut self, runtime_time: RuntimeTimeSettings, fixed_time: FixedTime) {
-        self.runtime_time = runtime_time;
-        self.fixed_time = fixed_time;
-    }
-
-    pub(crate) fn force_catch_up_policy(&mut self, policy: FixedCatchUpPolicy) {
-        self.fixed_time = self.fixed_time.with_catch_up_policy(policy);
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EffectiveTaskSettings {
-    pub pool_config: TaskPoolConfig,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct EffectiveWindowSettings {
-    pub enabled: bool,
-    pub title: String,
-    pub width: u32,
-    pub height: u32,
-    pub scale_factor: f64,
-    pub mode: ProjectWindowMode,
-    pub present_mode: ProjectPresentMode,
-    pub resizable: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectiveInputSettings {
     pub action_map: Option<ProjectPath>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EffectiveDiagnosticsSettings {
-    pub runtime: RuntimeDiagnosticsSettings,
 }

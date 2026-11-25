@@ -1,4 +1,5 @@
 mod composition;
+#[cfg(feature = "project-source")]
 mod ingest;
 mod product_launch;
 #[cfg(any(
@@ -25,16 +26,16 @@ pub use nara_window::winit::{
 #[doc(hidden)]
 pub mod process_image;
 
-#[cfg(feature = "serde")]
+#[cfg(feature = "project-tooling")]
 mod file_publication;
 
 #[cfg(feature = "project-tooling")]
 pub(crate) mod schema;
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 pub(crate) mod check;
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 pub(crate) mod runtime_agreement;
 
 pub mod advanced;
@@ -47,7 +48,7 @@ pub(crate) use runtime::has_active_project_scene_addition;
 
 #[cfg(feature = "serde")]
 pub use crate::project_assets::{ProjectAssetCollection, ProjectDomainAssets};
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 pub use crate::project_content::{
     ProjectContentBudgetError, ProjectContentBudgetHost, ProjectContentBudgetKind,
     ProjectContentBudgetSnapshot, ProjectContentClosureReceipt, ProjectContentDeliveryReceipt,
@@ -58,22 +59,26 @@ pub use crate::project_content::{
     StartupContentClosureReceipt,
 };
 pub use composition::{
-    CompiledProductCapabilities, CompositionError, ProjectSettingsCandidate,
-    ProjectSettingsLineage, RuntimeConfigurationPlan, RuntimeConfigurationPlanError, RuntimePlan,
-    RuntimePlanError, SchemaValidationInput, compiled_product_capabilities, resolve_product_recipe,
+    CompiledProductCapabilities, CompositionError, RuntimeCapabilityError,
+    RuntimeCapabilityErrorKind, RuntimeConfigurationPlan, RuntimeConfigurationPlanError,
+    RuntimePlanError, SchemaValidationInput, compiled_product_capabilities,
     resolve_runtime_configuration,
+};
+#[cfg(feature = "project-source")]
+pub use composition::{
+    ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan, resolve_product_recipe,
 };
 #[cfg(feature = "project-tooling")]
 pub(crate) use ingest::read_manifest_profile;
+#[cfg(feature = "project-source")]
 pub use ingest::{ProjectCandidateError, ProjectCandidateErrorKind, ingest_project_manifest};
 #[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
 pub use product_launch::DesktopProductLaunch;
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 pub use product_launch::HeadlessProductRun;
 #[doc(hidden)]
 pub use product_launch::{open_explicit_product_project_root, open_product_project_root};
@@ -85,19 +90,17 @@ pub use runtime_pack::open_executable_relative_runtime_pack;
 #[doc(hidden)]
 pub const PROJECT_PRIMARY_UI_SURFACE_ID: u64 = crate::product::PROJECT_PRIMARY_UI_SURFACE_ID;
 #[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
 pub use desktop_run::DesktopPresentationVerificationReceipt;
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 pub(crate) use ingest::{
     ingest_project_manifest_bytes, ingest_project_manifest_with_expected_digest,
 };
 #[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -107,7 +110,7 @@ pub use runtime::{
     HeadlessRun, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport, HeadlessSession,
     HeadlessSessionClose, HeadlessSessionError,
 };
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 pub use runtime::{
     HeadlessRunIntent, ProjectAppLoadError, ProjectSceneSourceUpdateStatus, load_project_app,
 };
@@ -116,7 +119,7 @@ pub(crate) use runtime::{
     PROJECT_SCENE_REQUEST_CLOSE_OBLIGATION, poll_project_scene_requests,
     register_project_scene_close_participant,
 };
-#[cfg(all(feature = "runtime-2d", feature = "serde", feature = "asset-watch"))]
+#[cfg(all(feature = "project-source", feature = "asset-watch"))]
 pub use runtime::{
     PROJECT_SCENE_WATCH_PLUGIN_ID, ProjectSceneWatchConfigurationError, ProjectSceneWatchPlugin,
     ProjectSceneWatchState, ProjectSceneWatchStatus,

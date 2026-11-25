@@ -12,7 +12,7 @@ use super::{
     DecodeLease, RuntimeCodecRole, RuntimeContentBase, RuntimeContentBudgetKind,
     RuntimeContentError, RuntimeContentMember, checked_add,
 };
-use crate::project_content::materials::material_record_work_bytes;
+use crate::scene_retention::material_record_work_bytes;
 
 #[cfg(test)]
 mod tests;

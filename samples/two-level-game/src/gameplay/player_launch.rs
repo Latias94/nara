@@ -119,5 +119,5 @@ fn apply(world: &mut World) -> Result<bool, String> {
     Ok(true)
 }
 
-#[cfg(all(test, feature = "local-player"))]
+#[cfg(all(test, any(feature = "development", feature = "cook")))]
 mod tests;

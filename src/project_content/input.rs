@@ -243,7 +243,7 @@ impl LoadContext<'_> {
         #[cfg(feature = "desktop-winit")]
         if candidate
             .normalized_capabilities()
-            .contains(nara_project::ProductCapability::DesktopWinit)
+            .contains(nara_scene::runtime_configuration::ProductCapability::DesktopWinit)
         {
             nara_window::winit::validate_action_map_keyboard(&definition)
                 .map_err(|error| unsupported_keyboard_binding(selected.as_str(), error))?;

@@ -1,7 +1,5 @@
 #![cfg(all(
-    feature = "project-runtime",
-    feature = "runtime-2d",
-    feature = "serde",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]

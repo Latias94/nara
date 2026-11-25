@@ -27,7 +27,7 @@ pub(super) struct Additions {
     pub(super) active: Vec<ActiveAddition>,
     #[cfg(feature = "runtime-2d")]
     pub(super) stock: StockResidency,
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     pub(super) catalog: Vec<AssetRecord>,
     pub(super) revision: u64,
     pub(super) retiring: bool,
@@ -74,7 +74,7 @@ pub(in crate::project_host::runtime) fn admits_processed_addition(
         return false;
     };
     let (base, deferred_scene_products) = match &residency.authority {
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         ResidencyAuthority::Source { .. } => return false,
         ResidencyAuthority::Processed {
             base,
@@ -125,7 +125,7 @@ pub(in crate::project_host::runtime) fn activate_addition(
             "The selected asset collections are unavailable for additive Scene residency",
         )));
     }
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     if let ResidencyInput::Source(snapshot) = input {
         let database = validate_catalogue(world).map_err(rejected)?;
         let incoming = snapshot.asset_database();
@@ -195,7 +195,7 @@ pub(in crate::project_host::runtime) fn activate_addition(
         (reservations, stock, staged_server)
     };
     let scene = match content {
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         PreparedSceneContent::Source(snapshot) => bindings.prepare_scene_with_reservations(
             world,
             snapshot.compiled_candidate(),
@@ -230,10 +230,7 @@ pub(in crate::project_host::runtime) fn activate_addition(
                 inputs,
                 &[],
                 &staged_server,
-                candidate
-                    .catalog
-                    .asset_resolution()
-                    .map(|resolver| resolver.database()),
+                candidate.catalog.asset_database(),
             )
             .map_err(rejected)?;
             candidate.commit(world, Some(prepared))
@@ -286,15 +283,16 @@ impl PreparedAddition {
             #[cfg(feature = "runtime-2d")]
             let stock = stock::commit_publications(world, images, tilesets, materials);
             let authority = self.catalog.commit(world);
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             let mut authority = authority;
             let mut residency = world.resource_mut::<ProjectSceneResidency>();
             let additions = &mut residency.additions;
+            #[cfg(feature = "project-source")]
+            if let ResidencyAuthority::Source { catalog, .. } = &mut authority {
+                additions.catalog.append(catalog);
+            }
             #[cfg(feature = "runtime-2d")]
             {
-                if let ResidencyAuthority::Source { catalog, .. } = &mut authority {
-                    additions.catalog.append(catalog);
-                }
                 additions.stock.images.extend(stock.images);
                 additions.stock.materials.append(stock.materials);
                 additions.stock.tilesets.extend(
@@ -360,7 +358,10 @@ pub fn unload_project_scene_addition(
                 Vec::new(),
                 &prepared.retirement.tilesets,
                 world.resource::<AssetServer>(),
+                #[cfg(feature = "project-source")]
                 world.get_resource::<ProjectAssetDatabase>(),
+                #[cfg(not(feature = "project-source"))]
+                None,
             )
             .map_err(|fault| fault.diagnostics)?;
             prepared.commit(world, expected, Some(publications))
@@ -393,6 +394,7 @@ impl PreparedUnload {
             images,
             materials,
             tilesets,
+            #[cfg(feature = "project-source")]
             catalog,
         } = self.retirement;
         #[cfg(feature = "runtime-2d")]
@@ -410,13 +412,12 @@ impl PreparedUnload {
             retire_and_despawn_scene_instance(world, expected)?
         };
         #[cfg(feature = "runtime-2d")]
-        {
-            stock::commit_publications(world, images, publications, materials);
-            if !catalog.is_empty() {
-                let mut database = world.resource_mut::<ProjectAssetDatabase>();
-                for record in &catalog {
-                    assert!(database.remove_exact(record));
-                }
+        stock::commit_publications(world, images, publications, materials);
+        #[cfg(feature = "project-source")]
+        if !catalog.is_empty() {
+            let mut database = world.resource_mut::<ProjectAssetDatabase>();
+            for record in &catalog {
+                assert!(database.remove_exact(record));
             }
         }
         let mut residency = world.resource_mut::<ProjectSceneResidency>();
@@ -436,8 +437,9 @@ impl PreparedUnload {
                 .stock
                 .tilesets
                 .retain(|receipt| !retiring_tilesets.contains(&receipt.handle().id()));
-            additions.catalog.retain(|record| !catalog.contains(record));
         }
+        #[cfg(feature = "project-source")]
+        additions.catalog.retain(|record| !catalog.contains(record));
         additions.revision = self.revision;
         Ok(count)
     }
@@ -456,6 +458,7 @@ struct StockRetirement {
     images: ImagePublications,
     materials: MaterialPublications,
     tilesets: Vec<TileSetContentReceipt>,
+    #[cfg(feature = "project-source")]
     catalog: Vec<AssetRecord>,
 }
 
@@ -471,25 +474,29 @@ fn prepare_retirement(
         .chain(&additions.active[index + 1..])
         .filter(|other| !nara_scene::advanced::scene_instance_retired(world, &other.receipt))
         .collect::<Vec<_>>();
-    let mut retiring_catalog = Vec::new();
-    if let Some(source) = active._source.asset_resolution() {
-        let database = validate_catalogue(world)?;
-        for record in &additions.catalog {
-            if source.database().record_for_path(record.path()) != Some(record) {
-                continue;
-            }
-            if database.record_for_path(record.path()) != Some(record) {
-                return Err(catalog_changed());
-            }
-            if !remaining.iter().any(|other| {
-                other._source.asset_resolution().is_some_and(|resolver| {
-                    resolver.database().record_for_path(record.path()) == Some(record)
-                })
-            }) {
-                retiring_catalog.push(record.clone());
+    #[cfg(feature = "project-source")]
+    let retiring_catalog = {
+        let mut retiring_catalog = Vec::new();
+        if let Some(source) = active._source.asset_resolution() {
+            let database = validate_catalogue(world)?;
+            for record in &additions.catalog {
+                if source.database().record_for_path(record.path()) != Some(record) {
+                    continue;
+                }
+                if database.record_for_path(record.path()) != Some(record) {
+                    return Err(catalog_changed());
+                }
+                if !remaining.iter().any(|other| {
+                    other._source.asset_resolution().is_some_and(|resolver| {
+                        resolver.database().record_for_path(record.path()) == Some(record)
+                    })
+                }) {
+                    retiring_catalog.push(record.clone());
+                }
             }
         }
-    }
+        retiring_catalog
+    };
     let materials = MaterialPublications::retire(
         additions.stock.materials.iter().filter(|material| {
             active.stock.materials.contains(&material.product)
@@ -546,11 +553,12 @@ fn prepare_retirement(
         images,
         materials,
         tilesets,
+        #[cfg(feature = "project-source")]
         catalog: retiring_catalog,
     })
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 fn validate_catalogue(world: &World) -> Result<&ProjectAssetDatabase, HostFault> {
     let database = world
         .get_resource::<ProjectAssetDatabase>()
@@ -564,7 +572,7 @@ fn validate_catalogue(world: &World) -> Result<&ProjectAssetDatabase, HostFault>
     Ok(database)
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 fn catalog_changed() -> HostFault {
     failure(
         "project.scene.asset-catalog-changed",

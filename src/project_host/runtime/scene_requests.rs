@@ -3,10 +3,10 @@
 mod api;
 pub(crate) mod domains;
 mod preparation;
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 mod source_updates;
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 pub use api::ProjectSceneSourceUpdateStatus;
 pub use api::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
@@ -14,7 +14,7 @@ pub use api::{
     activate_prepared_project_scene, begin_prepared_project_scene_travel,
     commit_prepared_project_scene,
 };
-#[cfg(all(test, any(windows, target_os = "linux")))]
+#[cfg(all(test, feature = "project-source", any(windows, target_os = "linux")))]
 mod tests;
 
 use std::sync::{
@@ -29,13 +29,14 @@ use nara_app::{
     RuntimeGeneration,
 };
 use nara_asset::AssetProductRef;
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use nara_asset::AssetSourcePath;
 use nara_core::diagnostic::{
     DiagnosticCode, DiagnosticReport, ReportDiagnostic as Diagnostic, SafeSummary,
 };
 use nara_ecs::identity::SpawnedSceneInstance;
 use nara_ecs::{Res, ResMut, Resource, World, system::SystemParam};
+#[cfg(feature = "project-source")]
 use nara_project::ProjectPath;
 use nara_scene::{
     CompiledSceneDocument, SceneSpawnReport,
@@ -43,7 +44,7 @@ use nara_scene::{
 };
 
 use super::{content::PreparedSceneContent, content_residency::ProjectSceneResidency};
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use crate::project_host::{
     ProjectContentErrorKind, ProjectContentLoader, ProjectSettingsCandidate, RuntimePlan,
 };
@@ -57,7 +58,7 @@ use preparation::Preparation;
 static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 
 enum Context {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     Source {
         candidate: ProjectSettingsCandidate,
         plan: RuntimePlan,
@@ -72,7 +73,7 @@ enum Context {
 impl Context {
     fn matches_current(&self, current: &CurrentSceneOwner) -> bool {
         match self {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             Self::Source { .. } => current.is_project_backed(),
             Self::Processed { base } => current
                 .hosted_runtime_base()
@@ -80,7 +81,7 @@ impl Context {
         }
     }
 
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn declares_source_path(&self, path: &ProjectPath) -> bool {
         let Self::Source { candidate, .. } = self else {
             return false;
@@ -92,13 +93,13 @@ impl Context {
 
     fn admits_request(&self, selection: &ProjectSceneSelection) -> bool {
         match (self, selection) {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             (Self::Source { .. }, ProjectSceneSelection::Source(path)) => {
                 self.declares_source_path(path)
             }
             // Product identity and declared-root membership need actual source discovery. The
             // worker admits that association or returns a rejection without owner-thread I/O.
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             (Self::Source { .. }, ProjectSceneSelection::Product(_)) => true,
             (Self::Processed { base }, ProjectSceneSelection::Product(product)) => {
                 base.catalog().scenes().contains(product)
@@ -106,6 +107,7 @@ impl Context {
                         matches!(member.kind(), RuntimeContentMemberKind::Scene { .. })
                     })
             }
+            #[cfg(feature = "project-source")]
             (Self::Processed { .. }, ProjectSceneSelection::Source(_)) => false,
         }
     }
@@ -122,7 +124,7 @@ struct Admission {
 #[derive(Clone)]
 enum RequestPurpose {
     Travel,
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     AdditiveSource(AssetSourcePath),
     AdditiveProcessed,
 }
@@ -138,7 +140,7 @@ struct RequestOwner {
     context: Arc<Context>,
     closing: Arc<AtomicBool>,
     slot: Option<Slot>,
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     source_updates: Option<source_updates::SourceUpdates>,
     #[cfg(test)]
     gate: Option<preparation::TestGate>,
@@ -177,7 +179,7 @@ struct ManagedTravelState {
     state: ProjectSceneRequestState,
     publication_diagnostics: DiagnosticReport,
     diagnostics: DiagnosticReport,
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     source_closure: Option<crate::project_content::ProjectContentClosureReceipt>,
 }
 
@@ -363,7 +365,7 @@ impl RequestOwner {
 }
 
 /// Installs only the original Host authority. Call during unpublished runtime admission.
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 pub(super) fn install_context(
     world: &mut World,
     candidate: ProjectSettingsCandidate,
@@ -395,7 +397,7 @@ pub(super) fn install_runtime_context(
     install_request_owner(
         world,
         Context::Processed { base },
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         None,
     )
 }
@@ -403,7 +405,7 @@ pub(super) fn install_runtime_context(
 fn install_request_owner(
     world: &mut World,
     context: Context,
-    #[cfg(feature = "runtime-2d")] source_closure: Option<
+    #[cfg(feature = "project-source")] source_closure: Option<
         crate::project_content::ProjectContentClosureReceipt,
     >,
 ) -> Result<(), ProjectSceneRequestError> {
@@ -418,7 +420,7 @@ fn install_request_owner(
     if closing.load(Ordering::Acquire) {
         return Err(ProjectSceneRequestError::Unavailable);
     }
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     let source_updates = if let Some(source_closure) = source_closure {
         let generation = world
             .get_resource::<RuntimeGeneration>()
@@ -438,7 +440,7 @@ fn install_request_owner(
         context: Arc::new(context),
         closing,
         slot: None,
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         source_updates,
         #[cfg(test)]
         gate: None,
@@ -446,7 +448,7 @@ fn install_request_owner(
     Ok(())
 }
 
-#[cfg(all(test, feature = "runtime-2d"))]
+#[cfg(all(test, feature = "project-source"))]
 pub(super) fn hold_next_preparation(
     world: &mut World,
 ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
@@ -459,7 +461,7 @@ pub(super) fn hold_next_preparation(
 
 /// The exclusive TaskUpdate poll is inert in runtimes without a project request owner.
 pub(crate) fn poll_project_scene_requests(world: &mut World) {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     if world.get_resource::<RequestOwner>().is_some_and(|owner| {
         owner.slot.is_none()
             && !owner.closing.load(Ordering::Acquire)
@@ -531,7 +533,7 @@ pub(crate) fn poll_project_scene_requests(world: &mut World) {
                     Slot::Ready { admission, content }
                 }
                 (None, Err(failure)) => {
-                    #[cfg(feature = "runtime-2d")]
+                    #[cfg(feature = "project-source")]
                     if let Some(updates) = &mut owner.source_updates {
                         updates.failed(id, failure.error, failure.observations);
                     }
@@ -709,7 +711,7 @@ fn drive_managed_travel(world: &mut World) {
                     }
                 };
                 travel.published = report.instance;
-                #[cfg(feature = "runtime-2d")]
+                #[cfg(feature = "project-source")]
                 if let (Some(updates), Some(source_closure), Some(instance)) =
                     (&mut owner.source_updates, travel.source_closure.take(), travel.published.as_ref())
                 {
@@ -836,7 +838,7 @@ impl RuntimeCloseParticipant for CloseParticipant {
         if let Some(owner) = context.get_resource_mut::<RequestOwner>().map_err(|_| {
             RuntimeCloseParticipantError::new("project.scene.close-owner-unavailable")
         })? {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             let owner = {
                 let owner = owner.into_inner();
                 owner.source_updates = None;

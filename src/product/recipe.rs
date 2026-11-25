@@ -10,16 +10,20 @@ use std::{
 use nara_app::{
     App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
     PluginDefinitionKey, PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginId,
-    PluginPlanEntry, PluginPreflightContext, PluginSchemaProviderId, PluginSlot, PluginSlotId,
+    PluginPlanEntry, PluginPreflightContext, PluginSchemaProviderId,
 };
+#[cfg(feature = "render-wgpu")]
+use nara_app::PluginSlot;
 use nara_reflect::{
     ComponentSchemaOwnerSnapshot, ComponentSchemaProviderDefinition,
     PersistentComponentSchemaOwnerId,
 };
 use thiserror::Error;
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 use crate::project_content::ProjectContentLimits;
+#[cfg(feature = "render-wgpu")]
+use nara_scene::runtime_configuration::{ProductCapability, ProductCapabilitySet};
 
 #[cfg(feature = "render-wgpu")]
 use super::SLOT_WGPU_SELECTED_POLICY;
@@ -348,11 +352,11 @@ pub struct ProductRecipe {
     defaults: default_settings::ProductDefaultSettings,
     #[cfg(feature = "render-wgpu")]
     wgpu_policy: Option<RecipeWgpuPolicy>,
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub(crate) asset_domains: crate::project_content::ProjectAssetDomains,
     #[cfg(feature = "serde")]
     pub(crate) runtime_codecs: crate::runtime_content::RuntimeCodecs,
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     source_content_limits: Option<ProjectContentLimits>,
 }
 
@@ -379,11 +383,11 @@ impl fmt::Debug for ProductRecipe {
             .field("defaults", &self.defaults);
         #[cfg(feature = "render-wgpu")]
         debug.field("wgpu_policy", &self.selected_wgpu_policy());
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         debug.field("asset_domains", &self.asset_domains);
         #[cfg(feature = "serde")]
         debug.field("runtime_codecs", &self.runtime_codecs);
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         debug.field("source_content_limits", &self.source_content_limits);
         debug.finish()
     }
@@ -397,11 +401,11 @@ impl ProductRecipe {
             defaults: default_settings::ProductDefaultSettings::new(),
             #[cfg(feature = "render-wgpu")]
             wgpu_policy: None,
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             asset_domains: crate::project_content::ProjectAssetDomains::new(),
             #[cfg(feature = "serde")]
             runtime_codecs: crate::runtime_content::RuntimeCodecs::new(),
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             source_content_limits: None,
         }
     }
@@ -417,13 +421,13 @@ impl ProductRecipe {
         let empty = self.entries.is_empty() && self.defaults.is_empty();
         #[cfg(feature = "serde")]
         let empty = empty && self.runtime_codecs.is_empty();
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         let empty = empty && self.asset_domains.is_empty() && self.source_content_limits.is_none();
         empty
     }
 
     /// Sets the limits for file-backed Hosts loading source project content.
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     #[must_use]
     pub const fn with_source_content_limits(mut self, limits: ProjectContentLimits) -> Self {
         self.source_content_limits = Some(limits);
@@ -431,14 +435,14 @@ impl ProductRecipe {
     }
 
     /// Returns the configured source project content limits or their defaults.
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     #[must_use]
     pub fn source_content_limits(&self) -> ProjectContentLimits {
         self.source_content_limits.unwrap_or_default()
     }
 
     /// Selects one compiled source domain for file-backed Check and Play. Settings live in metadata.
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub fn add_asset_domain<D: nara_asset::SourceAssetImporter>(
         mut self,
     ) -> Result<Self, ProductRecipeError> {
@@ -598,12 +602,9 @@ impl ProductRecipe {
 
     /// Projects installation onto an admitted profile without removing compiled recipe entries.
     #[cfg(feature = "render-wgpu")]
-    pub(crate) fn with_profile_capabilities(
-        mut self,
-        capabilities: nara_project::ProductCapabilitySet,
-    ) -> Self {
+    pub(crate) fn with_profile_capabilities(mut self, capabilities: ProductCapabilitySet) -> Self {
         if let Some(selection) = &mut self.wgpu_policy {
-            selection.active = capabilities.contains(nara_project::ProductCapability::RenderWgpu);
+            selection.active = capabilities.contains(ProductCapability::RenderWgpu);
         }
         self
     }

@@ -1,4 +1,4 @@
-#![cfg(feature = "local-player")]
+#![cfg(any(feature = "development", feature = "cook"))]
 #![forbid(unsafe_code)]
 
 #[path = "support/resume_gameplay.rs"]

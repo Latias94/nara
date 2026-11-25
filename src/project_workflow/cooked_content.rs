@@ -18,12 +18,12 @@ use nara_asset::{
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_input::{ActionMapAsset, ActionMapDomain, ActionMapRuntimeCodec};
-use nara_project::RuntimeConfiguration;
 use nara_reflect::asset_reference::{
     AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
 };
 use nara_render::image::{ImageAsset, ImageDomain, ImageRuntimeCodec};
 use nara_render::tilemap::{TileSetDescriptor, TileSetDomain, TileSetRuntimeCodec};
+use nara_scene::runtime_configuration::RuntimeConfiguration;
 use nara_scene::{CompiledSceneCandidate, RuntimeSceneCandidate};
 
 use crate::{

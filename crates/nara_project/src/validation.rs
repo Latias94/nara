@@ -6,7 +6,6 @@ use nara_core::diagnostic::{
 };
 
 use crate::path::{ProjectPath, ProjectPathError};
-use crate::{MAX_PROJECT_FIXED_DEBT_STEPS, MAX_PROJECT_FIXED_STEPS_PER_FRAME};
 
 pub(crate) fn error(code: &'static str, summary: &'static str) -> Diagnostic {
     Diagnostic::error(
@@ -144,38 +143,6 @@ pub(crate) fn duration_from_positive_seconds(value: f64) -> Option<Duration> {
         .filter(|duration| !duration.is_zero())
 }
 
-pub(crate) fn validate_time_scale(
-    diagnostics: &mut DiagnosticReport,
-    field_path: &str,
-    value: f32,
-) {
-    if !value.is_finite() || value < 0.0 {
-        let diagnostic = error(
-            "project.runtime.invalid-time-scale",
-            "Runtime time scale must be finite and non-negative",
-        );
-        let diagnostic = with_field_path(diagnostic, field_path);
-        let diagnostic = with_public_bool(diagnostic, "finite", value.is_finite());
-        diagnostics.push(with_public_bool(diagnostic, "non_negative", value >= 0.0));
-    }
-}
-
-pub(crate) fn validate_nonzero_duration(
-    diagnostics: &mut DiagnosticReport,
-    field_path: &str,
-    value: Duration,
-) {
-    if value.is_zero() {
-        diagnostics.push(with_field_path(
-            error(
-                "project.runtime.invalid-duration",
-                "Runtime duration must be greater than zero",
-            ),
-            field_path,
-        ));
-    }
-}
-
 pub(crate) fn validate_duration_seconds(
     diagnostics: &mut DiagnosticReport,
     field_path: &str,
@@ -195,45 +162,6 @@ pub(crate) fn validate_duration_seconds(
             "A runtime duration cannot be represented at nanosecond precision",
         );
         diagnostics.push(with_field_path(diagnostic, field_path));
-    }
-}
-
-pub(crate) fn validate_fixed_step_limits(
-    diagnostics: &mut DiagnosticReport,
-    prefix: &str,
-    max_steps_per_frame: Option<u32>,
-    max_debt_steps: Option<u32>,
-) {
-    for (field, value, maximum, zero_code, oversized_code) in [
-        (
-            "max_fixed_steps_per_frame",
-            max_steps_per_frame,
-            MAX_PROJECT_FIXED_STEPS_PER_FRAME,
-            "project.runtime.invalid-max-fixed-steps",
-            "project.runtime.max-fixed-steps-too-large",
-        ),
-        (
-            "max_fixed_debt_steps",
-            max_debt_steps,
-            MAX_PROJECT_FIXED_DEBT_STEPS,
-            "project.runtime.invalid-max-fixed-debt",
-            "project.runtime.max-fixed-debt-too-large",
-        ),
-    ] {
-        let Some(value) = value else {
-            continue;
-        };
-        let field_path = format!("{prefix}.{field}");
-        if value == 0 {
-            let diagnostic = error(zero_code, "A fixed-step limit must be greater than zero");
-            let diagnostic = with_field_path(diagnostic, &field_path);
-            diagnostics.push(with_public_u64(diagnostic, "actual", u64::from(value)));
-        } else if value > maximum {
-            let diagnostic = error(oversized_code, "A fixed-step limit exceeds its hard limit");
-            let diagnostic = with_field_path(diagnostic, &field_path);
-            let diagnostic = with_public_u64(diagnostic, "actual", u64::from(value));
-            diagnostics.push(with_public_u64(diagnostic, "limit", u64::from(maximum)));
-        }
     }
 }
 

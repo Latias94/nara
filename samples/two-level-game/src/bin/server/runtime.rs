@@ -12,7 +12,6 @@ use nara::{
     app::{FixedCatchUpPolicy, FixedTime},
     fs::{ContentDigest, RelativePath},
     identity::EntityLookup,
-    project::{ProductCapability, ProductCapabilitySet, RuntimePreset},
     project_host::{
         HeadlessSession, HeadlessSessionClose, HeadlessSessionError,
         open_executable_relative_runtime_pack,
@@ -21,6 +20,7 @@ use nara::{
         RuntimeContentBase, RuntimeContentExpectation, RuntimeContentLimits,
         RuntimeContentMemberKind, RuntimeContentTarget,
     },
+    scene::runtime_configuration::{ProductCapability, ProductCapabilitySet, RuntimePreset},
 };
 use serde_json::{Value, json};
 use two_level_game::{
@@ -329,7 +329,7 @@ fn verify_runtime(session: &HeadlessSession, snapshot: &GameSnapshot) -> Result<
                     )
                 })
         }) == Some(true);
-        #[cfg(feature = "local-player")]
+        #[cfg(any(feature = "development", feature = "cook"))]
         let processed = processed && current.source_content_stamp().is_none();
         if !processed || Some(receipt.instance_id()) != snapshot.current_instance {
             return Err("Server did not retain the live processed Scene members".into());

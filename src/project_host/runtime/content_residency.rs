@@ -1,7 +1,7 @@
 //! Concrete CPU content ownership for the committed project Scene group.
 
 mod additive;
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 mod catalog;
 #[cfg(feature = "runtime-2d")]
 mod images;
@@ -20,9 +20,11 @@ pub use additive::unload_project_scene_addition;
 pub use instances::{inspect_current_scene_dependency, instantiate_current_scene_dependency};
 pub(super) use replacement::StagedProjectSceneReplacement;
 
+#[cfg(feature = "project-source")]
+use nara_asset::AssetRecord;
 use nara_asset::AssetServer;
 #[cfg(feature = "runtime-2d")]
-use nara_asset::{AssetRecord, ProjectAssetDatabase};
+use nara_asset::ProjectAssetDatabase;
 use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
 #[cfg(feature = "runtime-2d")]
 use nara_ecs::Mut;
@@ -40,7 +42,7 @@ use nara_scene::{
 
 use super::content::PreparedSceneContent;
 use super::{HostFault, single_error};
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use crate::project_content::ProjectContentSnapshot;
 use crate::{
     ecs::transaction,
@@ -66,7 +68,7 @@ impl ProjectSceneResidency {
         !self.additions.active.is_empty()
     }
 
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn owned_catalog_records(&self) -> impl Iterator<Item = &AssetRecord> {
         let primary = match &self.authority {
             ResidencyAuthority::Source { catalog, .. } => catalog.as_slice(),
@@ -86,7 +88,7 @@ impl ProjectSceneResidency {
 
 #[derive(Clone, Copy)]
 enum ResidencyInput<'a> {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     Source(&'a ProjectContentSnapshot),
     Processed(&'a ProcessedSceneContent),
 }
@@ -94,7 +96,7 @@ enum ResidencyInput<'a> {
 impl<'a> From<&'a PreparedSceneContent> for ResidencyInput<'a> {
     fn from(content: &'a PreparedSceneContent) -> Self {
         match content {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             PreparedSceneContent::Source(snapshot) => Self::Source(snapshot),
             PreparedSceneContent::Processed(content) => Self::Processed(content),
         }
@@ -104,7 +106,7 @@ impl<'a> From<&'a PreparedSceneContent> for ResidencyInput<'a> {
 impl<'a> ResidencyInput<'a> {
     fn domain_assets(self) -> &'a ProjectDomainAssets {
         match self {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             Self::Source(snapshot) => snapshot.domain_assets(),
             Self::Processed(content) => &content.domains,
         }
@@ -112,7 +114,7 @@ impl<'a> ResidencyInput<'a> {
 }
 
 /// Source startup uses the same concrete resource preparation and publication as later travel.
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 pub(super) fn publish_startup(
     world: &mut World,
     snapshot: &ProjectContentSnapshot,
@@ -161,10 +163,7 @@ fn publish_startup_content(
                     inputs,
                     &prepared.stock.tilesets.retirements,
                     prepared.bindings.staged_server(),
-                    prepared
-                        .catalog
-                        .asset_resolution()
-                        .map(|resolver| resolver.database()),
+                    prepared.catalog.asset_database(),
                 )?;
                 prepared.commit_startup(world, content.domain_assets(), Some(tilesets));
                 Ok(())
@@ -187,7 +186,7 @@ fn prepare_startup_resources(
     world.register_component::<AssetServer>();
     world.register_component::<ProjectSceneResidency>();
     world.register_component::<ProjectDomainAssets>();
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     if matches!(content, ResidencyInput::Source(_)) {
         world.register_component::<ProjectAssetDatabase>();
     }
@@ -195,10 +194,12 @@ fn prepare_startup_resources(
     let unsupported = transaction::validate_resource_insertion::<AssetServer>(world).is_err()
         || transaction::validate_resource_insertion::<ProjectSceneResidency>(world).is_err()
         || transaction::validate_resource_insertion::<ProjectDomainAssets>(world).is_err();
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     let unsupported = unsupported
         || matches!(content, ResidencyInput::Source(_))
-            && transaction::validate_resource_insertion::<ProjectAssetDatabase>(world).is_err()
+            && transaction::validate_resource_insertion::<ProjectAssetDatabase>(world).is_err();
+    #[cfg(feature = "runtime-2d")]
+    let unsupported = unsupported
         || content.tileset_count() != 0
             && transaction::validate_resource_scope::<TileSetAssets>(world).is_err();
     if unsupported {
@@ -269,6 +270,7 @@ impl PreparedResidency {
         #[cfg(feature = "runtime-2d")]
         let (bindings, stock) = {
             let mut bindings = bindings;
+            #[cfg(feature = "project-source")]
             if let (Some(_), ResidencyInput::Source(snapshot)) = (current, content) {
                 catalog.stage_source_relocations(snapshot, &mut bindings)?;
             }

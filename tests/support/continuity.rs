@@ -294,7 +294,12 @@ impl Fixture {
             assert!(
                 !matches!(
                     name,
-                    "notify" | "nara_asset_watch" | "nara_tooling" | "nara-editor" | "cpal"
+                    "notify"
+                        | "nara_asset_watch"
+                        | "nara_project"
+                        | "nara_tooling"
+                        | "nara-editor"
+                        | "cpal"
                 ) && !name.starts_with("nara_ui")
                     && !name.starts_with("dear-imgui"),
                 "shipping runtime inherited development or UI package: {line}",
@@ -313,6 +318,7 @@ impl Fixture {
                     runtime = true;
                     for forbidden in [
                         "default",
+                        "project-source",
                         "project-tooling",
                         "project-workflow",
                         "tooling",

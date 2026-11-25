@@ -3,9 +3,7 @@ use nara_app::{PluginDefinition, PluginSlot, PluginSlotId};
 use nara_app::{PluginGroup, PluginGroupBuilder, PluginGroupId};
 
 #[cfg(all(
-    feature = "project-runtime",
-    feature = "runtime-2d",
-    feature = "serde",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -232,7 +230,7 @@ mod desktop {
         let presentation = DesktopPresentationDriver::new(
             &runtime,
             DesktopPresentationOptions::default(),
-            #[cfg(all(feature = "project-runtime", feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             None,
             DesktopPresentationReports::default(),
         );

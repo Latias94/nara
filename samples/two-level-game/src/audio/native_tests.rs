@@ -17,6 +17,7 @@ use super::{
     start_audio, witness,
 };
 
+#[cfg(any(feature = "development", feature = "cook"))]
 #[path = "development_native_tests.rs"]
 mod development;
 

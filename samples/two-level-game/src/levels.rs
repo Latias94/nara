@@ -1,7 +1,6 @@
-use nara::{
-    asset::{AssetProductRef, ImportedProductId, StableAssetId},
-    project::ProjectPath,
-};
+use nara::asset::{AssetProductRef, ImportedProductId, StableAssetId};
+#[cfg(any(feature = "development", feature = "cook"))]
+use nara::project::ProjectPath;
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// Number of members in each supplied Scene fixture, including the explorer and static walls.
@@ -28,14 +27,19 @@ impl LevelId {
     pub const ALL: [Self; 2] = [Self::Meadow, Self::Cavern];
     pub const STARTUP: Self = Self::Meadow;
 
-    /// Scene path relative to the project's effective `paths.scenes` directory.
     #[must_use]
-    pub fn scene_path(self) -> ProjectPath {
-        ProjectPath::new(match self {
+    pub const fn scene_file_name(self) -> &'static str {
+        match self {
             Self::Meadow => "meadow.scene.json",
             Self::Cavern => "cavern.scene.json",
-        })
-        .expect("the game's static Scene paths are valid")
+        }
+    }
+
+    /// Scene path relative to the project's effective `paths.scenes` directory.
+    #[cfg(any(feature = "development", feature = "cook"))]
+    #[must_use]
+    pub fn scene_path(self) -> ProjectPath {
+        ProjectPath::new(self.scene_file_name()).expect("the game's static Scene paths are valid")
     }
 
     /// Complete shipping Scene identity, independent of authoring `ProjectLocation` identities.

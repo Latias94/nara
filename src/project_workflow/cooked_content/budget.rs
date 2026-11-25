@@ -45,7 +45,7 @@ pub(super) fn request_heap_bytes(
         total,
         mul(
             request.configuration.capabilities.requested.len(),
-            size_of::<nara_project::ProductCapability>(),
+            size_of::<nara_scene::runtime_configuration::ProductCapability>(),
         )?,
     )?;
     add(

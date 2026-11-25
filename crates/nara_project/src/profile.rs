@@ -2,30 +2,31 @@ use std::fmt;
 
 use nara_app::TimeSettingsError;
 use nara_app::tasks::TaskConfigError;
-use nara_core::diagnostic::{
-    DiagnosticReport, DiagnosticSettingsError, MAX_RUNTIME_DIAGNOSTIC_ENTRIES,
+use nara_core::diagnostic::{DiagnosticReport, DiagnosticSettingsError};
+use nara_scene::runtime_configuration::RuntimeSettingsError;
+use nara_scene::runtime_configuration::validation::{
+    validate_fixed_step_limits, validate_time_scale, validate_window_fields,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::MAX_PROJECT_EXECUTION_CONTRACT_BYTES;
-use crate::capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
 use crate::effective::{
-    EffectiveDiagnosticsSettings, EffectiveInputSettings, EffectiveProjectPaths,
-    EffectiveProjectSettings, EffectiveRuntimeSettings, EffectiveStartupSettings,
-    EffectiveTaskSettings, EffectiveUiSettings, EffectiveWindowSettings, ProjectExecutionContract,
+    EffectiveInputSettings, EffectiveProjectPaths, EffectiveProjectSettings,
+    EffectiveStartupSettings, ProjectExecutionContract,
 };
 use crate::path::{ProjectPath, ProjectPathError};
 use crate::render::ProjectRenderPatch;
-use crate::sections::{
-    ProjectCapabilitiesManifest, ProjectFixedCatchUpPolicy, ProjectPresentMode,
-    ProjectTaskPoolManifest, ProjectTaskShutdownManifest, ProjectTasksManifest,
-    ProjectUiSurfaceManifest, ProjectWindowMode, runtime_diagnostics_settings,
-};
 use crate::validation::{
-    duration_from_positive_seconds, error, validate_duration_seconds, validate_fixed_step_limits,
-    validate_optional_path_field, validate_path_field, validate_time_scale, with_field_path,
-    with_public_bool, with_public_u64,
+    duration_from_positive_seconds, error, validate_duration_seconds, validate_optional_path_field,
+    validate_path_field, with_field_path, with_public_u64,
+};
+use crate::{
+    EffectiveDiagnosticsSettings, EffectiveRuntimeSettings, EffectiveUiSettings,
+    EffectiveWindowSettings, MAX_PROJECT_EXECUTION_CONTRACT_BYTES, ProductCapability,
+    ProductCapabilitySet, ProjectCapabilitiesManifest, ProjectDiagnosticsManifest,
+    ProjectFixedCatchUpPolicy, ProjectPresentMode, ProjectTaskPoolManifest,
+    ProjectTaskShutdownManifest, ProjectTasksManifest, ProjectUiManifest, ProjectUiSurfaceManifest,
+    ProjectWindowMode, RuntimePreset,
 };
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
@@ -88,6 +89,7 @@ impl ProjectProfileOverlay {
     pub(crate) fn apply_to(
         &self,
         settings: &mut EffectiveProjectSettings,
+        base_tasks: ProjectTasksManifest,
     ) -> Result<(), ProjectProfileError> {
         self.paths.apply_to(&mut settings.paths)?;
         self.startup.apply_to(&mut settings.startup)?;
@@ -97,7 +99,7 @@ impl ProjectProfileOverlay {
         if let Some(preset) = self.runtime.preset {
             settings.runtime_preset = preset;
         }
-        self.tasks.apply_to(&mut settings.tasks)?;
+        settings.tasks = self.tasks.merged_with(base_tasks).try_into()?;
         self.render.apply_to(&mut settings.render);
         self.ui.apply_to(&mut settings.ui);
         self.window.apply_to(&mut settings.window);
@@ -184,9 +186,10 @@ pub struct ProjectUiPatch {
 
 impl ProjectUiPatch {
     fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
-        if let Some(surface) = self.primary_surface {
-            surface.validate_into(diagnostics, &format!("{prefix}.primary_surface"));
+        ProjectUiManifest {
+            primary_surface: self.primary_surface,
         }
+        .validate_into(diagnostics, prefix);
         if self.clear_primary_surface && self.primary_surface.is_some() {
             diagnostics.push(with_field_path(
                 error(
@@ -430,7 +433,7 @@ impl ProjectRuntimePatch {
                 .set_catch_up_policy(catch_up_policy.into())
                 .map_err(ProjectProfileError::InvalidRuntimeSettings)?;
         }
-        runtime.replace(runtime_time, fixed_time);
+        *runtime = EffectiveRuntimeSettings::new(runtime_time, fixed_time);
         Ok(())
     }
 }
@@ -456,12 +459,6 @@ impl ProjectTasksPatch {
         base: &ProjectTasksManifest,
     ) {
         self.merged_with(*base).validate_into(diagnostics, prefix);
-    }
-
-    fn apply_to(&self, tasks: &mut EffectiveTaskSettings) -> Result<(), ProjectProfileError> {
-        let base = ProjectTasksManifest::from_config(tasks.pool_config);
-        *tasks = self.merged_with(base).lower()?;
-        Ok(())
     }
 
     fn merged_with(&self, mut tasks: ProjectTasksManifest) -> ProjectTasksManifest {
@@ -541,43 +538,14 @@ pub struct ProjectWindowPatch {
 
 impl ProjectWindowPatch {
     fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
-        if self
-            .title
-            .as_ref()
-            .is_some_and(|title| title.trim().is_empty())
-        {
-            diagnostics.push(with_field_path(
-                error("project.window.empty-title", "Window title cannot be empty"),
-                &format!("{prefix}.title"),
-            ));
-        }
-        if matches!(self.width, Some(0)) {
-            let diagnostic = error(
-                "project.window.invalid-width",
-                "Window width must be greater than zero",
-            );
-            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.width"));
-            diagnostics.push(with_public_u64(diagnostic, "actual", 0));
-        }
-        if matches!(self.height, Some(0)) {
-            let diagnostic = error(
-                "project.window.invalid-height",
-                "Window height must be greater than zero",
-            );
-            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.height"));
-            diagnostics.push(with_public_u64(diagnostic, "actual", 0));
-        }
-        if let Some(scale_factor) = self.scale_factor
-            && (!scale_factor.is_finite() || scale_factor <= 0.0)
-        {
-            let diagnostic = error(
-                "project.window.invalid-scale-factor",
-                "Window scale factor must be finite and greater than zero",
-            );
-            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.scale_factor"));
-            let diagnostic = with_public_bool(diagnostic, "finite", scale_factor.is_finite());
-            diagnostics.push(with_public_bool(diagnostic, "positive", scale_factor > 0.0));
-        }
+        validate_window_fields(
+            diagnostics,
+            prefix,
+            self.title.as_deref(),
+            self.width,
+            self.height,
+            self.scale_factor,
+        );
     }
 
     fn apply_to(&self, window: &mut EffectiveWindowSettings) {
@@ -656,32 +624,8 @@ pub struct ProjectDiagnosticsPatch {
 
 impl ProjectDiagnosticsPatch {
     fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
-        if matches!(self.runtime_capacity, Some(0)) {
-            let diagnostic = error(
-                "project.diagnostics.invalid-runtime-capacity",
-                "Runtime diagnostic capacity must be greater than zero",
-            );
-            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.runtime_capacity"));
-            diagnostics.push(with_public_u64(diagnostic, "actual", 0));
-        }
-        if let Some(capacity) = self.runtime_capacity
-            && capacity > MAX_RUNTIME_DIAGNOSTIC_ENTRIES
-        {
-            let diagnostic = error(
-                "project.diagnostics.runtime-capacity-too-large",
-                "Runtime diagnostic capacity exceeds its hard limit",
-            );
-            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.runtime_capacity"));
-            let diagnostic = with_public_u64(
-                diagnostic,
-                "actual",
-                u64::try_from(capacity).unwrap_or(u64::MAX),
-            );
-            diagnostics.push(with_public_u64(
-                diagnostic,
-                "limit",
-                u64::try_from(MAX_RUNTIME_DIAGNOSTIC_ENTRIES).unwrap_or(u64::MAX),
-            ));
+        if let Some(runtime_capacity) = self.runtime_capacity {
+            ProjectDiagnosticsManifest { runtime_capacity }.validate_into(diagnostics, prefix);
         }
     }
 
@@ -689,8 +633,8 @@ impl ProjectDiagnosticsPatch {
         &self,
         diagnostics: &mut EffectiveDiagnosticsSettings,
     ) -> Result<(), ProjectProfileError> {
-        if let Some(capacity) = self.runtime_capacity {
-            diagnostics.runtime = runtime_diagnostics_settings(capacity)?;
+        if let Some(runtime_capacity) = self.runtime_capacity {
+            *diagnostics = ProjectDiagnosticsManifest { runtime_capacity }.try_into()?;
         }
         Ok(())
     }
@@ -719,6 +663,22 @@ pub enum ProjectProfileError {
     InvalidDiagnosticCapacity,
     #[error("invalid diagnostic settings: {0}")]
     InvalidDiagnosticSettings(DiagnosticSettingsError),
+}
+
+impl From<RuntimeSettingsError> for ProjectProfileError {
+    fn from(error: RuntimeSettingsError) -> Self {
+        match error {
+            RuntimeSettingsError::InvalidRuntimeSettings(error) => {
+                Self::InvalidRuntimeSettings(error)
+            }
+            RuntimeSettingsError::InvalidTaskLimit { field } => Self::InvalidTaskLimit { field },
+            RuntimeSettingsError::InvalidTaskSettings(error) => Self::InvalidTaskSettings(error),
+            RuntimeSettingsError::InvalidDiagnosticCapacity => Self::InvalidDiagnosticCapacity,
+            RuntimeSettingsError::InvalidDiagnosticSettings(error) => {
+                Self::InvalidDiagnosticSettings(error)
+            }
+        }
+    }
 }
 
 impl fmt::Debug for ProjectProfileError {

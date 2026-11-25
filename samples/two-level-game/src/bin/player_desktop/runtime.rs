@@ -280,9 +280,12 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
         .map(|report| output::bounded(&format!("{:?}", report.diagnostics())));
     if message.is_none()
         && report.as_ref().is_some_and(|report| {
+            #[cfg(any(feature = "development", feature = "cook"))]
+            if report.startup_content_closure().is_some() {
+                return true;
+            }
             !matches!(report.outcome(), DesktopRunOutcome::Completed(_))
                 || report.diagnostics().has_errors()
-                || report.startup_content_closure().is_some()
         })
     {
         message = Some(

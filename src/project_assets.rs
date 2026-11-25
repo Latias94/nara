@@ -7,15 +7,17 @@ use std::{
     sync::Arc,
 };
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use std::collections::{BTreeMap, BTreeSet};
 
-use nara_asset::{AssetDomain, AssetProductRef, AssetRef, ImportedProductId};
 #[cfg(feature = "runtime-2d")]
-use nara_asset::{AssetPathScope, AssetRecord, StableAssetId};
+use nara_asset::AssetRecord;
+use nara_asset::{AssetDomain, AssetProductRef, AssetRef, ImportedProductId};
+#[cfg(feature = "project-source")]
+use nara_asset::{AssetPathScope, StableAssetId};
 use nara_ecs::Resource;
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use crate::project_content::ProjectContentLease;
 use crate::runtime_content::{
     RuntimeContentAsset, RuntimeContentBase, RuntimeContentError, RuntimeContentLease,
@@ -28,7 +30,7 @@ pub struct ProjectAssetCollection<T> {
 }
 
 pub(crate) enum CollectionStorage<T> {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     Source {
         scope: AssetPathScope,
         records: Vec<AssetRecord>,
@@ -55,7 +57,7 @@ impl<T> ProjectAssetCollection<T> {
     #[must_use]
     pub fn get(&self, reference: &AssetRef) -> Option<&T> {
         match &self.storage {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             CollectionStorage::Source {
                 scope,
                 records,
@@ -95,7 +97,7 @@ impl<T> ProjectAssetCollection<T> {
     /// Visits each stored decoded value once, independently of its aliases or Product mappings.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &T> {
         match &self.storage {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             CollectionStorage::Source { products, .. } => CollectionIter::Source(products.iter()),
             CollectionStorage::Processed { products, .. } => {
                 CollectionIter::Processed(products.iter())
@@ -114,6 +116,7 @@ impl<T> ProjectAssetCollection<T> {
     pub(crate) fn runtime_acquisitions(&self) -> &[RuntimeContentAsset<T>] {
         match &self.storage {
             CollectionStorage::Processed { products, .. } => products,
+            #[cfg(feature = "project-source")]
             CollectionStorage::Source { .. } => &[],
         }
     }
@@ -121,6 +124,7 @@ impl<T> ProjectAssetCollection<T> {
     #[cfg(feature = "runtime-2d")]
     fn source_records_slice(&self) -> &[AssetRecord] {
         match &self.storage {
+            #[cfg(feature = "project-source")]
             CollectionStorage::Source { records, .. } => records,
             CollectionStorage::Processed { .. } => &[],
         }
@@ -128,7 +132,7 @@ impl<T> ProjectAssetCollection<T> {
 }
 
 enum CollectionIter<'a, T> {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     Source(std::slice::Iter<'a, T>),
     Processed(std::slice::Iter<'a, RuntimeContentAsset<T>>),
 }
@@ -138,7 +142,7 @@ impl<'a, T> Iterator for CollectionIter<'a, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             Self::Source(products) => products.next(),
             Self::Processed(products) => products.next().map(RuntimeContentAsset::product),
         }
@@ -146,7 +150,7 @@ impl<'a, T> Iterator for CollectionIter<'a, T> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         match self {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             Self::Source(products) => products.size_hint(),
             Self::Processed(products) => products.size_hint(),
         }
@@ -155,17 +159,17 @@ impl<'a, T> Iterator for CollectionIter<'a, T> {
 
 impl<T> ExactSizeIterator for CollectionIter<'_, T> {}
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 pub(crate) type RequiredAssetProducts = BTreeMap<StableAssetId, BTreeSet<AssetProductRef>>;
 
 pub(crate) trait ErasedCollection: Any + Send + Sync {
     fn domain_type(&self) -> TypeId;
     fn as_any(&self) -> &dyn Any;
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn as_any_mut(&mut self) -> &mut dyn Any;
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn records(&self) -> &[AssetRecord];
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn validate_product_selections(
         &self,
         required: &mut RequiredAssetProducts,
@@ -223,15 +227,15 @@ impl<D: AssetDomain> ErasedCollection for DomainCollection<D> {
     fn as_any(&self) -> &dyn Any {
         &self.0
     }
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn as_any_mut(&mut self) -> &mut dyn Any {
         &mut self.0
     }
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn records(&self) -> &[AssetRecord] {
         self.0.source_records_slice()
     }
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn validate_product_selections(
         &self,
         required: &mut RequiredAssetProducts,
@@ -264,7 +268,7 @@ struct DomainAssetsInner {
 }
 
 enum DomainAssetsCustody {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     Source { _lease: ProjectContentLease },
     Processed {
         _lease: RuntimeContentLease,
@@ -295,7 +299,7 @@ impl ProjectDomainAssets {
             .checked_add(collections.checked_mul(size_of::<Box<dyn ErasedCollection>>())?)
     }
 
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     pub(crate) fn validate_product_selections(
         &self,
         required: &mut RequiredAssetProducts,
@@ -309,7 +313,7 @@ impl ProjectDomainAssets {
         Ok(())
     }
 
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     pub(crate) fn new(
         collections: Vec<Box<dyn ErasedCollection>>,
         lease: ProjectContentLease,
@@ -361,7 +365,7 @@ impl fmt::Debug for ProjectDomainAssets {
     }
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 pub(crate) fn validate_product_membership<D: AssetDomain>(
     product: &D::Product,
     required: BTreeSet<AssetProductRef>,

@@ -11,7 +11,7 @@ use nara::{
     image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec},
     input::ActionMapRuntimeCodec,
     material::Material2dRuntimeCodec,
-    project::RuntimeConfiguration,
+    scene::runtime_configuration::RuntimeConfiguration,
     project_host::resolve_runtime_configuration,
     runtime_content::{
         RuntimeContentCatalog, RuntimeContentCatalogLimits, RuntimeContentDependency,

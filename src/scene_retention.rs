@@ -15,6 +15,14 @@ pub(crate) const BTREE_ENTRY_OVERHEAD: usize = 6 * size_of::<usize>();
 pub(crate) const ARC_CONTROL_BLOCK_BYTES: usize = 4 * size_of::<usize>();
 pub(crate) const VALUE_NODE_ALLOCATION_BYTES: usize = 32;
 
+#[cfg(all(feature = "project-runtime", feature = "runtime-2d", feature = "serde"))]
+pub(crate) fn material_record_work_bytes(cost: nara_reflect::ComponentValueCost) -> Option<usize> {
+    cost.nodes()
+        .checked_mul(size_of::<nara_reflect::ComponentValue>().checked_add(BTREE_ENTRY_OVERHEAD)?)?
+        .checked_add(cost.logical_bytes())?
+        .checked_add(size_of::<nara_render::material::Material2dRecord>())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SceneRetentionOverflow;
 
@@ -1524,7 +1532,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(source.retained_bytes(), required);
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         assert!(!source.is_project_backed());
         assert!(!source.is_content_managed());
         assert!(source.asset_resolution().is_none());

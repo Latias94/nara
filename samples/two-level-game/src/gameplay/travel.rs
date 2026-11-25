@@ -28,13 +28,16 @@ use super::{
     side_room::{self, Room, Rooms},
     storage::Storage,
 };
+#[cfg(any(feature = "development", feature = "cook"))]
+use crate::resume::LevelContentStamp;
+#[cfg(feature = "local-player")]
+use crate::command::CommandSource;
 use crate::{
     command::{
-        CommandKey, CommandSchedule, CommandSource, GameCommand, SERVER_COMMAND_SOURCE,
-        SemanticCommand, ServerCommand,
+        CommandKey, CommandSchedule, GameCommand, SERVER_COMMAND_SOURCE, SemanticCommand,
+        ServerCommand,
     },
     levels::{LevelId, LevelKey},
-    resume::LevelContentStamp,
     save::{Checkpoint, CheckpointLocation, MAX_MARKERS, io::CheckpointBinding},
 };
 
@@ -51,6 +54,7 @@ struct Pending {
     checkpoint: Checkpoint,
     target: LevelKey,
     validate: Vec<LevelId>,
+    #[cfg(any(feature = "development", feature = "cook"))]
     content: Vec<LevelContentStamp>,
     request: Option<ProjectSceneRequestId>,
     kind: TravelKind,
@@ -327,6 +331,7 @@ pub(super) fn begin(
             .map(|pickup| pickup.level.level()),
     );
     validate.extend(checkpoint.markers.iter().map(|marker| marker.level.level()));
+    #[cfg(any(feature = "development", feature = "cook"))]
     validate.extend(super::resume::required_levels(world));
     // Validate other sources first; keep the final target's prepared generation for commit.
     validate.remove(&checkpoint.location.level.level());
@@ -334,6 +339,7 @@ pub(super) fn begin(
         target: checkpoint.location.level,
         checkpoint,
         validate: validate.into_iter().collect(),
+        #[cfg(any(feature = "development", feature = "cook"))]
         content: Vec::new(),
         request: None,
         kind,
@@ -355,7 +361,7 @@ pub(super) fn advance(world: &mut World) {
         .unwrap_or(pending.target.level());
     if pending.request.is_none() {
         let selection = match CurrentScene::get(world) {
-            #[cfg(feature = "local-player")]
+            #[cfg(any(feature = "development", feature = "cook"))]
             Some(current) if current.source_view().with_runtime_scene(|_| ()).is_none() => {
                 ProjectSceneSelection::Source(level.scene_path())
             }
@@ -399,16 +405,18 @@ pub(super) fn advance(world: &mut World) {
                     .ok_or("prepared level lacks its Sound Bank")?;
                 bank.validate(view.domain_assets(), &presentation.bank)?;
             }
-            #[cfg(feature = "local-player")]
-            let source = view.source_content_stamp().map(|source| {
-                (
-                    super::resume::stamp(level, source),
-                    source.schema_fingerprint().as_bytes(),
-                )
-            });
-            #[cfg(not(feature = "local-player"))]
-            let source = None;
-            Ok((content, source))
+            #[cfg(any(feature = "development", feature = "cook"))]
+            {
+                let source = view.source_content_stamp().map(|source| {
+                    (
+                        super::resume::stamp(level, source),
+                        source.schema_fingerprint().as_bytes(),
+                    )
+                });
+                Ok((content, source))
+            }
+            #[cfg(not(any(feature = "development", feature = "cook")))]
+            Ok(content)
         }),
         Some(ProjectSceneRequestState::Preparing | ProjectSceneRequestState::Cancelling) => None,
         state => Some(Err(format!(
@@ -420,7 +428,7 @@ pub(super) fn advance(world: &mut World) {
         world.resource_mut::<Travel>().pending = Some(pending);
         return;
     };
-    let (content, source) = match prepared {
+    let content = match prepared {
         Ok(content) => content,
         Err(error) => {
             cancel_ack(world, request);
@@ -428,6 +436,9 @@ pub(super) fn advance(world: &mut World) {
             return;
         }
     };
+    #[cfg(any(feature = "development", feature = "cook"))]
+    let (content, source) = content;
+    #[cfg(any(feature = "development", feature = "cook"))]
     let stamp = match super::resume::validate_content(world, source) {
         Ok(stamp) => stamp,
         Err(error) => {
@@ -450,6 +461,7 @@ pub(super) fn advance(world: &mut World) {
         reject(world, error);
         return;
     }
+    #[cfg(any(feature = "development", feature = "cook"))]
     pending.content.extend(stamp);
     if !pending.validate.is_empty() {
         cancel_ack(world, request);
@@ -493,6 +505,7 @@ pub(super) fn advance(world: &mut World) {
         );
         return;
     }
+    #[cfg(any(feature = "development", feature = "cook"))]
     super::resume::commit_content(world, pending.content);
     *world.resource_mut::<Rooms>() = Rooms::default();
     #[cfg(all(windows, feature = "audio-cpal", feature = "local-player"))]
@@ -576,5 +589,5 @@ fn cancel_ack(world: &mut World, request: ProjectSceneRequestId) {
 #[cfg(test)]
 #[path = "travel/tests/admission.rs"]
 mod admission_tests;
-#[cfg(all(test, feature = "local-player"))]
+#[cfg(all(test, any(feature = "development", feature = "cook")))]
 mod tests;

@@ -1926,7 +1926,7 @@ mod tests {
     use nara::{
         asset::{AssetProductRef, ImportedProductId, StableAssetId},
         fs::ContentDigest,
-        project::RuntimeConfiguration,
+        scene::runtime_configuration::RuntimeConfiguration,
         runtime_content::{
             RuntimeContentCatalog, RuntimeContentCatalogDefinition, RuntimeContentCatalogLimits,
             RuntimeContentMember, RuntimeContentMemberKind, RuntimeContentTarget,

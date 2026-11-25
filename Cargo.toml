@@ -223,12 +223,16 @@ project-runtime = [
     "dep:rustix",
     "dep:windows-sys",
     "nara_core/fs-capabilities",
-    "dep:nara_project",
+    "nara_scene/runtime-configuration",
 ]
-project-workflow = [
+project-source = [
     "project-runtime",
     "runtime-2d",
     "serde",
+    "dep:nara_project",
+]
+project-workflow = [
+    "project-source",
     "dep:getrandom",
     "dep:uuid",
     "dep:toml",
@@ -320,12 +324,12 @@ required-features = ["project-runtime", "runtime-core"]
 [[test]]
 name = "project_composition"
 path = "tests/project_composition.rs"
-required-features = ["project-runtime", "runtime-core"]
+required-features = ["project-source"]
 
 [[test]]
 name = "runtime_configuration_composition"
 path = "tests/runtime_configuration_composition.rs"
-required-features = ["project-runtime", "runtime-core"]
+required-features = ["project-source"]
 
 [[test]]
 name = "runtime_scene_activation"
@@ -335,32 +339,32 @@ required-features = ["project-runtime", "runtime-core", "serde"]
 [[test]]
 name = "project_content_boot"
 path = "tests/project_content_boot.rs"
-required-features = ["project-runtime", "runtime-2d", "serde"]
+required-features = ["project-source"]
 
 [[test]]
 name = "project_content_boundary"
 path = "tests/project_content_boundary.rs"
-required-features = ["project-runtime", "runtime-2d", "serde"]
+required-features = ["project-source"]
 
 [[test]]
 name = "project_content_limits"
 path = "tests/project_content_limits.rs"
-required-features = ["project-runtime", "runtime-2d", "serde"]
+required-features = ["project-source"]
 
 [[test]]
 name = "project_host_boundary"
 path = "tests/project_host_boundary.rs"
-required-features = ["project-runtime", "runtime-2d", "serde"]
+required-features = ["project-source"]
 
 [[test]]
 name = "project_runtime_boot"
 path = "tests/project_runtime_boot.rs"
-required-features = ["project-runtime", "runtime-2d", "serde"]
+required-features = ["project-source"]
 
 [[test]]
 name = "plugin_composition"
 path = "tests/plugin_composition.rs"
-required-features = ["project-runtime", "runtime-core"]
+required-features = ["project-source"]
 
 [[test]]
 name = "scene_authoring_session"

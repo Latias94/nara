@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use crate::fs::DirectoryCapability;
 use nara_app::{
     AppExit, RuntimeClosePolicy, RuntimeControl, RuntimeControlStatus, RuntimeScopeError,
@@ -15,9 +15,9 @@ use super::{
     CleanupDriveOutcome, HostFault, PreparedProjectStart, ProjectHost,
     prepare_runtime_content_start,
 };
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use super::{StartupContentClosureReceipt, prepare_project_start};
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use crate::ProductRecipe;
 
 /// Failure of an explicit operation on a retained Headless product.
@@ -51,7 +51,7 @@ pub enum HeadlessSessionClose {
 }
 
 enum Inputs {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     Source {
         root: DirectoryCapability,
         recipe: ProductRecipe,
@@ -73,7 +73,7 @@ pub struct HeadlessSession {
     inputs: Option<Inputs>,
     host: Option<ProjectHost>,
     diagnostics: DiagnosticReport,
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     startup_content_closure: Option<StartupContentClosureReceipt>,
     paused_boundary: bool,
     exit: Option<AppExit>,
@@ -96,7 +96,7 @@ impl std::fmt::Debug for HeadlessSession {
 
 impl HeadlessSession {
     /// Selects a source product without starting it or installing a toolchain.
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     #[must_use]
     pub fn new(root: DirectoryCapability, recipe: ProductRecipe) -> Self {
         Self::with_inputs(Inputs::Source { root, recipe })
@@ -113,7 +113,7 @@ impl HeadlessSession {
             inputs: Some(inputs),
             host: None,
             diagnostics: DiagnosticReport::default(),
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             startup_content_closure: None,
             paused_boundary: false,
             exit: None,
@@ -135,7 +135,7 @@ impl HeadlessSession {
             .take()
             .ok_or(HeadlessSessionError::Unavailable)?;
         let prepared = match inputs {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             Inputs::Source { root, recipe } => {
                 prepare_project_start(root, None, RuntimeClosePolicy::default(), recipe, None)
             }
@@ -147,12 +147,12 @@ impl HeadlessSession {
             mut host,
             mut attempt,
             plan_diagnostics,
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             startup_content_closure,
         } = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
-                #[cfg(feature = "runtime-2d")]
+                #[cfg(feature = "project-source")]
                 {
                     self.startup_content_closure = error.startup_content_closure;
                 }
@@ -160,7 +160,7 @@ impl HeadlessSession {
             }
         };
         self.diagnostics.extend(plan_diagnostics);
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         {
             self.startup_content_closure = startup_content_closure;
         }
@@ -192,7 +192,7 @@ impl HeadlessSession {
     }
 
     #[must_use]
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     pub fn startup_content_closure(&self) -> Option<&StartupContentClosureReceipt> {
         self.startup_content_closure.as_ref()
     }

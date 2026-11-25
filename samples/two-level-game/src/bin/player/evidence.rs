@@ -103,6 +103,7 @@ impl Evidence {
     }
 
     pub fn observe(&mut self, session: &HeadlessSession) -> Result<(), String> {
+        #[cfg(any(feature = "development", feature = "cook"))]
         if session.startup_content_closure().is_some() {
             return Err("processed Player unexpectedly retained a source startup closure".into());
         }
@@ -235,6 +236,7 @@ impl Evidence {
             return Ok(());
         }
         let view = current.source_view();
+        #[cfg(any(feature = "development", feature = "cook"))]
         if current.source_content_stamp().is_some() || view.with_compiled_scene(|_, _| ()).is_some()
         {
             return Err("Player current Scene unexpectedly retained authoring source".into());
@@ -254,7 +256,7 @@ impl Evidence {
                 }
                 let level = LevelId::ALL
                     .into_iter()
-                    .find(|level| path.as_str() == format!("scenes/{}", level.scene_path()))
+                    .find(|level| path.as_str() == format!("scenes/{}", level.scene_file_name()))
                     .ok_or("Runtime Scene has an unknown ProjectLocation path")?;
                 Ok((level, json!(runtime.source_key())))
             })

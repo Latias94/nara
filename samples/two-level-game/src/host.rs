@@ -2,18 +2,18 @@
 use std::fs::File;
 use std::{io, path::Path};
 
-use nara::{
-    fs::{
-        CapabilityRights, DirectoryCapability, FsError, FsOperation, HostCapabilityOptions,
-        TrustMode,
-    },
-    project_host::{open_explicit_product_project_root, open_product_project_root},
+use nara::fs::{
+    CapabilityRights, DirectoryCapability, FsError, FsOperation, HostCapabilityOptions, TrustMode,
 };
+#[cfg(any(feature = "development", feature = "cook"))]
+use nara::project_host::{open_explicit_product_project_root, open_product_project_root};
 
+#[cfg(any(feature = "development", feature = "cook"))]
 pub fn open_project_root() -> Result<DirectoryCapability, FsError> {
     open_product_project_root(env!("CARGO_MANIFEST_DIR"))
 }
 
+#[cfg(any(feature = "development", feature = "cook"))]
 pub fn open_explicit_project_root(path: &Path) -> Result<DirectoryCapability, FsError> {
     open_explicit_product_project_root(path)
 }

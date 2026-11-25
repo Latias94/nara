@@ -2,7 +2,6 @@ use std::{collections::BTreeSet, fs, ops::Range, path::Path};
 
 use nara::{
     fs::ContentDigest,
-    project::{ProductCapability, ProductCapabilitySet, ProjectFixedCatchUpPolicy, RuntimePreset},
     project_tooling::host_fs,
     project_workflow::cargo::CargoBuildSelection,
     runtime_content::{
@@ -10,7 +9,12 @@ use nara::{
         RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentMemberKind,
         RuntimeContentTarget,
     },
-    scene::SourceDocumentOrigin,
+    scene::{
+        SourceDocumentOrigin,
+        runtime_configuration::{
+            ProductCapability, ProductCapabilitySet, ProjectFixedCatchUpPolicy, RuntimePreset,
+        },
+    },
 };
 use serde_json::{Value, json};
 use two_level_game::{delivery::PlayerSelection, levels::LevelId, markers, side_room};

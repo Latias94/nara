@@ -192,6 +192,7 @@ fn wrong_format_versions_and_non_schema_fields_are_refused() {
         json!({ "side_room": "closed", "lookout": "closed" })
     );
     assert_eq!(decode_processed_resume(&bytes).unwrap(), example());
+    #[cfg(any(feature = "development", feature = "cook"))]
     assert!(matches!(
         super::super::decode_resume(&bytes),
         Err(ResumeError::WrongKind)

@@ -67,7 +67,7 @@ impl StagedProjectSceneReplacement {
                 server.clone()
             };
             let scene = match content {
-                #[cfg(feature = "runtime-2d")]
+                #[cfg(feature = "project-source")]
                 PreparedSceneContent::Source(snapshot) => component_bindings
                     .stage_scene_replacement_with_claims(
                         world,
@@ -188,9 +188,7 @@ impl StagedProjectSceneReplacement {
                     inputs,
                     &self.stock.tilesets.retirements,
                     &self.staged_server,
-                    self.catalog
-                        .asset_resolution()
-                        .map(|resolver| resolver.database()),
+                    self.catalog.asset_database(),
                 ) {
                     Ok(prepared) => prepared,
                     Err(fault) => return Err((self, rejected(fault))),
@@ -301,8 +299,8 @@ fn validate_resources(
     let unsupported = transaction::validate_resource_scope::<ProjectSceneResidency>(world).is_err()
         || transaction::validate_resource_scope::<ProjectDomainAssets>(world).is_err()
         || transaction::validate_resource_scope::<CurrentSceneOwner>(world).is_err();
-    #[cfg(feature = "runtime-2d")]
-    let unsupported = {
+    #[cfg(feature = "project-source")]
+    let source = {
         let source = matches!(content, ResidencyInput::Source(_));
         if source
             && (!world.contains_resource::<ProjectAssetDatabase>()
@@ -310,12 +308,18 @@ fn validate_resources(
         {
             return Err(resources_missing());
         }
+        source
+    };
+    #[cfg(feature = "runtime-2d")]
+    let unsupported = {
         let current = world.resource::<ProjectSceneResidency>();
         stock::validate_resources(world, content, Some(current))?;
         let uses_tilesets = content.tileset_count() != 0 || current.tileset_count() != 0;
-        unsupported
+        #[cfg(feature = "project-source")]
+        let unsupported = unsupported
             || source
-                && transaction::validate_resource_scope::<ProjectAssetDatabase>(world).is_err()
+                && transaction::validate_resource_scope::<ProjectAssetDatabase>(world).is_err();
+        unsupported
             || uses_tilesets
                 && transaction::validate_resource_scope::<TileSetAssets>(world).is_err()
     };

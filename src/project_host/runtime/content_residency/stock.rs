@@ -1,7 +1,9 @@
 use nara_asset::{AssetEvents, AssetServer, AssetStates, Assets, ProjectAssetDatabase};
 use nara_ecs::{Mut, Res, ResMut, World, bevy_ecs::system::SystemState};
 use nara_render::image::ImageAsset;
-use nara_render::material::{Material2dAsset, Material2dDomain};
+use nara_render::material::Material2dAsset;
+#[cfg(feature = "project-source")]
+use nara_render::material::Material2dDomain;
 use nara_render::tilemap::{
     PreparedTileSetPublications, TileSet, TileSetAssetError, TileSetAssets, TileSetContentReceipt,
     TileSetPublicationInput,
@@ -58,6 +60,7 @@ impl ProjectSceneResidency {
 impl ResidencyInput<'_> {
     pub(super) fn material_count(self) -> usize {
         match self {
+            #[cfg(feature = "project-source")]
             Self::Source(snapshot) => snapshot
                 .domain_assets()
                 .collection::<Material2dDomain>()
@@ -68,6 +71,7 @@ impl ResidencyInput<'_> {
 
     pub(super) fn image_count(self) -> usize {
         match self {
+            #[cfg(feature = "project-source")]
             Self::Source(snapshot) => snapshot.images().len(),
             Self::Processed(content) => content.images.len(),
         }
@@ -75,6 +79,7 @@ impl ResidencyInput<'_> {
 
     pub(super) fn tileset_count(self) -> usize {
         match self {
+            #[cfg(feature = "project-source")]
             Self::Source(snapshot) => snapshot.tilesets().len(),
             Self::Processed(content) => content.tilesets.len(),
         }
@@ -171,9 +176,7 @@ pub(super) fn probe_tilesets(
             inputs,
             &changes.retirements,
             server,
-            catalog
-                .asset_resolution()
-                .map(|resolver| resolver.database()),
+            catalog.asset_database(),
         )
         .map(|_| ())
     })

@@ -1541,39 +1541,6 @@ requested = ["future-renderer"]
 }
 
 #[test]
-fn product_capability_iteration_is_stable_and_sorted_by_engine_vocabulary() {
-    let set = ProductCapabilitySet::from_capabilities([
-        ProductCapability::Runtime2d,
-        ProductCapability::RuntimeCore,
-        ProductCapability::Presentation2d,
-        ProductCapability::RenderWgpu,
-    ]);
-
-    assert_eq!(
-        set.iter()
-            .map(ProductCapability::as_str)
-            .collect::<Vec<_>>(),
-        vec![
-            "runtime-core",
-            "runtime-2d",
-            "presentation-2d",
-            "render-wgpu"
-        ]
-    );
-}
-
-#[test]
-fn product_capability_discriminants_preserve_existing_bits() {
-    assert_eq!(ProductCapability::RuntimeCore as u8, 0);
-    assert_eq!(ProductCapability::Runtime2d as u8, 1);
-    assert_eq!(ProductCapability::RuntimeUi as u8, 2);
-    assert_eq!(ProductCapability::AssetWatch as u8, 3);
-    assert_eq!(ProductCapability::DesktopWinit as u8, 4);
-    assert_eq!(ProductCapability::RenderWgpu as u8, 5);
-    assert_eq!(ProductCapability::Presentation2d as u8, 6);
-}
-
-#[test]
 fn canonical_writer_changes_only_the_selected_profile_startup_scene_semantics() {
     let source = format!(
         "{COMPLETE_MANIFEST}\n[startup]\ndefault_scene = \"base.scene.json\"\n\n[profiles.dev.startup]\ndefault_scene = \"old.scene.json\"\n"

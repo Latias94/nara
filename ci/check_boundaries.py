@@ -58,12 +58,18 @@ def check_rust_sources():
 if __name__ == "__main__":
     ui = r"(?:open[-_]gpui|gpui)(?:[-_]|$)"
     editor = rf"{ui}|nara[-_](?:editor|tooling)(?:[-_]|$)|dear[-_]imgui"
+    shipping = re.compile(rf"{editor}|nara_project$|bevy_reflect$")
     check_dependencies("nara", re.compile(rf"{editor}|ctrlc$"), "--all-features")
     check_dependencies(
-        "nara", re.compile(rf"{editor}|nara_project$|bevy_reflect$"),
+        "nara", shipping,
         "--no-default-features", "--features",
         "physics-2d,audio-device,presentation-2d,presentation-ui,desktop-winit,render-wgpu",
     )
+    for target in ("cooked-server", "cooked-player,desktop"):
+        check_dependencies(
+            "two-level-game", shipping, "--manifest-path", "samples/two-level-game/Cargo.toml",
+            "--no-default-features", "--features", target,
+        )
     check_dependencies("nara_project", re.compile(rf"{editor}|^(?:wgpu|winit)$"), "--all-features")
     check_dependencies("nara_editor_core", re.compile(ui), "--all-features")
     if len(set(check_wgpu())) != 1:

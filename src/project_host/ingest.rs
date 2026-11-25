@@ -8,12 +8,12 @@ use nara_core::diagnostic::{
     PublicDiagnosticIdentifier, ReportDiagnostic as Diagnostic, SafeSummary,
 };
 use nara_project::{
-    DEFAULT_MANIFEST_BYTE_LIMIT, EffectiveProjectSettings, EffectiveRuntimeConfiguration,
-    ProductCapability, ProductCapabilitySet, ProjectManifest, ProjectProfileError, RuntimePreset,
+    DEFAULT_MANIFEST_BYTE_LIMIT, EffectiveProjectSettings, ProjectManifest, ProjectProfileError,
 };
 
 use super::composition::{
-    ProjectSettingsCandidate, ProjectSettingsLineage, compiled_product_capabilities,
+    ProjectSettingsCandidate, ProjectSettingsLineage, RuntimeCapabilityErrorKind,
+    validate_runtime_capabilities,
 };
 use crate::project_diagnostic_ids::{fs_operation_id, io_error_kind_id};
 
@@ -247,87 +247,27 @@ fn validate_product_request(
             error.diagnostics().clone(),
         )
     })?;
-    let admission = validate_runtime_capabilities(source_runtime_projection.runtime())?;
+    let admission =
+        validate_runtime_capabilities(source_runtime_projection.runtime()).map_err(|error| {
+            let kind = match error.kind() {
+                RuntimeCapabilityErrorKind::PresetConflict => {
+                    ProjectCandidateErrorKind::PresetConflict
+                }
+                RuntimeCapabilityErrorKind::InvalidCapabilityClosure => {
+                    ProjectCandidateErrorKind::InvalidCapabilityClosure
+                }
+                RuntimeCapabilityErrorKind::UnavailableCapabilities => {
+                    ProjectCandidateErrorKind::UnavailableCapabilities
+                }
+            };
+            ProjectCandidateError::new(kind, error.into_diagnostics())
+        })?;
     Ok(ProjectSettingsCandidate {
         lineage,
         manifest_digest,
         settings,
         source_runtime_projection,
         capabilities: admission,
-    })
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) struct RuntimeCapabilityAdmission {
-    pub(super) explicit: ProductCapabilitySet,
-    pub(super) implied: ProductCapabilitySet,
-    pub(super) normalized: ProductCapabilitySet,
-    pub(super) required: ProductCapabilitySet,
-    pub(super) compiled: super::composition::CompiledProductCapabilities,
-}
-
-pub(super) fn validate_runtime_capabilities(
-    settings: &EffectiveRuntimeConfiguration,
-) -> Result<RuntimeCapabilityAdmission, ProjectCandidateError> {
-    let explicit = settings.requested_capabilities();
-    let required = ProductCapabilitySet::singleton(ProductCapability::RuntimeCore);
-    let normalized = explicit.union(required);
-    let implied = normalized.difference(explicit);
-
-    if normalized.contains(ProductCapability::Presentation2d)
-        && !normalized.contains(ProductCapability::Runtime2d)
-    {
-        return Err(capability_dependency_error(
-            ProductCapability::Presentation2d,
-            ProductCapability::Runtime2d,
-        ));
-    }
-    if normalized.contains(ProductCapability::PresentationUi)
-        && !normalized.contains(ProductCapability::RuntimeUi)
-    {
-        return Err(capability_dependency_error(
-            ProductCapability::PresentationUi,
-            ProductCapability::RuntimeUi,
-        ));
-    }
-
-    if settings.runtime_preset() == RuntimePreset::Server {
-        let forbidden = ProductCapabilitySet::from_capabilities([
-            ProductCapability::Runtime2d,
-            ProductCapability::RuntimeUi,
-            ProductCapability::Presentation2d,
-            ProductCapability::PresentationUi,
-            ProductCapability::DesktopWinit,
-            ProductCapability::RenderWgpu,
-        ]);
-        let conflicting = normalized.intersection(forbidden);
-        if !conflicting.is_empty() {
-            return Err(capability_error(
-                ProjectCandidateErrorKind::PresetConflict,
-                "project.product.preset-conflict",
-                "Runtime preset conflicts with requested product capabilities",
-                conflicting,
-            ));
-        }
-    }
-
-    let compiled = compiled_product_capabilities();
-    let unavailable = normalized.difference(compiled.capabilities());
-    if !unavailable.is_empty() {
-        return Err(capability_error(
-            ProjectCandidateErrorKind::UnavailableCapabilities,
-            "project.product.unavailable-capability",
-            "Project requests a product capability that is not compiled",
-            unavailable,
-        ));
-    }
-
-    Ok(RuntimeCapabilityAdmission {
-        explicit,
-        implied,
-        normalized,
-        required,
-        compiled,
     })
 }
 
@@ -492,45 +432,6 @@ fn manifest_too_large_error(actual: usize, limit: usize) -> ProjectCandidateErro
         u64::try_from(limit).unwrap_or(u64::MAX),
     );
     ProjectCandidateError::single(ProjectCandidateErrorKind::ManifestTooLarge, diagnostic)
-}
-
-fn capability_error(
-    kind: ProjectCandidateErrorKind,
-    code: &'static str,
-    summary: &'static str,
-    capabilities: ProductCapabilitySet,
-) -> ProjectCandidateError {
-    let first = capabilities
-        .iter()
-        .next()
-        .expect("capability errors require a non-empty set");
-    let diagnostic =
-        with_public_identifier(diagnostic(code, summary), "capability", first.as_str());
-    let diagnostic = with_public_u64(
-        diagnostic,
-        "count",
-        u64::try_from(capabilities.len()).unwrap_or(u64::MAX),
-    );
-    ProjectCandidateError::single(kind, diagnostic)
-}
-
-fn capability_dependency_error(
-    capability: ProductCapability,
-    dependency: ProductCapability,
-) -> ProjectCandidateError {
-    let diagnostic = with_public_identifier(
-        diagnostic(
-            "project.product.incomplete-capability-closure",
-            "Product capability requires an explicit content capability",
-        ),
-        "capability",
-        capability.as_str(),
-    );
-    let diagnostic = with_public_identifier(diagnostic, "required-capability", dependency.as_str());
-    ProjectCandidateError::single(
-        ProjectCandidateErrorKind::InvalidCapabilityClosure,
-        diagnostic,
-    )
 }
 
 fn diagnostic(code: &'static str, summary: &'static str) -> Diagnostic {

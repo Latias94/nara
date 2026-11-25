@@ -6,38 +6,39 @@ use std::{
     time::Duration,
 };
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 pub(crate) use super::composition::RuntimePluginOverlay;
 use super::runtime_diagnostics::*;
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use super::{
     CompositionError, ProjectContentRevision, ProjectContentSnapshot, ProjectSettingsLineage,
     RuntimePlan, RuntimePlanError,
 };
 #[cfg(all(
     test,
-    feature = "runtime-2d",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
 use super::{DesktopRun, DesktopRunOutcome};
-#[cfg(all(test, feature = "runtime-2d"))]
+#[cfg(feature = "project-source")]
+use nara_app::PluginPlanError;
+#[cfg(all(test, feature = "project-source"))]
 use nara_app::RuntimeCloseCause;
 use nara_app::tasks::{TaskScopeCloseReport, TaskShutdownReport};
 use nara_app::{
-    AppExit, PluginFailureReport, PluginPlanError, RuntimeCandidateFailure,
-    RuntimeCandidateRetirementState, RuntimeCloseEvidence, RuntimeClosePolicy,
-    RuntimeConstructionFailure, RuntimeControl, RuntimeControlRejection,
-    RuntimeControlRequestResult, RuntimeControlStatus, RuntimeControlTicket, RuntimeFault,
-    RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration, RuntimeInstance,
-    RuntimeObligationLedger, RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement,
-    RuntimeState,
+    AppExit, PluginFailureReport, RuntimeCandidateFailure, RuntimeCandidateRetirementState,
+    RuntimeCloseEvidence, RuntimeClosePolicy, RuntimeConstructionFailure, RuntimeControl,
+    RuntimeControlRejection, RuntimeControlRequestResult, RuntimeControlStatus,
+    RuntimeControlTicket, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration,
+    RuntimeInstance, RuntimeObligationLedger, RuntimePublicationFailure, RuntimePublicationSlot,
+    RuntimeRetirement, RuntimeState,
 };
 use nara_core::diagnostic::{
     DiagnosticField, DiagnosticReport, PublicDiagnosticIdentifier, ReportDiagnostic as Diagnostic,
 };
 use nara_ecs::{Resource, World};
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use nara_reflect::SchemaCompositionFingerprint;
 use nara_reflect::{component_registry, validate_component_registry_authority};
 use nara_scene::{
@@ -48,7 +49,7 @@ use super::composition::RuntimeConfigurationPlan;
 use crate::runtime_content::{ProcessedSceneContent, RuntimeContentBase, RuntimeContentError};
 use crate::startup_scene::{SceneSource, materialize_startup_scene};
 
-#[cfg(all(test, feature = "runtime-2d"))]
+#[cfg(all(test, feature = "project-source"))]
 const PROJECT_MANIFEST: &str = "nara.toml";
 
 mod action;
@@ -61,15 +62,15 @@ pub use content_residency::{
 };
 #[cfg(all(
     test,
-    feature = "runtime-2d",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
 mod desktop_poll_tests;
 mod scene_requests;
-#[cfg(all(feature = "runtime-2d", feature = "asset-watch"))]
+#[cfg(all(feature = "project-source", feature = "asset-watch"))]
 mod source_watch;
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 pub use scene_requests::ProjectSceneSourceUpdateStatus;
 pub use scene_requests::domains::{
     ManagedSceneDomain, ManagedSceneDomainAttempt, ManagedSceneDomainError, ManagedSceneDomainId,
@@ -85,7 +86,7 @@ pub use scene_requests::{
     activate_prepared_project_scene, begin_prepared_project_scene_travel,
     commit_prepared_project_scene,
 };
-#[cfg(all(feature = "runtime-2d", feature = "asset-watch"))]
+#[cfg(all(feature = "project-source", feature = "asset-watch"))]
 pub use source_watch::{
     PROJECT_SCENE_WATCH_PLUGIN_ID, ProjectSceneWatchConfigurationError, ProjectSceneWatchPlugin,
     ProjectSceneWatchState, ProjectSceneWatchStatus,
@@ -98,7 +99,7 @@ pub use source_watch::{
 ))]
 pub(super) use action::DesktopRunInputs;
 #[cfg(all(
-    feature = "runtime-2d",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -107,7 +108,7 @@ pub use action::{
     HeadlessRun, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport, HeadlessSession,
     HeadlessSessionClose, HeadlessSessionError,
 };
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 pub use action::{HeadlessRunIntent, ProjectAppLoadError, load_project_app};
 
 struct RuntimeStartAttempt {
@@ -126,7 +127,7 @@ struct PreparedRuntimeStart {
 }
 
 impl PreparedRuntimeStart {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn source(&self) -> Option<(&ProjectContentSnapshot, &RuntimePlan)> {
         match &self.content {
             RuntimeStartContent::Source { snapshot, plan } => Some((snapshot, plan)),
@@ -146,7 +147,7 @@ struct RuntimeStartInputs {
     content: RuntimeStartContent,
     startup_scene: SceneSource,
     obligations: RuntimeObligationLedger,
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     scene_preparation: Option<(
         super::ProjectSettingsCandidate,
         Arc<crate::project_content::ProjectContentLoader>,
@@ -155,7 +156,7 @@ struct RuntimeStartInputs {
 
 #[derive(Clone)]
 enum RuntimeStartContent {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     Source {
         snapshot: ProjectContentSnapshot,
         plan: RuntimePlan,
@@ -171,7 +172,7 @@ enum RuntimeStartContent {
 impl RuntimeStartContent {
     fn plan(&self) -> &RuntimeConfigurationPlan {
         match self {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             Self::Source { plan, .. } => plan.configuration_plan(),
             Self::Processed { base, .. } => base.plan(),
         }
@@ -179,7 +180,7 @@ impl RuntimeStartContent {
 }
 
 enum RuntimeStartStamp {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     Source {
         lineage: ProjectSettingsLineage,
         content_revision: ProjectContentRevision,
@@ -198,7 +199,7 @@ enum RuntimeStartStamp {
 impl RuntimeStartStamp {
     fn capture(content: &RuntimeStartContent) -> Self {
         match content {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             RuntimeStartContent::Source { snapshot, plan } => Self::Source {
                 lineage: snapshot.lineage(),
                 content_revision: snapshot.revision(),
@@ -222,7 +223,7 @@ impl RuntimeStartStamp {
 
     fn matches(&self, content: &RuntimeStartContent, startup_scene: &SceneSource) -> bool {
         match (self, content) {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             (
                 Self::Source {
                     lineage,
@@ -284,7 +285,7 @@ impl RuntimeStartStamp {
                     )
                     && startup_scene.is_content_managed()
             }
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             _ => false,
         }
     }
@@ -420,7 +421,7 @@ struct PublishedProjectRuntime {
 }
 
 enum PublishedRuntimeContent {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     Source {
         startup_admission_revision: ProjectContentRevision,
         _plan: RuntimePlan,
@@ -836,7 +837,7 @@ impl ProjectHost {
         }
     }
 
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn running_content_revision(&self) -> Option<ProjectContentRevision> {
         match &self.slot {
             ProjectHostSlot::Running(published) => match &published._content {
@@ -968,7 +969,7 @@ impl ProjectHost {
         !matches!(self.slot, ProjectHostSlot::Empty) || self.start_claim.any_active()
     }
 
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn begin_start(
         &mut self,
         snapshot: ProjectContentSnapshot,
@@ -978,7 +979,7 @@ impl ProjectHost {
         self.begin_start_with_scene(snapshot, plan, startup_scene)
     }
 
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn begin_project_start(
         &mut self,
         snapshot: ProjectContentSnapshot,
@@ -1038,7 +1039,7 @@ impl ProjectHost {
         )
     }
 
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn begin_start_with_scene(
         &mut self,
         snapshot: ProjectContentSnapshot,
@@ -1115,7 +1116,7 @@ impl ProjectHost {
                 content,
                 startup_scene,
                 obligations: RuntimeObligationLedger::new(),
-                #[cfg(feature = "runtime-2d")]
+                #[cfg(feature = "project-source")]
                 scene_preparation: None,
             }),
         })
@@ -1132,7 +1133,7 @@ impl ProjectHost {
             content,
             startup_scene,
             obligations,
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             scene_preparation,
         } = inputs;
         let plan = content.plan().clone();
@@ -1160,7 +1161,7 @@ impl ProjectHost {
             #[cfg(feature = "runtime-input")]
             {
                 let input_selection = match &admission_content {
-                    #[cfg(feature = "runtime-2d")]
+                    #[cfg(feature = "project-source")]
                     RuntimeStartContent::Source { snapshot, .. } => snapshot
                         .input_action_map()
                         .map(|input| input.prepare_state())
@@ -1200,7 +1201,7 @@ impl ProjectHost {
                     materialize_runtime(world, &admission_plan, &admission_content, startup_scene)
                         .and_then(|diagnostics| {
                             match &admission_content {
-                                #[cfg(feature = "runtime-2d")]
+                                #[cfg(feature = "project-source")]
                                 RuntimeStartContent::Source { plan, snapshot } => {
                                     if let Some((candidate, loader)) = scene_preparation {
                                         install_source_scene_context(
@@ -1347,7 +1348,7 @@ impl ProjectHost {
         debug_assert!(matches!(self.slot, ProjectHostSlot::Empty));
         debug_assert!(claim.owner.is_active(epoch));
         let content = match content {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             RuntimeStartContent::Source { snapshot, plan } => PublishedRuntimeContent::Source {
                 // Freshness compares the admitted startup, even after a legal current-Scene change.
                 // Live sources and published Images retain their own decoded generation instead.
@@ -1368,7 +1369,7 @@ impl ProjectHost {
         diagnostics
     }
 
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     fn abort_prepared_start(&mut self, mut prepared: PreparedRuntimeStart) {
         let epoch = prepared.claim.epoch();
         let task_close = ProjectTaskClose::planned(&prepared.plan);
@@ -1807,7 +1808,7 @@ fn verify_processed_runtime_plan(plan: &RuntimeConfigurationPlan) -> Result<(), 
         #[cfg(feature = "asset-watch")]
         let source_execution =
             source_execution || plugin == nara_asset::watch::ASSET_WATCH_PLUGIN_ID;
-        #[cfg(all(feature = "runtime-2d", feature = "asset-watch"))]
+        #[cfg(all(feature = "project-source", feature = "asset-watch"))]
         let source_execution = source_execution || plugin == PROJECT_SCENE_WATCH_PLUGIN_ID;
         if source_execution {
             return Err(HostFault::new(single_diagnostic(attach_identifier(
@@ -1836,12 +1837,12 @@ fn materialize_runtime(
         RuntimeStartContent::Processed { content, .. } => {
             content_residency::publish_processed_startup(world, content)?;
         }
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         RuntimeStartContent::Source { .. } => {}
     }
     let diagnostics = materialize_startup_scene(world, startup_scene)
         .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     if let RuntimeStartContent::Source { snapshot, .. } = content {
         content_residency::publish_startup(world, snapshot)?;
     }
@@ -1864,7 +1865,7 @@ fn scene_context_fault() -> HostFault {
     ))
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 fn install_source_scene_context(
     world: &mut World,
     candidate: super::ProjectSettingsCandidate,
@@ -2051,7 +2052,7 @@ fn processed_content_fault(error: &RuntimeContentError) -> HostFault {
     HostFault::new(diagnostics)
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 fn runtime_plan_failure_report(error: &RuntimePlanError) -> DiagnosticReport {
     match error {
         RuntimePlanError::Composition(error) => composition_failure_report(error),
@@ -2059,7 +2060,7 @@ fn runtime_plan_failure_report(error: &RuntimePlanError) -> DiagnosticReport {
     }
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
     let reason = match error {
         CompositionError::ProjectLineageMismatch => "project-lineage-mismatch",
@@ -2147,16 +2148,18 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
     single_diagnostic(diagnostic)
 }
 
+#[cfg(feature = "project-source")]
 fn normalized_product_capability_alternatives(
-    alternatives: nara_project::ProductCapabilitySet,
+    alternatives: nara_scene::runtime_configuration::ProductCapabilitySet,
 ) -> String {
     alternatives
         .iter()
-        .map(nara_project::ProductCapability::as_str)
+        .map(nara_scene::runtime_configuration::ProductCapability::as_str)
         .collect::<Vec<_>>()
         .join("/")
 }
 
+#[cfg(feature = "project-source")]
 fn plugin_plan_failure_report(error: &PluginPlanError) -> DiagnosticReport {
     let reason = match error {
         PluginPlanError::DeclarationPanicked => "declaration-panicked",
@@ -2286,7 +2289,7 @@ fn inject_publication_fault_if_armed(reporter: &nara_app::RuntimeFaultReporter) 
     });
 }
 
-#[cfg(all(test, feature = "serde", feature = "runtime-2d"))]
+#[cfg(all(test, feature = "project-source"))]
 mod tests;
 
 #[cfg(all(test, feature = "serde", feature = "runtime-2d"))]

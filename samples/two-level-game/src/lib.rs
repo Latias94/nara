@@ -32,9 +32,9 @@ pub use gameplay::movement_keyboard_bindings;
 pub use gameplay::resume::{
     GameResumeError, capture_processed_resume, claim_processed_checkpoint, restore_processed_resume,
 };
-#[cfg(feature = "desktop")]
+#[cfg(all(feature = "desktop", any(feature = "development", feature = "cook")))]
 pub use gameplay::resume::{capture_desktop_resume, restore_desktop_resume};
-#[cfg(feature = "local-player")]
+#[cfg(any(feature = "development", feature = "cook"))]
 pub use gameplay::resume::{capture_resume, request_resume};
 pub use gameplay::{
     CollisionBox, GamePhase, GameSnapshot, RunOptions, Scenario, ServerCommandRejections,
@@ -42,4 +42,5 @@ pub use gameplay::{
 };
 #[cfg(feature = "local-player")]
 pub use gameplay::{configured_recipe, cooked_recipe, flow, input, product_recipe};
+#[cfg(any(feature = "development", feature = "cook"))]
 pub use host::{open_explicit_project_root, open_project_root};

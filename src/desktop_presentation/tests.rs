@@ -103,7 +103,7 @@ fn lazy_producer_failure_reconciles_or_retains_the_original_capture_result() {
         let mut driver = DesktopPresentationDriver::new(
             &runtime,
             DesktopPresentationOptions::default(),
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             None,
             DesktopPresentationReports::default(),
         );
@@ -174,7 +174,7 @@ fn retirement_retains_original_result_and_seals_host_facts_before_native_close()
             telemetry: Some(WgpuBackendTelemetryConfig::default()),
             observer: None,
         },
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         None,
         reports.clone(),
     );
@@ -260,7 +260,7 @@ fn final_observer_evidence_failure_vetoes_seal_success_and_is_delivered_once() {
     let mut driver = DesktopPresentationDriver::new(
         &runtime,
         options,
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         None,
         reports.clone(),
     );
@@ -307,7 +307,7 @@ fn final_observer_success_cannot_override_a_required_exit() {
     let mut driver = DesktopPresentationDriver::new(
         &runtime,
         options,
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         None,
         sealed_reports(),
     );
@@ -340,7 +340,7 @@ fn final_observer_veto_during_target_retirement_survives_native_success() {
     let mut driver = DesktopPresentationDriver::new(
         &runtime,
         options,
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         None,
         reports.clone(),
     );
@@ -390,7 +390,7 @@ fn repeated_active_seal_request_preserves_veto_without_resetting_deadline() {
     let mut driver = DesktopPresentationDriver::new(
         &runtime,
         options,
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         None,
         DesktopPresentationReports::default(),
     );
@@ -452,7 +452,7 @@ fn final_report_seal_request_vetoes_success_without_restarting_or_redelivery() {
     let mut driver = DesktopPresentationDriver::new(
         &runtime,
         options,
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         None,
         reports.clone(),
     );

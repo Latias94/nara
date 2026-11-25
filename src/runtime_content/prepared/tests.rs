@@ -15,7 +15,6 @@ use nara_asset::{
 use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_ecs::identity::SceneEntityId;
-use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
@@ -24,6 +23,7 @@ use nara_reflect::{
 };
 #[cfg(feature = "runtime-2d")]
 use nara_render::image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec};
+use nara_scene::runtime_configuration::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentRecord, SceneDocument,
     SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,

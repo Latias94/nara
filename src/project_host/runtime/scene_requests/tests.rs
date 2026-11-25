@@ -14,8 +14,7 @@ use nara_core::ItemLimit;
 use nara_ecs::bevy_ecs::system::SystemState;
 use nara_ecs::identity::SceneEntityId;
 #[cfg(feature = "runtime-2d")]
-use nara_project::ProductCapability;
-use nara_project::{RuntimeConfiguration, RuntimePreset};
+use nara_scene::runtime_configuration::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{CompiledSceneDocument, SceneDocument, SceneEntityRecord};
 
 #[cfg(all(feature = "runtime-2d", target_os = "linux"))]

@@ -5,17 +5,18 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+#[cfg(feature = "project-source")]
 use crate::fs::{ContentDigest, FileIdentity};
 use nara_app::{
-    EditedPluginGroup, Plugin, PluginDefinition, PluginGroup, PluginGroupBuilder, PluginGroupId,
-    PluginId, PluginPlan, PluginPlanError, PluginProductCapability, PluginSchemaProviderId,
+    EditedPluginGroup, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginId, PluginPlan,
+    PluginPlanError, PluginProductCapability, PluginSchemaProviderId,
 };
+#[cfg(feature = "project-source")]
+use nara_app::{Plugin, PluginDefinition};
 #[cfg(feature = "runtime-input")]
 use nara_input::INPUT_PLUGIN_ID;
-use nara_project::{
-    EffectiveProjectSettings, EffectiveRuntimeConfiguration, ProductCapability,
-    ProductCapabilitySet, ProjectPath, SourceRuntimeProjection,
-};
+#[cfg(feature = "project-source")]
+use nara_project::{EffectiveProjectSettings, ProjectPath, SourceRuntimeProjection};
 use nara_reflect::provider::ResolvedComponentSchemaProvider;
 #[cfg(feature = "serde")]
 use nara_reflect::{
@@ -28,12 +29,17 @@ use nara_reflect::{
     ComponentSchemaProviderReceipt, ComponentTypeId, ExecutableRegistryFingerprint,
     SchemaCompositionFingerprint, preloaded_component_registry_plugin,
 };
+use nara_scene::runtime_configuration::{
+    EffectiveRuntimeConfiguration, ProductCapability, ProductCapabilitySet,
+};
 use nara_scene::{SceneComponentBindingError, SceneComponentBindings};
 
-use super::ingest::RuntimeCapabilityAdmission;
-
+mod capabilities;
 mod runtime_configuration;
 
+use capabilities::RuntimeCapabilityAdmission;
+pub(super) use capabilities::validate_runtime_capabilities;
+pub use capabilities::{RuntimeCapabilityError, RuntimeCapabilityErrorKind};
 pub use runtime_configuration::{
     RuntimeConfigurationPlan, RuntimeConfigurationPlanError, resolve_runtime_configuration,
 };
@@ -80,25 +86,26 @@ pub const fn compiled_product_capabilities() -> CompiledProductCapabilities {
 }
 
 /// Opaque identity of one authorized project root, manifest byte sequence, and selected profile.
+#[cfg(feature = "project-source")]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ProjectSettingsLineage {
     pub(super) settings_digest: [u8; 32],
     pub(super) project_root_identity: Option<FileIdentity>,
 }
 
+#[cfg(feature = "project-source")]
 impl fmt::Debug for ProjectSettingsLineage {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("ProjectSettingsLineage(..)")
     }
 }
 
+#[cfg(feature = "project-source")]
 impl ProjectSettingsLineage {
-    #[cfg(all(feature = "serde", feature = "runtime-2d"))]
     pub(crate) const fn settings_digest(self) -> [u8; 32] {
         self.settings_digest
     }
 
-    #[cfg(all(feature = "serde", feature = "runtime-2d"))]
     pub(crate) const fn project_root_identity(self) -> Option<FileIdentity> {
         self.project_root_identity
     }
@@ -107,6 +114,7 @@ impl ProjectSettingsLineage {
 /// An immutable settings candidate whose product capability request fits this binary.
 ///
 /// Source input selection remains an explicit obligation until content and receiving admission.
+#[cfg(feature = "project-source")]
 #[derive(Clone, PartialEq)]
 pub struct ProjectSettingsCandidate {
     pub(super) lineage: ProjectSettingsLineage,
@@ -116,6 +124,7 @@ pub struct ProjectSettingsCandidate {
     pub(super) capabilities: RuntimeCapabilityAdmission,
 }
 
+#[cfg(feature = "project-source")]
 impl ProjectSettingsCandidate {
     #[must_use]
     pub const fn lineage(&self) -> ProjectSettingsLineage {
@@ -151,7 +160,9 @@ impl ProjectSettingsCandidate {
 
     #[must_use]
     pub const fn implied_capabilities(&self) -> ProductCapabilitySet {
-        self.capabilities.implied
+        self.capabilities
+            .normalized
+            .difference(self.capabilities.explicit)
     }
 
     #[must_use]
@@ -170,6 +181,7 @@ impl ProjectSettingsCandidate {
     }
 }
 
+#[cfg(feature = "project-source")]
 impl fmt::Debug for ProjectSettingsCandidate {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -179,7 +191,7 @@ impl fmt::Debug for ProjectSettingsCandidate {
             .field("runtime_preset", &self.settings.runtime_preset)
             .field("profile_present", &self.settings.profile_name.is_some())
             .field("explicit", &self.capabilities.explicit)
-            .field("implied", &self.capabilities.implied)
+            .field("implied", &self.implied_capabilities())
             .field("normalized", &self.capabilities.normalized)
             .field("required", &self.capabilities.required)
             .field("compiled", &self.capabilities.compiled)
@@ -193,6 +205,7 @@ impl fmt::Debug for ProjectSettingsCandidate {
 /// [`crate::ProductRecipe`] and lower it privately. The type remains available from
 /// [`crate::project_host::advanced`] for engine integration tests and advanced embedders that need
 /// to inspect profile-owned slot edits before any `App` exists.
+#[cfg(feature = "project-source")]
 pub struct ProjectRuntimePlugins {
     lineage: ProjectSettingsLineage,
     plugins: EditedPluginGroup<crate::product::ProjectProfilePlugins>,
@@ -200,21 +213,26 @@ pub struct ProjectRuntimePlugins {
     overlay: Option<RuntimePluginOverlay>,
 }
 
+#[cfg(feature = "project-source")]
 pub(crate) struct RuntimePluginOverlay {
     definition: PluginDefinition,
 }
 
+#[cfg(feature = "project-source")]
 pub(crate) fn runtime_plugin_overlay(definition: PluginDefinition) -> RuntimePluginOverlay {
     RuntimePluginOverlay { definition }
 }
 
+#[cfg(feature = "project-source")]
 const PROJECT_RUNTIME_OVERLAY_GROUP_ID: PluginGroupId =
     PluginGroupId::new("nara.plugins.project-runtime-overlay");
 
+#[cfg(feature = "project-source")]
 struct RuntimeOverlayPlugins {
     definition: PluginDefinition,
 }
 
+#[cfg(feature = "project-source")]
 impl PluginGroup for RuntimeOverlayPlugins {
     const ID: PluginGroupId = PROJECT_RUNTIME_OVERLAY_GROUP_ID;
 
@@ -226,6 +244,7 @@ impl PluginGroup for RuntimeOverlayPlugins {
 struct ProjectRuntimeAppPlugins {
     plugins: EditedPluginGroup<crate::product::ProjectProfilePlugins>,
     recipe: crate::ProductRecipe,
+    #[cfg(feature = "project-source")]
     overlay: Option<RuntimePluginOverlay>,
 }
 
@@ -235,15 +254,17 @@ impl PluginGroup for ProjectRuntimeAppPlugins {
     fn build(self) -> PluginGroupBuilder {
         let builder =
             PluginGroupBuilder::new().add_group(self.recipe.with_edited_defaults(self.plugins));
-        match self.overlay {
-            Some(overlay) => builder.add_group(RuntimeOverlayPlugins {
+        #[cfg(feature = "project-source")]
+        if let Some(overlay) = self.overlay {
+            return builder.add_group(RuntimeOverlayPlugins {
                 definition: overlay.definition,
-            }),
-            None => builder,
+            });
         }
+        builder
     }
 }
 
+#[cfg(feature = "project-source")]
 impl fmt::Debug for ProjectRuntimePlugins {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -255,6 +276,7 @@ impl fmt::Debug for ProjectRuntimePlugins {
     }
 }
 
+#[cfg(feature = "project-source")]
 impl ProjectRuntimePlugins {
     #[must_use]
     pub fn disable<P: Plugin>(mut self) -> Self {
@@ -376,15 +398,16 @@ impl SchemaValidationInput {
 }
 
 /// A source-lineage-bound Runtime composition and its remaining input selection obligation.
+#[cfg(feature = "project-source")]
 #[derive(Clone)]
 pub struct RuntimePlan {
     lineage: ProjectSettingsLineage,
     configuration: RuntimeConfigurationPlan,
     input_requirement: Option<ProjectPath>,
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) asset_domains: crate::project_content::ProjectAssetDomains,
 }
 
+#[cfg(feature = "project-source")]
 impl fmt::Debug for RuntimePlan {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -395,6 +418,7 @@ impl fmt::Debug for RuntimePlan {
     }
 }
 
+#[cfg(feature = "project-source")]
 impl RuntimePlan {
     #[must_use]
     pub const fn configuration_plan(&self) -> &RuntimeConfigurationPlan {
@@ -623,9 +647,7 @@ impl From<PluginPlanError> for RuntimePlanError {
 
 /// Returns every trusted schema-provider binding compiled into this root package.
 ///
-/// This is an advanced plan-inspection input, not a schema-provider channel on
-/// [`crate::project_host::advanced::RuntimeProbe`]. Ordinary file-backed products bind schema
-/// authority through [`crate::SchemaContribution`].
+/// Ordinary file-backed products bind schema authority through [`crate::SchemaContribution`].
 #[must_use]
 pub fn built_in_schema_providers() -> Vec<ComponentSchemaProviderDefinition> {
     #[allow(unused_mut)]
@@ -653,6 +675,7 @@ pub fn built_in_schema_providers() -> Vec<ComponentSchemaProviderDefinition> {
 }
 
 /// Builds an explicit advanced, lineage-bound plugin request for one project settings candidate.
+#[cfg(feature = "project-source")]
 #[must_use]
 pub fn project_runtime_plugins(candidate: &ProjectSettingsCandidate) -> ProjectRuntimePlugins {
     project_runtime_plugins_from_profile(
@@ -664,6 +687,7 @@ pub fn project_runtime_plugins(candidate: &ProjectSettingsCandidate) -> ProjectR
     )
 }
 
+#[cfg(feature = "project-source")]
 fn project_runtime_plugins_from_profile(
     candidate: &ProjectSettingsCandidate,
     plugins: crate::product::ProjectProfilePlugins,
@@ -687,6 +711,7 @@ fn configured_profile_plugins(
 }
 
 /// Builds the file-backed project request for one ordinary product recipe.
+#[cfg(feature = "project-source")]
 #[must_use]
 pub(crate) fn project_runtime_plugins_with_recipe(
     candidate: &ProjectSettingsCandidate,
@@ -700,6 +725,7 @@ pub(crate) fn project_runtime_plugins_with_recipe(
     }
 }
 
+#[cfg(feature = "project-source")]
 pub(crate) fn resolve_project_runtime_request(
     candidate: &ProjectSettingsCandidate,
     request: ProjectRuntimePlugins,
@@ -707,6 +733,7 @@ pub(crate) fn resolve_project_runtime_request(
     resolve_runtime_plan(candidate, request, built_in_schema_providers())
 }
 
+#[cfg(feature = "project-source")]
 pub(crate) fn resolve_product_recipe_with_overlay(
     candidate: &ProjectSettingsCandidate,
     recipe: crate::ProductRecipe,
@@ -719,6 +746,7 @@ pub(crate) fn resolve_product_recipe_with_overlay(
 }
 
 /// Resolves one ordinary product recipe before creating an `App` or acquiring runtime authority.
+#[cfg(feature = "project-source")]
 pub fn resolve_product_recipe(
     candidate: &ProjectSettingsCandidate,
     recipe: crate::ProductRecipe,
@@ -733,6 +761,7 @@ pub fn resolve_product_recipe(
 /// including definitions that the selected plugin recipe does not activate. Resolution executes
 /// every current-head source to reserve inactive owner claims, but it executes native registration
 /// callbacks only for providers selected by the resolved plugin plan.
+#[cfg(feature = "project-source")]
 pub fn resolve_runtime_plan(
     candidate: &ProjectSettingsCandidate,
     request: ProjectRuntimePlugins,
@@ -761,14 +790,13 @@ pub fn resolve_runtime_plan(
         lineage: candidate.lineage,
         configuration: resolved.configuration,
         input_requirement: candidate.input_requirement().cloned(),
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
         asset_domains: resolved.asset_domains,
     })
 }
 
 struct ResolvedRuntimeComposition {
     configuration: RuntimeConfigurationPlan,
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     asset_domains: crate::project_content::ProjectAssetDomains,
 }
 
@@ -807,7 +835,7 @@ fn resolve_runtime_composition(
         .map(|(_, owner)| owner)
         .collect::<Vec<_>>();
     let data_contributors = request.recipe.data_contributors();
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     let asset_domains = request.recipe.asset_domains.clone();
     #[cfg(feature = "serde")]
     let runtime_codecs = request.recipe.runtime_codecs.clone();
@@ -847,6 +875,7 @@ fn resolve_runtime_composition(
     {
         return Err(CompositionError::DataContributionNotSelected { plugin }.into());
     }
+    #[cfg(feature = "project-source")]
     if let Some(overlay) = plugin_plan.entries().iter().find(|entry| {
         entry
             .group_provenance()
@@ -880,7 +909,7 @@ fn resolve_runtime_composition(
             #[cfg(feature = "serde")]
             runtime_codecs,
         },
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         asset_domains,
     })
 }

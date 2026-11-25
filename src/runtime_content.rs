@@ -45,13 +45,13 @@ use nara_asset::{
     RuntimeAssetCodec,
 };
 use nara_core::ByteLimit;
-use nara_project::RuntimeConfigurationError;
 use nara_reflect::{
     DeclaredAssetReferenceError,
     asset_reference::{
         AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
     },
 };
+use nara_scene::runtime_configuration::RuntimeConfigurationError;
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneDocumentCandidate, RuntimeSceneError, RuntimeSceneLimits,
 };

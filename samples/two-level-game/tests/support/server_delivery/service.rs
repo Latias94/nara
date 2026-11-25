@@ -815,6 +815,17 @@ impl<'a> Service<'a> {
         self.exchange_observation(&request("observe"), "observed")
     }
 
+    pub(super) fn observe_after_capture_maintenance(&mut self, mut before_capture: Value) -> Value {
+        let frames = number(&before_capture["time"], "frames");
+        before_capture["time"]["frames"] = json!(frames + 1);
+        let observed = self.observe();
+        assert_eq!(
+            observed, before_capture,
+            "capture after command admission must complete exactly one zero-duration App frame"
+        );
+        observed
+    }
+
     pub(super) fn advance(&mut self, elapsed_nanos: u64) -> Value {
         let advanced = self.exchange_observation(
             &json!({"request": "advance", "elapsed_nanos": elapsed_nanos}),

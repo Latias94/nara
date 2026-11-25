@@ -19,7 +19,6 @@ use nara_ecs::identity::SceneEntityId;
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMapBuilder, ActionMapLimits, KeyCode,
 };
-use nara_project::{ProductCapability, RuntimePreset};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
@@ -30,6 +29,7 @@ use nara_render::image::{
     ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec,
 };
 use nara_render::tilemap::TileAtlasLayout;
+use nara_scene::runtime_configuration::{ProductCapability, RuntimePreset};
 use nara_scene::{
     RuntimeSceneLimits, SceneComponentRecord, SceneDocument, SceneEntityRecord, SourceDocumentKey,
     SourceDocumentKind,

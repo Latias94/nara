@@ -1,4 +1,4 @@
-#![cfg(feature = "local-player")]
+#![cfg(any(feature = "development", feature = "cook"))]
 #![forbid(unsafe_code)]
 
 #[allow(dead_code, reason = "reuse the public headless game driver")]

@@ -4,7 +4,7 @@ use std::{
     process::{Command, ExitStatus},
 };
 
-use nara_project::{ProductCapability, ProductCapabilitySet};
+use nara_scene::runtime_configuration::{ProductCapability, ProductCapabilitySet};
 use thiserror::Error;
 
 use super::cargo_build::{

@@ -1,19 +1,19 @@
 //! Inspection and placement of dependencies retained by the current hosted Scene.
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use std::sync::Arc;
 
 use nara_asset::{AssetProductRef, ImportedProductId};
 use nara_ecs::World;
 use nara_ecs::identity::{SpawnedSceneInstance, WorldIdentityDomain};
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use nara_scene::CompiledSceneCandidate;
 use nara_scene::{
     CompiledSceneDocument, SceneComponentBindings, SceneOccurrenceKey, SceneSpawnReport,
 };
 
 use super::{ProjectSceneResidency, ResidencyAuthority, failure, rejected};
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use crate::project_content::ProjectSourceContent;
 use crate::{
     runtime_content::{RuntimeContentMemberKind, RuntimeContentScene},
@@ -67,7 +67,7 @@ pub fn instantiate_current_scene_dependency(
         Err(report) => return report,
     };
     let prepared = match &dependency {
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         SceneDependency::Source { sources, candidate } => {
             bindings.prepare_scene(world, candidate, occurrence, Some(sources.resolution()))
         }
@@ -82,7 +82,7 @@ pub fn instantiate_current_scene_dependency(
 }
 
 enum SceneDependency {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     Source {
         sources: Arc<ProjectSourceContent>,
         candidate: Arc<CompiledSceneCandidate>,
@@ -93,7 +93,7 @@ enum SceneDependency {
 impl SceneDependency {
     fn document(&self) -> &CompiledSceneDocument {
         match self {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             Self::Source { candidate, .. } => candidate.document(),
             Self::Processed(scene) => scene.candidate().document(),
         }
@@ -136,7 +136,7 @@ fn current_dependency(
             ))
         })?;
     match &residency.authority {
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         ResidencyAuthority::Source { .. } => {
             let sources = current.project_sources().ok_or_else(authority_mismatch)?;
             let candidate = sources

@@ -1,4 +1,4 @@
-#![cfg(feature = "local-player")]
+#![cfg(any(feature = "development", feature = "cook"))]
 
 #[cfg(feature = "development")]
 use std::process::Command;

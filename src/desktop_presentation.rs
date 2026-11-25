@@ -21,7 +21,7 @@ use nara_render::gpu::{
 use nara_window::winit::{WinitPresentationDriver, WinitPresentationProgress};
 use nara_window::{WindowId, backend::BackendWindowHandles};
 
-#[cfg(all(feature = "project-runtime", feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 use crate::project_host::desktop_run::verification::DesktopFirstPresentVerification;
 
 const MAINTENANCE_POLL_INTERVAL: Duration = Duration::from_millis(2);
@@ -247,7 +247,7 @@ pub(crate) struct DesktopPresentationDriver {
     host: WgpuRenderHost,
     producer: Option<WgpuRenderProducer>,
     pending_result: Option<WgpuRuntimeResult>,
-    #[cfg(all(feature = "project-runtime", feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     verification: Option<DesktopFirstPresentVerification>,
     observer: Option<DesktopPresentationObserver>,
     reports: DesktopPresentationReports,
@@ -265,8 +265,7 @@ impl DesktopPresentationDriver {
     pub(crate) fn new(
         runtime: &RuntimeInstance,
         options: DesktopPresentationOptions,
-        #[cfg(all(feature = "project-runtime", feature = "runtime-2d", feature = "serde"))]
-        verification: Option<DesktopFirstPresentVerification>,
+        #[cfg(feature = "project-source")] verification: Option<DesktopFirstPresentVerification>,
         reports: DesktopPresentationReports,
     ) -> Self {
         let mut host = WgpuRenderHost::offscreen();
@@ -288,7 +287,7 @@ impl DesktopPresentationDriver {
             host,
             producer: None,
             pending_result: None,
-            #[cfg(all(feature = "project-runtime", feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             verification,
             observer: options.observer,
             reports,
@@ -501,7 +500,7 @@ impl DesktopPresentationDriver {
             exit: None,
             next_wake: None,
         };
-        #[cfg(all(feature = "project-runtime", feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         if let Some(verification) = &self.verification {
             let verified = verification.observe(runtime.generation(), presented, now);
             progress.exit = verified.exit;

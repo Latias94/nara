@@ -2007,9 +2007,9 @@ name = "nara_project"
 version = "0.1.0"
 dependencies = [
  "nara_app",
- "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_scene",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

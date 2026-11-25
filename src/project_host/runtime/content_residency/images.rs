@@ -4,10 +4,11 @@ use std::{
 };
 
 use nara_asset::{
-    AssetEvents, AssetMutationBaseline, AssetProductRef, AssetPublicationRevision, AssetRecord,
-    AssetRef, AssetServer, AssetSlotRevision, AssetSourceKind, AssetStateRevision, AssetStates,
-    Assets, Handle, ImportedProductId, LoadState,
+    AssetEvents, AssetMutationBaseline, AssetProductRef, AssetPublicationRevision, AssetServer,
+    AssetSlotRevision, AssetStateRevision, AssetStates, Assets, Handle, LoadState,
 };
+#[cfg(feature = "project-source")]
+use nara_asset::{AssetRecord, AssetRef, AssetSourceKind, ImportedProductId};
 use nara_render::image::ImageAsset;
 use nara_scene::advanced::SceneAssetReservations;
 
@@ -28,6 +29,7 @@ struct RuntimeImageOwner {
 pub(super) struct OwnedImage {
     pub(super) handle: Handle<ImageAsset>,
     pub(super) product: AssetProductRef,
+    #[cfg(feature = "project-source")]
     pub(super) record: Option<AssetRecord>,
     slot: AssetSlotRevision,
     state: AssetStateRevision,
@@ -38,13 +40,14 @@ impl OwnedImage {
     pub(super) fn capture(
         handle: Handle<ImageAsset>,
         product: AssetProductRef,
-        record: Option<AssetRecord>,
+        #[cfg(feature = "project-source")] record: Option<AssetRecord>,
         images: &Assets<ImageAsset>,
         states: &AssetStates,
     ) -> Self {
         Self {
             handle,
             product,
+            #[cfg(feature = "project-source")]
             record,
             slot: images.slot_revision(handle),
             state: states.state_revision(handle.id()),
@@ -71,7 +74,13 @@ impl OwnedImage {
         images
             .get(self.handle)
             .is_some_and(|image| image.product() == Some(self.product))
-            && binding_matches(self.handle, self.product, self.record.as_ref(), server)
+            && binding_matches(
+                self.handle,
+                self.product,
+                #[cfg(feature = "project-source")]
+                self.record.as_ref(),
+                server,
+            )
             && images.slot_revision(self.handle) == self.slot
             && states.published_slot_revision(self.handle.id()) == Some(&self.slot)
             && states
@@ -98,6 +107,7 @@ impl OwnedImage {
 pub(super) struct ImagePublication {
     handle: Handle<ImageAsset>,
     product: AssetProductRef,
+    #[cfg(feature = "project-source")]
     record: Option<AssetRecord>,
     image: ImageAsset,
     baseline: AssetMutationBaseline<ImageAsset>,
@@ -160,7 +170,7 @@ impl ImagePublications {
         let mut shared = Vec::new();
         let mut insert = |handle: Handle<ImageAsset>,
                           product: AssetProductRef,
-                          record: Option<AssetRecord>,
+                          #[cfg(feature = "project-source")] record: Option<AssetRecord>,
                           image: ImageAsset| {
             if image.product() != Some(product)
                 || publish.contains_key(&product)
@@ -170,7 +180,9 @@ impl ImagePublications {
             }
             let original = owned_by_id
                 .get(&handle.id())
-                .filter(|image| image.product == product && (!additive || image.record == record));
+                .filter(|image| image.product == product);
+            #[cfg(feature = "project-source")]
+            let original = original.filter(|image| !additive || image.record == record);
             if additive && let Some(original) = original {
                 if !original.matches(server, images, states)
                     || images.get(handle).is_none_or(|resident| {
@@ -202,6 +214,7 @@ impl ImagePublications {
                 ImagePublication {
                     handle,
                     product,
+                    #[cfg(feature = "project-source")]
                     record,
                     image,
                     baseline,
@@ -210,6 +223,7 @@ impl ImagePublications {
             Ok(())
         };
         match content {
+            #[cfg(feature = "project-source")]
             ResidencyInput::Source(snapshot) => {
                 for (index, content) in snapshot.images().iter().enumerate() {
                     let source = content.source();
@@ -254,7 +268,13 @@ impl ImagePublications {
                         _metadata: Arc::clone(runtime_lease.ok_or_else(super::resources_missing)?),
                     });
                     let image = acquired.product().share_with_retention_owner(owner);
-                    insert(handle, product, None, image)?;
+                    insert(
+                        handle,
+                        product,
+                        #[cfg(feature = "project-source")]
+                        None,
+                        image,
+                    )?;
                 }
             }
         }
@@ -392,6 +412,7 @@ impl ImagePublications {
             assert!(binding_matches(
                 item.handle,
                 item.product,
+                #[cfg(feature = "project-source")]
                 item.record.as_ref(),
                 server
             ));
@@ -422,6 +443,7 @@ impl ImagePublications {
             receipts.push(OwnedImage::capture(
                 item.handle,
                 item.product,
+                #[cfg(feature = "project-source")]
                 item.record,
                 images,
                 states,
@@ -442,16 +464,23 @@ impl ImagePublications {
 fn binding_matches(
     handle: Handle<ImageAsset>,
     product: AssetProductRef,
-    record: Option<&AssetRecord>,
+    #[cfg(feature = "project-source")] record: Option<&AssetRecord>,
     server: &AssetServer,
 ) -> bool {
-    server.get_handle::<ImageAsset>(handle.id()) == Some(handle)
-        && server.product(handle.id()) == Some(product)
-        && record.is_none_or(|record| {
-            product.source() == record.stable_id()
-                && product.product() == ImportedProductId::PRIMARY
-                && server.path(handle.id()) == Some(record.path())
-        })
+    if server.get_handle::<ImageAsset>(handle.id()) != Some(handle)
+        || server.product(handle.id()) != Some(product)
+    {
+        return false;
+    }
+    #[cfg(feature = "project-source")]
+    if let Some(record) = record
+        && (product.source() != record.stable_id()
+            || product.product() != ImportedProductId::PRIMARY
+            || server.path(handle.id()) != Some(record.path()))
+    {
+        return false;
+    }
+    true
 }
 
 fn superseded() -> HostFault {

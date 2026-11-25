@@ -1,4 +1,4 @@
-#[cfg(feature = "desktop")]
+#[cfg(all(feature = "desktop", any(feature = "development", feature = "cook")))]
 use nara::project_host::DesktopRun;
 use nara::{
     advanced_prelude::CurrentScene,
@@ -8,7 +8,7 @@ use nara::{
     prelude::Transform2d,
     tasks::{TaskPools, TaskReturnState},
 };
-#[cfg(feature = "local-player")]
+#[cfg(any(feature = "development", feature = "cook"))]
 use nara::{
     app::RuntimeTimeSettings,
     asset::Assets,
@@ -19,7 +19,7 @@ use nara::{
 
 use super::{GameResumeError, ResumeControl};
 use crate::command::CommandSchedule;
-#[cfg(feature = "local-player")]
+#[cfg(any(feature = "development", feature = "cook"))]
 use crate::{
     gameplay::{ActiveLevel, side_room::Rooms},
     resume::ResumeCompatibility,
@@ -34,7 +34,7 @@ use crate::{
     },
 };
 
-#[cfg(feature = "local-player")]
+#[cfg(any(feature = "development", feature = "cook"))]
 pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
     let reject = |reason: &str| GameResumeError::Ineligible(reason.into());
     if !world.resource::<Session>().local_player {
@@ -160,7 +160,7 @@ pub(super) fn require_unconfigured_checkpoint(world: &World) -> Result<(), GameR
 /// as do material assets or components not represented by `ResumeState`.
 /// Empty material storage and its installed Schema are supported. This value contains no
 /// World identity or native-service authority.
-#[cfg(feature = "local-player")]
+#[cfg(any(feature = "development", feature = "cook"))]
 pub fn capture_resume(session: &HeadlessSession) -> Result<ResumeState, GameResumeError> {
     let runtime_time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;
     session.capture(|world| {
@@ -179,7 +179,7 @@ pub fn capture_resume(session: &HeadlessSession) -> Result<ResumeState, GameResu
 /// the game-owned logical state crosses this boundary. A fresh desktop candidate must reconstruct
 /// those native services before a caller can use this value for restore. Development audio resets
 /// its voices and effect history with publication disabled; no audio state is reconstructed.
-#[cfg(feature = "desktop")]
+#[cfg(all(feature = "desktop", any(feature = "development", feature = "cook")))]
 pub fn capture_desktop_resume(session: &DesktopRun) -> Result<ResumeState, GameResumeError> {
     let runtime_time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;
     let bindings = crate::movement_keyboard_bindings(session)?;
@@ -193,7 +193,7 @@ pub fn capture_desktop_resume(session: &DesktopRun) -> Result<ResumeState, GameR
     Ok(state)
 }
 
-#[cfg(feature = "local-player")]
+#[cfg(any(feature = "development", feature = "cook"))]
 pub(crate) fn capture_world(
     world: &World,
     runtime_time: RuntimeTimeState,

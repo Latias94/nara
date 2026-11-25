@@ -1,6 +1,6 @@
 //! Public CPU acceptance for the opt-in source game's round and menu policy.
 
-#![cfg(feature = "local-player")]
+#![cfg(any(feature = "development", feature = "cook"))]
 #![forbid(unsafe_code)]
 
 #[allow(

@@ -339,16 +339,16 @@ fn changed_runtime_codec_fingerprint_changes_canonical_content_and_round_trips()
 fn canonical_bytes_do_not_depend_on_collection_insertion_order() {
     let mut first = definition();
     first.configuration.capabilities.requested = vec![
-        nara_project::ProductCapability::Runtime2d,
-        nara_project::ProductCapability::RuntimeCore,
+        nara_scene::runtime_configuration::ProductCapability::Runtime2d,
+        nara_scene::runtime_configuration::ProductCapability::RuntimeCore,
     ];
     let mut second = definition();
     second.members.reverse();
     second.scenes.reverse();
     second.addressable_roots.reverse();
     second.configuration.capabilities.requested = vec![
-        nara_project::ProductCapability::RuntimeCore,
-        nara_project::ProductCapability::Runtime2d,
+        nara_scene::runtime_configuration::ProductCapability::RuntimeCore,
+        nara_scene::runtime_configuration::ProductCapability::Runtime2d,
     ];
     for member in &mut second.members {
         member.products.reverse();

@@ -89,7 +89,7 @@ pub use nara_app::tasks;
 pub use nara_input as input;
 #[cfg(feature = "physics-2d")]
 pub use nara_physics2d as physics2d;
-#[cfg(feature = "project-runtime")]
+#[cfg(feature = "project-source")]
 pub use nara_project as project;
 #[cfg(feature = "runtime-core")]
 pub use nara_reflect as reflect;
@@ -163,10 +163,10 @@ mod test_host_fs;
 #[cfg(all(test, feature = "runtime-core", feature = "project-tooling"))]
 use project_tooling::host_fs as test_host_fs;
 
-#[cfg(feature = "project-runtime")]
+#[cfg(feature = "project-source")]
 mod project_diagnostic_ids;
 
-#[cfg(all(feature = "project-runtime", feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 mod project_content;
 
 #[cfg(all(feature = "project-runtime", feature = "serde"))]
@@ -178,7 +178,7 @@ pub mod runtime_content;
 #[cfg(feature = "project-runtime")]
 mod scene_retention;
 
-#[cfg(all(feature = "project-runtime", feature = "serde"))]
+#[cfg(feature = "project-source")]
 mod scene_format_diagnostic;
 
 #[cfg(feature = "project-runtime")]
@@ -223,19 +223,14 @@ pub mod prelude {
     pub use crate::Runtime2dPlugins;
     #[cfg(feature = "runtime-ui")]
     pub use crate::RuntimeUiPlugins;
-    #[cfg(all(feature = "project-runtime", feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub use crate::project_host::ProjectSceneSourceUpdateStatus;
     #[cfg(all(feature = "project-runtime", feature = "serde"))]
     pub use crate::project_host::{
         PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
         ProjectSceneRequestState, ProjectScenes,
     };
-    #[cfg(all(
-        feature = "project-runtime",
-        feature = "runtime-2d",
-        feature = "serde",
-        feature = "asset-watch"
-    ))]
+    #[cfg(all(feature = "project-source", feature = "asset-watch"))]
     pub use crate::project_host::{
         ProjectSceneWatchConfigurationError, ProjectSceneWatchPlugin, ProjectSceneWatchState,
         ProjectSceneWatchStatus,

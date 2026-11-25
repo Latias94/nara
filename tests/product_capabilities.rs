@@ -5,8 +5,8 @@ use std::{
 };
 
 use nara::{
-    ServerPlugins, app::App, project::ProductCapability,
-    project_host::compiled_product_capabilities,
+    ServerPlugins, app::App, project_host::compiled_product_capabilities,
+    scene::runtime_configuration::ProductCapability,
 };
 use serde_json::Value;
 
@@ -109,6 +109,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
         "presentation-2d",
         "presentation-ui",
         "project-runtime",
+        "project-source",
         "project-tooling",
         "project-workflow",
         "project-workflow-cargo-facts",
@@ -170,6 +171,21 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
             "dep:nara_render",
             "nara_render/hud-presentation"
         ]
+    );
+    assert_eq!(
+        feature_members(features, "project-runtime"),
+        [
+            "runtime-core",
+            "dep:blake3",
+            "dep:rustix",
+            "dep:windows-sys",
+            "nara_core/fs-capabilities",
+            "nara_scene/runtime-configuration",
+        ],
+    );
+    assert_eq!(
+        feature_members(features, "project-source"),
+        ["project-runtime", "runtime-2d", "serde", "dep:nara_project"],
     );
     assert_eq!(
         feature_members(features, "serde"),
@@ -256,13 +272,10 @@ fn examples_and_optional_tests_declare_their_capability_ceiling() {
         targets["product_capabilities"],
         ["project-runtime", "runtime-core"]
     );
-    assert_eq!(
-        targets["project_composition"],
-        ["project-runtime", "runtime-core"]
-    );
+    assert_eq!(targets["project_composition"], ["project-source"]);
     assert_eq!(
         targets["runtime_configuration_composition"],
-        ["project-runtime", "runtime-core"]
+        ["project-source"]
     );
     assert_eq!(
         targets["runtime_scene_activation"],
@@ -330,6 +343,32 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             "runtime-core-serde",
             vec!["--no-default-features", "--features", "runtime-core,serde"],
             runtime_core.clone(),
+        ),
+        (
+            "project-runtime",
+            vec![
+                "--no-default-features",
+                "--features",
+                "project-runtime,serde",
+            ],
+            runtime_core.clone(),
+        ),
+        (
+            "cooked-desktop",
+            vec![
+                "--no-default-features",
+                "--features",
+                "project-runtime,serde,presentation-2d,desktop-winit,render-wgpu",
+            ],
+            with_packages(&local_runtime, &["nara_material_derive", "nara_render"]),
+        ),
+        (
+            "project-source",
+            vec!["--no-default-features", "--features", "project-source"],
+            with_packages(
+                &local_runtime,
+                &["nara_material_derive", "nara_project", "nara_render"],
+            ),
         ),
         (
             "runtime-input",
@@ -406,7 +445,10 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
         for tool_package in ["nara_editor", "nara_editor_core", "gpui", "ctrlc"] {
             assert_not_present(&tree, tool_package);
         }
-        if !matches!(name, "desktop-winit" | "render-wgpu" | "all-features") {
+        if !matches!(
+            name,
+            "desktop-winit" | "render-wgpu" | "cooked-desktop" | "all-features"
+        ) {
             assert_not_present(&tree, "winit");
             assert_not_present(&tree, "wgpu");
         }

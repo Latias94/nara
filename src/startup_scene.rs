@@ -44,7 +44,7 @@ use nara_scene::{
     scene_component_bindings, validate_scene_component_bindings_authority,
 };
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 use crate::project_content::{
     ProjectContentGenerationLease, ProjectContentLease, ProjectSceneContentStamp,
     ProjectSourceContent,
@@ -88,7 +88,7 @@ impl fmt::Display for SceneSourceError {
 impl Error for SceneSourceError {}
 
 enum SceneRetention {
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     Project {
         _lease: ProjectContentLease,
         _generation: ProjectContentGenerationLease,
@@ -202,7 +202,7 @@ impl SceneSource {
         })
     }
 
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub(crate) fn from_project_content(
         candidate: Arc<CompiledSceneCandidate>,
         sources: Arc<ProjectSourceContent>,
@@ -271,7 +271,7 @@ impl SceneSource {
 
     pub(crate) fn asset_resolution(&self) -> Option<nara_asset::AssetReferenceResolver<'_>> {
         match &self.retention {
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             SceneRetention::Project { sources, .. } => Some(sources.resolution()),
             #[cfg(feature = "serde")]
             SceneRetention::RuntimeContent { .. } => None,
@@ -279,12 +279,12 @@ impl SceneSource {
         }
     }
 
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub(crate) fn is_project_backed(&self) -> bool {
         matches!(self.retention, SceneRetention::Project { .. })
     }
 
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub(crate) fn source_content_stamp(&self) -> Option<ProjectSceneContentStamp> {
         match &self.retention {
             SceneRetention::Project { content_stamp, .. } => *content_stamp,
@@ -294,7 +294,7 @@ impl SceneSource {
 
     pub(crate) fn is_content_managed(&self) -> bool {
         match self.retention {
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             SceneRetention::Project { .. } => true,
             #[cfg(feature = "serde")]
             SceneRetention::RuntimeContent { ref custody, .. } => {
@@ -310,7 +310,7 @@ impl SceneSource {
             return candidate.definitions().matches(bindings);
         }
         match &self.retention {
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             SceneRetention::Project {
                 schema_authority, ..
             } => schema_authority.matches(bindings),
@@ -328,7 +328,7 @@ impl SceneSource {
     #[must_use]
     pub(crate) fn retained_bytes(&self) -> usize {
         match &self.retention {
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             SceneRetention::Project { retained_bytes, .. } => *retained_bytes,
             #[cfg(feature = "serde")]
             SceneRetention::RuntimeContent { content, .. } => content.retained_bytes(),
@@ -339,7 +339,7 @@ impl SceneSource {
     #[cfg(test)]
     pub(crate) fn direct_limit(&self) -> Option<usize> {
         match self.retention {
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             SceneRetention::Project { .. } => None,
             #[cfg(feature = "serde")]
             SceneRetention::RuntimeContent { .. } => None,
@@ -357,7 +357,7 @@ impl fmt::Debug for SceneSource {
             .field(
                 "retention",
                 &match self.retention {
-                    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+                    #[cfg(feature = "project-source")]
                     SceneRetention::Project { .. } => "project-content",
                     #[cfg(feature = "serde")]
                     SceneRetention::RuntimeContent { .. } => "runtime-content",
@@ -509,7 +509,7 @@ impl CurrentScene<'_> {
     ///
     /// Direct, processed and Editor working-copy Scenes return `None`. Saved-source stamps stay
     /// frozen even if files subsequently change.
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     #[must_use]
     pub fn source_content_stamp(&self) -> Option<ProjectSceneContentStamp> {
         self.owner.source.source_content_stamp()
@@ -542,7 +542,7 @@ impl CurrentSceneView<'_> {
     ///
     /// Direct, processed and Editor working-copy Scenes return `None`. Saved-source stamps stay
     /// frozen even if files subsequently change.
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     #[must_use]
     pub fn source_content_stamp(&self) -> Option<ProjectSceneContentStamp> {
         self.owner.source.source_content_stamp()
@@ -565,7 +565,7 @@ impl CurrentSceneView<'_> {
 }
 
 impl CurrentSceneOwner {
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub(crate) fn is_project_backed(&self) -> bool {
         self.source.is_project_backed()
     }
@@ -575,7 +575,7 @@ impl CurrentSceneOwner {
         self.source.is_content_managed()
     }
 
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub(crate) fn project_sources(&self) -> Option<&Arc<ProjectSourceContent>> {
         match &self.source.retention {
             SceneRetention::Project { sources, .. } => Some(sources),
@@ -583,7 +583,7 @@ impl CurrentSceneOwner {
         }
     }
 
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "project-source")]
     pub(crate) fn deferred_source_scene(
         &self,
         product: nara_asset::AssetProductRef,
@@ -926,7 +926,7 @@ pub fn materialize_startup_scene(
     Ok(report.diagnostics)
 }
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 pub(crate) fn materialized_startup_scene_receipt(world: &World) -> Option<&SpawnedSceneInstance> {
     world
         .get_resource::<StartupSceneActivationInput>()
@@ -1107,7 +1107,7 @@ mod tests {
             ));
             assert!(std::ptr::eq(current.source(), scheduled.source()));
             assert!(std::ptr::eq(current.receipt(), scheduled.receipt()));
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             {
                 assert_eq!(current.source_content_stamp(), None);
                 assert_eq!(scheduled.source_content_stamp(), None);

@@ -1,6 +1,6 @@
 //! CPU-only controls registered by the shared desktop oracle, without a native window or GPU.
 
-#![cfg(feature = "desktop")]
+#![cfg(all(feature = "desktop", any(feature = "development", feature = "cook")))]
 #![forbid(unsafe_code)]
 
 #[path = "support/desktop_capture.rs"]

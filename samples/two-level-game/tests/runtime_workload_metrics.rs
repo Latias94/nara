@@ -1,6 +1,10 @@
 //! Arithmetic, identity custody, and public snapshot classification for the native workload.
 
-#![cfg(all(feature = "desktop", feature = "cost-measurement"))]
+#![cfg(all(
+    feature = "desktop",
+    feature = "cost-measurement",
+    any(feature = "development", feature = "cook")
+))]
 
 #[path = "../src/bin/runtime_workload/observe.rs"]
 #[allow(dead_code)]

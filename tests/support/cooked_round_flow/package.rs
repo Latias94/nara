@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use nara::{
     fs::ContentDigest,
-    project::RuntimeConfiguration,
+    scene::runtime_configuration::RuntimeConfiguration,
     project_tooling::host_fs,
     runtime_content::{
         RuntimeContentBase, RuntimeContentCatalog, RuntimeContentCatalogLimits,

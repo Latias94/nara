@@ -20,8 +20,12 @@ serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
 tracing = { workspace = true, optional = true }
 
+[dev-dependencies]
+toml.workspace = true
+
 [features]
 default = []
+runtime-configuration = ["serde", "nara_app/tasks"]
 work-observation = ["dep:tracing"]
 serde = [
     "dep:serde",

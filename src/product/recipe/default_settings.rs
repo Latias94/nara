@@ -3,8 +3,8 @@ use std::sync::Arc;
 use nara_app::tasks::TaskFacilities;
 use nara_app::{EditedPluginGroup, PluginGroup, PluginGroupBuilder, PluginGroupId};
 #[cfg(feature = "runtime-ui")]
-use nara_project::ProductCapability;
-use nara_project::ProductCapabilitySet;
+use nara_scene::runtime_configuration::ProductCapability;
+use nara_scene::runtime_configuration::ProductCapabilitySet;
 
 use super::{ProductRecipe, ProductRecipeError};
 

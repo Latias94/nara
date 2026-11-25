@@ -7,6 +7,7 @@
 #![cfg(feature = "local-player")]
 #![forbid(unsafe_code)]
 
+#[cfg(any(feature = "development", feature = "cook"))]
 #[allow(dead_code)]
 #[path = "../src/bin/cook/input.rs"]
 mod input;
@@ -22,17 +23,20 @@ mod evidence;
 #[allow(dead_code)]
 #[path = "../src/bin/player/output.rs"]
 mod output;
-use input::{ControllerBackend, GameFlow, PlayerSelection, RuntimeKind};
+#[cfg(any(feature = "development", feature = "cook"))]
 use nara::{
     app::PluginId, input::ActionMapFileCandidate, project::ProjectManifest,
     project_host::resolve_runtime_configuration,
 };
+use two_level_game::delivery::{ControllerBackend, GameFlow, PlayerSelection, RuntimeKind};
+#[cfg(any(feature = "development", feature = "cook"))]
 use two_level_game::input::{INPUT_PATH, input_product};
 
 fn keyboard(runtime: RuntimeKind) -> PlayerSelection {
     PlayerSelection::new(runtime, ControllerBackend::Disabled).unwrap()
 }
 
+#[cfg(any(feature = "development", feature = "cook"))]
 fn plan(selection: PlayerSelection) -> nara::project_host::RuntimeConfigurationPlan {
     let manifest = ProjectManifest::parse_toml_bytes(include_bytes!("../nara.toml"));
     assert!(!manifest.has_errors(), "{:?}", manifest.diagnostics);
@@ -55,6 +59,7 @@ fn plan(selection: PlayerSelection) -> nara::project_host::RuntimeConfigurationP
     resolve_runtime_configuration(&configuration, selection.recipe().unwrap()).unwrap()
 }
 
+#[cfg(any(feature = "development", feature = "cook"))]
 #[test]
 fn headless_cooking_selects_authored_semantics_without_a_native_window() {
     let selected = keyboard(RuntimeKind::parse("headless").unwrap());
@@ -76,6 +81,7 @@ fn headless_cooking_selects_authored_semantics_without_a_native_window() {
 }
 
 #[cfg(feature = "desktop")]
+#[cfg(any(feature = "development", feature = "cook"))]
 #[test]
 fn desktop_selection_binds_its_profile_and_authored_game_input() {
     let selected = keyboard(RuntimeKind::parse("desktop").unwrap());
@@ -103,6 +109,7 @@ fn desktop_selection_binds_its_profile_and_authored_game_input() {
 }
 
 #[cfg(all(windows, feature = "desktop", feature = "audio-cpal"))]
+#[cfg(any(feature = "development", feature = "cook"))]
 #[test]
 fn audible_selection_is_explicit_and_never_opens_a_device_during_composition() {
     let selected = keyboard(RuntimeKind::parse("audio-desktop").unwrap());
@@ -212,6 +219,7 @@ fn flow_names_are_explicit_and_headless_round_is_always_refused() {
     }
 }
 
+#[cfg(any(feature = "development", feature = "cook"))]
 fn cook_options(extra: &[&str]) -> Result<input::Options, String> {
     use std::{ffi::OsString, path::Path};
 
@@ -241,6 +249,7 @@ fn cook_options(extra: &[&str]) -> Result<input::Options, String> {
     input::Options::from_args(arguments)
 }
 
+#[cfg(any(feature = "development", feature = "cook"))]
 #[test]
 fn cooker_defaults_to_exploration_and_refuses_invalid_flow_arguments() {
     let default = cook_options(&[]).unwrap().selection;
@@ -295,6 +304,7 @@ fn cooker_defaults_to_exploration_and_refuses_invalid_flow_arguments() {
 }
 
 #[cfg(feature = "play-flow")]
+#[cfg(any(feature = "development", feature = "cook"))]
 #[test]
 fn round_recipes_select_ui_owners_without_acquiring_native_devices() {
     for (runtime, controllers, expected_features) in [
@@ -396,6 +406,7 @@ fn round_recipes_select_ui_owners_without_acquiring_native_devices() {
     }
 }
 
+#[cfg(any(feature = "development", feature = "cook"))]
 #[test]
 fn keyboard_selections_never_add_native_controller_ingress() {
     for runtime in [
@@ -432,6 +443,7 @@ fn keyboard_selections_never_add_native_controller_ingress() {
 }
 
 #[cfg(all(windows, feature = "gamepad"))]
+#[cfg(any(feature = "development", feature = "cook"))]
 #[test]
 fn explicit_controllers_select_one_native_ingress_without_changing_authored_input() {
     let selected = PlayerSelection::new(RuntimeKind::Desktop, ControllerBackend::Gilrs).unwrap();
@@ -472,6 +484,7 @@ fn explicit_controllers_select_one_native_ingress_without_changing_authored_inpu
 }
 
 #[cfg(all(windows, feature = "gamepad", feature = "audio-cpal"))]
+#[cfg(any(feature = "development", feature = "cook"))]
 #[test]
 fn audio_and_controllers_compose_without_acquiring_either_native_device() {
     let selected =
@@ -645,6 +658,7 @@ fn content_profiles_roundtrip_the_complete_player_selection() {
         assert_eq!(restored.manifest_profile(), selected.manifest_profile());
         assert_eq!(restored.binary(), selected.binary());
         assert_eq!(restored.features(), selected.features());
+        #[cfg(any(feature = "development", feature = "cook"))]
         assert_eq!(
             plan(restored).plugin_plan().fingerprint(),
             plan(selected).plugin_plan().fingerprint()
@@ -982,11 +996,11 @@ mod atlas_content {
             ProductRecipe,
             app::FixedTime,
             asset::{AssetPathScope, ProjectAssetDatabase},
-            project::RuntimeConfiguration,
             project_workflow::cooked_content::{
                 CookedContentBuilder, CookedContentLimits, CookedContentRequest,
             },
             runtime_content::RuntimeContentTarget,
+            scene::runtime_configuration::RuntimeConfiguration,
             scene::{SceneDocument, SourceDocumentKey},
         };
         use two_level_game::{GameResumeError, capture_processed_resume, restore_processed_resume};

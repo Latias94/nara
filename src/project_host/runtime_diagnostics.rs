@@ -306,24 +306,6 @@ pub(super) fn single_warning(code: &'static str, summary: &'static str) -> Diagn
     ))
 }
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
-pub(super) fn single_warning_with_project_relative(
-    code: &'static str,
-    summary: &'static str,
-    key: &'static str,
-    value: &str,
-) -> DiagnosticReport {
-    let Ok(field) = DiagnosticField::project_relative(field_key(key), value) else {
-        return single_warning(code, summary);
-    };
-    let Ok(diagnostic) =
-        Diagnostic::warning(diagnostic_code(code), safe_summary(summary)).try_with_field(field)
-    else {
-        return single_warning(code, summary);
-    };
-    single_diagnostic(diagnostic)
-}
-
 #[cfg(feature = "serde")]
 pub(super) fn single_error_with_u64(
     code: &'static str,

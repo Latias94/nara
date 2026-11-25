@@ -4,26 +4,30 @@ use std::{mem::size_of, sync::Arc};
 
 use nara_asset::AssetProductRef;
 #[cfg(feature = "runtime-2d")]
-use nara_asset::{AssetId, AssetMutationBaseline, AssetSourceKind, ImportedProductId};
+use nara_asset::{AssetId, AssetMutationBaseline};
+#[cfg(feature = "project-source")]
+use nara_asset::{AssetSourceKind, ImportedProductId};
 #[cfg(feature = "runtime-2d")]
 use nara_render::image::ImageAsset;
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use nara_render::material::{Material2dAsset, Material2dDomain};
 #[cfg(feature = "runtime-2d")]
 use nara_render::tilemap::{
     TileSet, TileSetContentReceipt, TileSetDescriptor, TileSetPublicationInput,
 };
 
+#[cfg(feature = "project-source")]
+use super::catalog::CatalogChange;
+#[cfg(feature = "runtime-2d")]
+use super::images::OwnedImage;
 use super::*;
-#[cfg(feature = "runtime-2d")]
-use super::{catalog::CatalogChange, images::OwnedImage};
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 use crate::{
     project_content::{ProjectContentLease, asset_record_retained_bytes},
     project_host::ProjectSettingsLineage,
-    runtime_content::RuntimeContentAsset,
-    scene_retention::BTREE_ENTRY_OVERHEAD,
 };
+#[cfg(feature = "runtime-2d")]
+use crate::{runtime_content::RuntimeContentAsset, scene_retention::BTREE_ENTRY_OVERHEAD};
 use crate::{
     runtime_content::{RuntimeContentBase, RuntimeContentLease, RuntimeContentScene},
     scene_retention::ARC_CONTROL_BLOCK_BYTES,
@@ -33,7 +37,7 @@ use crate::{
 mod tests;
 
 pub(super) enum ResidencyAuthority {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     Source {
         lineage: ProjectSettingsLineage,
         catalog: Vec<AssetRecord>,
@@ -53,7 +57,7 @@ pub(super) enum ResidencyAuthority {
 impl ResidencyAuthority {
     pub(super) fn validate(&self, content: ResidencyInput<'_>) -> Result<(), HostFault> {
         match (self, content) {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             (Self::Source { lineage, scope, .. }, ResidencyInput::Source(snapshot))
                 if *lineage == snapshot.lineage()
                     && scope == snapshot.asset_resolution().scope() =>
@@ -65,7 +69,7 @@ impl ResidencyAuthority {
             {
                 Ok(())
             }
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             (Self::Source { .. }, ResidencyInput::Source(_)) => Err(failure(
                 "project.scene.lineage-mismatch",
                 "Prepared Scene belongs to another project",
@@ -79,7 +83,7 @@ impl ResidencyAuthority {
 }
 
 pub(super) enum PreparedCatalog {
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     Source {
         original: Option<ProjectAssetDatabase>,
         change: CatalogChange,
@@ -112,7 +116,7 @@ impl PreparedCatalog {
             addition_to,
         )?;
         match content {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             ResidencyInput::Source(snapshot) => {
                 let lease = snapshot
                     .reserve_consumer_retained(bytes)
@@ -154,14 +158,15 @@ impl PreparedCatalog {
     }
 
     #[cfg(feature = "runtime-2d")]
-    pub(super) fn asset_resolution(&self) -> Option<nara_asset::AssetReferenceResolver<'_>> {
+    pub(super) fn asset_database(&self) -> Option<&ProjectAssetDatabase> {
         match self {
-            Self::Source { change, scope, .. } => Some(change.database.resolver(scope)),
+            #[cfg(feature = "project-source")]
+            Self::Source { change, .. } => Some(&change.database),
             Self::Processed { .. } => None,
         }
     }
 
-    #[cfg(feature = "runtime-2d")]
+    #[cfg(feature = "project-source")]
     pub(super) fn stage_source_relocations(
         &self,
         snapshot: &ProjectContentSnapshot,
@@ -228,13 +233,14 @@ impl PreparedCatalog {
     #[cfg(feature = "runtime-2d")]
     pub(super) fn runtime_lease(&self) -> Option<&Arc<RuntimeContentLease>> {
         match self {
+            #[cfg(feature = "project-source")]
             Self::Source { .. } => None,
             Self::Processed { lease, .. } => Some(lease),
         }
     }
 
     pub(super) fn validate(&self, _world: &World) -> Result<(), HostFault> {
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         if let Self::Source { original, .. } = self {
             if _world.get_resource::<ProjectAssetDatabase>() != original.as_ref() {
                 return Err(failure(
@@ -248,7 +254,7 @@ impl PreparedCatalog {
 
     pub(super) fn commit(self, _world: &mut World) -> ResidencyAuthority {
         match self {
-            #[cfg(feature = "runtime-2d")]
+            #[cfg(feature = "project-source")]
             Self::Source {
                 original: _,
                 change,
@@ -313,7 +319,7 @@ fn metadata_bytes(
     #[cfg(feature = "runtime-2d")]
     stock_metadata_bytes(&mut bytes, content, current, addition_to, staged_copies)?;
     let content = match content {
-        #[cfg(feature = "runtime-2d")]
+        #[cfg(feature = "project-source")]
         ResidencyInput::Source(snapshot) => {
             source_metadata_bytes(&mut bytes, world, snapshot)?;
             return Ok(bytes);
@@ -349,6 +355,7 @@ fn stock_metadata_bytes(
     // Only the staged copies grow. A complete new binding is a conservative upper bound
     // even when the target reuses an existing identity; current-only bindings are already above.
     match content {
+        #[cfg(feature = "project-source")]
         ResidencyInput::Source(snapshot) => {
             for record in snapshot.asset_database().records() {
                 let growth =
@@ -425,7 +432,7 @@ fn stock_metadata_bytes(
     Ok(())
 }
 
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "project-source")]
 fn source_metadata_bytes(
     bytes: &mut usize,
     world: &World,

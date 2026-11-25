@@ -11,17 +11,19 @@ use crate::content::ProjectContentManifest;
 use crate::effective::EffectiveProjectSettings;
 use crate::path::ProjectPath;
 use crate::profile::{ProjectProfileError, ProjectProfileOverlay};
-use crate::render::ProjectRenderManifest;
 use crate::sections::{
-    ProjectAuthoringManifest, ProjectCapabilitiesManifest, ProjectDiagnosticsManifest, ProjectInfo,
-    ProjectInputManifest, ProjectPathsManifest, ProjectProfileKind, ProjectRuntimeManifest,
-    ProjectStartupManifest, ProjectTasksManifest, ProjectUiManifest, ProjectWindowManifest,
+    ProjectAuthoringManifest, ProjectInfo, ProjectInputManifest, ProjectPathsManifest,
+    ProjectProfileKind, ProjectRuntimeManifest, ProjectStartupManifest,
 };
 use crate::validation::{
     error, validate_path_field, validate_profile_name, with_field_path, with_profile_identifier,
     with_public_u64, with_secret,
 };
-use crate::{CURRENT_PROJECT_SCHEMA_VERSION, DEFAULT_MANIFEST_BYTE_LIMIT};
+use crate::{
+    CURRENT_PROJECT_SCHEMA_VERSION, DEFAULT_MANIFEST_BYTE_LIMIT, ProjectCapabilitiesManifest,
+    ProjectDiagnosticsManifest, ProjectRenderManifest, ProjectTasksManifest, ProjectUiManifest,
+    ProjectWindowManifest,
+};
 
 #[derive(Clone, PartialEq)]
 pub struct ProjectManifestLoad {
@@ -294,7 +296,7 @@ impl ProjectManifest {
         let profile_kind = ProjectProfileKind::from_profile_name(profile_name);
         settings.profile_name = Some(profile_name.to_owned());
         settings.apply_profile_kind_defaults(profile_kind);
-        overlay.apply_to(&mut settings)?;
+        overlay.apply_to(&mut settings, self.tasks)?;
         settings.enforce_profile_kind_invariants(profile_kind);
         settings.enforce_product_invariants();
         Ok(settings)

@@ -87,10 +87,11 @@ pub(super) fn accept(
         incumbent.admit(&after_ticks(action("marker"), HANDOFF_OFFSET)),
         original_tick + HANDOFF_OFFSET
     );
-    let boundary = incumbent.observe();
-    assert_eq!(boundary["state"], burst["state"], "{boundary}");
-    assert_eq!(boundary["time"], burst["time"], "{boundary}");
+    let before_capture = incumbent.observe();
+    assert_eq!(before_capture["state"], burst["state"], "{before_capture}");
+    assert_eq!(before_capture["time"], burst["time"], "{before_capture}");
     let (captured, bytes) = capture(&mut incumbent);
+    let boundary = incumbent.observe_after_capture_maintenance(before_capture);
     assert_capture(&captured, &boundary["state"], levels, placements);
     let manifest = executable.with_file_name("package.json");
     let package: Value = serde_json::from_slice(&read_bounded(&manifest, 1024 * 1024)).unwrap();
@@ -152,6 +153,7 @@ pub(super) fn accept(
         bytes,
         "canonical resume bytes changed"
     );
+    assert_eq!(candidate.observe(), restored);
     assert_eq!(incumbent.observe(), boundary);
 
     drive_suffix(&mut incumbent, &mut candidate, &boundary, &restored);
@@ -243,16 +245,24 @@ pub(super) fn accept_open_rooms(
         incumbent.admit(&after_ticks(vertical_movement(UP, false), RELEASE_OFFSET)),
         original_tick + RELEASE_OFFSET
     );
-    let boundary = incumbent.observe();
-    assert_eq!(boundary["paused"], true, "{boundary}");
-    assert_eq!(boundary["state"], found, "{boundary}");
-    assert_eq!(boundary["state"]["held"], json!(HELD_UP), "{boundary}");
-    assert_eq!(boundary["time"]["fixed_debt_nanos"], 0, "{boundary}");
+    let before_capture = incumbent.observe();
+    assert_eq!(before_capture["paused"], true, "{before_capture}");
+    assert_eq!(before_capture["state"], found, "{before_capture}");
     assert_eq!(
-        boundary["time"]["fixed_remainder_nanos"], INITIAL_REMAINDER,
-        "{boundary}"
+        before_capture["state"]["held"],
+        json!(HELD_UP),
+        "{before_capture}"
+    );
+    assert_eq!(
+        before_capture["time"]["fixed_debt_nanos"], 0,
+        "{before_capture}"
+    );
+    assert_eq!(
+        before_capture["time"]["fixed_remainder_nanos"], INITIAL_REMAINDER,
+        "{before_capture}"
     );
     let (captured, bytes) = capture(&mut incumbent);
+    let boundary = incumbent.observe_after_capture_maintenance(before_capture);
     assert_eq!(
         captured.rooms,
         ProcessedRooms {
@@ -300,6 +310,7 @@ pub(super) fn accept_open_rooms(
     );
     assert_eq!(incumbent.observe(), boundary);
     assert_eq!(capture(&mut incumbent).1, bytes);
+    assert_eq!(incumbent.observe(), boundary);
 
     let resume_path = storage.join("meadow-with-rooms.json");
     fs::write(&resume_path, &bytes).unwrap();
@@ -331,6 +342,7 @@ pub(super) fn accept_open_rooms(
         bytes,
         "room resume bytes changed"
     );
+    assert_eq!(candidate.observe(), restored);
 
     incumbent.send(&request("retire"));
     let retired = incumbent.finish("retired", None);
@@ -597,6 +609,11 @@ fn drive_suffix(
             assert_eq!(
                 number(&current["time"], "elapsed_nanos"),
                 number(&start["time"], "elapsed_nanos") + elapsed,
+                "{current}"
+            );
+            assert_eq!(
+                number(&current["time"], "frames"),
+                number(&start["time"], "frames") + 2 * (index as u64 + 1),
                 "{current}"
             );
         }

@@ -1,13 +1,13 @@
 use std::fmt;
 
 use nara_app::PluginPlan;
-use nara_project::{EffectiveRuntimeConfiguration, ProductCapabilitySet};
+use nara_scene::runtime_configuration::{EffectiveRuntimeConfiguration, ProductCapabilitySet};
 
 use super::{
-    CompiledProductCapabilities, ProjectRuntimeAppPlugins, RuntimePlanError, SchemaValidationInput,
-    built_in_schema_providers, configured_profile_plugins, resolve_runtime_composition,
+    CompiledProductCapabilities, ProjectRuntimeAppPlugins, RuntimeCapabilityError,
+    RuntimePlanError, SchemaValidationInput, built_in_schema_providers, configured_profile_plugins,
+    resolve_runtime_composition, validate_runtime_capabilities,
 };
-use crate::project_host::ingest::{ProjectCandidateError, validate_runtime_capabilities};
 
 /// Immutable executable composition admitted from Runtime configuration, without source lineage.
 ///
@@ -99,7 +99,7 @@ impl RuntimeConfigurationPlan {
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeConfigurationPlanError {
     /// The shared product-capability admission rejected the requested Runtime configuration.
-    Capabilities(ProjectCandidateError),
+    Capabilities(RuntimeCapabilityError),
     /// Plugin or Schema resolution rejected the selected executable recipe.
     Resolution(RuntimePlanError),
 }
@@ -145,6 +145,7 @@ pub fn resolve_runtime_configuration(
         ProjectRuntimeAppPlugins {
             plugins,
             recipe,
+            #[cfg(feature = "project-source")]
             overlay: None,
         },
         built_in_schema_providers(),

@@ -8,13 +8,15 @@ use nara_asset::{
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_ecs::identity::{EntityLookup, SceneEntityId, WorldIdentityDomain};
-use nara_project::{ProductCapability, ProjectPath, RuntimeConfiguration, RuntimePreset};
+#[cfg(feature = "project-source")]
+use nara_project::ProjectPath;
 use nara_reflect::{ComponentTypeId, ComponentValue, encode_asset_reference_value};
 use nara_render::image::{
     ImageAsset, ImageColorSpace, ImageDomain, ImageExtent, ImageFormat, ImageRuntimeCodec,
 };
 use nara_scene::{
     RuntimeSceneDocumentCandidate, RuntimeSceneLimits, SourceDocumentKey, SourceDocumentKind,
+    runtime_configuration::{ProductCapability, RuntimeConfiguration, RuntimePreset},
 };
 
 use super::*;
@@ -267,6 +269,7 @@ impl Plugin for RequestProbePlugin {
             let request = world.resource::<RequestProbe>().request;
             let request = request.unwrap_or_else(|| {
                 ProjectScenes::scope(world, |scenes| {
+                    #[cfg(feature = "project-source")]
                     assert_eq!(
                         scenes.request(ProjectPath::new("later.scene.json").unwrap()),
                         Err(ProjectSceneRequestError::UndeclaredScene),
@@ -279,6 +282,7 @@ impl Plugin for RequestProbePlugin {
                     return false;
                 }
                 let view = scenes.prepared(request).unwrap();
+                #[cfg(feature = "project-source")]
                 assert_eq!(view.selected_scene_path(), None);
                 assert_eq!(view.selected_scene_product(), Some(later()));
                 assert_eq!(view.scene().roots(), [SceneEntityId::new("later").unwrap()]);
@@ -350,6 +354,7 @@ fn headless_session_retains_the_original_processed_base_across_pause_step_and_cl
     let mut session = HeadlessSession::from_runtime_content(base.clone());
     session.start().unwrap();
     let generation = session.runtime_generation().unwrap();
+    #[cfg(feature = "project-source")]
     assert!(session.startup_content_closure().is_none());
     assert!(matches!(
         session.capture(|_| ()),

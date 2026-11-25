@@ -243,20 +243,20 @@ To refresh the saved authoring bundle from this product's native schema provider
 | `--no-default-features --features cooked-player,desktop,gamepad` (plus `audio-cpal` for audible placement) | Native controller implementation available to an explicitly controller-selected cooked profile; availability alone does not activate it |
 | `desktop,cost-measurement,scene-work-observation` | Development-only native workload with existing Scene owner span attribution; disabled by default |
 
-Cargo features are additive. Enabling `cooked-player` with defaults still enables development;
-the production cooker always disables defaults for its separate captured Player build. Its own
-features and the supervising tests' tooling do not become Player features. Check the exact
-normal/build graph with Cargo rather than the test process or an all-feature workspace graph:
+Cargo features are additive. Enabling `cooked-player` with defaults also enables development.
+The cooker turns off defaults for its separate shipping build. The shipping Player and Server
+exclude `nara_project`. Check their normal and build dependency graphs with Cargo.
 
 ```text
+cargo tree --locked --no-default-features --features cooked-server --edges normal,build
 cargo tree --locked --no-default-features --features cooked-player --edges normal,build
 cargo tree --locked --no-default-features --features cooked-player,desktop --edges normal,build
 ```
 
-Local Player selections include the Sprite clip importer and codec, CPU Sound Bank importer and
-codec, Hound for WAV admission, and CPU Image and Material support. Headless and silent Player
-selections exclude CPAL and rtrb. The delivery tests check the dependency selection and execute
-the actual relocated packages.
+Local Player selections include the Sprite clip and CPU Sound Bank codecs and CPU Image and
+Material support. Development and Cook recipes register the source importers. Headless and silent
+Player selections exclude CPAL and rtrb. The delivery tests check the dependency selection and
+execute the relocated packages.
 
 ## Optional Windows Game Audio
 

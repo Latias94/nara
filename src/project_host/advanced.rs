@@ -1,27 +1,33 @@
 //! Explicit project-plan inspection and non-replayable Host probes.
 //!
 //! Raw plan editing is intentionally separated from ordinary product intents. A
-//! [`RuntimeProbe`] is narrower still: it adds exactly one non-replayable definition over an
-//! ordinary [`ProductRecipe`] and cannot carry schema providers or profile edits.
+//! With `project-source`, `RuntimeProbe` adds one non-replayable definition over an ordinary
+//! `ProductRecipe`. Source probe definitions cannot carry schema providers or profile edits.
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 use crate::fs::DirectoryCapability;
+#[cfg(feature = "project-source")]
 use nara_app::PluginDefinition;
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 use nara_ecs::Resource;
 
+#[cfg(feature = "project-source")]
 use super::composition::{
     RuntimePluginOverlay, resolve_product_recipe_with_overlay, runtime_plugin_overlay,
 };
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 use super::runtime::{HeadlessRun, HeadlessRunIntent};
+#[cfg(feature = "project-source")]
 use super::{ProjectSettingsCandidate, RuntimePlan, RuntimePlanError};
+#[cfg(feature = "project-source")]
 use crate::ProductRecipe;
 #[cfg(feature = "runtime-window")]
 pub use crate::product::window_from_settings;
 
+pub use super::composition::built_in_schema_providers;
+#[cfg(feature = "project-source")]
 pub use super::composition::{
-    ProjectRuntimePlugins, built_in_schema_providers, project_runtime_plugins, resolve_runtime_plan,
+    ProjectRuntimePlugins, project_runtime_plugins, resolve_runtime_plan,
 };
 #[cfg(feature = "serde")]
 pub use super::runtime::{
@@ -31,8 +37,7 @@ pub use super::runtime::{
 };
 
 #[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -44,11 +49,13 @@ use super::{DesktopRun, DesktopRunIntent};
 /// edit profile-owned plugins, attach schema providers, or carry more than one probe definition.
 /// Schema-owning definitions are rejected during Host composition and must use
 /// `SchemaContribution` in the ordinary recipe.
+#[cfg(feature = "project-source")]
 #[derive(Debug)]
 pub struct RuntimeProbe {
     definition: PluginDefinition,
 }
 
+#[cfg(feature = "project-source")]
 impl RuntimeProbe {
     /// Creates one recipe-anchored non-replayable probe.
     ///
@@ -64,6 +71,7 @@ impl RuntimeProbe {
 }
 
 /// Resolves one ordinary recipe plus one non-replayable probe before creating an `App`.
+#[cfg(feature = "project-source")]
 #[must_use = "the resolved plan or rejection must be inspected"]
 pub fn resolve_product_recipe_with_probe(
     candidate: &ProjectSettingsCandidate,
@@ -74,7 +82,7 @@ pub fn resolve_product_recipe_with_probe(
 }
 
 /// Creates one headless product action with a single non-replayable probe overlay.
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "project-source")]
 #[must_use]
 pub fn headless_run_with_probe<O>(
     project_root: DirectoryCapability,
@@ -89,8 +97,7 @@ where
 
 /// Creates one desktop product action with a single non-replayable probe overlay.
 #[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
+    feature = "project-source",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]

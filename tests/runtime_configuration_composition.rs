@@ -17,9 +17,9 @@ use nara::{
         PluginProductCapability,
     },
     fs::{FileCapability, TrustMode},
-    project::{ProductCapability, ProjectPath, RuntimeConfiguration, RuntimePreset},
+    project::ProjectPath,
     project_host::{
-        CompositionError, ProjectCandidateErrorKind, RuntimeConfigurationPlanError,
+        CompositionError, RuntimeCapabilityErrorKind, RuntimeConfigurationPlanError,
         RuntimePlanError, ingest_project_manifest, resolve_product_recipe,
         resolve_runtime_configuration,
     },
@@ -27,7 +27,10 @@ use nara::{
         ComponentCapability, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
         ComponentSchemaVersion, ComponentTypeId, PersistentComponentSchemaOwnerId,
     },
-    scene::TRANSFORM_SCHEMA_PROVIDER_ID,
+    scene::{
+        TRANSFORM_SCHEMA_PROVIDER_ID,
+        runtime_configuration::{ProductCapability, RuntimeConfiguration, RuntimePreset},
+    },
 };
 
 #[cfg(feature = "runtime-input")]
@@ -536,9 +539,9 @@ fn runtime_capability_admission_rejects_before_any_app_or_plugin_factory() {
     for (record, kind) in [
         (
             incomplete,
-            ProjectCandidateErrorKind::InvalidCapabilityClosure,
+            RuntimeCapabilityErrorKind::InvalidCapabilityClosure,
         ),
-        (conflict, ProjectCandidateErrorKind::PresetConflict),
+        (conflict, RuntimeCapabilityErrorKind::PresetConflict),
     ] {
         let effective = record.resolve().unwrap();
         let error =
@@ -615,7 +618,7 @@ fn runtime_configuration_uses_the_actual_compiled_capability_ceiling() {
     };
     assert_eq!(
         error.kind(),
-        ProjectCandidateErrorKind::UnavailableCapabilities
+        RuntimeCapabilityErrorKind::UnavailableCapabilities
     );
     assert_eq!(instances.load(Ordering::SeqCst), 0);
 }

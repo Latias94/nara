@@ -13,12 +13,15 @@ use two_level_game::{
 #[test]
 fn logical_instances_share_a_source_without_sharing_persistent_object_keys() {
     assert_eq!(LevelId::STARTUP, LevelId::Meadow);
-    assert_eq!(LevelId::Meadow.scene_path().as_str(), "meadow.scene.json");
-    assert_eq!(LevelId::Cavern.scene_path().as_str(), "cavern.scene.json");
+    assert_eq!(LevelId::Meadow.scene_file_name(), "meadow.scene.json");
+    assert_eq!(LevelId::Cavern.scene_file_name(), "cavern.scene.json");
     let first = LevelKey::main(LevelId::Meadow);
     let second = LevelKey::new(LevelId::Meadow, 1).unwrap();
     assert_ne!(first, second);
-    assert_eq!(first.level().scene_path(), second.level().scene_path());
+    assert_eq!(
+        first.level().scene_product(),
+        second.level().scene_product()
+    );
     assert_eq!(second.instance(), 1);
     assert!(LevelKey::new(LevelId::Cavern, MAX_LEVEL_INSTANCES).is_err());
 

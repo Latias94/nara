@@ -1,7 +1,11 @@
 use nara_app::{
     PluginDefinition, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginSlot, PluginSlotId,
 };
-use nara_project::{EffectiveRuntimeConfiguration, ProductCapabilitySet, RuntimePreset};
+#[cfg(feature = "runtime-ui")]
+use nara_scene::runtime_configuration::EffectivePrimaryUiSurface;
+use nara_scene::runtime_configuration::{
+    EffectiveRuntimeConfiguration, ProductCapability, ProductCapabilitySet, RuntimePreset,
+};
 
 use super::{HeadlessRuntimePlugins, MinimalPlugins, ServerPlugins};
 
@@ -33,7 +37,7 @@ pub(crate) struct ProjectProfilePlugins {
     ))]
     render_definition: PluginDefinition,
     #[cfg(feature = "runtime-ui")]
-    primary_ui_surface: Option<nara_project::EffectivePrimaryUiSurface>,
+    primary_ui_surface: Option<EffectivePrimaryUiSurface>,
 }
 
 impl ProjectProfilePlugins {
@@ -70,10 +74,10 @@ impl PluginGroup for ProjectProfilePlugins {
         let task_plugin = nara_app::tasks::plugin(self.task_config);
         let product_group_includes_minimal = self
             .capabilities
-            .contains(nara_project::ProductCapability::Runtime2d)
+            .contains(ProductCapability::Runtime2d)
             || self
                 .capabilities
-                .contains(nara_project::ProductCapability::RuntimeUi);
+                .contains(ProductCapability::RuntimeUi);
         let builder = PluginGroupBuilder::new().add_slot(
             PluginSlot::required(SLOT_RUNTIME_TIME, super::runtime_time::PLUGIN_ID),
             self.time_definition,
@@ -93,7 +97,7 @@ impl PluginGroup for ProjectProfilePlugins {
         #[cfg(feature = "runtime-2d")]
         let builder = if self
             .capabilities
-            .contains(nara_project::ProductCapability::Runtime2d)
+            .contains(ProductCapability::Runtime2d)
         {
             builder.add_edited_group(
                 super::Runtime2dPlugins
@@ -107,7 +111,7 @@ impl PluginGroup for ProjectProfilePlugins {
         #[cfg(feature = "runtime-ui")]
         let builder = if self
             .capabilities
-            .contains(nara_project::ProductCapability::RuntimeUi)
+            .contains(ProductCapability::RuntimeUi)
         {
             let builder = builder.add_edited_group(
                 super::RuntimeUiPlugins
@@ -140,7 +144,7 @@ impl PluginGroup for ProjectProfilePlugins {
         #[cfg(feature = "presentation-2d")]
         let builder = if self
             .capabilities
-            .contains(nara_project::ProductCapability::Presentation2d)
+            .contains(ProductCapability::Presentation2d)
         {
             builder.add_edited_group(
                 super::Presentation2dPlugins
@@ -154,7 +158,7 @@ impl PluginGroup for ProjectProfilePlugins {
         #[cfg(feature = "presentation-ui")]
         let builder = if self
             .capabilities
-            .contains(nara_project::ProductCapability::PresentationUi)
+            .contains(ProductCapability::PresentationUi)
         {
             builder.add_edited_group(
                 super::PresentationUiPlugins
@@ -168,7 +172,7 @@ impl PluginGroup for ProjectProfilePlugins {
         #[cfg(feature = "desktop-winit")]
         let builder = if self
             .capabilities
-            .contains(nara_project::ProductCapability::DesktopWinit)
+            .contains(ProductCapability::DesktopWinit)
         {
             builder.add_edited_group(
                 super::DesktopWinitPlugins
@@ -182,14 +186,14 @@ impl PluginGroup for ProjectProfilePlugins {
         #[cfg(feature = "render-wgpu")]
         let builder = if self
             .capabilities
-            .contains(nara_project::ProductCapability::RenderWgpu)
+            .contains(ProductCapability::RenderWgpu)
         {
             let backend = super::WgpuBackendPlugins
                 .edit()
                 .configure_slot(super::SLOT_RENDER, self.render_definition.clone());
             let backend = if self
                 .capabilities
-                .contains(nara_project::ProductCapability::DesktopWinit)
+                .contains(ProductCapability::DesktopWinit)
             {
                 backend
             } else {
@@ -216,9 +220,9 @@ impl PluginGroup for ProjectProfilePlugins {
 #[cfg(feature = "runtime-window")]
 #[must_use]
 pub fn window_from_settings(
-    settings: &nara_project::EffectiveWindowSettings,
+    settings: &nara_scene::runtime_configuration::EffectiveWindowSettings,
 ) -> Option<nara_window::Window> {
-    use nara_project::{ProjectPresentMode, ProjectWindowMode};
+    use nara_scene::runtime_configuration::{ProjectPresentMode, ProjectWindowMode};
     use nara_window::{PresentMode, Window, WindowMode, WindowResolution};
 
     if !settings.enabled {
@@ -250,8 +254,8 @@ fn add_product_contributions(
     let _ = capabilities;
 
     #[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
-    let builder = if capabilities.contains(nara_project::ProductCapability::Presentation2d)
-        && capabilities.contains(nara_project::ProductCapability::RenderWgpu)
+    let builder = if capabilities.contains(ProductCapability::Presentation2d)
+        && capabilities.contains(ProductCapability::RenderWgpu)
     {
         builder.add_slot(
             PluginSlot::required(
@@ -265,8 +269,8 @@ fn add_product_contributions(
     };
 
     #[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
-    let builder = if capabilities.contains(nara_project::ProductCapability::PresentationUi)
-        && capabilities.contains(nara_project::ProductCapability::RenderWgpu)
+    let builder = if capabilities.contains(ProductCapability::PresentationUi)
+        && capabilities.contains(ProductCapability::RenderWgpu)
     {
         builder.add_slot(
             PluginSlot::required(

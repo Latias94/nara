@@ -16,6 +16,8 @@ mod verification;
 
 use std::{path::PathBuf, sync::Arc};
 
+#[cfg(feature = "local-player")]
+use nara::sprite::Sprite;
 use nara::{
     ProductConfiguration, ProductRecipe, SchemaContribution,
     advanced_prelude::{CurrentScene, add_startup_scene_activation_systems},
@@ -40,8 +42,8 @@ use nara::{
         },
     },
 };
-#[cfg(feature = "local-player")]
-use nara::{core::ItemLimit, project_host::ProjectContentLimits, sprite::Sprite};
+#[cfg(any(feature = "development", feature = "cook"))]
+use nara::{core::ItemLimit, project_host::ProjectContentLimits};
 use serde::Serialize;
 
 use crate::{
@@ -486,13 +488,11 @@ fn with_cooked_image_codec(recipe: ProductRecipe) -> ProductRecipe {
 #[cfg(feature = "local-player")]
 #[must_use]
 pub fn configured_recipe(options: RunOptions) -> ProductRecipe {
-    exploration_recipe(ExplorationConfiguration::LocalPlayer(options))
+    let recipe = exploration_recipe(ExplorationConfiguration::LocalPlayer(options))
         .add_runtime_asset_codec::<nara::input::ActionMapDomain, nara::input::ActionMapRuntimeCodec>(
             nara::runtime_content::RuntimeCodecDefinitionId::new("two-level-game.input", 1),
         )
         .expect("the game's Input Runtime codec is valid")
-        .add_asset_domain::<nara::material::Material2dDomain>()
-        .expect("the region Material source importer is valid")
         .add_runtime_material_codec::<nara::material::Material2dRuntimeCodec>(
             nara::runtime_content::RuntimeCodecDefinitionId::new("two-level-game.region-material", 1),
         )
@@ -501,8 +501,6 @@ pub fn configured_recipe(options: RunOptions) -> ProductRecipe {
             nara::runtime_content::RuntimeCodecDefinitionId::new("two-level-game.region-tileset", 1),
         )
         .expect("the region TileSet Runtime codec is valid")
-        .add_asset_domain::<crate::sound_bank::SoundBankDomain>()
-        .expect("the game's Sound Bank source importer is valid")
         .add_runtime_asset_codec::<
             crate::sound_bank::SoundBankDomain,
             crate::sound_bank::SoundBankCodec,
@@ -511,15 +509,22 @@ pub fn configured_recipe(options: RunOptions) -> ProductRecipe {
             1,
         ))
         .expect("the game's Sound Bank Runtime codec is valid")
-        .add_asset_domain::<nara_render::animation::SpriteAnimationDomain>()
-        .expect("the Sprite animation source importer is valid")
         .add_runtime_asset_codec::<
             nara_render::animation::SpriteAnimationDomain,
             nara_render::animation::SpriteAnimationCodec,
         >(nara::runtime_content::RuntimeCodecDefinitionId::new(
             "two-level-game.sprite-animation", 1,
         ))
-        .expect("the Sprite animation Runtime codec is valid")
+        .expect("the Sprite animation Runtime codec is valid");
+    #[cfg(any(feature = "development", feature = "cook"))]
+    let recipe = recipe
+        .add_asset_domain::<nara::material::Material2dDomain>()
+        .expect("the region Material source importer is valid")
+        .add_asset_domain::<crate::sound_bank::SoundBankDomain>()
+        .expect("the game's Sound Bank source importer is valid")
+        .add_asset_domain::<nara_render::animation::SpriteAnimationDomain>()
+        .expect("the Sprite animation source importer is valid");
+    recipe
         .add_plugin::<input::GameInputPlugin>()
         .expect("static input plugin")
 }
@@ -536,7 +541,7 @@ fn exploration_recipe(configuration: ExplorationConfiguration) -> ProductRecipe 
     let recipe = ProductRecipe::new()
         .add_plugin::<FixedSpatialPlugin>()
         .expect("static spatial capture plugin");
-    #[cfg(feature = "local-player")]
+    #[cfg(any(feature = "development", feature = "cook"))]
     let recipe = recipe.with_source_content_limits(
         ProjectContentLimits::default().with_retained_generations(ItemLimit::new(4).unwrap()),
     );
@@ -587,7 +592,7 @@ fn initialize(world: &mut World) {
         return;
     };
     world.resource_mut::<Session>().clock.timestep_nanos = timestep;
-    #[cfg(feature = "local-player")]
+    #[cfg(any(feature = "development", feature = "cook"))]
     resume::remember_current(world);
     let content = Content::read_current(world);
     match content {
@@ -862,5 +867,5 @@ fn capture(world: &mut World) {
     *world.resource_mut::<GameSnapshot>() = snapshot;
 }
 
-#[cfg(all(test, feature = "local-player"))]
+#[cfg(all(test, any(feature = "development", feature = "cook")))]
 mod resource_tests;

@@ -3,8 +3,8 @@
 //! Decoding checks the complete format, not compatibility with a running or prepared game. The
 //! gameplay owner must compare the App configuration, Schema, and content stamps with fresh
 //! admission before reconstructing state. No Runtime generation, World entity, input route, or
-//! native handle is represented here. Use [`decode_resume`] to admit external bytes; derived Serde
-//! alone does not enforce the byte, shape, or semantic limits.
+//! native handle is represented here. The format-specific decoders enforce byte, shape, and
+//! semantic limits beyond those of the derived Serde implementations.
 
 pub mod processed;
 mod runtime_time;
@@ -22,8 +22,10 @@ use crate::{
     save::{Checkpoint, CheckpointError, MAX_OBJECT_ID_BYTES},
 };
 
+#[cfg(any(feature = "development", feature = "cook"))]
 const KIND: &str = "two_level_resume";
 const MAX_TIMESTEP_NANOS: u64 = 1_000_000_000;
+#[cfg(any(feature = "development", feature = "cook"))]
 pub const CURRENT_FORMAT_VERSION: u32 = 3;
 pub const GAME_COMPATIBILITY: u32 = 1;
 pub const MAX_RESUME_BYTES: usize = 128 * 1024;
@@ -90,6 +92,7 @@ pub struct LevelContentStamp {
     pub content: [u8; 32],
 }
 
+#[cfg(any(feature = "development", feature = "cook"))]
 impl ResumeState {
     /// Checks bounded, internally consistent game data without reading or activating content.
     pub fn validate(&self) -> Result<(), ResumeError> {
@@ -289,6 +292,7 @@ pub enum ResumeError {
 }
 
 /// Produces canonical, bounded version-three bytes without file I/O or content admission.
+#[cfg(any(feature = "development", feature = "cook"))]
 pub fn encode_resume(state: &ResumeState) -> Result<Vec<u8>, ResumeError> {
     state.validate()?;
     let mut state = state.clone();
@@ -310,6 +314,7 @@ pub fn encode_resume(state: &ResumeState) -> Result<Vec<u8>, ResumeError> {
 /// content or that referenced objects exist. Hashes are full recorded values; no special byte
 /// pattern proves or disproves compatibility. This format has no checkpoint-save migration path.
 /// Versions one and two are refused because they lack the exact scaled time remainder.
+#[cfg(any(feature = "development", feature = "cook"))]
 pub fn decode_resume(bytes: &[u8]) -> Result<ResumeState, ResumeError> {
     preflight(bytes)?;
     let header: Header = serde_json::from_slice(bytes).map_err(ResumeError::Json)?;
@@ -350,6 +355,7 @@ fn preflight(bytes: &[u8]) -> Result<(), ResumeError> {
     deserializer.end().map_err(ResumeError::Json)
 }
 
+#[cfg(any(feature = "development", feature = "cook"))]
 #[derive(Serialize)]
 struct Envelope<'a> {
     kind: &'static str,
@@ -365,6 +371,7 @@ struct Header {
     game_compatibility: u32,
 }
 
+#[cfg(any(feature = "development", feature = "cook"))]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Wire {
@@ -377,5 +384,5 @@ struct Wire {
     payload: ResumeState,
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "development", feature = "cook")))]
 mod tests;

@@ -8,16 +8,17 @@ use std::{
 use crate::fs::ContentDigest;
 use nara_asset::{
     AssetImportSource, AssetMeta, AssetMetaIdentity, AssetMetaIdentityCandidate, AssetPath,
-    AssetSourcePath, RuntimeAssetCodec, SourceAssetImporter, StableAssetId,
+    AssetRecord, AssetSourcePath, ImportedProductId, RuntimeAssetCodec, SourceAssetImporter,
+    StableAssetId,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
-use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{ComponentSchemaVersion, ComponentTypeId};
 use nara_render::image::{ImageColorSpace, ImageExtent, ImageFormat};
 use nara_render::material::{
     AlphaMode2d, Material2dDeclaration, Material2dRecord, Material2dRuntimeCodec, Material2dSource,
     MaterialParameterKind, MaterialParameterLayout, MaterialParameterValue, MaterialUniformField,
 };
+use nara_scene::runtime_configuration::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentRecord, SceneDocument, SceneEntityId,
     SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,

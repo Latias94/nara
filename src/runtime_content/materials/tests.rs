@@ -15,7 +15,6 @@ use nara_asset::{
     RuntimeAssetCodec, SourceAssetImporter, StableAssetId,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
-use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
@@ -30,6 +29,7 @@ use nara_render::material::{
     Material2dSource, MaterialParameterKind, MaterialParameterLayout, MaterialParameterValue,
     MaterialTextureDeclaration, MaterialUniformField,
 };
+use nara_scene::runtime_configuration::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentRecord, SceneDocument, SceneEntityId,
     SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,

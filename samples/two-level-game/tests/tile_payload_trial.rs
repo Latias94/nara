@@ -6,7 +6,11 @@
 //! Both formats retain default cook-wire refusal; the complete positive round trip explicitly
 //! requests two million wire nodes while keeping every other original receiving/cook limit.
 
-#![cfg(all(feature = "desktop", feature = "cost-measurement"))]
+#![cfg(all(
+    feature = "desktop",
+    feature = "cost-measurement",
+    any(feature = "development", feature = "cook")
+))]
 #![forbid(unsafe_code)]
 
 #[path = "tile_payload_trial/codec.rs"]

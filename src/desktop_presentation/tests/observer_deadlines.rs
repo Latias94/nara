@@ -39,7 +39,7 @@ fn idle_root_maintenance_adds_no_wake_with_or_without_a_continuing_observer() {
         let mut driver = DesktopPresentationDriver::new(
             &runtime,
             options,
-            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            #[cfg(feature = "project-source")]
             None,
             DesktopPresentationReports::default(),
         );
@@ -88,7 +88,7 @@ fn observer_absolute_wake_merges_with_earlier_and_later_original_owner_progress(
                 DesktopPresentationControl::WakeAt(deadline)
             })),
         },
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         None,
         DesktopPresentationReports::default(),
     );
@@ -138,7 +138,7 @@ fn observer_continue_withdraws_only_its_previous_deadline_from_fresh_owner_progr
                 observed_request.get()
             })),
         },
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         None,
         DesktopPresentationReports::default(),
     );
@@ -201,7 +201,7 @@ fn expired_observer_deadline_returns_its_original_time_without_an_app_frame() {
                 DesktopPresentationControl::WakeAt(deadline)
             })),
         },
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         None,
         DesktopPresentationReports::default(),
     );
@@ -248,7 +248,7 @@ fn final_observer_exit_veto_survives_its_previous_wake_request() {
                 }
             })),
         },
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         None,
         reports.clone(),
     );
@@ -318,7 +318,7 @@ fn original_seal_deadline_survives_observer_wake_withdrawal_and_repeated_sealing
                 observed_request.get()
             })),
         },
-        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        #[cfg(feature = "project-source")]
         None,
         DesktopPresentationReports::default(),
     );

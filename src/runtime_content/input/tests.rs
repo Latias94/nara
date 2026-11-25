@@ -25,7 +25,7 @@ use nara_input::{
     ActionMapDomain, ActionMapLimits, ActionMapRuntimeCodec, ActionMaps, InputBinding, InputPlugin,
     InputSeatId, KeyCode, SemanticActions,
 };
-use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
+use nara_scene::runtime_configuration::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneLimits, SceneDocument, SceneEntityRecord, SourceDocumentKey,
     SourceDocumentKind,
