@@ -13,8 +13,7 @@ use super::cargo_build::{
 use super::{ProjectToolFailure, ProjectToolRequest, ProjectToolSummary, host_fs, protocol};
 use crate::project_host::read_manifest_profile;
 use crate::project_workflow::cargo::{
-    CargoBuildDecoder, CargoBuildInvocation, CargoBuildSelection, CargoCompilerDiagnostic,
-    CargoMetadataFacts,
+    CargoBuildDecoder, CargoBuildInvocation, CargoCompilerDiagnostic, project_tool_invocation,
 };
 
 const DESKTOP_CAPABILITIES: ProductCapabilitySet = ProductCapabilitySet::EMPTY
@@ -242,23 +241,8 @@ fn build_headless(
             "Cargo could not discover the project's headless tool target".to_owned(),
         ));
     }
-    let package = CargoMetadataFacts::project_tool_package(&declarations, &manifest, "desktop")
+    let invocation = project_tool_invocation(&declarations, &manifest, &host, desktop_if_declared)
         .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
-    if package.protocol != Some(1) {
-        return Err(ProjectToolInvocationError::Bootstrap(
-            "the project does not declare supported package.metadata.nara.project-tool-protocol = 1".to_owned(),
-        ));
-    }
-    let desktop = desktop_if_declared && package.declares_feature;
-    // This is the desktop-2D starter's tool policy. The generic Cargo contract neither names
-    // these binaries/features nor derives them from a product profile label.
-    let features: Vec<&str> = if desktop { vec!["desktop"] } else { Vec::new() };
-    let selection =
-        CargoBuildSelection::new(package.name, "headless", "dev", &host, features, false)
-            .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
-    let invocation =
-        CargoBuildInvocation::from_metadata_declarations(&declarations, &manifest, selection)
-            .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
     if !paths_match(
         invocation.source_path(),
         &project.join("src/bin/headless.rs"),
@@ -288,8 +272,8 @@ fn build_headless(
         .arg(invocation.target_triple())
         .env("RUSTC", tools.rustc_path())
         .env("CARGO_TARGET_DIR", invocation.target_directory());
-    if desktop {
-        build.args(["--features", "desktop"]);
+    if !invocation.features().is_empty() {
+        build.arg("--features").arg(invocation.features().join(","));
     }
     let (status, bytes) = bounded_output(&mut build, 64 * 1024 * 1024)?;
     finish_bootstrap_build(status, &bytes, invocation)
@@ -354,7 +338,9 @@ mod build_tests {
     use serde_json::json;
 
     use super::*;
-    use crate::project_workflow::cargo::CargoBuildError;
+    use crate::project_workflow::cargo::{
+        CargoBuildError, CargoBuildSelection, CargoMetadataFacts,
+    };
 
     const DIAGNOSTIC: &str = "bootstrap compiler diagnostic must survive failure";
     const PACKAGE_ID: &str = "bootstrap-test-package-id";

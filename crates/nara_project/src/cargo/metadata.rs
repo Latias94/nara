@@ -6,8 +6,8 @@ use std::{
 use serde_json::{Map, Value};
 use thiserror::Error;
 
-use super::build::{CargoBuildInvocation, CargoInvocationError};
-use super::selection::{CargoBuildSelection, is_name};
+use super::build::{CargoBuildInvocation, CargoInvocationError, CargoTargetDeclarationError};
+use super::selection::{CargoBuildSelection, CargoBuildSelectionError, is_name};
 use super::{
     MAX_FEATURE_BYTES, MAX_FEATURE_COUNT, MAX_METADATA_BYTES, MAX_PACKAGE_COUNT,
     MAX_PACKAGE_ID_BYTES, MAX_PACKAGE_NAME_BYTES, MAX_PATH_BYTES, MAX_TARGET_COUNT,
@@ -60,13 +60,6 @@ pub struct CargoMetadataFacts {
     project_tool_protocol: Option<u64>,
 }
 
-#[cfg(feature = "project-tooling")]
-pub(crate) struct CargoProjectToolPackage {
-    pub(crate) name: String,
-    pub(crate) protocol: Option<u64>,
-    pub(crate) declares_feature: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CargoTargetDeclaration {
     pub(super) selection: CargoBuildSelection,
@@ -113,28 +106,6 @@ impl CargoMetadataFacts {
         Ok(manifest_owner(&value, expected_package_manifest)?
             .package
             .name)
-    }
-
-    #[cfg(feature = "project-tooling")]
-    pub(crate) fn project_tool_package(
-        metadata: &[u8],
-        expected_package_manifest: &Path,
-        feature: &str,
-    ) -> Result<CargoProjectToolPackage, CargoMetadataFactsError> {
-        let value = metadata_document(metadata, expected_package_manifest)?;
-        let package = manifest_owner(&value, expected_package_manifest)?;
-        let features = package
-            .metadata
-            .get("features")
-            .and_then(Value::as_object)
-            .ok_or(CargoMetadataFactsError::InvalidField {
-                field: "packages[].features",
-            })?;
-        Ok(CargoProjectToolPackage {
-            protocol: package.project_tool_protocol(),
-            name: package.package.name,
-            declares_feature: features.contains_key(feature),
-        })
     }
 
     pub fn package(&self) -> &CargoPackageGraphFact {
@@ -197,6 +168,56 @@ impl CargoMetadataFacts {
     ) -> Result<CargoBuildInvocation, CargoInvocationError> {
         CargoBuildInvocation::new(self, selection)
     }
+}
+
+/// Selects the declared headless tool for an authored project.
+///
+/// Use output from `cargo metadata --no-deps --format-version 1`. The optional desktop
+/// feature is selected only when requested and declared by the same package.
+pub fn project_tool_invocation(
+    metadata: &[u8],
+    manifest: &Path,
+    host: &str,
+    desktop_if_declared: bool,
+) -> Result<CargoBuildInvocation, ProjectToolTargetError> {
+    let value = metadata_document(metadata, manifest)?;
+    let package = manifest_owner(&value, manifest)?;
+    let features = package
+        .metadata
+        .get("features")
+        .and_then(Value::as_object)
+        .ok_or(CargoMetadataFactsError::InvalidField {
+            field: "packages[].features",
+        })?;
+    if package.project_tool_protocol() != Some(1) {
+        return Err(ProjectToolTargetError::UnsupportedProtocol);
+    }
+    let desktop = (desktop_if_declared && features.contains_key("desktop")).then_some("desktop");
+    let selection = CargoBuildSelection::new(
+        package.package.name,
+        "headless",
+        "dev",
+        host,
+        desktop,
+        false,
+    )?;
+    Ok(CargoBuildInvocation::from_metadata_declarations(
+        metadata, manifest, selection,
+    )?)
+}
+
+#[derive(Debug, Error)]
+pub enum ProjectToolTargetError {
+    #[error(transparent)]
+    Metadata(#[from] CargoMetadataFactsError),
+    #[error(
+        "the project does not declare supported package.metadata.nara.project-tool-protocol = 1"
+    )]
+    UnsupportedProtocol,
+    #[error(transparent)]
+    Selection(#[from] CargoBuildSelectionError),
+    #[error(transparent)]
+    Declaration(#[from] CargoTargetDeclarationError),
 }
 
 #[derive(Debug, Error)]

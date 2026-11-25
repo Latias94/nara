@@ -5,8 +5,7 @@
 //! build output does not grant product activation or Runtime readiness.
 
 #[cfg(feature = "project-workflow-cargo-facts")]
-#[path = "cargo_facts.rs"]
-pub mod cargo;
+pub use nara_project::cargo;
 mod check;
 pub mod cooked_content;
 mod repair;

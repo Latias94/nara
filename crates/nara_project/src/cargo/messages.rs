@@ -234,12 +234,7 @@ impl CargoDiagnostics {
     /// Windows uses the existing lexical root comparison, including ordinary/verbatim drive roots;
     /// ambiguous roots are withheld. Links and filesystem identity are not observed. Withheld
     /// locations mark their diagnostic truncated and count each affected diagnostic only once.
-    #[cfg(any(feature = "project-tooling", test))]
-    pub(crate) fn with_project_relative_locations(
-        mut self,
-        project: &Path,
-        workspace: &Path,
-    ) -> Self {
+    pub fn with_project_relative_locations(mut self, project: &Path, workspace: &Path) -> Self {
         for diagnostic in &mut self.entries {
             let Some(location) = diagnostic.primary_location.as_mut() else {
                 continue;
@@ -259,7 +254,6 @@ impl CargoDiagnostics {
     }
 }
 
-#[cfg(any(feature = "project-tooling", test))]
 fn project_relative_location_path(
     path: &Path,
     project: &Path,
@@ -279,7 +273,7 @@ fn project_relative_location_path(
         path
     } else {
         let spelling = path.to_str()?.replace(std::path::MAIN_SEPARATOR, "/");
-        crate::fs::RelativePath::preflight(&spelling).ok()?;
+        nara_core::vfs::capabilities::RelativePath::preflight(&spelling).ok()?;
         anchored = workspace.join(spelling);
         &anchored
     };
@@ -293,7 +287,7 @@ fn project_relative_location_path(
     }
     let relative = components.as_path();
     let spelling = relative.to_str()?.replace(std::path::MAIN_SEPARATOR, "/");
-    crate::fs::RelativePath::preflight(&spelling).ok()?;
+    nara_core::vfs::capabilities::RelativePath::preflight(&spelling).ok()?;
     Some(PathBuf::from(spelling))
 }
 

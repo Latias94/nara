@@ -1,18 +1,13 @@
 //! Bounded, capability-free Cargo metadata and JSON-message facts.
 //!
-//! This Module deliberately owns no process, filesystem, or publication capability. Absolute paths
-//! are retained only as transient invocation facts so the private owner can bind Cargo output before
-//! copying the selected executable into its immutable generation.
+//! Absolute paths are transient invocation facts. The caller binds Cargo output before copying
+//! the selected executable into its immutable generation.
 
 use std::path::Path;
 
-#[path = "cargo_facts/build.rs"]
 mod build;
-#[path = "cargo_facts/messages.rs"]
 mod messages;
-#[path = "cargo_facts/metadata.rs"]
 mod metadata;
-#[path = "cargo_facts/selection.rs"]
 mod selection;
 
 pub use build::{
@@ -25,6 +20,7 @@ pub use messages::{
 };
 pub use metadata::{
     CargoMetadataFacts, CargoMetadataFactsError, CargoPackageGraphFact, CargoPackageSourceKind,
+    ProjectToolTargetError, project_tool_invocation,
 };
 pub use selection::{CargoBuildSelection, CargoBuildSelectionError};
 
@@ -70,5 +66,4 @@ fn paths_match(left: &Path, right: &Path) -> bool {
 }
 
 #[cfg(test)]
-#[path = "cargo_facts/tests.rs"]
 mod tests;

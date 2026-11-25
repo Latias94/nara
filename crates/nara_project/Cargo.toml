@@ -38,6 +38,7 @@ windows-sys = { workspace = true, optional = true, features = [
 
 [features]
 default = ["workflow"]
+cargo-facts = ["nara_core/fs-capabilities"]
 workflow = ["dep:ctrlc", "dep:libc", "dep:nara_input", "dep:nara_reflect", "dep:uuid", "dep:windows-sys"]
 
 [[bin]]

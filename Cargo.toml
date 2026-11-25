@@ -237,7 +237,7 @@ project-workflow = [
     "dep:uuid",
     "dep:toml",
 ]
-project-workflow-cargo-facts = ["project-workflow", "dep:serde_json"]
+project-workflow-cargo-facts = ["project-workflow", "nara_project/cargo-facts"]
 project-tooling = [
     "project-workflow-cargo-facts",
     "windows-sys?/Win32_System_JobObjects",

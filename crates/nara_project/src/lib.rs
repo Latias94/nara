@@ -12,6 +12,8 @@ pub const MAX_PROJECT_EXECUTION_CONTRACT_BYTES: usize = 128;
 pub const MAX_PROJECT_CONTENT_SCENES: usize = 64;
 
 mod authoring;
+#[cfg(feature = "cargo-facts")]
+pub mod cargo;
 mod content;
 mod defaults;
 pub mod delivery;
