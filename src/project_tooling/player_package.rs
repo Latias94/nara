@@ -232,11 +232,7 @@ pub fn build_player_package(
 ) -> Result<PreparedPlayerPackage, PlayerPackageError> {
     check_bootstrap(&content, &bootstrap)?;
     check_target(&content, request.selection())?;
-    if request.generated_rust_input().is_none_or(|input| {
-        input.path() != bootstrap.name() || input.digest() != bootstrap.digest()
-    }) {
-        return Err(PlayerPackageError::BuildInputMismatch);
-    }
+    check_generated_build_input(&bootstrap, request.generated_rust_input())?;
     let resident = sum(&[content.retained_bytes(), bootstrap.retained_bytes()])?;
     check(
         sum(&[resident, request.limits().work_bytes.get()])?,
@@ -310,14 +306,9 @@ impl PreparedPlayerPackage {
         if provenance.selection() != expected_selection {
             return Err(PlayerPackageError::BuildSelectionMismatch);
         }
-        if provenance.generated_rust_input().is_none_or(|input| {
-            input.path() != bootstrap.name() || input.digest() != bootstrap.digest()
-        }) {
-            return Err(PlayerPackageError::BuildInputMismatch);
-        }
+        check_generated_build_input(&bootstrap, provenance.generated_rust_input())?;
         let filename = executable
-            .original_path()
-            .file_name()
+            .original_file_name()
             .and_then(|name| name.to_str())
             .filter(|name| {
                 ![PLAYER_PACK_FILE, PLAYER_PACKAGE_MANIFEST_FILE]
@@ -654,6 +645,18 @@ fn check_target(
 ) -> Result<(), PlayerPackageError> {
     if content.expectation().target().triple() != selection.target_triple() {
         return Err(PlayerPackageError::TargetMismatch);
+    }
+    Ok(())
+}
+
+fn check_generated_build_input(
+    bootstrap: &GeneratedPlayerBootstrap,
+    input: Option<&CargoDeclaredInput>,
+) -> Result<(), PlayerPackageError> {
+    if input.is_none_or(|input| {
+        input.path() != bootstrap.name() || input.digest() != bootstrap.digest()
+    }) {
+        return Err(PlayerPackageError::BuildInputMismatch);
     }
     Ok(())
 }

@@ -1,28 +1,32 @@
 //! Explicit trusted Cargo builds returning exact target bytes, independently of execution.
 
 use std::{
+    ffi::OsStr,
     io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     sync::Arc,
 };
 
-use crate::fs::{
-    ContentDigest, DirectoryCapability, FileCapability, FsError, LockMode, LockedFileCapability,
-    RelativeComponent, RelativePath,
+use nara_core::{
+    ByteLimit, ItemLimit,
+    vfs::capabilities::{
+        ContentDigest, DirectoryCapability, FileCapability, FsError, LockMode,
+        LockedFileCapability, RelativeComponent, RelativePath,
+    },
 };
-use nara_core::{ByteLimit, ItemLimit};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::project_workflow::cargo::{
+use super::{
     CargoBuildDecoder, CargoBuildError, CargoBuildInvocation, CargoBuildSelection,
     CargoDiagnostics, CargoInvocationError, CargoMetadataFactsError, CargoTargetDeclarationError,
 };
+use crate::host_fs::{self, HostDirectoryError, HostFileError};
 
-use super::host_fs::{self, HostDirectoryError, HostFileError};
-
+mod bootstrap;
 mod tools;
+pub use bootstrap::{ProjectToolBootstrapError, run_project_tool};
 pub use tools::CargoBuildTools;
 
 /// Finite logical bounds for one build and its escaped captured result.
@@ -361,44 +365,6 @@ impl std::fmt::Debug for CapturedCargoExecutable {
 }
 
 impl CapturedCargoExecutable {
-    #[cfg(test)]
-    pub(super) fn with_declared_input_for_test(
-        path: &Path,
-        selection: CargoBuildSelection,
-        input_name: &str,
-        input_digest: ContentDigest,
-    ) -> Self {
-        let original = host_fs::readable_file(path).unwrap();
-        let bytes = original.read_to_end_bounded(1024).unwrap();
-        let digest = ContentDigest::of_bytes(&bytes);
-        let provenance = CargoBuildProvenance {
-            selection,
-            resolved_features: Box::default(),
-            toolchain: CargoToolchainObservation {
-                cargo: digest,
-                rustc: digest,
-                cargo_version: digest,
-                rustc_version: digest,
-                host_target: "x86_64-pc-windows-msvc".to_owned(),
-            },
-            inputs: vec![CargoDeclaredInput {
-                path: input_name.to_owned(),
-                digest: input_digest,
-            }],
-            generated_rust_input: None,
-            metadata: digest,
-            digest,
-        };
-        Self(Arc::new(CapturedExecutableInner {
-            retained_bytes: bytes.len(),
-            bytes: bytes.into(),
-            digest,
-            provenance,
-            diagnostics: CargoDiagnostics::default(),
-            original_path: path.to_path_buf(),
-        }))
-    }
-
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
         &self.0.bytes
@@ -420,8 +386,10 @@ impl CapturedCargoExecutable {
         self.0.retained_bytes
     }
 
-    pub(crate) fn original_path(&self) -> &Path {
-        &self.0.original_path
+    /// Returns the filename reported by Cargo for the captured artifact.
+    #[must_use]
+    pub fn original_file_name(&self) -> Option<&OsStr> {
+        self.0.original_path.file_name()
     }
 }
 
@@ -982,10 +950,7 @@ fn revalidate_inputs(
     Ok(())
 }
 
-pub(crate) fn bounded_output(
-    command: &mut Command,
-    limit: usize,
-) -> Result<Vec<u8>, CargoBuildFailure> {
+fn bounded_output(command: &mut Command, limit: usize) -> Result<Vec<u8>, CargoBuildFailure> {
     let (status, output) = bounded_status_output(command, limit)?;
     if !status.success() {
         return Err(CargoBuildFailure::ProcessFailed);
@@ -993,7 +958,7 @@ pub(crate) fn bounded_output(
     Ok(output)
 }
 
-pub(crate) fn bounded_status_output(
+fn bounded_status_output(
     command: &mut Command,
     limit: usize,
 ) -> Result<(ExitStatus, Vec<u8>), CargoBuildFailure> {
@@ -1063,7 +1028,7 @@ fn wait_retry(child: &mut Child) -> io::Result<ExitStatus> {
     }
 }
 
-pub(crate) fn parse_host_target(bytes: &[u8]) -> Result<String, CargoBuildFailure> {
+fn parse_host_target(bytes: &[u8]) -> Result<String, CargoBuildFailure> {
     let text = std::str::from_utf8(bytes).map_err(|_| CargoBuildFailure::InvalidToolIdentity)?;
     let mut hosts = text.lines().filter_map(|line| line.strip_prefix("host: "));
     let host = hosts.next().ok_or(CargoBuildFailure::InvalidToolIdentity)?;
@@ -1238,9 +1203,7 @@ fn generated_source_work(
         .ok_or(CargoBuildFailure::Limit("generated Rust input work"))
 }
 
-fn invocation_allocation(
-    invocation: &crate::project_workflow::cargo::CargoBuildInvocation,
-) -> Result<usize, CargoBuildFailure> {
+fn invocation_allocation(invocation: &CargoBuildInvocation) -> Result<usize, CargoBuildFailure> {
     let mut bytes = std::mem::size_of_val(invocation);
     for path in [
         invocation.manifest_path(),
@@ -1296,5 +1259,4 @@ fn diagnostics_allocation(diagnostics: &CargoDiagnostics) -> Result<usize, Cargo
 }
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
-#[path = "cargo_build/tests.rs"]
 mod tests;

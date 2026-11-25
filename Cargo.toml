@@ -230,7 +230,7 @@ project-workflow = [
     "nara_asset/artifact-build",
 ]
 project-workflow-cargo-facts = ["project-workflow", "nara_project/cargo-facts"]
-project-tooling = ["project-workflow-cargo-facts", "nara_project/product-process"]
+project-tooling = ["project-workflow-cargo-facts", "nara_project/cargo-build", "nara_project/product-process"]
 
 [[example]]
 name = "windowed_clear"

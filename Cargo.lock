@@ -2174,6 +2174,7 @@ dependencies = [
 name = "nara_project"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "ctrlc",
  "libc",
  "nara_app",

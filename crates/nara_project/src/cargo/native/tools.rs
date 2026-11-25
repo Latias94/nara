@@ -6,10 +6,10 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::fs::{ContentDigest, FileCapability, FsError};
+use nara_core::vfs::capabilities::{ContentDigest, FileCapability, FsError};
 
 use super::{CargoBuildFailure, CargoToolchainObservation, bounded_output, parse_host_target};
-use crate::project_tooling::host_fs;
+use crate::host_fs;
 
 const MAX_RESOLVED_TOOL_PATH_BYTES: usize = 128 * 1024;
 

@@ -18,6 +18,8 @@ mod content;
 mod defaults;
 pub mod delivery;
 mod effective;
+#[cfg(feature = "cargo-build")]
+pub mod host_fs;
 mod manifest;
 mod path;
 #[cfg(all(

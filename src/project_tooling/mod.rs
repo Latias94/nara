@@ -17,15 +17,13 @@ use crate::{
 use thiserror::Error;
 
 mod bootstrap;
-pub mod cargo_build;
-pub mod host_fs;
 pub mod player_package;
 pub mod project_cook;
 mod protocol;
 mod schema;
 
 pub use bootstrap::{ProjectToolInvocationError, invoke_project_tool};
-pub use nara_project::process;
+pub use nara_project::{cargo::native as cargo_build, host_fs, process};
 pub use protocol::{
     ProjectToolDiagnostic, ProjectToolDiagnosticLoss, ProjectToolFailure, ProjectToolFailureStage,
     ProjectToolRepairHint,

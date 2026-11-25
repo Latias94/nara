@@ -1,4 +1,4 @@
-//! Bounded, capability-free Cargo metadata and JSON-message facts.
+//! Bounded Cargo metadata and JSON-message facts, with native builds behind `cargo-build`.
 //!
 //! Absolute paths are transient invocation facts. The caller binds Cargo output before copying
 //! the selected executable into its immutable generation.
@@ -8,6 +8,8 @@ use std::path::Path;
 mod build;
 mod messages;
 mod metadata;
+#[cfg(feature = "cargo-build")]
+pub mod native;
 mod selection;
 
 pub use build::{

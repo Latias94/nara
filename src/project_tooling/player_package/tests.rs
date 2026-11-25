@@ -150,51 +150,12 @@ fn changed_content_expectation_cannot_reuse_the_original_generated_input() {
 }
 
 #[test]
-fn ordinary_file_fact_cannot_replace_request_owned_generated_input_at_binding() {
+fn binding_requires_the_request_owned_generated_input() {
     let content = content();
     let limits = PlayerPackageLimits::default();
     let bootstrap = GeneratedPlayerBootstrap::new(&content, "player-bootstrap.rs", limits).unwrap();
-    let selection = CargoBuildSelection::new(
-        "fixture",
-        "player",
-        "dev",
-        content.expectation().target().triple(),
-        Vec::<String>::new(),
-        false,
-    )
-    .unwrap();
-    let path = std::env::temp_dir().join(format!(
-        "nara-generated-bind-{}-{}.bin",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-    ));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .unwrap();
-    file.write_all(b"bounded capture for missing-provenance injection")
-        .unwrap();
-    drop(file);
-    let capture = CapturedCargoExecutable::with_declared_input_for_test(
-        &path,
-        selection.clone(),
-        bootstrap.name(),
-        bootstrap.digest(),
-    );
-    assert!(capture.provenance().generated_rust_input().is_none());
-    assert!(
-        capture.provenance().declared_inputs().iter().any(|input| {
-            input.path() == bootstrap.name() && input.digest() == bootstrap.digest()
-        })
-    );
-    let result = PreparedPlayerPackage::bind(content, bootstrap, &selection, capture, limits);
-    std::fs::remove_file(&path).unwrap();
     assert!(matches!(
-        result,
+        check_generated_build_input(&bootstrap, None),
         Err(PlayerPackageError::BuildInputMismatch)
     ));
 }

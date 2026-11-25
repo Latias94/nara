@@ -5,6 +5,8 @@ use std::{
 
 use super::*;
 
+const DIRECT_CLEANUP_CHILD: &str = "cargo::native::tests::direct_cleanup_child";
+
 struct Root(PathBuf);
 
 impl Root {
@@ -299,11 +301,7 @@ fn failed_reap_and_forwarded_cleanup_keep_every_original_output_lease() {
     let first_lease = TargetBuildLease::acquire_at(first.0.clone()).unwrap();
     let second_lease = TargetBuildLease::acquire_at(second.0.clone()).unwrap();
     let child = Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "project_tooling::cargo_build::tests::direct_cleanup_child",
-            "--ignored",
-        ])
+        .args(["--exact", DIRECT_CLEANUP_CHILD, "--ignored"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -344,21 +342,15 @@ fn failed_reap_and_forwarded_cleanup_keep_every_original_output_lease() {
 fn output_limit_and_bootstrap_error_preserve_unconfirmed_child_custody() {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command
-        .args([
-            "--exact",
-            "project_tooling::cargo_build::tests::direct_cleanup_child",
-            "--ignored",
-            "--nocapture",
-        ])
+        .args(["--exact", DIRECT_CLEANUP_CHILD, "--ignored", "--nocapture"])
         .stderr(Stdio::null());
     let error = bounded_status_output_with(&mut command, 1, |child| {
         finish_child_with(child, |_| Err(io::Error::other("injected wait failure")))
     })
     .unwrap_err();
-    let error = crate::project_tooling::ProjectToolInvocationError::from(error);
-    let crate::project_tooling::ProjectToolInvocationError::ProcessOwner(
-        CargoBuildFailure::CleanupIncomplete(mut custody),
-    ) = error
+    let error = ProjectToolBootstrapError::from(error);
+    let ProjectToolBootstrapError::Process(CargoBuildFailure::CleanupIncomplete(mut custody)) =
+        error
     else {
         panic!("output overflow and bootstrap forwarding must retain the unconfirmed child")
     };
