@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, num::NonZeroU64};
 
 use nara::{
-    ProductConfiguration, ProductRecipe, ProductRecipeError,
+    ProductRecipe, ProductRecipeError,
     app::{Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId, StartupStage},
     ecs::{Command, Res, ResMut, Resource, World, bevy_ecs::error::BevyError},
     prelude::{App, FixedTime},
@@ -130,28 +130,25 @@ pub fn wave_retry_request_count(world: &World) -> usize {
     world.resource::<WaveInput>().retry_requests().count()
 }
 
-#[derive(Clone)]
-struct WaveScript(Vec<WaveCommand>);
-
-impl ProductConfiguration for WaveScript {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        for command in &self.0 {
-            output.extend_from_slice(&command.tick.get().to_le_bytes());
-            output.extend_from_slice(&command.sequence.get().to_le_bytes());
-            match command.intent {
-                WaveIntent::Move { direction, pressed } => {
-                    output.extend_from_slice(&[0, direction as u8, u8::from(pressed)]);
-                }
-                WaveIntent::Retry { ui_sequence } => {
-                    output.extend_from_slice(&[1, u8::from(ui_sequence.is_some())]);
-                    output.extend_from_slice(&ui_sequence.unwrap_or_default().to_le_bytes());
-                }
+fn wave_script_configuration_bytes(commands: &[WaveCommand]) -> Vec<u8> {
+    let mut output = Vec::new();
+    for command in commands {
+        output.extend_from_slice(&command.tick.get().to_le_bytes());
+        output.extend_from_slice(&command.sequence.get().to_le_bytes());
+        match command.intent {
+            WaveIntent::Move { direction, pressed } => {
+                output.extend_from_slice(&[0, direction as u8, u8::from(pressed)]);
+            }
+            WaveIntent::Retry { ui_sequence } => {
+                output.extend_from_slice(&[1, u8::from(ui_sequence.is_some())]);
+                output.extend_from_slice(&ui_sequence.unwrap_or_default().to_le_bytes());
             }
         }
     }
+    output
 }
 
-struct WaveScriptPlugin(WaveScript);
+struct WaveScriptPlugin(Vec<WaveCommand>);
 
 impl Plugin for WaveScriptPlugin {
     fn declaration() -> &'static PluginDeclaration {
@@ -168,7 +165,7 @@ impl Plugin for WaveScriptPlugin {
         app.add_systems(
             StartupStage::Runtime,
             move |mut input: ResMut<WaveInput>| -> Result<(), BevyError> {
-                for command in &script.0 {
+                for command in &script {
                     input.schedule(0, *command)?;
                 }
                 Ok(())
@@ -185,7 +182,7 @@ pub fn with_wave_script(
     if commands.is_empty() {
         return Ok(recipe);
     }
-    recipe.add_configured_plugin(WaveScript(commands), |script| {
-        WaveScriptPlugin(script.clone())
+    recipe.add_configured_plugin(wave_script_configuration_bytes(&commands), move || {
+        WaveScriptPlugin(commands.clone())
     })
 }

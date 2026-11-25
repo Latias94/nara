@@ -11,7 +11,6 @@ mod support;
 use std::sync::{Arc, Mutex};
 
 use nara::{
-    ProductConfiguration,
     app::{
         CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId, StartupStage,
     },
@@ -38,12 +37,6 @@ enum Operation {
 
 #[derive(Clone, Default, Resource)]
 struct Driver(Arc<Mutex<Vec<Operation>>>);
-
-impl ProductConfiguration for Driver {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(b"two-level-game.controller-input-test/v1");
-    }
-}
 
 struct DriverPlugin(Driver);
 
@@ -157,8 +150,11 @@ fn button(action: &str, pressed: bool) -> Operation {
 
 fn game() -> (Game, Driver) {
     let driver = Driver::default();
+    let plugin_driver = driver.clone();
     let recipe = product_recipe()
-        .add_configured_plugin(driver.clone(), |driver| DriverPlugin(driver.clone()))
+        .add_configured_plugin(b"two-level-game.controller-input-test/v1", move || {
+            DriverPlugin(plugin_driver.clone())
+        })
         .unwrap();
     (Game::with_recipe(recipe), driver)
 }

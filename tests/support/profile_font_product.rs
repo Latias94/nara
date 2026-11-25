@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use nara::{
-    ProductConfiguration, ProductRecipe, ProductRecipeError,
+    ProductRecipe, ProductRecipeError,
     app::{
         App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
         StartupStage,
@@ -26,17 +26,6 @@ pub struct ProfileFontOutcome {
 
 pub type ProfileFontObservations = Arc<Mutex<Vec<ProfileFontOutcome>>>;
 
-struct ProfileFontConfiguration {
-    face: FontFace,
-    observations: Option<ProfileFontObservations>,
-}
-
-impl ProductConfiguration for ProfileFontConfiguration {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(self.face.id().as_bytes());
-    }
-}
-
 /// One ordinary product recipe shared by all fixture entry points.
 pub fn profile_font_recipe(
     face: FontFace,
@@ -44,13 +33,10 @@ pub fn profile_font_recipe(
 ) -> Result<ProductRecipe, ProductRecipeError> {
     ProductRecipe::new()
         .with_ui_font(face.clone())?
-        .add_configured_plugin(
-            ProfileFontConfiguration { face, observations },
-            |configuration| ProfileFontPlugin {
-                face: configuration.face.clone(),
-                observations: configuration.observations.clone(),
-            },
-        )
+        .add_configured_plugin(face.id().as_bytes(), move || ProfileFontPlugin {
+            face: face.clone(),
+            observations: observations.clone(),
+        })
 }
 
 struct ProfileFontPlugin {

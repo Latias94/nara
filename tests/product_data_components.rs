@@ -15,7 +15,7 @@ use std::{
 };
 
 use nara::{
-    ProductConfiguration, ProductRecipe, Runtime2dPlugins, SchemaContribution,
+    ProductRecipe, Runtime2dPlugins, SchemaContribution,
     advanced_prelude::{
         CurrentScene, SceneProductTransactionLimits, StartupSceneActivationPlugin,
         materialize_startup_scene,
@@ -274,13 +274,6 @@ struct DataConfiguration {
     travel: bool,
 }
 
-impl ProductConfiguration for DataConfiguration {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(b"product-data-workflow-v1");
-        output.push(u8::from(self.travel));
-    }
-}
-
 #[derive(Default)]
 struct DataPlugin(DataConfiguration);
 
@@ -308,11 +301,13 @@ fn runtime_recipe(owners: &[ComponentSchemaOwnerSnapshot]) -> ProductRecipe {
         owners: owners.to_vec(),
         travel: true,
     };
+    let mut configuration_bytes = b"product-data-workflow-v1".to_vec();
+    configuration_bytes.push(u8::from(configuration.travel));
     ProductRecipe::new()
         .add_contribution(
             SchemaContribution::<DataPlugin>::data_configured(
-                configuration,
-                |configuration| DataPlugin(configuration.clone()),
+                configuration_bytes,
+                move || DataPlugin(configuration.clone()),
                 owners.iter().cloned(),
             )
             .unwrap(),

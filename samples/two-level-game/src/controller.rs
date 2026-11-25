@@ -1,26 +1,23 @@
 //! Optional native controller configuration shared by source and cooked game recipes.
 
-struct GamepadConfiguration(nara::input::GilrsInputPlugin);
-
-impl nara::ProductConfiguration for GamepadConfiguration {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(b"two-level-game.gilrs/v1\0");
-        match self.0.default_route {
-            Some(route) => {
-                output.push(1);
-                output.extend_from_slice(&route.window.get().to_le_bytes());
-                output.extend_from_slice(&route.seat.get().to_le_bytes());
-            }
-            None => output.push(0),
+fn controller_configuration_bytes(plugin: &nara::input::GilrsInputPlugin) -> Vec<u8> {
+    let mut output = b"two-level-game.gilrs/v1\0".to_vec();
+    match plugin.default_route {
+        Some(route) => {
+            output.push(1);
+            output.extend_from_slice(&route.window.get().to_le_bytes());
+            output.extend_from_slice(&route.seat.get().to_le_bytes());
         }
-        for limit in [self.0.max_devices, self.0.max_events_per_frame] {
-            output.extend_from_slice(
-                &u64::try_from(limit)
-                    .expect("gamepad configuration limit fits u64")
-                    .to_le_bytes(),
-            );
-        }
+        None => output.push(0),
     }
+    for limit in [plugin.max_devices, plugin.max_events_per_frame] {
+        output.extend_from_slice(
+            &u64::try_from(limit)
+                .expect("gamepad configuration limit fits u64")
+                .to_le_bytes(),
+        );
+    }
+    output
 }
 
 /// Adds Gilrs input for window 1 and the primary seat with the backend's default limits.
@@ -35,13 +32,11 @@ impl nara::ProductConfiguration for GamepadConfiguration {
 pub fn with_gilrs_input(
     recipe: nara::ProductRecipe,
 ) -> Result<nara::ProductRecipe, nara::ProductRecipeError> {
-    let configuration = GamepadConfiguration(nara::input::GilrsInputPlugin::new(Some(
-        nara::input::GamepadRoute::new(
-            nara::input::InputWindowId::new(1),
-            nara::input::InputSeatId::PRIMARY,
-        ),
+    let plugin = nara::input::GilrsInputPlugin::new(Some(nara::input::GamepadRoute::new(
+        nara::input::InputWindowId::new(1),
+        nara::input::InputSeatId::PRIMARY,
     )));
-    recipe.add_configured_plugin(configuration, |config| config.0)
+    recipe.add_configured_plugin(controller_configuration_bytes(&plugin), move || plugin)
 }
 
 #[cfg(test)]

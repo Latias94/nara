@@ -49,19 +49,6 @@ const PRODUCT_RECIPE_SCHEMA_AUTHORITY_DEFINITION_ID: PluginDefinitionId =
 const PRODUCT_RECIPE_SCHEMA_AUTHORITY_CONFIGURATION_PREFIX: &[u8] =
     b"nara.product-recipe.schema-authority.v1\0";
 
-/// Canonical encoding for one typed product-plugin configuration.
-///
-/// Implementations must write every behavior-bearing field in a deterministic,
-/// architecture-independent form. The bytes are not persisted; they identify equivalent recipe
-/// configurations across repeated resolution within one compiled product.
-pub trait ProductConfiguration: Send + Sync + 'static {
-    fn write_canonical(&self, output: &mut Vec<u8>);
-}
-
-impl ProductConfiguration for () {
-    fn write_canonical(&self, _output: &mut Vec<u8>) {}
-}
-
 /// The product meaning of one recipe entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProductRecipeEntryKind {
@@ -264,18 +251,20 @@ impl<P: Plugin> SchemaContribution<P> {
         schema_contribution(declaration, definition, providers, Vec::new())
     }
 
-    /// Creates a contribution from typed configuration and a reconstructible factory.
-    pub fn configured<C, F>(
-        configuration: C,
+    /// Creates a contribution from canonical configuration bytes and a replayable factory.
+    ///
+    /// The bytes identify the configuration across recipe resolutions and cooked products. Encode
+    /// every behavior-bearing setting deterministically and capture the same settings in the factory.
+    pub fn configured<F>(
+        canonical_configuration: impl AsRef<[u8]>,
         factory: F,
         providers: impl IntoIterator<Item = ComponentSchemaProviderDefinition>,
     ) -> Result<Self, ProductRecipeError>
     where
-        C: ProductConfiguration,
-        F: Fn(&C) -> P + Send + Sync + 'static,
+        F: Fn() -> P + Send + Sync + 'static,
     {
         let declaration = recipe_declaration::<P>()?;
-        let definition = configured_definition(declaration, Arc::new(configuration), factory)?;
+        let definition = configured_definition(declaration, canonical_configuration, factory);
         schema_contribution(declaration, definition, providers, Vec::new())
     }
 
@@ -300,18 +289,17 @@ impl<P: Plugin> SchemaContribution<P> {
         )
     }
 
-    /// Creates a configured data-only contribution with replayable owner-local admissions.
-    pub fn data_configured<C, F>(
-        configuration: C,
+    /// Creates a data-only contribution with the same configuration contract as [`Self::configured`].
+    pub fn data_configured<F>(
+        canonical_configuration: impl AsRef<[u8]>,
         factory: F,
         owners: impl IntoIterator<Item = ComponentSchemaOwnerSnapshot>,
     ) -> Result<Self, ProductRecipeError>
     where
-        C: ProductConfiguration,
-        F: Fn(&C) -> P + Send + Sync + 'static,
+        F: Fn() -> P + Send + Sync + 'static,
     {
         let declaration = recipe_declaration::<P>()?;
-        let definition = configured_definition(declaration, Arc::new(configuration), factory)?;
+        let definition = configured_definition(declaration, canonical_configuration, factory);
         schema_contribution(
             declaration,
             definition,
@@ -527,26 +515,24 @@ impl ProductRecipe {
 
     /// Adds and selects the replayable policy/composer entry for WGPU defaults.
     ///
-    /// Both factories receive the same immutable canonical configuration. The plugin owns Runtime
-    /// capture composition; each Editor Scene or Canvas owner creates a fresh adapter with its own
-    /// installation. Neither factory may reconstruct a retained input through a current policy.
+    /// Both factories must capture the same settings identified by the canonical configuration
+    /// bytes. The plugin owns Runtime capture composition. Each Editor Scene or Canvas owner
+    /// creates a fresh adapter with its own installation. Neither factory may reconstruct a
+    /// retained input through a current policy.
     /// The plugin must declare the common stock capture dependency and cannot provide Schema.
     /// Source and processed profiles activate the entry only when they request WGPU; headless
     /// profiles retain its configuration identity without installing rendering or capture plugins.
     #[cfg(feature = "render-wgpu")]
-    pub fn select_wgpu_policy<P, C, F, A>(
+    pub fn select_wgpu_policy<P, F, A>(
         self,
-        configuration: C,
+        canonical_configuration: impl AsRef<[u8]>,
         plugin_factory: F,
         adapter_factory: A,
     ) -> Result<Self, ProductRecipeError>
     where
         P: Plugin,
-        C: ProductConfiguration,
-        F: Fn(&C) -> P + Send + Sync + 'static,
-        A: Fn(
-                &C,
-            ) -> Result<
+        F: Fn() -> P + Send + Sync + 'static,
+        A: Fn() -> Result<
                 nara_render::gpu::WgpuStockCaptureAdapter,
                 nara_render::gpu::WgpuRenderProgramError,
             > + Send
@@ -567,9 +553,8 @@ impl ProductRecipe {
                 plugin: declaration.id,
             });
         }
-        let configuration = Arc::new(configuration);
         let definition =
-            configured_definition(declaration, Arc::clone(&configuration), plugin_factory)?;
+            configured_definition(declaration, canonical_configuration, plugin_factory);
         let entry = recipe_entry::<P>(
             declaration,
             ProductRecipeEntryKind::RuntimePlugin,
@@ -584,7 +569,7 @@ impl ProductRecipe {
                     plugin: entry.plugin_id,
                 },
             )?,
-            adapter: Arc::new(move || adapter_factory(&configuration)),
+            adapter: Arc::new(adapter_factory),
         };
         let mut recipe = self.add_runtime_entry(entry)?;
         recipe.wgpu_policy = Some(selection);
@@ -641,19 +626,21 @@ impl ProductRecipe {
         )?)
     }
 
-    /// Adds a replayable runtime-only plugin with typed configuration.
-    pub fn add_configured_plugin<P, C, F>(
+    /// Adds a replayable runtime-only plugin from canonical configuration bytes.
+    ///
+    /// Encode every behavior-bearing setting deterministically and capture the same settings in
+    /// the factory. The factory constructs a fresh plugin each time the plan is instantiated.
+    pub fn add_configured_plugin<P, F>(
         self,
-        configuration: C,
+        canonical_configuration: impl AsRef<[u8]>,
         factory: F,
     ) -> Result<Self, ProductRecipeError>
     where
         P: Plugin,
-        C: ProductConfiguration,
-        F: Fn(&C) -> P + Send + Sync + 'static,
+        F: Fn() -> P + Send + Sync + 'static,
     {
         let declaration = recipe_declaration::<P>()?;
-        let definition = configured_definition(declaration, Arc::new(configuration), factory)?;
+        let definition = configured_definition(declaration, canonical_configuration, factory);
         self.add_runtime_entry(recipe_entry::<P>(
             declaration,
             ProductRecipeEntryKind::RuntimePlugin,
@@ -662,16 +649,15 @@ impl ProductRecipe {
         )?)
     }
 
-    /// Replaces the typed configuration and factory for an existing runtime-only plugin.
-    pub fn configure_plugin<P, C, F>(
+    /// Replaces the configuration bytes and factory for an existing runtime-only plugin.
+    pub fn configure_plugin<P, F>(
         self,
-        configuration: C,
+        canonical_configuration: impl AsRef<[u8]>,
         factory: F,
     ) -> Result<Self, ProductRecipeError>
     where
         P: Plugin,
-        C: ProductConfiguration,
-        F: Fn(&C) -> P + Send + Sync + 'static,
+        F: Fn() -> P + Send + Sync + 'static,
     {
         let declaration = recipe_declaration::<P>()?;
         #[cfg(feature = "render-wgpu")]
@@ -684,7 +670,7 @@ impl ProductRecipe {
                 plugin: declaration.id,
             });
         }
-        let definition = configured_definition(declaration, Arc::new(configuration), factory)?;
+        let definition = configured_definition(declaration, canonical_configuration, factory);
         self.replace_entry(recipe_entry::<P>(
             declaration,
             ProductRecipeEntryKind::RuntimePlugin,
@@ -943,8 +929,6 @@ pub enum ProductRecipeError {
     DuplicateDefaultConfiguration { plugin: PluginId },
     #[error("plugin declaration for {plugin_type} panicked")]
     DeclarationPanicked { plugin_type: &'static str },
-    #[error("plugin {plugin} configuration encoding panicked")]
-    ConfigurationPanicked { plugin: PluginId },
     #[error("plugin {plugin} did not produce a stable recipe configuration identity")]
     MissingConfigurationIdentity { plugin: PluginId },
     #[error("plugin {plugin} appears more than once in the product recipe")]
@@ -999,28 +983,18 @@ const fn recipe_definition_id(declaration: &PluginDeclaration) -> PluginDefiniti
     PluginDefinitionId::new(declaration.id.as_str(), 1)
 }
 
-fn configured_definition<P, C, F>(
+fn configured_definition<P, F>(
     declaration: &'static PluginDeclaration,
-    configuration: Arc<C>,
+    canonical_configuration: impl AsRef<[u8]>,
     factory: F,
-) -> Result<PluginDefinition, ProductRecipeError>
+) -> PluginDefinition
 where
     P: Plugin,
-    C: ProductConfiguration,
-    F: Fn(&C) -> P + Send + Sync + 'static,
+    F: Fn() -> P + Send + Sync + 'static,
 {
     let mut canonical = Vec::from(PRODUCT_RECIPE_CONFIGURATION_PREFIX);
-    catch_unwind(AssertUnwindSafe(|| {
-        configuration.write_canonical(&mut canonical);
-    }))
-    .map_err(|_| ProductRecipeError::ConfigurationPanicked {
-        plugin: declaration.id,
-    })?;
-    Ok(PluginDefinition::infallible::<P, _>(
-        recipe_definition_id(declaration),
-        canonical,
-        move || factory(&configuration),
-    ))
+    canonical.extend_from_slice(canonical_configuration.as_ref());
+    PluginDefinition::infallible::<P, _>(recipe_definition_id(declaration), canonical, factory)
 }
 
 fn schema_contribution<P: Plugin>(

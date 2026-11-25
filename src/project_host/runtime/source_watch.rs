@@ -20,11 +20,8 @@ use super::{
     HostFault, ProjectScenes,
     scene_requests::{input_reload, poll_project_scene_requests},
 };
-use crate::{
-    ProductConfiguration,
-    project_host::{
-        ProjectContentLoader, ProjectSettingsCandidate, open_explicit_product_project_root,
-    },
+use crate::project_host::{
+    ProjectContentLoader, ProjectSettingsCandidate, open_explicit_product_project_root,
 };
 
 pub const PROJECT_SCENE_WATCH_PLUGIN_ID: PluginId = PluginId::new("nara.project.scene-watch");
@@ -81,10 +78,14 @@ impl ProjectSceneWatchPlugin {
         self.limits = limits;
         self
     }
-}
 
-impl ProductConfiguration for ProjectSceneWatchPlugin {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
+    /// Returns the canonical recipe bytes for this root and its queue limits.
+    ///
+    /// Pass these bytes to [`crate::ProductRecipe::add_configured_plugin`] with a factory that
+    /// clones this configuration. Encoding preserves the native path and does not open it.
+    #[must_use]
+    pub fn configuration_bytes(&self) -> Vec<u8> {
+        let mut output = Vec::new();
         #[cfg(windows)]
         {
             use std::os::windows::ffi::OsStrExt;
@@ -112,6 +113,7 @@ impl ProductConfiguration for ProjectSceneWatchPlugin {
         }
         output.extend_from_slice(&(self.limits.events().get() as u64).to_le_bytes());
         output.extend_from_slice(&(self.limits.retained_bytes().get() as u64).to_le_bytes());
+        output
     }
 }
 

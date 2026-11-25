@@ -41,33 +41,33 @@ fn canonical_configuration_distinguishes_root_and_each_queue_limit() {
     let limits =
         AssetWatchQueueLimits::new(ItemLimit::new(2).unwrap(), ByteLimit::new(4096).unwrap());
     let configuration = configuration.with_queue_limits(limits);
-    let bytes = canonical(&configuration);
-    assert_eq!(bytes, canonical(&configuration.clone()));
+    let bytes = configuration.configuration_bytes();
+    assert_eq!(bytes, configuration.clone().configuration_bytes());
     assert_ne!(
         bytes,
-        canonical(
-            &ProjectSceneWatchPlugin::new(directory.path.join("other"))
-                .unwrap()
-                .with_queue_limits(limits)
-        )
+        ProjectSceneWatchPlugin::new(directory.path.join("other"))
+            .unwrap()
+            .with_queue_limits(limits)
+            .configuration_bytes()
     );
     assert_ne!(
         bytes,
-        canonical(
-            &configuration
-                .clone()
-                .with_queue_limits(AssetWatchQueueLimits::new(
-                    ItemLimit::new(3).unwrap(),
-                    limits.retained_bytes(),
-                ))
-        )
+        configuration
+            .clone()
+            .with_queue_limits(AssetWatchQueueLimits::new(
+                ItemLimit::new(3).unwrap(),
+                limits.retained_bytes(),
+            ))
+            .configuration_bytes()
     );
     assert_ne!(
         bytes,
-        canonical(&configuration.with_queue_limits(AssetWatchQueueLimits::new(
-            limits.events(),
-            ByteLimit::new(4097).unwrap(),
-        )))
+        configuration
+            .with_queue_limits(AssetWatchQueueLimits::new(
+                limits.events(),
+                ByteLimit::new(4097).unwrap(),
+            ))
+            .configuration_bytes()
     );
 }
 
@@ -95,8 +95,12 @@ fn canonical_configuration_preserves_distinct_native_non_unicode_paths() {
     assert_ne!(first, second);
     assert_eq!(first.to_string_lossy(), second.to_string_lossy());
     assert_ne!(
-        canonical(&ProjectSceneWatchPlugin::new(first).unwrap()),
-        canonical(&ProjectSceneWatchPlugin::new(second).unwrap())
+        ProjectSceneWatchPlugin::new(first)
+            .unwrap()
+            .configuration_bytes(),
+        ProjectSceneWatchPlugin::new(second)
+            .unwrap()
+            .configuration_bytes()
     );
 }
 
@@ -208,12 +212,6 @@ fn coverage_accepts_128_native_paths_and_refuses_the_next_uncovered_path() {
             .unwrap_err()
             .contains("128 native paths")
     );
-}
-
-fn canonical(configuration: &ProjectSceneWatchPlugin) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    configuration.write_canonical(&mut bytes);
-    bytes
 }
 
 struct TestDirectory {

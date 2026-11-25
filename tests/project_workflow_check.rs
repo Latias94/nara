@@ -78,7 +78,6 @@ fn public_check_returns_the_exact_loader_owned_startup_closure() {
 #[test]
 fn shared_policy_recipe_checks_headless_content_and_preserves_source_processed_selection() {
     use nara::{
-        ProductConfiguration,
         app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId},
         fs::RelativePath,
         project_host::{
@@ -119,21 +118,14 @@ fn shared_policy_recipe_checks_headless_content_and_preserves_source_processed_s
         }
     }
 
-    struct Configuration(u32);
-    impl ProductConfiguration for Configuration {
-        fn write_canonical(&self, output: &mut Vec<u8>) {
-            output.extend_from_slice(&self.0.to_le_bytes());
-        }
-    }
-
-    let recipe = |value| {
+    let recipe = |value: u32| {
         ProductRecipe::new()
             .add_plugin::<ContentPlugin>()
             .unwrap()
-            .select_wgpu_policy::<PolicyPlugin, _, _, _>(
-                Configuration(value),
-                |_| panic!("Check cannot invoke the policy factory"),
-                |_| panic!("Check cannot invoke the Editor adapter factory"),
+            .select_wgpu_policy::<PolicyPlugin, _, _>(
+                value.to_le_bytes(),
+                || panic!("Check cannot invoke the policy factory"),
+                || panic!("Check cannot invoke the Editor adapter factory"),
             )
             .unwrap()
     };

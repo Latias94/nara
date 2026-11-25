@@ -74,14 +74,12 @@ fn processed_runtime_plan_rejects_source_watch_before_its_factory_runs() {
     verify_processed_runtime_plan(&ordinary).unwrap();
     let factories = Arc::new(AtomicUsize::new(0));
     let factory_count = Arc::clone(&factories);
+    let configuration = project.configuration();
     let recipe = ProductRecipe::new()
-        .add_configured_plugin::<ProjectSceneWatchPlugin, _, _>(
-            project.configuration(),
-            move |configuration| {
-                factory_count.fetch_add(1, Ordering::Relaxed);
-                configuration.clone()
-            },
-        )
+        .add_configured_plugin(configuration.configuration_bytes(), move || {
+            factory_count.fetch_add(1, Ordering::Relaxed);
+            configuration.clone()
+        })
         .unwrap();
     let plan = resolve_runtime_configuration(candidate.runtime_configuration(), recipe).unwrap();
     assert_eq!(factories.load(Ordering::Relaxed), 0);
@@ -108,24 +106,21 @@ fn stock_generic_route_conflicts_during_recipe_resolution_before_native_acquisit
     let factories = Arc::new(AtomicUsize::new(0));
     let scene_count = Arc::clone(&factories);
     let stock_count = Arc::clone(&factories);
+    let configuration = project.configuration();
+    let canonical_configuration = configuration.configuration_bytes();
+    let root = configuration.root.clone();
     let recipe = ProductRecipe::new()
         .add_plugin::<nara_asset::AssetSourcePlugin>()
         .unwrap()
-        .add_configured_plugin::<ProjectSceneWatchPlugin, _, _>(
-            project.configuration(),
-            move |configuration| {
-                scene_count.fetch_add(1, Ordering::Relaxed);
-                configuration.clone()
-            },
-        )
+        .add_configured_plugin(&canonical_configuration, move || {
+            scene_count.fetch_add(1, Ordering::Relaxed);
+            configuration.clone()
+        })
         .unwrap()
-        .add_configured_plugin::<AssetWatchPlugin, _, _>(
-            project.configuration(),
-            move |configuration| {
-                stock_count.fetch_add(1, Ordering::Relaxed);
-                AssetWatchPlugin::new(configuration.root.clone(), AssetPathScope::ROOT)
-            },
-        )
+        .add_configured_plugin(canonical_configuration, move || {
+            stock_count.fetch_add(1, Ordering::Relaxed);
+            AssetWatchPlugin::new(root.clone(), AssetPathScope::ROOT)
+        })
         .unwrap();
     assert!(matches!(
         resolve_product_recipe(&project.candidate(), recipe),
@@ -710,7 +705,9 @@ fn source_status(world: &mut World) -> crate::project_host::ProjectSceneSourceUp
 
 fn watch_recipe(configuration: ProjectSceneWatchPlugin) -> ProductRecipe {
     ProductRecipe::new()
-        .add_configured_plugin::<ProjectSceneWatchPlugin, _, _>(configuration, Clone::clone)
+        .add_configured_plugin(configuration.configuration_bytes(), move || {
+            configuration.clone()
+        })
         .unwrap()
 }
 

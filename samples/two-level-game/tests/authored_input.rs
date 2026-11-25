@@ -15,7 +15,6 @@ use std::{
 };
 
 use nara::{
-    ProductConfiguration,
     advanced_prelude::CurrentScene,
     app::{
         CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId, StartupStage,
@@ -49,12 +48,6 @@ enum Operation {
 
 #[derive(Clone, Default, Resource)]
 struct Driver(Arc<Mutex<Vec<Operation>>>);
-
-impl ProductConfiguration for Driver {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(b"authored-input-game-test/v1");
-    }
-}
 
 struct DriverPlugin(Driver);
 
@@ -183,8 +176,11 @@ fn edited_keys_drive_original_commands_pause_collision_animation_and_context_lif
     let project = ProjectCopy::new();
     write(&project, &rebound(&project));
     let driver = Driver::default();
+    let plugin_driver = driver.clone();
     let recipe = product_recipe()
-        .add_configured_plugin(driver.clone(), |driver| DriverPlugin(driver.clone()))
+        .add_configured_plugin(b"authored-input-game-test/v1", move || {
+            DriverPlugin(plugin_driver.clone())
+        })
         .unwrap();
     let mut game = Game::from_project_with_recipe(project.root(), recipe);
     let bindings = game.session.observe(movement_bindings).unwrap().unwrap();

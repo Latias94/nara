@@ -6,7 +6,6 @@ use std::{
 };
 
 use nara::{
-    ProductConfiguration,
     app::{
         FixedTime, PluginCategory, PluginDeclaration, PluginId, RuntimeGeneration, RuntimeState,
     },
@@ -45,22 +44,10 @@ struct CapturedTick {
     commands: Vec<ScheduledCommand>,
 }
 
-#[derive(Clone)]
-struct Configuration {
+struct CapturePlugin {
     mode: Mode,
     slot: CaptureSlot,
 }
-
-impl ProductConfiguration for Configuration {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(match self.mode {
-            Mode::Record => b"two-level-game.exact-step-record/v1",
-            Mode::Replay => b"two-level-game.exact-step-replay/v1",
-        });
-    }
-}
-
-struct CapturePlugin(Configuration);
 
 impl Plugin for CapturePlugin {
     fn declaration() -> &'static PluginDeclaration {
@@ -73,12 +60,12 @@ impl Plugin for CapturePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        if matches!(self.0.mode, Mode::Replay) {
+        if matches!(self.mode, Mode::Replay) {
             app.insert_resource(CommandSchedule::replay_only(
                 CommandSource::replay(REPLAY_SOURCE).expect("fixed game Replay source"),
             ))?;
         }
-        app.insert_resource(self.0.slot.clone())?;
+        app.insert_resource(self.slot.clone())?;
         app.add_systems(CoreStage::FixedUpdate, capture.in_set(CommandSet::Capture))?;
         Ok(())
     }
@@ -109,14 +96,16 @@ impl Game {
         let root = crate::open_explicit_project_root(project)
             .map_err(|error| ReplayError::new(error.to_string()))?;
         let slot = CaptureSlot::default();
+        let capture_slot = slot.clone();
+        let configuration: &[u8] = match mode {
+            Mode::Record => b"two-level-game.exact-step-record/v1",
+            Mode::Replay => b"two-level-game.exact-step-replay/v1",
+        };
         let recipe = crate::product_recipe()
-            .add_configured_plugin(
-                Configuration {
-                    mode,
-                    slot: slot.clone(),
-                },
-                |configuration| CapturePlugin(configuration.clone()),
-            )
+            .add_configured_plugin(configuration, move || CapturePlugin {
+                mode,
+                slot: capture_slot.clone(),
+            })
             .map_err(|error| ReplayError::new(error.to_string()))?;
         Ok(Self {
             session: HeadlessSession::new(root, recipe),

@@ -19,7 +19,7 @@ use std::{path::PathBuf, sync::Arc};
 #[cfg(feature = "local-player")]
 use nara::sprite::Sprite;
 use nara::{
-    ProductConfiguration, ProductRecipe, SchemaContribution,
+    ProductRecipe, SchemaContribution,
     advanced_prelude::{CurrentScene, add_startup_scene_activation_systems},
     app::{
         PluginCategory, PluginDeclaration, PluginId, PluginSchemaProviderId, RuntimeFaultReporter,
@@ -97,12 +97,6 @@ pub struct RunOptions {
     pub scenario: Scenario,
     pub save_path: Option<PathBuf>,
 }
-impl ProductConfiguration for RunOptions {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend(serde_json::to_vec(self).expect("finite game configuration"));
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum GamePhase {
     #[default]
@@ -320,16 +314,6 @@ enum ExplorationConfiguration {
     LocalPlayer(RunOptions),
 }
 
-impl ProductConfiguration for ExplorationConfiguration {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        match self {
-            Self::Server => output.extend_from_slice(b"two-level-game.server.v1"),
-            #[cfg(feature = "local-player")]
-            Self::LocalPlayer(options) => options.write_canonical(output),
-        }
-    }
-}
-
 struct ExplorationPlugin {
     configuration: ExplorationConfiguration,
 }
@@ -419,7 +403,11 @@ impl Plugin for ExplorationPlugin {
             )?;
         add_fixed_transform_projection_systems(
             app,
-            (collect_pickups, side_room::find_relics, capture).chain(),
+            (collect_pickups, side_room::find_relics).chain(),
+        )?;
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            capture.in_set(CommandSet::Capture),
         )?;
         app.add_systems(
             CoreStage::FixedUpdate,
@@ -530,9 +518,16 @@ pub fn configured_recipe(options: RunOptions) -> ProductRecipe {
 }
 
 fn exploration_recipe(configuration: ExplorationConfiguration) -> ProductRecipe {
+    let configuration_bytes = match &configuration {
+        ExplorationConfiguration::Server => b"two-level-game.server.v1".to_vec(),
+        #[cfg(feature = "local-player")]
+        ExplorationConfiguration::LocalPlayer(options) => {
+            serde_json::to_vec(options).expect("finite game configuration")
+        }
+    };
     let contribution = SchemaContribution::configured(
-        configuration,
-        |configuration| ExplorationPlugin {
+        configuration_bytes,
+        move || ExplorationPlugin {
             configuration: configuration.clone(),
         },
         [PROVIDER],

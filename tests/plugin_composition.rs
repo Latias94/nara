@@ -11,13 +11,13 @@ use nara::project_host::advanced::{
     resolve_product_recipe_with_probe, resolve_runtime_plan,
 };
 use nara::{
-    MinimalPlugins, ProductConfiguration, ProductRecipe, ProductRecipeEntryKind,
-    ProductRecipeError, SchemaContribution,
+    MinimalPlugins, ProductRecipe, ProductRecipeEntryKind, ProductRecipeError, SchemaContribution,
     advanced_prelude::STARTUP_SCENE_ACTIVATION_PLUGIN_ID,
     app::{
-        AddPluginsError, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginError,
-        PluginHook, PluginHookMutation, PluginId, PluginInstantiationError,
-        PluginProductCapability, PluginSchemaProviderId, RuntimeCandidateRetirementState,
+        AddPluginsError, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
+        PluginDefinitionId, PluginError, PluginHook, PluginHookMutation, PluginId,
+        PluginInstantiationError, PluginProductCapability, PluginSchemaProviderId,
+        RuntimeCandidateRetirementState,
     },
     fs::{FileCapability, TrustMode},
     hierarchy::HIERARCHY_PLUGIN_ID,
@@ -299,14 +299,6 @@ const TEST_DEFAULT_RECIPE_PLUGIN_DECLARATION: PluginDeclaration =
 static COUNTED_PROVIDER_VALIDATIONS: AtomicUsize = AtomicUsize::new(0);
 static COUNTED_PROVIDER_REGISTRATIONS: AtomicUsize = AtomicUsize::new(0);
 static COUNTED_PROVIDER_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-struct RecipeProbeConfiguration(u32);
-
-impl ProductConfiguration for RecipeProbeConfiguration {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(&self.0.to_le_bytes());
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, nara::ecs::Resource)]
 struct RecipeProbe {
@@ -741,25 +733,34 @@ impl Plugin for ReentrantProductRecipePlugin {
 fn product_recipe_configuration_replaces_typed_entry_and_reconstructs_fresh_plugins() {
     let instances = Arc::new(AtomicUsize::new(0));
     let first_instances = Arc::clone(&instances);
-    let recipe = ProductRecipe::new()
-        .add_configured_plugin(
-            RecipeProbeConfiguration(7),
-            move |configuration: &RecipeProbeConfiguration| RecipeProbePlugin {
-                value: configuration.0,
+    let recipe = {
+        let configuration = 7_u32.to_le_bytes();
+        ProductRecipe::new()
+            .add_configured_plugin(configuration.as_slice(), move || RecipeProbePlugin {
+                value: 7,
                 instance: first_instances.fetch_add(1, Ordering::SeqCst),
-            },
-        )
-        .unwrap();
+            })
+            .unwrap()
+    };
     let first_fingerprint = recipe.entries().next().unwrap().configuration_fingerprint();
+    let v0_definition = PluginDefinition::infallible(
+        PluginDefinitionId::new(TEST_RECIPE_PLUGIN_ID.as_str(), 1),
+        b"nara.product-recipe.config.v1\0\x07\0\0\0",
+        || RecipeProbePlugin {
+            value: 7,
+            instance: 0,
+        },
+    );
+    assert_eq!(
+        first_fingerprint,
+        v0_definition.key().unwrap().configuration().as_bytes()
+    );
     let replacement_instances = Arc::clone(&instances);
     let recipe = recipe
-        .configure_plugin(
-            RecipeProbeConfiguration(11),
-            move |configuration: &RecipeProbeConfiguration| RecipeProbePlugin {
-                value: configuration.0,
-                instance: replacement_instances.fetch_add(1, Ordering::SeqCst),
-            },
-        )
+        .configure_plugin(11_u32.to_le_bytes(), move || RecipeProbePlugin {
+            value: 11,
+            instance: replacement_instances.fetch_add(1, Ordering::SeqCst),
+        })
         .unwrap();
     let entry = recipe.entries().next().unwrap();
     assert_eq!(recipe.len(), 1);
@@ -774,13 +775,10 @@ fn product_recipe_configuration_replaces_typed_entry_and_reconstructs_fresh_plug
     let independently_reconstructed_instances = Arc::new(AtomicUsize::new(0));
     let independently_reconstructed_counter = Arc::clone(&independently_reconstructed_instances);
     let independently_reconstructed = ProductRecipe::new()
-        .add_configured_plugin(
-            RecipeProbeConfiguration(11),
-            move |configuration: &RecipeProbeConfiguration| RecipeProbePlugin {
-                value: configuration.0,
-                instance: independently_reconstructed_counter.fetch_add(1, Ordering::SeqCst),
-            },
-        )
+        .add_configured_plugin(11_u32.to_le_bytes(), move || RecipeProbePlugin {
+            value: 11,
+            instance: independently_reconstructed_counter.fetch_add(1, Ordering::SeqCst),
+        })
         .unwrap();
     let independently_reconstructed =
         resolve_product_recipe(&candidate, independently_reconstructed).unwrap();
@@ -962,20 +960,16 @@ fn schema_contribution_rejects_divergent_plugin_receipts_in_direct_and_file_back
 #[test]
 fn schema_contribution_configuration_replaces_the_replayable_plugin_entry() {
     let contribution = SchemaContribution::<ConfiguredSchemaProviderPlugin>::configured(
-        RecipeProbeConfiguration(3),
-        |configuration: &RecipeProbeConfiguration| ConfiguredSchemaProviderPlugin {
-            value: configuration.0,
-        },
+        3_u32.to_le_bytes(),
+        || ConfiguredSchemaProviderPlugin { value: 3 },
         [counted_schema_provider()],
     )
     .unwrap();
     let recipe = ProductRecipe::new().add_contribution(contribution).unwrap();
     let first_fingerprint = recipe.entries().next().unwrap().configuration_fingerprint();
     let replacement = SchemaContribution::<ConfiguredSchemaProviderPlugin>::configured(
-        RecipeProbeConfiguration(9),
-        |configuration: &RecipeProbeConfiguration| ConfiguredSchemaProviderPlugin {
-            value: configuration.0,
-        },
+        9_u32.to_le_bytes(),
+        || ConfiguredSchemaProviderPlugin { value: 9 },
         [counted_schema_provider()],
     )
     .unwrap();

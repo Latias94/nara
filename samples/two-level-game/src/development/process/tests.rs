@@ -276,7 +276,7 @@ fn continuity_packets_require_and_preserve_the_exact_scaled_remainder() {
     let expected = json!([u64::MAX, 9_007_199_254_740_993_u64, (1 << 21) - 1]);
 
     let mut wire = serde_json::to_value(&request).unwrap();
-    assert_eq!(wire["version"], 7);
+    assert_eq!(wire["version"], PROTOCOL_VERSION);
     assert_eq!(
         wire["command"]["state"]["runtime_time"]["scaled_remainder"],
         expected
@@ -292,7 +292,7 @@ fn continuity_packets_require_and_preserve_the_exact_scaled_remainder() {
     assert!(serde_json::from_value::<Request>(wire).is_err());
 
     let mut wire = serde_json::to_value(&response).unwrap();
-    assert_eq!(wire["version"], 7);
+    assert_eq!(wire["version"], PROTOCOL_VERSION);
     let time = &mut wire["result"]["Ok"]["state"]["runtime_time"];
     assert_eq!(time["scaled_remainder"], expected);
     assert_eq!(

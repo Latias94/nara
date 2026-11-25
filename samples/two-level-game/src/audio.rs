@@ -17,7 +17,7 @@ use std::{
 };
 
 use nara::{
-    ProductConfiguration, ProductRecipe,
+    ProductRecipe,
     advanced_prelude::CurrentScene,
     app::{
         PluginCategory, PluginDeclaration, PluginId, PluginShutdownObligationId,
@@ -64,19 +64,6 @@ impl AudioOptions {
     }
 }
 
-impl ProductConfiguration for AudioOptions {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        self.capture_mode().write_canonical(output);
-    }
-}
-
-impl ProductConfiguration for CaptureMode {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(b"two-level-cpal-f32-stereo-48000/v1");
-        output.push(*self as u8);
-    }
-}
-
 /// An explicit audible source-game composition; ordinary and cooked recipes stay independent.
 pub fn recipe(options: RunOptions, audio: AudioOptions) -> ProductRecipe {
     with_audio(crate::configured_recipe(options), audio.capture_mode())
@@ -88,24 +75,28 @@ pub fn recipe(options: RunOptions, audio: AudioOptions) -> ProductRecipe {
 /// Suppressed pickup/travel effects are discarded and never replayed by enablement or resume.
 /// Production development callers should leave `AudioOptions::capture_output` disabled.
 pub fn development_recipe(options: RunOptions, audio: AudioOptions) -> ProductRecipe {
+    let capture = audio.capture_mode();
+    let policy = AudioPolicy::ResetOnRebuild;
     crate::configured_recipe(options)
-        .add_configured_plugin(DevelopmentAudioOptions(audio), |options| AudioPlugin {
-            capture: options.0.capture_mode(),
-            policy: AudioPolicy::ResetOnRebuild,
-            native_gate: None,
-            #[cfg(test)]
-            test_clips: None,
+        .add_configured_plugin(audio_configuration_bytes(capture, policy), move || {
+            AudioPlugin {
+                capture,
+                policy,
+                native_gate: None,
+                #[cfg(test)]
+                test_clips: None,
+            }
         })
         .expect("the game's fixed development audio contribution is valid")
 }
 
-struct DevelopmentAudioOptions(AudioOptions);
-
-impl ProductConfiguration for DevelopmentAudioOptions {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        self.0.write_canonical(output);
+fn audio_configuration_bytes(capture: CaptureMode, policy: AudioPolicy) -> Vec<u8> {
+    let mut output = b"two-level-cpal-f32-stereo-48000/v1".to_vec();
+    output.push(capture as u8);
+    if policy == AudioPolicy::ResetOnRebuild {
         output.extend_from_slice(b"two-level-game.audio.reset-on-rebuild.discard-until-enabled/v1");
     }
+    output
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Resource)]
@@ -121,13 +112,16 @@ pub fn cooked_recipe() -> ProductRecipe {
 }
 
 fn with_audio(recipe: ProductRecipe, capture: CaptureMode) -> ProductRecipe {
+    let policy = AudioPolicy::Ordinary;
     recipe
-        .add_configured_plugin(capture, |capture| AudioPlugin {
-            capture: *capture,
-            policy: AudioPolicy::Ordinary,
-            native_gate: None,
-            #[cfg(test)]
-            test_clips: None,
+        .add_configured_plugin(audio_configuration_bytes(capture, policy), move || {
+            AudioPlugin {
+                capture,
+                policy,
+                native_gate: None,
+                #[cfg(test)]
+                test_clips: None,
+            }
         })
         .expect("the game's fixed audio contribution is valid")
 }

@@ -1,13 +1,16 @@
 use std::sync::Mutex;
 
-use nara_app::{PluginPlan, PluginPlanError, PluginSlotPresence};
-use nara_render::RenderFramePacket;
+use nara_app::{PluginPlan, PluginPlanError, PluginSlotPresence, RuntimeInstance};
 use nara_render::gpu::{
     WGPU_STOCK_CAPTURE_PLUGIN_ID, WGPU_STOCK_POLICY_PLUGIN_ID, WgpuPolicyBindingContext,
     WgpuPolicyBuildContext, WgpuPolicyDefinition, WgpuPolicyInstallation, WgpuPolicyProgram,
     WgpuRenderPolicy, WgpuRenderProgramError, WgpuStockBindings, WgpuStockCapture,
     WgpuStockCaptureAdapter, WgpuStockPolicy, install_wgpu_policy,
 };
+use nara_render::{
+    RenderFramePacket, RenderWindowPacket, runtime_integration::build_window_overlay_frame_packet,
+};
+use nara_window::{PresentMode, WindowId, WindowResolution};
 
 use super::super::{MinimalPlugins, SLOT_WGPU_WINDOW_PRESENTATION, WgpuBackendPlugins};
 use super::*;
@@ -65,12 +68,6 @@ struct TestConfiguration {
     value: u32,
     // Test observations do not change policy behavior or its canonical configuration.
     factory_inputs: Arc<Mutex<Vec<(u32, usize)>>>,
-}
-
-impl ProductConfiguration for TestConfiguration {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(&self.value.to_le_bytes());
-    }
 }
 
 impl TestConfiguration {
@@ -138,8 +135,14 @@ fn adapter(
 }
 
 fn configured_recipe(configuration: TestConfiguration) -> ProductRecipe {
+    let configuration = Arc::new(configuration);
+    let plugin_configuration = Arc::clone(&configuration);
     ProductRecipe::new()
-        .select_wgpu_policy(configuration, TestPolicyPlugin::from_configuration, adapter)
+        .select_wgpu_policy(
+            configuration.value.to_le_bytes(),
+            move || TestPolicyPlugin::from_configuration(&plugin_configuration),
+            move || adapter(&configuration),
+        )
         .unwrap()
 }
 
@@ -203,19 +206,19 @@ fn selection_rejects_missing_capture_dependency_and_schema_contributors_before_f
     }
 
     assert!(matches!(
-        ProductRecipe::new().select_wgpu_policy::<WithoutCapture, _, _, _>(
-            (),
-            |_| panic!("an invalid selection must not construct a plugin"),
-            |_| panic!("an invalid selection must not construct an adapter"),
+        ProductRecipe::new().select_wgpu_policy::<WithoutCapture, _, _>(
+            [],
+            || panic!("an invalid selection must not construct a plugin"),
+            || panic!("an invalid selection must not construct an adapter"),
         ),
         Err(ProductRecipeError::WgpuPolicyRequiresStockCapture { plugin })
             if plugin == WithoutCapture::declaration().id
     ));
     assert!(matches!(
-        ProductRecipe::new().select_wgpu_policy::<SchemaPolicy, _, _, _>(
-            (),
-            |_| panic!("a Schema policy must not construct a plugin"),
-            |_| panic!("a Schema policy must not construct an adapter"),
+        ProductRecipe::new().select_wgpu_policy::<SchemaPolicy, _, _>(
+            [],
+            || panic!("a Schema policy must not construct a plugin"),
+            || panic!("a Schema policy must not construct an adapter"),
         ),
         Err(ProductRecipeError::RuntimePluginProvidesSchema { plugin })
             if plugin == SchemaPolicy::declaration().id
@@ -223,20 +226,14 @@ fn selection_rejects_missing_capture_dependency_and_schema_contributors_before_f
 }
 
 #[test]
-fn selection_retains_the_exact_configured_entry_and_shared_factory_configuration() {
+fn selection_retains_the_exact_configuration_and_installs_separate_capture_owners() {
     let observations = Arc::default();
     let recipe = configured_recipe(TestConfiguration {
         value: 19,
         factory_inputs: Arc::clone(&observations),
     });
     let ordinary = ProductRecipe::new()
-        .add_configured_plugin(
-            TestConfiguration {
-                value: 19,
-                factory_inputs: Arc::default(),
-            },
-            TestPolicyPlugin::from_configuration,
-        )
+        .add_configured_plugin(19_u32.to_le_bytes(), || TestPolicyPlugin { value: 19 })
         .unwrap();
     let selected = recipe.selected_wgpu_policy().unwrap();
     assert_eq!(selected.plugin_type, TypeId::of::<TestPolicyPlugin>());
@@ -284,20 +281,35 @@ fn selection_retains_the_exact_configured_entry_and_shared_factory_configuration
     let mut app = App::new();
     app.add_plugins(recipe.clone().with_defaults(TestDefaults))
         .unwrap();
-    assert_eq!(
-        app.world()
-            .resource::<WgpuPolicyInstallation<TestPolicy>>()
-            .definition()
-            .policy()
-            .value,
-        19,
-    );
+    let runtime_policy = app.world().resource::<WgpuPolicyInstallation<TestPolicy>>();
+    assert_eq!(runtime_policy.definition().policy().value, 19);
     assert!(
         !app.world()
             .contains_resource::<WgpuPolicyInstallation<WgpuStockPolicy>>()
     );
-    let _scene = recipe.create_wgpu_capture_adapter().unwrap();
-    let _canvas = recipe.create_wgpu_capture_adapter().unwrap();
+    let scene = recipe.create_wgpu_capture_adapter().unwrap();
+    let canvas = recipe.create_wgpu_capture_adapter().unwrap();
+    let runtime = RuntimeInstance::start(App::new()).unwrap();
+    let packet = build_window_overlay_frame_packet(
+        runtime.generation(),
+        1,
+        RenderWindowPacket {
+            id: WindowId::PRIMARY,
+            resolution: WindowResolution::new(1, 1),
+            present_mode: PresentMode::default(),
+        },
+        None,
+    )
+    .unwrap();
+    let scene = scene
+        .capture(packet.clone(), WgpuStockCapture::new())
+        .unwrap();
+    let canvas = canvas.capture(packet, WgpuStockCapture::new()).unwrap();
+    assert_ne!(scene.installation(), canvas.installation());
+    for capture in [scene, canvas] {
+        assert_ne!(capture.installation(), runtime_policy.id());
+        assert_eq!(capture.captured::<TestPolicy>().unwrap().value, 19);
+    }
     let observations = observations.lock().unwrap();
     assert_eq!(observations.len(), 3);
     assert!(observations.iter().all(|input| input == &observations[0]));
@@ -344,24 +356,15 @@ fn selection_has_stable_behavioral_fingerprints_and_preserves_default_selection(
 #[test]
 fn selection_rejects_unpaired_reconfiguration_and_missing_defaults() {
     assert!(matches!(
-        recipe(19).configure_plugin(
-            TestConfiguration {
-                value: 23,
-                factory_inputs: Arc::default(),
-            },
-            TestPolicyPlugin::from_configuration,
-        ),
+        recipe(19).configure_plugin(23_u32.to_le_bytes(), || TestPolicyPlugin { value: 23 }),
         Err(ProductRecipeError::SelectedWgpuPolicyConfiguration { plugin })
             if plugin == TestPolicyPlugin::declaration().id
     ));
     assert!(matches!(
         recipe(19).select_wgpu_policy(
-            TestConfiguration {
-                value: 23,
-                factory_inputs: Arc::default(),
-            },
-            TestPolicyPlugin::from_configuration,
-            adapter,
+            23_u32.to_le_bytes(),
+            || TestPolicyPlugin { value: 23 },
+            || panic!("a duplicate selection must not construct an adapter"),
         ),
         Err(ProductRecipeError::DuplicateDefaultConfiguration { .. })
     ));

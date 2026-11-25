@@ -414,21 +414,11 @@ pub(crate) fn with_test_script(
     recipe: nara::ProductRecipe,
     commands: Vec<ScheduledCommand>,
 ) -> Result<nara::ProductRecipe, nara::ProductRecipeError> {
-    use nara::{
-        ProductConfiguration,
-        app::{
-            App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId, StartupStage,
-        },
+    use nara::app::{
+        App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId, StartupStage,
     };
 
-    #[derive(Clone)]
     struct TestScript(Vec<ScheduledCommand>);
-
-    impl ProductConfiguration for TestScript {
-        fn write_canonical(&self, output: &mut Vec<u8>) {
-            output.extend_from_slice(format!("{:?}", self.0).as_bytes());
-        }
-    }
 
     impl Plugin for TestScript {
         fn declaration() -> &'static PluginDeclaration {
@@ -455,5 +445,7 @@ pub(crate) fn with_test_script(
         }
     }
 
-    recipe.add_configured_plugin(TestScript(commands), Clone::clone)
+    recipe.add_configured_plugin(format!("{commands:?}").into_bytes(), move || {
+        TestScript(commands.clone())
+    })
 }

@@ -81,12 +81,6 @@ impl RecipeFailure {
                 None,
                 1,
             ),
-            Error::ConfigurationPanicked { plugin } => (
-                "project.tool.recipe-configuration-panicked",
-                "A plugin configuration encoding panicked during product recipe construction",
-                Some(*plugin),
-                0,
-            ),
             Error::MissingConfigurationIdentity { plugin } => (
                 "project.tool.recipe-missing-configuration-identity",
                 "A plugin did not produce a stable product recipe configuration identity",

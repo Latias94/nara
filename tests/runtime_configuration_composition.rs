@@ -178,7 +178,6 @@ pending_capacity = 8
 #[cfg(feature = "render-wgpu")]
 #[test]
 fn source_and_runtime_configuration_keep_the_exact_selected_policy_and_fingerprint() {
-    use nara::ProductConfiguration;
     use nara::render_wgpu::{WGPU_STOCK_CAPTURE_PLUGIN_ID, WGPU_STOCK_POLICY_PLUGIN_ID};
 
     struct PolicyPlugin;
@@ -197,19 +196,12 @@ fn source_and_runtime_configuration_keep_the_exact_selected_policy_and_fingerpri
         }
     }
 
-    struct PolicyConfiguration(u32);
-    impl ProductConfiguration for PolicyConfiguration {
-        fn write_canonical(&self, output: &mut Vec<u8>) {
-            output.extend_from_slice(&self.0.to_le_bytes());
-        }
-    }
-
-    let recipe = |value| {
+    let recipe = |value: u32| {
         ProductRecipe::new()
-            .select_wgpu_policy::<PolicyPlugin, _, _, _>(
-                PolicyConfiguration(value),
-                |_| panic!("configuration resolution cannot invoke the plugin factory"),
-                |_| panic!("configuration resolution cannot invoke the adapter factory"),
+            .select_wgpu_policy::<PolicyPlugin, _, _>(
+                value.to_le_bytes(),
+                || panic!("configuration resolution cannot invoke the plugin factory"),
+                || panic!("configuration resolution cannot invoke the adapter factory"),
             )
             .unwrap()
     };
@@ -355,7 +347,7 @@ impl Plugin for FactoryProbe {
 fn probe_recipe(instances: &Arc<AtomicUsize>) -> ProductRecipe {
     let instances = Arc::clone(instances);
     ProductRecipe::new()
-        .add_configured_plugin((), move |_: &()| {
+        .add_configured_plugin([], move || {
             instances.fetch_add(1, Ordering::SeqCst);
             FactoryProbe
         })

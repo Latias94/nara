@@ -191,12 +191,6 @@ fn known_recipe_variants_have_distinct_static_codes_and_explicit_field_omissions
             1,
         ),
         (
-            Recipe::ConfigurationPanicked { plugin: PLUGIN },
-            "project.tool.recipe-configuration-panicked",
-            true,
-            0,
-        ),
-        (
             Recipe::MissingConfigurationIdentity { plugin: PLUGIN },
             "project.tool.recipe-missing-configuration-identity",
             true,

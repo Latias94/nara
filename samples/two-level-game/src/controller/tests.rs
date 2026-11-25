@@ -1,22 +1,9 @@
 use nara::{
-    ProductConfiguration, ProductRecipe, ProductRecipeEntryKind, ProductRecipeError,
+    ProductRecipe, ProductRecipeEntryKind, ProductRecipeError,
     input::{GILRS_INPUT_PLUGIN_ID, GamepadRoute, GilrsInputPlugin},
 };
 
 use super::with_gilrs_input;
-
-struct OriginalDesktopConfiguration;
-
-impl ProductConfiguration for OriginalDesktopConfiguration {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(b"two-level-game.gilrs/v1\0");
-        output.push(1);
-        output.extend_from_slice(&1_u64.to_le_bytes());
-        output.extend_from_slice(&0_u32.to_le_bytes());
-        output.extend_from_slice(&16_u64.to_le_bytes());
-        output.extend_from_slice(&256_u64.to_le_bytes());
-    }
-}
 
 fn controller_fingerprint(recipe: &ProductRecipe) -> [u8; 32] {
     recipe
@@ -28,8 +15,14 @@ fn controller_fingerprint(recipe: &ProductRecipe) -> [u8; 32] {
 
 #[test]
 fn controller_fingerprint_preserves_original_desktop_configuration() {
+    let mut original_configuration = b"two-level-game.gilrs/v1\0".to_vec();
+    original_configuration.push(1);
+    original_configuration.extend_from_slice(&1_u64.to_le_bytes());
+    original_configuration.extend_from_slice(&0_u32.to_le_bytes());
+    original_configuration.extend_from_slice(&16_u64.to_le_bytes());
+    original_configuration.extend_from_slice(&256_u64.to_le_bytes());
     let original = ProductRecipe::new()
-        .add_configured_plugin(OriginalDesktopConfiguration, |_| {
+        .add_configured_plugin(original_configuration, || {
             GilrsInputPlugin::new(Some(GamepadRoute::new(
                 nara::input::InputWindowId::new(1),
                 nara::input::InputSeatId::PRIMARY,

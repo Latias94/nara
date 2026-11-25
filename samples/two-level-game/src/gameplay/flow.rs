@@ -219,27 +219,16 @@ pub fn with_play_flow(
     match controls {
         PlayFlowControls::Keyboard => recipe.add_plugin::<PlayFlowPlugin>(),
         #[cfg(feature = "gamepad")]
-        PlayFlowControls::KeyboardAndGamepad => {
-            recipe.add_configured_plugin(GamepadRound, |_| PlayFlowPlugin {
-                controls: PlayFlowControls::KeyboardAndGamepad,
-            })
-        }
+        PlayFlowControls::KeyboardAndGamepad => recipe
+            .add_configured_plugin(b"two-level-game.play-flow.gamepad/v1\0", move || {
+                PlayFlowPlugin { controls }
+            }),
     }
 }
 
 #[derive(Default)]
 struct PlayFlowPlugin {
     controls: PlayFlowControls,
-}
-
-#[cfg(feature = "gamepad")]
-struct GamepadRound;
-
-#[cfg(feature = "gamepad")]
-impl nara::ProductConfiguration for GamepadRound {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(b"two-level-game.play-flow.gamepad/v1\0");
-    }
 }
 
 impl Plugin for PlayFlowPlugin {

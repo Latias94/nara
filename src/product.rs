@@ -28,8 +28,8 @@ pub use profile::window_from_settings;
 pub(crate) use recipe::data_contributor_mismatch;
 #[cfg(feature = "project-runtime")]
 pub use recipe::{
-    ProductConfiguration, ProductRecipe, ProductRecipeEntry, ProductRecipeEntryKind,
-    ProductRecipeError, SchemaContribution,
+    ProductRecipe, ProductRecipeEntry, ProductRecipeEntryKind, ProductRecipeError,
+    SchemaContribution,
 };
 #[cfg(feature = "runtime-ui")]
 pub(crate) use ui_surface::PROJECT_PRIMARY_UI_SURFACE_ID;

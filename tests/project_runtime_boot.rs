@@ -33,7 +33,7 @@ use std::{
 };
 
 use nara::{
-    ProductConfiguration, ProductRecipe,
+    ProductRecipe,
     app::{
         App, AppExitRequests, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginCategory,
         PluginDeclaration, PluginDefinition, PluginDefinitionId, PluginDomainError, PluginError,
@@ -93,9 +93,9 @@ struct FailureConfiguration {
     shutdowns: Arc<AtomicUsize>,
 }
 
-impl ProductConfiguration for FailureConfiguration {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(b"project-domain-failure-v1");
+impl FailureConfiguration {
+    fn configuration_bytes(&self) -> Vec<u8> {
+        let mut output = b"project-domain-failure-v1".to_vec();
         output.push(match self.hook {
             PluginHook::Preflight => 0,
             PluginHook::Build => 1,
@@ -103,6 +103,7 @@ impl ProductConfiguration for FailureConfiguration {
             PluginHook::Shutdown => 3,
         });
         output.push(u8::from(self.legacy));
+        output
     }
 }
 
@@ -437,15 +438,15 @@ fn recipe_lifecycle_domain_failures_preserve_public_facts_through_terminal_clean
         let project = TestProject::with_prefab_startup();
         project.select_local_headless_profile();
         let shutdowns = Arc::new(AtomicUsize::new(0));
+        let configuration = FailureConfiguration {
+            hook,
+            legacy: false,
+            shutdowns: Arc::clone(&shutdowns),
+        };
         let recipe = boot_recipe()
-            .add_configured_plugin(
-                FailureConfiguration {
-                    hook,
-                    legacy: false,
-                    shutdowns: Arc::clone(&shutdowns),
-                },
-                |configuration: &FailureConfiguration| FailurePlugin(configuration.clone()),
-            )
+            .add_configured_plugin(configuration.configuration_bytes(), move || {
+                FailurePlugin(configuration.clone())
+            })
             .unwrap();
         let mut run: HeadlessRun<BootOutcome> = HeadlessRun::from_recipe(
             project.root_capability(),
@@ -512,15 +513,15 @@ fn recipe_lifecycle_domain_failures_preserve_public_facts_through_terminal_clean
 fn recipe_legacy_failure_publishes_actual_hook_identity_without_dynamic_error_text() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
+    let configuration = FailureConfiguration {
+        hook: PluginHook::Build,
+        legacy: true,
+        shutdowns: Arc::new(AtomicUsize::new(0)),
+    };
     let recipe = boot_recipe()
-        .add_configured_plugin(
-            FailureConfiguration {
-                hook: PluginHook::Build,
-                legacy: true,
-                shutdowns: Arc::new(AtomicUsize::new(0)),
-            },
-            |configuration: &FailureConfiguration| FailurePlugin(configuration.clone()),
-        )
+        .add_configured_plugin(configuration.configuration_bytes(), move || {
+            FailurePlugin(configuration.clone())
+        })
         .unwrap();
     let mut run: HeadlessRun<BootOutcome> = HeadlessRun::from_recipe(
         project.root_capability(),

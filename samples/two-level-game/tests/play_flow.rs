@@ -20,7 +20,7 @@ use std::{
 #[cfg(feature = "gamepad")]
 use nara::input::{ButtonTransitionPhase, GamepadButton, GamepadConnection};
 use nara::{
-    ProductConfiguration, ProductRecipe,
+    ProductRecipe,
     advanced_prelude::CurrentScene,
     app::{
         AppExit, CoreStage, FixedTime, Plugin, PluginCategory, PluginDeclaration, PluginError,
@@ -66,12 +66,6 @@ enum DriverInput {
     Button(usize, GamepadButton, bool),
     #[cfg(feature = "gamepad")]
     Disconnect(usize),
-}
-
-impl ProductConfiguration for Driver {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(b"two-level-game.play-flow-test/v1");
-    }
 }
 
 impl Driver {
@@ -240,8 +234,11 @@ impl Game {
 
     fn from_project(root: &Path, recipe: ProductRecipe) -> Self {
         let driver = Driver::default();
+        let plugin_driver = driver.clone();
         let recipe = recipe
-            .add_configured_plugin(driver.clone(), |driver| DriverPlugin(driver.clone()))
+            .add_configured_plugin(b"two-level-game.play-flow-test/v1", move || {
+                DriverPlugin(plugin_driver.clone())
+            })
             .unwrap();
         let mut game = Self {
             session: HeadlessSession::new(open_explicit_project_root(root).unwrap(), recipe),

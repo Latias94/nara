@@ -8,7 +8,6 @@ mod support;
 use two_level_game::command::CommandSet;
 
 use nara::{
-    ProductConfiguration,
     advanced_prelude::CurrentScene,
     app::{PluginCategory, PluginDeclaration, PluginId},
     ecs::{Entity, World, schedule::IntoScheduleConfigs},
@@ -34,12 +33,6 @@ enum PickupEdit {
     Retire,
     Move,
     DetachSprite,
-}
-
-impl ProductConfiguration for PickupEdit {
-    fn write_canonical(&self, output: &mut Vec<u8>) {
-        output.push(*self as u8);
-    }
 }
 
 impl Plugin for PickupEdit {
@@ -109,7 +102,7 @@ fn edit_pickup(world: &mut World, edit: PickupEdit, detached_sprite: &mut Option
 
 fn game_with_pickup_edit(edit: PickupEdit) -> Game {
     let recipe = product_recipe()
-        .add_configured_plugin(edit, |edit| *edit)
+        .add_configured_plugin([edit as u8], move || edit)
         .unwrap();
     Game::with_recipe(recipe)
 }

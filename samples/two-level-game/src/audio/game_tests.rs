@@ -78,10 +78,18 @@ fn development_reset_is_fingerprinted_without_changing_ordinary_audio_options() 
         );
     }
     for capture_output in [false, true] {
-        let mut canonical = Vec::new();
-        AudioOptions { capture_output }.write_canonical(&mut canonical);
+        let capture = AudioOptions { capture_output }.capture_mode();
         let mut expected = b"two-level-cpal-f32-stereo-48000/v1".to_vec();
         expected.push(u8::from(capture_output));
-        assert_eq!(canonical, expected);
+        assert_eq!(
+            audio_configuration_bytes(capture, AudioPolicy::Ordinary),
+            expected
+        );
+        expected
+            .extend_from_slice(b"two-level-game.audio.reset-on-rebuild.discard-until-enabled/v1");
+        assert_eq!(
+            audio_configuration_bytes(capture, AudioPolicy::ResetOnRebuild),
+            expected,
+        );
     }
 }
