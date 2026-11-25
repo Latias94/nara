@@ -1,18 +1,11 @@
 //! Safe format facts shared by strict content Check and ordinary authoring Open.
 
+use crate::{SceneFileBudgetKind, SceneFileEncoding, SceneFormatError};
 use nara_core::diagnostic::{
     DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
     ReportDiagnostic as Diagnostic, SafeSummary,
 };
 use nara_core::{EngineVersion, PersistentFileContractError, SerdeShapeError};
-use nara_scene::{SceneFileBudgetKind, SceneFileEncoding, SceneFormatError};
-
-fn diagnostic(code: &'static str, summary: &'static str) -> Diagnostic {
-    Diagnostic::error(
-        DiagnosticCode::new(code).expect("Scene format diagnostic codes are engine-owned"),
-        SafeSummary::new(summary).expect("Scene format summaries are engine-owned"),
-    )
-}
 
 fn field_key(key: &'static str) -> DiagnosticFieldKey {
     DiagnosticFieldKey::new(key).expect("Scene format field keys are engine-owned")
@@ -24,89 +17,92 @@ fn attach_field(diagnostic: Diagnostic, field: DiagnosticField) -> Diagnostic {
         .expect("Scene format diagnostics use unique bounded fields")
 }
 
-/// Projects typed facts only. Parser messages can contain arbitrary document contents.
-pub(crate) fn scene_format_diagnostic(
-    code: &'static str,
-    summary: &'static str,
-    error: &SceneFormatError,
-) -> Diagnostic {
-    let diagnostic = diagnostic(code, summary);
-    match error {
-        SceneFormatError::EncodedBytesExceeded { observed, maximum } => {
-            budget(diagnostic, "encoded-bytes", Some(*observed), *maximum)
-        }
-        SceneFormatError::Shape { encoding, .. }
-        | SceneFormatError::Header { encoding, .. }
-        | SceneFormatError::Payload { encoding, .. } => {
-            let stage = match error {
-                SceneFormatError::Shape { .. } => "shape-invalid",
-                SceneFormatError::Header { .. } => "header-invalid",
-                _ => "payload-invalid",
-            };
-            let diagnostic = identifier(
+impl SceneFormatError {
+    /// Reports the format, error category, and any known source coordinates. Only admitted
+    /// diagnostic fields are retained, so parser messages cannot disclose document contents.
+    pub fn to_diagnostic(&self, code: DiagnosticCode, summary: SafeSummary) -> Diagnostic {
+        let diagnostic = Diagnostic::error(code, summary);
+        match self {
+            SceneFormatError::EncodedBytesExceeded { observed, maximum } => {
+                budget(diagnostic, "encoded-bytes", Some(*observed), *maximum)
+            }
+            SceneFormatError::Shape { encoding, .. }
+            | SceneFormatError::Header { encoding, .. }
+            | SceneFormatError::Payload { encoding, .. } => {
+                let stage = match self {
+                    SceneFormatError::Shape { .. } => "shape-invalid",
+                    SceneFormatError::Header { .. } => "header-invalid",
+                    _ => "payload-invalid",
+                };
+                let diagnostic = identifier(
+                    diagnostic,
+                    "encoding",
+                    match encoding {
+                        SceneFileEncoding::Json => "json",
+                        SceneFileEncoding::Ron => "ron",
+                    },
+                );
+                parser_failure(diagnostic, self, stage)
+            }
+            SceneFormatError::Contract(PersistentFileContractError::UnsupportedFormatVersion {
+                supported,
+                actual,
+                ..
+            }) => {
+                let diagnostic = identifier(diagnostic, "reason", "format-version-unsupported");
+                let diagnostic = number(diagnostic, "observed_version", u64::from(actual.get()));
+                number(diagnostic, "supported_version", u64::from(supported.get()))
+            }
+            SceneFormatError::Contract(PersistentFileContractError::WrongKind {
+                expected,
+                actual,
+            }) => {
+                let diagnostic = identifier(diagnostic, "reason", "kind-mismatch");
+                let diagnostic = format_kind(diagnostic, "expected_kind", expected.as_str());
+                format_kind(diagnostic, "observed_kind", actual.as_str())
+            }
+            SceneFormatError::Contract(PersistentFileContractError::EngineVersionTooOld {
+                current,
+                required,
+            }) => {
+                let diagnostic = identifier(diagnostic, "reason", "engine-version-too-old");
+                let diagnostic = engine_version(diagnostic, "current_engine", current);
+                engine_version(diagnostic, "required_engine", required)
+            }
+            SceneFormatError::PatchFormatVersion { observed, expected } => {
+                let diagnostic =
+                    identifier(diagnostic, "reason", "embedded-patch-version-unsupported");
+                let diagnostic = number(diagnostic, "observed_version", u64::from(*observed));
+                number(diagnostic, "supported_version", u64::from(*expected))
+            }
+            SceneFormatError::SessionOnlyPatchOperation { operation_index } => {
+                let diagnostic = identifier(diagnostic, "reason", "session-only-patch-operation");
+                number(
+                    diagnostic,
+                    "operation_index",
+                    u64::try_from(*operation_index).unwrap_or(u64::MAX),
+                )
+            }
+            SceneFormatError::Budget(error) => budget(
                 diagnostic,
-                "encoding",
-                match encoding {
-                    SceneFileEncoding::Json => "json",
-                    SceneFileEncoding::Ron => "ron",
+                match error.kind {
+                    SceneFileBudgetKind::Entities => "entities",
+                    SceneFileBudgetKind::Placements => "placements",
+                    SceneFileBudgetKind::PlacementDepth => "placement-depth",
+                    SceneFileBudgetKind::Components => "components",
+                    SceneFileBudgetKind::PrefabInstances => "prefab-instances",
+                    SceneFileBudgetKind::PatchOperations => "patch-operations",
+                    SceneFileBudgetKind::OverlayDeclarations => "overlay-declarations",
+                    SceneFileBudgetKind::DiagnosticSources => "diagnostic-sources",
+                    SceneFileBudgetKind::ComponentValueNodes => "component-value-nodes",
+                    SceneFileBudgetKind::ComponentValueBytes => "component-value-bytes",
                 },
-            );
-            parser_failure(diagnostic, error, stage)
+                Some(error.observed),
+                error.maximum,
+            ),
+            SceneFormatError::Encode { .. } => identifier(diagnostic, "reason", "encoding-failed"),
+            SceneFormatError::Metadata(_) => identifier(diagnostic, "reason", "metadata-invalid"),
         }
-        SceneFormatError::Contract(PersistentFileContractError::UnsupportedFormatVersion {
-            supported,
-            actual,
-            ..
-        }) => {
-            let diagnostic = identifier(diagnostic, "reason", "format-version-unsupported");
-            let diagnostic = number(diagnostic, "observed_version", u64::from(actual.get()));
-            number(diagnostic, "supported_version", u64::from(supported.get()))
-        }
-        SceneFormatError::Contract(PersistentFileContractError::WrongKind { expected, actual }) => {
-            let diagnostic = identifier(diagnostic, "reason", "kind-mismatch");
-            let diagnostic = format_kind(diagnostic, "expected_kind", expected.as_str());
-            format_kind(diagnostic, "observed_kind", actual.as_str())
-        }
-        SceneFormatError::Contract(PersistentFileContractError::EngineVersionTooOld {
-            current,
-            required,
-        }) => {
-            let diagnostic = identifier(diagnostic, "reason", "engine-version-too-old");
-            let diagnostic = engine_version(diagnostic, "current_engine", current);
-            engine_version(diagnostic, "required_engine", required)
-        }
-        SceneFormatError::PatchFormatVersion { observed, expected } => {
-            let diagnostic = identifier(diagnostic, "reason", "embedded-patch-version-unsupported");
-            let diagnostic = number(diagnostic, "observed_version", u64::from(*observed));
-            number(diagnostic, "supported_version", u64::from(*expected))
-        }
-        SceneFormatError::SessionOnlyPatchOperation { operation_index } => {
-            let diagnostic = identifier(diagnostic, "reason", "session-only-patch-operation");
-            number(
-                diagnostic,
-                "operation_index",
-                u64::try_from(*operation_index).unwrap_or(u64::MAX),
-            )
-        }
-        SceneFormatError::Budget(error) => budget(
-            diagnostic,
-            match error.kind {
-                SceneFileBudgetKind::Entities => "entities",
-                SceneFileBudgetKind::Placements => "placements",
-                SceneFileBudgetKind::PlacementDepth => "placement-depth",
-                SceneFileBudgetKind::Components => "components",
-                SceneFileBudgetKind::PrefabInstances => "prefab-instances",
-                SceneFileBudgetKind::PatchOperations => "patch-operations",
-                SceneFileBudgetKind::OverlayDeclarations => "overlay-declarations",
-                SceneFileBudgetKind::DiagnosticSources => "diagnostic-sources",
-                SceneFileBudgetKind::ComponentValueNodes => "component-value-nodes",
-                SceneFileBudgetKind::ComponentValueBytes => "component-value-bytes",
-            },
-            Some(error.observed),
-            error.maximum,
-        ),
-        SceneFormatError::Encode { .. } => identifier(diagnostic, "reason", "encoding-failed"),
-        SceneFormatError::Metadata(_) => identifier(diagnostic, "reason", "metadata-invalid"),
     }
 }
 
@@ -220,11 +216,22 @@ fn usize_to_u64(value: usize) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use crate::{SceneDocumentCandidate, SceneFormatError};
     use nara_core::diagnostic::{DiagnosticFieldClass, DiagnosticValueRef};
     use nara_core::{EngineVersion, FormatKind, PersistentFileContractError};
-    use nara_scene::{SceneDocumentCandidate, SceneFormatError};
 
-    use super::scene_format_diagnostic;
+    use super::*;
+
+    fn scene_format_diagnostic(
+        code: &'static str,
+        summary: &'static str,
+        error: &SceneFormatError,
+    ) -> Diagnostic {
+        error.to_diagnostic(
+            DiagnosticCode::new(code).unwrap(),
+            SafeSummary::new(summary).unwrap(),
+        )
+    }
 
     #[test]
     fn kind_diagnostics_publish_only_known_scene_format_labels() {

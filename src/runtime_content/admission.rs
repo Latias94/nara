@@ -4,6 +4,8 @@ use std::{mem::size_of, sync::Arc};
 
 use nara_asset::pack::Pack;
 use nara_core::ByteLimit;
+use nara_core::vfs::capabilities::ContentDigest;
+use nara_scene::runtime_catalog::RuntimeContentCatalogAdmissionError;
 
 use super::{
     DecodeBudget, EncodedBacking, ProductRecipe, RuntimeContentBase, RuntimeContentBaseInner,
@@ -16,6 +18,7 @@ use crate::project_host::RuntimeConfigurationPlan;
 pub(super) struct AdmittedCatalog {
     pub(super) bytes: Vec<u8>,
     pub(super) catalog: RuntimeContentCatalog,
+    digest: ContentDigest,
     plan: RuntimeConfigurationPlan,
     limits: RuntimeContentLimits,
     declared_encoded: usize,
@@ -26,7 +29,7 @@ pub(super) fn input_limits(
     expected: &RuntimeContentExpectation,
     limits: RuntimeContentLimits,
 ) -> Result<(usize, RuntimeContentCatalogLimits), RuntimeContentError> {
-    let length = usize::try_from(expected.catalog_digest.length()).map_err(|_| {
+    let length = usize::try_from(expected.catalog_digest().length()).map_err(|_| {
         budget_error(
             RuntimeContentBudgetKind::TotalEncodedBytes,
             usize::MAX,
@@ -87,14 +90,20 @@ impl AdmittedCatalog {
         limits: RuntimeContentLimits,
         catalog_limits: RuntimeContentCatalogLimits,
     ) -> Result<Self, RuntimeContentError> {
-        if crate::fs::ContentDigest::of_bytes(&bytes) != expected.catalog_digest {
-            return Err(RuntimeContentError::CatalogDigestMismatch);
-        }
-        let catalog = RuntimeContentCatalog::from_json_bytes(&bytes, catalog_limits)
-            .map_err(RuntimeContentError::Catalog)?;
-        if catalog.target() != &expected.target {
-            return Err(RuntimeContentError::TargetMismatch);
-        }
+        let catalog =
+            expected
+                .admit_catalog(&bytes, catalog_limits)
+                .map_err(|error| match error {
+                    RuntimeContentCatalogAdmissionError::DigestMismatch => {
+                        RuntimeContentError::CatalogDigestMismatch
+                    }
+                    RuntimeContentCatalogAdmissionError::TargetMismatch => {
+                        RuntimeContentError::TargetMismatch
+                    }
+                    RuntimeContentCatalogAdmissionError::InvalidCatalog(error) => {
+                        RuntimeContentError::Catalog(error)
+                    }
+                })?;
         let configuration = catalog
             .configuration()
             .clone()
@@ -145,6 +154,7 @@ impl AdmittedCatalog {
         Ok(Self {
             bytes,
             catalog,
+            digest: expected.catalog_digest(),
             plan,
             limits,
             declared_encoded,
@@ -193,7 +203,7 @@ impl AdmittedCatalog {
     pub(super) fn publish(self, backing: EncodedBacking, retained: usize) -> RuntimeContentBase {
         RuntimeContentBase {
             inner: Arc::new(RuntimeContentBaseInner {
-                catalog_digest: crate::fs::ContentDigest::of_bytes(&self.bytes),
+                catalog_digest: self.digest,
                 catalog: self.catalog,
                 plan: self.plan,
                 catalog_bytes: self.bytes,

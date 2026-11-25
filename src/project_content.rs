@@ -3408,7 +3408,10 @@ fn map_format_error(
     summary: &'static str,
     error: &SceneFormatError,
 ) -> ProjectContentError {
-    let diagnostic = crate::scene_format_diagnostic::scene_format_diagnostic(code, summary, error);
+    let diagnostic = error.to_diagnostic(
+        DiagnosticCode::new(code).expect("Scene format diagnostic codes are engine-owned"),
+        SafeSummary::new(summary).expect("Scene format summaries are engine-owned"),
+    );
     let source = PublicDiagnosticIdentifier::new(path).map_or_else(
         |_| DiagnosticField::sensitive(field_key(source_key)),
         |value| DiagnosticField::public_identifier(field_key(source_key), value),

@@ -28,3 +28,8 @@ inspector, prefab overrides, and future animation. Use compact `PackedU16`, `Pac
   directory sorted by `AssetId`. Support optional per-entry LZ4 compression and independent reads.
 - Let the game own its save snapshots separately from its cooked asset and scene formats. Migrate
   the shipped examples and starter at the format cutover and retire the v0 JSON readers.
+
+The Phase 3 `.pack` format uses `nara_asset::pack` for v1 archive I/O.
+`nara_scene::runtime_catalog` owns the catalog and canonical member order. The executable supplies
+the expected digest and target. Admission checks both before the runtime selects member codecs or
+starts the world.

@@ -16,7 +16,7 @@ fn time_and_frame(
 }
 
 #[test]
-fn idle_root_maintenance_adds_no_wake_with_or_without_a_continuing_observer() {
+fn idle_maintenance_adds_no_wake_with_or_without_a_continuing_observer() {
     for with_observer in [false, true] {
         let mut runtime = render_runtime();
         let generation = runtime.generation();
@@ -39,8 +39,6 @@ fn idle_root_maintenance_adds_no_wake_with_or_without_a_continuing_observer() {
         let mut driver = DesktopPresentationDriver::new(
             &runtime,
             options,
-            #[cfg(feature = "project-source")]
-            None,
             DesktopPresentationReports::default(),
         );
         let handles = BackendWindowHandles::default();
@@ -70,6 +68,59 @@ fn idle_root_maintenance_adds_no_wake_with_or_without_a_continuing_observer() {
 }
 
 #[test]
+fn frame_progress_observer_keeps_its_deadline_after_final_telemetry_delivery() {
+    let mut runtime = live_runtime();
+    let generation = runtime.generation();
+    let reports = sealed_reports();
+    let handles = BackendWindowHandles::default();
+    let now = Instant::now();
+    let deadline = now + Duration::from_secs(60);
+    let frame_calls = Rc::new(Cell::new(0));
+    let telemetry_calls = Rc::new(Cell::new(0));
+    let options = DesktopPresentationOptions::default().with_observer({
+        let frame_calls = Rc::clone(&frame_calls);
+        let telemetry_calls = Rc::clone(&telemetry_calls);
+        move |observation| {
+            assert_eq!(frame_calls.get(), 1);
+            assert!(observation.telemetry_seal().is_some());
+            telemetry_calls.set(telemetry_calls.get() + 1);
+            DesktopPresentationControl::WakeAt(deadline + Duration::from_secs(1))
+        }
+    });
+    let mut driver = DesktopPresentationDriver::new(&runtime, options, reports.clone())
+        .with_frame_progress_observer({
+            let frame_calls = Rc::clone(&frame_calls);
+            move |current, presented, now| {
+                assert_eq!(current, generation);
+                assert!(presented.is_none());
+                frame_calls.set(frame_calls.get() + 1);
+                WinitPresentationProgress {
+                    exit: (now >= deadline).then_some(AppExit::Requested),
+                    next_wake: (now < deadline).then_some(deadline),
+                }
+            }
+        });
+
+    for elapsed in [Duration::ZERO, Duration::from_secs(1)] {
+        let progress = driver
+            .maintain(&mut runtime, &handles, now + elapsed)
+            .unwrap();
+        assert_eq!(progress.next_wake, Some(deadline));
+        assert_eq!(progress.exit, None);
+    }
+    assert!(
+        driver
+            .retire(&mut runtime, &handles, &[], deadline)
+            .unwrap()
+    );
+    assert_eq!(reports.reconcile_exit(AppExit::Success), AppExit::Requested);
+    assert_eq!(frame_calls.get(), 3);
+    assert_eq!(telemetry_calls.get(), 1);
+    drop(driver);
+    retire(runtime);
+}
+
+#[test]
 fn observer_absolute_wake_merges_with_earlier_and_later_original_owner_progress() {
     let runtime = live_runtime();
     let now = Instant::now();
@@ -88,8 +139,6 @@ fn observer_absolute_wake_merges_with_earlier_and_later_original_owner_progress(
                 DesktopPresentationControl::WakeAt(deadline)
             })),
         },
-        #[cfg(feature = "project-source")]
-        None,
         DesktopPresentationReports::default(),
     );
     for callback_now in [now, now + Duration::from_millis(5)] {
@@ -138,8 +187,6 @@ fn observer_continue_withdraws_only_its_previous_deadline_from_fresh_owner_progr
                 observed_request.get()
             })),
         },
-        #[cfg(feature = "project-source")]
-        None,
         DesktopPresentationReports::default(),
     );
     for (owner_wake, expected_wake) in [
@@ -201,8 +248,6 @@ fn expired_observer_deadline_returns_its_original_time_without_an_app_frame() {
                 DesktopPresentationControl::WakeAt(deadline)
             })),
         },
-        #[cfg(feature = "project-source")]
-        None,
         DesktopPresentationReports::default(),
     );
     let handles = BackendWindowHandles::default();
@@ -248,8 +293,6 @@ fn final_observer_exit_veto_survives_its_previous_wake_request() {
                 }
             })),
         },
-        #[cfg(feature = "project-source")]
-        None,
         reports.clone(),
     );
     let pending = driver.observe_consumer(
@@ -318,8 +361,6 @@ fn original_seal_deadline_survives_observer_wake_withdrawal_and_repeated_sealing
                 observed_request.get()
             })),
         },
-        #[cfg(feature = "project-source")]
-        None,
         DesktopPresentationReports::default(),
     );
     driver.begin_seal(original_deadline, Some(AppExit::Success));

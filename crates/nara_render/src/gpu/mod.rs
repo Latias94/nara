@@ -6,6 +6,19 @@ mod backend;
 mod budget;
 mod candidate;
 mod canvas;
+#[cfg(all(
+    feature = "winit",
+    any(
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    )
+))]
+pub mod desktop;
 mod device;
 mod error;
 mod frame;

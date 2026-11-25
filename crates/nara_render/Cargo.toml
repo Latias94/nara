@@ -73,6 +73,8 @@ hud = ["render-prepare", "dep:guillotiere", "dep:nara_ui"]
 hud-runtime = ["hud", "runtime", "image-runtime"]
 hud-presentation = ["hud-runtime", "dep:nara_input", "nara_ui/runtime"]
 wgpu = ["runtime", "material", "dep:bytemuck", "dep:pollster", "dep:wgpu"]
+winit = ["nara_window/winit"]
+desktop-winit = ["wgpu", "winit"]
 
 [[test]]
 name = "generation_workflow"

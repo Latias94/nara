@@ -75,43 +75,11 @@ use budget::{DecodeBudget, DecodeLease};
 use dependencies::DependencyInventory;
 
 pub use nara_scene::runtime_catalog::{
-    RuntimeContentCatalog, RuntimeContentCatalogDefinition, RuntimeContentCatalogError,
-    RuntimeContentCatalogLimits, RuntimeContentDependency, RuntimeContentDependencyRole,
-    RuntimeContentMember, RuntimeContentMemberKind, RuntimeContentTarget,
+    RUNTIME_CONTENT_CATALOG_FILE, RuntimeContentCatalog, RuntimeContentCatalogDefinition,
+    RuntimeContentCatalogError, RuntimeContentCatalogLimits, RuntimeContentDependency,
+    RuntimeContentDependencyRole, RuntimeContentExpectation, RuntimeContentMember,
+    RuntimeContentMemberKind, RuntimeContentTarget,
 };
-
-/// The one catalog entry read relative to the Host-issued base directory.
-pub const RUNTIME_CONTENT_CATALOG_FILE: &str = "catalog.json";
-
-/// Independent Host expectations for one trusted local base.
-///
-/// These values must come from the selected build/output authority, not from the catalog being
-/// opened. They establish local integrity and compatibility, not remote authenticity or freshness.
-#[derive(Debug, Clone)]
-pub struct RuntimeContentExpectation {
-    catalog_digest: ContentDigest,
-    target: RuntimeContentTarget,
-}
-
-impl RuntimeContentExpectation {
-    #[must_use]
-    pub const fn new(catalog_digest: ContentDigest, target: RuntimeContentTarget) -> Self {
-        Self {
-            catalog_digest,
-            target,
-        }
-    }
-
-    #[must_use]
-    pub const fn catalog_digest(&self) -> ContentDigest {
-        self.catalog_digest
-    }
-
-    #[must_use]
-    pub const fn target(&self) -> &RuntimeContentTarget {
-        &self.target
-    }
-}
 
 /// Bounds owned by content capture and concurrent typed acquisition.
 ///
@@ -455,7 +423,7 @@ impl RuntimeContentBase {
         let catalog_bytes = directory
             .open_file(&path)
             .map_err(RuntimeContentError::Host)?
-            .read_to_end_bounded(expected.catalog_digest.length())
+            .read_to_end_bounded(expected.catalog_digest().length())
             .map_err(RuntimeContentError::Host)?;
         let admitted = admission::AdmittedCatalog::new(
             catalog_bytes,

@@ -12,3 +12,5 @@
 - Key incremental cooking under `.nara/cache/` by source bytes, sidecar bytes, importer version,
   and target platform. Traverse referenced dependencies at Cook time so Export contains the assets
   the game needs.
+- Keep CPU image import, reload, Cook, and local artifact caching in `nara_asset`.
+  `nara_render` owns prepared image views, upload, and GPU residency.

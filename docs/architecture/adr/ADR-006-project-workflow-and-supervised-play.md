@@ -16,9 +16,9 @@ workflow. Leave project orchestration outside the shipping game graph.
   Preserve unknown components when the cached catalog cannot describe them.
 - Build the project incrementally before Play. Parse Cargo's structured diagnostics and stream
   the game's `stdout` and `stderr` into the editor Console. Leave the project's Rust code in the
-  external game process.
+  external game process. `nara_project` owns Cargo metadata and compiler-message decoding.
 - Supervise the process tree with a kill-on-close Job Object on Windows and a managed process group
   on Unix. Stop and restart must terminate and reap the previous game process. Use development
-  asset watching for live data changes.
+  asset watching for live data changes. `nara_project` owns the native product process adapter.
 - Export a self-contained executable and `.npak` with no source or editor dependencies. Verify the
   packaged game from a clean directory before claiming standalone delivery.

@@ -112,6 +112,32 @@ fn budget(error: RuntimeContentCatalogError, name: &'static str) {
 }
 
 #[test]
+fn expected_digest_and_target_are_both_required_to_admit_a_catalog() {
+    let catalog = catalog();
+    let bytes = catalog.to_json_bytes().unwrap();
+    let digest = ContentDigest::of_bytes(&bytes);
+    let limits = RuntimeContentCatalogLimits::default();
+    let expected = RuntimeContentExpectation::new(digest, catalog.target().clone());
+    assert_eq!(
+        expected
+            .admit_catalog(&bytes, limits)
+            .unwrap()
+            .startup_scene(),
+        catalog.startup_scene()
+    );
+    assert!(matches!(
+        expected.admit_catalog(b"invalid bytes", limits),
+        Err(RuntimeContentCatalogAdmissionError::DigestMismatch)
+    ));
+    let other_target = RuntimeContentTarget::new(catalog.target().triple(), "debug").unwrap();
+    let foreign = RuntimeContentExpectation::new(digest, other_target);
+    assert!(matches!(
+        foreign.admit_catalog(&bytes, limits),
+        Err(RuntimeContentCatalogAdmissionError::TargetMismatch)
+    ));
+}
+
+#[test]
 fn complete_catalog_round_trip_retains_configuration_identity_and_compound_products() {
     let catalog = catalog();
     let bytes = catalog.to_json_bytes().unwrap();

@@ -5,6 +5,8 @@ use std::{
 };
 
 use nara_app::{AppExit, RuntimeGeneration};
+use nara_render::gpu::execution::WgpuPresentedFrameReceipt;
+use nara_window::winit::WinitPresentationProgress;
 
 use super::super::StartupContentClosureReceipt;
 
@@ -18,13 +20,13 @@ const FIRST_PRESENT_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Clone)]
 pub struct DesktopPresentationVerificationReceipt {
     startup_content_closure: StartupContentClosureReceipt,
-    presented_frame: nara_render::gpu::execution::WgpuPresentedFrameReceipt,
+    presented_frame: WgpuPresentedFrameReceipt,
 }
 
 impl DesktopPresentationVerificationReceipt {
     pub(in crate::project_host) const fn new(
         startup_content_closure: StartupContentClosureReceipt,
-        presented_frame: nara_render::gpu::execution::WgpuPresentedFrameReceipt,
+        presented_frame: WgpuPresentedFrameReceipt,
     ) -> Self {
         Self {
             startup_content_closure,
@@ -66,12 +68,12 @@ impl DesktopFirstPresentVerification {
     }
 
     /// Observes presentation or schedules an idle wake at the verification deadline.
-    pub(crate) fn observe(
+    pub(super) fn observe(
         &self,
         runtime_generation: RuntimeGeneration,
-        presented: Option<nara_render::gpu::execution::WgpuPresentedFrameReceipt>,
+        presented: Option<WgpuPresentedFrameReceipt>,
         now: Instant,
-    ) -> DesktopFirstPresentProgress {
+    ) -> WinitPresentationProgress {
         let mut outcome = self.lock_outcome();
         let (exit, next_wake) = if let DesktopFirstPresentOutcome::Awaiting { deadline } = *outcome
         {
@@ -91,7 +93,7 @@ impl DesktopFirstPresentVerification {
         } else {
             (None, None)
         };
-        DesktopFirstPresentProgress { exit, next_wake }
+        WinitPresentationProgress { exit, next_wake }
     }
 
     pub(in crate::project_host) fn outcome(&self) -> DesktopFirstPresentOutcome {
@@ -105,15 +107,10 @@ impl DesktopFirstPresentVerification {
     }
 }
 
-pub(crate) struct DesktopFirstPresentProgress {
-    pub(crate) exit: Option<AppExit>,
-    pub(crate) next_wake: Option<Instant>,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::project_host) enum DesktopFirstPresentOutcome {
     Awaiting { deadline: Instant },
-    Accepted(nara_render::gpu::execution::WgpuPresentedFrameReceipt),
+    Accepted(WgpuPresentedFrameReceipt),
     TimedOut,
 }
 

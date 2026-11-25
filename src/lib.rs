@@ -144,9 +144,6 @@ pub use nara_window::winit;
 #[cfg(feature = "project-runtime")]
 pub mod project_host;
 
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-mod desktop_presentation;
-
 #[cfg(feature = "project-workflow")]
 pub mod project_workflow;
 
@@ -177,9 +174,6 @@ pub mod runtime_content;
 
 #[cfg(feature = "project-runtime")]
 mod scene_retention;
-
-#[cfg(feature = "project-source")]
-mod scene_format_diagnostic;
 
 #[cfg(feature = "project-runtime")]
 mod startup_scene;

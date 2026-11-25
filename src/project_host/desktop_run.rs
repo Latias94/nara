@@ -9,6 +9,9 @@ use nara_app::{
     RuntimeState,
 };
 use nara_core::diagnostic::DiagnosticReport;
+use nara_render::gpu::desktop::{
+    DesktopPresentationDriver, DesktopPresentationOptions, DesktopPresentationReports,
+};
 use nara_window::winit::{
     WinitControlFlow, WinitEventLoop, WinitRunProgress, WinitRunner, WinitSession,
 };
@@ -30,14 +33,11 @@ use super::runtime_diagnostics::{
     runtime_fault_diagnostic, runtime_fault_kind_id, runtime_fault_report, single_diagnostic,
     single_error,
 };
-pub use crate::desktop_presentation::{
+pub use control::DesktopControlError;
+pub use nara_render::gpu::desktop::{
     DesktopPresentationControl, DesktopPresentationObservation, DesktopTelemetrySealOutcome,
     DesktopTelemetrySealReport,
 };
-use crate::desktop_presentation::{
-    DesktopPresentationDriver, DesktopPresentationOptions, DesktopPresentationReports,
-};
-pub use control::DesktopControlError;
 pub(super) use poll::DesktopDriveMode;
 pub use poll::DesktopRunProgress;
 pub(in crate::project_host) use startup::{DesktopStartupObservation, StartupTimer};
@@ -120,7 +120,7 @@ impl DesktopRunOptions {
     /// Configures the local native owner before its first submission.
     #[must_use]
     pub fn with_telemetry(mut self, config: nara_render::gpu::WgpuBackendTelemetryConfig) -> Self {
-        self.presentation.telemetry = Some(config);
+        self.presentation = self.presentation.with_telemetry(config);
         self
     }
 
@@ -134,7 +134,7 @@ impl DesktopRunOptions {
         mut self,
         observer: impl FnMut(DesktopPresentationObservation<'_>) -> DesktopPresentationControl + 'static,
     ) -> Self {
-        self.presentation.observer = Some(Box::new(observer));
+        self.presentation = self.presentation.with_observer(observer);
         self
     }
 
@@ -379,13 +379,17 @@ impl DesktopRun {
         }
         let reports =
             DesktopPresentationReports::with_startup_observation(self.startup_timings.is_some());
-        let driver = DesktopPresentationDriver::new(
-            &runtime,
-            execution.presentation,
-            #[cfg(feature = "project-source")]
-            verification.clone(),
-            reports.clone(),
-        );
+        let driver =
+            DesktopPresentationDriver::new(&runtime, execution.presentation, reports.clone());
+        #[cfg(feature = "project-source")]
+        let driver = match verification.clone() {
+            Some(verification) => {
+                driver.with_frame_progress_observer(move |generation, presented, now| {
+                    verification.observe(generation, presented, now)
+                })
+            }
+            None => driver,
+        };
         // This consumes the one published Runtime. Its publication slot is never refilled.
         let mut session = execution.runner.start_with_presentation_on(
             runtime,

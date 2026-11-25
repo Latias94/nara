@@ -11,6 +11,7 @@ mod property_patch_tests;
 mod publication_shape;
 #[cfg(test)]
 mod publication_shape_tests;
+mod safe_diagnostics;
 #[cfg(test)]
 mod source_placement_tests;
 

@@ -1,10 +1,10 @@
 use std::{cell::Cell, rc::Rc};
 
+use crate::{FrameStats, RenderFrame, RenderFrameState};
 use nara_app::{
     App, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeClosePolicy,
     RuntimeObligationLedger,
 };
-use nara_render::{FrameStats, RenderFrame, RenderFrameState};
 
 use super::*;
 
@@ -28,14 +28,14 @@ fn render_runtime() -> RuntimeInstance {
         nara_reflect::ComponentRegistryPlugin,
         nara_scene::hierarchy::HierarchyPlugin,
         nara_scene::SpatialPlugin,
-        nara_render::RenderComponentsPlugin,
-        nara_render::RenderPlugin::default(),
-        nara_render::gpu::WgpuCapturePlugin,
-        nara_render::gpu::WgpuStockCapturePlugin,
-        nara_render::gpu::WgpuStockPolicyPlugin,
+        crate::RenderComponentsPlugin,
+        crate::RenderPlugin::default(),
+        crate::gpu::WgpuCapturePlugin,
+        crate::gpu::WgpuStockCapturePlugin,
+        crate::gpu::WgpuStockPolicyPlugin,
     ))
     .unwrap();
-    app.add_plugins(nara_render::gpu::WgpuWindowPresentationPlugin)
+    app.add_plugins(crate::gpu::WgpuWindowPresentationPlugin)
         .unwrap();
     RuntimeInstance::start(app).unwrap()
 }
@@ -103,8 +103,6 @@ fn lazy_producer_failure_reconciles_or_retains_the_original_capture_result() {
         let mut driver = DesktopPresentationDriver::new(
             &runtime,
             DesktopPresentationOptions::default(),
-            #[cfg(feature = "project-source")]
-            None,
             DesktopPresentationReports::default(),
         );
         driver
@@ -174,8 +172,6 @@ fn retirement_retains_original_result_and_seals_host_facts_before_native_close()
             telemetry: Some(WgpuBackendTelemetryConfig::default()),
             observer: None,
         },
-        #[cfg(feature = "project-source")]
-        None,
         reports.clone(),
     );
     driver.producer = Some(driver.host.create_producer().unwrap());
@@ -257,13 +253,7 @@ fn final_observer_evidence_failure_vetoes_seal_success_and_is_delivered_once() {
         })),
     };
     let reports = sealed_reports();
-    let mut driver = DesktopPresentationDriver::new(
-        &runtime,
-        options,
-        #[cfg(feature = "project-source")]
-        None,
-        reports.clone(),
-    );
+    let mut driver = DesktopPresentationDriver::new(&runtime, options, reports.clone());
     let final_progress = driver.observe_consumer(
         &runtime,
         None,
@@ -304,13 +294,7 @@ fn final_observer_success_cannot_override_a_required_exit() {
             DesktopPresentationControl::Exit(AppExit::Success)
         })),
     };
-    let mut driver = DesktopPresentationDriver::new(
-        &runtime,
-        options,
-        #[cfg(feature = "project-source")]
-        None,
-        sealed_reports(),
-    );
+    let mut driver = DesktopPresentationDriver::new(&runtime, options, sealed_reports());
     let progress = driver.observe_consumer(
         &runtime,
         None,
@@ -337,13 +321,7 @@ fn final_observer_veto_during_target_retirement_survives_native_success() {
             DesktopPresentationControl::Exit(AppExit::Requested)
         })),
     };
-    let mut driver = DesktopPresentationDriver::new(
-        &runtime,
-        options,
-        #[cfg(feature = "project-source")]
-        None,
-        reports.clone(),
-    );
+    let mut driver = DesktopPresentationDriver::new(&runtime, options, reports.clone());
     assert!(
         driver
             .retire(
@@ -387,13 +365,8 @@ fn repeated_active_seal_request_preserves_veto_without_resetting_deadline() {
             }
         })),
     };
-    let mut driver = DesktopPresentationDriver::new(
-        &runtime,
-        options,
-        #[cfg(feature = "project-source")]
-        None,
-        DesktopPresentationReports::default(),
-    );
+    let mut driver =
+        DesktopPresentationDriver::new(&runtime, options, DesktopPresentationReports::default());
     let first = driver.observe_consumer(
         &runtime,
         None,
@@ -449,13 +422,7 @@ fn final_report_seal_request_vetoes_success_without_restarting_or_redelivery() {
             }
         })),
     };
-    let mut driver = DesktopPresentationDriver::new(
-        &runtime,
-        options,
-        #[cfg(feature = "project-source")]
-        None,
-        reports.clone(),
-    );
+    let mut driver = DesktopPresentationDriver::new(&runtime, options, reports.clone());
     let final_progress = driver.observe_consumer(
         &runtime,
         None,

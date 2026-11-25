@@ -3,7 +3,8 @@
 //! Catalog membership describes complete logical products, not source files or residency.
 //! Several products may share one encoded member. Required and Reference edges require membership
 //! in this base; Soft edges are optional metadata. Cycles never cause traversal here.
-//! Filesystem capture, trusted expected identity and concrete resource decoding belong to the Host.
+//! The executable supplies the expected identity. The Host opens the storage, selects concrete
+//! resource codecs, and installs the decoded products.
 
 use std::{
     cmp::Ordering,
@@ -33,7 +34,7 @@ use crate::{
 };
 
 const FILE_KIND: &str = "runtime_content_catalog";
-const RESERVED_CATALOG_PATH: &str = "catalog.json";
+pub const RUNTIME_CONTENT_CATALOG_FILE: &str = "catalog.json";
 const MAX_MEMBER_PATH_BYTES: usize = 4096;
 const STARTUP_INPUT_V1_FORMAT: &str = "runtime_action_map";
 
@@ -94,6 +95,59 @@ impl RuntimeContentTarget {
         }
         Ok(())
     }
+}
+
+/// The catalog digest and target selected by the executable before opening the pack.
+#[derive(Debug, Clone)]
+pub struct RuntimeContentExpectation {
+    catalog_digest: ContentDigest,
+    target: RuntimeContentTarget,
+}
+
+impl RuntimeContentExpectation {
+    #[must_use]
+    pub const fn new(catalog_digest: ContentDigest, target: RuntimeContentTarget) -> Self {
+        Self {
+            catalog_digest,
+            target,
+        }
+    }
+
+    #[must_use]
+    pub const fn catalog_digest(&self) -> ContentDigest {
+        self.catalog_digest
+    }
+
+    #[must_use]
+    pub const fn target(&self) -> &RuntimeContentTarget {
+        &self.target
+    }
+
+    /// Opens matching catalog bytes within the caller's decode limits.
+    pub fn admit_catalog(
+        &self,
+        encoded: &[u8],
+        limits: RuntimeContentCatalogLimits,
+    ) -> Result<RuntimeContentCatalog, RuntimeContentCatalogAdmissionError> {
+        if ContentDigest::of_bytes(encoded) != self.catalog_digest {
+            return Err(RuntimeContentCatalogAdmissionError::DigestMismatch);
+        }
+        let catalog = RuntimeContentCatalog::from_json_bytes(encoded, limits)?;
+        if catalog.target() != self.target() {
+            return Err(RuntimeContentCatalogAdmissionError::TargetMismatch);
+        }
+        Ok(catalog)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RuntimeContentCatalogAdmissionError {
+    #[error("runtime catalog bytes differ from the executable's expected digest")]
+    DigestMismatch,
+    #[error("runtime catalog target differs from the executable's expected target")]
+    TargetMismatch,
+    #[error(transparent)]
+    InvalidCatalog(#[from] RuntimeContentCatalogError),
 }
 
 /// The representation selected by the producer for this complete encoded member.
@@ -965,7 +1019,7 @@ fn validate_member_path(path: &str) -> Result<(), RuntimeContentCatalogError> {
                 "path segments must be nonempty portable filenames without dot traversal or trailing dots/spaces",
             ));
         }
-        if index == 0 && segment.eq_ignore_ascii_case(RESERVED_CATALOG_PATH) {
+        if index == 0 && segment.eq_ignore_ascii_case(RUNTIME_CONTENT_CATALOG_FILE) {
             return Err(refused(
                 "catalog.json is reserved and cannot be a member or member ancestor",
             ));

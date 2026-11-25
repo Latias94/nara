@@ -1,4 +1,4 @@
-#[cfg(feature = "physics-2d")]
+#[cfg(any(feature = "audio", feature = "physics-2d"))]
 use nara_app::{PluginDefinition, PluginSlot, PluginSlotId};
 use nara_app::{PluginGroup, PluginGroupBuilder, PluginGroupId};
 
@@ -80,68 +80,24 @@ impl PluginGroup for DefaultPlugins {
         #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
         if let Some(window) = self.window {
             #[cfg(feature = "audio")]
-            let plugins = audio::add::<{ cfg!(feature = "audio-device") }>(plugins);
+            let plugins = with_audio::<{ cfg!(feature = "audio-device") }>(plugins);
             return desktop::add(plugins, window);
         }
         #[cfg(feature = "audio")]
-        let plugins = audio::add::<false>(plugins);
+        let plugins = with_audio::<false>(plugins);
         plugins
     }
 }
 
 #[cfg(feature = "audio")]
-mod audio {
-    use nara_app::{
-        App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginCategory, PluginDeclaration,
-        PluginDefinition, PluginError, PluginGroupBuilder, PluginId, PluginSlot, PluginSlotId,
-    };
-    use nara_audio::{AudioMixer, setup_audio, update_audio_players};
-    use nara_ecs::{Res, ResMut, schedule::IntoScheduleConfigs};
-    use nara_scene::spatial::SpatialSet;
-
-    const ID: PluginId = PluginId::new("nara.audio");
-    const DECLARATION: PluginDeclaration = PluginDeclaration::new(ID, PluginCategory::Runtime);
-
-    #[derive(Default)]
-    struct AudioPlugin<const DEVICE: bool>;
-
-    impl<const DEVICE: bool> Plugin for AudioPlugin<DEVICE> {
-        fn declaration() -> &'static PluginDeclaration {
-            &DECLARATION
-        }
-
-        fn build(&self, app: &mut App) -> Result<(), PluginError> {
-            let mixer = if DEVICE {
-                AudioMixer::new()
-            } else {
-                AudioMixer::mock()
-            };
-            let mixer = mixer.map_err(|error| PluginError::SetupFailed {
-                plugin: ID,
-                message: error.to_string(),
-            })?;
-            setup_audio(app.world_mut()?, mixer);
-            app.add_systems(
-                CoreStage::FixedUpdate,
-                (advance_mock, update_audio_players)
-                    .chain()
-                    .after(SpatialSet::AfterFixed)
-                    .in_set(FixedUpdateSet::Finalize),
-            )?;
-            Ok(())
-        }
-    }
-
-    fn advance_mock(time: Res<FixedTime>, mut mixer: ResMut<AudioMixer>) {
-        mixer.advance_mock(time.delta());
-    }
-
-    pub(super) fn add<const DEVICE: bool>(plugins: PluginGroupBuilder) -> PluginGroupBuilder {
-        plugins.add_slot(
-            PluginSlot::required(PluginSlotId::new("nara.plugins.slot.audio"), ID),
-            PluginDefinition::for_default::<AudioPlugin<DEVICE>>(),
-        )
-    }
+fn with_audio<const DEVICE: bool>(plugins: PluginGroupBuilder) -> PluginGroupBuilder {
+    plugins.add_slot(
+        PluginSlot::required(
+            PluginSlotId::new("nara.plugins.slot.audio"),
+            nara_audio::AUDIO_PLUGIN_ID,
+        ),
+        PluginDefinition::for_default::<nara_audio::AudioPlugin<DEVICE>>(),
+    )
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
@@ -151,7 +107,7 @@ mod desktop {
         PluginError, PluginGroupBuilder, PluginId, PluginSlot, PluginSlotId, RuntimeInstance,
     };
 
-    use crate::desktop_presentation::{
+    use nara_render::gpu::desktop::{
         DesktopPresentationDriver, DesktopPresentationOptions, DesktopPresentationReports,
     };
 
@@ -230,8 +186,6 @@ mod desktop {
         let presentation = DesktopPresentationDriver::new(
             &runtime,
             DesktopPresentationOptions::default(),
-            #[cfg(feature = "project-source")]
-            None,
             DesktopPresentationReports::default(),
         );
         let mut session = nara_window::winit::WinitRunner::default().start_with_presentation_on(

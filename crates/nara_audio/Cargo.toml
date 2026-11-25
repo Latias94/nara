@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 bevy_ecs.workspace = true
 kira = { version = "0.12.6", default-features = false, features = ["ogg", "pcm", "vorbis", "wav"] }
+nara_app.workspace = true
 nara_asset = { workspace = true, features = ["runtime"] }
 nara_core.workspace = true
 nara_scene.workspace = true

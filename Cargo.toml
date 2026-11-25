@@ -189,7 +189,7 @@ presentation-ui = [
     "nara_render/hud-presentation",
 ]
 asset-watch = ["runtime-core", "nara_asset/hot-reload"]
-desktop-winit = ["runtime-input", "runtime-window", "nara_window/winit"]
+desktop-winit = ["runtime-input", "runtime-window", "nara_window/winit", "nara_render?/winit"]
 audio = ["runtime-core", "dep:nara_audio"]
 audio-device = ["audio", "nara_audio/device"]
 physics-2d = ["runtime-2d", "dep:nara_physics2d"]

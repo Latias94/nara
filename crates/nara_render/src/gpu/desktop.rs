@@ -1,4 +1,6 @@
-//! Root's concrete stock WGPU connection to the retained native Winit session.
+//! Stock WGPU presentation for a retained native Winit session.
+//!
+//! The `desktop-winit` feature enables both the WGPU backend and Winit integration.
 
 use std::{
     cell::RefCell,
@@ -9,7 +11,10 @@ use std::{
 
 use nara_app::{AppExit, AppRunError, RuntimeGeneration, RuntimeInstance, RuntimeState};
 use nara_ecs::World;
-use nara_render::gpu::{
+use nara_window::winit::{WinitPresentationDriver, WinitPresentationProgress};
+use nara_window::{WindowId, backend::BackendWindowHandles};
+
+use super::{
     WgpuAdapterSummary, WgpuBackendTelemetryConfig, WgpuFrameCompletionSample,
     WgpuFrameCompletionStats, WgpuGpuResourceStats, WgpuRenderHost, WgpuRenderObservation,
     WgpuRenderProducer,
@@ -18,14 +23,9 @@ use nara_render::gpu::{
         cancel_runtime_frame, complete_runtime_frame, take_runtime_frame,
     },
 };
-use nara_window::winit::{WinitPresentationDriver, WinitPresentationProgress};
-use nara_window::{WindowId, backend::BackendWindowHandles};
-
-#[cfg(feature = "project-source")]
-use crate::project_host::desktop_run::verification::DesktopFirstPresentVerification;
 
 const MAINTENANCE_POLL_INTERVAL: Duration = Duration::from_millis(2);
-pub(crate) const DEFAULT_TELEMETRY_SEAL_TIMEOUT: Duration = Duration::from_secs(5);
+const DEFAULT_TELEMETRY_SEAL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Finite decisions available to a CPU-only desktop presentation observer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,13 +182,39 @@ impl DesktopTelemetrySealReport {
     }
 }
 
-pub(crate) type DesktopPresentationObserver =
+type DesktopPresentationObserver =
     Box<dyn FnMut(DesktopPresentationObservation<'_>) -> DesktopPresentationControl>;
 
+type DesktopFrameProgressObserver = Box<
+    dyn FnMut(
+        RuntimeGeneration,
+        Option<WgpuPresentedFrameReceipt>,
+        Instant,
+    ) -> WinitPresentationProgress,
+>;
+
+/// Configures telemetry and post-host observation for a local desktop driver.
 #[derive(Default)]
-pub(crate) struct DesktopPresentationOptions {
-    pub(crate) telemetry: Option<WgpuBackendTelemetryConfig>,
-    pub(crate) observer: Option<DesktopPresentationObserver>,
+pub struct DesktopPresentationOptions {
+    telemetry: Option<WgpuBackendTelemetryConfig>,
+    observer: Option<DesktopPresentationObserver>,
+}
+
+impl DesktopPresentationOptions {
+    #[must_use]
+    pub fn with_telemetry(mut self, config: WgpuBackendTelemetryConfig) -> Self {
+        self.telemetry = Some(config);
+        self
+    }
+
+    #[must_use]
+    pub fn with_observer(
+        mut self,
+        observer: impl FnMut(DesktopPresentationObservation<'_>) -> DesktopPresentationControl + 'static,
+    ) -> Self {
+        self.observer = Some(Box::new(observer));
+        self
+    }
 }
 
 impl fmt::Debug for DesktopPresentationOptions {
@@ -203,7 +229,7 @@ impl fmt::Debug for DesktopPresentationOptions {
 
 /// This shared value holds CPU diagnostics only. WinitSession alone owns the live Host.
 #[derive(Clone, Default)]
-pub(crate) struct DesktopPresentationReports(Rc<RefCell<DesktopPresentationReportState>>, bool);
+pub struct DesktopPresentationReports(Rc<RefCell<DesktopPresentationReportState>>, bool);
 
 #[derive(Default)]
 struct DesktopPresentationReportState {
@@ -213,22 +239,28 @@ struct DesktopPresentationReportState {
 }
 
 impl DesktopPresentationReports {
-    pub(crate) fn with_startup_observation(enabled: bool) -> Self {
+    #[must_use]
+    pub fn with_startup_observation(enabled: bool) -> Self {
         Self(
             Rc::new(RefCell::new(DesktopPresentationReportState::default())),
             enabled,
         )
     }
 
-    pub(crate) fn has_presented(&self) -> bool {
+    /// Reports the first native presentation when startup observation was enabled.
+    #[must_use]
+    pub fn has_presented(&self) -> bool {
         self.0.borrow().first_presentation_observed
     }
 
-    pub(crate) fn telemetry_seal(&self) -> Option<DesktopTelemetrySealReport> {
+    #[must_use]
+    pub fn telemetry_seal(&self) -> Option<DesktopTelemetrySealReport> {
         self.0.borrow().telemetry_seal.clone()
     }
 
-    pub(crate) fn reconcile_exit(&self, native_exit: AppExit) -> AppExit {
+    /// Applies exits recorded during presentation maintenance and native retirement.
+    #[must_use]
+    pub fn reconcile_exit(&self, native_exit: AppExit) -> AppExit {
         // Target retirement returns only a bool to Winit. Preserve a final observer veto even
         // when it arrives through that path rather than a normal maintain progress value.
         merge_exit(Some(native_exit), self.0.borrow().exit).unwrap_or(native_exit)
@@ -243,12 +275,12 @@ struct TelemetrySeal {
     samples: Vec<WgpuFrameCompletionSample>,
 }
 
-pub(crate) struct DesktopPresentationDriver {
+/// Owns the stock WGPU host and its outstanding work for one Winit session.
+pub struct DesktopPresentationDriver {
     host: WgpuRenderHost,
     producer: Option<WgpuRenderProducer>,
     pending_result: Option<WgpuRuntimeResult>,
-    #[cfg(feature = "project-source")]
-    verification: Option<DesktopFirstPresentVerification>,
+    frame_progress: Option<DesktopFrameProgressObserver>,
     observer: Option<DesktopPresentationObserver>,
     reports: DesktopPresentationReports,
     seal: Option<TelemetrySeal>,
@@ -257,15 +289,15 @@ pub(crate) struct DesktopPresentationDriver {
     attachment_failure: Option<AppRunError>,
     last_observation: WgpuRenderObservation,
     seal_report_delivered: bool,
-    #[cfg(feature = "presentation-ui")]
-    ui: Option<nara_render::hud::UiPostHostConnection>,
+    #[cfg(feature = "hud-presentation")]
+    ui: Option<crate::hud::UiPostHostConnection>,
 }
 
 impl DesktopPresentationDriver {
-    pub(crate) fn new(
+    #[must_use]
+    pub fn new(
         runtime: &RuntimeInstance,
         options: DesktopPresentationOptions,
-        #[cfg(feature = "project-source")] verification: Option<DesktopFirstPresentVerification>,
         reports: DesktopPresentationReports,
     ) -> Self {
         let mut host = WgpuRenderHost::offscreen();
@@ -273,22 +305,20 @@ impl DesktopPresentationDriver {
         if let Some(config) = telemetry {
             host.configure_telemetry(config);
         }
-        #[cfg(feature = "presentation-ui")]
-        let (ui, attachment_failure) =
-            match nara_render::hud::UiPostHostConnection::capture(runtime) {
-                Ok(ui) => (ui, None),
-                Err(error) => (None, Some(error)),
-            };
-        #[cfg(not(feature = "presentation-ui"))]
+        #[cfg(feature = "hud-presentation")]
+        let (ui, attachment_failure) = match crate::hud::UiPostHostConnection::capture(runtime) {
+            Ok(ui) => (ui, None),
+            Err(error) => (None, Some(error)),
+        };
+        #[cfg(not(feature = "hud-presentation"))]
         let _ = runtime;
-        #[cfg(not(feature = "presentation-ui"))]
+        #[cfg(not(feature = "hud-presentation"))]
         let attachment_failure = None;
         Self {
             host,
             producer: None,
             pending_result: None,
-            #[cfg(feature = "project-source")]
-            verification,
+            frame_progress: None,
             observer: options.observer,
             reports,
             seal: None,
@@ -297,9 +327,28 @@ impl DesktopPresentationDriver {
             attachment_failure,
             last_observation: WgpuRenderObservation::default(),
             seal_report_delivered: false,
-            #[cfg(feature = "presentation-ui")]
+            #[cfg(feature = "hud-presentation")]
             ui,
         }
+    }
+
+    /// Observes frame progress before telemetry polling on every maintenance and retirement call.
+    ///
+    /// The callback receives the runtime generation, the optional receipt for this call's native
+    /// submit and present operation, and the boundary time. The driver merges its exit and
+    /// absolute wake requests with telemetry and post-host observer progress.
+    #[must_use]
+    pub fn with_frame_progress_observer(
+        mut self,
+        observe: impl FnMut(
+            RuntimeGeneration,
+            Option<WgpuPresentedFrameReceipt>,
+            Instant,
+        ) -> WinitPresentationProgress
+        + 'static,
+    ) -> Self {
+        self.frame_progress = Some(Box::new(observe));
+        self
     }
 
     fn complete_pending(
@@ -325,14 +374,14 @@ impl DesktopPresentationDriver {
                 if !is_live(runtime) || completion.retired {
                     return Ok(None);
                 }
-                #[cfg(feature = "presentation-ui")]
+                #[cfg(feature = "hud-presentation")]
                 if let Some(ui) = &self.ui {
                     ui.complete(runtime)?;
                 }
                 Ok(completion.presented)
             }
             Err(failure) => {
-                // Scope/port refusal is before consumption and retains that exact result.
+                // Scope refusal is before consumption and retains that exact result.
                 self.pending_result = Some(failure.result);
                 Err(exchange_failure(
                     "the original WGPU Runtime result was refused",
@@ -496,16 +545,12 @@ impl DesktopPresentationDriver {
             self.reports.0.borrow_mut().first_presentation_observed = true;
             self.reports.1 = false;
         }
-        let mut progress = WinitPresentationProgress {
-            exit: None,
-            next_wake: None,
-        };
-        #[cfg(feature = "project-source")]
-        if let Some(verification) = &self.verification {
-            let verified = verification.observe(runtime.generation(), presented, now);
-            progress.exit = verified.exit;
-            progress.next_wake = verified.next_wake;
-        }
+        let mut progress = self
+            .frame_progress
+            .as_mut()
+            .map_or_else(WinitPresentationProgress::default, |observe| {
+                observe(runtime.generation(), presented, now)
+            });
 
         let maintenance = self.host.poll_runtime_maintenance();
         let samples = maintenance.samples;
@@ -610,7 +655,7 @@ impl WinitPresentationDriver for DesktopPresentationDriver {
         if frame.is_err() {
             self.retiring = true;
         }
-        // Deadlines and READY I/O advance even when capture or completion was refused.
+        // Presentation deadlines advance even when capture or completion was refused.
         let progress = self.observe(
             runtime,
             frame.as_ref().ok().copied().flatten(),
@@ -723,5 +768,5 @@ fn exchange_failure(
     with_postfault(error, postfault)
 }
 
-#[cfg(all(test, feature = "project-runtime"))]
+#[cfg(test)]
 mod tests;
