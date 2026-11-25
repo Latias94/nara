@@ -131,7 +131,7 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     assert!(rejecting_presenter.submitted().is_none());
     assert_eq!(
         rejected.attempt(),
-        nara_ui_render::__private::presentation_attempt(&packet)
+        nara_render::hud::presentation::presentation_attempt(&packet)
     );
     assert!(matches!(
         driver::apply(&mut runtime, GalleryDriverInput::Commit(rejected))?,

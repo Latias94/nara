@@ -23,7 +23,7 @@ use nara::{
     prelude::{Component, FixedTime, Sprite, Vec2, World},
     project_host::ProjectContentLoader,
     scene::SceneEntitySource,
-    sprite_render::__private::{ExtractedSprites, TextureUvRect},
+    sprite_render::batching::{ExtractedSprites, TextureUvRect},
     transform::{Transform2d, historical_spatial_snapshot, presented_spatial_snapshot},
     ui::{UiLayer, UiSurfaceId, ui_candidate_frame},
 };

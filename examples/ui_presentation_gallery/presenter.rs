@@ -65,7 +65,7 @@ impl HeadlessTestPresenter {
     ) -> Result<HeadlessTestOutcome, Box<dyn Error>> {
         if packet.target() != self.target {
             return Ok(HeadlessTestOutcome::ContentRejected {
-                attempt: nara_ui_render::__private::presentation_attempt(&packet),
+                attempt: nara_render::hud::presentation::presentation_attempt(&packet),
             });
         }
         if !self.input_initialized {
@@ -81,29 +81,29 @@ impl HeadlessTestPresenter {
         }
 
         assert!(!packet.primitives().is_empty());
-        let epoch = nara_ui_render::UiPresentationEpoch::new(presentation_epoch)
+        let epoch = nara_render::hud::UiPresentationEpoch::new(presentation_epoch)
             .ok_or("the headless presenter requires a non-zero presentation epoch")?;
         let authority =
             nara_ui::__private::prepare_ui_presentation(world, packet.frame(), presentation_epoch)?;
-        let prepared = nara_ui_render::__private::prepare_backend_submission(
-            nara_ui_render::UiPresentationAttemptId::new(
+        let prepared = nara_render::hud::presentation::prepare_backend_submission(
+            nara_render::hud::UiPresentationAttemptId::new(
                 NEXT_PRESENTATION_ATTEMPT_ID.fetch_add(1, Ordering::Relaxed),
             )
             .expect("the headless presenter uses non-zero attempt identities"),
             Arc::clone(&packet),
             epoch,
-            nara_ui_render::UiPresentationRuntimeGeneration::new(1)
+            nara_render::hud::UiPresentationRuntimeGeneration::new(1)
                 .expect("the headless presenter uses a non-zero runtime generation"),
-            nara_ui_render::UiPresentationCapabilityGeneration::new(1)
+            nara_render::hud::UiPresentationCapabilityGeneration::new(1)
                 .expect("the headless presenter uses a non-zero capability generation"),
         );
-        let mut outcomes = nara_ui_render::__private::UiPresentationOutcomes::default();
+        let mut outcomes = nara_render::hud::presentation::UiPresentationOutcomes::default();
         let permit = outcomes
             .reserve_backend(std::slice::from_ref(&prepared))?
             .pop()
             .expect("one prepared attempt reserves one backend outcome");
-        let envelope = nara_ui_render::__private::UiBackendSubmission::pair(prepared, permit)?;
-        let mut submitted = nara_ui_render::__private::bind_backend_submission_batch(
+        let envelope = nara_render::hud::presentation::UiBackendSubmission::pair(prepared, permit)?;
+        let mut submitted = nara_render::hud::presentation::bind_backend_submission_batch(
             vec![envelope],
             self.backend_generation,
         )
@@ -121,7 +121,7 @@ impl HeadlessTestPresenter {
         outcomes.commit_backend(submitted.presented());
         let mut backend_world = World::new();
         backend_world.insert_resource(outcomes);
-        let mut published = nara_ui_render::drain_ui_presentation_outcomes(&mut backend_world)?;
+        let mut published = nara_render::hud::drain_ui_presentation_outcomes(&mut backend_world)?;
         let UiPresentationOutcome::Presented(commit) = published
             .pop()
             .expect("one backend submission publishes one exact outcome")
@@ -145,7 +145,7 @@ pub(super) fn commit_headless_test_outcome(
 ) -> Result<Option<UiPresentationReceipt>, Box<dyn Error>> {
     match outcome {
         HeadlessTestOutcome::Presented { commit, authority } => {
-            let accepted = nara_ui_render::__private::discard_ui_backend_acceptance(commit);
+            let accepted = nara_render::hud::presentation::discard_ui_backend_acceptance(commit);
             let identity = accepted.packet().identity();
             if !Arc::ptr_eq(&accepted.packet().frame(), authority.frame()) {
                 nara_ui::__private::supersede_prepared_ui_presentation(world, *authority);

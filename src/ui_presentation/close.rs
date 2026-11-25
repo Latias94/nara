@@ -6,7 +6,7 @@ use nara_app::{
     RuntimeCloseProgress, RuntimeState, RuntimeWorldAccessError,
 };
 use nara_ecs::{Resource, World};
-use nara_ui_render::__private::{
+use nara_render::hud::presentation::{
     UiBackendOutcomeReceiver, UiPresentationPlannerClaim, backend_outcome_receiver,
     presentation_planner_claim,
 };

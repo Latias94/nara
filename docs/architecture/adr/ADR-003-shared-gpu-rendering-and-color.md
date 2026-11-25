@@ -11,12 +11,15 @@ extracted frames. Declare `RenderPass` attachments so a future graph can order t
 - The editor startup requests the union of renderer features and limits. `SharedWgpuContext`
   carries the shared `wgpu::Device` and `Queue` and one `Arc<DeviceErrorState>`. Install the device
   loss and uncaptured error callbacks once when creating the device. Both renderers observe that
-  error state. Keep the device integration usable from the game runtime without a GPUI dependency.
+  error state. Nara accepts the application device and observes its callbacks through a WGPU-only
+  interface, so the standalone game runtime keeps its own device lifecycle and dependency graph.
 - Reuse transient render targets with `TextureCache` and frame buffers with `FrameRingBuffer`.
   Rebuild `DirtyTileChunk` GPU data only for affected chunks. Keep synchronous pipeline validation
   out of frame submission and return device failures through the normal surface lifecycle.
 - Draw the game scene directly into its swapchain image. Clear it in the scene pass and use
   `LoadOp::Load` for the game UI. Present after both passes, with zero full-screen copies or blits.
+  An explicit virtual-resolution `WorldCanvas` or a custom policy may require an intermediate
+  image. The stock surface path requires a clear followed by an optional in-place HUD pass.
 - Render editor viewports offscreen with the `EditorOverlayPass` in the same frame. Submit Nara's
   work before GPUI's sampling pass on the same queue. Pass the pooled target lease through
   `WgpuAtlas::import_image` as `owner: Arc<_>` and release it after the last GPU submission using it

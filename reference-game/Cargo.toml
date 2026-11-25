@@ -25,10 +25,9 @@ resolver = "3"
 nara = { path = "..", default-features = false, features = ["runtime-2d", "runtime-ui", "serde", "project-tooling"] }
 
 [dev-dependencies]
-nara_render = { path = "../crates/nara_render" }
+nara_render = { path = "../crates/nara_render", features = ["hud-runtime"] }
 nara_ui = { path = "../crates/nara_ui" }
 nara_ui_kernel = { path = "../crates/nara_ui_kernel" }
-nara_ui_render = { path = "../crates/nara_ui_render" }
 serde_json = "1"
 
 [[bin]]

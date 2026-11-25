@@ -65,7 +65,7 @@ pub(super) fn write_flag(directory: &Path, stable_id: &str, pixels: [u8; 4]) {
             AssetPath::new(FLAG).unwrap(),
             AssetSourceKind::Image,
         ),
-        nara_image::ImageImportSettings::default(),
+        nara_render::image::ImageImportSettings::default(),
     );
     fs::write(
         directory.join(format!("{FLAG}.meta")),

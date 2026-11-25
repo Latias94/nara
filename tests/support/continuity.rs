@@ -137,7 +137,7 @@ impl Fixture {
         );
         let absolute = serde_json::to_string(fixture.repository.to_str().unwrap()).unwrap();
         let mut manifest = manifest.replacen(original, &format!("path = {absolute}"), 1);
-        for dependency in ["nara_rapier2d", "nara_sprite_animation", "nara_gilrs"] {
+        for dependency in ["nara_rapier2d", "nara_render", "nara_gilrs"] {
             let original = format!("path = \"../../crates/{dependency}\"");
             assert_eq!(
                 manifest.matches(&original).count(),
@@ -154,7 +154,7 @@ impl Fixture {
             let absolute = serde_json::to_string(path.to_str().unwrap()).unwrap();
             manifest = manifest.replacen(&original, &format!("path = {absolute}"), 1);
         }
-        for dependency in ["winit", "notify"] {
+        for dependency in ["winit"] {
             let original = format!("path = \"../../vendor/{dependency}\"");
             assert_eq!(
                 manifest.matches(&original).count(),
@@ -321,7 +321,7 @@ impl Fixture {
                         assert!(!features.contains(&forbidden), "{line}");
                     }
                 }
-                "nara_render_wgpu" | "nara_winit" | "wgpu" | "winit" => {
+                "nara_winit" | "wgpu" | "winit" => {
                     renderer = true;
                     assert!(
                         desktop,

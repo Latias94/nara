@@ -16,7 +16,6 @@ use nara_asset::{
 use nara_core::Vec2;
 use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
 use nara_identity::SceneEntityId;
-use nara_image::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec};
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMapBuilder, ActionMapLimits, KeyCode,
 };
@@ -27,11 +26,14 @@ use nara_reflect::{
     ComponentTypeId, ComponentValue, ComponentValueShape, PersistentComponentSchemaOwnerId,
     encode_asset_reference_value,
 };
+use nara_render::image::{
+    ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec,
+};
+use nara_render::tilemap::TileAtlasLayout;
 use nara_scene::{
     RuntimeSceneLimits, SceneComponentRecord, SceneDocument, SceneEntityRecord, SourceDocumentKey,
     SourceDocumentKind,
 };
-use nara_tilemap::TileAtlasLayout;
 
 use super::*;
 use crate::{

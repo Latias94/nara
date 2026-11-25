@@ -12,13 +12,13 @@ use nara_ecs::{
     Mut, ResMut, bevy_ecs::lifecycle::Remove, bevy_ecs::observer::On, bevy_ecs::system::SystemState,
 };
 use nara_identity::SpawnedSceneInstance;
-use nara_image::{ImageExtent, ImageFormat, ImageSourceMetadata};
 use nara_project::ProjectPath;
-use nara_scene::advanced::SceneProductTransactionLimits;
-use nara_tilemap::{
+use nara_render::image::{ImageExtent, ImageFormat, ImageSourceMetadata};
+use nara_render::tilemap::{
     TileAtlasLayout, TileSet, TileSetAssetError, TileSetAssetLimits, TileSetAssets, TileSetContent,
     TileSetRetentionSnapshot, TileSetSource,
 };
+use nara_scene::advanced::SceneProductTransactionLimits;
 
 use super::super::{
     ProjectSceneRequestId, ProjectSceneRequestState, ProjectScenes, commit_prepared_project_scene,
@@ -50,7 +50,7 @@ impl Plugin for ResidencyProbePlugin {
             PluginId::new("nara.test.project-residency"),
             PluginCategory::Runtime,
         )
-        .requires_plugins(&[nara_tilemap::TILESET_ASSET_PLUGIN_ID]);
+        .requires_plugins(&[nara_render::tilemap::TILESET_ASSET_PLUGIN_ID]);
         &DECLARATION
     }
 
@@ -126,7 +126,7 @@ impl ResidencyFixture {
             },
         );
         let request = project_runtime_plugins(&candidate)
-            .insert_after::<nara_tilemap::TileSetAssetPlugin>(definition);
+            .insert_after::<nara_render::tilemap::TileSetAssetPlugin>(definition);
         let request = if with_scene_requests {
             request.with_recipe(
                 crate::ProductRecipe::new()
@@ -816,7 +816,10 @@ fn hosted_scene_replacement_recovers_revoked_tileset_in_the_same_world() {
             panic!("the replacement Scene must contain its Tilemap");
         };
         assert_eq!(
-            world.get::<nara_tilemap::Tilemap>(entity).unwrap().tileset,
+            world
+                .get::<nara_render::tilemap::Tilemap>(entity)
+                .unwrap()
+                .tileset,
             Some(tile)
         );
         let tilesets = world.resource::<Assets<TileSet>>();
@@ -1218,7 +1221,7 @@ fn hosted_startup_tileset_refusal_releases_complete_prepared_residency() {
         },
     );
     let request = project_runtime_plugins(&candidate)
-        .insert_after::<nara_tilemap::TileSetAssetPlugin>(definition);
+        .insert_after::<nara_render::tilemap::TileSetAssetPlugin>(definition);
     let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = load_runtime_snapshot(&loader, &candidate, &plan);

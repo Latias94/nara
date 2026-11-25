@@ -787,7 +787,7 @@ mod atlas_content {
             TileSetSourceFileLimits, Tilemap,
         },
     };
-    use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain};
+    use nara_render::animation::{SpriteAnimationCodec, SpriteAnimationDomain};
     use two_level_game::{
         GamePhase, GameSnapshot, Scenario, SideRoomPhase,
         animation::{atlas_product, clips_product},

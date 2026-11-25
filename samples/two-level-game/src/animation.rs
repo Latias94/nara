@@ -7,7 +7,7 @@ use nara::{
 #[cfg(feature = "local-player")]
 use nara::{core::Vec2, project_host::ProjectDomainAssets, sprite::TextureRegion};
 #[cfg(feature = "local-player")]
-use nara_sprite_animation::SpriteAnimationDomain;
+use nara_render::animation::SpriteAnimationDomain;
 #[cfg(feature = "local-player")]
 use serde::Serialize;
 

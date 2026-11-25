@@ -9,7 +9,7 @@ use nara_asset::{
     AssetMetaFileLimits, AssetProductRef, AssetSourceKind, ImportedProductId, RuntimeAssetCodec,
 };
 use nara_core::{FormatKind, FormatVersion};
-use nara_image::{
+use nara_render::image::{
     ImageAsset, ImageBytesImportRequest, ImageCookError, ImageCookLimits, ImageCookSettings,
     ImageCookTarget, ImageImportSettings, ImageImporter, ImageOversizePolicy, ImageRuntimeCodec,
     cook_runtime_image,

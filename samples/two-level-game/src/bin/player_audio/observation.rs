@@ -8,7 +8,7 @@ use nara::{
         backend::{BackendWindowHandles, WindowTargetPhase},
     },
 };
-use nara_sprite_animation::SpriteAnimationDomain;
+use nara_render::animation::SpriteAnimationDomain;
 use serde_json::{Value, json};
 use two_level_game::{
     GameSnapshot,

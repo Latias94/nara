@@ -1,0 +1,2129 @@
+use std::{
+    collections::BTreeMap,
+    error::Error,
+    fmt,
+    sync::{Arc, Weak},
+};
+
+use crate::image::{
+    ImageAsset, ImageContentError, ImageContentSnapshot, ImageExtent, ImageSourceMetadata,
+};
+use nara_app::{App, CoreStage, Plugin, PluginError};
+use nara_asset::{
+    AssetError, AssetEvents, AssetId, AssetPathScope, AssetProductRef, AssetRecord, AssetRef,
+    AssetServer, AssetSlotRevision, AssetSourceKind, AssetSourcePath, AssetStateError,
+    AssetStateRevision, AssetStates, AssetTaskUpdateSet, Assets, Handle, ImportedProductId,
+    LoadState, ProjectAssetDatabase, SourceHash, StableAssetId,
+};
+use nara_core::{ByteLimit, ItemLimit};
+use nara_ecs::{Resource, schedule::IntoScheduleConfigs};
+
+use crate::tilemap::{TileAtlasLayout, TileSet, TileSetDescriptor, TileSetSource};
+
+mod access;
+mod publication;
+
+pub use access::TileSetContent;
+pub use publication::{
+    PreparedTileSetPublications, TileSetContentReceipt, TileSetPublicationInput,
+};
+
+/// Bounds entry count, each captured source dependency path, and retained Image storage.
+/// Original source records and authored metadata remain admitted by the source Host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TileSetAssetLimits {
+    entries: ItemLimit,
+    retained_images: ItemLimit,
+    retained_bytes: ByteLimit,
+    source_reference_bytes: ByteLimit,
+}
+
+impl TileSetAssetLimits {
+    #[must_use]
+    pub const fn new(
+        entries: ItemLimit,
+        retained_images: ItemLimit,
+        retained_bytes: ByteLimit,
+    ) -> Self {
+        Self {
+            entries,
+            retained_images,
+            retained_bytes,
+            source_reference_bytes: ByteLimit::new(64 * 1024)
+                .expect("nonzero source reference limit"),
+        }
+    }
+
+    #[must_use]
+    pub const fn entries(self) -> ItemLimit {
+        self.entries
+    }
+
+    #[must_use]
+    pub const fn retained_images(self) -> ItemLimit {
+        self.retained_images
+    }
+
+    #[must_use]
+    pub const fn retained_bytes(self) -> ByteLimit {
+        self.retained_bytes
+    }
+
+    /// Maximum canonical path bytes admitted before binding one source Image dependency.
+    #[must_use]
+    pub const fn source_reference_bytes(self) -> ByteLimit {
+        self.source_reference_bytes
+    }
+
+    #[must_use]
+    pub const fn with_source_reference_bytes(mut self, maximum: ByteLimit) -> Self {
+        self.source_reference_bytes = maximum;
+        self
+    }
+}
+
+impl Default for TileSetAssetLimits {
+    fn default() -> Self {
+        Self::new(
+            ItemLimit::new(256).expect("default TileSet entry limit is non-zero"),
+            ItemLimit::new(512).expect("default TileSet retained image limit is non-zero"),
+            ByteLimit::new(128 * 1024 * 1024).expect("default TileSet byte limit is non-zero"),
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TileSetRetentionSnapshot {
+    pub images: usize,
+    pub bytes: usize,
+}
+
+#[derive(Debug)]
+struct RetainedImage {
+    image: ImageContentSnapshot,
+}
+
+/// Compares live slice identity for nonempty, immutable Image pixel allocations.
+fn same_pixels(left: &[u8], right: &[u8]) -> bool {
+    std::ptr::eq(left, right)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DependencyObservation {
+    record: Option<AssetRecord>,
+    handle: Option<Handle<ImageAsset>>,
+    state: Option<AssetStateRevision>,
+    slot: Option<AssetSlotRevision>,
+}
+
+impl DependencyObservation {
+    fn capture(
+        record: Option<AssetRecord>,
+        handle: Option<Handle<ImageAsset>>,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> Self {
+        Self {
+            record,
+            handle,
+            state: handle.map(|handle| states.state_revision(handle.id())),
+            slot: handle.map(|handle| images.slot_revision(handle)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum TileSetDeclaration {
+    Source {
+        record: AssetRecord,
+        source: TileSetSource,
+        source_hash: SourceHash,
+        // Part of declaration equality: an equal authored source under another scope can
+        // select a different dependency and must rotate the declaration/publication claim.
+        image: SourceImageReference,
+    },
+    Product(TileSetDescriptor),
+}
+
+/// An immutable source dependency bound once through the requesting Host's actual scope.
+/// Cloned declarations share the canonical spelling instead of copying its prefix on refresh.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SourceImageReference {
+    Path(Arc<AssetSourcePath>),
+    StableId(StableAssetId),
+    Product(AssetProductRef),
+}
+
+impl SourceImageReference {
+    fn bind(
+        reference: &AssetRef,
+        scope: &AssetPathScope,
+        maximum: ByteLimit,
+    ) -> Result<Self, TileSetAssetError> {
+        match reference {
+            AssetRef::Path(path) => {
+                let bytes = scope
+                    .prefix()
+                    .map_or(Some(0), |prefix| prefix.as_str().len().checked_add(1))
+                    .and_then(|bytes| bytes.checked_add(path.as_str().len()));
+                if bytes.is_none_or(|bytes| bytes > maximum.get()) {
+                    return Err(TileSetAssetError::SourceReferenceCapacity);
+                }
+                Ok(Self::Path(Arc::new(scope.resolve(path))))
+            }
+            AssetRef::StableId(id) => Ok(Self::StableId(*id)),
+            AssetRef::Product(product) => Ok(Self::Product(*product)),
+        }
+    }
+
+    fn validate_limit(&self, maximum: ByteLimit) -> Result<(), TileSetAssetError> {
+        if matches!(self, Self::Path(path) if path.as_str().len() > maximum.get()) {
+            return Err(TileSetAssetError::SourceReferenceCapacity);
+        }
+        Ok(())
+    }
+
+    fn record<'a>(&self, database: &'a ProjectAssetDatabase) -> Option<&'a AssetRecord> {
+        match self {
+            Self::Path(path) => database.record_for_path(path),
+            Self::StableId(id) => database.record_for_stable_id(*id),
+            Self::Product(product) => database.record_for_stable_id(product.source()),
+        }
+    }
+}
+
+impl TileSetDeclaration {
+    fn same_declaration(&self, other: &Self) -> bool {
+        self == other && self.float_bits() == other.float_bits()
+    }
+
+    fn float_bits(&self) -> [u32; 10] {
+        let atlas = self.atlas();
+        let tint = match self {
+            Self::Source { source, .. } => source.tint,
+            Self::Product(descriptor) => descriptor.tint(),
+        };
+        [
+            atlas.tile_size.x,
+            atlas.tile_size.y,
+            atlas.margin.x,
+            atlas.margin.y,
+            atlas.spacing.x,
+            atlas.spacing.y,
+            tint.r,
+            tint.g,
+            tint.b,
+            tint.a,
+        ]
+        .map(f32::to_bits)
+    }
+
+    fn from_source(
+        record: AssetRecord,
+        source: TileSetSource,
+        source_hash: SourceHash,
+        scope: &AssetPathScope,
+        maximum: ByteLimit,
+    ) -> Result<Self, TileSetAssetError> {
+        source
+            .validate()
+            .map_err(|_| TileSetAssetError::InvalidSource)?;
+        if record.source_kind() != &crate::tilemap::tileset_asset_source_kind() {
+            return Err(TileSetAssetError::InvalidSourceKind);
+        }
+        let image = SourceImageReference::bind(&source.image, scope, maximum)?;
+        Ok(Self::Source {
+            record,
+            source,
+            source_hash,
+            image,
+        })
+    }
+
+    fn validate_source_reference_limit(&self, maximum: ByteLimit) -> Result<(), TileSetAssetError> {
+        if let Self::Source { image, .. } = self {
+            image.validate_limit(maximum)?;
+        }
+        Ok(())
+    }
+
+    fn source(&self) -> Option<(&AssetRecord, &TileSetSource)> {
+        match self {
+            Self::Source { record, source, .. } => Some((record, source)),
+            Self::Product(_) => None,
+        }
+    }
+
+    fn source_hash(&self) -> Option<SourceHash> {
+        match self {
+            Self::Source { source_hash, .. } => Some(*source_hash),
+            Self::Product(_) => None,
+        }
+    }
+
+    fn atlas(&self) -> TileAtlasLayout {
+        match self {
+            Self::Source { source, .. } => source.atlas,
+            Self::Product(descriptor) => descriptor.atlas(),
+        }
+    }
+
+    fn validate(&self) -> Result<(), TileSetAssetError> {
+        match self {
+            Self::Source { record, source, .. } => {
+                source
+                    .validate()
+                    .map_err(|_| TileSetAssetError::InvalidSource)?;
+                if record.source_kind() != &crate::tilemap::tileset_asset_source_kind() {
+                    return Err(TileSetAssetError::InvalidSourceKind);
+                }
+                Ok(())
+            }
+            Self::Product(descriptor) => descriptor
+                .validate()
+                .map_err(|_| TileSetAssetError::InvalidDescriptor),
+        }
+    }
+
+    fn binding_matches(&self, handle: Handle<TileSet>, server: &AssetServer) -> bool {
+        match self {
+            Self::Source { record, .. } => record_matches(handle, record, server),
+            Self::Product(descriptor) => product_matches(handle, descriptor.product(), server),
+        }
+    }
+
+    fn is_admitted(
+        &self,
+        handle: Handle<TileSet>,
+        server: &AssetServer,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> bool {
+        self.binding_matches(handle, server)
+            && match self {
+                Self::Source { record, .. } => database.is_some_and(|database| {
+                    database.record_for_path(record.path()) == Some(record)
+                }),
+                Self::Product(_) => true,
+            }
+    }
+
+    fn image_record<'a>(
+        &self,
+        database: Option<&'a ProjectAssetDatabase>,
+    ) -> Option<&'a AssetRecord> {
+        let Self::Source { image, .. } = self else {
+            return None;
+        };
+        image.record(database?)
+    }
+
+    fn published_image_is_admitted(
+        &self,
+        image: &ImageContentSnapshot,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> bool {
+        match self {
+            Self::Source { .. } => image.source().is_some_and(|source| {
+                database
+                    .and_then(|database| database.record_for_path(source.path()))
+                    .is_some_and(|record| {
+                        record.source_kind() == &AssetSourceKind::Image
+                            && record.stable_id() == source.stable_id()
+                    })
+            }),
+            Self::Product(_) => true,
+        }
+    }
+
+    fn validate_image_identity(
+        &self,
+        handle: Handle<ImageAsset>,
+        product: AssetProductRef,
+        source: Option<&ImageSourceMetadata>,
+        server: &AssetServer,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> Result<(), TileSetAssetError> {
+        let valid = match self {
+            Self::Source { .. } => {
+                let record = self
+                    .image_record(database)
+                    .ok_or(TileSetAssetError::DependencyUnavailable)?;
+                record.source_kind() == &AssetSourceKind::Image
+                    && record_matches(handle, record, server)
+                    && product.source() == record.stable_id()
+                    && product.product() == ImportedProductId::PRIMARY
+                    && source.is_some_and(|source| {
+                        source.path() == record.path() && source.stable_id() == record.stable_id()
+                    })
+            }
+            Self::Product(descriptor) => {
+                product == descriptor.image_product() && product_matches(handle, product, server)
+            }
+        };
+        valid
+            .then_some(())
+            .ok_or(TileSetAssetError::IdentityMismatch)
+    }
+
+    fn validate_image_extent(&self, extent: ImageExtent) -> Result<(), TileSetAssetError> {
+        match self {
+            Self::Source { source, .. } => source
+                .validate_image_extent(extent)
+                .map_err(|_| TileSetAssetError::ImageExtentMismatch),
+            Self::Product(descriptor) => descriptor
+                .validate_image_extent(extent)
+                .map_err(|_| TileSetAssetError::ImageExtentMismatch),
+        }
+    }
+
+    fn into_tileset(self, image: Handle<ImageAsset>) -> Result<TileSet, TileSetAssetError> {
+        match self {
+            Self::Source { source, .. } => source
+                .into_tileset(image)
+                .map_err(|_| TileSetAssetError::InvalidSource),
+            Self::Product(descriptor) => descriptor
+                .into_tileset(image)
+                .map_err(|_| TileSetAssetError::InvalidDescriptor),
+        }
+    }
+}
+
+fn record_matches<T: 'static>(
+    handle: Handle<T>,
+    record: &AssetRecord,
+    server: &AssetServer,
+) -> bool {
+    server.get_handle::<T>(handle.id()) == Some(handle)
+        && server.path(handle.id()) == Some(record.path())
+        && server.stable_id(handle.id()) == Some(record.stable_id())
+}
+
+fn product_matches<T: 'static>(
+    handle: Handle<T>,
+    product: AssetProductRef,
+    server: &AssetServer,
+) -> bool {
+    server.get_handle::<T>(handle.id()) == Some(handle)
+        && server.product(handle.id()) == Some(product)
+}
+
+#[derive(Debug)]
+struct TileSetEntry {
+    claim: Arc<()>,
+    handle: Handle<TileSet>,
+    declaration: TileSetDeclaration,
+    active: bool,
+    accepted_atlas: Option<TileAtlasLayout>,
+    published: Option<ImageContentSnapshot>,
+    observation: Option<DependencyObservation>,
+    slot: AssetSlotRevision,
+    state: AssetStateRevision,
+    error: Option<TileSetAssetError>,
+}
+
+impl TileSetEntry {
+    /// Keeps the original declaration through a rejected notification in the same value slot.
+    fn owned_state_revision(
+        &self,
+        tilesets: &Assets<TileSet>,
+        states: &AssetStates,
+    ) -> Option<AssetStateRevision> {
+        if self.error == Some(TileSetAssetError::Superseded)
+            || self.slot != tilesets.slot_revision(self.handle)
+        {
+            return None;
+        }
+        let id = self.handle.id();
+        let revision = states.state_revision(id);
+        (self.state == revision
+            || (self.declaration.source().is_some()
+                && states.source_rejection_follows(id, &self.state)))
+        .then_some(revision)
+    }
+}
+
+/// Concrete reconciliation owner for TileSet declarations and exact Image dependencies.
+#[derive(Debug, Resource)]
+pub struct TileSetAssets {
+    limits: TileSetAssetLimits,
+    entries: BTreeMap<AssetId, TileSetEntry>,
+    retained: Vec<Weak<RetainedImage>>,
+}
+
+impl Default for TileSetAssets {
+    fn default() -> Self {
+        Self::with_limits(TileSetAssetLimits::default())
+    }
+}
+
+impl TileSetAssets {
+    #[must_use]
+    pub fn with_limits(limits: TileSetAssetLimits) -> Self {
+        Self {
+            limits,
+            entries: BTreeMap::new(),
+            retained: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub const fn limits(&self) -> TileSetAssetLimits {
+        self.limits
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    #[must_use]
+    pub fn error(&self, handle: Handle<TileSet>) -> Option<&TileSetAssetError> {
+        self.entries
+            .get(&handle.id())
+            .and_then(|entry| entry.error.as_ref())
+    }
+
+    #[must_use]
+    pub fn desired(&self, handle: Handle<TileSet>) -> Option<&TileSetSource> {
+        self.entries
+            .get(&handle.id())?
+            .declaration
+            .source()
+            .map(|(_, source)| source)
+    }
+
+    /// Enumerates admitted source ownership for concrete Host refresh and dependency demand.
+    pub fn sources(&self) -> impl Iterator<Item = (Handle<TileSet>, &AssetRecord, &TileSetSource)> {
+        self.entries.values().filter_map(|entry| {
+            entry
+                .declaration
+                .source()
+                .map(|(record, source)| (entry.handle, record, source))
+        })
+    }
+
+    fn source_conflicts_with_product(&self, record: &AssetRecord) -> bool {
+        self.entries.values().any(|entry| match &entry.declaration {
+            TileSetDeclaration::Source { .. } => false,
+            TileSetDeclaration::Product(descriptor) => {
+                descriptor.product().source() == record.stable_id()
+                    && descriptor.product().product() == ImportedProductId::PRIMARY
+            }
+        })
+    }
+
+    #[must_use]
+    pub fn retention(&self) -> TileSetRetentionSnapshot {
+        self.retained.iter().filter_map(Weak::upgrade).fold(
+            TileSetRetentionSnapshot {
+                images: 0,
+                bytes: 0,
+            },
+            |mut snapshot, retained| {
+                snapshot.images += 1;
+                snapshot.bytes += retained.image.pixels().len();
+                snapshot
+            },
+        )
+    }
+
+    /// Replaces the latest desired source without giving up an eligible published dependency.
+    /// Binds authored Image aliases once, before reserving any runtime identity or state.
+    #[allow(clippy::too_many_arguments)]
+    pub fn request(
+        &mut self,
+        record: AssetRecord,
+        source: TileSetSource,
+        source_hash: SourceHash,
+        scope: &AssetPathScope,
+        server: &mut AssetServer,
+        tilesets: &Assets<TileSet>,
+        states: &mut AssetStates,
+    ) -> Result<Handle<TileSet>, TileSetAssetError> {
+        let declaration = TileSetDeclaration::from_source(
+            record,
+            source,
+            source_hash,
+            scope,
+            self.limits.source_reference_bytes,
+        )?;
+        let (record, _) = declaration
+            .source()
+            .expect("source request has a source record");
+        if self.source_conflicts_with_product(record) {
+            return Err(TileSetAssetError::Superseded);
+        }
+        let existing = self
+            .entries
+            .values()
+            .find(|entry| {
+                entry
+                    .declaration
+                    .source()
+                    .is_some_and(|(existing, _)| existing.path() == record.path())
+            })
+            .map(|entry| entry.handle);
+        if existing.is_none_or(|handle| !self.entries.contains_key(&handle.id()))
+            && self.entries.len() >= self.limits.entries.get()
+        {
+            return Err(TileSetAssetError::Capacity);
+        }
+        let handle = server
+            .reserve_record::<TileSet>(record)
+            .map_err(TileSetAssetError::Asset)?;
+        let previous = self.entries.get(&handle.id());
+        let accepted_atlas = previous.and_then(|entry| entry.accepted_atlas);
+        let owned_state = previous.and_then(|entry| entry.owned_state_revision(tilesets, states));
+        let same_declaration =
+            previous.is_some_and(|entry| entry.declaration.same_declaration(&declaration));
+        if previous.is_some_and(|entry| {
+            same_declaration
+                && entry.active
+                && owned_state.as_ref() == Some(&entry.state)
+                && entry.error != Some(TileSetAssetError::RetentionCapacity)
+        }) {
+            if let Some(entry) = self.entries.get_mut(&handle.id()) {
+                if matches!(
+                    entry.error,
+                    Some(
+                        TileSetAssetError::DependencyUnavailable
+                            | TileSetAssetError::ImageExtentMismatch
+                    )
+                ) {
+                    entry.observation = None;
+                    entry.error = None;
+                }
+            }
+            return Ok(handle);
+        }
+        let previous = previous.filter(|_| owned_state.is_some());
+        let published = previous.and_then(|entry| entry.published.clone());
+        let claim = previous
+            .filter(|_| same_declaration)
+            .map_or_else(|| Arc::new(()), |entry| Arc::clone(&entry.claim));
+        states.set_loading(handle.id());
+        self.entries.insert(
+            handle.id(),
+            TileSetEntry {
+                claim,
+                handle,
+                declaration,
+                active: true,
+                accepted_atlas,
+                published,
+                observation: None,
+                slot: tilesets.slot_revision(handle),
+                state: states.state_revision(handle.id()),
+                error: None,
+            },
+        );
+        Ok(handle)
+    }
+
+    /// Explicitly rechecks a capacity or dependency failure against current authority.
+    pub fn retry(&mut self, handle: Handle<TileSet>) -> bool {
+        let Some(entry) = self.entries.get_mut(&handle.id()) else {
+            return false;
+        };
+        entry.observation = None;
+        true
+    }
+
+    /// Stops a rejected source's pending dependency publication while retaining eligible last-good.
+    pub fn reject_source(
+        &mut self,
+        handle: Handle<TileSet>,
+        tilesets: &mut Assets<TileSet>,
+        states: &mut AssetStates,
+        events: &mut AssetEvents,
+    ) -> Result<bool, TileSetAssetError> {
+        let Some(entry) = self
+            .entries
+            .get_mut(&handle.id())
+            .filter(|entry| entry.declaration.source().is_some())
+        else {
+            return Ok(false);
+        };
+        let Some(state) = entry.owned_state_revision(tilesets, states) else {
+            return Err(TileSetAssetError::Superseded);
+        };
+        if !entry.active
+            && entry.error == Some(TileSetAssetError::InvalidSource)
+            && state == entry.state
+        {
+            return Ok(true);
+        }
+        entry.active = false;
+        states.set_loading(handle.id());
+        let message = TileSetAssetError::InvalidSource.to_string();
+        if entry.published.is_some()
+            && states.published_slot_revision(handle.id()) == Some(&entry.slot)
+        {
+            tilesets.record_reload_failure(handle, states, events, message)
+        } else {
+            let result = tilesets.record_load_failure(handle, states, events, message);
+            if result.is_ok() {
+                entry.published = None;
+            }
+            result
+        }
+        .map_err(TileSetAssetError::State)?;
+        entry.error = Some(TileSetAssetError::InvalidSource);
+        refresh_entry(entry, tilesets, states);
+        Ok(true)
+    }
+
+    pub fn remove(
+        &mut self,
+        handle: Handle<TileSet>,
+        tilesets: &mut Assets<TileSet>,
+        states: &mut AssetStates,
+        events: &mut AssetEvents,
+    ) -> Result<bool, TileSetAssetError> {
+        let Some(entry) = self.entries.get(&handle.id()) else {
+            return Ok(false);
+        };
+        if entry.owned_state_revision(tilesets, states).is_none() {
+            return Err(TileSetAssetError::Superseded);
+        }
+        let result = revoke(handle, tilesets, states, events);
+        if result.is_err() {
+            states.invalidate_publication(handle.id());
+            tilesets.remove(handle);
+        }
+        self.entries.remove(&handle.id());
+        result?;
+        Ok(true)
+    }
+
+    /// Revokes a missing source without discarding the layout contract required by its consumers.
+    pub fn revoke_source(
+        &mut self,
+        handle: Handle<TileSet>,
+        tilesets: &mut Assets<TileSet>,
+        states: &mut AssetStates,
+        events: &mut AssetEvents,
+    ) -> Result<bool, TileSetAssetError> {
+        let Some(entry) = self
+            .entries
+            .get_mut(&handle.id())
+            .filter(|entry| entry.declaration.source().is_some())
+        else {
+            return Ok(false);
+        };
+        if entry.owned_state_revision(tilesets, states).is_none() {
+            return Err(TileSetAssetError::Superseded);
+        }
+        if !entry.active && entry.published.is_none() {
+            return Ok(true);
+        }
+        let result = revoke(handle, tilesets, states, events);
+        if result.is_err() {
+            states.invalidate_publication(handle.id());
+            tilesets.remove(handle);
+        }
+        entry.active = false;
+        entry.published = None;
+        entry.error = Some(TileSetAssetError::IdentityMismatch);
+        refresh_entry(entry, tilesets, states);
+        result?;
+        Ok(true)
+    }
+
+    /// Observes dependency identity and exact slot changes without repeating source I/O or decoding.
+    /// Retries a retention refusal when the desired Image allocation can be admitted.
+    pub fn reconcile(
+        &mut self,
+        server: &mut AssetServer,
+        database: Option<&ProjectAssetDatabase>,
+        images: &Assets<ImageAsset>,
+        tilesets: &mut Assets<TileSet>,
+        states: &mut AssetStates,
+        events: &mut AssetEvents,
+    ) {
+        let ids = self.entries.keys().copied().collect::<Vec<_>>();
+        for id in ids {
+            let Some(mut entry) = self.entries.remove(&id) else {
+                continue;
+            };
+            self.reconcile_entry(
+                &mut entry, server, database, images, tilesets, states, events,
+            );
+            self.entries.insert(id, entry);
+        }
+    }
+
+    fn retain_image(
+        &mut self,
+        image: ImageContentSnapshot,
+    ) -> Result<ImageContentSnapshot, TileSetAssetError> {
+        self.retained
+            .retain(|retained| retained.strong_count() != 0);
+        if let Some(retained) = self.admit_image_retention(image.pixels())? {
+            return Ok(image.with_retention_owner(retained));
+        }
+        let owner = Arc::new(RetainedImage {
+            image: image.clone(),
+        });
+        self.retained.push(Arc::downgrade(&owner));
+        Ok(image.with_retention_owner(owner))
+    }
+
+    fn admit_image_retention(
+        &self,
+        pixels: &[u8],
+    ) -> Result<Option<Arc<RetainedImage>>, TileSetAssetError> {
+        let mut images = 0;
+        let mut bytes = 0;
+        for retained in self.retained.iter().filter_map(Weak::upgrade) {
+            let retained_pixels = retained.image.pixels();
+            if same_pixels(retained_pixels, pixels) {
+                return Ok(Some(retained));
+            }
+            images += 1;
+            bytes += retained_pixels.len();
+        }
+        if images >= self.limits.retained_images.get()
+            || pixels.len() > self.limits.retained_bytes.get().saturating_sub(bytes)
+        {
+            return Err(TileSetAssetError::RetentionCapacity);
+        }
+        Ok(None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn reconcile_entry(
+        &mut self,
+        entry: &mut TileSetEntry,
+        server: &mut AssetServer,
+        database: Option<&ProjectAssetDatabase>,
+        images: &Assets<ImageAsset>,
+        tilesets: &mut Assets<TileSet>,
+        states: &mut AssetStates,
+        events: &mut AssetEvents,
+    ) {
+        if entry.error == Some(TileSetAssetError::Superseded) {
+            return;
+        }
+        let Some(state) = entry.owned_state_revision(tilesets, states) else {
+            entry.published = None;
+            entry.error = Some(TileSetAssetError::Superseded);
+            refresh_entry(entry, tilesets, states);
+            return;
+        };
+        if state != entry.state {
+            entry.active = false;
+            entry.observation = None;
+        }
+        let catalog_valid = entry
+            .declaration
+            .is_admitted(entry.handle, server, database);
+        let tileset_revoked = entry.published.is_some()
+            && states.published_slot_revision(entry.handle.id()) != Some(&entry.slot);
+        let publication_revoked = tileset_revoked
+            || entry.published.as_ref().is_some_and(|image| {
+                !image.is_authorized(server, states, images)
+                    || !entry
+                        .declaration
+                        .published_image_is_admitted(image, database)
+            });
+        if (!catalog_valid && entry.published.is_some()) || publication_revoked {
+            let keep_loading = entry.active
+                && catalog_valid
+                && states
+                    .state(entry.handle.id())
+                    .is_some_and(|state| state.load_state() == &LoadState::Loading);
+            if let Err(error) = revoke(entry.handle, tilesets, states, events) {
+                states.invalidate_publication(entry.handle.id());
+                tilesets.remove(entry.handle);
+                entry.error = Some(error);
+                entry.published = None;
+                refresh_entry(entry, tilesets, states);
+                return;
+            }
+            entry.published = None;
+            if keep_loading {
+                states.set_loading(entry.handle.id());
+            } else if tileset_revoked {
+                entry.error = Some(TileSetAssetError::IdentityMismatch);
+            }
+            refresh_entry(entry, tilesets, states);
+        }
+        if !catalog_valid {
+            entry.observation = None;
+            entry.error = Some(TileSetAssetError::IdentityMismatch);
+            return;
+        }
+        if !entry.active {
+            return;
+        }
+        let record = entry.declaration.image_record(database);
+        let image_handle = match &entry.declaration {
+            TileSetDeclaration::Source { .. } => record
+                .filter(|record| record.source_kind() == &AssetSourceKind::Image)
+                .and_then(|record| server.reserve_record::<ImageAsset>(record).ok()),
+            TileSetDeclaration::Product(descriptor) => server
+                .resolve_product::<ImageAsset>(descriptor.image_product())
+                .ok(),
+        };
+        let observation =
+            DependencyObservation::capture(record.cloned(), image_handle, images, states);
+        if entry.observation.as_ref() == Some(&observation) && !publication_revoked {
+            let retryable = entry.error == Some(TileSetAssetError::RetentionCapacity)
+                && image_handle
+                    .and_then(|handle| images.get(handle))
+                    .is_some_and(|image| self.admit_image_retention(image.pixels()).is_ok());
+            if !retryable {
+                return;
+            }
+        }
+        entry.observation = Some(observation);
+        let result = (|| {
+            if entry
+                .accepted_atlas
+                .is_some_and(|atlas| atlas != entry.declaration.atlas())
+            {
+                return Err(TileSetAssetError::AtlasLayoutChangeRequiresRebuild);
+            }
+            let handle = image_handle.ok_or(TileSetAssetError::DependencyUnavailable)?;
+            // Published content remains eligible while a later import is pending or failed.
+            // Snapshot admission owns identity, publication and exact storage-slot checks.
+            let image = match ImageContentSnapshot::capture(handle, server, states, images) {
+                Ok(image) => image,
+                Err(ImageContentError::Unavailable)
+                    if states.state(handle.id()).is_some_and(|state| {
+                        matches!(state.load_state(), LoadState::Loading)
+                            && state.usable_version().is_none()
+                    }) =>
+                {
+                    return Ok(None);
+                }
+                Err(_) => return Err(TileSetAssetError::DependencyUnavailable),
+            };
+            entry.declaration.validate_image_identity(
+                handle,
+                image.product(),
+                image.source(),
+                server,
+                database,
+            )?;
+            entry.declaration.validate_image_extent(image.extent())?;
+            let tileset = entry
+                .declaration
+                .clone()
+                .into_tileset(handle)?
+                .with_image_content(image.clone());
+            let source_hash = entry.declaration.source_hash();
+            // Dependency diagnostics can change without changing the admitted publication.
+            // A pending or failed TileSet still needs its own successful publication to recover.
+            if entry.error.is_none()
+                && states.state(entry.handle.id()).is_some_and(|state| {
+                    state.load_state() == &LoadState::Loaded
+                        && state.usable_version().is_some()
+                        && state.source_hash() == source_hash
+                })
+                && states.published_slot_revision(entry.handle.id()) == Some(&entry.slot)
+                && tilesets.get(entry.handle) == Some(&tileset)
+            {
+                return Ok(None);
+            }
+            states
+                .next_version(entry.handle.id())
+                .map_err(TileSetAssetError::State)?;
+            let image = self.retain_image(image)?;
+            let tileset = tileset.with_image_content(image.clone());
+            tilesets
+                .commit_loaded(entry.handle, tileset, states, events, source_hash, None)
+                .map_err(TileSetAssetError::State)?;
+            Ok(Some(image))
+        })();
+        match result {
+            Ok(Some(image)) => {
+                entry.accepted_atlas = Some(entry.declaration.atlas());
+                entry.published = Some(image);
+                entry.error = None;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                states.set_loading(entry.handle.id());
+                let failure = if entry.published.is_some() {
+                    tilesets.record_reload_failure(entry.handle, states, events, error.to_string())
+                } else {
+                    tilesets.record_load_failure(entry.handle, states, events, error.to_string())
+                };
+                entry.error = Some(failure.err().map(TileSetAssetError::State).unwrap_or(error));
+            }
+        }
+        refresh_entry(entry, tilesets, states);
+    }
+}
+
+fn refresh_entry(entry: &mut TileSetEntry, tilesets: &Assets<TileSet>, states: &AssetStates) {
+    entry.slot = tilesets.slot_revision(entry.handle);
+    entry.state = states.state_revision(entry.handle.id());
+}
+
+fn revoke(
+    handle: Handle<TileSet>,
+    tilesets: &mut Assets<TileSet>,
+    states: &mut AssetStates,
+    events: &mut AssetEvents,
+) -> Result<(), TileSetAssetError> {
+    tilesets
+        .remove_with_state(handle, states, events)
+        .map(|_| ())
+        .map_err(TileSetAssetError::State)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TileSetAssetError {
+    InvalidSourceKind,
+    InvalidSource,
+    InvalidDescriptor,
+    Capacity,
+    SourceReferenceCapacity,
+    RetentionCapacity,
+    DependencyUnavailable,
+    ImageExtentMismatch,
+    AtlasLayoutChangeRequiresRebuild,
+    IdentityMismatch,
+    Superseded,
+    InvalidPublicationBatch,
+    Asset(AssetError),
+    State(AssetStateError),
+}
+
+impl fmt::Display for TileSetAssetError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Asset(error) => error.fmt(formatter),
+            Self::State(error) => error.fmt(formatter),
+            _ => formatter.write_str(match self {
+                Self::InvalidSourceKind => "TileSet source kind is invalid",
+                Self::InvalidSource => "TileSet source is invalid",
+                Self::InvalidDescriptor => "TileSet product descriptor is invalid",
+                Self::Capacity => "TileSet content capacity is exhausted",
+                Self::SourceReferenceCapacity => {
+                    "TileSet source Image reference capacity is exhausted"
+                }
+                Self::RetentionCapacity => "TileSet retained Image capacity is exhausted",
+                Self::DependencyUnavailable => "TileSet Image dependency is unavailable",
+                Self::ImageExtentMismatch => {
+                    "TileSet atlas does not exactly match its Image extent"
+                }
+                Self::AtlasLayoutChangeRequiresRebuild => {
+                    "TileSet atlas layout changes require rebuilding its consumers"
+                }
+                Self::IdentityMismatch => "TileSet content identity is no longer admitted",
+                Self::Superseded => "TileSet publication was superseded by another writer",
+                Self::InvalidPublicationBatch => {
+                    "TileSet publication inputs overlap or repeat an identity"
+                }
+                Self::Asset(_) | Self::State(_) => unreachable!(),
+            }),
+        }
+    }
+}
+
+impl Error for TileSetAssetError {}
+
+/// Maintains native TileSet storage and automatic Source/Product Image reconciliation.
+/// Source dependency scopes are bound explicitly when their declarations are requested.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TileSetAssetPlugin;
+
+pub const TILESET_ASSET_PLUGIN_ID: nara_app::PluginId =
+    nara_app::PluginId::new("nara.tilemap.assets");
+pub const TILESET_ASSET_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(TILESET_ASSET_PLUGIN_ID, nara_app::PluginCategory::Asset)
+        .requires_plugins(&[nara_asset::ASSET_PLUGIN_ID]);
+
+impl Plugin for TileSetAssetPlugin {
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &TILESET_ASSET_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.init_resource::<TileSetAssets>()?;
+        app.init_resource::<Assets<TileSet>>()?;
+        app.init_resource::<Assets<ImageAsset>>()?;
+        app.add_systems(
+            CoreStage::TaskUpdate,
+            reconcile_tilesets.after(AssetTaskUpdateSet::ApplyResults),
+        )?;
+        Ok(())
+    }
+}
+
+fn reconcile_tilesets(mut content: TileSetContent) {
+    content.reconcile();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::image::{ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata};
+    use nara_asset::ProjectAssetDatabase;
+    use nara_asset::{
+        AssetRef, AssetSourcePath, ImportDependencyDigest, ImportRecipe, ImporterId,
+        ImporterVersion, StableAssetId,
+    };
+    use nara_core::Vec2;
+
+    use crate::tilemap::{TileAtlasLayout, TileIndex};
+
+    mod access;
+    mod processed;
+    mod publication;
+    mod source_admission;
+
+    struct Fixture {
+        server: AssetServer,
+        database: ProjectAssetDatabase,
+        images: Assets<ImageAsset>,
+        tilesets: Assets<TileSet>,
+        states: AssetStates,
+        events: AssetEvents,
+        owner: TileSetAssets,
+        image_a: AssetRecord,
+        image_b: AssetRecord,
+        tileset: AssetRecord,
+    }
+
+    impl Fixture {
+        fn new(limits: TileSetAssetLimits) -> Self {
+            let image_a = record(
+                "10000000-0000-4000-8000-000000000001",
+                "a.png",
+                AssetSourceKind::Image,
+            );
+            let image_b = record(
+                "10000000-0000-4000-8000-000000000002",
+                "b.png",
+                AssetSourceKind::Image,
+            );
+            let tileset = record(
+                "10000000-0000-4000-8000-000000000003",
+                "terrain.tileset.ron",
+                AssetSourceKind::Other(String::from("tileset")),
+            );
+            let mut fixture = Self {
+                server: AssetServer::new(),
+                database: ProjectAssetDatabase::default(),
+                images: Assets::default(),
+                tilesets: Assets::default(),
+                states: AssetStates::default(),
+                events: AssetEvents::default(),
+                owner: TileSetAssets::with_limits(limits),
+                image_a,
+                image_b,
+                tileset,
+            };
+            fixture.database.insert(fixture.image_a.clone()).unwrap();
+            fixture.database.insert(fixture.tileset.clone()).unwrap();
+            fixture.publish_image(fixture.image_a.clone(), 2, 1, 10);
+            fixture
+        }
+
+        fn publish_image(
+            &mut self,
+            record: AssetRecord,
+            width: u32,
+            height: u32,
+            byte: u8,
+        ) -> Handle<ImageAsset> {
+            let handle = self.server.reserve_record::<ImageAsset>(&record).unwrap();
+            let image = image(&record, width, height, byte);
+            self.images
+                .commit_loaded(
+                    handle,
+                    image,
+                    &mut self.states,
+                    &mut self.events,
+                    None,
+                    None,
+                )
+                .unwrap();
+            handle
+        }
+
+        fn request(&mut self, image: &str) -> Handle<TileSet> {
+            self.owner
+                .request(
+                    self.tileset.clone(),
+                    source(image),
+                    SourceHash::from_bytes(image.as_bytes()),
+                    &nara_asset::AssetPathScope::ROOT,
+                    &mut self.server,
+                    &self.tilesets,
+                    &mut self.states,
+                )
+                .unwrap()
+        }
+
+        fn reconcile(&mut self) {
+            self.owner.reconcile(
+                &mut self.server,
+                Some(&self.database),
+                &self.images,
+                &mut self.tilesets,
+                &mut self.states,
+                &mut self.events,
+            );
+        }
+    }
+
+    fn record(id: &str, path: &str, kind: AssetSourceKind) -> AssetRecord {
+        AssetRecord::new(
+            StableAssetId::parse_str(id).unwrap(),
+            AssetSourcePath::new(path).unwrap(),
+            kind,
+        )
+    }
+
+    fn source(path: &str) -> TileSetSource {
+        TileSetSource::new(
+            AssetRef::path(path).unwrap(),
+            TileAtlasLayout::grid(Vec2::new(1.0, 1.0), 2, 1),
+        )
+    }
+
+    #[test]
+    fn one_owner_retains_two_source_scopes_bound_by_request_and_publication() {
+        let assets = AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
+        let packages = AssetPathScope::under(AssetSourcePath::new("package/art").unwrap());
+        let image_a = record(
+            "11111111-1111-4111-8111-111111111111",
+            "game/art/shared.png",
+            AssetSourceKind::Image,
+        );
+        let image_b = record(
+            "22222222-2222-4222-8222-222222222222",
+            "package/art/shared.png",
+            AssetSourceKind::Image,
+        );
+        let tileset_a = record(
+            "33333333-3333-4333-8333-333333333333",
+            "game/art/terrain.ron",
+            crate::tilemap::tileset_asset_source_kind(),
+        );
+        let tileset_b = record(
+            "44444444-4444-4444-8444-444444444444",
+            "package/art/terrain.ron",
+            crate::tilemap::tileset_asset_source_kind(),
+        );
+        let mut database = ProjectAssetDatabase::default();
+        for record in [&image_a, &image_b, &tileset_a, &tileset_b] {
+            database.insert(record.clone()).unwrap();
+        }
+        let mut server = AssetServer::new();
+        let mut images = Assets::<ImageAsset>::default();
+        let mut tilesets = Assets::<TileSet>::default();
+        let mut states = AssetStates::default();
+        let mut events = AssetEvents::default();
+        let mut retained = Vec::new();
+        for (record, byte) in [(&image_a, 10), (&image_b, 20)] {
+            let handle = server.reserve_record::<ImageAsset>(record).unwrap();
+            let mut image = image(record, 2, 1, byte);
+            assert!(image.try_attach_retention_owner(Arc::new(())));
+            retained.push(image.share_retained().unwrap());
+            images
+                .commit_loaded(handle, image, &mut states, &mut events, None, None)
+                .unwrap();
+        }
+        let image_a_handle = server.reserve_record::<ImageAsset>(&image_a).unwrap();
+        let image_b_handle = server.reserve_record::<ImageAsset>(&image_b).unwrap();
+        let mut owner = TileSetAssets::default();
+        let hash = SourceHash::from_bytes(b"scoped");
+        let handle_a = owner
+            .request(
+                tileset_a.clone(),
+                source("shared.png"),
+                hash,
+                &assets,
+                &mut server,
+                &tilesets,
+                &mut states,
+            )
+            .unwrap();
+        let handle_b = server.reserve_record::<TileSet>(&tileset_b).unwrap();
+        let input = TileSetPublicationInput::from_source(
+            handle_b,
+            tileset_b.clone(),
+            source("shared.png"),
+            hash,
+            image_b_handle,
+            retained.pop().unwrap(),
+            &packages,
+            owner.limits().source_reference_bytes(),
+        )
+        .unwrap();
+        owner
+            .prepare_publications(
+                vec![input],
+                &[],
+                &server,
+                Some(&database),
+                &tilesets,
+                &states,
+            )
+            .unwrap()
+            .commit(&server, &images, &mut tilesets, &mut states, &mut events);
+        drop(assets);
+        drop(packages);
+        owner.reconcile(
+            &mut server,
+            Some(&database),
+            &images,
+            &mut tilesets,
+            &mut states,
+            &mut events,
+        );
+        for (handle, expected) in [(handle_a, image_a_handle), (handle_b, image_b_handle)] {
+            assert_eq!(owner.error(handle), None);
+            assert_eq!(
+                tilesets.get(handle).unwrap().material().image,
+                Some(expected)
+            );
+            assert_eq!(owner.desired(handle), Some(&source("shared.png")));
+            assert_eq!(states.state(handle.id()).unwrap().source_hash(), Some(hash));
+        }
+        let sources = owner
+            .sources()
+            .map(|(_, record, _)| record.clone())
+            .collect::<Vec<_>>();
+        assert!(sources.contains(&tileset_a));
+        assert!(sources.contains(&tileset_b));
+    }
+
+    fn image(record: &AssetRecord, width: u32, height: u32, byte: u8) -> ImageAsset {
+        let pixels = vec![byte; width as usize * height as usize * 4];
+        let settings = ImageImportSettings::default();
+        let import_recipe = ImportRecipe::new(
+            record.stable_id(),
+            SourceHash::from_bytes(&pixels),
+            ImportDependencyDigest::empty(),
+            ImporterId::new("test.image").unwrap(),
+            ImporterVersion::new(1),
+            settings.settings_hash(),
+        );
+        ImageAsset::from_import(
+            ImageSourceMetadata::new(record.path().clone(), settings, import_recipe).unwrap(),
+            ImageExtent::new(width, height),
+            ImageFormat::Rgba8,
+            pixels,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn compatible_image_replacement_publishes_exact_new_content_and_retains_old_pixels() {
+        let mut fixture = Fixture::new(TileSetAssetLimits::default());
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        let old = fixture
+            .tilesets
+            .get(tileset)
+            .unwrap()
+            .image_content()
+            .unwrap()
+            .clone();
+        let image = fixture.publish_image(fixture.image_a.clone(), 2, 1, 20);
+        fixture.reconcile();
+        let successor = fixture.tilesets.get(tileset).unwrap();
+        let current = successor.image_content().unwrap();
+        assert_eq!(old.pixels(), &[10; 8]);
+        assert_eq!(current.pixels(), &[20; 8]);
+        assert_eq!(current.handle(), image);
+        assert!(old.is_authorized(&fixture.server, &fixture.states, &fixture.images));
+        assert!(!old.is_current(&fixture.server, &fixture.states, &fixture.images));
+        assert!(current.is_current(&fixture.server, &fixture.states, &fixture.images));
+        assert_eq!(
+            successor.normalized_region(TileIndex::new(1)).unwrap().min,
+            Vec2::new(0.5, 0.0)
+        );
+    }
+
+    #[test]
+    fn new_and_retargeted_tilesets_use_published_images_during_reload_or_failure() {
+        for retarget in [false, true] {
+            for reload_failed in [false, true] {
+                let mut fixture = Fixture::new(TileSetAssetLimits::default());
+                let dependency = if retarget {
+                    let tileset = fixture.request("a.png");
+                    fixture.reconcile();
+                    assert!(fixture.tilesets.get(tileset).is_some());
+                    fixture.database.insert(fixture.image_b.clone()).unwrap();
+                    fixture.publish_image(fixture.image_b.clone(), 2, 1, 20)
+                } else {
+                    fixture
+                        .server
+                        .reserve_record::<ImageAsset>(&fixture.image_a)
+                        .unwrap()
+                };
+                let published = ImageContentSnapshot::capture(
+                    dependency,
+                    &fixture.server,
+                    &fixture.states,
+                    &fixture.images,
+                )
+                .unwrap();
+                fixture.states.set_loading(dependency.id());
+                if reload_failed {
+                    fixture
+                        .images
+                        .record_reload_failure(
+                            dependency,
+                            &mut fixture.states,
+                            &mut fixture.events,
+                            "successor decode failed",
+                        )
+                        .unwrap();
+                }
+                assert!(published.is_current(&fixture.server, &fixture.states, &fixture.images));
+
+                let tileset = fixture.request(if retarget { "b.png" } else { "a.png" });
+                fixture.reconcile();
+                assert_eq!(fixture.owner.error(tileset), None);
+                let actual = fixture
+                    .tilesets
+                    .get(tileset)
+                    .expect("an authorized published dependency must admit its TileSet")
+                    .image_content()
+                    .unwrap();
+                assert!(actual.same_allocation(&published));
+                assert_eq!(actual.version(), published.version());
+                assert_eq!(actual.pixels(), published.pixels());
+
+                fixture
+                    .images
+                    .remove_with_state(dependency, &mut fixture.states, &mut fixture.events)
+                    .unwrap();
+                fixture.reconcile();
+                assert!(fixture.tilesets.get(tileset).is_none());
+                assert!(!published.is_authorized(
+                    &fixture.server,
+                    &fixture.states,
+                    &fixture.images,
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn unpublished_dependencies_wait_or_fail_and_recover_after_publication() {
+        for load_failed in [false, true] {
+            let mut fixture = Fixture::new(TileSetAssetLimits::default());
+            let dependency = fixture
+                .server
+                .reserve_record::<ImageAsset>(&fixture.image_a)
+                .unwrap();
+            fixture
+                .images
+                .remove_with_state(dependency, &mut fixture.states, &mut fixture.events)
+                .unwrap();
+            fixture.states.set_loading(dependency.id());
+            if load_failed {
+                fixture
+                    .images
+                    .record_load_failure(
+                        dependency,
+                        &mut fixture.states,
+                        &mut fixture.events,
+                        "initial decode failed",
+                    )
+                    .unwrap();
+            }
+            let tileset = fixture.request("a.png");
+            fixture.reconcile();
+            assert!(fixture.tilesets.get(tileset).is_none());
+            assert_eq!(
+                fixture.owner.error(tileset),
+                load_failed.then_some(&TileSetAssetError::DependencyUnavailable),
+            );
+
+            fixture.publish_image(fixture.image_a.clone(), 2, 1, 30);
+            fixture.reconcile();
+            assert_eq!(fixture.owner.error(tileset), None);
+            assert_eq!(
+                fixture
+                    .tilesets
+                    .get(tileset)
+                    .unwrap()
+                    .image_content()
+                    .unwrap()
+                    .pixels(),
+                &[30; 8],
+            );
+        }
+    }
+
+    #[test]
+    fn loading_cannot_hide_invalid_published_identity_or_storage() {
+        for wrong_identity in [false, true] {
+            let mut fixture = Fixture::new(TileSetAssetLimits::default());
+            let dependency = fixture
+                .server
+                .reserve_record::<ImageAsset>(&fixture.image_a)
+                .unwrap();
+            if wrong_identity {
+                let invalid = image(&fixture.image_b, 2, 1, 20);
+                fixture
+                    .images
+                    .commit_loaded(
+                        dependency,
+                        invalid,
+                        &mut fixture.states,
+                        &mut fixture.events,
+                        None,
+                        None,
+                    )
+                    .unwrap();
+            } else {
+                let removed = fixture.images.remove(dependency).unwrap();
+                fixture.images.insert(dependency, removed);
+            }
+            fixture.states.set_loading(dependency.id());
+            let tileset = fixture.request("a.png");
+            fixture.reconcile();
+            assert!(fixture.tilesets.get(tileset).is_none());
+            assert_eq!(
+                fixture.owner.error(tileset),
+                Some(&TileSetAssetError::DependencyUnavailable),
+            );
+        }
+    }
+
+    #[test]
+    fn incompatible_image_extent_keeps_coherent_last_good_until_a_valid_successor() {
+        let mut fixture = Fixture::new(TileSetAssetLimits::default());
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        let old_version = fixture.states.version(tileset.id());
+        fixture.publish_image(fixture.image_a.clone(), 4, 1, 30);
+        fixture.reconcile();
+        assert_eq!(
+            fixture.owner.error(tileset),
+            Some(&TileSetAssetError::ImageExtentMismatch)
+        );
+        let old = fixture
+            .tilesets
+            .get(tileset)
+            .unwrap()
+            .image_content()
+            .unwrap();
+        assert_eq!(old.extent(), ImageExtent::new(2, 1));
+        assert_eq!(old.pixels(), &[10; 8]);
+        assert_eq!(
+            fixture.states.state(tileset.id()).unwrap().usable_version(),
+            old_version
+        );
+        fixture.publish_image(fixture.image_a.clone(), 2, 1, 40);
+        fixture.reconcile();
+        assert_eq!(fixture.owner.error(tileset), None);
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .image_content()
+                .unwrap()
+                .pixels(),
+            &[40; 8]
+        );
+    }
+
+    #[test]
+    fn unresolved_desired_dependency_does_not_churn_and_recovers_after_catalog_admission() {
+        let mut fixture = Fixture::new(TileSetAssetLimits::default());
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        assert_eq!(fixture.request("b.png"), tileset);
+        fixture.reconcile();
+        let failed = fixture.states.state_revision(tileset.id());
+        let events = fixture.events.len();
+        for _ in 0..3 {
+            fixture.reconcile();
+        }
+        assert_eq!(fixture.states.state_revision(tileset.id()), failed);
+        assert_eq!(fixture.events.len(), events);
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .image_content()
+                .unwrap()
+                .pixels(),
+            &[10; 8]
+        );
+        fixture.database.insert(fixture.image_b.clone()).unwrap();
+        fixture.publish_image(fixture.image_b.clone(), 2, 1, 50);
+        fixture.reconcile();
+        assert_eq!(fixture.owner.error(tileset), None);
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .image_content()
+                .unwrap()
+                .source()
+                .unwrap()
+                .path(),
+            fixture.image_b.path()
+        );
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .image_content()
+                .unwrap()
+                .pixels(),
+            &[50; 8]
+        );
+    }
+
+    #[test]
+    fn published_dependency_removal_revokes_while_latest_desired_dependency_is_missing() {
+        let mut fixture = Fixture::new(TileSetAssetLimits::default());
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        let old = fixture
+            .tilesets
+            .get(tileset)
+            .unwrap()
+            .image_content()
+            .unwrap()
+            .clone();
+        fixture.request("b.png");
+        fixture.reconcile();
+        let image_a = fixture
+            .server
+            .reserve_record::<ImageAsset>(&fixture.image_a)
+            .unwrap();
+        fixture
+            .images
+            .remove_with_state(image_a, &mut fixture.states, &mut fixture.events)
+            .unwrap();
+        fixture.reconcile();
+        assert!(fixture.tilesets.get(tileset).is_none());
+        assert!(
+            fixture
+                .states
+                .state(tileset.id())
+                .unwrap()
+                .usable_version()
+                .is_none()
+        );
+        fixture.publish_image(fixture.image_a.clone(), 2, 1, 60);
+        fixture.reconcile();
+        assert!(fixture.tilesets.get(tileset).is_none());
+        assert!(!old.is_authorized(&fixture.server, &fixture.states, &fixture.images));
+        fixture.database.insert(fixture.image_b.clone()).unwrap();
+        fixture.publish_image(fixture.image_b.clone(), 2, 1, 70);
+        fixture.reconcile();
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .image_content()
+                .unwrap()
+                .pixels(),
+            &[70; 8]
+        );
+    }
+
+    #[test]
+    fn retained_image_budget_charges_shared_payload_once_and_outlives_removed_tilesets() {
+        let limits = TileSetAssetLimits::new(
+            ItemLimit::new(2).unwrap(),
+            ItemLimit::ONE,
+            ByteLimit::new(8).unwrap(),
+        );
+        let mut fixture = Fixture::new(limits);
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        let retained = fixture
+            .tilesets
+            .get(tileset)
+            .unwrap()
+            .image_content()
+            .unwrap()
+            .clone();
+        let second_record = record(
+            "10000000-0000-4000-8000-000000000004",
+            "second.tileset.ron",
+            AssetSourceKind::Other(String::from("tileset")),
+        );
+        fixture.database.insert(second_record.clone()).unwrap();
+        let second = fixture
+            .owner
+            .request(
+                second_record,
+                source("a.png"),
+                SourceHash::from_bytes(b"second"),
+                &nara_asset::AssetPathScope::ROOT,
+                &mut fixture.server,
+                &fixture.tilesets,
+                &mut fixture.states,
+            )
+            .unwrap();
+        fixture.reconcile();
+        assert!(fixture.tilesets.get(second).is_some());
+        assert_eq!(
+            fixture.owner.retention(),
+            TileSetRetentionSnapshot {
+                images: 1,
+                bytes: 8
+            }
+        );
+        fixture.publish_image(fixture.image_a.clone(), 2, 1, 80);
+        fixture.reconcile();
+        assert_eq!(
+            fixture.owner.error(tileset),
+            Some(&TileSetAssetError::RetentionCapacity)
+        );
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .image_content()
+                .unwrap()
+                .pixels(),
+            &[10; 8]
+        );
+        fixture
+            .owner
+            .remove(
+                tileset,
+                &mut fixture.tilesets,
+                &mut fixture.states,
+                &mut fixture.events,
+            )
+            .unwrap();
+        fixture
+            .owner
+            .remove(
+                second,
+                &mut fixture.tilesets,
+                &mut fixture.states,
+                &mut fixture.events,
+            )
+            .unwrap();
+        assert_eq!(fixture.owner.retention().bytes, 8);
+        drop(retained);
+        assert_eq!(
+            fixture.owner.retention(),
+            TileSetRetentionSnapshot {
+                images: 0,
+                bytes: 0
+            }
+        );
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .image_content()
+                .unwrap()
+                .pixels(),
+            &[80; 8]
+        );
+    }
+
+    #[test]
+    fn a_direct_tileset_write_stops_the_reconciler_without_destroying_another_writers_value() {
+        let mut fixture = Fixture::new(TileSetAssetLimits::default());
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        let replacement = TileSet::new(Vec2::new(9.0, 7.0));
+        fixture.tilesets.insert(tileset, replacement.clone());
+        fixture.reconcile();
+        assert_eq!(
+            fixture.owner.error(tileset),
+            Some(&TileSetAssetError::Superseded)
+        );
+        let slot = fixture.tilesets.slot_revision(tileset);
+        fixture.publish_image(fixture.image_a.clone(), 2, 1, 90);
+        fixture.reconcile();
+        assert_eq!(fixture.tilesets.get(tileset), Some(&replacement));
+        assert_eq!(fixture.tilesets.slot_revision(tileset), slot);
+    }
+
+    #[test]
+    fn invalid_direct_source_is_rejected_before_claiming_a_handle_or_changing_state() {
+        let mut fixture = Fixture::new(TileSetAssetLimits::default());
+        let mut invalid = source("a.png");
+        invalid.atlas.columns = 0;
+        let baseline = fixture.server.clone();
+        let states = fixture.states.len();
+        assert_eq!(
+            fixture.owner.request(
+                fixture.tileset.clone(),
+                invalid,
+                SourceHash::from_bytes(b"invalid"),
+                &nara_asset::AssetPathScope::ROOT,
+                &mut fixture.server,
+                &fixture.tilesets,
+                &mut fixture.states
+            ),
+            Err(TileSetAssetError::InvalidSource)
+        );
+        assert_eq!(fixture.server, baseline);
+        assert_eq!(fixture.states.len(), states);
+        assert!(fixture.owner.is_empty());
+    }
+
+    #[test]
+    fn rejected_source_blocks_late_desired_dependency_but_keeps_published_revocation_active() {
+        let mut fixture = Fixture::new(TileSetAssetLimits::default());
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        fixture.request("b.png");
+        fixture.reconcile();
+        fixture
+            .owner
+            .reject_source(
+                tileset,
+                &mut fixture.tilesets,
+                &mut fixture.states,
+                &mut fixture.events,
+            )
+            .unwrap();
+        fixture.database.insert(fixture.image_b.clone()).unwrap();
+        fixture.publish_image(fixture.image_b.clone(), 2, 1, 80);
+        fixture.reconcile();
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .image_content()
+                .unwrap()
+                .pixels(),
+            &[10; 8]
+        );
+        let image_a = fixture
+            .server
+            .reserve_record::<ImageAsset>(&fixture.image_a)
+            .unwrap();
+        fixture
+            .images
+            .remove_with_state(image_a, &mut fixture.states, &mut fixture.events)
+            .unwrap();
+        fixture.reconcile();
+        assert!(fixture.tilesets.get(tileset).is_none());
+        fixture.request("b.png");
+        fixture.reconcile();
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .image_content()
+                .unwrap()
+                .pixels(),
+            &[80; 8]
+        );
+    }
+
+    #[test]
+    fn published_dependency_catalog_revocation_is_observed_while_desired_dependency_is_missing() {
+        for mismatched_identity in [false, true] {
+            let mut fixture = Fixture::new(TileSetAssetLimits::default());
+            let tileset = fixture.request("a.png");
+            fixture.reconcile();
+            fixture.request("b.png");
+            fixture.reconcile();
+            fixture.database = ProjectAssetDatabase::default();
+            fixture.database.insert(fixture.tileset.clone()).unwrap();
+            if mismatched_identity {
+                fixture
+                    .database
+                    .insert(record(
+                        "10000000-0000-4000-8000-000000000099",
+                        "a.png",
+                        AssetSourceKind::Image,
+                    ))
+                    .unwrap();
+            }
+            fixture.reconcile();
+            assert!(fixture.tilesets.get(tileset).is_none());
+            assert!(
+                fixture
+                    .states
+                    .state(tileset.id())
+                    .unwrap()
+                    .usable_version()
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn appearance_edits_keep_exact_image_content_and_image_edits_clear_it() {
+        let mut fixture = Fixture::new(TileSetAssetLimits::default());
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        let original = fixture.tilesets.get(tileset).unwrap().clone();
+        let changed = original
+            .clone()
+            .with_tint(nara_core::Color::rgb(0.5, 0.75, 1.0))
+            .with_sampler(crate::material::SamplerDescriptor::NEAREST_CLAMP)
+            .with_alpha_mode(crate::material::AlphaMode2d::Opaque);
+        assert_eq!(changed.image_content(), original.image_content());
+        let changed = changed.with_image(
+            original.image_content().unwrap().handle(),
+            original.atlas().unwrap(),
+        );
+        assert!(changed.image_content().is_none());
+    }
+
+    #[test]
+    fn published_atlas_layout_requires_rebuild_and_cannot_be_changed_through_dependency_recreation()
+    {
+        let mut fixture = Fixture::new(TileSetAssetLimits::default());
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        let altered = TileSetSource::new(
+            AssetRef::path("a.png").unwrap(),
+            TileAtlasLayout::grid(Vec2::new(2.0, 1.0), 1, 1),
+        );
+        fixture
+            .owner
+            .request(
+                fixture.tileset.clone(),
+                altered,
+                SourceHash::from_bytes(b"layout-change"),
+                &nara_asset::AssetPathScope::ROOT,
+                &mut fixture.server,
+                &fixture.tilesets,
+                &mut fixture.states,
+            )
+            .unwrap();
+        fixture.reconcile();
+        assert_eq!(
+            fixture.owner.error(tileset),
+            Some(&TileSetAssetError::AtlasLayoutChangeRequiresRebuild)
+        );
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .atlas()
+                .unwrap()
+                .columns,
+            2
+        );
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .image_content()
+                .unwrap()
+                .pixels(),
+            &[10; 8]
+        );
+        let image = fixture
+            .server
+            .reserve_record::<ImageAsset>(&fixture.image_a)
+            .unwrap();
+        fixture
+            .images
+            .remove_with_state(image, &mut fixture.states, &mut fixture.events)
+            .unwrap();
+        fixture.reconcile();
+        fixture.publish_image(fixture.image_a.clone(), 2, 1, 60);
+        fixture.reconcile();
+        assert!(fixture.tilesets.get(tileset).is_none());
+        assert_eq!(
+            fixture.owner.error(tileset),
+            Some(&TileSetAssetError::AtlasLayoutChangeRequiresRebuild)
+        );
+        fixture.request("a.png");
+        fixture.reconcile();
+        assert_eq!(fixture.owner.error(tileset), None);
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .image_content()
+                .unwrap()
+                .pixels(),
+            &[60; 8]
+        );
+    }
+
+    #[test]
+    fn source_revocation_preserves_the_published_layout_until_consumers_are_rebuilt() {
+        let mut fixture = Fixture::new(TileSetAssetLimits::default());
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        fixture
+            .owner
+            .revoke_source(
+                tileset,
+                &mut fixture.tilesets,
+                &mut fixture.states,
+                &mut fixture.events,
+            )
+            .unwrap();
+        assert!(fixture.tilesets.get(tileset).is_none());
+
+        let changed_layout = TileSetSource::new(
+            AssetRef::path("a.png").unwrap(),
+            TileAtlasLayout::grid(Vec2::new(2.0, 1.0), 1, 1),
+        );
+        let restored_handle = fixture
+            .owner
+            .request(
+                fixture.tileset.clone(),
+                changed_layout,
+                SourceHash::from_bytes(b"restored-with-changed-layout"),
+                &nara_asset::AssetPathScope::ROOT,
+                &mut fixture.server,
+                &fixture.tilesets,
+                &mut fixture.states,
+            )
+            .unwrap();
+        fixture.reconcile();
+        assert_eq!(restored_handle, tileset);
+        assert_eq!(
+            fixture.owner.error(tileset),
+            Some(&TileSetAssetError::AtlasLayoutChangeRequiresRebuild)
+        );
+        assert!(fixture.tilesets.get(tileset).is_none());
+
+        assert_eq!(fixture.request("a.png"), tileset);
+        fixture.reconcile();
+        let restored = fixture.tilesets.get(tileset).unwrap();
+        assert_eq!(fixture.owner.error(tileset), None);
+        assert_eq!(restored.atlas().unwrap().columns, 2);
+        assert_eq!(restored.image_content().unwrap().pixels(), &[10; 8]);
+    }
+
+    #[test]
+    fn releasing_retention_does_not_retry_an_unchanged_extent_mismatch() {
+        let limits = TileSetAssetLimits::new(
+            ItemLimit::ONE,
+            ItemLimit::new(4).unwrap(),
+            ByteLimit::new(16).unwrap(),
+        );
+        let mut fixture = Fixture::new(limits);
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        let held_first = fixture
+            .tilesets
+            .get(tileset)
+            .unwrap()
+            .image_content()
+            .unwrap()
+            .clone();
+        fixture.publish_image(fixture.image_a.clone(), 2, 1, 20);
+        fixture.reconcile();
+        assert_eq!(fixture.owner.retention().bytes, 16);
+
+        fixture.publish_image(fixture.image_a.clone(), 1, 1, 25);
+        fixture.reconcile();
+        assert_eq!(
+            fixture.owner.error(tileset),
+            Some(&TileSetAssetError::ImageExtentMismatch)
+        );
+        let state = fixture.states.state_revision(tileset.id());
+        let events = fixture.events.len();
+
+        drop(held_first);
+        assert_eq!(fixture.owner.retention().bytes, 8);
+        fixture.reconcile();
+        assert_eq!(fixture.states.state_revision(tileset.id()), state);
+        assert_eq!(fixture.events.len(), events);
+    }
+
+    #[test]
+    fn requesting_an_identical_source_retries_capacity_after_a_retained_generation_is_released() {
+        let limits = TileSetAssetLimits::new(
+            ItemLimit::ONE,
+            ItemLimit::new(2).unwrap(),
+            ByteLimit::new(16).unwrap(),
+        );
+        let mut fixture = Fixture::new(limits);
+        let tileset = fixture.request("a.png");
+        fixture.reconcile();
+        let held_first = fixture
+            .tilesets
+            .get(tileset)
+            .unwrap()
+            .image_content()
+            .unwrap()
+            .clone();
+
+        fixture.publish_image(fixture.image_a.clone(), 2, 1, 20);
+        fixture.reconcile();
+        assert_eq!(
+            fixture.owner.retention(),
+            TileSetRetentionSnapshot {
+                images: 2,
+                bytes: 16
+            }
+        );
+        fixture.publish_image(fixture.image_a.clone(), 2, 1, 30);
+        fixture.reconcile();
+        assert_eq!(
+            fixture.owner.error(tileset),
+            Some(&TileSetAssetError::RetentionCapacity)
+        );
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .image_content()
+                .unwrap()
+                .pixels(),
+            &[20; 8]
+        );
+
+        drop(held_first);
+        assert_eq!(
+            fixture.owner.retention(),
+            TileSetRetentionSnapshot {
+                images: 1,
+                bytes: 8
+            }
+        );
+        assert_eq!(fixture.request("a.png"), tileset);
+        fixture.reconcile();
+        assert_eq!(fixture.owner.error(tileset), None);
+        assert_eq!(
+            fixture
+                .tilesets
+                .get(tileset)
+                .unwrap()
+                .image_content()
+                .unwrap()
+                .pixels(),
+            &[30; 8]
+        );
+        assert_eq!(
+            fixture.owner.retention(),
+            TileSetRetentionSnapshot {
+                images: 1,
+                bytes: 8
+            }
+        );
+    }
+}

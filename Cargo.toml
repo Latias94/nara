@@ -9,6 +9,7 @@ description = "An open-source game engine written in Rust."
 [workspace]
 resolver = "3"
 exclude = [
+    "examples/shared-viewport",
     "reference-game",
     "samples/collect-game",
     "samples/two-level-game",
@@ -25,31 +26,23 @@ members = [
     "crates/nara_editor_core",
     "crates/nara_fs",
     "crates/nara_hierarchy",
-    "crates/nara_image",
     "crates/nara_identity",
     "crates/nara_input",
     "crates/nara_gameplay",
     "crates/nara_gilrs",
-    "crates/nara_material",
     "crates/nara_material_derive",
     "crates/nara_project",
     "crates/nara_rapier2d",
     "crates/nara_reflect",
     "crates/nara_reflect_derive",
     "crates/nara_render",
-    "crates/nara_render_wgpu",
     "crates/nara_scene",
-    "crates/nara_sprite",
-    "crates/nara_sprite_animation",
-    "crates/nara_sprite_render",
-    "crates/nara_tilemap",
     "crates/nara_tasks",
     "crates/nara_text",
     "crates/nara_transform",
     "crates/nara_ui_kernel",
     "crates/nara_ui_widgets",
     "crates/nara_ui",
-    "crates/nara_ui_render",
     "crates/nara_window",
     "crates/nara_winit",
 ]
@@ -70,31 +63,23 @@ nara_ecs = { path = "crates/nara_ecs" }
 nara_ecs_derive = { path = "crates/nara_ecs_derive" }
 nara_fs = { path = "crates/nara_fs" }
 nara_hierarchy = { path = "crates/nara_hierarchy" }
-nara_image = { path = "crates/nara_image" }
 nara_identity = { path = "crates/nara_identity" }
 nara_input = { path = "crates/nara_input" }
 nara_gameplay = { path = "crates/nara_gameplay" }
 nara_gilrs = { path = "crates/nara_gilrs" }
-nara_material = { path = "crates/nara_material" }
 nara_material_derive = { path = "crates/nara_material_derive" }
 nara_project = { path = "crates/nara_project" }
 nara_rapier2d = { path = "crates/nara_rapier2d" }
 nara_reflect = { path = "crates/nara_reflect" }
 nara_reflect_derive = { path = "crates/nara_reflect_derive" }
 nara_render = { path = "crates/nara_render" }
-nara_render_wgpu = { path = "crates/nara_render_wgpu" }
 nara_scene = { path = "crates/nara_scene" }
-nara_sprite = { path = "crates/nara_sprite" }
-nara_sprite_animation = { path = "crates/nara_sprite_animation" }
-nara_sprite_render = { path = "crates/nara_sprite_render" }
-nara_tilemap = { path = "crates/nara_tilemap" }
 nara_tasks = { path = "crates/nara_tasks" }
 nara_text = { path = "crates/nara_text" }
 nara_transform = { path = "crates/nara_transform" }
 nara_ui_kernel = { path = "crates/nara_ui_kernel" }
 nara_ui_widgets = { path = "crates/nara_ui_widgets" }
 nara_ui = { path = "crates/nara_ui" }
-nara_ui_render = { path = "crates/nara_ui_render" }
 nara_window = { path = "crates/nara_window" }
 nara_winit = { path = "crates/nara_winit" }
 
@@ -156,23 +141,16 @@ nara_diagnostic = { workspace = true, optional = true, features = ["runtime"] }
 nara_ecs = { workspace = true, optional = true }
 nara_fs = { workspace = true, optional = true }
 nara_hierarchy = { workspace = true, optional = true }
-nara_image = { workspace = true, optional = true, features = ["runtime"] }
 nara_identity = { workspace = true, optional = true, features = ["runtime"] }
 nara_input = { workspace = true, optional = true }
 nara_gameplay = { workspace = true, optional = true }
-nara_material = { workspace = true, optional = true }
 nara_project = { workspace = true, optional = true }
 nara_reflect = { workspace = true, optional = true }
 nara_render = { workspace = true, optional = true, features = ["runtime"] }
-nara_render_wgpu = { workspace = true, optional = true }
 nara_scene = { workspace = true, optional = true }
-nara_sprite = { workspace = true, optional = true }
-nara_sprite_render = { workspace = true, optional = true }
-nara_tilemap = { workspace = true, optional = true }
 nara_tasks = { workspace = true, optional = true }
 nara_transform = { workspace = true, optional = true }
 nara_ui = { workspace = true, optional = true }
-nara_ui_render = { workspace = true, optional = true, features = ["runtime"] }
 nara_window = { workspace = true, optional = true, features = ["runtime"] }
 nara_winit = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
@@ -237,18 +215,15 @@ runtime-window = ["runtime-core", "dep:nara_window"]
 runtime-2d = [
     "runtime-input",
     "runtime-window",
-    "dep:nara_image",
-    "dep:nara_material",
-    "nara_material/material",
     "dep:nara_render",
-    "dep:nara_sprite",
-    "dep:nara_tilemap",
+    "nara_render/image-runtime",
+    "nara_render/persistent",
+    "nara_render/sprites",
+    "nara_render/tiles",
 ]
 presentation-2d = [
     "runtime-2d",
-    "dep:nara_sprite_render",
-    "nara_image/render-prepare",
-    "nara_render_wgpu?/stock-sprite",
+    "nara_render/sprite-render",
 ]
 runtime-ui = [
     "runtime-input",
@@ -257,15 +232,12 @@ runtime-ui = [
 ]
 presentation-ui = [
     "runtime-ui",
-    "dep:nara_image",
     "dep:nara_render",
-    "dep:nara_ui_render",
-    "nara_image/render-prepare",
-    "nara_render_wgpu?/stock-ui",
+    "nara_render/hud-runtime",
 ]
 asset-watch = ["runtime-core", "dep:nara_asset_watch"]
 desktop-winit = ["runtime-input", "runtime-window", "dep:nara_winit"]
-render-wgpu = ["runtime-window", "dep:nara_render", "dep:nara_render_wgpu"]
+render-wgpu = ["runtime-window", "dep:nara_render", "nara_render/wgpu"]
 serde = [
     "dep:serde",
     "dep:serde_json",
@@ -273,18 +245,13 @@ serde = [
     "nara_core?/serde",
     "nara_diagnostic?/serde",
     "nara_ecs?/serde",
-    "nara_image?/serde",
     "nara_identity?/serde",
     "nara_input?/serde",
     "nara_gameplay?/serde",
-    "nara_material?/serde",
-    "nara_material?/persistent",
     "nara_reflect?/serde",
     "nara_transform?/serde",
     "nara_render?/serde",
     "nara_scene?/serde",
-    "nara_sprite?/serde",
-    "nara_tilemap?/serde",
     "nara_ui?/serde",
     "nara_window?/serde",
 ]

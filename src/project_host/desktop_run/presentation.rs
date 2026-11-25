@@ -9,14 +9,14 @@ use std::{
 
 use nara_app::{AppExit, AppRunError, RuntimeGeneration, RuntimeInstance, RuntimeState};
 use nara_ecs::World;
-use nara_render_wgpu::{
-    __private::{
-        WgpuPresentedFrameReceipt, WgpuRuntimeExchangeError, WgpuRuntimeResult,
-        cancel_runtime_frame, complete_runtime_frame, take_runtime_frame,
-    },
+use nara_render::gpu::{
     WgpuAdapterSummary, WgpuBackendTelemetryConfig, WgpuFrameCompletionSample,
     WgpuFrameCompletionStats, WgpuGpuResourceStats, WgpuRenderHost, WgpuRenderObservation,
     WgpuRenderProducer,
+    execution::{
+        WgpuPresentedFrameReceipt, WgpuRuntimeExchangeError, WgpuRuntimeResult,
+        cancel_runtime_frame, complete_runtime_frame, take_runtime_frame,
+    },
 };
 use nara_window::{WindowId, backend::BackendWindowHandles};
 use nara_winit::__private::{__WinitPresentationDriver, __WinitPresentationProgress};

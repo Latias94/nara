@@ -10,8 +10,8 @@ use nara_asset::{
     AssetStates, Assets, Handle, ImportedProductId, LoadState,
 };
 use nara_ecs::World;
-use nara_image::ImageAsset;
-use nara_material::{Material2dAsset, Material2dDomain, MaterialParameterValue};
+use nara_render::image::ImageAsset;
+use nara_render::material::{Material2dAsset, Material2dDomain, MaterialParameterValue};
 use nara_scene::advanced::SceneAssetReservations;
 
 use super::{

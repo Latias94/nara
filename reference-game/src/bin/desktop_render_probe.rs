@@ -23,8 +23,8 @@ use nara::{
         advanced::{RuntimeProbe, desktop_run_with_probe},
     },
     render::RenderFrame,
-    render_wgpu::{__private::presented_frame_this_transaction, WgpuRenderObservation},
-    sprite_render::__private::SpriteBatches,
+    render_wgpu::{WgpuRenderObservation, execution::presented_frame_this_transaction},
+    sprite_render::batching::SpriteBatches,
     ui_render::advanced::latest_presented_ui_observation,
     window::{
         Window, WindowId,

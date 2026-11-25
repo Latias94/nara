@@ -226,7 +226,7 @@ fn material_product_prepares_its_texture_and_records_its_raw_shader_input() {
     assert_eq!(snapshot.images()[0].path().as_str(), "assets/texture.png");
     assert_eq!(
         snapshot.images()[0].image().extent(),
-        nara_image::ImageExtent::new(1, 1),
+        nara_render::image::ImageExtent::new(1, 1),
     );
     assert_eq!(snapshot.images()[0].image().pixels().len(), 4);
     assert!(snapshot.scene_dependencies().is_empty());

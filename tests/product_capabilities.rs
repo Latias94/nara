@@ -61,7 +61,7 @@ fn server_bundle_stays_free_of_raw_client_resources() {
     {
         assert!(
             !app.world()
-                .contains_resource::<nara::render_wgpu::__private::WgpuRuntimeConnection>()
+                .contains_resource::<nara::render_wgpu::execution::WgpuRuntimeConnection>()
         );
         assert!(
             !app.world()
@@ -86,7 +86,7 @@ fn wgpu_bundle_installs_cpu_exchange_without_making_the_gpu_owner_a_resource() {
 
     assert!(
         app.world()
-            .contains_resource::<nara::render_wgpu::__private::WgpuRuntimeConnection>()
+            .contains_resource::<nara::render_wgpu::execution::WgpuRuntimeConnection>()
     );
     assert!(
         app.world()
@@ -141,22 +141,16 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
         [
             "runtime-input",
             "runtime-window",
-            "dep:nara_image",
-            "dep:nara_material",
-            "nara_material/material",
             "dep:nara_render",
-            "dep:nara_sprite",
-            "dep:nara_tilemap",
+            "nara_render/image-runtime",
+            "nara_render/persistent",
+            "nara_render/sprites",
+            "nara_render/tiles",
         ]
     );
     assert_eq!(
         feature_members(features, "presentation-2d"),
-        [
-            "runtime-2d",
-            "dep:nara_sprite_render",
-            "nara_image/render-prepare",
-            "nara_render_wgpu?/stock-sprite",
-        ]
+        ["runtime-2d", "nara_render/sprite-render"]
     );
     assert_eq!(
         feature_members(features, "runtime-ui"),
@@ -164,14 +158,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
     );
     assert_eq!(
         feature_members(features, "presentation-ui"),
-        [
-            "runtime-ui",
-            "dep:nara_image",
-            "dep:nara_render",
-            "dep:nara_ui_render",
-            "nara_image/render-prepare",
-            "nara_render_wgpu?/stock-ui",
-        ]
+        ["runtime-ui", "dep:nara_render", "nara_render/hud-runtime"]
     );
     assert_eq!(
         feature_members(features, "serde"),
@@ -182,18 +169,13 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
             "nara_core?/serde",
             "nara_diagnostic?/serde",
             "nara_ecs?/serde",
-            "nara_image?/serde",
             "nara_identity?/serde",
             "nara_input?/serde",
             "nara_gameplay?/serde",
-            "nara_material?/serde",
-            "nara_material?/persistent",
             "nara_reflect?/serde",
             "nara_transform?/serde",
             "nara_render?/serde",
             "nara_scene?/serde",
-            "nara_sprite?/serde",
-            "nara_tilemap?/serde",
             "nara_ui?/serde",
             "nara_window?/serde",
         ]
@@ -269,37 +251,25 @@ fn examples_and_optional_tests_declare_their_capability_ceiling() {
 
 #[test]
 fn wgpu_submitter_dependency_trees_are_isolated() {
-    let base = cargo_tree(&["--no-default-features", "--features", "render-wgpu"]);
-    assert_not_present(&base, "nara_image");
-    assert_not_present(&base, "nara_material");
-    assert_not_present(&base, "nara_sprite_render");
-    assert_not_present(&base, "nara_ui_render");
-
-    let content_with_backend = cargo_tree(&[
-        "--no-default-features",
-        "--features",
-        "runtime-2d,render-wgpu",
-    ]);
-    assert_not_present(&content_with_backend, "nara_sprite_render");
-
-    let sprites = cargo_tree(&[
-        "--no-default-features",
-        "--features",
-        "presentation-2d,render-wgpu",
-    ]);
-    assert_present(&sprites, "nara_sprite_render");
-    assert_not_present(&sprites, "nara_ui");
-    assert_not_present(&sprites, "nara_ui_render");
-
-    let ui = cargo_tree(&[
-        "--no-default-features",
-        "--features",
-        "presentation-ui,render-wgpu",
-    ]);
-    assert_present(&ui, "nara_ui_render");
-    assert_not_present(&ui, "nara_sprite");
-    assert_not_present(&ui, "nara_sprite_render");
-    assert_not_present(&ui, "nara_tilemap");
+    for (features, sprites, hud) in [
+        ("render-wgpu", false, false),
+        ("runtime-2d,render-wgpu", false, false),
+        ("presentation-2d,render-wgpu", true, false),
+        ("presentation-ui,render-wgpu", false, true),
+    ] {
+        let tree = cargo_tree(&["--no-default-features", "--features", features]);
+        let renderer = tree
+            .lines()
+            .find(|line| line.starts_with("nara_render "))
+            .unwrap();
+        let enabled = renderer.split_once('|').unwrap().1.trim_end_matches(" (*)");
+        let enabled: BTreeSet<_> = enabled.split(',').collect();
+        assert_eq!(enabled.contains("sprite-render"), sprites, "{renderer}");
+        assert_eq!(enabled.contains("hud-runtime"), hud, "{renderer}");
+        if !hud {
+            assert_not_present(&tree, "nara_ui");
+        }
+    }
 }
 
 #[test]
@@ -358,17 +328,7 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
         (
             "runtime-2d",
             vec!["--no-default-features", "--features", "runtime-2d"],
-            with_packages(
-                &local_runtime,
-                &[
-                    "nara_image",
-                    "nara_material",
-                    "nara_material_derive",
-                    "nara_render",
-                    "nara_sprite",
-                    "nara_tilemap",
-                ],
-            ),
+            with_packages(&local_runtime, &["nara_material_derive", "nara_render"]),
         ),
         (
             "runtime-ui",
@@ -376,7 +336,7 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             with_packages(
                 &local_runtime,
                 &[
-                    "nara_image",
+                    "nara_render",
                     "nara_text",
                     "nara_ui",
                     "nara_ui_kernel",
@@ -387,18 +347,7 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
         (
             "presentation-2d",
             vec!["--no-default-features", "--features", "presentation-2d"],
-            with_packages(
-                &local_runtime,
-                &[
-                    "nara_image",
-                    "nara_material",
-                    "nara_material_derive",
-                    "nara_render",
-                    "nara_sprite",
-                    "nara_sprite_render",
-                    "nara_tilemap",
-                ],
-            ),
+            with_packages(&local_runtime, &["nara_material_derive", "nara_render"]),
         ),
         (
             "presentation-ui",
@@ -406,12 +355,10 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             with_packages(
                 &local_runtime,
                 &[
-                    "nara_image",
                     "nara_render",
                     "nara_text",
                     "nara_ui",
                     "nara_ui_kernel",
-                    "nara_ui_render",
                     "nara_ui_widgets",
                 ],
             ),
@@ -431,7 +378,7 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             vec!["--no-default-features", "--features", "render-wgpu"],
             with_packages(
                 &runtime_core,
-                &["nara_render", "nara_render_wgpu", "nara_window"],
+                &["nara_material_derive", "nara_render", "nara_window"],
             ),
         ),
         (
@@ -441,18 +388,11 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
                 &local_runtime,
                 &[
                     "nara_asset_watch",
-                    "nara_image",
-                    "nara_material",
                     "nara_material_derive",
                     "nara_render",
-                    "nara_render_wgpu",
-                    "nara_sprite",
-                    "nara_sprite_render",
-                    "nara_tilemap",
                     "nara_text",
                     "nara_ui",
                     "nara_ui_kernel",
-                    "nara_ui_render",
                     "nara_ui_widgets",
                     "nara_winit",
                 ],
@@ -531,7 +471,7 @@ fn feature_members<'a>(features: &'a serde_json::Map<String, Value>, name: &str)
 fn cargo_tree(arguments: &[&str]) -> String {
     let mut command = Command::new(env!("CARGO"));
     command.args([
-        "tree", "-p", "nara", "-e", "normal", "--locked", "--prefix", "none",
+        "tree", "-p", "nara", "-e", "normal", "--locked", "--prefix", "none", "--format", "{p}|{f}",
     ]);
     let output = command
         .args(arguments)

@@ -181,9 +181,10 @@ pub(crate) fn product_recipe(
 ) -> Result<ProductRecipe, crate::ProductRecipeError> {
     use crate::runtime_content::RuntimeCodecDefinitionId;
 
-    let recipe = ProductRecipe::new().add_runtime_image_codec::<nara_image::ImageRuntimeCodec>(
-        RuntimeCodecDefinitionId::new("nara.starter.desktop-2d.image", 1),
-    )?;
+    let recipe = ProductRecipe::new()
+        .add_runtime_image_codec::<nara_render::image::ImageRuntimeCodec>(
+            RuntimeCodecDefinitionId::new("nara.starter.desktop-2d.image", 1),
+        )?;
     if starter.has_action_map() {
         recipe.add_runtime_asset_codec::<nara_input::ActionMapDomain, nara_input::ActionMapRuntimeCodec>(
             RuntimeCodecDefinitionId::new("nara.starter.desktop-2d.actions", 1),

@@ -2,6 +2,23 @@
 //!
 //! The `runtime` feature enables App/ECS extraction, frame packets and plugins.
 
+#[cfg(feature = "animation")]
+pub mod animation;
+#[cfg(feature = "wgpu")]
+pub mod gpu;
+#[cfg(feature = "hud")]
+pub mod hud;
+#[cfg(feature = "image")]
+pub mod image;
+#[cfg(feature = "material")]
+pub mod material;
+#[cfg(feature = "sprites")]
+pub mod sprite;
+#[cfg(feature = "sprite-render")]
+pub mod sprite_render;
+#[cfg(feature = "tiles")]
+pub mod tilemap;
+
 mod canvas;
 mod error;
 #[cfg(feature = "runtime")]

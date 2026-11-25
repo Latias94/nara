@@ -38,7 +38,7 @@ use nara::{
     },
     tilemap::{TileSetDomain, TileSetRuntimeCodec, TileSetSource, TileSetSourceFileLimits},
 };
-use nara_sprite_animation::SpriteAnimationDomain;
+use nara_render::animation::SpriteAnimationDomain;
 use two_level_game::{
     delivery::{ControllerBackend, PlayerSelection, RuntimeKind},
     input::INPUT_PATH,

@@ -30,11 +30,11 @@ use nara_reference_game::{
     WaveRunGeneration, WaveSnapshot, bundled_wave_commands,
 };
 use nara_render::RenderTarget;
-use nara_ui_kernel::UiPaintPrimitive;
-use nara_ui_render::{
+use nara_render::hud::{
     UiGlyphAtlasPageKey, UiPacketPrimitive, UiPacketRect, UiPaintPacketIdentity, UiPreparedImages,
     UiPresentationPlanner,
 };
+use nara_ui_kernel::UiPaintPrimitive;
 
 use super::project_content_fixture::{
     headless_wave_candidate_plan_and_root_with, headless_wave_candidate_plan_and_root_with_at,

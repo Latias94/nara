@@ -1,16 +1,18 @@
 use std::sync::Arc;
 
 use nara_ecs::{Resource, World};
+use nara_render::hud::presentation::UiAcceptedBackendPresentation;
+use nara_render::hud::{
+    UiBackendSubmissionIdentity, UiPaintPacket, UiPresentationBackendGeneration,
+};
 use nara_ui::{UiPresentationReceipt, advanced::UiFrame};
-use nara_ui_render::__private::UiAcceptedBackendPresentation;
-use nara_ui_render::{UiBackendSubmissionIdentity, UiPaintPacket, UiPresentationBackendGeneration};
 
 /// Immutable facts copied from the concrete WGPU transaction that submitted one UI packet.
 #[cfg(feature = "render-wgpu")]
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PresentedUiWgpuFacts {
-    submission: nara_render_wgpu::__private::WgpuSubmittedUiFacts,
+    submission: nara_render::gpu::execution::WgpuSubmittedUiFacts,
 }
 
 #[cfg(feature = "render-wgpu")]
@@ -157,12 +159,12 @@ pub(super) fn stage_presented_ui_observation(
     accepted: &UiAcceptedBackendPresentation,
 ) -> Result<StagedPresentedUiObservation, String> {
     #[cfg(feature = "render-wgpu")]
-    let wgpu = match _world.get_resource::<nara_render_wgpu::WgpuRenderObservation>() {
+    let wgpu = match _world.get_resource::<nara_render::gpu::WgpuRenderObservation>() {
         Some(observation)
             if accepted.backend_generation().backend_instance_id() == observation.instance_id()
                 && accepted.backend_generation().device_epoch() == observation.device_epoch() =>
         {
-            let submission = nara_render_wgpu::__private::submitted_ui_facts(
+            let submission = nara_render::gpu::execution::submitted_ui_facts(
                 observation,
                 accepted.identity(),
                 accepted.backend_generation(),

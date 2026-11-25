@@ -7,7 +7,7 @@ use nara_app::{
     RuntimeWorldAccessError,
 };
 use nara_ecs::{Resource, World};
-use nara_ui_render::__private::{UiPresentationPlannerClaim, presentation_planner_claim};
+use nara_render::hud::presentation::{UiPresentationPlannerClaim, presentation_planner_claim};
 
 use super::{UiPresentationAttemptLedger, commit_runtime_ui_presentations};
 
@@ -138,18 +138,18 @@ mod tests {
         HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
     };
     use nara_input::{InputPointerId, InputSeatId, InputWindowId};
-    use nara_ui::{
-        UiColor, UiNode, UiRoot, UiRuntimeKey, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform,
-        UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot, UiVisual,
-    };
-    use nara_ui_render::{
-        __private::{
+    use nara_render::hud::{
+        UiBackendSubmissionIdentity, UiPresentationBackendGeneration,
+        UiPresentationIntegrationError,
+        presentation::{
             UiBackendPresentationFrame, UiCompletedBackendOutcome, backend_outcome_receiver,
             bind_backend_submission_batch, commit_ui_backend_outcome,
             take_ui_backend_presentation_frame,
         },
-        UiBackendSubmissionIdentity, UiPresentationBackendGeneration,
-        UiPresentationIntegrationError,
+    };
+    use nara_ui::{
+        UiColor, UiNode, UiRoot, UiRuntimeKey, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform,
+        UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot, UiVisual,
     };
 
     use super::*;

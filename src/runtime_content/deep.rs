@@ -16,28 +16,28 @@ use nara_diagnostic::{
     SafeSummary,
 };
 use nara_fs::ContentDigest;
-#[cfg(feature = "runtime-2d")]
-use nara_image::ImageDomain;
-#[cfg(feature = "runtime-2d")]
-use nara_material::{Material2dAsset, Material2dDeclaration, Material2dDomain};
 #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
 use nara_reflect::ComponentTypeId;
 #[cfg(feature = "runtime-2d")]
 use nara_reflect::{
     ComponentValueRef, asset_reference_decode_work_bytes, decode_asset_reference_value,
 };
-#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
-use nara_scene::SceneEntityId;
 #[cfg(feature = "runtime-2d")]
-use nara_sprite::{
+use nara_render::image::ImageDomain;
+#[cfg(feature = "runtime-2d")]
+use nara_render::material::{Material2dAsset, Material2dDeclaration, Material2dDomain};
+#[cfg(feature = "runtime-2d")]
+use nara_render::sprite::{
     SPRITE_COMPONENT_ID, SPRITE_IMAGE_FIELD_ID, SPRITE_SCHEMA_OWNER_ID,
     persisted_sprite_image_value,
 };
 #[cfg(feature = "runtime-2d")]
-use nara_tilemap::{
+use nara_render::tilemap::{
     TileSetDescriptor, TileSetDomain, TilemapMembershipRequirement,
     prepare_persisted_tilemap_membership, tilemap_membership_work_bytes,
 };
+#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+use nara_scene::SceneEntityId;
 #[cfg(all(feature = "runtime-2d", feature = "runtime-ui"))]
 use nara_ui::__private::persisted_ui_visual_image_value;
 #[cfg(feature = "runtime-ui")]
@@ -547,7 +547,7 @@ mod tests {
 
     use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
     use nara_reflect::{ComponentValue, encode_asset_reference_value};
-    use nara_tilemap::{
+    use nara_render::tilemap::{
         TilemapMembershipRequirement, prepare_persisted_tilemap_membership,
         tilemap_membership_work_bytes,
     };

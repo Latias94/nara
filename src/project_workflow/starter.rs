@@ -393,9 +393,9 @@ const AUTHORING_SCHEMA_PROVIDERS: [ComponentSchemaProviderDefinition; 6] = [
     nara_scene::SCENE_COMPONENTS_SCHEMA_PROVIDER,
     nara_transform::TRANSFORM_SCHEMA_PROVIDER,
     nara_render::RENDER_SCHEMA_PROVIDER,
-    nara_sprite::SPRITE_SCHEMA_PROVIDER,
-    nara_tilemap::TILEMAP_SCHEMA_PROVIDER,
-    nara_material::MATERIAL_SCHEMA_PROVIDER,
+    nara_render::sprite::SPRITE_SCHEMA_PROVIDER,
+    nara_render::tilemap::TILEMAP_SCHEMA_PROVIDER,
+    nara_render::material::MATERIAL_SCHEMA_PROVIDER,
 ];
 
 pub(super) fn build_creation_plan(

@@ -1,12 +1,12 @@
 use std::{fmt, sync::Arc};
 
 use nara_ecs::Resource;
-use nara_ui::{UiSurfaceId, advanced::UiFrame};
-use nara_ui_render::{
+use nara_render::hud::{
     UiBackendSubmissionIdentity, UiPaintPacket, UiPresentationAttemptId,
     UiPresentationBackendGeneration, UiPresentationCapabilityGeneration, UiPresentationEpoch,
     UiPresentationRuntimeGeneration,
 };
+use nara_ui::{UiSurfaceId, advanced::UiFrame};
 
 const MAX_ACTIVE_PRESENTATION_ATTEMPTS: usize = 16;
 const INITIAL_CAPABILITY_GENERATION: u64 = 1;
@@ -30,7 +30,7 @@ pub(super) enum UiPresentationAttempt {
     Deferred {
         identity: UiBackendSubmissionIdentity,
         ui: nara_ui::__private::UiDeferredPresentationAuthority,
-        backend: nara_ui_render::__private::UiDeferredBackendPresentation,
+        backend: nara_render::hud::presentation::UiDeferredBackendPresentation,
     },
 }
 
@@ -48,7 +48,7 @@ impl UiPresentationAttempt {
     pub(super) fn deferred(
         identity: UiBackendSubmissionIdentity,
         ui: nara_ui::__private::UiDeferredPresentationAuthority,
-        backend: nara_ui_render::__private::UiDeferredBackendPresentation,
+        backend: nara_render::hud::presentation::UiDeferredBackendPresentation,
     ) -> Self {
         Self::Deferred {
             identity,
@@ -249,12 +249,12 @@ impl UiPresentationAttemptLedger {
         &mut self,
         identity: UiBackendSubmissionIdentity,
         ui: nara_ui::__private::UiDeferredPresentationAuthority,
-        backend: nara_ui_render::__private::UiDeferredBackendPresentation,
+        backend: nara_render::hud::presentation::UiDeferredBackendPresentation,
     ) -> Result<
         (),
         UiPresentationAttemptInsertError<(
             nara_ui::__private::UiDeferredPresentationAuthority,
-            nara_ui_render::__private::UiDeferredBackendPresentation,
+            nara_render::hud::presentation::UiDeferredBackendPresentation,
         )>,
     > {
         if let Err(error) = self.preflight_insert(identity) {
@@ -303,7 +303,7 @@ impl UiPresentationAttemptLedger {
     ) -> Option<(
         UiBackendSubmissionIdentity,
         nara_ui::__private::UiDeferredPresentationAuthority,
-        nara_ui_render::__private::UiDeferredBackendPresentation,
+        nara_render::hud::presentation::UiDeferredBackendPresentation,
     )> {
         let index = self
             .active

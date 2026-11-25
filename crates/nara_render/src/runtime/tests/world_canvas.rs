@@ -1,12 +1,12 @@
 use super::*;
 use nara_ecs::bevy_ecs::system::SystemState;
 
-use crate::{__private::prepare_world_presentation, WorldInputMapping2d};
+use crate::{WorldInputMapping2d, runtime_integration::prepare_world_presentation};
 
 fn publish(
     world: &mut World,
     packet: &RenderFramePacket,
-) -> crate::__private::WorldPresentationGuard {
+) -> crate::runtime_integration::WorldPresentationGuard {
     let (presented, guard) =
         prepare_world_presentation(packet, WorldInputMapping2d::identity()).unwrap();
     guard.mark_presented();
@@ -422,7 +422,7 @@ fn capture_retains_the_configuration_that_produced_the_views() {
         .spawn((Camera2d::default(), Transform2d::default()));
     app.add_systems(
         CoreStage::Extract,
-        change_canvas_after_extraction.after(__private::RenderExtractSet::Views),
+        change_canvas_after_extraction.after(runtime_integration::RenderExtractSet::Views),
     )
     .unwrap();
     let mut windows = app.world_mut().unwrap().query::<&Window>();

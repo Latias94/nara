@@ -8,13 +8,13 @@ use std::{
 
 use nara_ecs::World;
 use nara_render::RenderTarget;
-use nara_ui::UiPresentationReceipt;
-use nara_ui_kernel::UiFrame;
-use nara_ui_render::{
+use nara_render::hud::{
     UiPreparedImages, UiPresentationAttemptId, UiPresentationBackendGeneration,
     UiPresentationCapabilityGeneration, UiPresentationEpoch, UiPresentationOutcome,
     UiPresentationPlanner, UiPresentationRuntimeGeneration,
 };
+use nara_ui::UiPresentationReceipt;
+use nara_ui_kernel::UiFrame;
 use nara_window::WindowId;
 
 static NEXT_BACKEND_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
@@ -51,7 +51,7 @@ impl HeadlessInteractionPresenter {
             .ok_or("the interaction lab requires a non-zero presentation epoch")?;
         let authority =
             nara_ui::__private::prepare_ui_presentation(world, packet.frame(), presentation_epoch)?;
-        let prepared = nara_ui_render::__private::prepare_backend_submission(
+        let prepared = nara_render::hud::presentation::prepare_backend_submission(
             UiPresentationAttemptId::new(
                 NEXT_PRESENTATION_ATTEMPT_ID.fetch_add(1, Ordering::Relaxed),
             )
@@ -63,13 +63,13 @@ impl HeadlessInteractionPresenter {
             UiPresentationCapabilityGeneration::new(1)
                 .expect("the interaction lab uses a non-zero capability generation"),
         );
-        let mut outcomes = nara_ui_render::__private::UiPresentationOutcomes::default();
+        let mut outcomes = nara_render::hud::presentation::UiPresentationOutcomes::default();
         let permit = outcomes
             .reserve_backend(std::slice::from_ref(&prepared))?
             .pop()
             .expect("one prepared attempt reserves one backend outcome");
-        let envelope = nara_ui_render::__private::UiBackendSubmission::pair(prepared, permit)?;
-        let mut submitted = nara_ui_render::__private::bind_backend_submission_batch(
+        let envelope = nara_render::hud::presentation::UiBackendSubmission::pair(prepared, permit)?;
+        let mut submitted = nara_render::hud::presentation::bind_backend_submission_batch(
             vec![envelope],
             self.backend_generation,
         )
@@ -87,14 +87,14 @@ impl HeadlessInteractionPresenter {
 
         let mut backend_world = World::new();
         backend_world.insert_resource(outcomes);
-        let mut published = nara_ui_render::drain_ui_presentation_outcomes(&mut backend_world)?;
+        let mut published = nara_render::hud::drain_ui_presentation_outcomes(&mut backend_world)?;
         let UiPresentationOutcome::Presented(commit) = published
             .pop()
             .expect("one backend submission publishes one exact outcome")
         else {
             unreachable!("accepted backend evidence always produces Presented")
         };
-        let accepted = nara_ui_render::__private::discard_ui_backend_acceptance(commit);
+        let accepted = nara_render::hud::presentation::discard_ui_backend_acceptance(commit);
         if !Arc::ptr_eq(accepted.packet(), &packet) {
             nara_ui::__private::supersede_prepared_ui_presentation(world, authority);
             return Err("backend acceptance did not retain the exact planned packet".into());

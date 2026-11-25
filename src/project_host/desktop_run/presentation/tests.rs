@@ -45,12 +45,12 @@ fn render_runtime() -> RuntimeInstance {
         nara_transform::TransformPlugin,
         nara_render::RenderComponentsPlugin,
         nara_render::RenderPlugin::default(),
-        nara_render_wgpu::WgpuCapturePlugin,
-        nara_render_wgpu::WgpuStockCapturePlugin,
-        nara_render_wgpu::WgpuStockPolicyPlugin,
+        nara_render::gpu::WgpuCapturePlugin,
+        nara_render::gpu::WgpuStockCapturePlugin,
+        nara_render::gpu::WgpuStockPolicyPlugin,
     ))
     .unwrap();
-    app.add_plugins(nara_render_wgpu::WgpuWindowPresentationPlugin)
+    app.add_plugins(nara_render::gpu::WgpuWindowPresentationPlugin)
         .unwrap();
     app.insert_resource(FrameStatsPort).unwrap();
     app.__register_driver_port::<FrameStatsPort>(|world, replacement| {

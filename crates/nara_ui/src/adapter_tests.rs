@@ -178,7 +178,7 @@ fn ui_app() -> UiTestApp {
 fn custom_font_uses_ordinary_adapter_and_configured_presentation() {
     fn compile_packets(world: &mut World) {
         let frames = crate::ui_candidate_frames(world).unwrap();
-        let stats = nara_ui_render::compile_ui_paint_packets(world, &frames).unwrap();
+        let stats = nara_render::hud::compile_ui_paint_packets(world, &frames).unwrap();
         assert_eq!(stats.admitted_packets, 1);
         assert_eq!(stats.rejected_packets, 0);
     }
@@ -199,12 +199,12 @@ fn custom_font_uses_ordinary_adapter_and_configured_presentation() {
         crate::plugin(bundled.clone()).key()
     );
     assert_eq!(
-        nara_ui_render::plugin(font.clone()).key(),
-        nara_ui_render::plugin(font.clone()).key()
+        nara_render::hud::plugin(font.clone()).key(),
+        nara_render::hud::plugin(font.clone()).key()
     );
     assert_ne!(
-        nara_ui_render::plugin(font.clone()).key(),
-        nara_ui_render::plugin(bundled).key()
+        nara_render::hud::plugin(font.clone()).key(),
+        nara_render::hud::plugin(bundled).key()
     );
 
     let mut configuration = App::new();
@@ -217,10 +217,10 @@ fn custom_font_uses_ordinary_adapter_and_configured_presentation() {
             (
                 nara_render::RenderComponentsPlugin,
                 nara_render::RenderPlugin::default(),
-                nara_image::ImagePreparePlugin,
+                nara_render::image::ImagePreparePlugin,
             ),
             crate::plugin(font.clone()),
-            nara_ui_render::plugin(font.clone()),
+            nara_render::hud::plugin(font.clone()),
         ))
         .unwrap();
     configuration
@@ -241,9 +241,9 @@ fn custom_font_uses_ordinary_adapter_and_configured_presentation() {
             .unwrap();
     }
     install_test_surface(world);
-    nara_ui_render::__private::replace_ui_presentation_routes(
+    nara_render::hud::presentation::replace_ui_presentation_routes(
         world,
-        [nara_ui_render::__private::UiPresentationRoute::new(
+        [nara_render::hud::presentation::UiPresentationRoute::new(
             surface_id(),
             nara_window::WindowId::PRIMARY,
         )
@@ -286,7 +286,7 @@ fn custom_font_uses_ordinary_adapter_and_configured_presentation() {
             .iter()
             .all(|glyph| glyph.key().face_id() == font.id())
     );
-    let (packets, _) = nara_ui_render::__private::snapshot_ui_paint_packets(app.world())
+    let (packets, _) = nara_render::hud::presentation::snapshot_ui_paint_packets(app.world())
         .unwrap()
         .into_parts();
     assert_eq!(packets.len(), 1);
@@ -635,7 +635,7 @@ fn image_brush_preserves_complete_products_without_source_database() {
         assert_eq!(references[0].asset_ref(), &reference);
         let mut server = nara_asset::AssetServer::new();
         let handle = server
-            .reserve_product::<nara_image::ImageAsset>(reference.as_product().unwrap())
+            .reserve_product::<nara_render::image::ImageAsset>(reference.as_product().unwrap())
             .unwrap();
         let mut context = ComponentDecodeContext::with_asset_server(&mut server);
         let prepared = snapshot
@@ -648,7 +648,7 @@ fn image_brush_preserves_complete_products_without_source_database() {
         assert_eq!(
             world.get::<UiVisual>(entity).unwrap().kernel().background(),
             Some(&UiBrush::Image {
-                image: nara_ui_kernel::UiImageId::external::<nara_image::ImageAsset>(
+                image: nara_ui_kernel::UiImageId::external::<nara_render::image::ImageAsset>(
                     handle.id().raw()
                 ),
                 tint: UiColor::rgba(1.0, 1.0, 1.0, 1.0),
@@ -855,7 +855,7 @@ fn opaque_named_and_external_image_ids_never_acquire_a_persistent_binding() {
     let mut server = nara_asset::AssetServer::new();
     let source = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
     let handle = server
-        .reserve_record::<nara_image::ImageAsset>(&AssetRecord::new(
+        .reserve_record::<nara_render::image::ImageAsset>(&AssetRecord::new(
             source,
             AssetSourcePath::new("textures/panel.png").unwrap(),
             AssetSourceKind::Image,
@@ -866,7 +866,7 @@ fn opaque_named_and_external_image_ids_never_acquire_a_persistent_binding() {
         nara_ui_kernel::UiImageId::new("textures/panel.png").unwrap(),
         nara_ui_kernel::UiImageId::new("product:2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f/primary")
             .unwrap(),
-        nara_ui_kernel::UiImageId::external::<nara_image::ImageAsset>(handle.id().raw()),
+        nara_ui_kernel::UiImageId::external::<nara_render::image::ImageAsset>(handle.id().raw()),
     ] {
         let entity = world
             .spawn(UiVisual::image(image, UiColor::rgba(1.0, 1.0, 1.0, 1.0)))
@@ -884,7 +884,7 @@ fn image_asset_binding_survives_shape_changes_and_clears_on_background_replaceme
     let id = ComponentTypeId::new("nara.ui.UiVisual");
     let mut server = nara_asset::AssetServer::new();
     let handle = server
-        .reserve::<nara_image::ImageAsset>("game/art/panel.png")
+        .reserve::<nara_render::image::ImageAsset>("game/art/panel.png")
         .unwrap();
     let scope = AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
     let tint = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
@@ -907,7 +907,9 @@ fn image_asset_binding_survives_shape_changes_and_clears_on_background_replaceme
         Some(AssetRef::path("panel.png").unwrap())
     );
     let replaced = bound.clone().with_background(UiBrush::Image {
-        image: nara_ui_kernel::UiImageId::external::<nara_image::ImageAsset>(handle.id().raw()),
+        image: nara_ui_kernel::UiImageId::external::<nara_render::image::ImageAsset>(
+            handle.id().raw(),
+        ),
         tint,
     });
     assert_eq!(replaced.image_handle(), None);

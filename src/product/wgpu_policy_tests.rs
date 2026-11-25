@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use nara_app::{PluginPlan, PluginPlanError, PluginSlotPresence};
 use nara_render::RenderFramePacket;
-use nara_render_wgpu::{
+use nara_render::gpu::{
     WGPU_STOCK_CAPTURE_PLUGIN_ID, WGPU_STOCK_POLICY_PLUGIN_ID, WgpuPolicyBindingContext,
     WgpuPolicyBuildContext, WgpuPolicyDefinition, WgpuPolicyInstallation, WgpuPolicyProgram,
     WgpuRenderPolicy, WgpuRenderProgramError, WgpuStockBindings, WgpuStockCapture,
@@ -25,7 +25,7 @@ impl WgpuRenderPolicy for TestPolicy {
     type Capture = TestCapture;
     type Bindings = WgpuStockBindings;
 
-    fn device_requirements(&self) -> nara_render_wgpu::WgpuDeviceRequirements {
+    fn device_requirements(&self) -> nara_render::gpu::WgpuDeviceRequirements {
         self.stock.device_requirements()
     }
 

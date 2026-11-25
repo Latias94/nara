@@ -61,14 +61,14 @@ pub(super) fn synchronize_runtime_ui_routes(world: &mut World) -> Result<(), Str
     let routes = slots
         .into_iter()
         .map(|slot| {
-            nara_ui_render::__private::UiPresentationRoute::new(
+            nara_render::hud::presentation::UiPresentationRoute::new(
                 slot.surface_id(),
                 nara_window::WindowId::new(slot.endpoint().window().get()),
             )
             .map_err(|error| error.to_string())
         })
         .collect::<Result<Vec<_>, _>>()?;
-    nara_ui_render::__private::replace_ui_presentation_routes(world, routes)
+    nara_render::hud::presentation::replace_ui_presentation_routes(world, routes)
         .map_err(|error| error.to_string())
 }
 

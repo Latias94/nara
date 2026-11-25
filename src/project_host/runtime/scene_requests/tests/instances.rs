@@ -721,11 +721,11 @@ fn resource_counts(world: &World) -> ResourceCounts {
         asset_states: world.get_resource::<AssetStates>().map(AssetStates::len),
         #[cfg(feature = "runtime-2d")]
         images: world
-            .get_resource::<Assets<nara_image::ImageAsset>>()
+            .get_resource::<Assets<nara_render::image::ImageAsset>>()
             .map(Assets::len),
         #[cfg(feature = "runtime-2d")]
         tilesets: world
-            .get_resource::<Assets<nara_tilemap::TileSet>>()
+            .get_resource::<Assets<nara_render::tilemap::TileSet>>()
             .map(Assets::len),
     }
 }

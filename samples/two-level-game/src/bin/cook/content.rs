@@ -14,7 +14,7 @@ use nara::{
     reflect::ComponentTypeId,
     runtime_content::RuntimeContentTarget,
 };
-use nara_sprite_animation::SpriteAnimationDomain;
+use nara_render::animation::SpriteAnimationDomain;
 use two_level_game::{delivery::ControllerBackend, sound_bank::SoundBankDomain};
 
 const COOKER_BYTES: u64 = 512 * 1024 * 1024;

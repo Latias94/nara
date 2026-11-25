@@ -20,7 +20,7 @@ use nara::{
     scene::{SourceDocumentKind, SourceDocumentOrigin},
     tilemap::TileSetRuntimeCodec,
 };
-use nara_sprite_animation::SpriteAnimationCodec;
+use nara_render::animation::SpriteAnimationCodec;
 use serde_json::{Value, json};
 use two_level_game::{
     animation::{atlas_product, clips_product},

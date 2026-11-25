@@ -1,5 +1,5 @@
 use nara::{
-    render_wgpu::{__private::presented_frame_this_transaction, WgpuRenderObservation},
+    render_wgpu::{WgpuRenderObservation, execution::presented_frame_this_transaction},
     ui_render::advanced::PresentedUiObservation,
 };
 
@@ -19,6 +19,8 @@ pub(crate) fn submitted_product_frame(observation: &WgpuRenderObservation) -> bo
         && transaction.surface_acquires() == 1
         && transaction.queue_submissions() == 1
         && transaction.presents() == 1
+        && transaction.direct_surface_presents() == 1
+        && transaction.native_work().encoded_texture_copy_commands == 0
 }
 
 /// Requires actual glyph draws and bound textures in the same accepted UI presentation. Cache

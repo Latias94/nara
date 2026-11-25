@@ -366,7 +366,7 @@ fn capture_tileset_publication(
 
 #[cfg(feature = "presentation-2d")]
 fn capture_rendered_tiles(
-    batches: Res<nara::sprite_render::__private::SpriteBatches>,
+    batches: Res<nara::sprite_render::batching::SpriteBatches>,
     stats: Res<nara::sprite_render::SpriteRenderStats>,
     mut outcome: ResMut<TileSetPublicationOutcome>,
 ) {

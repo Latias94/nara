@@ -9,8 +9,8 @@ use nara::project_host::{
     DesktopRunOutcome,
 };
 use nara::render_wgpu::{
-    __private::{WgpuPresentedFrameReceipt, WgpuRuntimeConnection},
     WgpuRenderObservation,
+    execution::{WgpuPresentedFrameReceipt, WgpuRuntimeConnection},
 };
 use nara::window::backend::{BackendWindowHandles, WindowTargetPhase};
 use nara::{advanced_prelude::*, backend_prelude::*};

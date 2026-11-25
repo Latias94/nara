@@ -15,20 +15,20 @@ use nara_asset::{
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_fs::ContentDigest;
-use nara_image::{
-    ImageAsset, ImageColorSpace, ImageDomain, ImageExtent, ImageFormat, ImageRuntimeCodec,
-};
-use nara_material::{
-    AlphaMode2d, Material2dDeclaration, Material2dDomain, Material2dRecord, Material2dRuntimeCodec,
-    Material2dSource, MaterialParameterKind, MaterialParameterLayout, MaterialParameterValue,
-    MaterialTextureDeclaration, MaterialUniformField,
-};
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
     ComponentTypeId, ComponentValueShape, PersistentComponentSchemaOwnerId,
     encode_asset_reference_value,
+};
+use nara_render::image::{
+    ImageAsset, ImageColorSpace, ImageDomain, ImageExtent, ImageFormat, ImageRuntimeCodec,
+};
+use nara_render::material::{
+    AlphaMode2d, Material2dDeclaration, Material2dDomain, Material2dRecord, Material2dRuntimeCodec,
+    Material2dSource, MaterialParameterKind, MaterialParameterLayout, MaterialParameterValue,
+    MaterialTextureDeclaration, MaterialUniformField,
 };
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentRecord, SceneDocument, SceneEntityId,

@@ -6,11 +6,13 @@ use nara_asset::AssetProductRef;
 #[cfg(feature = "runtime-2d")]
 use nara_asset::{AssetId, AssetMutationBaseline, AssetSourceKind, ImportedProductId};
 #[cfg(feature = "runtime-2d")]
-use nara_image::ImageAsset;
+use nara_render::image::ImageAsset;
 #[cfg(feature = "runtime-2d")]
-use nara_material::{Material2dAsset, Material2dDomain};
+use nara_render::material::{Material2dAsset, Material2dDomain};
 #[cfg(feature = "runtime-2d")]
-use nara_tilemap::{TileSet, TileSetContentReceipt, TileSetDescriptor, TileSetPublicationInput};
+use nara_render::tilemap::{
+    TileSet, TileSetContentReceipt, TileSetDescriptor, TileSetPublicationInput,
+};
 
 use super::*;
 #[cfg(feature = "runtime-2d")]

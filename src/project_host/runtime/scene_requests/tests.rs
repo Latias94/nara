@@ -666,9 +666,12 @@ fn with_context_world_and_startup(
             #[cfg(feature = "runtime-2d")]
             nara_render::RenderComponentsPlugin,
             #[cfg(feature = "runtime-2d")]
-            (nara_sprite::SpritePlugin, nara_material::Material2dPlugin),
+            (
+                nara_render::sprite::SpritePlugin,
+                nara_render::material::Material2dPlugin,
+            ),
             #[cfg(feature = "runtime-2d")]
-            nara_tilemap::TilemapPlugin,
+            nara_render::tilemap::TilemapPlugin,
             nara_scene::SceneComponentBindingsPlugin::new(
                 schema.bindings().data_owners().iter().cloned(),
             ),

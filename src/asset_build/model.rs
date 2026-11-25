@@ -198,8 +198,8 @@ pub enum ArtifactBuildError {
     Panicked,
     Domain(Box<nara_diagnostic::Diagnostic>),
     Codec(nara_asset::AssetRuntimeError),
-    Image(nara_image::ImageImportError),
-    Cook(nara_image::ImageCookError),
+    Image(nara_render::image::ImageImportError),
+    Cook(nara_render::image::ImageCookError),
     DeterminismConflict,
     /// The index name may have changed; the receipt remains available for recovery observation.
     Uncertain {

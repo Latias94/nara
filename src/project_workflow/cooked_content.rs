@@ -17,14 +17,14 @@ use nara_asset::{
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_fs::ContentDigest;
-use nara_image::{ImageAsset, ImageDomain, ImageRuntimeCodec};
 use nara_input::{ActionMapAsset, ActionMapDomain, ActionMapRuntimeCodec};
 use nara_project::RuntimeConfiguration;
 use nara_reflect::__private::{
     AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
 };
+use nara_render::image::{ImageAsset, ImageDomain, ImageRuntimeCodec};
+use nara_render::tilemap::{TileSetDescriptor, TileSetDomain, TileSetRuntimeCodec};
 use nara_scene::{CompiledSceneCandidate, RuntimeSceneCandidate};
-use nara_tilemap::{TileSetDescriptor, TileSetDomain, TileSetRuntimeCodec};
 
 use crate::{
     ProductRecipe,
@@ -570,7 +570,7 @@ impl CookedContentBuilder {
     /// source loading, publication or native preparation.
     pub fn add_material(
         &mut self,
-        material: &nara_material::Material2dAsset,
+        material: &nara_render::material::Material2dAsset,
     ) -> Result<(), CookedContentError> {
         let mut dependencies = [(material.product(), AssetReferenceDemand::Immediate); 8];
         let mut count = 0;
@@ -590,7 +590,7 @@ impl CookedContentBuilder {
             *slot = (*product, AssetReferenceDemand::Immediate);
             count += 1;
         }
-        self.add_cpu::<nara_material::Material2dDomain, nara_material::Material2dRuntimeCodec>(
+        self.add_cpu::<nara_render::material::Material2dDomain, nara_render::material::Material2dRuntimeCodec>(
             material.product(),
             material,
             &dependencies[..count],

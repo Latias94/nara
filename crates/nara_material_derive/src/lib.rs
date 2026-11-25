@@ -16,7 +16,7 @@ use syn::{Data, DeriveInput, Error, Fields, LitStr, Path, Result, parse_macro_in
 /// field types are `f32`, `i32`, `u32` and `glam::Vec2`, `Vec3`, `Vec4`; aliases
 /// work through the sealed field codec. Arrays are not WGSL vectors.
 ///
-/// A renamed direct `nara_material` or root `nara` dependency is detected. Use
+/// A renamed direct `nara_render` or root `nara` dependency is detected. Use
 /// `#[material(crate = "engine::material")]` for an explicit facade path, or
 /// `#[material(crate = "materials")]` for a direct material crate. The path
 /// must expose material `__macro_support`. Unquoted paths are accepted too.
@@ -217,7 +217,7 @@ fn support_path(explicit: Option<Path>) -> Result<Path> {
     if let Some(path) = explicit {
         return Ok(parse_quote!(#path::__macro_support));
     }
-    for package in ["nara_material", "nara"] {
+    for package in ["nara_render", "nara"] {
         let root: Path = match crate_name(package) {
             Ok(FoundCrate::Itself)
                 if std::env::var("CARGO_CRATE_NAME").as_deref() == Ok(package) =>
@@ -234,15 +234,11 @@ fn support_path(explicit: Option<Path>) -> Result<Path> {
             }
             Err(_) => continue,
         };
-        return Ok(if package == "nara_material" {
-            parse_quote!(#root::__macro_support)
-        } else {
-            parse_quote!(#root::material::__macro_support)
-        });
+        return Ok(parse_quote!(#root::material::__macro_support));
     }
     Err(Error::new(
         Span::call_site(),
-        "MaterialParameters requires a direct nara_material or nara dependency; use #[material(crate = \"path\")] to override it",
+        "MaterialParameters requires a direct nara_render or nara dependency; use #[material(crate = \"path\")] to override it",
     ))
 }
 

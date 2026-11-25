@@ -42,11 +42,11 @@ use nara_fs::{
 };
 use nara_gameplay::{GameplayCommandPlugin, GameplayCommandQueue};
 use nara_identity::{EntityLookup, WorldIdentityDomain};
-use nara_image::{ImageAsset, ImageImportSettings};
 use nara_reflect::{
     AuthoringSchemaBundle, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue,
 };
+use nara_render::image::{ImageAsset, ImageImportSettings};
 use nara_scene::{CompiledSceneDocument, SceneComponentRecord, SceneDocument, SceneEntityRecord};
 use nara_tasks::{
     TASK_PLUGIN_ID, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest,
@@ -2329,7 +2329,7 @@ requested = ["runtime-2d"]
         drop(manifest);
         let request = project_runtime_plugins(&candidate);
         let request = if disable_tilemap {
-            request.disable::<nara_tilemap::TilemapPlugin>()
+            request.disable::<nara_render::tilemap::TilemapPlugin>()
         } else {
             request
         };
@@ -2430,7 +2430,7 @@ requested = ["runtime-2d"]
         .unwrap();
         let reduced_plan = resolve_runtime_plan(
             &candidate,
-            project_runtime_plugins(&candidate).disable::<nara_tilemap::TilemapPlugin>(),
+            project_runtime_plugins(&candidate).disable::<nara_render::tilemap::TilemapPlugin>(),
             built_in_schema_providers(),
         )
         .unwrap();

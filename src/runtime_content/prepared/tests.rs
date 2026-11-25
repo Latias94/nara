@@ -15,8 +15,6 @@ use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 use nara_fs::{ContentDigest, RelativePath};
 use nara_identity::SceneEntityId;
-#[cfg(feature = "runtime-2d")]
-use nara_image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec};
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
@@ -24,6 +22,8 @@ use nara_reflect::{
     ComponentTypeId, ComponentValue, ComponentValueShape, PersistentComponentSchemaOwnerId,
     encode_asset_reference_value,
 };
+#[cfg(feature = "runtime-2d")]
+use nara_render::image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec};
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentRecord, SceneDocument,
     SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,

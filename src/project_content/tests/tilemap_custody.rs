@@ -4,10 +4,10 @@ use nara_asset::{AssetPathScope, AssetServer};
 use nara_core::{Color, Vec2};
 use nara_ecs::World;
 use nara_reflect::{ComponentEncodeContext, ComponentRegistrySnapshot};
-use nara_scene::CompiledSceneDocument;
-use nara_tilemap::{
+use nara_render::tilemap::{
     TileAtlasLayout, TileCell, TileCoord, TileIndex, TileSet, TileSetSource, Tilemap,
 };
+use nara_scene::CompiledSceneDocument;
 
 use crate::project_content::ProjectContentBudgetSnapshot;
 
@@ -82,10 +82,13 @@ fn assert_tilemaps(
             panic!("the original Tilemap codec must emit a cell list");
         };
         assert_eq!(cells.len(), 4_096);
-        nara_tilemap::validate_persisted_tilemap_membership(component.value(), |reference| {
-            assert_eq!(reference, &AssetRef::path("terrain.tileset.ron").unwrap());
-            Some(atlas)
-        })
+        nara_render::tilemap::validate_persisted_tilemap_membership(
+            component.value(),
+            |reference| {
+                assert_eq!(reference, &AssetRef::path("terrain.tileset.ron").unwrap());
+                Some(atlas)
+            },
+        )
         .unwrap();
     }
 }
@@ -164,7 +167,7 @@ fn large_root_bound_tilemaps_release_original_documents_and_budget_at_their_last
                     AssetPath::new("unused.png").unwrap(),
                     AssetSourceKind::Image,
                 ),
-                nara_image::ImageImportSettings::default(),
+                nara_render::image::ImageImportSettings::default(),
             )
             .to_json_string()
             .unwrap(),

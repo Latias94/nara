@@ -11,7 +11,7 @@ use nara_asset::{
 };
 use nara_core::ByteLimit;
 #[cfg(feature = "project-tooling")]
-use nara_material::{Material2dAsset, Material2dDomain};
+use nara_render::material::{Material2dAsset, Material2dDomain};
 
 pub(super) use crate::project_assets::{CollectionStorage, ErasedCollection};
 use crate::project_assets::{DomainCollection, validate_product_membership};

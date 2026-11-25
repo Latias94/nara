@@ -8,7 +8,7 @@ use nara_asset::{
     AssetRef, AssetServer, AssetSlotRevision, AssetSourceKind, AssetStateRevision, AssetStates,
     Assets, Handle, ImportedProductId, LoadState,
 };
-use nara_image::ImageAsset;
+use nara_render::image::ImageAsset;
 use nara_scene::advanced::SceneAssetReservations;
 
 use super::super::{HostFault, single_error};

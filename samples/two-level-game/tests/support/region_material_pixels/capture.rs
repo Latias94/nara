@@ -16,7 +16,7 @@ use nara::{
     },
     scene::SceneEntitySource,
     sprite::Sprite,
-    sprite_render::__private::{
+    sprite_render::batching::{
         ExtractedSpriteKind, ExtractedSprites, QueuedSpriteItems, SpriteBatchKind, SpriteBatches,
         SpriteInstance,
     },

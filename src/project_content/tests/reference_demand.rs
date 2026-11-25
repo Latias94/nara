@@ -143,7 +143,7 @@ fn write_image(project: &LazyContentProject, name: &str, stable: &str) {
                 AssetPath::new(name).unwrap(),
                 AssetSourceKind::Image,
             ),
-            nara_image::ImageImportSettings::default(),
+            nara_render::image::ImageImportSettings::default(),
         )
         .to_json_string()
         .unwrap(),

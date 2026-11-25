@@ -8,11 +8,11 @@ use nara_asset::{
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_fs::ContentDigest;
 use nara_identity::{EntityLookup, SceneEntityId, WorldIdentityDomain};
-use nara_image::{
-    ImageAsset, ImageColorSpace, ImageDomain, ImageExtent, ImageFormat, ImageRuntimeCodec,
-};
 use nara_project::{ProductCapability, ProjectPath, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{ComponentTypeId, ComponentValue, encode_asset_reference_value};
+use nara_render::image::{
+    ImageAsset, ImageColorSpace, ImageDomain, ImageExtent, ImageFormat, ImageRuntimeCodec,
+};
 use nara_scene::{
     RuntimeSceneDocumentCandidate, RuntimeSceneLimits, SourceDocumentKey, SourceDocumentKind,
 };
@@ -457,7 +457,7 @@ fn processed_start_installs_native_values_and_original_request_context_without_f
         };
         assert_eq!(
             world
-                .get::<nara_sprite::Sprite>(entity)
+                .get::<nara_render::sprite::Sprite>(entity)
                 .unwrap()
                 .material
                 .image,

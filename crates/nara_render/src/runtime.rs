@@ -37,7 +37,7 @@ use nara_transform::Transform2d;
 use nara_window::{PrimaryWindowId, Window, WindowId};
 
 #[doc(hidden)]
-pub mod __private {
+pub mod runtime_integration {
     pub use crate::frame::build_window_overlay_frame_packet;
     pub use crate::world_pointer::{
         PresentedWorldFrame, WorldPresentationGuard, WorldPresentationRevoker,
@@ -420,7 +420,7 @@ impl Plugin for RenderPlugin {
             CoreStage::Extract,
             extract_views
                 .after(nara_transform::__private::TransformSet::Present)
-                .in_set(__private::RenderExtractSet::Views),
+                .in_set(runtime_integration::RenderExtractSet::Views),
         )?;
         app.add_systems(CoreStage::Render, begin_render_frame)?;
         Ok(())
@@ -1610,7 +1610,7 @@ mod tests {
             CoreStage::Extract,
             spawn_camera_after_spatial_cut
                 .after(nara_transform::__private::TransformSet::Present)
-                .before(__private::RenderExtractSet::Views),
+                .before(runtime_integration::RenderExtractSet::Views),
         )
         .unwrap();
 

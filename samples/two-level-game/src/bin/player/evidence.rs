@@ -19,7 +19,7 @@ use nara::{
     scene::{SourceDocumentKind, SourceDocumentOrigin},
     sprite::{Sprite, SpriteAnchor},
 };
-use nara_sprite_animation::{SpriteAnimationDomain, SpriteAnimationSet};
+use nara_render::animation::{SpriteAnimationDomain, SpriteAnimationSet};
 use serde_json::{Value, json};
 use two_level_game::{
     CollisionBox, GamePhase, GameSnapshot, Scenario,

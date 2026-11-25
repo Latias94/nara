@@ -1,6 +1,6 @@
 use super::*;
 use nara_input::SemanticActions;
-use nara_ui_render::{UiPacketPrimitive, UiPreparedImages, UiPresentationPlanner};
+use nara_render::hud::{UiPacketPrimitive, UiPreparedImages, UiPresentationPlanner};
 
 fn test_root(world: &mut World, layer: UiLayer, key: &str) -> Entity {
     world

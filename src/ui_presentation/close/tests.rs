@@ -13,16 +13,16 @@ use nara_input::{
     InputPresentedRoute, InputRouteGeneration, InputSeatId, InputSlotGeneration, InputSurfaceId,
     InputTimeline, InputWindowId,
 };
-use nara_ui::{
-    UiColor, UiNode, UiRoot, UiRuntimeKey, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform,
-    UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot, UiVisual,
-};
-use nara_ui_render::__private::{
+use nara_render::hud::presentation::{
     UiBackendPresentationFrame, UiBackendSubmission, UiCompletedBackendOutcome,
     UiPresentationOutcomes, bind_backend_submission_batch, commit_ui_backend_outcome,
     take_ui_backend_presentation_frame,
 };
-use nara_ui_render::{UiPresentationBackendGeneration, UiPresentationIntegrationError};
+use nara_render::hud::{UiPresentationBackendGeneration, UiPresentationIntegrationError};
+use nara_ui::{
+    UiColor, UiNode, UiRoot, UiRuntimeKey, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform,
+    UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot, UiVisual,
+};
 
 use super::*;
 use crate::ui_presentation::UiPresentationBridgeStats;
@@ -118,9 +118,9 @@ fn apply_fixture(
                 .next()
                 .unwrap()
                 .identity();
-            let _ = nara_ui_render::__private::abort_ui_planned_packet(
+            let _ = nara_render::hud::presentation::abort_ui_planned_packet(
                 world,
-                nara_ui_render::__private::submitted_attempt(identity),
+                nara_render::hud::presentation::submitted_attempt(identity),
             );
             CloseFixtureOutput::Done
         }
@@ -429,7 +429,7 @@ fn logical_close_waits_for_the_real_in_flight_permit_after_cross_frame_capture()
             .identity(),
         identity,
     );
-    let (planned, _) = nara_ui_render::__private::snapshot_ui_paint_packets(runtime.world())
+    let (planned, _) = nara_render::hud::presentation::snapshot_ui_paint_packets(runtime.world())
         .unwrap()
         .into_parts();
     assert!(
@@ -642,7 +642,7 @@ fn logical_close_waits_for_a_held_candidate_after_real_window_hide_and_route_ret
             .unwrap()
             .is_empty()
     );
-    let (planned, _) = nara_ui_render::__private::snapshot_ui_paint_packets(runtime.world())
+    let (planned, _) = nara_render::hud::presentation::snapshot_ui_paint_packets(runtime.world())
         .unwrap()
         .into_parts();
     assert!(planned.is_empty());
@@ -679,7 +679,7 @@ fn logical_close_aborts_original_ui_input_authority_after_its_target_plan_has_go
         apply(&mut runtime, CloseFixtureInput::RetirePlan),
         CloseFixtureOutput::Done
     ));
-    let (planned, _) = nara_ui_render::__private::snapshot_ui_paint_packets(runtime.world())
+    let (planned, _) = nara_render::hud::presentation::snapshot_ui_paint_packets(runtime.world())
         .unwrap()
         .into_parts();
     assert!(planned.is_empty());

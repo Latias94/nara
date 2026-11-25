@@ -26,13 +26,13 @@ const READY_PUBLICATION_POLL_INTERVAL: Duration = Duration::from_millis(2);
 #[derive(Clone)]
 pub struct DesktopPresentationVerificationReceipt {
     startup_content_closure: StartupContentClosureReceipt,
-    presented_frame: nara_render_wgpu::__private::WgpuPresentedFrameReceipt,
+    presented_frame: nara_render::gpu::execution::WgpuPresentedFrameReceipt,
 }
 
 impl DesktopPresentationVerificationReceipt {
     pub(in crate::project_host) const fn new(
         startup_content_closure: StartupContentClosureReceipt,
-        presented_frame: nara_render_wgpu::__private::WgpuPresentedFrameReceipt,
+        presented_frame: nara_render::gpu::execution::WgpuPresentedFrameReceipt,
     ) -> Self {
         Self {
             startup_content_closure,
@@ -102,7 +102,7 @@ impl DesktopFirstPresentVerification {
     pub(in crate::project_host) fn observe(
         &self,
         runtime_generation: RuntimeGeneration,
-        presented: Option<nara_render_wgpu::__private::WgpuPresentedFrameReceipt>,
+        presented: Option<nara_render::gpu::execution::WgpuPresentedFrameReceipt>,
         now: Instant,
     ) -> DesktopFirstPresentProgress {
         let exit = match advance(&self.shared, runtime_generation, presented, now) {
@@ -200,7 +200,7 @@ pub(in crate::project_host) enum DesktopFirstPresentOutcome {
     Unarmed,
     Awaiting,
     Publishing,
-    Accepted(nara_render_wgpu::__private::WgpuPresentedFrameReceipt),
+    Accepted(nara_render::gpu::execution::WgpuPresentedFrameReceipt),
     TimedOut,
     Failed(DesktopFirstPresentFailure),
 }
@@ -221,10 +221,10 @@ enum DesktopFirstPresentState {
         behavior: DesktopFirstPresentBehavior,
     },
     Publishing {
-        presented: nara_render_wgpu::__private::WgpuPresentedFrameReceipt,
+        presented: nara_render::gpu::execution::WgpuPresentedFrameReceipt,
         publication: ProductSupervisedDesktopReadyPublication,
     },
-    Accepted(nara_render_wgpu::__private::WgpuPresentedFrameReceipt),
+    Accepted(nara_render::gpu::execution::WgpuPresentedFrameReceipt),
     TimedOut,
     Failed(DesktopFirstPresentFailure),
     Transitioning,
@@ -279,7 +279,7 @@ fn first_present_decision<T>(
 fn advance(
     shared: &Arc<Mutex<DesktopFirstPresentState>>,
     runtime_generation: RuntimeGeneration,
-    presented: Option<nara_render_wgpu::__private::WgpuPresentedFrameReceipt>,
+    presented: Option<nara_render::gpu::execution::WgpuPresentedFrameReceipt>,
     now: Instant,
 ) -> DesktopFirstPresentAction {
     let mut state = lock(shared);

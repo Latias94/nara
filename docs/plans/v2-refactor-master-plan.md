@@ -133,6 +133,49 @@ for zero transient texture or buffer creation, zero full-screen copies, and zero
 waits. Verify direct swapchain rendering in a standalone Winit game with no Open-GPUI dependency.
 Qualify the macOS and Linux behaviors on their native platforms before claiming parity.
 
+### Phase 2 verification
+
+The renderer consolidation reduced the Nara workspace from 38 to 30 packages. Open-GPUI's
+platform consolidation reduced its workspace from 28 to 24 packages. Both use WGPU 30.0.0 at
+`cddb2f5d80dc0009b2ef6767635140cacf90a007`, including the independent shared-viewport workspace.
+Using the Phase 1 counting rules, Nara project Rust source moved from 827,547 to 830,883 lines,
+and Open-GPUI project Rust source moved from 678,381 to 668,470 lines. The workspaces contain
+6 and 10,496 lines of Rust fixtures, respectively.
+
+On Windows 11 with a GeForce RTX 4090 and DX12, the release shared-viewport example presented
+animated sprites and 480 tile cells in two peer native windows. A two-second sample on a 144 Hz
+display recorded 284 viewport submissions at 141.8 FPS and zero Inspector submissions. The viewport
+replayed the same GPUI scene after each image update. The native smoke also verified resize,
+paused refresh, and shared-queue completion. A resource-pressure run reproduced a deferred
+texture allocation and verified that the viewport keeps its previous image and resumes after
+resize. [Example and measurement procedure](../../examples/shared-viewport/README.md)
+
+PIX exported 12 warmed-up Mode A frames with zero in-frame texture or buffer creations and zero
+texture copies in the application commands. The symbolized release timing trace recorded zero
+DX12 surface-acquisition wait stacks. Forcing WGPU's `Wait` option produced four such stacks on
+the same executable. The default trace recorded two driver-internal wait samples, one under
+command recording and one under present. The reason for each wait remains unresolved within the
+driver.
+
+Windows manual testing exercised Microsoft Pinyin composition and candidate commit, and a viewport
+move from 150% to 125% DPI updated its physical render extent. During later automated retesting,
+Windows deactivated the secondary outputs just after temporary extension, including with no demo
+running. Win32 DPI readback changed for both windows, and the viewport resumed presenting at the
+primary monitor's scale. A sustained final-build mixed-DPI drag remains to be repeated on a stable
+extended desktop.
+
+The standalone Winit reference game passed six desktop tests and presented its first playable
+frame in a real Windows window. Its stock scene and HUD drew into the same swapchain image with
+one submission. A separate six-frame PIX capture recorded zero texture-to-texture copies and two
+glyph uploads. The standalone dependency tree contains no Open-GPUI packages.
+
+Both locked Windows workspaces passed all-feature, all-target checks. Nara passed 1,059 renderer
+tests and 11 targeted native GPU tests, and its portable Wasm core compiled. The Open-GPUI Linux
+feature matrix and 212 tests passed on WSL2. Six additional native X11/Wayland tests passed with
+isolated Xvfb and Weston displays and Mesa llvmpipe. The macOS platform passed the Apple Silicon
+all-feature, all-target cross-check. Native AppKit and hardware Linux results remain separate
+qualifications.
+
 ## Phase 3 — Rebuild the core and project workflow
 
 **Entry.** Phase 2 passes and RFC-2 defines the public runtime and project API.

@@ -1,0 +1,41 @@
+[package]
+name = "nara-shared-viewport"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[dependencies]
+nara_render = { path = "../../crates/nara_render", features = ["wgpu", "sprite-render"] }
+anyhow = "1"
+env_logger = "0.11"
+nara_app = { path = "../../crates/nara_app" }
+nara_asset = { path = "../../crates/nara_asset" }
+nara_core = { path = "../../crates/nara_core" }
+nara_ecs = { path = "../../crates/nara_ecs" }
+nara_hierarchy = { path = "../../crates/nara_hierarchy" }
+nara_reflect = { path = "../../crates/nara_reflect" }
+nara_transform = { path = "../../crates/nara_transform" }
+nara_window = { path = "../../crates/nara_window", features = ["runtime"] }
+open_gpui = { package = "open-gpui", path = "../../../open-gpui/crates/gpui", default-features = false }
+open_gpui_platform = { package = "open-gpui-platform", path = "../../../open-gpui/crates/gpui_platform" }
+open_gpui_wgpu = { package = "open-gpui-wgpu", path = "../../../open-gpui/crates/gpui_wgpu" }
+parking_lot = "0.12"
+pollster = "0.4"
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+open_gpui_platform = { package = "open-gpui-platform", path = "../../../open-gpui/crates/gpui_platform", features = ["font-kit"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+open_gpui_platform = { package = "open-gpui-platform", path = "../../../open-gpui/crates/gpui_platform", features = ["wayland", "x11"] }
+
+[patch.crates-io]
+accesskit_windows = { path = "../../../open-gpui/third_party/accesskit_windows" }
+async-process = { git = "https://github.com/zed-industries/async-process.git", rev = "0b6d6713570af61806e1e5cb40e0f757cb93fd9d" }
+calloop = { git = "https://github.com/zed-industries/calloop", rev = "3759371fee14c40066d64777e2a36b6ffcc22590" }
+khronos-egl = { git = "https://github.com/zed-industries/khronos-egl", rev = "42214b36347b108fd9630ca6254b96dde59e04fe" }
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }

@@ -42,12 +42,8 @@ pub mod identity {
         spawn_identity_entity,
     };
 }
-#[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
-pub use nara_image as image;
 #[cfg(feature = "runtime-input")]
 pub use nara_input as input;
-#[cfg(feature = "runtime-2d")]
-pub use nara_material as material;
 #[cfg(feature = "runtime-core")]
 pub use nara_project as project;
 #[cfg(feature = "runtime-core")]
@@ -64,17 +60,21 @@ pub use nara_reflect::persistent_components;
 ))]
 pub use nara_render as render;
 #[cfg(feature = "render-wgpu")]
-pub use nara_render_wgpu as render_wgpu;
+pub use nara_render::gpu as render_wgpu;
+#[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
+pub use nara_render::image;
+#[cfg(feature = "runtime-2d")]
+pub use nara_render::material;
+#[cfg(feature = "runtime-2d")]
+pub use nara_render::sprite;
+#[cfg(feature = "presentation-2d")]
+pub use nara_render::sprite_render;
+#[cfg(feature = "runtime-2d")]
+pub use nara_render::tilemap;
 #[cfg(feature = "runtime-core")]
 pub use nara_scene as scene;
-#[cfg(feature = "runtime-2d")]
-pub use nara_sprite as sprite;
-#[cfg(feature = "presentation-2d")]
-pub use nara_sprite_render as sprite_render;
 #[cfg(feature = "runtime-core")]
 pub use nara_tasks as tasks;
-#[cfg(feature = "runtime-2d")]
-pub use nara_tilemap as tilemap;
 #[cfg(feature = "runtime-core")]
 pub use nara_transform as transform;
 #[cfg(feature = "runtime-ui")]
@@ -83,7 +83,7 @@ pub use nara_ui as ui;
 pub mod ui_render {
     //! Runtime UI presentation product surface.
 
-    pub use nara_ui_render::{
+    pub use nara_render::hud::{
         UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiRenderPlugin, plugin,
     };
 
@@ -92,7 +92,7 @@ pub mod ui_render {
         #[cfg(feature = "render-wgpu")]
         pub use crate::ui_presentation::PresentedUiWgpuFacts;
         pub use crate::ui_presentation::{PresentedUiObservation, latest_presented_ui_observation};
-        pub use nara_ui_render::advanced::*;
+        pub use nara_render::hud::advanced::*;
     }
 }
 #[cfg(feature = "runtime-window")]
@@ -257,18 +257,26 @@ pub mod prelude {
     };
 
     #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
-    pub use nara_image::{
+    pub use nara_render::image::{
         ImageAsset, ImageAssetCreateError, ImageColorSpace, ImageExtent, ImageFormat,
         ImageImportSettings, ImagePlugin,
     };
     #[cfg(feature = "runtime-2d")]
-    pub use nara_material::{
+    pub use nara_render::material::{
         AddressMode, AlphaMode2d, FilterMode, Material2dBinding, Material2dDeclaration,
         Material2dGeneration, Material2dLibrary, MaterialDeclarationError, MaterialParameterKind,
         MaterialParameterLayout, MaterialParameterValue, MaterialParameterValues,
         MaterialParameters, MaterialShaderArtifact, MaterialShaderError,
         MaterialTextureDeclaration, MaterialUniformField, MaterialUpdateError,
         PreparedMaterial2dUpdate, SamplerDescriptor,
+    };
+    #[cfg(feature = "runtime-2d")]
+    pub use nara_render::sprite::{
+        Sprite, SpriteAnchor, SpriteMaterial, SpritePlugin, TextureRegion,
+    };
+    #[cfg(feature = "runtime-2d")]
+    pub use nara_render::tilemap::{
+        TileCell, TileCoord, TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
     };
     #[cfg(any(
         feature = "runtime-2d",
@@ -283,12 +291,6 @@ pub mod prelude {
         feature = "render-wgpu"
     ))]
     pub use nara_render::{ClearColor, RenderPlugin, WorldCanvas, WorldPointer};
-    #[cfg(feature = "runtime-2d")]
-    pub use nara_sprite::{Sprite, SpriteAnchor, SpriteMaterial, SpritePlugin, TextureRegion};
-    #[cfg(feature = "runtime-2d")]
-    pub use nara_tilemap::{
-        TileCell, TileCoord, TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
-    };
     #[cfg(feature = "runtime-ui")]
     pub use nara_ui::{
         UiActionConsumerError, UiActionConsumerId, UiActionCursor, UiActionEvent, UiActionId,
@@ -410,7 +412,7 @@ pub mod advanced_prelude {
         AssetWatchRuntimeStatus, AssetWatchTranslator, AssetWatcher,
     };
     #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
-    pub use nara_image::{
+    pub use nara_render::image::{
         AdmittedImageImport, IMAGE_IMPORT_MEMORY_PLAN_VERSION, ImageBytesImportRequest,
         ImageFileImportRequest, ImageImportBudgetError, ImageImportBudgetHost,
         ImageImportBudgetSnapshot, ImageImportError, ImageImportLimitKind, ImageImportLimits,
@@ -421,7 +423,7 @@ pub mod advanced_prelude {
         ImageUnsupportedFeature,
     };
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-    pub use nara_image::{
+    pub use nara_render::image::{
         ImagePreparePlugin, ImagePrepareStats, PreparedImageResource, PreparedImageSnapshot,
         PreparedImages, image_content_hash, image_resource_key, prepare_images,
     };
@@ -462,7 +464,7 @@ pub mod backend_prelude {
     #[cfg(feature = "render-wgpu")]
     pub use crate::WgpuBackendPlugins;
     #[cfg(feature = "render-wgpu")]
-    pub use nara_render_wgpu::{
+    pub use nara_render::gpu::{
         SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus,
         WGPU_CAPTURE_PLUGIN_DECLARATION, WGPU_CAPTURE_PLUGIN_ID,
         WGPU_STOCK_CAPTURE_PLUGIN_DECLARATION, WGPU_STOCK_CAPTURE_PLUGIN_ID,
@@ -473,11 +475,11 @@ pub mod backend_prelude {
         WgpuWindowPresentationPlugin,
     };
     #[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
-    pub use nara_render_wgpu::{
+    pub use nara_render::gpu::{
         WGPU_STOCK_SPRITE_PLUGIN_DECLARATION, WGPU_STOCK_SPRITE_PLUGIN_ID, WgpuStockSpritePlugin,
     };
     #[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
-    pub use nara_render_wgpu::{
+    pub use nara_render::gpu::{
         WGPU_STOCK_UI_PLUGIN_DECLARATION, WGPU_STOCK_UI_PLUGIN_ID, WgpuStockUiPlugin,
     };
     #[cfg(feature = "runtime-window")]
@@ -901,11 +903,11 @@ mod tests {
 
         assert!(
             app.installed_plugins()
-                .any(|plugin| plugin.id == nara_ui_render::UI_RENDER_PLUGIN_ID)
+                .any(|plugin| plugin.id == nara_render::hud::UI_RENDER_PLUGIN_ID)
         );
         assert!(
             app.world()
-                .contains_resource::<nara_ui_render::__private::UiPresentationOutcomes>()
+                .contains_resource::<nara_render::hud::presentation::UiPresentationOutcomes>()
         );
     }
 
@@ -918,11 +920,11 @@ mod tests {
 
         assert!(
             app.installed_plugins()
-                .any(|plugin| plugin.id == nara_sprite_render::SPRITE_RENDER_PLUGIN_ID)
+                .any(|plugin| plugin.id == nara_render::sprite_render::SPRITE_RENDER_PLUGIN_ID)
         );
         assert!(
             app.world()
-                .contains_resource::<nara_sprite_render::__private::SpriteBatches>()
+                .contains_resource::<nara_render::sprite_render::batching::SpriteBatches>()
         );
     }
 }

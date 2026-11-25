@@ -2,11 +2,11 @@ use std::{collections::HashSet, sync::Arc};
 
 use nara_app::{App, CoreStage, Plugin, PluginError, RuntimeGeneration};
 use nara_ecs::{World, schedule::IntoScheduleConfigs};
-use nara_ui::{UiPresentationReceipt, UiSurfaceId};
-use nara_ui_render::{
+use nara_render::hud::{
     UiPaintPacket, UiPresentationAttemptId, UiPresentationAttemptIdentity,
     UiPresentationBackendFaultDomain, UiPresentationRuntimeGeneration,
 };
+use nara_ui::{UiPresentationReceipt, UiSurfaceId};
 
 mod attempts;
 mod close;
@@ -42,7 +42,7 @@ pub(crate) struct UiPresentationBridgePlugin;
 pub(crate) const UI_PRESENTATION_BRIDGE_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.ui-presentation-bridge");
 const UI_PRESENTATION_BRIDGE_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] =
-    &[nara_ui::UI_PLUGIN_ID, nara_ui_render::UI_RENDER_PLUGIN_ID];
+    &[nara_ui::UI_PLUGIN_ID, nara_render::hud::UI_RENDER_PLUGIN_ID];
 const UI_PRESENTATION_BRIDGE_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
     &[nara_app::PluginProductCapability::new("presentation-ui")];
 pub(crate) const UI_PRESENTATION_BRIDGE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
@@ -98,7 +98,7 @@ fn compile_runtime_ui_packets(world: &mut World) {
         .active()
         .any(UiPresentationAttempt::is_submitted)
     {
-        let Some(receiver) = nara_ui_render::__private::backend_outcome_receiver(world) else {
+        let Some(receiver) = nara_render::hud::presentation::backend_outcome_receiver(world) else {
             record_bridge_error(
                 world,
                 "the original backend outcome owner is unavailable".to_owned(),
@@ -135,7 +135,7 @@ fn compile_runtime_ui_packets(world: &mut World) {
             .collect::<Vec<_>>()
     });
     let frames_to_compile = compile_frames.as_deref().unwrap_or(&frames);
-    let stats = match nara_ui_render::compile_ui_paint_packets(world, frames_to_compile) {
+    let stats = match nara_render::hud::compile_ui_paint_packets(world, frames_to_compile) {
         Ok(stats) => stats,
         Err(error) => {
             abort_prepared_attempts(world, &submission_ids, AttemptTermination::Aborted);
@@ -143,7 +143,7 @@ fn compile_runtime_ui_packets(world: &mut World) {
             return;
         }
     };
-    let snapshots = match nara_ui_render::__private::snapshot_ui_paint_packets(world) {
+    let snapshots = match nara_render::hud::presentation::snapshot_ui_paint_packets(world) {
         Ok(snapshots) => snapshots,
         Err(error) => {
             abort_prepared_attempts(world, &submission_ids, AttemptTermination::Aborted);
@@ -178,14 +178,15 @@ fn compile_runtime_ui_packets(world: &mut World) {
                 submissions.push(submission);
             }
             Err(error) => {
-                let attempt = nara_ui_render::__private::presentation_attempt(&packet);
-                let _ = nara_ui_render::__private::abort_ui_planned_packet(world, attempt);
+                let attempt = nara_render::hud::presentation::presentation_attempt(&packet);
+                let _ = nara_render::hud::presentation::abort_ui_planned_packet(world, attempt);
                 record_bridge_error(world, error);
             }
         }
     }
 
-    match nara_ui_render::__private::replace_ui_backend_frame(world, draw_packets, submissions) {
+    match nara_render::hud::presentation::replace_ui_backend_frame(world, draw_packets, submissions)
+    {
         Ok(unconsumed) => {
             abort_unconsumed_backend_submissions(world, unconsumed);
             let transition_error = {
@@ -227,7 +228,7 @@ fn prepare_backend_attempt(
     world: &mut World,
     packet: Arc<UiPaintPacket>,
     runtime_generation: UiPresentationRuntimeGeneration,
-) -> Result<nara_ui_render::__private::UiPreparedBackendSubmission, String> {
+) -> Result<nara_render::hud::presentation::UiPreparedBackendSubmission, String> {
     let surface_id = packet.identity().surface_id();
     let reservation = world
         .resource_mut::<UiPresentationAttemptLedger>()
@@ -239,7 +240,7 @@ fn prepare_backend_attempt(
         reservation.presentation_epoch.get(),
     )
     .map_err(|error| error.to_string())?;
-    let submission = nara_ui_render::__private::prepare_backend_submission(
+    let submission = nara_render::hud::presentation::prepare_backend_submission(
         reservation.attempt_id,
         packet,
         reservation.presentation_epoch,
@@ -249,7 +250,7 @@ fn prepare_backend_attempt(
     let identity = submission.identity();
     if !identity.matches_receipt(authority.receipt()) {
         nara_ui::__private::abort_prepared_ui_presentation(world, authority);
-        let _ = nara_ui_render::__private::discard_prepared(submission);
+        let _ = nara_render::hud::presentation::discard_prepared(submission);
         return Err(format!(
             "UI presentation attempt {} does not match its pre-submit receipt authority",
             identity.admission_id().get()
@@ -262,7 +263,7 @@ fn prepare_backend_attempt(
     if let Some(insert_error) = insert_error {
         let (error, authority) = insert_error.into_parts();
         nara_ui::__private::abort_prepared_ui_presentation(world, authority);
-        let _ = nara_ui_render::__private::discard_prepared(submission);
+        let _ = nara_render::hud::presentation::discard_prepared(submission);
         return Err(error.to_string());
     }
     Ok(submission)
@@ -271,7 +272,7 @@ fn prepare_backend_attempt(
 fn prepare_deferred_retries(
     world: &mut World,
 ) -> (
-    Vec<nara_ui_render::__private::UiPreparedBackendSubmission>,
+    Vec<nara_render::hud::presentation::UiPreparedBackendSubmission>,
     Vec<UiPresentationAttemptId>,
     HashSet<UiSurfaceId>,
 ) {
@@ -299,13 +300,14 @@ fn prepare_deferred_retries(
         match nara_ui::__private::retry_deferred_ui_presentation(world, ui) {
             Ok(nara_ui::__private::UiDeferredPresentationRetry::Prepared(authority)) => {
                 let authority = *authority;
-                let submission = nara_ui_render::__private::retry_deferred(backend);
+                let submission = nara_render::hud::presentation::retry_deferred(backend);
                 if submission.identity() != identity {
-                    let discarded_attempt = nara_ui_render::__private::discard_prepared(submission);
+                    let discarded_attempt =
+                        nara_render::hud::presentation::discard_prepared(submission);
                     nara_ui::__private::abort_prepared_ui_presentation(world, authority);
-                    let _ = nara_ui_render::__private::abort_ui_planned_packet(
+                    let _ = nara_render::hud::presentation::abort_ui_planned_packet(
                         world,
-                        nara_ui_render::__private::submitted_attempt(identity),
+                        nara_render::hud::presentation::submitted_attempt(identity),
                     );
                     world
                         .resource_mut::<UiPresentationBridgeStats>()
@@ -327,12 +329,13 @@ fn prepare_deferred_retries(
                 if let Some(insert_error) = insert_error {
                     let (error, authority) = insert_error.into_parts();
                     nara_ui::__private::abort_prepared_ui_presentation(world, authority);
-                    let discarded_attempt = nara_ui_render::__private::discard_prepared(submission);
+                    let discarded_attempt =
+                        nara_render::hud::presentation::discard_prepared(submission);
                     world
                         .resource_mut::<UiPresentationBridgeStats>()
                         .aborted_packets += 1;
                     record_bridge_error(world, error.to_string());
-                    let _ = nara_ui_render::__private::abort_ui_planned_packet(
+                    let _ = nara_render::hud::presentation::abort_ui_planned_packet(
                         world,
                         discarded_attempt,
                     );
@@ -343,19 +346,19 @@ fn prepare_deferred_retries(
                 submissions.push(submission);
             }
             Ok(nara_ui::__private::UiDeferredPresentationRetry::Superseded) => {
-                let attempt = nara_ui_render::__private::discard_prepared(
-                    nara_ui_render::__private::retry_deferred(backend),
+                let attempt = nara_render::hud::presentation::discard_prepared(
+                    nara_render::hud::presentation::retry_deferred(backend),
                 );
-                let _ = nara_ui_render::__private::abort_ui_planned_packet(world, attempt);
+                let _ = nara_render::hud::presentation::abort_ui_planned_packet(world, attempt);
                 world
                     .resource_mut::<UiPresentationBridgeStats>()
                     .superseded_packets += 1;
             }
             Err(error) => {
-                let attempt = nara_ui_render::__private::discard_prepared(
-                    nara_ui_render::__private::retry_deferred(backend),
+                let attempt = nara_render::hud::presentation::discard_prepared(
+                    nara_render::hud::presentation::retry_deferred(backend),
                 );
-                let _ = nara_ui_render::__private::abort_ui_planned_packet(world, attempt);
+                let _ = nara_render::hud::presentation::abort_ui_planned_packet(world, attempt);
                 world
                     .resource_mut::<UiPresentationBridgeStats>()
                     .aborted_packets += 1;
@@ -368,7 +371,7 @@ fn prepare_deferred_retries(
 
 fn clear_unconsumed_backend_frame(world: &mut World) -> Result<(), String> {
     let unconsumed =
-        nara_ui_render::__private::replace_ui_backend_frame(world, Vec::new(), Vec::new())
+        nara_render::hud::presentation::replace_ui_backend_frame(world, Vec::new(), Vec::new())
             .map_err(|error| error.to_string())?;
     abort_unconsumed_backend_submissions(world, unconsumed);
     Ok(())
@@ -376,10 +379,10 @@ fn clear_unconsumed_backend_frame(world: &mut World) -> Result<(), String> {
 
 fn abort_unconsumed_backend_submissions(
     world: &mut World,
-    submissions: Vec<nara_ui_render::__private::UiPreparedBackendSubmission>,
+    submissions: Vec<nara_render::hud::presentation::UiPreparedBackendSubmission>,
 ) {
     for submission in submissions {
-        let attempt = nara_ui_render::__private::discard_prepared(submission);
+        let attempt = nara_render::hud::presentation::discard_prepared(submission);
         if let Some(attempt_id) = attempt.admission_id() {
             terminate_attempt(world, attempt_id, AttemptTermination::Aborted);
         }
@@ -425,12 +428,12 @@ pub(crate) fn commit_runtime_ui_presentations(world: &mut World) {
         return;
     };
     if ledger.is_closing()
-        || nara_ui_render::__private::backend_outcome_receiver(world)
+        || nara_render::hud::presentation::backend_outcome_receiver(world)
             .is_none_or(|receiver| receiver.is_closing())
     {
         return;
     }
-    let outcomes = match nara_ui_render::drain_ui_presentation_outcomes(world) {
+    let outcomes = match nara_render::hud::drain_ui_presentation_outcomes(world) {
         Ok(outcomes) => outcomes,
         Err(error) => {
             record_bridge_error(world, error.to_string());
@@ -440,22 +443,22 @@ pub(crate) fn commit_runtime_ui_presentations(world: &mut World) {
     let mut device_fault_generations = HashSet::new();
     for outcome in outcomes {
         match outcome {
-            nara_ui_render::UiPresentationOutcome::Presented(commit) => {
+            nara_render::hud::UiPresentationOutcome::Presented(commit) => {
                 commit_presented_attempt(world, commit);
             }
-            nara_ui_render::UiPresentationOutcome::ContentRejected { attempt, message } => {
+            nara_render::hud::UiPresentationOutcome::ContentRejected { attempt, message } => {
                 terminate_outcome_attempt(world, attempt, AttemptTermination::Aborted);
                 let mut bridge = world.resource_mut::<UiPresentationBridgeStats>();
                 bridge.content_rejections += 1;
                 bridge.last_error = Some(message);
             }
-            nara_ui_render::UiPresentationOutcome::Deferred { retry, message } => {
+            nara_render::hud::UiPresentationOutcome::Deferred { retry, message } => {
                 defer_submitted_attempt(world, retry);
                 let mut bridge = world.resource_mut::<UiPresentationBridgeStats>();
                 bridge.deferred_packets += 1;
                 bridge.last_error = Some(message);
             }
-            nara_ui_render::UiPresentationOutcome::BackendFault {
+            nara_render::hud::UiPresentationOutcome::BackendFault {
                 attempt,
                 backend_generation,
                 domain,
@@ -473,10 +476,10 @@ pub(crate) fn commit_runtime_ui_presentations(world: &mut World) {
                 bridge.backend_faults += 1;
                 bridge.last_error = Some(message);
             }
-            nara_ui_render::UiPresentationOutcome::Aborted { attempt, .. } => {
+            nara_render::hud::UiPresentationOutcome::Aborted { attempt, .. } => {
                 terminate_outcome_attempt(world, attempt, AttemptTermination::Aborted);
             }
-            nara_ui_render::UiPresentationOutcome::Superseded { attempt, .. } => {
+            nara_render::hud::UiPresentationOutcome::Superseded { attempt, .. } => {
                 terminate_outcome_attempt(world, attempt, AttemptTermination::Superseded);
             }
         }
@@ -489,14 +492,17 @@ pub(crate) fn commit_runtime_ui_presentations(world: &mut World) {
     }
 }
 
-fn commit_presented_attempt(world: &mut World, commit: nara_ui_render::OneShotPresentationCommit) {
+fn commit_presented_attempt(
+    world: &mut World,
+    commit: nara_render::hud::OneShotPresentationCommit,
+) {
     let identity = commit.submission();
     let attempt_id = identity.admission_id();
     let Some(authority) = world
         .resource_mut::<UiPresentationAttemptLedger>()
         .take_submitted(identity, commit.packet())
     else {
-        let _ = nara_ui_render::__private::discard_ui_backend_acceptance(commit);
+        let _ = nara_render::hud::presentation::discard_ui_backend_acceptance(commit);
         let mut bridge = world.resource_mut::<UiPresentationBridgeStats>();
         bridge.stale_backend_acceptances += 1;
         bridge.last_error = Some(format!(
@@ -505,7 +511,7 @@ fn commit_presented_attempt(world: &mut World, commit: nara_ui_render::OneShotPr
         ));
         return;
     };
-    let accepted = nara_ui_render::__private::commit_ui_backend_presentation(world, commit);
+    let accepted = nara_render::hud::presentation::commit_ui_backend_presentation(world, commit);
     let completion = nara_ui::__private::commit_prepared_ui_presentation(world, authority);
     let receipt = match completion {
         nara_ui::__private::UiPresentationCommit::Committed(receipt) => receipt,
@@ -536,15 +542,15 @@ fn commit_presented_attempt(world: &mut World, commit: nara_ui_render::OneShotPr
 
 fn defer_submitted_attempt(
     world: &mut World,
-    retry: nara_ui_render::__private::UiDeferredBackendPresentation,
+    retry: nara_render::hud::presentation::UiDeferredBackendPresentation,
 ) {
     let identity = retry.identity().submission();
     let Some(authority) = world
         .resource_mut::<UiPresentationAttemptLedger>()
         .take_submitted(identity, retry.packet())
     else {
-        let _ = nara_ui_render::__private::discard_prepared(
-            nara_ui_render::__private::retry_deferred(retry),
+        let _ = nara_render::hud::presentation::discard_prepared(
+            nara_render::hud::presentation::retry_deferred(retry),
         );
         return;
     };
@@ -556,10 +562,10 @@ fn defer_submitted_attempt(
     if let Some(insert_error) = insert_error {
         let (error, (deferred, retry)) = insert_error.into_parts();
         nara_ui::__private::supersede_deferred_ui_presentation(deferred);
-        let attempt = nara_ui_render::__private::discard_prepared(
-            nara_ui_render::__private::retry_deferred(retry),
+        let attempt = nara_render::hud::presentation::discard_prepared(
+            nara_render::hud::presentation::retry_deferred(retry),
         );
-        let _ = nara_ui_render::__private::abort_ui_planned_packet(world, attempt);
+        let _ = nara_render::hud::presentation::abort_ui_planned_packet(world, attempt);
         record_bridge_error(world, error.to_string());
     }
 }
@@ -585,12 +591,12 @@ fn terminate_attempt(
     else {
         return;
     };
-    let attempt_identity = nara_ui_render::__private::submitted_attempt(attempt.identity());
+    let attempt_identity = nara_render::hud::presentation::submitted_attempt(attempt.identity());
     match attempt {
         UiPresentationAttempt::Deferred { ui, backend, .. } => {
             nara_ui::__private::supersede_deferred_ui_presentation(ui);
-            let _ = nara_ui_render::__private::discard_prepared(
-                nara_ui_render::__private::retry_deferred(backend),
+            let _ = nara_render::hud::presentation::discard_prepared(
+                nara_render::hud::presentation::retry_deferred(backend),
             );
         }
         UiPresentationAttempt::Prepared { authority, .. }
@@ -603,7 +609,7 @@ fn terminate_attempt(
             }
         },
     }
-    let _ = nara_ui_render::__private::abort_ui_planned_packet(world, attempt_identity);
+    let _ = nara_render::hud::presentation::abort_ui_planned_packet(world, attempt_identity);
     if let Some(mut bridge) = world.get_resource_mut::<UiPresentationBridgeStats>() {
         match termination {
             AttemptTermination::Aborted => bridge.aborted_packets += 1,

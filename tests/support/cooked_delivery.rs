@@ -179,7 +179,7 @@ pub mod native {
         },
         tilemap::TileSetRuntimeCodec,
     };
-    use nara_sprite_animation::SpriteAnimationCodec;
+    use nara_render::animation::SpriteAnimationCodec;
     use serde::{Deserialize, Serialize};
     use serde_json::{Value, json};
     use two_level_game::{

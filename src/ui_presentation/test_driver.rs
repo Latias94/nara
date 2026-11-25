@@ -4,8 +4,8 @@ use nara_app::{
     __RuntimeDriverPort, RuntimeDriveError, RuntimeDriveOutcome, RuntimeInstance,
     RuntimeWorldAccessError,
 };
-use nara_ui_render::__private::{UiBackendPresentationFrame, UiCompletedBackendOutcome};
-use nara_ui_render::{UiPaintCompileStats, UiPresentationIntegrationError};
+use nara_render::hud::presentation::{UiBackendPresentationFrame, UiCompletedBackendOutcome};
+use nara_render::hud::{UiPaintCompileStats, UiPresentationIntegrationError};
 
 use super::*;
 
@@ -253,13 +253,13 @@ impl BridgeTestDriver {
                 BridgeTestResult::Retirement(nara_ui::retire_ui_surface(world, surface))
             }
             BridgeTestOperation::CompilePackets(frames) => BridgeTestResult::Compilation(
-                nara_ui_render::compile_ui_paint_packets(world, &frames),
+                nara_render::hud::compile_ui_paint_packets(world, &frames),
             ),
             BridgeTestOperation::TakeBackendFrame => BridgeTestResult::BackendFrame(
-                nara_ui_render::__private::take_ui_backend_presentation_frame(world),
+                nara_render::hud::presentation::take_ui_backend_presentation_frame(world),
             ),
             BridgeTestOperation::CommitBackendOutcome(outcome) => BridgeTestResult::BackendOutcome(
-                nara_ui_render::__private::commit_ui_backend_outcome(world, outcome),
+                nara_render::hud::presentation::commit_ui_backend_outcome(world, outcome),
             ),
             BridgeTestOperation::CommitPresentations => {
                 commit_runtime_ui_presentations(world);

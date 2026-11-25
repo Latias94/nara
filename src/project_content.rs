@@ -33,10 +33,6 @@ use nara_diagnostic::{
     PublicDiagnosticIdentifier, SafeSummary,
 };
 use nara_fs::{ContentDigest, DirectoryCapability, FsError, FsOperation, RelativePath};
-use nara_image::{
-    ImageAsset, ImageBytesImportRequest, ImageImportError, ImageImportMemoryPlan,
-    ImageImportSettings, ImageImporter, ImageImporterCreateError,
-};
 use nara_reflect::{
     __private::{
         AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
@@ -44,15 +40,19 @@ use nara_reflect::{
     ComponentValueMaterializationLimits, DeclaredAssetReference, DeclaredAssetReferenceError,
     SchemaCompositionFingerprint,
 };
+use nara_render::image::{
+    ImageAsset, ImageBytesImportRequest, ImageImportError, ImageImportMemoryPlan,
+    ImageImportSettings, ImageImporter, ImageImporterCreateError,
+};
+use nara_render::tilemap::{
+    TileSetSource, TileSetSourceFileLimits, TilemapMembershipError, tilemap_membership_work_bytes,
+    validate_persisted_tilemap_membership,
+};
 use nara_scene::{
     CompiledSceneCandidate, CompiledSceneComponent, CompiledSceneDocument, CompiledSceneEntity,
     PrefabDocument, PrefabDocumentCandidate, ResolvedPrefabSource, SceneComponentBindings,
     SceneComponentBindingsWitness, SceneDocument, SceneDocumentCandidate, SceneEntityProvenanceMap,
     SceneFormatError, SourceDocumentKey, SourceDocumentKind,
-};
-use nara_tilemap::{
-    TileSetSource, TileSetSourceFileLimits, TilemapMembershipError, tilemap_membership_work_bytes,
-    validate_persisted_tilemap_membership,
 };
 
 pub(crate) use crate::project_assets::ErasedCollection;
@@ -250,7 +250,7 @@ impl ProjectImageContent {
 
     /// Real source-import provenance captured by this source-only content owner.
     #[must_use]
-    pub fn source(&self) -> &nara_image::ImageSourceMetadata {
+    pub fn source(&self) -> &nara_render::image::ImageSourceMetadata {
         self.image
             .source()
             .expect("Project source content admits only imported Images")
@@ -4304,7 +4304,7 @@ mod tests {
                 AssetPath::new("data.png").unwrap(),
                 AssetSourceKind::Image,
             ),
-            nara_image::ImageImportSettings::default(),
+            nara_render::image::ImageImportSettings::default(),
         );
         fs::write(
             project.root.join("assets/data.png.meta"),
@@ -4360,7 +4360,7 @@ mod tests {
                     AssetPath::new("unused.png").unwrap(),
                     AssetSourceKind::Image,
                 ),
-                nara_image::ImageImportSettings::default(),
+                nara_render::image::ImageImportSettings::default(),
             )
             .to_json_string()
             .unwrap(),
@@ -5369,7 +5369,7 @@ mod tests {
             project.root.join(root.as_str()).join(alias.meta_path()),
             AssetMeta::new(
                 AssetMetaIdentity::new(stable_id, alias.clone(), AssetSourceKind::Image),
-                nara_image::ImageImportSettings::default(),
+                nara_render::image::ImageImportSettings::default(),
             )
             .to_json_string()
             .unwrap(),

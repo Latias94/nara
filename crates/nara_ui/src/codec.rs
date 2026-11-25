@@ -1,6 +1,5 @@
 use nara_asset::{AssetRecord, AssetRef, AssetServer, AssetSourceKind, AssetSourcePath, Handle};
 use nara_ecs::World;
-use nara_image::ImageAsset;
 use nara_reflect::{
     ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
     ComponentEncodeContext, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
@@ -9,6 +8,7 @@ use nara_reflect::{
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueRef,
     PreparedComponentCandidate,
 };
+use nara_render::image::ImageAsset;
 use nara_scene::PrefabDocument;
 use nara_ui_kernel::{
     UiActionId, UiAlign, UiBorder, UiBrush, UiColor, UiColorRole, UiCornerRadii, UiDimension,

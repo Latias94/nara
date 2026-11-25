@@ -60,7 +60,7 @@ order, normalized UV regions, durations and `once`/`loop` mode in the descriptor
 Rust. Default data contains one Idle frame and three 100 ms Walk frames. Walking follows net held
 intent, including movement against a wall; opposing keys cancel per axis.
 
-The directly consumed [Sprite animation module](../../crates/nara_sprite_animation/README.md)
+The directly consumed [sprite animation module](../../crates/nara_render/src/animation/README.md)
 loads immutable named clips through the existing source/cooked Asset owners. The original integer
 game clock supplies elapsed time. Pause leaves it frozen; an exact Step advances one fixed tick.
 Travel and exact Runtime reconstruction derive the Sprite region before presentation, including

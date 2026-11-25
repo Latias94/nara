@@ -62,7 +62,7 @@ pub fn feature_closure(graph: &str, player: PlayerSelection) {
                 }
                 assert!(features.contains(&"presentation-ui") && features.contains(&"runtime-ui"));
             }
-            "nara_ui_render" => ui = true,
+            "nara_render" => ui = features.contains(&"hud-runtime"),
             "cpal" => audio = true,
             "nara_gilrs" => gamepad = true,
             _ => {}

@@ -6,9 +6,9 @@ use nara_asset::{
     StableAssetId,
 };
 use nara_fs::{ContentDigest, DirectoryCapability};
-use nara_material::{Material2dAsset, Material2dDomain};
 use nara_project::ProjectPath;
-use nara_tilemap::TileSetSource;
+use nara_render::material::{Material2dAsset, Material2dDomain};
+use nara_render::tilemap::TileSetSource;
 
 use super::{
     BTREE_ENTRY_OVERHEAD, ContentReadContext, DeliveryCatalogue, DeliveryImageExpectation,

@@ -28,6 +28,8 @@ use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 use nara_ecs::Mut;
 use nara_ecs::{Resource, World};
 use nara_identity::SpawnedSceneInstance;
+#[cfg(feature = "runtime-2d")]
+use nara_render::tilemap::{PreparedTileSetPublications, TileSetAssets};
 use nara_scene::{
     SceneSpawnReport,
     advanced::{
@@ -35,8 +37,6 @@ use nara_scene::{
         SceneProductRetirement, SceneProductTransactionLimits, StagedSceneReplacement,
     },
 };
-#[cfg(feature = "runtime-2d")]
-use nara_tilemap::{PreparedTileSetPublications, TileSetAssets};
 
 use super::content::PreparedSceneContent;
 use super::{HostFault, single_error};

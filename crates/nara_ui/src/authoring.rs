@@ -1,6 +1,6 @@
 use nara_asset::Handle;
 use nara_ecs::Component;
-use nara_image::ImageAsset;
+use nara_render::image::ImageAsset;
 use nara_ui_kernel::{
     UiActionId, UiAuthoringError, UiBorder, UiBrush, UiColor, UiColorRole, UiCornerRadii,
     UiImageId, UiKeyError, UiLayer, UiSemanticRole, UiStyle, UiStyleError, UiTextAlignment,

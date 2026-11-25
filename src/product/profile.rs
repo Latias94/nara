@@ -250,9 +250,9 @@ fn add_product_contributions(
         builder.add_slot(
             PluginSlot::required(
                 SLOT_WGPU_STOCK_SPRITE,
-                nara_render_wgpu::WGPU_STOCK_SPRITE_PLUGIN_ID,
+                nara_render::gpu::WGPU_STOCK_SPRITE_PLUGIN_ID,
             ),
-            PluginDefinition::for_default::<nara_render_wgpu::WgpuStockSpritePlugin>(),
+            PluginDefinition::for_default::<nara_render::gpu::WgpuStockSpritePlugin>(),
         )
     } else {
         builder
@@ -265,9 +265,9 @@ fn add_product_contributions(
         builder.add_slot(
             PluginSlot::required(
                 SLOT_WGPU_STOCK_UI,
-                nara_render_wgpu::WGPU_STOCK_UI_PLUGIN_ID,
+                nara_render::gpu::WGPU_STOCK_UI_PLUGIN_ID,
             ),
-            PluginDefinition::for_default::<nara_render_wgpu::WgpuStockUiPlugin>(),
+            PluginDefinition::for_default::<nara_render::gpu::WgpuStockUiPlugin>(),
         )
     } else {
         builder

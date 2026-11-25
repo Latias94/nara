@@ -121,7 +121,7 @@ impl DesktopRunOptions {
 
     /// Configures the local native owner before its first submission.
     #[must_use]
-    pub fn with_telemetry(mut self, config: nara_render_wgpu::WgpuBackendTelemetryConfig) -> Self {
+    pub fn with_telemetry(mut self, config: nara_render::gpu::WgpuBackendTelemetryConfig) -> Self {
         self.presentation.telemetry = Some(config);
         self
     }

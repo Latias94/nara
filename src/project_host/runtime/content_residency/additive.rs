@@ -8,10 +8,10 @@ use nara_asset::{AssetEvents, AssetStates, Assets, Handle};
 use nara_asset::{AssetProductRef, ImportedProductId};
 use nara_diagnostic::DiagnosticReport;
 #[cfg(feature = "runtime-2d")]
-use nara_image::ImageAsset;
-use nara_scene::{SceneOccurrenceKey, retire_and_despawn_scene_instance};
+use nara_render::image::ImageAsset;
 #[cfg(feature = "runtime-2d")]
-use nara_tilemap::{TileSet, TileSetContentReceipt};
+use nara_render::tilemap::{TileSet, TileSetContentReceipt};
+use nara_scene::{SceneOccurrenceKey, retire_and_despawn_scene_instance};
 
 use super::*;
 #[cfg(feature = "runtime-2d")]

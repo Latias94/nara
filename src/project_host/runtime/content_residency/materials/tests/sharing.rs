@@ -1,7 +1,7 @@
 use super::*;
 
 use nara_ecs::{ResMut, bevy_ecs::system::SystemState};
-use nara_material::MaterialTextureDeclaration;
+use nara_render::material::MaterialTextureDeclaration;
 
 use crate::project_host::runtime::content_residency::stock::commit_materials;
 

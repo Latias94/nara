@@ -1,12 +1,12 @@
 use nara_asset::{AssetEvents, AssetServer, AssetStates, Assets, ProjectAssetDatabase};
 use nara_ecs::{Mut, Res, ResMut, World, bevy_ecs::system::SystemState};
-use nara_image::ImageAsset;
-use nara_material::{Material2dAsset, Material2dDomain};
-use nara_scene::advanced::SceneAssetReservations;
-use nara_tilemap::{
+use nara_render::image::ImageAsset;
+use nara_render::material::{Material2dAsset, Material2dDomain};
+use nara_render::tilemap::{
     PreparedTileSetPublications, TileSet, TileSetAssetError, TileSetAssets, TileSetContentReceipt,
     TileSetPublicationInput,
 };
+use nara_scene::advanced::SceneAssetReservations;
 
 use super::{
     HostFault, PreparedCatalog, ProjectSceneResidency, ResidencyInput,

@@ -1,7 +1,7 @@
 use super::*;
 
 use nara_asset::{AssetSourcePath, StableAssetId};
-use nara_image::{ImageColorSpace, ImageExtent, ImageFormat};
+use nara_render::image::{ImageColorSpace, ImageExtent, ImageFormat};
 
 const SOURCE: &str = "aed61cf0-6e45-4078-8793-1fa45c794fd3";
 const FOREIGN: &str = "c93d5412-de9f-41fe-913d-369e5f8b9f38";

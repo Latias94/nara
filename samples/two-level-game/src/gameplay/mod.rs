@@ -462,11 +462,11 @@ pub fn configured_recipe(options: RunOptions) -> ProductRecipe {
             1,
         ))
         .expect("the game's Sound Bank Runtime codec is valid")
-        .add_asset_domain::<nara_sprite_animation::SpriteAnimationDomain>()
+        .add_asset_domain::<nara_render::animation::SpriteAnimationDomain>()
         .expect("the Sprite animation source importer is valid")
         .add_runtime_asset_codec::<
-            nara_sprite_animation::SpriteAnimationDomain,
-            nara_sprite_animation::SpriteAnimationCodec,
+            nara_render::animation::SpriteAnimationDomain,
+            nara_render::animation::SpriteAnimationCodec,
         >(nara::runtime_content::RuntimeCodecDefinitionId::new(
             "two-level-game.sprite-animation", 1,
         ))

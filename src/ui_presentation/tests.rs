@@ -19,10 +19,10 @@ mod driver;
 use driver::BridgeRuntime;
 
 #[derive(Debug, Default, Resource)]
-struct FakeBackendFrame(Option<nara_ui_render::__private::UiBackendPresentationFrame>);
+struct FakeBackendFrame(Option<nara_render::hud::presentation::UiBackendPresentationFrame>);
 
 #[derive(Debug, Default, Resource)]
-struct FakeHeldBackendAcceptances(Vec<nara_ui_render::OneShotPresentationCommit>);
+struct FakeHeldBackendAcceptances(Vec<nara_render::hud::OneShotPresentationCommit>);
 
 #[derive(Debug, Clone, Copy, Resource)]
 enum FakeBackendMode {
@@ -37,7 +37,7 @@ enum FakeBackendMode {
 }
 
 fn capture_fake_backend_frame(
-    mut reader: nara_ui_render::__private::UiBackendSubmissionReader,
+    mut reader: nara_render::hud::presentation::UiBackendSubmissionReader,
     mode: Res<FakeBackendMode>,
     mut frame: ResMut<FakeBackendFrame>,
 ) {
@@ -54,7 +54,7 @@ fn capture_fake_backend_frame(
 fn submit_fake_backend_frame(
     mut frame: ResMut<FakeBackendFrame>,
     mode: Res<FakeBackendMode>,
-    mut outcomes: ResMut<nara_ui_render::__private::UiPresentationOutcomes>,
+    mut outcomes: ResMut<nara_render::hud::presentation::UiPresentationOutcomes>,
 ) {
     let Some(frame) = frame.0.take() else {
         return;
@@ -77,7 +77,7 @@ fn submit_fake_backend_frame(
         {
             outcomes.commit_backend(envelope.backend_fault(
                 None,
-                nara_ui_render::UiPresentationBackendFaultDomain::Target,
+                nara_render::hud::UiPresentationBackendFaultDomain::Target,
                 "fake target fault".to_owned(),
             ));
             continue;
@@ -92,9 +92,9 @@ fn submit_fake_backend_frame(
             1
         };
         let backend_generation =
-            nara_ui_render::UiPresentationBackendGeneration::new(77, backend_epoch)
+            nara_render::hud::UiPresentationBackendGeneration::new(77, backend_epoch)
                 .expect("fake backend generation should be non-zero");
-        let mut submitted = nara_ui_render::__private::bind_backend_submission_batch(
+        let mut submitted = nara_render::hud::presentation::bind_backend_submission_batch(
             vec![envelope],
             backend_generation,
         )
@@ -106,7 +106,7 @@ fn submit_fake_backend_frame(
             FakeBackendMode::Deferred => submitted.deferred("fake backend deferral".to_owned()),
             FakeBackendMode::DeviceFaultWindowFirst(window) if target_window == Some(window) => {
                 submitted.backend_fault(
-                    nara_ui_render::UiPresentationBackendFaultDomain::Device,
+                    nara_render::hud::UiPresentationBackendFaultDomain::Device,
                     "fake device fault".to_owned(),
                 )
             }
@@ -133,12 +133,12 @@ fn hold_fake_backend_acceptances(world: &mut World) {
     ) {
         return;
     }
-    let outcomes = nara_ui_render::drain_ui_presentation_outcomes(world)
+    let outcomes = nara_render::hud::drain_ui_presentation_outcomes(world)
         .expect("the fake backend should publish complete outcomes before Host cleanup");
     let mut held = Vec::with_capacity(outcomes.len());
     for outcome in outcomes {
         match outcome {
-            nara_ui_render::UiPresentationOutcome::Presented(commit) => held.push(commit),
+            nara_render::hud::UiPresentationOutcome::Presented(commit) => held.push(commit),
             outcome => panic!("hold mode expected only presented outcomes, got {outcome:?}"),
         }
     }
@@ -417,9 +417,10 @@ fn host_minimize_suspends_routes_and_restore_requires_fresh_presentation() {
         nara_ui::ui_semantic_snapshot(app.world(), initial_receipt, nara_ui::UiSeatId::PRIMARY)
             .is_err()
     );
-    let (_, suspended_packets) = nara_ui_render::__private::snapshot_ui_paint_packets(app.world())
-        .unwrap()
-        .into_parts();
+    let (_, suspended_packets) =
+        nara_render::hud::presentation::snapshot_ui_paint_packets(app.world())
+            .unwrap()
+            .into_parts();
     assert!(suspended_packets.is_empty());
     assert!(
         app.world()
@@ -531,7 +532,7 @@ fn host_acceptance_commits_one_exact_receipt_without_a_post_submit_failure() {
     assert!(observation.submission().matches_receipt(receipt));
     assert_eq!(
         observation.backend_generation(),
-        nara_ui_render::UiPresentationBackendGeneration::new(77, 1).unwrap()
+        nara_render::hud::UiPresentationBackendGeneration::new(77, 1).unwrap()
     );
     let packet = observation.packet();
     let frame = observation.frame();
@@ -637,7 +638,7 @@ fn host_discards_a_late_backend_acceptance_after_committing_its_successor() {
         observation.submission().presentation_epoch().get(),
         stale_epoch.get()
     );
-    let (_, presented) = nara_ui_render::__private::snapshot_ui_paint_packets(app.world())
+    let (_, presented) = nara_render::hud::presentation::snapshot_ui_paint_packets(app.world())
         .expect("the planner should retain the successor packet")
         .into_parts();
     assert_eq!(presented.len(), 1);
@@ -739,9 +740,9 @@ fn host_device_fault_retires_only_matching_backend_generation() {
     app.update()
         .expect("the fake backend should defer two generations before faulting one of them");
 
-    let generation_a = nara_ui_render::UiPresentationBackendGeneration::new(77, 1)
+    let generation_a = nara_render::hud::UiPresentationBackendGeneration::new(77, 1)
         .expect("fake generation A should be valid");
-    let generation_b = nara_ui_render::UiPresentationBackendGeneration::new(77, 2)
+    let generation_b = nara_render::hud::UiPresentationBackendGeneration::new(77, 2)
         .expect("fake generation B should be valid");
     let ledger = app.world().resource::<UiPresentationAttemptLedger>();
     assert!(ledger.deferred_ids_for_backend(generation_a).is_empty());
@@ -763,7 +764,7 @@ fn host_device_fault_retires_only_matching_backend_generation() {
             .resource::<UiPresentationAttemptLedger>()
             .is_empty()
     );
-    let (_, presented) = nara_ui_render::__private::snapshot_ui_paint_packets(app.world())
+    let (_, presented) = nara_render::hud::presentation::snapshot_ui_paint_packets(app.world())
         .expect("the planner should expose all successfully presented packets")
         .into_parts();
     assert!(
@@ -851,10 +852,12 @@ fn host_external_backend_rendezvous_reexports_the_exact_deferred_retry() {
         .take_backend_frame()
         .expect("the external Host should reserve the prepared UI frame");
     let (_, submissions) = first.into_parts();
-    let backend_generation = nara_ui_render::UiPresentationBackendGeneration::new(91, 4).unwrap();
-    let mut submitted =
-        nara_ui_render::__private::bind_backend_submission_batch(submissions, backend_generation)
-            .unwrap();
+    let backend_generation = nara_render::hud::UiPresentationBackendGeneration::new(91, 4).unwrap();
+    let mut submitted = nara_render::hud::presentation::bind_backend_submission_batch(
+        submissions,
+        backend_generation,
+    )
+    .unwrap();
     let first_identity = submitted[0].submission().identity();
     let completed = submitted
         .pop()
@@ -875,9 +878,11 @@ fn host_external_backend_rendezvous_reexports_the_exact_deferred_retry() {
         submissions[0].submission().required_backend_generation(),
         Some(backend_generation)
     );
-    let mut submitted =
-        nara_ui_render::__private::bind_backend_submission_batch(submissions, backend_generation)
-            .unwrap();
+    let mut submitted = nara_render::hud::presentation::bind_backend_submission_batch(
+        submissions,
+        backend_generation,
+    )
+    .unwrap();
     app.commit_backend_outcome(submitted.pop().unwrap().presented())
         .expect("the exact retry should reach one terminal presented outcome");
     app.commit_presentations();

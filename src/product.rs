@@ -373,8 +373,8 @@ struct RecipeWgpuPolicy {
     active: bool,
     adapter: Arc<
         dyn Fn() -> Result<
-                nara_render_wgpu::WgpuStockCaptureAdapter,
-                nara_render_wgpu::WgpuRenderProgramError,
+                nara_render::gpu::WgpuStockCaptureAdapter,
+                nara_render::gpu::WgpuRenderProgramError,
             > + Send
             + Sync,
     >,
@@ -480,12 +480,13 @@ impl ProductRecipe {
         definition: crate::runtime_content::RuntimeCodecDefinitionId,
     ) -> Result<Self, ProductRecipeError>
     where
-        C: nara_asset::RuntimeAssetCodec<nara_image::ImageAsset>,
+        C: nara_asset::RuntimeAssetCodec<nara_render::image::ImageAsset>,
     {
-        self.runtime_codecs.add::<nara_image::ImageDomain, C>(
-            definition,
-            crate::runtime_content::RuntimeCodecRole::Image,
-        )?;
+        self.runtime_codecs
+            .add::<nara_render::image::ImageDomain, C>(
+                definition,
+                crate::runtime_content::RuntimeCodecRole::Image,
+            )?;
         Ok(self)
     }
 
@@ -496,12 +497,13 @@ impl ProductRecipe {
         definition: crate::runtime_content::RuntimeCodecDefinitionId,
     ) -> Result<Self, ProductRecipeError>
     where
-        C: nara_asset::RuntimeAssetCodec<nara_tilemap::TileSetDescriptor>,
+        C: nara_asset::RuntimeAssetCodec<nara_render::tilemap::TileSetDescriptor>,
     {
-        self.runtime_codecs.add::<nara_tilemap::TileSetDomain, C>(
-            definition,
-            crate::runtime_content::RuntimeCodecRole::TileSet,
-        )?;
+        self.runtime_codecs
+            .add::<nara_render::tilemap::TileSetDomain, C>(
+                definition,
+                crate::runtime_content::RuntimeCodecRole::TileSet,
+            )?;
         Ok(self)
     }
 
@@ -514,10 +516,10 @@ impl ProductRecipe {
         definition: crate::runtime_content::RuntimeCodecDefinitionId,
     ) -> Result<Self, ProductRecipeError>
     where
-        C: nara_asset::RuntimeAssetCodec<nara_material::Material2dAsset>,
+        C: nara_asset::RuntimeAssetCodec<nara_render::material::Material2dAsset>,
     {
         self.runtime_codecs
-            .add::<nara_material::Material2dDomain, C>(
+            .add::<nara_render::material::Material2dDomain, C>(
                 definition,
                 crate::runtime_content::RuntimeCodecRole::Material2d,
             )?;
@@ -550,8 +552,8 @@ impl ProductRecipe {
         A: Fn(
                 &C,
             ) -> Result<
-                nara_render_wgpu::WgpuStockCaptureAdapter,
-                nara_render_wgpu::WgpuRenderProgramError,
+                nara_render::gpu::WgpuStockCaptureAdapter,
+                nara_render::gpu::WgpuRenderProgramError,
             > + Send
             + Sync
             + 'static,
@@ -564,7 +566,7 @@ impl ProductRecipe {
         }
         if !declaration
             .requires_plugins
-            .contains(&nara_render_wgpu::WGPU_STOCK_CAPTURE_PLUGIN_ID)
+            .contains(&nara_render::gpu::WGPU_STOCK_CAPTURE_PLUGIN_ID)
         {
             return Err(ProductRecipeError::WgpuPolicyRequiresStockCapture {
                 plugin: declaration.id,
@@ -618,13 +620,13 @@ impl ProductRecipe {
     #[cfg(feature = "render-wgpu")]
     pub(crate) fn create_wgpu_capture_adapter(
         &self,
-    ) -> Result<nara_render_wgpu::WgpuStockCaptureAdapter, nara_render_wgpu::WgpuRenderProgramError>
+    ) -> Result<nara_render::gpu::WgpuStockCaptureAdapter, nara_render::gpu::WgpuRenderProgramError>
     {
         let Some(selection) = &self.wgpu_policy else {
-            return nara_render_wgpu::WgpuStockCaptureAdapter::stock();
+            return nara_render::gpu::WgpuStockCaptureAdapter::stock();
         };
         catch_unwind(AssertUnwindSafe(|| (selection.adapter)())).unwrap_or(Err(
-            nara_render_wgpu::WgpuRenderProgramError::PolicyPanicked,
+            nara_render::gpu::WgpuRenderProgramError::PolicyPanicked,
         ))
     }
 
@@ -1414,26 +1416,29 @@ impl PluginGroup for Runtime2dPlugins {
                 PluginDefinition::for_default::<nara_render::RenderComponentsPlugin>(),
             )
             .add_slot(
-                PluginSlot::required(SLOT_SPRITE, nara_sprite::SPRITE_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_sprite::SpritePlugin>(),
+                PluginSlot::required(SLOT_SPRITE, nara_render::sprite::SPRITE_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_render::sprite::SpritePlugin>(),
             )
             .add_slot(
-                PluginSlot::optional(SLOT_TILEMAP, nara_tilemap::TILEMAP_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_tilemap::TilemapPlugin>(),
+                PluginSlot::optional(SLOT_TILEMAP, nara_render::tilemap::TILEMAP_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_render::tilemap::TilemapPlugin>(),
             )
             .add_slot(
-                PluginSlot::required(SLOT_IMAGE, nara_image::IMAGE_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_image::ImagePlugin>(),
+                PluginSlot::required(SLOT_IMAGE, nara_render::image::IMAGE_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_render::image::ImagePlugin>(),
             );
         #[cfg(feature = "serde")]
         let builder = builder
             .add_slot(
-                PluginSlot::optional(SLOT_TILESET_ASSETS, nara_tilemap::TILESET_ASSET_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_tilemap::TileSetAssetPlugin>(),
+                PluginSlot::optional(
+                    SLOT_TILESET_ASSETS,
+                    nara_render::tilemap::TILESET_ASSET_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_render::tilemap::TileSetAssetPlugin>(),
             )
             .add_slot(
-                PluginSlot::optional(SLOT_MATERIAL, nara_material::MATERIAL_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_material::Material2dPlugin>(),
+                PluginSlot::optional(SLOT_MATERIAL, nara_render::material::MATERIAL_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_render::material::Material2dPlugin>(),
             );
         builder
     }
@@ -1480,16 +1485,19 @@ impl PluginGroup for PresentationUiPlugins {
                 nara_render::plugin(None),
             )
             .add_slot(
-                PluginSlot::required(SLOT_IMAGE_PREPARE, nara_image::IMAGE_PREPARE_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_image::ImagePreparePlugin>(),
+                PluginSlot::required(
+                    SLOT_IMAGE_PREPARE,
+                    nara_render::image::IMAGE_PREPARE_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_render::image::ImagePreparePlugin>(),
             )
             .add_slot(
-                PluginSlot::required(SLOT_IMAGE, nara_image::IMAGE_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_image::ImagePlugin>(),
+                PluginSlot::required(SLOT_IMAGE, nara_render::image::IMAGE_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_render::image::ImagePlugin>(),
             )
             .add_slot(
-                PluginSlot::required(SLOT_UI_RENDER, nara_ui_render::UI_RENDER_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_ui_render::UiRenderPlugin>(),
+                PluginSlot::required(SLOT_UI_RENDER, nara_render::hud::UI_RENDER_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_render::hud::UiRenderPlugin>(),
             )
             .add_slot(
                 PluginSlot::required(
@@ -1525,15 +1533,18 @@ impl PluginGroup for Presentation2dPlugins {
                 nara_render::plugin(None),
             )
             .add_slot(
-                PluginSlot::required(SLOT_IMAGE_PREPARE, nara_image::IMAGE_PREPARE_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_image::ImagePreparePlugin>(),
+                PluginSlot::required(
+                    SLOT_IMAGE_PREPARE,
+                    nara_render::image::IMAGE_PREPARE_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_render::image::ImagePreparePlugin>(),
             )
             .add_slot(
                 PluginSlot::required(
                     SLOT_SPRITE_RENDER,
-                    nara_sprite_render::SPRITE_RENDER_PLUGIN_ID,
+                    nara_render::sprite_render::SPRITE_RENDER_PLUGIN_ID,
                 ),
-                PluginDefinition::for_default::<nara_sprite_render::SpriteRenderPlugin>(),
+                PluginDefinition::for_default::<nara_render::sprite_render::SpriteRenderPlugin>(),
             )
     }
 }
@@ -1580,29 +1591,29 @@ impl PluginGroup for WgpuBackendPlugins {
                 nara_render::plugin(None),
             )
             .add_slot(
-                PluginSlot::required(SLOT_WGPU_CAPTURE, nara_render_wgpu::WGPU_CAPTURE_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_render_wgpu::WgpuCapturePlugin>(),
+                PluginSlot::required(SLOT_WGPU_CAPTURE, nara_render::gpu::WGPU_CAPTURE_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_render::gpu::WgpuCapturePlugin>(),
             )
             .add_slot(
                 PluginSlot::optional(
                     SLOT_WGPU_WINDOW_PRESENTATION,
-                    nara_render_wgpu::WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
+                    nara_render::gpu::WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
                 ),
-                PluginDefinition::for_default::<nara_render_wgpu::WgpuWindowPresentationPlugin>(),
+                PluginDefinition::for_default::<nara_render::gpu::WgpuWindowPresentationPlugin>(),
             )
             .add_slot(
                 PluginSlot::required(
                     SLOT_WGPU_STOCK_CAPTURE,
-                    nara_render_wgpu::WGPU_STOCK_CAPTURE_PLUGIN_ID,
+                    nara_render::gpu::WGPU_STOCK_CAPTURE_PLUGIN_ID,
                 ),
-                PluginDefinition::for_default::<nara_render_wgpu::WgpuStockCapturePlugin>(),
+                PluginDefinition::for_default::<nara_render::gpu::WgpuStockCapturePlugin>(),
             )
             .add_slot(
                 PluginSlot::optional(
                     SLOT_WGPU_STOCK_POLICY,
-                    nara_render_wgpu::WGPU_STOCK_POLICY_PLUGIN_ID,
+                    nara_render::gpu::WGPU_STOCK_POLICY_PLUGIN_ID,
                 ),
-                PluginDefinition::for_default::<nara_render_wgpu::WgpuStockPolicyPlugin>(),
+                PluginDefinition::for_default::<nara_render::gpu::WgpuStockPolicyPlugin>(),
             )
     }
 }

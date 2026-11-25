@@ -244,9 +244,9 @@ pub enum RuntimeContentError {
         binding: nara_winit::UnsupportedKeyboardBinding,
     },
     #[cfg(feature = "runtime-2d")]
-    TileSet(nara_tilemap::TileSetDescriptorError),
+    TileSet(nara_render::tilemap::TileSetDescriptorError),
     #[cfg(feature = "runtime-2d")]
-    Tilemap(nara_tilemap::TilemapMembershipError),
+    Tilemap(nara_render::tilemap::TilemapMembershipError),
     Scene(RuntimeSceneError),
     SceneReference(DeclaredAssetReferenceError),
     Asset(AssetRuntimeError),

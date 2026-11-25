@@ -292,7 +292,7 @@ fn capture_font_paint(world: &mut nara::ecs::World) {
         bundled.plan(frame, nara::render::RenderTarget::Window(nara::window::WindowId::PRIMARY), &UiPreparedImages::new()),
         Err(UiPresentationContentError::FontFaceMismatch { actual, .. }) if actual == custom_face().id()
     );
-    let (packets, _) = nara_ui_render::__private::snapshot_ui_paint_packets(world)
+    let (packets, _) = nara_render::hud::presentation::snapshot_ui_paint_packets(world)
         .unwrap()
         .into_parts();
     *world.resource_mut::<FontPaintProof>() = FontPaintProof {

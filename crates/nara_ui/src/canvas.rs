@@ -709,7 +709,7 @@ mod tests {
             AssetSourceKind, AssetSourcePath, AssetStates, Assets, ImportedProductId,
             ProjectAssetDatabase, StableAssetId,
         };
-        use nara_image::{
+        use nara_render::image::{
             ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, PreparedImageSnapshot,
         };
         use nara_ui_kernel::{UiActionId, UiImageId, UiLayer, UiPaintPrimitive, UiResolvedBrush};
@@ -852,9 +852,9 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
             assert_eq!(image_ids, vec![&expected, &expected, &expected]);
-            let mut prepared = nara_ui_render::UiPreparedImages::new();
+            let mut prepared = nara_render::hud::UiPreparedImages::new();
             prepared.insert(expected, snapshot.clone());
-            let packet = nara_ui_render::UiPresentationPlanner::default()
+            let packet = nara_render::hud::UiPresentationPlanner::default()
                 .plan(
                     Arc::clone(candidate.frame()),
                     nara_render::RenderTarget::Window(nara_window::WindowId::PRIMARY),

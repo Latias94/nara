@@ -1,9 +1,9 @@
 //! Candidate-local material validation shared by source and processed Scene preparation.
 
-use nara_material::{Material2dAsset, Material2dRecord};
 use nara_reflect::{
     ComponentCodecError, ComponentTypeId, ComponentValue, ComponentValueCost, ComponentValueRef,
 };
+use nara_render::material::{Material2dAsset, Material2dRecord};
 use nara_scene::CompiledSceneDocument;
 
 use super::{ProjectAssetCollection, ProjectContentError, ProjectContentErrorKind};
@@ -117,7 +117,8 @@ pub(super) fn validate_source_materials(
     let materials = collections
         .iter()
         .filter(|collection| {
-            collection.domain_type() == std::any::TypeId::of::<nara_material::Material2dDomain>()
+            collection.domain_type()
+                == std::any::TypeId::of::<nara_render::material::Material2dDomain>()
         })
         .find_map(|collection| {
             collection

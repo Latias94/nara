@@ -45,7 +45,7 @@ use nara::{
         TileSetSourceFileLimits,
     },
 };
-use nara_sprite_animation::{SpriteAnimationCodec, SpriteAnimationDomain, SpriteAnimationSet};
+use nara_render::animation::{SpriteAnimationCodec, SpriteAnimationDomain, SpriteAnimationSet};
 use serde_json::{Value, json};
 use two_level_game::{
     GameSnapshot, SoundPalette,

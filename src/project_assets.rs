@@ -278,9 +278,9 @@ impl ProjectDomainAssets {
         {
             self.inner.collections.iter().any(|collection| {
                 let domain = collection.domain_type();
-                domain != TypeId::of::<nara_image::ImageDomain>()
-                    && domain != TypeId::of::<nara_material::Material2dDomain>()
-                    && domain != TypeId::of::<nara_tilemap::TileSetDomain>()
+                domain != TypeId::of::<nara_render::image::ImageDomain>()
+                    && domain != TypeId::of::<nara_render::material::Material2dDomain>()
+                    && domain != TypeId::of::<nara_render::tilemap::TileSetDomain>()
             })
         }
         #[cfg(not(feature = "runtime-2d"))]

@@ -1,8 +1,8 @@
 //! First-party CPU facts required before native publication or a successful deep Check.
 
 use nara_asset::AssetProductRef;
-use nara_image::{ImageAsset, ImageExtent};
-use nara_tilemap::TileSetDescriptor;
+use nara_render::image::{ImageAsset, ImageExtent};
+use nara_render::tilemap::TileSetDescriptor;
 
 use super::{RuntimeContentBase, RuntimeContentError};
 

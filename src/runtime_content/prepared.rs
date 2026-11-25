@@ -6,11 +6,11 @@ use nara_asset::AssetProductRef;
 #[cfg(feature = "runtime-2d")]
 use nara_asset::AssetRef;
 #[cfg(feature = "runtime-2d")]
-use nara_image::{ImageAsset, ImageDomain};
+use nara_render::image::{ImageAsset, ImageDomain};
 #[cfg(feature = "runtime-2d")]
-use nara_material::{Material2dAsset, Material2dDomain};
+use nara_render::material::{Material2dAsset, Material2dDomain};
 #[cfg(feature = "runtime-2d")]
-use nara_tilemap::{
+use nara_render::tilemap::{
     TileSetDescriptor, TileSetDomain, tilemap_membership_work_bytes,
     validate_persisted_tilemap_membership,
 };

@@ -33,15 +33,15 @@ use nara_reference_game::{
     PlayerRole, REFERENCE_RUNTIME_UI_PLUGIN_ID, WaveRetryRejection, WaveRetryStatus, WaveSnapshot,
 };
 use nara_render::RenderTarget;
+use nara_render::hud::{
+    UiBackendSubmissionIdentity, UiPaintPacket, UiPreparedImages, UiPresentationAttemptId,
+    UiPresentationBackendGeneration, UiPresentationCapabilityGeneration, UiPresentationEpoch,
+    UiPresentationOutcome, UiPresentationPlanner, UiPresentationRuntimeGeneration,
+};
 use nara_ui::{
     UiAccessibilityInput, UiActionConsumerId, UiActionCursor, UiActionEvent, UiActionJournal,
     UiPresentationReceipt, UiRouteDisposition, UiSurfaceContentTransform, active_ui_surface_slots,
     dispatch_ui_accessibility_input, update_ui_surface_slot,
-};
-use nara_ui_render::{
-    UiBackendSubmissionIdentity, UiPaintPacket, UiPreparedImages, UiPresentationAttemptId,
-    UiPresentationBackendGeneration, UiPresentationCapabilityGeneration, UiPresentationEpoch,
-    UiPresentationOutcome, UiPresentationPlanner, UiPresentationRuntimeGeneration,
 };
 
 use super::reference_surface_id;
@@ -408,7 +408,7 @@ fn present_latest_reference_ui_component(world: &mut World) {
             .expect("managed runtime generations are non-zero");
     let authority = nara_ui::__private::prepare_ui_presentation(world, packet.frame(), epoch)
         .expect("the Host should reserve exact presentation authority");
-    let prepared = nara_ui_render::__private::prepare_backend_submission(
+    let prepared = nara_render::hud::presentation::prepare_backend_submission(
         UiPresentationAttemptId::new(NEXT_PRESENTATION_ATTEMPT_ID.fetch_add(1, Ordering::Relaxed))
             .expect("the bounded component presenter uses non-zero attempt identities"),
         Arc::clone(&packet),
@@ -418,15 +418,15 @@ fn present_latest_reference_ui_component(world: &mut World) {
             .expect("the bounded component presenter uses a non-zero capability generation"),
     );
     let prepared_identity = prepared.identity();
-    let mut outcomes = nara_ui_render::__private::UiPresentationOutcomes::default();
+    let mut outcomes = nara_render::hud::presentation::UiPresentationOutcomes::default();
     let permit = outcomes
         .reserve_backend(std::slice::from_ref(&prepared))
         .expect("the bounded component presenter should reserve one backend outcome")
         .pop()
         .expect("one prepared attempt reserves one backend outcome");
-    let envelope = nara_ui_render::__private::UiBackendSubmission::pair(prepared, permit)
+    let envelope = nara_render::hud::presentation::UiBackendSubmission::pair(prepared, permit)
         .expect("the prepared attempt and backend permit should match");
-    let submitted = nara_ui_render::__private::bind_backend_submission_batch(
+    let submitted = nara_render::hud::presentation::bind_backend_submission_batch(
         vec![envelope],
         backend_generation,
     )
@@ -436,7 +436,7 @@ fn present_latest_reference_ui_component(world: &mut World) {
     outcomes.commit_backend(submitted.presented());
     let mut backend_world = World::new();
     backend_world.insert_resource(outcomes);
-    let commit = match nara_ui_render::drain_ui_presentation_outcomes(&mut backend_world)
+    let commit = match nara_render::hud::drain_ui_presentation_outcomes(&mut backend_world)
         .expect("the bounded component presenter should publish one backend outcome")
         .pop()
         .expect("one backend submission publishes one outcome")
@@ -444,7 +444,7 @@ fn present_latest_reference_ui_component(world: &mut World) {
         UiPresentationOutcome::Presented(commit) => commit,
         outcome => panic!("the bounded component presenter expected Presented, got {outcome:?}"),
     };
-    let accepted = nara_ui_render::__private::discard_ui_backend_acceptance(commit);
+    let accepted = nara_render::hud::presentation::discard_ui_backend_acceptance(commit);
     assert_eq!(accepted.identity(), prepared_identity);
     assert_eq!(accepted.identity().runtime_generation(), runtime_generation);
     if !Arc::ptr_eq(accepted.packet(), &packet) {

@@ -69,7 +69,7 @@ impl ProductDefaultSettings {
             let defaults = defaults.configure_slot(super::SLOT_UI, nara_ui::plugin(face.clone()));
             #[cfg(feature = "presentation-ui")]
             let defaults = defaults
-                .configure_slot_if_present(super::SLOT_UI_RENDER, nara_ui_render::plugin(face));
+                .configure_slot_if_present(super::SLOT_UI_RENDER, nara_render::hud::plugin(face));
             return defaults;
         }
         defaults

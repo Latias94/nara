@@ -1859,21 +1859,14 @@ dependencies = [
  "nara_gameplay",
  "nara_hierarchy",
  "nara_identity",
- "nara_image",
  "nara_input",
- "nara_material",
  "nara_project",
  "nara_reflect",
  "nara_render",
- "nara_render_wgpu",
  "nara_scene",
- "nara_sprite",
- "nara_sprite_render",
  "nara_tasks",
- "nara_tilemap",
  "nara_transform",
  "nara_ui",
- "nara_ui_render",
  "nara_window",
  "nara_winit",
  "rustix 1.1.5",
@@ -2012,24 +2005,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nara_image"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "nara_app",
- "nara_asset",
- "nara_core",
- "nara_diagnostic",
- "nara_ecs",
- "nara_fs",
- "nara_render",
- "nara_tasks",
- "png",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "nara_input"
 version = "0.1.0"
 dependencies = [
@@ -2041,27 +2016,6 @@ dependencies = [
  "nara_ecs",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "nara_material"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "encase",
- "glam 0.33.12",
- "naga",
- "nara_app",
- "nara_asset",
- "nara_core",
- "nara_diagnostic",
- "nara_ecs",
- "nara_image",
- "nara_material_derive",
- "nara_reflect",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2133,32 +2087,30 @@ name = "nara_render"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "bytemuck",
+ "encase",
+ "glam 0.33.12",
+ "guillotiere",
+ "naga",
  "nara_app",
  "nara_asset",
  "nara_core",
+ "nara_diagnostic",
  "nara_ecs",
+ "nara_fs",
  "nara_hierarchy",
+ "nara_material_derive",
  "nara_reflect",
+ "nara_tasks",
+ "nara_text",
  "nara_transform",
+ "nara_ui_kernel",
  "nara_window",
- "serde",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "nara_render_wgpu"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "nara_app",
- "nara_ecs",
- "nara_image",
- "nara_material",
- "nara_render",
- "nara_sprite_render",
- "nara_ui_render",
- "nara_window",
+ "png",
  "pollster",
+ "ron",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "wgpu",
 ]
@@ -2185,51 +2137,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nara_sprite"
-version = "0.1.0"
-dependencies = [
- "nara_app",
- "nara_asset",
- "nara_core",
- "nara_ecs",
- "nara_image",
- "nara_material",
- "nara_reflect",
- "serde",
-]
-
-[[package]]
-name = "nara_sprite_animation"
-version = "0.1.0"
-dependencies = [
- "nara_asset",
- "nara_core",
- "nara_diagnostic",
- "nara_sprite",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "nara_sprite_render"
-version = "0.1.0"
-dependencies = [
- "nara_app",
- "nara_asset",
- "nara_core",
- "nara_ecs",
- "nara_hierarchy",
- "nara_image",
- "nara_material",
- "nara_render",
- "nara_sprite",
- "nara_tilemap",
- "nara_transform",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "nara_tasks"
 version = "0.1.0"
 dependencies = [
@@ -2249,23 +2156,6 @@ dependencies = [
  "swash",
  "thiserror 2.0.21",
  "ttf-parser",
-]
-
-[[package]]
-name = "nara_tilemap"
-version = "0.1.0"
-dependencies = [
- "nara_app",
- "nara_asset",
- "nara_core",
- "nara_diagnostic",
- "nara_ecs",
- "nara_image",
- "nara_material",
- "nara_reflect",
- "ron",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -2291,9 +2181,9 @@ dependencies = [
  "nara_core",
  "nara_ecs",
  "nara_hierarchy",
- "nara_image",
  "nara_input",
  "nara_reflect",
+ "nara_render",
  "nara_scene",
  "nara_text",
  "nara_ui_kernel",
@@ -2307,22 +2197,6 @@ version = "0.1.0"
 dependencies = [
  "nara_text",
  "taffy",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "nara_ui_render"
-version = "0.1.0"
-dependencies = [
- "guillotiere",
- "nara_app",
- "nara_asset",
- "nara_ecs",
- "nara_image",
- "nara_render",
- "nara_text",
- "nara_ui_kernel",
- "nara_window",
  "thiserror 2.0.21",
 ]
 
@@ -3905,7 +3779,7 @@ dependencies = [
  "nara",
  "nara_gilrs",
  "nara_rapier2d",
- "nara_sprite_animation",
+ "nara_render",
  "notify",
  "rtrb",
  "serde",

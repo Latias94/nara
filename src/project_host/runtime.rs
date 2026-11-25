@@ -1841,7 +1841,8 @@ fn verify_processed_runtime_plan(plan: &RuntimeConfigurationPlan) -> Result<(), 
         let plugin = entry.plugin_id();
         let source_execution = plugin == nara_asset::ASSET_SOURCE_PLUGIN_ID;
         #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
-        let source_execution = source_execution || plugin == nara_image::IMAGE_SOURCE_PLUGIN_ID;
+        let source_execution =
+            source_execution || plugin == nara_render::image::IMAGE_SOURCE_PLUGIN_ID;
         #[cfg(feature = "asset-watch")]
         let source_execution =
             source_execution || plugin == nara_asset_watch::ASSET_WATCH_PLUGIN_ID;

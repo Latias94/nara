@@ -2,8 +2,10 @@ use std::{any::Any, mem::size_of, sync::Arc};
 
 use nara_asset::{AssetProductRef, AssetRef, AssetRuntimeError};
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
-use nara_image::ImageDomain;
-use nara_material::{MATERIAL_PLUGIN_ID, Material2dAsset, Material2dDeclaration, Material2dRecord};
+use nara_render::image::ImageDomain;
+use nara_render::material::{
+    MATERIAL_PLUGIN_ID, Material2dAsset, Material2dDeclaration, Material2dRecord,
+};
 use nara_scene::CompiledSceneComponent;
 
 use super::{
