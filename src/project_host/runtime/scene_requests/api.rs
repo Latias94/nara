@@ -474,8 +474,8 @@ impl ProjectScenes<'_> {
             .as_deref()
             .ok_or(ProjectSceneRequestError::Unavailable)?;
         #[cfg(feature = "project-source")]
-        if current.is_project_backed() {
-            let path = current
+        if current.source_content_stamp().is_some() {
+            let path = residency
                 .deferred_source_scene(product)
                 .ok_or(ProjectSceneRequestError::NotDeferredScene)?;
             let purpose = RequestPurpose::AdditiveSource(path.clone());
@@ -499,7 +499,7 @@ impl ProjectScenes<'_> {
             .current
             .as_deref()
             .ok_or(ProjectSceneRequestError::Unavailable)?;
-        if !current.is_content_managed() {
+        if !current.retained_source().is_content_managed() {
             return Err(ProjectSceneRequestError::Unavailable);
         }
         let generation = **self

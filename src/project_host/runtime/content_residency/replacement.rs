@@ -3,12 +3,12 @@
 use std::borrow::Cow;
 
 use nara_ecs::Mut;
+use nara_scene::current_scene::{StagedCurrentSceneReplacement, stage_current_scene_replacement};
 
 use super::*;
 
 pub(super) struct StagedProjectSceneReplacement<'content> {
-    scene: Option<StagedSceneReplacement>,
-    expected: &'content SpawnedSceneInstance,
+    scene: Option<StagedCurrentSceneReplacement>,
     content: &'content PreparedSceneContent,
     #[cfg(feature = "runtime-2d")]
     staged_server: AssetServer,
@@ -20,7 +20,7 @@ pub(super) struct StagedProjectSceneReplacement<'content> {
 impl<'content> StagedProjectSceneReplacement<'content> {
     pub(super) fn stage<F>(
         world: &mut World,
-        expected: &'content SpawnedSceneInstance,
+        expected: &SpawnedSceneInstance,
         content: &'content PreparedSceneContent,
         limits: SceneProductTransactionLimits,
         additional_retirements: &[SceneProductRetirement<'_>],
@@ -63,33 +63,17 @@ impl<'content> StagedProjectSceneReplacement<'content> {
                     .map_err(rejected)?;
                 server.clone()
             };
-            let scene = match content {
-                #[cfg(feature = "project-source")]
-                PreparedSceneContent::Source(snapshot) => component_bindings
-                    .stage_scene_replacement(
-                        world,
-                        snapshot.compiled_candidate(),
-                        Some(snapshot.asset_resolution()),
-                        expected,
-                        bindings,
-                        limits,
-                        &scene_retirements,
-                        configure,
-                    ),
-                PreparedSceneContent::Processed(content) => component_bindings
-                    .stage_runtime_scene_replacement(
-                        world,
-                        content.scene.candidate(),
-                        expected,
-                        bindings,
-                        limits,
-                        &scene_retirements,
-                        configure,
-                    ),
-            }?;
+            let scene = stage_current_scene_replacement(
+                world,
+                expected,
+                Some(content.scene_source()),
+                bindings,
+                limits,
+                &scene_retirements,
+                configure,
+            )?;
             Ok(Self {
                 scene: Some(scene),
-                expected,
                 content,
                 #[cfg(feature = "runtime-2d")]
                 staged_server,
@@ -101,13 +85,6 @@ impl<'content> StagedProjectSceneReplacement<'content> {
     }
 
     fn validate_content(&self, world: &World) -> Result<(), SceneSpawnReport> {
-        let bindings = current_scene_bindings(world, self.expected)?;
-        if !self.content.shares_component_bindings(&bindings) {
-            return Err(rejected(failure(
-                "project.scene.schema-mismatch",
-                "Prepared Scene uses another schema authority",
-            )));
-        }
         validate_resources(
             world,
             #[cfg(feature = "runtime-2d")]
@@ -182,14 +159,6 @@ impl<'content> StagedProjectSceneReplacement<'content> {
             stock::commit_publications(world, self.stock.images, tilesets, self.stock.materials);
         let authority = self.catalog.commit(world);
         world.insert_resource(self.content.domain_assets().clone());
-        world.resource_mut::<CurrentScene>().commit_source(
-            self.content.scene_source(),
-            report
-                .instance
-                .as_ref()
-                .expect("Scene commit returns its receipt")
-                .clone(),
-        );
         *world.resource_mut::<ProjectSceneResidency>() = ProjectSceneResidency {
             additions: additive::Additions::default(),
             #[cfg(feature = "runtime-2d")]
@@ -262,7 +231,10 @@ fn validate_resources(
         let source = matches!(content, ResidencyInput::Source(_));
         if source
             && (!world.contains_resource::<ProjectAssetDatabase>()
-                || !world.resource::<CurrentScene>().is_project_backed())
+                || world
+                    .resource::<CurrentScene>()
+                    .source_content_stamp()
+                    .is_none())
         {
             return Err(resources_missing());
         }

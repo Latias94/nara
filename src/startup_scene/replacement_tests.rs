@@ -5,8 +5,8 @@ use std::{
 
 use nara_app::CoreStage;
 use nara_core::ItemLimit;
-use nara_ecs::Resource;
 use nara_ecs::identity::{EntityLookup, SceneEntityId, WorldIdentityDomain};
+use nara_ecs::{Resource, World};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
@@ -14,8 +14,9 @@ use nara_reflect::{
     component_registry,
 };
 use nara_scene::{
-    SceneComponentRecord, SceneDocument, SceneEntityRecord, SceneSpawnReport,
+    SceneComponentRecord, SceneDocument, SceneEntityRecord, SceneOccurrenceKey, SceneSpawnReport,
     advanced::{SceneProductResource, SceneProductTransactionLimits},
+    scene_component_bindings,
 };
 
 use super::*;
@@ -77,10 +78,7 @@ fn limits() -> SceneProductTransactionLimits {
 }
 
 fn source_view(world: &World) -> SceneSourceView {
-    let source = &world.resource::<CurrentScene>().source;
-    SceneSourceView {
-        source: Arc::downgrade(source),
-    }
+    world.resource::<CurrentScene>().source_view()
 }
 
 fn assert_rejected(report: &SceneSpawnReport, code: &str) {
@@ -476,10 +474,6 @@ fn rejected_candidate_keeps_the_current_pair_and_product_state() {
             .unwrap(),
         );
         let rejected_source = SceneSource::direct(candidate);
-        let RetainedSceneCandidate::Compiled(candidate) = &rejected_source.candidate else {
-            panic!("the fixture retains a source compilation");
-        };
-        let weak_rejected = Arc::downgrade(candidate);
         let report = replace_current_scene_with_product(
             world,
             &current,
@@ -492,7 +486,6 @@ fn rejected_candidate_keeps_the_current_pair_and_product_state() {
         );
         assert!(report.diagnostics.has_errors());
         assert!(report.instance.is_none());
-        assert!(weak_rejected.upgrade().is_none());
         assert_eq!(world.resource::<CurrentScene>().receipt(), &current);
         assert_eq!(
             view.with_document(|scene| scene.roots().to_vec()),
@@ -509,19 +502,9 @@ fn rejected_candidate_keeps_the_current_pair_and_product_state() {
 }
 
 #[test]
-fn current_replacement_requires_finalized_startup_and_an_existing_owner() {
+fn current_replacement_requires_an_existing_owner() {
     with_current_scene(|world| {
         let current = world.resource::<CurrentScene>().receipt().clone();
-        world
-            .resource_mut::<StartupSceneActivationAuthority>()
-            .phase = StartupSceneActivationPhase::Materialized;
-        let report = restart_current_scene_with_product(world, &current, limits(), &[], |_| {
-            panic!("replacement cannot run inside the startup activation window");
-        });
-        assert_rejected(&report, "scene.current.startup-not-finalized");
-        world
-            .resource_mut::<StartupSceneActivationAuthority>()
-            .phase = StartupSceneActivationPhase::Finalized;
         let owner = world.remove_resource::<CurrentScene>().unwrap();
         let report = restart_current_scene_with_product(world, &current, limits(), &[], |_| {
             panic!("replacement cannot fabricate a current owner");

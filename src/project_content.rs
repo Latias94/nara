@@ -48,6 +48,7 @@ use nara_render::tilemap::{
     TileSetSource, TileSetSourceFileLimits, TilemapMembershipError, tilemap_membership_work_bytes,
     validate_persisted_tilemap_membership,
 };
+use nara_scene::current_scene::SceneSourceAssets;
 use nara_scene::{
     CompiledSceneCandidate, CompiledSceneComponent, CompiledSceneDocument, CompiledSceneEntity,
     PrefabDocument, PrefabDocumentCandidate, ResolvedPrefabSource, SceneComponentBindings,
@@ -315,6 +316,18 @@ pub(crate) struct ProjectSourceContent {
     _lease: ProjectContentLease,
 }
 
+struct ProjectSceneSource {
+    sources: Arc<ProjectSourceContent>,
+    _lease: ProjectContentLease,
+    _generation: ProjectContentGenerationLease,
+}
+
+impl SceneSourceAssets for ProjectSceneSource {
+    fn resolver(&self) -> AssetReferenceResolver<'_> {
+        self.sources.resolution()
+    }
+}
+
 impl ProjectSourceContent {
     pub(crate) fn database(&self) -> &ProjectAssetDatabase {
         &self.database
@@ -354,6 +367,10 @@ impl ProjectSourceContent {
 }
 
 impl ProjectContentSnapshot {
+    pub(crate) fn retained_sources(&self) -> &Arc<ProjectSourceContent> {
+        &self.inner.sources
+    }
+
     /// The separately retained global input definition selected by the source manifest.
     #[must_use]
     pub fn input_action_map(&self) -> Option<&ProjectInputContent> {
@@ -552,13 +569,15 @@ impl ProjectContentSnapshot {
     /// Retains the exact compiled selected source for one runtime materialization.
     #[must_use]
     pub fn scene_source(&self) -> SceneSource {
-        SceneSource::from_project_content(
+        SceneSource::authored(
             Arc::clone(&self.inner.sources.scenes.selected.compiled),
-            Arc::clone(&self.inner.sources),
-            Some(self.content_stamp()),
-            self.inner._runtime_lease.clone(),
-            self.inner._generation_lease.clone(),
+            ProjectSceneSource {
+                sources: Arc::clone(&self.inner.sources),
+                _lease: self.inner._runtime_lease.clone(),
+                _generation: self.inner._generation_lease.clone(),
+            },
             Arc::clone(&self.inner.schema_authority),
+            self.content_stamp(),
         )
     }
 }

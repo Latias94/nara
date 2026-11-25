@@ -51,9 +51,6 @@ pub(in crate::project_host::runtime) fn admits_processed_addition(
     current: &CurrentScene,
     product: AssetProductRef,
 ) -> bool {
-    let Some(root) = current.hosted_runtime_scene() else {
-        return false;
-    };
     let (base, deferred_scene_products) = match &residency.authority {
         #[cfg(feature = "project-source")]
         ResidencyAuthority::Source { .. } => return false,
@@ -64,7 +61,9 @@ pub(in crate::project_host::runtime) fn admits_processed_addition(
         } => (base, deferred_scene_products),
     };
     product.product() == ImportedProductId::PRIMARY
-        && base.same_base(root.base())
+        && current
+            .retained_source()
+            .uses_hosted_catalog(base.catalog())
         && deferred_scene_products.binary_search(&product).is_ok()
 }
 

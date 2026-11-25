@@ -1194,10 +1194,15 @@ fn headless_session_publishes_the_original_cpu_closure_and_retires_it() {
             assert_eq!(y.payload[0], Y);
 
             let current = CurrentScene::get(world).unwrap();
-            let owner = world.resource::<CurrentScene>();
-            let admitted = owner.hosted_runtime_scene().unwrap();
-            assert!(admitted.base().same_base(&base));
-            assert_eq!(admitted.product(), base.catalog().startup_scene());
+            assert!(
+                current
+                    .retained_source()
+                    .uses_hosted_catalog(base.catalog())
+            );
+            assert_eq!(
+                current.source_view().hosted_runtime_scene_identity(),
+                Some((base.catalog().startup_scene(), base.catalog_digest()))
+            );
             let root = SceneEntityId::new("root").unwrap();
             assert_eq!(current.source().roots(), std::slice::from_ref(&root));
             assert_eq!(current.receipt().entity_ids(), current.source().roots());

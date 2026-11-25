@@ -809,13 +809,32 @@ impl RuntimeContentScene {
     /// Shares this complete retained owner with ordinary startup/current-Scene materialization.
     #[must_use]
     pub fn scene_source(&self) -> SceneSource {
-        SceneSource::from_runtime_content(self.clone())
+        SceneSource::cooked(self.clone(), false)
     }
-    pub(crate) fn candidate_arc(&self) -> Arc<RuntimeSceneCandidate> {
-        Arc::clone(&self.inner.candidate)
+
+    pub(crate) fn hosted_scene_source(&self) -> SceneSource {
+        SceneSource::cooked(self.clone(), true)
     }
     pub(crate) fn retained_bytes(&self) -> usize {
         self.inner.retained_bytes
+    }
+}
+
+impl nara_scene::current_scene::PackedSceneSource for RuntimeContentScene {
+    fn candidate(&self) -> &RuntimeSceneCandidate {
+        self.candidate()
+    }
+
+    fn catalog(&self) -> &RuntimeContentCatalog {
+        self.base().catalog()
+    }
+
+    fn catalog_digest(&self) -> ContentDigest {
+        self.base().catalog_digest()
+    }
+
+    fn product(&self) -> AssetProductRef {
+        self.product()
     }
 }
 impl fmt::Debug for RuntimeContentScene {

@@ -23,7 +23,7 @@ use super::images::OwnedImage;
 use super::*;
 #[cfg(feature = "project-source")]
 use crate::{
-    project_content::{ProjectContentLease, asset_record_retained_bytes},
+    project_content::{ProjectContentLease, ProjectSourceContent, asset_record_retained_bytes},
     project_host::ProjectSettingsLineage,
 };
 #[cfg(feature = "runtime-2d")]
@@ -41,6 +41,7 @@ pub(super) enum ResidencyAuthority {
     Source {
         lineage: ProjectSettingsLineage,
         catalog: Vec<AssetRecord>,
+        sources: Arc<ProjectSourceContent>,
         scope: nara_asset::AssetPathScope,
         _lease: ProjectContentLease,
     },
@@ -88,6 +89,7 @@ pub(super) enum PreparedCatalog {
         original: Option<ProjectAssetDatabase>,
         change: CatalogChange,
         lineage: ProjectSettingsLineage,
+        sources: Arc<ProjectSourceContent>,
         scope: nara_asset::AssetPathScope,
         lease: ProjectContentLease,
     },
@@ -134,6 +136,7 @@ impl PreparedCatalog {
                     original,
                     change,
                     lineage: snapshot.lineage(),
+                    sources: Arc::clone(snapshot.retained_sources()),
                     scope: snapshot.asset_resolution().scope().clone(),
                     lease,
                 })
@@ -259,6 +262,7 @@ impl PreparedCatalog {
                 original: _,
                 change,
                 lineage,
+                sources,
                 scope,
                 lease,
             } => {
@@ -266,6 +270,7 @@ impl PreparedCatalog {
                 ResidencyAuthority::Source {
                     lineage,
                     catalog: change.owned,
+                    sources,
                     scope,
                     _lease: lease,
                 }

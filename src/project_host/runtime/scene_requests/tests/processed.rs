@@ -13,7 +13,7 @@ use crate::{
         RuntimeContentCatalogLimits, RuntimeContentExpectation, RuntimeContentLimits,
         RuntimeContentMember, RuntimeContentTarget,
     },
-    startup_scene::{SceneSource, replace_current_scene_with_product},
+    startup_scene::replace_current_scene_with_product,
 };
 
 #[cfg(feature = "runtime-2d")]
@@ -21,7 +21,7 @@ use crate::{
 fn processed_scene_refuses_source_notifications_and_rescans_without_admitting_io() {
     let fixture = ProcessedFixture::new();
     let base = fixture.open(RuntimeContentLimits::default());
-    let source = SceneSource::from_hosted_runtime_content(base.acquire_startup_scene().unwrap());
+    let source = base.acquire_startup_scene().unwrap().hosted_scene_source();
     with_context_world(
         Arc::new(Context::Processed { base: base.clone() }),
         source,
@@ -56,9 +56,8 @@ fn processed_scene_refuses_source_notifications_and_rescans_without_admitting_io
             assert!(
                 world
                     .resource::<CurrentScene>()
-                    .hosted_runtime_base()
-                    .unwrap()
-                    .same_base(&base)
+                    .retained_source()
+                    .uses_hosted_catalog(base.catalog())
             );
             assert!(world.resource::<RequestOwner>().slot.is_none());
         },
@@ -155,7 +154,7 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
     let other = fixture.open(RuntimeContentLimits::default());
     assert_eq!(base.catalog_digest(), other.catalog_digest());
     assert!(!base.same_base(&other));
-    let source = SceneSource::from_hosted_runtime_content(base.acquire_startup_scene().unwrap());
+    let source = base.acquire_startup_scene().unwrap().hosted_scene_source();
     with_context_world(
         Arc::new(Context::Processed { base: base.clone() }),
         source,
@@ -260,7 +259,7 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
 fn processed_cancellation_keeps_slot_and_original_worker_captures_until_return() {
     let fixture = ProcessedFixture::new();
     let base = fixture.open(RuntimeContentLimits::default());
-    let source = SceneSource::from_hosted_runtime_content(base.acquire_startup_scene().unwrap());
+    let source = base.acquire_startup_scene().unwrap().hosted_scene_source();
     with_context_world(Arc::new(Context::Processed { base }), source, |world| {
         world.insert_resource(pools());
         let expected = CurrentScene::get(world).unwrap().receipt().clone();
@@ -349,7 +348,7 @@ fn processed_failure_uses_runtime_content_error_and_safe_runtime_diagnostics() {
 fn processed_travel_publishes_content_and_retains_request_authority() {
     let fixture = ProcessedFixture::new();
     let base = fixture.open(RuntimeContentLimits::default());
-    let source = SceneSource::from_hosted_runtime_content(base.acquire_startup_scene().unwrap());
+    let source = base.acquire_startup_scene().unwrap().hosted_scene_source();
     with_context_world(
         Arc::new(Context::Processed { base: base.clone() }),
         source,
@@ -374,10 +373,14 @@ fn processed_travel_publishes_content_and_retains_request_authority() {
             assert_eq!(current.receipt(), &committed);
             assert_ne!(current.receipt().instance_id(), expected.instance_id());
             assert_eq!(current.source().roots(), [entity("later")]);
-            assert!(current.is_content_managed());
+            assert!(current.retained_source().is_content_managed());
             #[cfg(feature = "runtime-2d")]
-            assert!(!current.is_project_backed());
-            assert!(current.hosted_runtime_base().unwrap().same_base(&base));
+            assert!(current.source_content_stamp().is_none());
+            assert!(
+                current
+                    .retained_source()
+                    .uses_hosted_catalog(base.catalog())
+            );
             assert!(!world.contains_resource::<ProjectAssetDatabase>());
             // The next request uses the same owner after successful processed publication.
             let next =
@@ -399,11 +402,11 @@ fn processed_hosted_custody_requires_residency_and_preserves_independent_replace
     let later = base.acquire_scene(later_product()).unwrap();
     let independent = later.scene_source();
     #[cfg(feature = "runtime-2d")]
-    assert!(!independent.is_project_backed());
+    assert!(independent.source_stamp().is_none());
     assert!(!independent.is_content_managed());
-    let hosted = SceneSource::from_hosted_runtime_content(startup.clone());
+    let hosted = startup.hosted_scene_source();
     #[cfg(feature = "runtime-2d")]
-    assert!(!hosted.is_project_backed());
+    assert!(hosted.source_stamp().is_none());
     assert!(hosted.is_content_managed());
     let hosted_base = base.clone();
     let hosted_later = later.clone();
@@ -412,14 +415,13 @@ fn processed_hosted_custody_requires_residency_and_preserves_independent_replace
         hosted,
         move |world| {
             let current = world.resource::<CurrentScene>();
-            assert!(current.is_content_managed());
+            assert!(current.retained_source().is_content_managed());
             #[cfg(feature = "runtime-2d")]
-            assert!(!current.is_project_backed());
+            assert!(current.source_content_stamp().is_none());
             assert!(
                 current
-                    .hosted_runtime_base()
-                    .unwrap()
-                    .same_base(&hosted_base)
+                    .retained_source()
+                    .uses_hosted_catalog(hosted_base.catalog())
             );
             let expected = current.receipt().clone();
             let report = replace_current_scene_with_product(
@@ -442,8 +444,12 @@ fn processed_hosted_custody_requires_residency_and_preserves_independent_replace
         move |world| {
             world.insert_resource(pools());
             let current = world.resource::<CurrentScene>();
-            assert!(!current.is_content_managed());
-            assert!(current.hosted_runtime_base().is_none());
+            assert!(!current.retained_source().is_content_managed());
+            assert!(
+                !current
+                    .retained_source()
+                    .uses_hosted_catalog(later.base().catalog())
+            );
             let expected = current.receipt().clone();
             assert_eq!(
                 ProjectScenes::scope(world, |scenes| scenes.request(later_product())),
@@ -464,7 +470,7 @@ fn processed_hosted_custody_requires_residency_and_preserves_independent_replace
             let report = replace_current_scene_with_product(
                 world,
                 &committed,
-                SceneSource::from_hosted_runtime_content(later.clone()),
+                later.hosted_scene_source(),
                 limits(),
                 &[],
                 |_| panic!("hosted targets must be rejected before product configuration"),

@@ -36,7 +36,7 @@ use nara_scene::{
     SceneSpawnReport,
     advanced::{
         SceneAssetReservations, SceneProductOverlayWriter, SceneProductRetirement,
-        SceneProductTransactionLimits, StagedSceneReplacement,
+        SceneProductTransactionLimits,
     },
 };
 
@@ -83,6 +83,17 @@ impl ProjectSceneResidency {
         product: nara_asset::AssetProductRef,
     ) -> bool {
         additive::admits_processed_addition(self, current, product)
+    }
+
+    #[cfg(feature = "project-source")]
+    pub(super) fn deferred_source_scene(
+        &self,
+        product: nara_asset::AssetProductRef,
+    ) -> Option<&nara_asset::AssetSourcePath> {
+        match &self.authority {
+            ResidencyAuthority::Source { sources, .. } => sources.deferred_scene(product),
+            ResidencyAuthority::Processed { .. } => None,
+        }
     }
 }
 

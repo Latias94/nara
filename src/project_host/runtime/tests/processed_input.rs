@@ -478,9 +478,8 @@ fn processed_selection_is_visible_in_first_startup_from_the_captured_base_withou
         assert!(
             world
                 .resource::<CurrentScene>()
-                .hosted_runtime_base()
-                .unwrap()
-                .same_base(&base)
+                .retained_source()
+                .uses_hosted_catalog(base.catalog())
         );
     })
     .unwrap();

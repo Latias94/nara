@@ -118,7 +118,10 @@ fn current_dependency(
         )));
     }
     let current = world.resource::<CurrentScene>();
-    if !current.matches_component_bindings(bindings) {
+    if !current
+        .retained_source()
+        .matches_component_bindings(bindings)
+    {
         return Err(rejected(failure(
             "scene.current.component-bindings-mismatch",
             "Current Scene source does not match the installed component definitions",
@@ -137,11 +140,15 @@ fn current_dependency(
         })?;
     match &residency.authority {
         #[cfg(feature = "project-source")]
-        ResidencyAuthority::Source { .. } => {
-            let sources = current.project_sources().ok_or_else(authority_mismatch)?;
+        ResidencyAuthority::Source { sources, .. } => {
+            if current.source_content_stamp().is_none() {
+                return Err(authority_mismatch());
+            }
             let candidate = sources
                 .scene_dependency(product)
-                .filter(|candidate| candidate.source_key() != current.source_key())
+                .filter(|candidate| {
+                    candidate.source_key() != current.retained_source().source_key()
+                })
                 .ok_or_else(dependency_unavailable)?;
             Ok(SceneDependency::Source {
                 sources: Arc::clone(sources),
@@ -149,10 +156,10 @@ fn current_dependency(
             })
         }
         ResidencyAuthority::Processed { scenes, base, .. } => {
-            let current_base = current
-                .hosted_runtime_base()
-                .ok_or_else(authority_mismatch)?;
-            if !base.same_base(current_base) {
+            if !current
+                .retained_source()
+                .uses_hosted_catalog(base.catalog())
+            {
                 return Err(authority_mismatch());
             }
             let scene = scenes
@@ -167,7 +174,7 @@ fn current_dependency(
                 member.kind(),
                 RuntimeContentMemberKind::Scene { source }
                     if source == scene.candidate().source_key()
-            ) || scene.candidate().source_key() == current.source_key()
+            ) || scene.candidate().source_key() == current.retained_source().source_key()
             {
                 return Err(dependency_unavailable());
             }

@@ -1,20 +1,15 @@
 use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
-use nara_ecs::identity::SpawnedSceneInstance;
-use nara_ecs::{Mut, World};
+use nara_ecs::{World, identity::SpawnedSceneInstance};
 use nara_scene::{
-    SceneComponentBindings, SceneSpawnReport,
+    SceneSpawnReport,
     advanced::{
         SceneAssetReservations, SceneProductOverlayWriter, SceneProductRetirement,
         SceneProductTransactionLimits,
     },
-    scene_component_bindings, validate_scene_component_bindings_authority,
+    current_scene::{current_scene_bindings, stage_current_scene_replacement},
 };
 
-use super::{
-    CurrentScene, RetainedSceneCandidate, SceneSource, StartupSceneActivationAuthority,
-    StartupSceneActivationPhase,
-};
-use std::sync::Arc;
+use super::{CurrentScene, SceneSource};
 
 /// Restarts the committed Scene from its own retained source at an exclusive simulation boundary.
 ///
@@ -90,10 +85,9 @@ fn replace_current<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
-    let bindings = match current_scene_bindings(world, expected) {
-        Ok(bindings) => bindings,
-        Err(report) => return report,
-    };
+    if let Err(report) = current_scene_bindings(world, expected) {
+        return report;
+    }
     #[cfg(feature = "serde")]
     if crate::project_host::has_active_project_scene_addition(world) {
         return rejected(
@@ -101,119 +95,46 @@ where
             "Unload active project Scene additions before restarting the retained primary Scene",
         );
     }
-    let owner = world.resource::<CurrentScene>();
-    if source
-        .as_ref()
-        .is_some_and(|source| source.is_content_managed() || owner.source.is_content_managed())
-    {
+    if source.as_ref().is_some_and(|source| {
+        source.is_content_managed()
+            || world
+                .resource::<CurrentScene>()
+                .retained_source()
+                .is_content_managed()
+    }) {
         return rejected(
             "scene.current.project-residency-required",
             "Hosted Scene replacement requires content residency preparation",
         );
     }
-    if crate::ecs::transaction::validate_resource_scope::<CurrentScene>(world).is_err() {
-        return rejected(
-            "scene.current.owner-lifecycle-unsupported",
-            "Current Scene ownership cannot run lifecycle effects during replacement",
-        );
-    }
-    world.resource_scope(|world, mut owner: Mut<CurrentScene>| {
-        let source = source.map_or_else(|| Arc::clone(&owner.source), Arc::new);
-        if !source.matches_component_bindings(&bindings) {
-            return rejected(
-                "scene.current.component-bindings-mismatch",
-                "Current Scene candidate does not match the installed component definitions",
-            );
-        }
-        let assets = SceneAssetReservations::from_world(world);
-        let prepared = match &source.candidate {
-            RetainedSceneCandidate::Compiled(candidate) => bindings.stage_scene_replacement(
-                world,
-                candidate,
-                source.asset_resolution(),
-                &owner.receipt,
-                assets,
-                limits,
-                additional_retirements,
-                configure,
-            ),
-            #[cfg(feature = "serde")]
-            RetainedSceneCandidate::Runtime(candidate) => bindings.stage_runtime_scene_replacement(
-                world,
-                candidate,
-                &owner.receipt,
-                assets,
-                limits,
-                additional_retirements,
-                configure,
-            ),
-        };
-        let prepared = match prepared {
-            Ok(prepared) => prepared,
-            Err(report) => return report,
-        };
-        let report = match prepared.commit(world) {
-            Ok(report) => report,
-            Err((prepared, mut report)) => {
-                if prepared.discard(world).is_err() {
-                    report.diagnostics.push(Diagnostic::error(
-                        DiagnosticCode::new("scene.candidate-cleanup-incomplete")
-                            .expect("engine-owned diagnostic codes are valid"),
-                        SafeSummary::new("Rejected Scene candidate could not be safely discarded")
-                            .expect("engine-owned diagnostic summaries are safe"),
-                    ));
-                }
-                return report;
+    let assets = SceneAssetReservations::from_world(world);
+    let staged = match stage_current_scene_replacement(
+        world,
+        expected,
+        source,
+        assets,
+        limits,
+        additional_retirements,
+        configure,
+    ) {
+        Ok(staged) => staged,
+        Err(report) => return report,
+    };
+    match staged.commit(world) {
+        Ok(report) => report,
+        Err((staged, mut report)) => {
+            if staged.discard(world).is_err() {
+                report.diagnostics.extend(
+                    rejected(
+                        "scene.candidate-cleanup-incomplete",
+                        "Rejected Scene candidate could not be safely discarded",
+                    )
+                    .diagnostics,
+                );
             }
-        };
-        if !report.diagnostics.has_errors()
-            && let Some(receipt) = &report.instance
-        {
-            owner.source = source;
-            owner.receipt = receipt.clone();
+            report
         }
-        report
-    })
-}
-
-pub(crate) fn current_scene_bindings(
-    world: &World,
-    expected: &SpawnedSceneInstance,
-) -> Result<SceneComponentBindings, SceneSpawnReport> {
-    if !world
-        .get_resource::<StartupSceneActivationAuthority>()
-        .is_some_and(|authority| authority.phase == StartupSceneActivationPhase::Finalized)
-    {
-        return Err(rejected(
-            "scene.current.startup-not-finalized",
-            "Current Scene replacement requires completed startup",
-        ));
     }
-    let Some(owner) = world.get_resource::<CurrentScene>() else {
-        return Err(rejected(
-            "scene.current.owner-missing",
-            "Current Scene ownership is unavailable",
-        ));
-    };
-    if owner.receipt != *expected {
-        return Err(rejected(
-            "scene.current.expected-instance-mismatch",
-            "Current Scene no longer matches the expected instance",
-        ));
-    }
-    if validate_scene_component_bindings_authority(world).is_err() {
-        return Err(rejected(
-            "scene.current.component-bindings-authority-invalid",
-            "Current Scene component bindings authority is invalid",
-        ));
-    }
-    let Some(bindings) = scene_component_bindings(world).cloned() else {
-        return Err(rejected(
-            "scene.current.component-bindings-unavailable",
-            "Current Scene component bindings are unavailable",
-        ));
-    };
-    Ok(bindings)
 }
 
 fn rejected(code: &'static str, summary: &'static str) -> SceneSpawnReport {

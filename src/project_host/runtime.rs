@@ -1022,7 +1022,7 @@ impl ProjectHost {
                 "Runtime startup content differs from its original admitted base",
             )));
         }
-        let startup_scene = SceneSource::from_hosted_runtime_content(content.scene.clone());
+        let startup_scene = content.scene.hosted_scene_source();
         self.begin_start_inputs(
             RuntimeStartContent::Processed {
                 base,

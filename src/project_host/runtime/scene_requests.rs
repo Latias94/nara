@@ -73,10 +73,10 @@ impl Context {
     fn matches_current(&self, current: &CurrentScene) -> bool {
         match self {
             #[cfg(feature = "project-source")]
-            Self::Source { .. } => current.is_project_backed(),
+            Self::Source { .. } => current.source_content_stamp().is_some(),
             Self::Processed { base } => current
-                .hosted_runtime_base()
-                .is_some_and(|current| base.same_base(current)),
+                .retained_source()
+                .uses_hosted_catalog(base.catalog()),
         }
     }
 

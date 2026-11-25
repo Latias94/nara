@@ -366,9 +366,8 @@ fn headless_session_retains_the_original_processed_base_across_pause_step_and_cl
             assert!(
                 world
                     .resource::<CurrentScene>()
-                    .hosted_runtime_base()
-                    .unwrap()
-                    .same_base(&base)
+                    .retained_source()
+                    .uses_hosted_catalog(base.catalog())
             );
             assert!(
                 world
@@ -437,9 +436,13 @@ fn processed_start_installs_native_values_and_original_request_context_without_f
     assert_eq!(host.running_content_revision(), None);
     host.with_running_world(|world| {
         let current = world.resource::<CurrentScene>();
-        assert!(current.is_content_managed());
-        assert!(!current.is_project_backed());
-        assert!(current.hosted_runtime_base().unwrap().same_base(&base));
+        assert!(current.retained_source().is_content_managed());
+        assert!(current.source_content_stamp().is_none());
+        assert!(
+            current
+                .retained_source()
+                .uses_hosted_catalog(base.catalog())
+        );
         assert!(!world.contains_resource::<nara_asset::ProjectAssetDatabase>());
         let mut server = world.resource::<AssetServer>().clone();
         let handle = server
@@ -605,9 +608,8 @@ fn processed_publication_failure_and_aborted_preparation_retain_existing_cleanup
                 .world()
                 .unwrap()
                 .resource::<CurrentScene>()
-                .hosted_runtime_base()
-                .unwrap()
-                .same_base(&base)
+                .retained_source()
+                .uses_hosted_catalog(base.catalog())
         );
         assert!(host.has_runtime_custody());
         drop(attempt);

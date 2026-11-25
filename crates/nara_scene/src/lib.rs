@@ -11,6 +11,7 @@ mod compiled;
 mod component_binding_plugin;
 mod component_bindings;
 mod component_payload;
+pub mod current_scene;
 mod data_components;
 mod diagnostics;
 mod document;

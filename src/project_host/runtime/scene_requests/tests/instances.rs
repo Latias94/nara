@@ -166,9 +166,7 @@ fn additive_cancellation_retains_the_original_slot_until_its_worker_returns() {
 fn travel_retires_two_occurrences_of_the_same_deferred_scene_atomically() {
     let fixture = Fixture::empty();
     let base = processed_base(&fixture);
-    let source = crate::startup_scene::SceneSource::from_hosted_runtime_content(
-        base.acquire_startup_scene().unwrap(),
-    );
+    let source = base.acquire_startup_scene().unwrap().hosted_scene_source();
     with_context_world(Arc::new(Context::Processed { base }), source, |world| {
         world.insert_resource(pools());
         let primary = CurrentScene::get(world).unwrap().receipt().clone();
@@ -332,9 +330,7 @@ fn processed_dependency_instances_use_original_hosted_immediate_members_without_
     let base = processed_base(&fixture);
     assert!(base.acquire_scene(product(3)).is_err());
     fs::write(fixture.root.join("cooked/3.runtime.json"), b"{ malformed").unwrap();
-    let source = crate::startup_scene::SceneSource::from_hosted_runtime_content(
-        base.acquire_startup_scene().unwrap(),
-    );
+    let source = base.acquire_startup_scene().unwrap().hosted_scene_source();
     with_context_world(
         Arc::new(Context::Processed { base: base.clone() }),
         source,
@@ -343,9 +339,8 @@ fn processed_dependency_instances_use_original_hosted_immediate_members_without_
             assert!(
                 world
                     .resource::<CurrentScene>()
-                    .hosted_runtime_base()
-                    .unwrap()
-                    .same_base(&base)
+                    .retained_source()
+                    .uses_hosted_catalog(base.catalog())
             );
             let cap = RuntimeContentLimits::default().retained_bytes().get();
             let Err(RuntimeContentError::Budget {

@@ -26,9 +26,7 @@ impl PreparedSceneContent {
         match self {
             #[cfg(feature = "project-source")]
             Self::Source(snapshot) => snapshot.scene_source(),
-            Self::Processed(content) => {
-                SceneSource::from_hosted_runtime_content(content.scene.clone())
-            }
+            Self::Processed(content) => content.scene.hosted_scene_source(),
         }
     }
 
