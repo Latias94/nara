@@ -13,20 +13,23 @@ use std::{
     mem::size_of,
 };
 
-use crate::fs::{ContentDigest, RelativePath};
 use nara_asset::AssetProductRef;
 use nara_core::{
     ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, FormatVersion, ItemLimit,
     PersistentFileContract, PersistentFileContractError, PersistentFileDecodeError,
     PersistentFileEnvelope, PersistentFileHeader, SerdeShapeError, SerdeShapeLimits,
     SerdeShapePreflightError, decode_persistent_file_with_preflight, preflight_serde_shape,
+    vfs::capabilities::{ContentDigest, RelativePath},
 };
-use nara_scene::runtime_configuration::RuntimeConfiguration;
-use nara_scene::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin};
 use serde::{
     Deserialize, Serialize, Serializer,
     de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor},
     ser::SerializeSeq,
+};
+
+use crate::{
+    SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin,
+    runtime_configuration::{ProductCapability, RuntimeConfiguration},
 };
 
 const FILE_KIND: &str = "runtime_content_catalog";
@@ -457,9 +460,7 @@ impl RuntimeContentCatalog {
                 .capabilities
                 .requested
                 .len()
-                .checked_mul(size_of::<
-                    nara_scene::runtime_configuration::ProductCapability,
-                >()),
+                .checked_mul(size_of::<ProductCapability>()),
         )?;
         add_bytes(
             &mut retained,
@@ -585,7 +586,7 @@ impl RuntimeContentCatalog {
     }
 
     /// Rechecks cross-member invariants without building a second graph or traversing cycles.
-    pub(super) fn validate(&self) -> Result<(), RuntimeContentCatalogError> {
+    fn validate(&self) -> Result<(), RuntimeContentCatalogError> {
         for pair in self.products.windows(2) {
             if pair[0].product == pair[1].product {
                 return Err(RuntimeContentCatalogError::DuplicateProduct {
@@ -765,8 +766,10 @@ impl RuntimeContentCatalog {
         self.member_index(product).map(|index| &self.members[index])
     }
 
-    /// Returns the canonical `members()` position using the catalog's sole Product index.
-    pub(super) fn member_index(&self, product: AssetProductRef) -> Option<usize> {
+    /// Returns the product's canonical slot in [`Self::members`], or `None` if absent.
+    /// Products sharing one encoded member return the same slot.
+    #[must_use]
+    pub fn member_index(&self, product: AssetProductRef) -> Option<usize> {
         self.products
             .binary_search_by_key(&product, |entry| entry.product)
             .ok()

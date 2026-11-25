@@ -31,6 +31,8 @@ mod prefab;
 mod prefab_copy;
 mod product_transaction;
 mod provenance;
+#[cfg(feature = "runtime-catalog")]
+pub mod runtime_catalog;
 #[cfg(feature = "runtime-configuration")]
 pub mod runtime_configuration;
 mod runtime_hierarchy;

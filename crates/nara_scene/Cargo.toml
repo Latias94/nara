@@ -25,6 +25,7 @@ toml.workspace = true
 
 [features]
 default = []
+runtime-catalog = ["runtime-configuration", "nara_core/fs-capabilities"]
 runtime-configuration = ["serde", "nara_app/tasks"]
 work-observation = ["dep:tracing"]
 serde = [

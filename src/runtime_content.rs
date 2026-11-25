@@ -9,7 +9,12 @@
 mod admission;
 mod backing;
 mod budget;
-mod catalog;
+#[cfg(all(
+    test,
+    not(feature = "runtime-input"),
+    any(windows, target_os = "linux")
+))]
+mod catalog_host_tests;
 mod codecs;
 mod deep;
 mod dependencies;
@@ -69,7 +74,7 @@ use backing::EncodedBacking;
 use budget::{DecodeBudget, DecodeLease};
 use dependencies::DependencyInventory;
 
-pub use catalog::{
+pub use nara_scene::runtime_catalog::{
     RuntimeContentCatalog, RuntimeContentCatalogDefinition, RuntimeContentCatalogError,
     RuntimeContentCatalogLimits, RuntimeContentDependency, RuntimeContentDependencyRole,
     RuntimeContentMember, RuntimeContentMemberKind, RuntimeContentTarget,
