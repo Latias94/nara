@@ -393,9 +393,11 @@ fn actual_scene_and_input_cooking_is_canonical_across_insertion_order() {
         second.expectation().catalog_digest()
     );
     let mut packs = [Vec::new(), Vec::new()];
-    first.base().write_pack(&mut packs[0]).unwrap();
+    first.pack().write(&mut packs[0]).unwrap();
     second.base().write_pack(&mut packs[1]).unwrap();
     assert_eq!(packs[0], packs[1]);
+    assert_eq!(first.pack().catalog_digest(), first.base().catalog_digest());
+    assert_eq!(first.pack().encoded_bytes(), packs[0].len() as u64);
     assert!(first.retained_bytes() > packs[0].len());
     assert_eq!(first.base().validate_deep().unwrap().members(), 3);
     assert_eq!(
@@ -877,7 +879,7 @@ fn memory_capture_checks_exact_member_bytes_and_complete_table() {
     let mut valid = CookedContentBuilder::new(request(), recipe(), limits()).unwrap();
     add_scene(&mut valid, 1, None);
     let prepared = valid.finish().unwrap();
-    let encoded = prepared.base().catalog().to_json_bytes().unwrap();
+    let encoded = prepared.pack().catalog_bytes().to_vec();
     assert!(matches!(
         RuntimeContentBase::capture_members(
             encoded,

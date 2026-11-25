@@ -2,7 +2,7 @@
 
 use std::{mem::size_of, sync::Arc};
 
-use nara_asset::pack::Pack;
+use nara_asset::pack::{CapturedPack, Pack};
 use nara_core::ByteLimit;
 use nara_core::vfs::capabilities::ContentDigest;
 use nara_scene::runtime_catalog::RuntimeContentCatalogAdmissionError;
@@ -16,11 +16,11 @@ use super::{
 use crate::project_host::RuntimeConfigurationPlan;
 
 pub(super) struct AdmittedCatalog {
-    pub(super) bytes: Vec<u8>,
     pub(super) catalog: RuntimeContentCatalog,
     digest: ContentDigest,
     plan: RuntimeConfigurationPlan,
     limits: RuntimeContentLimits,
+    catalog_length: usize,
     declared_encoded: usize,
 }
 
@@ -84,7 +84,7 @@ pub(super) fn input_limits(
 
 impl AdmittedCatalog {
     pub(super) fn new(
-        bytes: Vec<u8>,
+        bytes: &[u8],
         expected: &RuntimeContentExpectation,
         recipe: ProductRecipe,
         limits: RuntimeContentLimits,
@@ -92,7 +92,7 @@ impl AdmittedCatalog {
     ) -> Result<Self, RuntimeContentError> {
         let catalog =
             expected
-                .admit_catalog(&bytes, catalog_limits)
+                .admit_catalog(bytes, catalog_limits)
                 .map_err(|error| match error {
                     RuntimeContentCatalogAdmissionError::DigestMismatch => {
                         RuntimeContentError::CatalogDigestMismatch
@@ -152,11 +152,11 @@ impl AdmittedCatalog {
             limits.total_encoded_bytes.get(),
         )?;
         Ok(Self {
-            bytes,
             catalog,
             digest: expected.catalog_digest(),
             plan,
             limits,
+            catalog_length: bytes.len(),
             declared_encoded,
         })
     }
@@ -164,10 +164,10 @@ impl AdmittedCatalog {
     /// Admit the complete backing before its member table or any payload allocation.
     pub(super) fn retained_bytes(&self, captured: bool) -> Result<usize, RuntimeContentError> {
         let member_count = self.catalog.members().len();
-        let table = if captured {
-            member_count.checked_mul(size_of::<Vec<u8>>())
+        let backing = if captured {
+            CapturedPack::retained_bytes_for(self.declared_encoded, member_count)
         } else {
-            Pack::index_bytes(member_count)
+            Pack::index_bytes(member_count).and_then(|table| self.catalog_length.checked_add(table))
         }
         .ok_or_else(|| {
             budget_error(
@@ -176,15 +176,9 @@ impl AdmittedCatalog {
                 self.limits.retained_bytes.get(),
             )
         })?;
-        let encoded = if captured {
-            self.declared_encoded
-        } else {
-            self.bytes.len()
-        };
         let retained = [
-            encoded,
+            backing,
             self.catalog.retained_bytes(),
-            table,
             size_of::<RuntimeContentBaseInner>(),
             2 * crate::scene_retention::ARC_CONTROL_BLOCK_BYTES,
         ]
@@ -206,7 +200,6 @@ impl AdmittedCatalog {
                 catalog_digest: self.digest,
                 catalog: self.catalog,
                 plan: self.plan,
-                catalog_bytes: self.bytes,
                 backing,
                 budget: DecodeBudget::new(
                     retained,

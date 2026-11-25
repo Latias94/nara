@@ -789,16 +789,14 @@ fn retained_pack_releases_member_encoding_and_overlaps_exact_decode_work() {
     let pack = fixture.open_pack(&path, content_limits()).unwrap();
     let captured_charge = charge(&captured, RuntimeContentBudgetKind::RetainedBytes);
     let pack_charge = charge(&pack, RuntimeContentBudgetKind::RetainedBytes);
-    let member_bytes: usize = captured
-        .catalog()
-        .members()
-        .iter()
-        .map(|member| member.digest().length() as usize)
-        .sum();
+    let super::super::EncodedBacking::Captured(captured_pack) = &captured.inner.backing else {
+        panic!("in-memory fixture must retain a captured pack");
+    };
+    let file_index =
+        nara_asset::pack::Pack::index_bytes(captured.catalog().members().len()).unwrap();
     assert_eq!(
         captured_charge - pack_charge,
-        member_bytes
-            + captured.catalog().members().len() * (size_of::<Vec<u8>>() - size_of::<u64>()),
+        captured_pack.retained_bytes() - captured_pack.catalog_bytes().len() - file_index,
     );
     let member = pack.member(product(Y)).unwrap();
     let exact = Y_WORK

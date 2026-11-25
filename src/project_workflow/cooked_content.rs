@@ -14,7 +14,7 @@ use std::{error::Error, fmt, fmt::Write as _, mem::size_of};
 use crate::fs::ContentDigest;
 use nara_asset::{
     AssetDomain, AssetProductRef, AssetRef, AssetReferenceDemand, AssetReferenceResolver,
-    RuntimeAssetCodec,
+    RuntimeAssetCodec, pack::CapturedPack,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_input::{ActionMapAsset, ActionMapDomain, ActionMapRuntimeCodec};
@@ -785,7 +785,7 @@ impl CookedContentBuilder {
             catalog.target().clone(),
         );
         drop(catalog);
-        let (base, base_retained) =
+        let (base, pack, base_retained) =
             RuntimeContentBase::capture_members(encoded, captured, &expectation, recipe, runtime)?;
         let retained_bytes = add(base_retained, prepared_overhead)?;
         check(
@@ -804,6 +804,7 @@ impl CookedContentBuilder {
         drop(groups);
         Ok(PreparedRuntimeContent {
             base,
+            pack,
             expectation,
             retained_bytes,
         })
@@ -974,6 +975,7 @@ impl CookedContentBuilder {
 #[derive(Debug)]
 pub struct PreparedRuntimeContent {
     base: RuntimeContentBase,
+    pack: CapturedPack,
     expectation: RuntimeContentExpectation,
     retained_bytes: usize,
 }
@@ -982,6 +984,11 @@ impl PreparedRuntimeContent {
     #[must_use]
     pub fn base(&self) -> &RuntimeContentBase {
         &self.base
+    }
+    /// The original catalog and ordered member bytes shared with the admitted Runtime base.
+    #[must_use]
+    pub fn pack(&self) -> &CapturedPack {
+        &self.pack
     }
     #[must_use]
     pub fn expectation(&self) -> &RuntimeContentExpectation {
@@ -996,6 +1003,10 @@ impl PreparedRuntimeContent {
     #[must_use]
     pub fn into_base(self) -> RuntimeContentBase {
         self.base
+    }
+
+    pub(crate) fn into_pack(self) -> (CapturedPack, RuntimeContentExpectation) {
+        (self.pack, self.expectation)
     }
 }
 

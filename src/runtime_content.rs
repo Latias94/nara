@@ -46,6 +46,8 @@ use std::{
 };
 
 use crate::fs::{ContentDigest, FileCapability, FsError};
+#[cfg(feature = "project-workflow")]
+use nara_asset::pack::CapturedPack;
 use nara_asset::{
     AssetDomain, AssetProductRef, AssetRef, AssetReferenceDemand, AssetRuntimeError,
     RuntimeAssetCodec,
@@ -346,7 +348,6 @@ struct RuntimeContentBaseInner {
     catalog_digest: ContentDigest,
     catalog: RuntimeContentCatalog,
     plan: RuntimeConfigurationPlan,
-    catalog_bytes: Vec<u8>,
     backing: EncodedBacking,
     budget: Arc<DecodeBudget>,
     limits: RuntimeContentLimits,
@@ -381,10 +382,10 @@ impl RuntimeContentBase {
         expected: &RuntimeContentExpectation,
         recipe: ProductRecipe,
         limits: RuntimeContentLimits,
-    ) -> Result<(Self, usize), RuntimeContentError> {
+    ) -> Result<(Self, CapturedPack, usize), RuntimeContentError> {
         let (_, catalog_limits) = admission::input_limits(expected, limits)?;
         let admitted = admission::AdmittedCatalog::new(
-            catalog_bytes,
+            &catalog_bytes,
             expected,
             recipe,
             limits,
@@ -399,11 +400,10 @@ impl RuntimeContentBase {
                 return Err(RuntimeContentError::MemberDigestMismatch);
             }
         }
+        let pack = CapturedPack::new(catalog_bytes, members).map_err(backing::pack_error)?;
         Ok((
-            admitted.publish(
-                EncodedBacking::Captured(members.into_boxed_slice()),
-                retained,
-            ),
+            admitted.publish(EncodedBacking::Captured(pack.clone()), retained),
+            pack,
             retained,
         ))
     }
@@ -422,14 +422,14 @@ impl RuntimeContentBase {
         let (length, catalog_limits) = admission::input_limits(expected, limits)?;
         let catalog_bytes = backing::read_catalog(&file, length)?;
         let admitted = admission::AdmittedCatalog::new(
-            catalog_bytes,
+            &catalog_bytes,
             expected,
             recipe,
             limits,
             catalog_limits,
         )?;
         let retained = admitted.retained_bytes(false)?;
-        let backing = backing::open_pack(file, &admitted.catalog, admitted.bytes.len())?;
+        let backing = backing::open_pack(file, &admitted.catalog, catalog_bytes)?;
         Ok(admitted.publish(backing, retained))
     }
 

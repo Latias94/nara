@@ -484,9 +484,10 @@ impl PreparedProjectCook {
         let Self { content, selection } = self;
         selection.verify(request.workspace())?;
         let code = ProjectCodeSelection::capture(&selection, &request)?;
-        let bootstrap = GeneratedPlayerBootstrap::new(&content, BOOTSTRAP_INPUT, limits)?;
+        let (pack, expected) = content.into_pack();
+        let bootstrap = GeneratedPlayerBootstrap::new(&pack, &expected, BOOTSTRAP_INPUT, limits)?;
         let request = request.with_generated_rust_input(bootstrap.name(), bootstrap.bytes())?;
-        let package = build_player_package(content, bootstrap, &request, limits, |_| {
+        let package = build_player_package(pack, &expected, bootstrap, &request, limits, |_| {
             code.verify(&selection)
                 .map_err(|_| PlayerPackageControlFailure::SelectionChanged)
         })?;

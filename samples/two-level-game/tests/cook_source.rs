@@ -427,7 +427,8 @@ fn original_delivery_and_build_inputs_stay_selected_after_bootstrap_generation()
     let directory = Directory::new();
     let prepared = directory.prepare().unwrap();
     let bootstrap = GeneratedPlayerBootstrap::new(
-        prepared.content(),
+        prepared.content().pack(),
+        prepared.content().expectation(),
         "player-bootstrap.rs",
         PlayerPackageLimits::default(),
     )
@@ -575,7 +576,8 @@ fn rust_inventory_keeps_compiler_inputs_explicit_and_never_selects_bootstrap_byt
     assert!(request.generated_rust_input().is_none());
     let prepared = directory.prepare().unwrap();
     let generated = GeneratedPlayerBootstrap::new(
-        prepared.content(),
+        prepared.content().pack(),
+        prepared.content().expectation(),
         "player-bootstrap.rs",
         PlayerPackageLimits::default(),
     )

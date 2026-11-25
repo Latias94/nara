@@ -1334,7 +1334,8 @@ pub mod native {
         )
         .unwrap();
         let bootstrap = nara::project_tooling::player_package::GeneratedPlayerBootstrap::new(
-            prepared.content(),
+            prepared.content().pack(),
+            prepared.content().expectation(),
             "player-bootstrap.rs",
             nara::project_tooling::player_package::PlayerPackageLimits::default(),
         )

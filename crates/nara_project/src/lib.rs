@@ -27,6 +27,8 @@ mod path;
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 pub mod play;
+#[cfg(feature = "player-package")]
+pub mod player_package;
 #[cfg(feature = "product-process")]
 pub mod process;
 mod profile;

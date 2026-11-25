@@ -13,22 +13,23 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind},
 };
 
-use crate::fs::{
+use nara_asset::pack::{CapturedPack, PackError};
+use nara_core::vfs::capabilities::{
     ContentDigest, DirectoryCapability, DirectoryEnumerationLimits, DirectoryPublicationBeginError,
     DirectoryPublicationOrphan, DirectoryPublicationOutcome, DirectoryPublicationReceipt,
     DirectoryPublicationRejection, FileKind, FsError, FsOperation, RelativeComponent, RelativePath,
 };
 use nara_core::{ByteLimit, EngineVersion, FormatGenerator, FormatKind, PersistentFileEnvelope};
+use nara_scene::runtime_catalog::{RuntimeContentExpectation, RuntimeContentTarget};
 use serde::Serialize;
 use thiserror::Error;
 
-use super::cargo_build::{
-    CapturedCargoExecutable, CargoBuildFailure, CargoBuildPoint, CargoBuildRequest,
-    CargoDeclaredInput, CargoToolchainObservation, build_executable,
-};
-use crate::{
-    project_workflow::{cargo::CargoBuildSelection, cooked_content::PreparedRuntimeContent},
-    runtime_content::{RuntimeContentError, RuntimeContentExpectation, RuntimeContentTarget},
+use crate::cargo::{
+    CargoBuildSelection,
+    native::{
+        CapturedCargoExecutable, CargoBuildFailure, CargoBuildPoint, CargoBuildRequest,
+        CargoDeclaredInput, CargoToolchainObservation, build_executable,
+    },
 };
 
 pub const PLAYER_PACK_FILE: &str = "content.pack";
@@ -98,17 +99,18 @@ impl fmt::Debug for GeneratedPlayerBootstrap {
 }
 
 impl GeneratedPlayerBootstrap {
+    /// Uses the producer's admitted expectation and checks it against the original catalog bytes.
     pub fn new(
-        content: &PreparedRuntimeContent,
+        pack: &CapturedPack,
+        expected: &RuntimeContentExpectation,
         input_name: &str,
         limits: PlayerPackageLimits,
     ) -> Result<Self, PlayerPackageError> {
         validate_input_name(input_name)?;
+        check_catalog(pack, expected)?;
         let mut counter = TextCount(0);
-        write_bootstrap(&mut counter, content.expectation())
-            .map_err(|_| PlayerPackageError::Overflow)?;
+        write_bootstrap(&mut counter, expected).map_err(|_| PlayerPackageError::Overflow)?;
         check(counter.0, limits.bootstrap_bytes, "bootstrap bytes")?;
-        let expected = content.expectation();
         let retained_bytes = sum(&[
             size_of::<Self>(),
             input_name.len(),
@@ -116,7 +118,7 @@ impl GeneratedPlayerBootstrap {
             expected.target().triple().len(),
             expected.target().profile().len(),
         ])?;
-        let overlap = sum(&[content.retained_bytes(), retained_bytes])?;
+        let overlap = sum(&[pack.retained_bytes(), retained_bytes])?;
         check(overlap, limits.retained_bytes, "bootstrap retention")?;
         check(overlap, limits.work_bytes, "bootstrap work")?;
         let mut text = String::with_capacity(counter.0);
@@ -180,7 +182,9 @@ pub enum PlayerPackageError {
     Overflow,
     #[error("generated Player input requires one canonical portable logical name")]
     InputName,
-    #[error("generated Player input does not describe the prepared content")]
+    #[error("captured pack catalog differs from the admitted content expectation")]
+    CatalogMismatch,
+    #[error("generated Player input does not describe the selected content")]
     BootstrapMismatch,
     #[error("captured Cargo provenance omits or disagrees with the exact generated input")]
     BuildInputMismatch,
@@ -202,7 +206,7 @@ pub enum PlayerPackageError {
         control: Option<(PlayerPackagePoint, PlayerPackageControlFailure)>,
     },
     #[error(transparent)]
-    Runtime(#[from] RuntimeContentError),
+    Pack(#[from] PackError),
     #[error(transparent)]
     Filesystem(#[from] FsError),
     #[error("native Player package I/O failed")]
@@ -219,21 +223,23 @@ pub enum PlayerPackageError {
 
 /// Builds the selected Player while keeping content and generated-input costs in the work bound.
 ///
-/// Select `bootstrap.name()` and `bootstrap.bytes()` through the request's generated Rust input.
+/// Supply the captured pack with its admitted content expectation. Select `bootstrap.name()` and
+/// `bootstrap.bytes()` through the request's generated Rust input.
 /// The control closure revalidates the actual source/metadata/auxiliary and processed selections;
 /// it is not replaced by Cargo's separate code inventory. All callback panics become finite
 /// failures. Cargo cleanup failures retain their original process/target-directory custody.
 pub fn build_player_package(
-    content: PreparedRuntimeContent,
+    pack: CapturedPack,
+    expected: &RuntimeContentExpectation,
     bootstrap: GeneratedPlayerBootstrap,
     request: &CargoBuildRequest,
     limits: PlayerPackageLimits,
     mut control: impl FnMut(PlayerPackagePoint) -> Result<(), PlayerPackageControlFailure>,
 ) -> Result<PreparedPlayerPackage, PlayerPackageError> {
-    check_bootstrap(&content, &bootstrap)?;
-    check_target(&content, request.selection())?;
+    check_bootstrap(&pack, expected, &bootstrap)?;
+    check_target(expected, request.selection())?;
     check_generated_build_input(&bootstrap, request.generated_rust_input())?;
-    let resident = sum(&[content.retained_bytes(), bootstrap.retained_bytes()])?;
+    let resident = sum(&[pack.retained_bytes(), bootstrap.retained_bytes()])?;
     check(
         sum(&[resident, request.limits().work_bytes.get()])?,
         limits.work_bytes,
@@ -260,12 +266,19 @@ pub fn build_player_package(
         control: rejected_control,
     })?;
     checkpoint(&mut control, PlayerPackagePoint::AfterBuild)?;
-    PreparedPlayerPackage::bind(content, bootstrap, request.selection(), executable, limits)
+    PreparedPlayerPackage::bind(
+        pack,
+        expected,
+        bootstrap,
+        request.selection(),
+        executable,
+        limits,
+    )
 }
 
 /// Move-only unpublished package retaining original captured content and executable bytes.
 pub struct PreparedPlayerPackage {
-    content: PreparedRuntimeContent,
+    pack: CapturedPack,
     executable: CapturedCargoExecutable,
     executable_name: String,
     manifest: Box<[u8]>,
@@ -277,7 +290,7 @@ impl fmt::Debug for PreparedPlayerPackage {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("PreparedPlayerPackage")
-            .field("content", &self.content)
+            .field("pack", &self.pack)
             .field("executable", &self.executable)
             .field("executable_name", &self.executable_name)
             .field("pack_digest", &self.pack_digest)
@@ -294,14 +307,15 @@ impl PreparedPlayerPackage {
     /// features and tool observations remain in the provenance and manifest. This does not scan
     /// executable code to prove use of the input and does not execute or qualify the Player.
     pub fn bind(
-        content: PreparedRuntimeContent,
+        pack: CapturedPack,
+        expected: &RuntimeContentExpectation,
         bootstrap: GeneratedPlayerBootstrap,
         expected_selection: &CargoBuildSelection,
         executable: CapturedCargoExecutable,
         limits: PlayerPackageLimits,
     ) -> Result<Self, PlayerPackageError> {
-        check_bootstrap(&content, &bootstrap)?;
-        check_target(&content, expected_selection)?;
+        check_bootstrap(&pack, expected, &bootstrap)?;
+        check_target(expected, expected_selection)?;
         let provenance = executable.provenance();
         if provenance.selection() != expected_selection {
             return Err(PlayerPackageError::BuildSelectionMismatch);
@@ -319,7 +333,7 @@ impl PreparedPlayerPackage {
         RelativeComponent::new(filename).map_err(|_| PlayerPackageError::ExecutableName)?;
         let base_retained = sum(&[
             size_of::<Self>(),
-            content.retained_bytes(),
+            pack.retained_bytes(),
             executable.retained_bytes(),
             filename.len(),
         ])?;
@@ -330,15 +344,15 @@ impl PreparedPlayerPackage {
             limits.work_bytes,
             "pack hashing work",
         )?;
-        let mut digest_writer = DigestWriter::new(io::sink(), content.base().pack_encoded_bytes()?);
-        content.base().write_pack(&mut digest_writer)?;
+        let mut digest_writer = DigestWriter::new(io::sink(), pack.encoded_bytes());
+        pack.write(&mut digest_writer)?;
         let pack_digest = digest_writer.finish()?;
         check(
             sum(&[overlap, 512])?,
             limits.work_bytes,
             "manifest envelope work",
         )?;
-        let wire = manifest(&content, &bootstrap, &executable, filename, pack_digest)?;
+        let wire = manifest(&pack, &bootstrap, &executable, filename, pack_digest)?;
         let mut count = ByteCount {
             bytes: 0,
             limit: limits.manifest_bytes.get(),
@@ -370,7 +384,7 @@ impl PreparedPlayerPackage {
         serde_json::to_writer(&mut bytes, &wire).map_err(|_| PlayerPackageError::Manifest)?;
         let executable_name = filename.to_owned();
         Ok(Self {
-            content,
+            pack,
             executable,
             executable_name,
             manifest: bytes.into_boxed_slice(),
@@ -439,7 +453,7 @@ impl PreparedPlayerPackage {
         let facts = PlayerPackageFiles {
             executable_name: self.executable_name,
             executable: self.executable.digest(),
-            catalog: self.content.base().catalog_digest(),
+            catalog: self.pack.catalog_digest(),
             pack: self.pack_digest,
             manifest: ContentDigest::of_bytes(&self.manifest),
             build_provenance: self.executable.provenance().digest(),
@@ -479,7 +493,7 @@ impl PreparedPlayerPackage {
             {
                 let writer = file.writer()?;
                 let mut writer = DigestWriter::new(writer, self.pack_digest.length());
-                self.content.base().write_pack(&mut writer)?;
+                self.pack.write(&mut writer)?;
                 writer.flush()?;
                 if writer.finish()? != self.pack_digest {
                     return Err(PlayerPackageError::StagedBytes);
@@ -626,11 +640,22 @@ fn checkpoint(
         .map_err(|failure| PlayerPackageError::Control { point, failure })
 }
 
+fn check_catalog(
+    pack: &CapturedPack,
+    expected: &RuntimeContentExpectation,
+) -> Result<(), PlayerPackageError> {
+    if pack.catalog_digest() != expected.catalog_digest() {
+        return Err(PlayerPackageError::CatalogMismatch);
+    }
+    Ok(())
+}
+
 fn check_bootstrap(
-    content: &PreparedRuntimeContent,
+    pack: &CapturedPack,
+    expected: &RuntimeContentExpectation,
     input: &GeneratedPlayerBootstrap,
 ) -> Result<(), PlayerPackageError> {
-    let expected = content.expectation();
+    check_catalog(pack, expected)?;
     if expected.catalog_digest() != input.expected.catalog_digest()
         || expected.target() != input.expected.target()
     {
@@ -640,10 +665,10 @@ fn check_bootstrap(
 }
 
 fn check_target(
-    content: &PreparedRuntimeContent,
+    expected: &RuntimeContentExpectation,
     selection: &CargoBuildSelection,
 ) -> Result<(), PlayerPackageError> {
-    if content.expectation().target().triple() != selection.target_triple() {
+    if expected.target().triple() != selection.target_triple() {
         return Err(PlayerPackageError::TargetMismatch);
     }
     Ok(())
@@ -820,21 +845,21 @@ struct ManifestWire<'a> {
 }
 
 fn manifest<'a>(
-    content: &'a PreparedRuntimeContent,
+    pack: &CapturedPack,
     input: &'a GeneratedPlayerBootstrap,
     executable: &'a CapturedCargoExecutable,
     executable_name: &'a str,
-    pack: ContentDigest,
+    pack_digest: ContentDigest,
 ) -> Result<PersistentFileEnvelope<ManifestWire<'a>>, PlayerPackageError> {
     let provenance = executable.provenance();
     let selection = provenance.selection();
     let payload = ManifestWire {
         executable_name,
         executable_digest: executable.digest().into(),
-        catalog_digest: content.base().catalog_digest().into(),
-        content_target: content.expectation().target(),
+        catalog_digest: pack.catalog_digest().into(),
+        content_target: input.expected.target(),
         pack_file: PLAYER_PACK_FILE,
-        pack_digest: pack.into(),
+        pack_digest: pack_digest.into(),
         generated_input_name: input.name(),
         generated_input_digest: input.digest().into(),
         build: BuildWire {

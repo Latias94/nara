@@ -4,8 +4,10 @@
 //! The caller owns catalog admission, executable selection, expected digests, and allocation limits.
 
 use std::{
+    fmt,
     io::{self, Read, Seek, SeekFrom, Write},
     mem::size_of,
+    sync::Arc,
 };
 
 use nara_core::vfs::capabilities::{ContentDigest, FileCapability, FsError, FsOperation};
@@ -25,6 +27,96 @@ pub enum PackError {
     ExtentMismatch,
     #[error("pack member differs from the expected digest")]
     MemberDigestMismatch,
+}
+
+/// Immutable catalog and ordered member buffers captured by a version-one pack producer.
+///
+/// Clones share the original byte allocations. The producer owns catalog and member admission.
+#[derive(Clone)]
+pub struct CapturedPack(Arc<CapturedPackInner>);
+
+struct CapturedPackInner {
+    catalog: Vec<u8>,
+    members: Box<[Vec<u8>]>,
+    catalog_digest: ContentDigest,
+    encoded_bytes: u64,
+    retained_bytes: usize,
+}
+
+impl fmt::Debug for CapturedPack {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CapturedPack")
+            .field("catalog_digest", &self.0.catalog_digest)
+            .field("members", &self.0.members.len())
+            .field("encoded_bytes", &self.0.encoded_bytes)
+            .finish()
+    }
+}
+
+impl CapturedPack {
+    /// Takes ownership of the original buffers in catalog order and checks the wire extent.
+    pub fn new(catalog: Vec<u8>, members: Vec<Vec<u8>>) -> Result<Self, PackError> {
+        let encoded_bytes = encoded_bytes(
+            catalog.len(),
+            members.iter().map(|bytes| bytes.len() as u64),
+        )?;
+        let payload_bytes =
+            usize::try_from(encoded_bytes - HEADER_BYTES).map_err(|_| PackError::ExtentMismatch)?;
+        let retained_bytes = Self::retained_bytes_for(payload_bytes, members.len())
+            .ok_or(PackError::ExtentMismatch)?;
+        Ok(Self(Arc::new(CapturedPackInner {
+            catalog_digest: ContentDigest::of_bytes(&catalog),
+            catalog,
+            members: members.into_boxed_slice(),
+            encoded_bytes,
+            retained_bytes,
+        })))
+    }
+
+    #[must_use]
+    pub fn catalog_bytes(&self) -> &[u8] {
+        &self.0.catalog
+    }
+
+    #[must_use]
+    pub fn catalog_digest(&self) -> ContentDigest {
+        self.0.catalog_digest
+    }
+
+    #[must_use]
+    pub fn member(&self, index: usize) -> Option<&[u8]> {
+        self.0.members.get(index).map(Vec::as_slice)
+    }
+
+    #[must_use]
+    pub fn encoded_bytes(&self) -> u64 {
+        self.0.encoded_bytes
+    }
+
+    /// Logical retained size of the shared allocation, excluding the shallow handle.
+    #[must_use]
+    pub fn retained_bytes(&self) -> usize {
+        self.0.retained_bytes
+    }
+
+    /// Computes the same logical size before retaining a catalog and its ordered member table.
+    #[must_use]
+    pub fn retained_bytes_for(payload_bytes: usize, member_count: usize) -> Option<usize> {
+        member_count
+            .checked_mul(size_of::<Vec<u8>>())?
+            .checked_add(size_of::<CapturedPackInner>() + 2 * size_of::<usize>())?
+            .checked_add(payload_bytes)
+    }
+
+    /// Writes the original bytes at the current position. A failed write can leave partial bytes.
+    pub fn write(&self, output: &mut (impl Write + ?Sized)) -> Result<(), PackError> {
+        write_catalog(output, self.catalog_bytes())?;
+        for member in &self.0.members {
+            output.write_all(member).map_err(write_error)?;
+        }
+        Ok(())
+    }
 }
 
 /// One held file capability and its exact ordered member layout.
@@ -128,10 +220,6 @@ pub fn read_catalog(file: &FileCapability, expected_length: usize) -> Result<Vec
 ///
 /// The caller appends the member bytes in catalog order. A failed write can leave partial bytes.
 pub fn write_catalog(output: &mut (impl Write + ?Sized), catalog: &[u8]) -> Result<(), PackError> {
-    let write_error = |source| FsError::Io {
-        operation: FsOperation::Write,
-        source,
-    };
     output.write_all(MAGIC).map_err(write_error)?;
     output
         .write_all(&VERSION.to_le_bytes())
@@ -141,6 +229,14 @@ pub fn write_catalog(output: &mut (impl Write + ?Sized), catalog: &[u8]) -> Resu
         .map_err(write_error)?;
     output.write_all(catalog).map_err(write_error)?;
     Ok(())
+}
+
+fn write_error(source: io::Error) -> PackError {
+    FsError::Io {
+        operation: FsOperation::Write,
+        source,
+    }
+    .into()
 }
 
 fn advance(start: u64, length: u64) -> Result<u64, PackError> {
@@ -189,6 +285,28 @@ mod tests {
             encoded_bytes(3, [u64::MAX]),
             Err(PackError::ExtentMismatch)
         ));
+    }
+
+    #[test]
+    fn captured_pack_shares_exact_catalog_and_ordered_member_buffers() {
+        let catalog = b"cat".to_vec();
+        let members = vec![Vec::new(), b"red".to_vec(), b"blue".to_vec()];
+        let catalog_start = catalog.as_ptr();
+        let member_start = members[1].as_ptr();
+        let pack = CapturedPack::new(catalog, members).unwrap();
+        let shared = pack.clone();
+        drop(pack);
+
+        assert_eq!(shared.catalog_bytes().as_ptr(), catalog_start);
+        assert_eq!(shared.member(1).unwrap().as_ptr(), member_start);
+        assert_eq!(shared.member(0), Some(b"".as_slice()));
+        assert!(shared.member(3).is_none());
+        assert_eq!(shared.catalog_digest(), ContentDigest::of_bytes(b"cat"));
+
+        let mut bytes = Vec::new();
+        shared.write(&mut bytes).unwrap();
+        assert_eq!(bytes, b"NARAPACK\x01\0\0\0\x03\0\0\0\0\0\0\0catredblue");
+        assert_eq!(shared.encoded_bytes(), bytes.len() as u64);
     }
 
     #[test]

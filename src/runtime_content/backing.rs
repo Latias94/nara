@@ -2,6 +2,8 @@
 
 use std::{borrow::Cow, io::Write};
 
+#[cfg(any(test, feature = "project-workflow"))]
+use nara_asset::pack::CapturedPack;
 use nara_asset::pack::{self, Pack, PackError};
 
 use crate::fs::{FileCapability, FsError, FsOperation};
@@ -10,8 +12,11 @@ use super::{DecodeLease, RuntimeContentBase, RuntimeContentCatalog, RuntimeConte
 
 pub(super) enum EncodedBacking {
     #[cfg(any(test, feature = "project-workflow"))]
-    Captured(Box<[Vec<u8>]>),
-    Pack(Pack),
+    Captured(CapturedPack),
+    File {
+        pack: Pack,
+        catalog: Vec<u8>,
+    },
 }
 
 pub(super) struct EncodedMember<'a> {
@@ -27,33 +32,20 @@ impl AsRef<[u8]> for EncodedMember<'_> {
 }
 
 impl RuntimeContentBase {
-    /// Returns the exact encoded size of this base's version-one pack.
-    ///
-    /// This uses the original admitted catalog bytes and member extents. It does not allocate a
-    /// pack, decode products or grant directory publication authority.
-    pub fn pack_encoded_bytes(&self) -> Result<u64, RuntimeContentError> {
-        pack::encoded_bytes(
-            self.inner.catalog_bytes.len(),
-            self.inner
-                .catalog
-                .members()
-                .iter()
-                .map(|member| member.digest().length()),
-        )
-        .map_err(pack_error)
-    }
-
     pub(super) fn encoded_member(
         &self,
         index: usize,
     ) -> Result<EncodedMember<'_>, RuntimeContentError> {
         match &self.inner.backing {
             #[cfg(any(test, feature = "project-workflow"))]
-            EncodedBacking::Captured(members) => Ok(EncodedMember {
-                bytes: Cow::Borrowed(&members[index]),
+            EncodedBacking::Captured(pack) => Ok(EncodedMember {
+                bytes: Cow::Borrowed(
+                    pack.member(index)
+                        .ok_or(RuntimeContentError::PackExtentMismatch)?,
+                ),
                 _work: None,
             }),
-            EncodedBacking::Pack(pack) => {
+            EncodedBacking::File { pack, .. } => {
                 let digest = self.inner.catalog.members()[index].digest();
                 // Catalogue admission already checked this conversion and the per-member cap.
                 let length =
@@ -77,7 +69,12 @@ impl RuntimeContentBase {
         &self,
         output: &mut (impl Write + ?Sized),
     ) -> Result<(), RuntimeContentError> {
-        pack::write_catalog(output, &self.inner.catalog_bytes).map_err(pack_error)?;
+        let catalog = match &self.inner.backing {
+            #[cfg(any(test, feature = "project-workflow"))]
+            EncodedBacking::Captured(pack) => return pack.write(output).map_err(pack_error),
+            EncodedBacking::File { catalog, .. } => catalog,
+        };
+        pack::write_catalog(output, catalog).map_err(pack_error)?;
         for index in 0..self.inner.catalog.members().len() {
             let encoded = self.encoded_member(index)?;
             output.write_all(encoded.as_ref()).map_err(|source| {
@@ -103,21 +100,24 @@ pub(super) fn read_catalog(
 pub(super) fn open_pack(
     file: FileCapability,
     catalog: &RuntimeContentCatalog,
-    catalog_length: usize,
+    catalog_bytes: Vec<u8>,
 ) -> Result<EncodedBacking, RuntimeContentError> {
     Pack::open(
         file,
-        catalog_length,
+        catalog_bytes.len(),
         catalog
             .members()
             .iter()
             .map(|member| member.digest().length()),
     )
-    .map(EncodedBacking::Pack)
+    .map(|pack| EncodedBacking::File {
+        pack,
+        catalog: catalog_bytes,
+    })
     .map_err(pack_error)
 }
 
-fn pack_error(error: PackError) -> RuntimeContentError {
+pub(super) fn pack_error(error: PackError) -> RuntimeContentError {
     match error {
         PackError::Io(error) => RuntimeContentError::Host(error),
         PackError::InvalidHeader => RuntimeContentError::InvalidPackHeader,

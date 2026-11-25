@@ -3,6 +3,7 @@
 use nara_core::vfs::capabilities::{DirectoryCapability, RelativePath};
 
 use super::*;
+use nara_asset::pack::CapturedPack;
 
 impl RuntimeContentBase {
     pub(crate) fn capture_test_directory(
@@ -20,7 +21,7 @@ impl RuntimeContentBase {
             .read_to_end_bounded(expected.catalog_digest().length())
             .map_err(RuntimeContentError::Host)?;
         let admitted = admission::AdmittedCatalog::new(
-            catalog_bytes,
+            &catalog_bytes,
             expected,
             recipe,
             limits,
@@ -41,9 +42,7 @@ impl RuntimeContentBase {
             }
             members.push(bytes);
         }
-        Ok(admitted.publish(
-            EncodedBacking::Captured(members.into_boxed_slice()),
-            retained,
-        ))
+        let pack = CapturedPack::new(catalog_bytes, members).map_err(backing::pack_error)?;
+        Ok(admitted.publish(EncodedBacking::Captured(pack), retained))
     }
 }

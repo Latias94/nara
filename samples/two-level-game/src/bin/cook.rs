@@ -215,7 +215,7 @@ fn stage_pack(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let name = RelativeComponent::new(PLAYER_PACK_FILE)?;
     let mut file = staging.create_child_file(&name)?;
-    content.base().write_pack(&mut file.writer()?)?;
+    content.pack().write(&mut file.writer()?)?;
     file.sync()?;
     drop(file);
     match staging.sync() {

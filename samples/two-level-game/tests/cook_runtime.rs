@@ -966,9 +966,13 @@ mod atlas_content {
         project: &Path,
         content: &PreparedRuntimeContent,
     ) -> GeneratedPlayerBootstrap {
-        let bootstrap =
-            GeneratedPlayerBootstrap::new(content, GENERATED, PlayerPackageLimits::default())
-                .unwrap();
+        let bootstrap = GeneratedPlayerBootstrap::new(
+            content.pack(),
+            content.expectation(),
+            GENERATED,
+            PlayerPackageLimits::default(),
+        )
+        .unwrap();
         assert_eq!(bootstrap.name(), GENERATED);
         assert_eq!(
             bootstrap.digest(),

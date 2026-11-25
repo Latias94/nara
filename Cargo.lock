@@ -2176,8 +2176,10 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "ctrlc",
+ "getrandom 0.3.4",
  "libc",
  "nara_app",
+ "nara_asset",
  "nara_core",
  "nara_ecs",
  "nara_input",
