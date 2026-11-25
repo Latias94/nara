@@ -203,8 +203,8 @@ pub use product::WgpuBackendPlugins;
 pub use product::{DefaultPlugins, HeadlessRuntimePlugins, MinimalPlugins, ServerPlugins};
 #[cfg(feature = "project-runtime")]
 pub use product::{
-    ProductConfiguration, ProductRecipe, ProductRecipeEntry, ProductRecipeEntryKind,
-    ProductRecipeError, SchemaContribution,
+    ProductRecipe, ProductRecipeEntry, ProductRecipeEntryKind, ProductRecipeError,
+    SchemaContribution,
 };
 
 #[cfg(feature = "runtime-core")]
@@ -232,8 +232,8 @@ pub mod prelude {
     pub use crate::{DefaultPlugins, HeadlessRuntimePlugins, MinimalPlugins, ServerPlugins};
     #[cfg(feature = "project-runtime")]
     pub use crate::{
-        ProductConfiguration, ProductRecipe, ProductRecipeEntry, ProductRecipeEntryKind,
-        ProductRecipeError, SchemaContribution,
+        ProductRecipe, ProductRecipeEntry, ProductRecipeEntryKind, ProductRecipeError,
+        SchemaContribution,
     };
     pub use nara_app::CoreStage::{
         Extract as RenderExtract, First, FixedUpdate, Last, PostUpdate, PreUpdate, Update,
