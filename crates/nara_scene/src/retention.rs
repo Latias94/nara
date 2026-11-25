@@ -31,16 +31,6 @@ pub fn scene_retained_bytes(document: &SceneDocument) -> Result<usize, SceneRete
     )
 }
 
-pub fn direct_startup_scene_retained_bytes(
-    candidate: &CompiledSceneCandidate,
-) -> Result<usize, SceneRetentionOverflow> {
-    checked_sum([
-        startup_scene_retained_bytes(candidate)?,
-        ARC_CONTROL_BLOCK_BYTES,
-        size_of::<std::sync::Arc<CompiledSceneCandidate>>(),
-    ])
-}
-
 pub fn startup_scene_retained_bytes(
     candidate: &CompiledSceneCandidate,
 ) -> Result<usize, SceneRetentionOverflow> {
@@ -48,17 +38,6 @@ pub fn startup_scene_retained_bytes(
         size_of::<CompiledSceneCandidate>(),
         candidate.source_key().retained_bytes(),
         compiled_scene_retained_bytes(candidate.document())?,
-    ])
-}
-
-#[cfg(feature = "serde")]
-pub fn direct_runtime_scene_retained_bytes(
-    candidate: &crate::RuntimeSceneCandidate,
-) -> Result<usize, SceneRetentionOverflow> {
-    checked_sum([
-        runtime_startup_scene_retained_bytes(candidate)?,
-        2 * ARC_CONTROL_BLOCK_BYTES,
-        size_of::<std::sync::Arc<crate::RuntimeSceneCandidate>>(),
     ])
 }
 

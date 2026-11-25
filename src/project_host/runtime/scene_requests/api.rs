@@ -217,7 +217,7 @@ impl PreparedProjectSceneView<'_> {
 #[derive(SystemParam)]
 pub struct ProjectScenes<'w> {
     owner: Option<ResMut<'w, RequestOwner>>,
-    current: Option<Res<'w, CurrentSceneOwner>>,
+    current: Option<Res<'w, CurrentScene>>,
     residency: Option<Res<'w, ProjectSceneResidency>>,
     generation: Option<Res<'w, RuntimeGeneration>>,
     pools: Option<Res<'w, TaskPools>>,
@@ -747,7 +747,7 @@ fn commit_ready_project_scene(
                 owner.matches(
                     admission,
                     world.get_resource::<RuntimeGeneration>().copied(),
-                    world.get_resource::<CurrentSceneOwner>(),
+                    world.get_resource::<CurrentScene>(),
                 )
             });
         if !valid {
@@ -863,7 +863,7 @@ where
             owner.matches(
                 admission,
                 world.get_resource::<RuntimeGeneration>().copied(),
-                world.get_resource::<CurrentSceneOwner>(),
+                world.get_resource::<CurrentScene>(),
             )
         });
         if !valid {

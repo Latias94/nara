@@ -48,7 +48,7 @@ use crate::{
     ecs::transaction,
     project_assets::ProjectDomainAssets,
     runtime_content::ProcessedSceneContent,
-    startup_scene::{CurrentSceneOwner, current_scene_bindings},
+    startup_scene::{CurrentScene, current_scene_bindings},
 };
 use metadata::{PreparedCatalog, ResidencyAuthority};
 #[cfg(feature = "runtime-2d")]
@@ -79,7 +79,7 @@ impl ProjectSceneResidency {
 
     pub(super) fn admits_processed_addition(
         &self,
-        current: &CurrentSceneOwner,
+        current: &CurrentScene,
         product: nara_asset::AssetProductRef,
     ) -> bool {
         additive::admits_processed_addition(self, current, product)
@@ -152,7 +152,7 @@ fn publish_startup_content(
     {
         prepared.stock.materials.validate(world)?;
         // This owner borrow fences capacity and claims through the same synchronous tail used
-        // by Scene replacement. Startup has no CurrentSceneOwner or live Scene to retire yet.
+        // by Scene replacement. Startup has no CurrentScene or live Scene to retire yet.
         if prepared.stock.tilesets.has_publications() {
             return world.resource_scope(|world, mut owner: Mut<TileSetAssets>| {
                 let mut prepared = prepared;

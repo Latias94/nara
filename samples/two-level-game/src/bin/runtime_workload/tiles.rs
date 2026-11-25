@@ -112,7 +112,7 @@ fn capture(
     runtime: Res<RuntimeGeneration>,
     frame: Res<FrameExecutionStart>,
     time: Res<FixedTime>,
-    current: CurrentScene,
+    current: Res<CurrentScene>,
     snapshot: Res<GameSnapshot>,
     cameras: Query<&Camera2d>,
     maps: Query<&Tilemap>,

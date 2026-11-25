@@ -184,7 +184,7 @@ impl InputFixture {
     }
 
     fn open(&self) -> RuntimeContentBase {
-        RuntimeContentBase::open(
+        RuntimeContentBase::capture_test_directory(
             &open_explicit_product_project_root(&self.root).unwrap(),
             &self.expected,
             self.recipe.clone(),
@@ -477,7 +477,7 @@ fn processed_selection_is_visible_in_first_startup_from_the_captured_base_withou
         );
         assert!(
             world
-                .resource::<CurrentSceneOwner>()
+                .resource::<CurrentScene>()
                 .hosted_runtime_base()
                 .unwrap()
                 .same_base(&base)

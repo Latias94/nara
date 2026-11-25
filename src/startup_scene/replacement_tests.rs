@@ -42,13 +42,9 @@ impl SceneProductResource for RunValue {
 }
 
 fn source(name: &str) -> SceneSource {
-    SceneSource::direct(
-        candidate(Arc::new(SceneDocument::from_ordered_roots([
-            SceneEntityRecord::new(id(name)),
-        ]))),
-        ByteLimit::new(16 * 1024).unwrap(),
-    )
-    .unwrap()
+    SceneSource::direct(candidate(Arc::new(SceneDocument::from_ordered_roots([
+        SceneEntityRecord::new(id(name)),
+    ]))))
 }
 
 fn candidate(document: Arc<SceneDocument>) -> CompiledSceneCandidate {
@@ -81,10 +77,9 @@ fn limits() -> SceneProductTransactionLimits {
 }
 
 fn source_view(world: &World) -> SceneSourceView {
-    let source = &world.resource::<CurrentSceneOwner>().source;
+    let source = &world.resource::<CurrentScene>().source;
     SceneSourceView {
         source: Arc::downgrade(source),
-        retained_bytes: source.retained_bytes(),
     }
 }
 
@@ -186,35 +181,31 @@ fn data_owner() -> ComponentSchemaOwnerSnapshot {
 }
 
 fn mixed_source(name: &str, enabled: bool) -> SceneSource {
-    SceneSource::direct(
-        candidate(Arc::new(SceneDocument::from_ordered_roots([
-            SceneEntityRecord::new(id(name))
-                .with_component(
-                    ComponentTypeId::new("nara.scene.Name"),
-                    SceneComponentRecord::new(
-                        ComponentSchemaVersion::ONE,
-                        ComponentValue::String(name.to_owned()),
-                    ),
-                )
-                .with_component(
-                    ComponentTypeId::new("test.data.Flag"),
-                    SceneComponentRecord::new(
-                        ComponentSchemaVersion::ONE,
-                        ComponentValue::map([("enabled", ComponentValue::Bool(enabled))]),
-                    )
-                    .with_owner(PersistentComponentSchemaOwnerId::try_new("test.data").unwrap()),
+    SceneSource::direct(candidate(Arc::new(SceneDocument::from_ordered_roots([
+        SceneEntityRecord::new(id(name))
+            .with_component(
+                ComponentTypeId::new("nara.scene.Name"),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::String(name.to_owned()),
                 ),
-        ]))),
-        ByteLimit::new(16 * 1024).unwrap(),
-    )
-    .unwrap()
+            )
+            .with_component(
+                ComponentTypeId::new("test.data.Flag"),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::map([("enabled", ComponentValue::Bool(enabled))]),
+                )
+                .with_owner(PersistentComponentSchemaOwnerId::try_new("test.data").unwrap()),
+            ),
+    ]))))
 }
 
 #[test]
 fn mixed_startup_replacement_and_restart_preserve_selected_data_definitions() {
     with_selected_current_scene([data_owner()], mixed_source("a", true), |world| {
         let bindings = scene_component_bindings(world).unwrap().clone();
-        let initial = world.resource::<CurrentSceneOwner>().receipt().clone();
+        let initial = world.resource::<CurrentScene>().receipt().clone();
         let EntityLookup::Resolved(entity) = initial.resolve(world, &id("a")) else {
             panic!("startup publishes the mixed entity");
         };
@@ -263,7 +254,7 @@ fn mixed_startup_replacement_and_restart_preserve_selected_data_definitions() {
                 .value(),
             &ComponentValue::map([("enabled", ComponentValue::Bool(false))])
         );
-        assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &restarted);
+        assert_eq!(world.resource::<CurrentScene>().receipt(), &restarted);
         assert_eq!(world.resource::<RunValue>().0, 2);
         assert!(!matches!(
             initial.resolve(world, &id("a")),
@@ -286,7 +277,7 @@ fn replacement_rejects_equivalent_owner_catalog_with_another_admission_basis() {
         )
         .unwrap();
         assert!(!installed.same_definitions(&foreign));
-        let current = world.resource::<CurrentSceneOwner>().receipt().clone();
+        let current = world.resource::<CurrentScene>().receipt().clone();
         let source_view = source_view(world);
         let entities = world.entities().len();
         let stats = world.resource::<WorldIdentityDomain>().stats();
@@ -307,7 +298,7 @@ fn replacement_rejects_equivalent_owner_catalog_with_another_admission_basis() {
             panic!("another owner admission cannot prepare replacement");
         };
         assert_rejected(&report, "scene.prepared-definition-changed");
-        assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &current);
+        assert_eq!(world.resource::<CurrentScene>().receipt(), &current);
         assert_eq!(
             source_view.with_document(|scene| scene.roots().to_vec()),
             Some(vec![id("a")])
@@ -321,7 +312,7 @@ fn replacement_rejects_equivalent_owner_catalog_with_another_admission_basis() {
 #[test]
 fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
     with_current_scene(|world| {
-        let first = world.resource::<CurrentSceneOwner>().receipt().clone();
+        let first = world.resource::<CurrentScene>().receipt().clone();
         let first_view = source_view(world);
         let before_entities = world.entities().len();
         let report = replace_current_scene_with_product(
@@ -336,7 +327,7 @@ fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
         );
         assert!(!report.diagnostics.has_errors());
         let second = report.instance.unwrap();
-        let current = world.resource::<CurrentSceneOwner>();
+        let current = world.resource::<CurrentScene>();
         assert_eq!(current.receipt(), &second);
         assert_eq!(current.source().roots(), [id("b")]);
         assert_ne!(first.instance_id(), second.instance_id());
@@ -359,11 +350,8 @@ fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
         assert!(!report.diagnostics.has_errors());
         let restarted = report.instance.unwrap();
         assert_ne!(second.instance_id(), restarted.instance_id());
-        assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &restarted);
-        assert_eq!(
-            world.resource::<CurrentSceneOwner>().source().roots(),
-            [id("b")]
-        );
+        assert_eq!(world.resource::<CurrentScene>().receipt(), &restarted);
+        assert_eq!(world.resource::<CurrentScene>().source().roots(), [id("b")]);
         assert_eq!(
             second_view.with_document(|scene| scene.roots().to_vec()),
             Some(vec![id("b")])
@@ -389,11 +377,8 @@ fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
         assert!(!report.diagnostics.has_errors());
         let returned = report.instance.unwrap();
         assert_ne!(returned.instance_id(), first.instance_id());
-        assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &returned);
-        assert_eq!(
-            world.resource::<CurrentSceneOwner>().source().roots(),
-            [id("a")]
-        );
+        assert_eq!(world.resource::<CurrentScene>().receipt(), &returned);
+        assert_eq!(world.resource::<CurrentScene>().source().roots(), [id("a")]);
         assert_eq!(second_view.with_document(|_| ()), None);
         assert_eq!(world.entities().len(), before_entities);
     });
@@ -402,7 +387,7 @@ fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
 #[test]
 fn stale_and_foreign_expected_receipts_reject_before_product_configuration() {
     with_current_scene(|world| {
-        let original = world.resource::<CurrentSceneOwner>().receipt().clone();
+        let original = world.resource::<CurrentScene>().receipt().clone();
         let replacement = replace_current_scene_with_product(
             world,
             &original,
@@ -436,7 +421,7 @@ fn stale_and_foreign_expected_receipts_reject_before_product_configuration() {
                 panic!("a foreign request cannot configure the next Scene");
             });
         assert_rejected(&report, "scene.current.expected-instance-mismatch");
-        assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &current);
+        assert_eq!(world.resource::<CurrentScene>().receipt(), &current);
         assert_eq!(
             view.with_document(|scene| scene.roots().to_vec()),
             Some(vec![id("b")])
@@ -450,7 +435,7 @@ fn stale_and_foreign_expected_receipts_reject_before_product_configuration() {
 #[test]
 fn rejected_candidate_keeps_the_current_pair_and_product_state() {
     with_current_scene(|world| {
-        let current = world.resource::<CurrentSceneOwner>().receipt().clone();
+        let current = world.resource::<CurrentScene>().receipt().clone();
         let view = source_view(world);
         let stats = world.resource::<WorldIdentityDomain>().stats();
         let entities = world.entities().len();
@@ -491,8 +476,7 @@ fn rejected_candidate_keeps_the_current_pair_and_product_state() {
             )
             .unwrap(),
         );
-        let rejected_source =
-            SceneSource::direct(candidate, ByteLimit::new(16 * 1024).unwrap()).unwrap();
+        let rejected_source = SceneSource::direct(candidate);
         let RetainedSceneCandidate::Compiled(candidate) = &rejected_source.candidate else {
             panic!("the fixture retains a source compilation");
         };
@@ -510,7 +494,7 @@ fn rejected_candidate_keeps_the_current_pair_and_product_state() {
         assert!(report.diagnostics.has_errors());
         assert!(report.instance.is_none());
         assert!(weak_rejected.upgrade().is_none());
-        assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &current);
+        assert_eq!(world.resource::<CurrentScene>().receipt(), &current);
         assert_eq!(
             view.with_document(|scene| scene.roots().to_vec()),
             Some(vec![id("a")])
@@ -528,7 +512,7 @@ fn rejected_candidate_keeps_the_current_pair_and_product_state() {
 #[test]
 fn current_replacement_requires_finalized_startup_and_an_existing_owner() {
     with_current_scene(|world| {
-        let current = world.resource::<CurrentSceneOwner>().receipt().clone();
+        let current = world.resource::<CurrentScene>().receipt().clone();
         world
             .resource_mut::<StartupSceneActivationAuthority>()
             .phase = StartupSceneActivationPhase::Materialized;
@@ -539,12 +523,12 @@ fn current_replacement_requires_finalized_startup_and_an_existing_owner() {
         world
             .resource_mut::<StartupSceneActivationAuthority>()
             .phase = StartupSceneActivationPhase::Finalized;
-        let owner = world.remove_resource::<CurrentSceneOwner>().unwrap();
+        let owner = world.remove_resource::<CurrentScene>().unwrap();
         let report = restart_current_scene_with_product(world, &current, limits(), &[], |_| {
             panic!("replacement cannot fabricate a current owner");
         });
         assert_rejected(&report, "scene.current.owner-missing");
         world.insert_resource(owner);
-        assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &current);
+        assert_eq!(world.resource::<CurrentScene>().receipt(), &current);
     });
 }

@@ -29,7 +29,7 @@ use crate::{
         RuntimeContentDependencyRole, RuntimeContentExpectation, RuntimeContentLimits,
         RuntimeContentMember, RuntimeContentMemberKind, RuntimeContentTarget,
     },
-    startup_scene::CurrentSceneOwner,
+    startup_scene::CurrentScene,
 };
 
 const STARTUP_FILE: &str = "startup.runtime.json";
@@ -172,7 +172,7 @@ impl Fixture {
     }
 
     fn open(&self, limits: RuntimeContentLimits) -> RuntimeContentBase {
-        RuntimeContentBase::open(
+        RuntimeContentBase::capture_test_directory(
             &open_explicit_product_project_root(&self.root).unwrap(),
             &self.expected,
             self.recipe.clone(),
@@ -365,7 +365,7 @@ fn headless_session_retains_the_original_processed_base_across_pause_step_and_cl
         .capture(|world| {
             assert!(
                 world
-                    .resource::<CurrentSceneOwner>()
+                    .resource::<CurrentScene>()
                     .hosted_runtime_base()
                     .unwrap()
                     .same_base(&base)
@@ -436,7 +436,7 @@ fn processed_start_installs_native_values_and_original_request_context_without_f
     assert!(!host.commit_prepared_start(prepared).has_errors());
     assert_eq!(host.running_content_revision(), None);
     host.with_running_world(|world| {
-        let current = world.resource::<CurrentSceneOwner>();
+        let current = world.resource::<CurrentScene>();
         assert!(current.is_content_managed());
         assert!(!current.is_project_backed());
         assert!(current.hosted_runtime_base().unwrap().same_base(&base));
@@ -604,7 +604,7 @@ fn processed_publication_failure_and_aborted_preparation_retain_existing_cleanup
             owner
                 .world()
                 .unwrap()
-                .resource::<CurrentSceneOwner>()
+                .resource::<CurrentScene>()
                 .hosted_runtime_base()
                 .unwrap()
                 .same_base(&base)

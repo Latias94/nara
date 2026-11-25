@@ -61,7 +61,7 @@ use crate::project_host::advanced::{
 };
 use crate::project_host::ingest_project_manifest;
 use crate::project_host::runtime_agreement::prepare_runtime_schema_agreement;
-use crate::startup_scene::{CurrentScene, CurrentSceneOwner, StartupSceneActivationSet};
+use crate::startup_scene::{CurrentScene, StartupSceneActivationSet};
 
 use super::*;
 
@@ -336,7 +336,7 @@ impl Plugin for ActivationProbePlugin {
     }
 }
 
-fn observe_startup_activation(activation: CurrentScene<'_>, probe: Res<ActivationProbe>) {
+fn observe_startup_activation(activation: Res<CurrentScene>, probe: Res<ActivationProbe>) {
     assert_eq!(
         activation.source().entities().len(),
         activation.receipt().len()
@@ -361,7 +361,7 @@ impl Plugin for ClassifiedStartupFailurePlugin {
     }
 }
 
-fn fail_classified_startup(_activation: CurrentScene<'_>) -> Result<(), BevyError> {
+fn fail_classified_startup(_activation: Res<CurrentScene>) -> Result<(), BevyError> {
     let detail = RuntimeFaultDetail::new(
         "nara.test.startup-configuration-invalid",
         "Startup configuration is invalid",
@@ -726,7 +726,7 @@ fn bundled_startup_activation_shares_the_spawned_source_and_resolves_its_receipt
         panic!("runtime is not visible in the Host slot");
     };
     let world = published.runtime().world();
-    let activation = world.resource::<CurrentSceneOwner>();
+    let activation = world.resource::<CurrentScene>();
     assert_eq!(
         activation.source() as *const CompiledSceneDocument,
         source_pointer
@@ -2029,8 +2029,8 @@ fn running_owner_identity(host: &ProjectHost) -> RunningOwnerIdentity {
         task_pools: world.resource::<TaskPools>() as *const TaskPools as usize,
         service_session: world.resource::<RuntimeServiceSessionId>().0,
         identity_domain: world.resource::<WorldIdentityDomain>().id().get(),
-        snapshot_scene: world.resource::<CurrentSceneOwner>().source()
-            as *const CompiledSceneDocument as usize,
+        snapshot_scene: world.resource::<CurrentScene>().source() as *const CompiledSceneDocument
+            as usize,
         registry_snapshot: nara_reflect::component_registry(world)
             .expect("the published runtime registry is installed")
             .clone(),

@@ -20,22 +20,14 @@ use nara_app::{
     App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId, RuntimeFaultDetail,
     StartupStage,
 };
-use nara_core::ByteLimit;
 use nara_core::diagnostic::{
     DiagnosticCode, DiagnosticReport, ReportDiagnostic as Diagnostic, SafeSummary,
 };
 use nara_ecs::identity::SpawnedSceneInstance;
 use nara_ecs::{
     Res, ResMut, Resource, SystemSet, World,
-    bevy_ecs::change_detection::Tick,
-    bevy_ecs::component::ComponentId,
-    bevy_ecs::error::BevyError,
-    bevy_ecs::system::{
-        ReadOnlySystemParam, ScheduleSystem, SystemAccess, SystemMeta, SystemParamValidationError,
-    },
-    bevy_ecs::world::unsafe_world_cell::UnsafeWorldCell,
+    bevy_ecs::{error::BevyError, system::ScheduleSystem},
     schedule::IntoScheduleConfigs,
-    system::SystemParam,
 };
 #[cfg(feature = "serde")]
 use nara_scene::RuntimeSceneCandidate;
@@ -49,10 +41,6 @@ use crate::project_content::{
     ProjectContentGenerationLease, ProjectContentLease, ProjectSceneContentStamp,
     ProjectSourceContent,
 };
-#[cfg(feature = "serde")]
-use crate::scene_retention::direct_runtime_scene_retained_bytes;
-use crate::scene_retention::direct_startup_scene_retained_bytes;
-
 /// Stable plugin identity for the provisional advanced startup-scene activation seam.
 pub const STARTUP_SCENE_ACTIVATION_PLUGIN_ID: PluginId =
     PluginId::new("nara.startup-scene-activation");
@@ -67,26 +55,6 @@ const STARTUP_SCENE_ACTIVATION_PLUGIN_DECLARATION: PluginDeclaration =
             crate::project_host::PROJECT_SCENE_REQUEST_CLOSE_OBLIGATION,
         ]);
 
-/// Validation failure while binding a direct managed-App Scene source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SceneSourceError {
-    /// Logical retained-byte accounting overflowed `usize`.
-    RetainedBytesOverflow,
-    /// The exact logical retained-byte charge exceeds the caller's declared limit.
-    RetainedBytesExceeded { required: usize, limit: usize },
-}
-
-impl fmt::Display for SceneSourceError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::RetainedBytesOverflow => "scene retained-byte accounting overflowed",
-            Self::RetainedBytesExceeded { .. } => "scene exceeds the direct retained-byte limit",
-        })
-    }
-}
-
-impl Error for SceneSourceError {}
-
 enum SceneRetention {
     #[cfg(feature = "project-source")]
     Project {
@@ -94,7 +62,6 @@ enum SceneRetention {
         _generation: ProjectContentGenerationLease,
         sources: Arc<ProjectSourceContent>,
         content_stamp: Option<ProjectSceneContentStamp>,
-        retained_bytes: usize,
         schema_authority: Arc<nara_scene::SceneComponentBindingsWitness>,
     },
     #[cfg(feature = "serde")]
@@ -102,10 +69,7 @@ enum SceneRetention {
         content: crate::runtime_content::RuntimeContentScene,
         custody: RuntimeContentCustody,
     },
-    Direct {
-        retained_bytes: usize,
-        _limit: usize,
-    },
+    Direct,
 }
 
 #[cfg(feature = "serde")]
@@ -123,12 +87,8 @@ enum RetainedSceneCandidate {
 /// Move-only retained source accepted by startup materialization or current-Scene replacement.
 ///
 /// File-backed callers receive this value from Project Content. Direct managed-App callers use
-/// [`SceneSource::direct`] for compiled sources or `SceneSource::runtime` for processed Scenes,
-/// and must declare a deterministic logical retained-byte limit. The processed entry requires
-/// the `serde` feature.
-/// That direct limit is neither allocator-capacity nor RSS accounting and does not claim a Project
-/// Content reservation. The value deliberately does not implement `Clone`: exactly one
-/// materialization consumes exactly one source owner.
+/// [`SceneSource::direct`] for compiled sources or `SceneSource::runtime` for cooked Scenes.
+/// Each materialization consumes the source owner. Cooked candidates require the `serde` feature.
 pub struct SceneSource {
     candidate: RetainedSceneCandidate,
     retention: SceneRetention,
@@ -143,63 +103,28 @@ pub struct SceneSource {
 #[derive(Clone)]
 pub struct SceneSourceView {
     source: Weak<SceneSource>,
-    retained_bytes: usize,
 }
 
 impl SceneSource {
-    /// Binds an owned source for a direct managed-App integration.
-    ///
-    /// This path enforces its explicit limit but does not claim or imply a
-    /// `ProjectContentBudgetHost` reservation.
-    pub fn direct(
-        candidate: CompiledSceneCandidate,
-        retained_byte_limit: ByteLimit,
-    ) -> Result<Self, SceneSourceError> {
-        let retained_bytes = direct_startup_scene_retained_bytes(&candidate)
-            .map_err(|_| SceneSourceError::RetainedBytesOverflow)?;
-        let limit = retained_byte_limit.get();
-        if retained_bytes > limit {
-            return Err(SceneSourceError::RetainedBytesExceeded {
-                required: retained_bytes,
-                limit,
-            });
-        }
-        Ok(Self {
+    /// Retains an already compiled source Scene for a direct managed-App integration.
+    #[must_use]
+    pub fn direct(candidate: CompiledSceneCandidate) -> Self {
+        Self {
             candidate: RetainedSceneCandidate::Compiled(Arc::new(candidate)),
-            retention: SceneRetention::Direct {
-                retained_bytes,
-                _limit: limit,
-            },
-        })
+            retention: SceneRetention::Direct,
+        }
     }
 
     /// Binds an admitted processed Scene for a direct managed-App integration.
     ///
-    /// The candidate retains its exact component definition witness and never acquires a source
-    /// database or source receipt. The deterministic logical charge includes its flat document,
-    /// provenance and retained definition metadata, even when that metadata is shared elsewhere.
-    /// The explicit limit is neither allocator/RSS accounting nor a content-Host reservation.
+    /// The candidate carries the component definitions that admitted its data.
     #[cfg(feature = "serde")]
-    pub fn runtime(
-        candidate: RuntimeSceneCandidate,
-        retained_byte_limit: ByteLimit,
-    ) -> Result<Self, SceneSourceError> {
-        let retained_bytes = direct_runtime_scene_retained_bytes(&candidate)
-            .map_err(|_| SceneSourceError::RetainedBytesOverflow)?;
-        let limit = retained_byte_limit.get();
-        if retained_bytes > limit {
-            return Err(SceneSourceError::RetainedBytesExceeded {
-                required: retained_bytes,
-                limit,
-            });
-        }
-        Ok(Self {
+    #[must_use]
+    pub fn runtime(candidate: RuntimeSceneCandidate) -> Self {
+        Self {
             candidate: RetainedSceneCandidate::Runtime(Arc::new(candidate)),
-            retention: SceneRetention::Direct {
-                retained_bytes,
-                _limit: limit,
-            },
-        })
+            retention: SceneRetention::Direct,
+        }
     }
 
     #[cfg(feature = "project-source")]
@@ -209,7 +134,6 @@ impl SceneSource {
         content_stamp: Option<ProjectSceneContentStamp>,
         lease: ProjectContentLease,
         generation: ProjectContentGenerationLease,
-        retained_bytes: usize,
         schema_authority: Arc<nara_scene::SceneComponentBindingsWitness>,
     ) -> Self {
         Self {
@@ -219,7 +143,6 @@ impl SceneSource {
                 _generation: generation,
                 sources,
                 content_stamp,
-                retained_bytes,
                 schema_authority,
             },
         }
@@ -275,7 +198,7 @@ impl SceneSource {
             SceneRetention::Project { sources, .. } => Some(sources.resolution()),
             #[cfg(feature = "serde")]
             SceneRetention::RuntimeContent { .. } => None,
-            SceneRetention::Direct { .. } => None,
+            SceneRetention::Direct => None,
         }
     }
 
@@ -288,7 +211,7 @@ impl SceneSource {
     pub(crate) fn source_content_stamp(&self) -> Option<ProjectSceneContentStamp> {
         match &self.retention {
             SceneRetention::Project { content_stamp, .. } => *content_stamp,
-            SceneRetention::RuntimeContent { .. } | SceneRetention::Direct { .. } => None,
+            SceneRetention::RuntimeContent { .. } | SceneRetention::Direct => None,
         }
     }
 
@@ -300,7 +223,7 @@ impl SceneSource {
             SceneRetention::RuntimeContent { ref custody, .. } => {
                 matches!(custody, RuntimeContentCustody::HostManaged)
             }
-            SceneRetention::Direct { .. } => false,
+            SceneRetention::Direct => false,
         }
     }
 
@@ -318,32 +241,10 @@ impl SceneSource {
             SceneRetention::RuntimeContent { .. } => unreachable!(
                 "Runtime content always retains a processed Scene with its own definitions"
             ),
-            SceneRetention::Direct { .. } => {
+            SceneRetention::Direct => {
                 let _ = bindings;
                 true
             }
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn retained_bytes(&self) -> usize {
-        match &self.retention {
-            #[cfg(feature = "project-source")]
-            SceneRetention::Project { retained_bytes, .. } => *retained_bytes,
-            #[cfg(feature = "serde")]
-            SceneRetention::RuntimeContent { content, .. } => content.retained_bytes(),
-            SceneRetention::Direct { retained_bytes, .. } => *retained_bytes,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn direct_limit(&self) -> Option<usize> {
-        match self.retention {
-            #[cfg(feature = "project-source")]
-            SceneRetention::Project { .. } => None,
-            #[cfg(feature = "serde")]
-            SceneRetention::RuntimeContent { .. } => None,
-            SceneRetention::Direct { _limit, .. } => Some(_limit),
         }
     }
 }
@@ -353,7 +254,6 @@ impl fmt::Debug for SceneSource {
         formatter
             .debug_struct("SceneSource")
             .field("entity_count", &self.document().entities().len())
-            .field("retained_bytes", &self.retained_bytes())
             .field(
                 "retention",
                 &match self.retention {
@@ -361,7 +261,7 @@ impl fmt::Debug for SceneSource {
                     SceneRetention::Project { .. } => "project-content",
                     #[cfg(feature = "serde")]
                     SceneRetention::RuntimeContent { .. } => "runtime-content",
-                    SceneRetention::Direct { .. } => "direct-limit",
+                    SceneRetention::Direct => "direct",
                 },
             )
             .finish_non_exhaustive()
@@ -428,12 +328,6 @@ impl SceneSourceView {
             _ => None,
         }
     }
-
-    /// Returns the logical retained-byte charge owned by the root activation authority.
-    #[must_use]
-    pub(crate) const fn retained_bytes(&self) -> usize {
-        self.retained_bytes
-    }
 }
 
 impl fmt::Debug for SceneSourceView {
@@ -441,32 +335,15 @@ impl fmt::Debug for SceneSourceView {
         formatter
             .debug_struct("SceneSourceView")
             .field("available", &(self.source.strong_count() > 0))
-            .field("retained_bytes", &self.retained_bytes())
             .finish_non_exhaustive()
     }
 }
 
-/// Read-only product view of the committed Scene source and its matching instance receipt.
+/// The active Scene's retained source and successful instance receipt.
 ///
-/// The activation plugin promotes a private one-shot materialization input into a private owner
-/// before product-dependent Startup systems run. That root resource, which downstream code
-/// cannot name or remove, owns source retention. Replacement and Restart update that same pair
-/// before their exclusive caller returns. A cloned receipt is an observation and an expected-state
-/// guard, not independently mutable current-Scene authority.
-///
-/// Scheduled systems receive this parameter directly. Exclusive callers use [`CurrentScene::get`]
-/// to borrow the same source and receipt from a shared [`World`] reference.
-pub struct CurrentScene<'w> {
-    owner: Res<'w, CurrentSceneOwner>,
-}
-
-/// Borrowed read-only access to the committed Scene source and its matching instance receipt.
-///
-/// Obtain this view with [`CurrentScene::get`]. Its private owner stays in the World, and the view
-/// retains no strong source reference. References returned by its methods borrow that same owner;
-/// finish inspecting them before mutating the World or committing a replacement.
-///
-/// The World cannot be mutated while a current-Scene borrow is still in use:
+/// Read this resource with `Res<CurrentScene>` in a system or borrow it through
+/// [`CurrentScene::get`] in an exclusive system. The Scene activation and travel operations
+/// update the source and receipt together.
 ///
 /// ```compile_fail,E0502
 /// use nara::{advanced_prelude::CurrentScene, ecs::World};
@@ -477,94 +354,26 @@ pub struct CurrentScene<'w> {
 ///     let _ = current.receipt();
 /// }
 /// ```
-pub struct CurrentSceneView<'w> {
-    owner: &'w CurrentSceneOwner,
-}
-
 #[derive(Resource)]
-pub(crate) struct CurrentSceneOwner {
+pub struct CurrentScene {
     source: Arc<SceneSource>,
     receipt: SpawnedSceneInstance,
 }
 
-impl CurrentScene<'_> {
-    /// Borrows the committed Scene source and its matching receipt without constructing a system.
-    ///
-    /// Returns `None` before startup activation or when no current Scene is installed. This only
-    /// reads the private owner; it does not activate, advance, flush or commit any work.
+impl CurrentScene {
+    /// Returns the active Scene after startup activation or a successful replacement.
     #[must_use]
-    pub fn get(world: &World) -> Option<CurrentSceneView<'_>> {
-        world
-            .get_resource::<CurrentSceneOwner>()
-            .map(|owner| CurrentSceneView { owner })
+    pub fn get(world: &World) -> Option<&Self> {
+        world.get_resource()
     }
 
-    /// Returns the exact immutable source admitted for the active runtime.
-    #[must_use]
-    pub fn source(&self) -> &CompiledSceneDocument {
-        self.owner.source()
-    }
-
-    /// Returns the original admitted source-content stamp for a Project Scene.
-    ///
-    /// Direct, processed and Editor working-copy Scenes return `None`. Saved-source stamps stay
-    /// frozen even if files subsequently change.
+    /// Returns the admitted source-content stamp, when the Scene came from project files.
     #[cfg(feature = "project-source")]
     #[must_use]
     pub fn source_content_stamp(&self) -> Option<ProjectSceneContentStamp> {
-        self.owner.source.source_content_stamp()
+        self.source.source_content_stamp()
     }
 
-    /// Returns the successful receipt paired with the admitted source.
-    #[must_use]
-    pub fn receipt(&self) -> &SpawnedSceneInstance {
-        self.owner.receipt()
-    }
-
-    /// Returns a non-owning view of the exact committed source.
-    ///
-    /// Cloning or leaking this view cannot keep an old source alive after replacement or runtime
-    /// retirement. Restart keeps this source and publishes a new matching instance receipt.
-    #[must_use]
-    pub fn source_view(&self) -> SceneSourceView {
-        self.owner.source_view()
-    }
-}
-
-impl CurrentSceneView<'_> {
-    /// Returns the exact immutable source admitted for the active runtime.
-    #[must_use]
-    pub fn source(&self) -> &CompiledSceneDocument {
-        self.owner.source()
-    }
-
-    /// Returns the original admitted source-content stamp for a Project Scene.
-    ///
-    /// Direct, processed and Editor working-copy Scenes return `None`. Saved-source stamps stay
-    /// frozen even if files subsequently change.
-    #[cfg(feature = "project-source")]
-    #[must_use]
-    pub fn source_content_stamp(&self) -> Option<ProjectSceneContentStamp> {
-        self.owner.source.source_content_stamp()
-    }
-
-    /// Returns the successful receipt paired with the admitted source.
-    #[must_use]
-    pub fn receipt(&self) -> &SpawnedSceneInstance {
-        self.owner.receipt()
-    }
-
-    /// Returns a non-owning view of the exact committed source.
-    ///
-    /// This weak view may outlive the World borrow, but cannot retain an old source after
-    /// replacement or runtime retirement. Restart keeps the source with a new matching receipt.
-    #[must_use]
-    pub fn source_view(&self) -> SceneSourceView {
-        self.owner.source_view()
-    }
-}
-
-impl CurrentSceneOwner {
     #[cfg(feature = "project-source")]
     pub(crate) fn is_project_backed(&self) -> bool {
         self.source.is_project_backed()
@@ -632,81 +441,40 @@ impl CurrentSceneOwner {
         self.receipt = receipt;
     }
 
-    pub(crate) fn source(&self) -> &CompiledSceneDocument {
+    /// Returns the immutable source admitted for the active Scene.
+    #[must_use]
+    pub fn source(&self) -> &CompiledSceneDocument {
         self.source.document()
     }
 
-    pub(crate) const fn receipt(&self) -> &SpawnedSceneInstance {
+    /// Returns the successful instance receipt paired with the active source.
+    #[must_use]
+    pub const fn receipt(&self) -> &SpawnedSceneInstance {
         &self.receipt
     }
 
-    fn source_view(&self) -> SceneSourceView {
+    /// Observes this exact source until its Scene is replaced or retired.
+    #[must_use]
+    pub fn source_view(&self) -> SceneSourceView {
         SceneSourceView {
             source: Arc::downgrade(&self.source),
-            retained_bytes: self.source.retained_bytes(),
         }
     }
 }
 
-impl fmt::Debug for CurrentScene<'_> {
+impl fmt::Debug for CurrentScene {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("CurrentScene")
-            .field("source", &self.owner.source)
-            .field("instance_id", &self.owner.receipt.instance_id())
-            .field("entity_count", &self.owner.receipt.len())
+            .field("source", &self.source)
+            .field("instance_id", &self.receipt.instance_id())
+            .field("entity_count", &self.receipt.len())
             .finish_non_exhaustive()
     }
 }
 
-// SAFETY: Every operation delegates to `Res<CurrentSceneOwner>` and therefore registers
-// and performs only the same read access to the private owner resource.
-unsafe impl SystemParam for CurrentScene<'_> {
-    type State = ComponentId;
-    type Item<'world, 'state> = CurrentScene<'world>;
-
-    fn init_state(world: &mut World) -> Self::State {
-        <Res<'_, CurrentSceneOwner> as SystemParam>::init_state(world)
-    }
-
-    fn init_access(
-        state: &Self::State,
-        system_meta: &mut SystemMeta,
-        system_access: &mut SystemAccess,
-        world: &mut World,
-    ) {
-        <Res<'_, CurrentSceneOwner> as SystemParam>::init_access(
-            state,
-            system_meta,
-            system_access,
-            world,
-        );
-    }
-
-    unsafe fn get_param<'world, 'state>(
-        state: &'state mut Self::State,
-        system_meta: &SystemMeta,
-        world: UnsafeWorldCell<'world>,
-        change_tick: Tick,
-    ) -> Result<Self::Item<'world, 'state>, SystemParamValidationError> {
-        // SAFETY: this method has exactly the access registered by the delegated `Res` parameter.
-        let owner = unsafe {
-            <Res<'_, CurrentSceneOwner> as SystemParam>::get_param(
-                state,
-                system_meta,
-                world,
-                change_tick,
-            )?
-        };
-        Ok(CurrentScene { owner })
-    }
-}
-
-// SAFETY: the delegated resource parameter is read-only.
-unsafe impl ReadOnlySystemParam for CurrentScene<'_> {}
-
 #[derive(Resource)]
-struct StartupSceneActivationInput(CurrentSceneOwner);
+struct StartupSceneActivationInput(CurrentScene);
 
 #[derive(Resource)]
 struct StartupSceneActivationAuthority {
@@ -740,7 +508,7 @@ pub(crate) fn current_scene_inspection_bindings(
         ));
         report
     };
-    let owner = world.get_resource::<CurrentSceneOwner>().ok_or_else(|| {
+    let owner = world.get_resource::<CurrentScene>().ok_or_else(|| {
         rejected(
             "scene.current.owner-missing",
             "Current Scene ownership is unavailable",
@@ -868,7 +636,7 @@ pub fn materialize_startup_scene(
         }
     }
     if world.contains_resource::<StartupSceneActivationInput>()
-        || world.contains_resource::<CurrentSceneOwner>()
+        || world.contains_resource::<CurrentScene>()
     {
         return Err(StartupSceneMaterializeError::single(
             "startup.scene.activation-state-conflict",
@@ -916,7 +684,7 @@ pub fn materialize_startup_scene(
         .instance
         .take()
         .expect("successful scene spawning always publishes an instance receipt");
-    world.insert_resource(StartupSceneActivationInput(CurrentSceneOwner {
+    world.insert_resource(StartupSceneActivationInput(CurrentScene {
         source: Arc::new(source),
         receipt,
     }));
@@ -937,7 +705,7 @@ fn consume_startup_scene_activation(world: &mut World) -> Result<(), BevyError> 
     if !world.contains_resource::<StartupSceneActivationInput>() {
         return Ok(());
     }
-    if world.contains_resource::<CurrentSceneOwner>() {
+    if world.contains_resource::<CurrentScene>() {
         return Err(classified_startup_error(
             "startup.scene.activation-conflict",
             "Startup scene activation authority conflicts with pending input",
@@ -953,7 +721,7 @@ fn consume_startup_scene_activation(world: &mut World) -> Result<(), BevyError> 
 fn finalize_startup_scene_activation(
     mut authority: ResMut<StartupSceneActivationAuthority>,
     pending: Option<Res<StartupSceneActivationInput>>,
-    active: Option<Res<CurrentSceneOwner>>,
+    active: Option<Res<CurrentScene>>,
 ) -> Result<(), BevyError> {
     let phase = authority.phase;
     authority.phase = StartupSceneActivationPhase::Finalized;
@@ -1066,20 +834,13 @@ mod tests {
     fn borrowed_current_scene_is_absent_without_activation() {
         let world = World::new();
         assert!(CurrentScene::get(&world).is_none());
-        assert!(!world.contains_resource::<CurrentSceneOwner>());
     }
 
     #[test]
     fn borrowed_and_scheduled_current_scene_share_owner_without_retaining_source() {
         let mut world = World::new();
         let document = Arc::new(SceneDocument::from_ordered_roots([]));
-        let source = Arc::new(
-            SceneSource::direct(
-                scene_candidate(Arc::clone(&document)),
-                ByteLimit::new(1024).unwrap(),
-            )
-            .unwrap(),
-        );
+        let source = Arc::new(SceneSource::direct(scene_candidate(Arc::clone(&document))));
         let RetainedSceneCandidate::Compiled(compiled) = &source.candidate else {
             panic!("the fixture retains a source compilation");
         };
@@ -1093,17 +854,17 @@ mod tests {
             None,
         );
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
-        world.insert_resource(CurrentSceneOwner {
+        world.insert_resource(CurrentScene {
             source,
             receipt: report.instance.unwrap(),
         });
-        let mut access = SystemState::<CurrentScene>::new(&mut world);
+        let mut access = SystemState::<Res<CurrentScene>>::new(&mut world);
         let (source_view, scheduled_view) = {
             let current = CurrentScene::get(&world).unwrap();
             let scheduled = access.get(&world).unwrap();
             assert!(std::ptr::eq(
                 current.source(),
-                current.owner.source.compiled_scene().unwrap().document()
+                current.source.compiled_scene().unwrap().document()
             ));
             assert!(std::ptr::eq(current.source(), scheduled.source()));
             assert!(std::ptr::eq(current.receipt(), scheduled.receipt()));
@@ -1119,7 +880,7 @@ mod tests {
                 source_view.with_document(|source| source as *const CompiledSceneDocument),
                 Some(current.source() as *const CompiledSceneDocument)
             );
-            assert_eq!(Arc::strong_count(&current.owner.source), 1);
+            assert_eq!(Arc::strong_count(&current.source), 1);
             (source_view, scheduled_view)
         };
 
@@ -1131,50 +892,11 @@ mod tests {
     }
 
     #[test]
-    fn direct_source_enforces_its_exact_retained_byte_limit() {
-        let document = Arc::new(SceneDocument::from_ordered_roots([]));
-        let required =
-            direct_startup_scene_retained_bytes(&scene_candidate(Arc::clone(&document))).unwrap();
-        assert!(required > 1);
-
-        let source = SceneSource::direct(
-            scene_candidate(Arc::clone(&document)),
-            ByteLimit::new(required).unwrap(),
-        )
-        .unwrap();
-
-        assert!(std::ptr::eq(
-            source.document(),
-            source.compiled_scene().unwrap().document()
-        ));
-        assert_eq!(source.retained_bytes(), required);
-        assert_eq!(source.direct_limit(), Some(required));
-        assert_eq!(
-            SceneSource::direct(
-                scene_candidate(document),
-                ByteLimit::new(required.checked_sub(1).unwrap()).unwrap(),
-            )
-            .unwrap_err(),
-            SceneSourceError::RetainedBytesExceeded {
-                required,
-                limit: required - 1,
-            }
-        );
-    }
-
-    #[test]
     fn source_view_cannot_extend_the_root_document_lifetime() {
         let document = Arc::new(SceneDocument::from_ordered_roots([]));
-        let source = Arc::new(
-            SceneSource::direct(
-                scene_candidate(Arc::clone(&document)),
-                ByteLimit::new(1024).unwrap(),
-            )
-            .unwrap(),
-        );
+        let source = Arc::new(SceneSource::direct(scene_candidate(Arc::clone(&document))));
         let view = SceneSourceView {
             source: Arc::downgrade(&source),
-            retained_bytes: source.retained_bytes(),
         };
         let clone = view.clone();
         let RetainedSceneCandidate::Compiled(compiled) = &source.candidate else {
@@ -1187,7 +909,6 @@ mod tests {
             view.with_document(|source| source.entities().len()),
             Some(0)
         );
-        assert_eq!(clone.retained_bytes(), source.retained_bytes());
         assert_eq!(
             view.with_compiled_scene(|candidate, database| {
                 assert!(candidate.canonical_provenance().is_empty());
@@ -1222,11 +943,9 @@ mod tests {
             nara_app::RuntimeClosePolicy::default(),
         )
         .unwrap();
-        let source = SceneSource::direct(
-            scene_candidate(Arc::new(SceneDocument::from_ordered_roots([]))),
-            ByteLimit::new(1024).unwrap(),
-        )
-        .unwrap();
+        let source = SceneSource::direct(scene_candidate(Arc::new(
+            SceneDocument::from_ordered_roots([]),
+        )));
         let materialization = Arc::new(OnceLock::new());
         let command_result = Arc::clone(&materialization);
 
@@ -1258,14 +977,14 @@ mod tests {
                 .world()
                 .contains_resource::<StartupSceneActivationInput>()
         );
-        assert!(!candidate.world().contains_resource::<CurrentSceneOwner>());
+        assert!(!candidate.world().contains_resource::<CurrentScene>());
         let runtime = candidate.complete_startup().unwrap().promote();
         assert!(
             !runtime
                 .world()
                 .contains_resource::<StartupSceneActivationInput>()
         );
-        assert!(runtime.world().contains_resource::<CurrentSceneOwner>());
+        assert!(runtime.world().contains_resource::<CurrentScene>());
         assert_eq!(
             runtime
                 .world()
@@ -1287,11 +1006,9 @@ mod tests {
             phase: StartupSceneActivationPhase::Finalized,
         });
         let entity_count = world.entities().len();
-        let source = SceneSource::direct(
-            scene_candidate(Arc::new(SceneDocument::from_ordered_roots([]))),
-            ByteLimit::new(1024).unwrap(),
-        )
-        .unwrap();
+        let source = SceneSource::direct(scene_candidate(Arc::new(
+            SceneDocument::from_ordered_roots([]),
+        )));
         let error = materialize_startup_scene(&mut world, source).unwrap_err();
 
         assert_eq!(
@@ -1300,7 +1017,7 @@ mod tests {
         );
         assert_eq!(world.entities().len(), entity_count);
         assert!(!world.contains_resource::<StartupSceneActivationInput>());
-        assert!(!world.contains_resource::<CurrentSceneOwner>());
+        assert!(!world.contains_resource::<CurrentScene>());
         assert_eq!(
             world.resource::<StartupSceneActivationAuthority>().phase,
             StartupSceneActivationPhase::Finalized

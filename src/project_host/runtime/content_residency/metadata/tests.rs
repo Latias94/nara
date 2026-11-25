@@ -102,7 +102,7 @@ impl Fixture {
         .to_json_bytes()
         .unwrap();
         fs::write(fixture.0.join(RUNTIME_CONTENT_CATALOG_FILE), &catalog).unwrap();
-        let base = RuntimeContentBase::open(
+        let base = RuntimeContentBase::capture_test_directory(
             &open_explicit_product_project_root(&fixture.0).unwrap(),
             &RuntimeContentExpectation::new(ContentDigest::of_bytes(&catalog), target),
             ProductRecipe::new(),

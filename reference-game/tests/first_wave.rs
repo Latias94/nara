@@ -22,7 +22,6 @@ use nara::{
         RuntimeControlRequestResult, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
         RuntimeInstance, RuntimeObligationLedger, RuntimeState,
     },
-    core::ByteLimit,
     ecs::{
         Entity, Resource, With, Without,
         bevy_ecs::component::ComponentId,
@@ -614,7 +613,7 @@ fn capture_run_initialization(world: &mut World) {
     }
     let state = normalized_run_state(world);
     let receipt = {
-        let mut current = SystemState::<CurrentScene<'_>>::new(world);
+        let mut current = SystemState::<Res<CurrentScene>>::new(world);
         current.get(world).unwrap().receipt().clone()
     };
     let mut audit = world.resource_mut::<RunInitializationAudit>();
@@ -1309,9 +1308,7 @@ fn reexpand_modified_authored_scene(
             .candidate
             .expect("successful expansion binds source provenance")
             .bind_source(snapshot.selected_scene_source_key().clone()),
-        ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
     )
-    .expect("the modified reference scene fits the bounded direct retention limit")
 }
 
 fn assert_startup_rejected(plan: nara::project_host::RuntimePlan, source: SceneSource) {

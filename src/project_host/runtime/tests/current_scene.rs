@@ -3,7 +3,7 @@ use crate::startup_scene::{
     SceneSource, replace_current_scene_with_product, restart_current_scene_with_product,
 };
 use nara_app::CoreStage;
-use nara_core::{ByteLimit, ItemLimit};
+use nara_core::ItemLimit;
 use nara_scene::advanced::SceneProductTransactionLimits;
 
 #[derive(Debug, Default)]
@@ -31,26 +31,21 @@ fn inspect_project_scene_restart(world: &mut World) {
     if world.contains_resource::<RestartedCurrentScene>() {
         return;
     }
-    let original = world.resource::<CurrentSceneOwner>().receipt().clone();
-    let source_pointer =
-        world.resource::<CurrentSceneOwner>().source() as *const CompiledSceneDocument;
+    let original = world.resource::<CurrentScene>().receipt().clone();
+    let source_pointer = world.resource::<CurrentScene>().source() as *const CompiledSceneDocument;
     let entity_count = world.entities().len();
     let limits =
         SceneProductTransactionLimits::new(ItemLimit::new(1).unwrap(), ItemLimit::new(1).unwrap());
-    let direct = SceneSource::direct(
-        crate::startup_scene::compile_test_scene(
-            &SceneDocument::default(),
-            nara_scene::scene_component_bindings(world).unwrap(),
-            nara_scene::SourceDocumentKey::named(
-                "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
-                "project-scene-restart-fixture",
-                nara_scene::SourceDocumentKind::Scene,
-            )
-            .unwrap(),
-        ),
-        ByteLimit::new(16 * 1024).unwrap(),
-    )
-    .unwrap();
+    let direct = SceneSource::direct(crate::startup_scene::compile_test_scene(
+        &SceneDocument::default(),
+        nara_scene::scene_component_bindings(world).unwrap(),
+        nara_scene::SourceDocumentKey::named(
+            "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+            "project-scene-restart-fixture",
+            nara_scene::SourceDocumentKind::Scene,
+        )
+        .unwrap(),
+    ));
     let rejected =
         replace_current_scene_with_product(world, &original, direct, limits, &[], |_| {
             panic!("project residency must reject before product configuration")
@@ -60,16 +55,16 @@ fn inspect_project_scene_restart(world: &mut World) {
         &rejected.diagnostics,
         "scene.current.project-residency-required"
     ));
-    assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &original);
+    assert_eq!(world.resource::<CurrentScene>().receipt(), &original);
     assert_eq!(world.entities().len(), entity_count);
 
     let restarted = restart_current_scene_with_product(world, &original, limits, &[], |_| {});
     assert!(!restarted.diagnostics.has_errors());
     let receipt = restarted.instance.unwrap();
     assert_ne!(receipt.instance_id(), original.instance_id());
-    assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &receipt);
+    assert_eq!(world.resource::<CurrentScene>().receipt(), &receipt);
     assert_eq!(
-        world.resource::<CurrentSceneOwner>().source() as *const CompiledSceneDocument,
+        world.resource::<CurrentScene>().source() as *const CompiledSceneDocument,
         source_pointer
     );
     assert_eq!(world.entities().len(), entity_count);

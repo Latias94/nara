@@ -90,7 +90,7 @@ impl PreparedReferenceRun {
     reason = "the Bevy system signature is the explicit startup access contract"
 )]
 pub(crate) fn initialize_reference_run(
-    activation: CurrentScene<'_>,
+    activation: Res<CurrentScene>,
     mut commands: Commands,
     scene_entities: Query<(Entity, &SceneEntitySource)>,
     mut movement: ResMut<MovementIntent>,
@@ -132,7 +132,7 @@ pub(crate) fn initialize_reference_run(
 }
 
 fn resolve_startup_entities(
-    activation: &CurrentScene<'_>,
+    activation: &CurrentScene,
     scene_entities: &Query<(Entity, &SceneEntitySource)>,
 ) -> Result<BTreeMap<SceneEntityId, Entity>, BevyError> {
     let mut entities = BTreeMap::new();
@@ -436,7 +436,7 @@ fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
         let last_rejection = status.last_rejection();
         let ui_action_sequence = status.pending_ui_action_sequence();
         let (expected, prepared) = {
-            let mut current_state = SystemState::<CurrentScene<'_>>::new(world);
+            let mut current_state = SystemState::<Res<CurrentScene>>::new(world);
             let current = current_state.get(world).map_err(BevyError::error)?;
             let prepared = prepare_reference_run(
                 current.source(),

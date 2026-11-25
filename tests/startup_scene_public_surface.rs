@@ -1,14 +1,14 @@
 #![cfg(all(feature = "project-runtime", feature = "runtime-core"))]
 
 use nara::advanced_prelude::{
-    CurrentScene, STARTUP_SCENE_ACTIVATION_PLUGIN_ID, SceneSource, SceneSourceError,
-    SceneSourceView, StartupSceneActivationPlugin, StartupSceneActivationSet,
-    StartupSceneMaterializeError, materialize_startup_scene,
+    CurrentScene, STARTUP_SCENE_ACTIVATION_PLUGIN_ID, SceneSource, SceneSourceView,
+    StartupSceneActivationPlugin, StartupSceneActivationSet, StartupSceneMaterializeError,
+    materialize_startup_scene,
 };
 use nara::diagnostic::DiagnosticReport;
-use nara::ecs::World;
+use nara::ecs::{Res, World};
 
-fn inspect(_activation: CurrentScene<'_>) {}
+fn inspect(_activation: Res<CurrentScene>) {}
 
 #[test]
 fn advanced_startup_scene_surface_is_available() {
@@ -17,7 +17,6 @@ fn advanced_startup_scene_surface_is_available() {
     let _ = StartupSceneActivationPlugin;
     let _ = StartupSceneActivationSet;
     let _: Option<SceneSource> = None;
-    let _: Option<SceneSourceError> = None;
     let _: Option<SceneSourceView> = None;
     let _: fn(&mut World, SceneSource) -> Result<DiagnosticReport, StartupSceneMaterializeError> =
         materialize_startup_scene;

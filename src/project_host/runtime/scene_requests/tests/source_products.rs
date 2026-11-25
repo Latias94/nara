@@ -409,7 +409,7 @@ fn source_product_ready_and_queued_publication_never_rediscover_or_retarget() {
                     .as_str(),
                 "scenes/second.scene.json"
             );
-            let mut access = SystemState::<CurrentScene>::new(world);
+            let mut access = SystemState::<Res<CurrentScene>>::new(world);
             assert_eq!(
                 access.get(world).unwrap().source_content_stamp(),
                 Some(prepared_stamp)

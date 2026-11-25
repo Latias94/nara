@@ -16,7 +16,7 @@ use nara::{
         RuntimeObligationLedger,
     },
     asset::{AssetPathScope, ProjectAssetDatabase},
-    core::{ByteLimit, ItemLimit},
+    core::ItemLimit,
     ecs::{
         Component, Entity, Resource, World,
         bevy_ecs::{lifecycle::HookContext, world::DeferredWorld},
@@ -168,7 +168,7 @@ fn runtime_source(
             .unwrap()
             .admit(&key, bindings)
             .unwrap();
-    SceneSource::runtime(candidate, ByteLimit::new(2 * 1024 * 1024).unwrap()).unwrap()
+    SceneSource::runtime(candidate)
 }
 
 fn limits() -> SceneProductTransactionLimits {
@@ -348,7 +348,7 @@ fn runtime_startup_replacement_restart_and_source_transition_share_one_owner() {
         let report = replace_current_scene_with_product(
             world,
             &restarted,
-            SceneSource::direct(compiled, ByteLimit::new(64 * 1024).unwrap()).unwrap(),
+            SceneSource::direct(compiled),
             limits(),
             &[],
             |_| {},

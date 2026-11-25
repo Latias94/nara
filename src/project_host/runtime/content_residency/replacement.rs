@@ -224,7 +224,7 @@ impl StagedProjectSceneReplacement {
             stock::commit_publications(world, self.stock.images, tilesets, self.stock.materials);
         let authority = self.catalog.commit(world);
         world.insert_resource(self.content.domain_assets().clone());
-        world.resource_mut::<CurrentSceneOwner>().commit_source(
+        world.resource_mut::<CurrentScene>().commit_source(
             self.content.scene_source(),
             report
                 .instance
@@ -290,7 +290,7 @@ fn validate_resources(
     world: &World,
     #[cfg(feature = "runtime-2d")] content: ResidencyInput<'_>,
 ) -> Result<(), HostFault> {
-    if !world.contains_resource::<CurrentSceneOwner>()
+    if !world.contains_resource::<CurrentScene>()
         || !world.contains_resource::<ProjectSceneResidency>()
         || !world.contains_resource::<ProjectDomainAssets>()
     {
@@ -298,13 +298,13 @@ fn validate_resources(
     }
     let unsupported = transaction::validate_resource_scope::<ProjectSceneResidency>(world).is_err()
         || transaction::validate_resource_scope::<ProjectDomainAssets>(world).is_err()
-        || transaction::validate_resource_scope::<CurrentSceneOwner>(world).is_err();
+        || transaction::validate_resource_scope::<CurrentScene>(world).is_err();
     #[cfg(feature = "project-source")]
     let source = {
         let source = matches!(content, ResidencyInput::Source(_));
         if source
             && (!world.contains_resource::<ProjectAssetDatabase>()
-                || !world.resource::<CurrentSceneOwner>().is_project_backed())
+                || !world.resource::<CurrentScene>().is_project_backed())
         {
             return Err(resources_missing());
         }

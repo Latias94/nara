@@ -439,11 +439,10 @@ pub mod advanced_prelude {
 
     #[cfg(feature = "project-runtime")]
     pub use crate::startup_scene::{
-        CurrentScene, CurrentSceneView, STARTUP_SCENE_ACTIVATION_PLUGIN_ID, SceneSource,
-        SceneSourceError, SceneSourceView, StartupSceneActivationPlugin, StartupSceneActivationSet,
-        StartupSceneMaterializeError, add_startup_scene_activation_systems,
-        materialize_startup_scene, replace_current_scene_with_product,
-        restart_current_scene_with_product,
+        CurrentScene, STARTUP_SCENE_ACTIVATION_PLUGIN_ID, SceneSource, SceneSourceView,
+        StartupSceneActivationPlugin, StartupSceneActivationSet, StartupSceneMaterializeError,
+        add_startup_scene_activation_systems, materialize_startup_scene,
+        replace_current_scene_with_product, restart_current_scene_with_product,
     };
 
     #[cfg(feature = "asset-watch")]

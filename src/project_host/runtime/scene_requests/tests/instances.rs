@@ -65,7 +65,7 @@ use crate::{
         RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentMember,
         RuntimeContentMemberKind, RuntimeContentTarget,
     },
-    startup_scene::{CurrentScene, CurrentSceneOwner},
+    startup_scene::CurrentScene,
 };
 
 const IMMEDIATE: &str = "test.scene-dependency.Immediate";
@@ -414,7 +414,7 @@ fn processed_dependency_instances_use_original_hosted_immediate_members_without_
             assert!(!world.contains_resource::<ProjectAssetDatabase>());
             assert!(
                 world
-                    .resource::<CurrentSceneOwner>()
+                    .resource::<CurrentScene>()
                     .hosted_runtime_base()
                     .unwrap()
                     .same_base(&base)
@@ -869,7 +869,7 @@ fn processed_base(fixture: &Fixture) -> RuntimeContentBase {
     .to_json_bytes()
     .unwrap();
     fs::write(directory.join(RUNTIME_CONTENT_CATALOG_FILE), &catalog).unwrap();
-    RuntimeContentBase::open(
+    RuntimeContentBase::capture_test_directory(
         &open_explicit_product_project_root(&directory).unwrap(),
         &RuntimeContentExpectation::new(ContentDigest::of_bytes(&catalog), target),
         recipe(),

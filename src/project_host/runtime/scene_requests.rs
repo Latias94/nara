@@ -52,7 +52,7 @@ use crate::project_host::{
 };
 use crate::{
     runtime_content::{RuntimeContentBase, RuntimeContentMemberKind},
-    startup_scene::CurrentSceneOwner,
+    startup_scene::CurrentScene,
 };
 use domains::ManagedSceneTravelAttempt;
 use preparation::Preparation;
@@ -73,7 +73,7 @@ enum Context {
 }
 
 impl Context {
-    fn matches_current(&self, current: &CurrentSceneOwner) -> bool {
+    fn matches_current(&self, current: &CurrentScene) -> bool {
         match self {
             #[cfg(feature = "project-source")]
             Self::Source { .. } => current.is_project_backed(),
@@ -299,7 +299,7 @@ impl RequestOwner {
         &self,
         admission: &Admission,
         generation: Option<RuntimeGeneration>,
-        current: Option<&CurrentSceneOwner>,
+        current: Option<&CurrentScene>,
     ) -> bool {
         !self.closing.load(Ordering::Acquire)
             && generation == Some(admission.id.generation)
@@ -508,7 +508,7 @@ pub(crate) fn poll_project_scene_requests(world: &mut World) {
                 owner.matches(
                     admission,
                     world.get_resource::<RuntimeGeneration>().copied(),
-                    world.get_resource::<CurrentSceneOwner>(),
+                    world.get_resource::<CurrentScene>(),
                 )
             })
     };

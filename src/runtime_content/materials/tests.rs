@@ -338,7 +338,7 @@ impl Fixture {
     }
 
     fn open(&self, limits: RuntimeContentLimits) -> RuntimeContentBase {
-        RuntimeContentBase::open(
+        RuntimeContentBase::capture_test_directory(
             &open_explicit_product_project_root(&self.root).unwrap(),
             &self.expected,
             self.recipe.clone(),

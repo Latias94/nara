@@ -1,6 +1,6 @@
 //! Exact encoded ownership, independent of the original executable plan and decoded residency.
 
-use std::io::Write;
+use std::{borrow::Cow, io::Write};
 
 use nara_asset::pack::{self, Pack, PackError};
 
@@ -9,22 +9,20 @@ use crate::fs::{FileCapability, FsError, FsOperation};
 use super::{DecodeLease, RuntimeContentBase, RuntimeContentCatalog, RuntimeContentError};
 
 pub(super) enum EncodedBacking {
+    #[cfg(any(test, feature = "project-workflow"))]
     Captured(Box<[Vec<u8>]>),
     Pack(Pack),
 }
 
-pub(super) enum EncodedMember<'a> {
-    Captured(&'a [u8]),
+pub(super) struct EncodedMember<'a> {
     // Rust drops fields in declaration order. Release the bytes before their shared allowance.
-    Read { bytes: Vec<u8>, _work: DecodeLease },
+    bytes: Cow<'a, [u8]>,
+    _work: Option<DecodeLease>,
 }
 
 impl AsRef<[u8]> for EncodedMember<'_> {
     fn as_ref(&self) -> &[u8] {
-        match self {
-            Self::Captured(bytes) => bytes,
-            Self::Read { bytes, .. } => bytes,
-        }
+        self.bytes.as_ref()
     }
 }
 
@@ -50,7 +48,11 @@ impl RuntimeContentBase {
         index: usize,
     ) -> Result<EncodedMember<'_>, RuntimeContentError> {
         match &self.inner.backing {
-            EncodedBacking::Captured(members) => Ok(EncodedMember::Captured(&members[index])),
+            #[cfg(any(test, feature = "project-workflow"))]
+            EncodedBacking::Captured(members) => Ok(EncodedMember {
+                bytes: Cow::Borrowed(&members[index]),
+                _work: None,
+            }),
             EncodedBacking::Pack(pack) => {
                 let digest = self.inner.catalog.members()[index].digest();
                 // Catalogue admission already checked this conversion and the per-member cap.
@@ -58,7 +60,10 @@ impl RuntimeContentBase {
                     usize::try_from(digest.length()).expect("admitted member length fits the host");
                 let work = self.inner.budget.reserve(0, length)?;
                 let bytes = pack.read_member(index, digest).map_err(pack_error)?;
-                Ok(EncodedMember::Read { bytes, _work: work })
+                Ok(EncodedMember {
+                    bytes: Cow::Owned(bytes),
+                    _work: Some(work),
+                })
             }
         }
     }

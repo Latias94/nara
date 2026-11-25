@@ -101,7 +101,7 @@ impl Verification {
 pub(super) fn drive(
     mut verifier: ResMut<Verification>,
     snapshot: Res<GameSnapshot>,
-    current: Option<CurrentScene>,
+    current: Option<Res<CurrentScene>>,
     mut commands: ResMut<CommandSchedule>,
 ) {
     verifier.driver_calls = verifier.driver_calls.saturating_add(1);

@@ -1,10 +1,9 @@
 //! Verified immutable Runtime content, independent of authoring source and import caches.
 //!
-//! The Host supplies the expected catalog digest and target independently of the directory.
-//! A base retains either complete captured bytes or one exact local pack with authenticated
-//! member reads. Subsequent acquisition retains that base and its original executable composition;
-//! it never reopens member paths or searches a source database. Integrity, typed decode and native
-//! residency are distinct operations. This module does not install decoded products into a World.
+//! The executable supplies the expected catalog digest and target. A shipping base holds the exact
+//! local pack and authenticates member reads. Cook assembles the same content in memory before
+//! writing the pack. Typed acquisitions retain that base and its executable composition until the
+//! concrete runtime domain installs or releases the decoded products.
 
 mod admission;
 mod backing;
@@ -25,6 +24,8 @@ mod materials;
 #[cfg(feature = "runtime-2d")]
 mod native;
 mod prepared;
+#[cfg(test)]
+mod test_directory;
 mod traversal;
 
 pub use codecs::{RuntimeCodecDefinitionId, RuntimeCodecSelectionError, RuntimeCodecsFingerprint};
@@ -44,7 +45,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::fs::{ContentDigest, DirectoryCapability, FileCapability, FsError, RelativePath};
+use crate::fs::{ContentDigest, FileCapability, FsError};
 use nara_asset::{
     AssetDomain, AssetProductRef, AssetRef, AssetReferenceDemand, AssetRuntimeError,
     RuntimeAssetCodec,
@@ -403,52 +404,6 @@ impl RuntimeContentBase {
                 EncodedBacking::Captured(members.into_boxed_slice()),
                 retained,
             ),
-            retained,
-        ))
-    }
-
-    /// Captures and verifies a trusted local base before any domain decode or App construction.
-    ///
-    /// The supplied Rust recipe is executable authority. The catalog only declares compatible
-    /// configuration and fingerprints; it cannot select code or supply its own expected digest.
-    pub fn open(
-        directory: &DirectoryCapability,
-        expected: &RuntimeContentExpectation,
-        recipe: ProductRecipe,
-        limits: RuntimeContentLimits,
-    ) -> Result<Self, RuntimeContentError> {
-        let (_, catalog_limits) = admission::input_limits(expected, limits)?;
-        let path =
-            RelativePath::new(RUNTIME_CONTENT_CATALOG_FILE).expect("fixed valid catalog path");
-        let catalog_bytes = directory
-            .open_file(&path)
-            .map_err(RuntimeContentError::Host)?
-            .read_to_end_bounded(expected.catalog_digest().length())
-            .map_err(RuntimeContentError::Host)?;
-        let admitted = admission::AdmittedCatalog::new(
-            catalog_bytes,
-            expected,
-            recipe,
-            limits,
-            catalog_limits,
-        )?;
-        let retained = admitted.retained_bytes(true)?;
-        let mut members = Vec::with_capacity(admitted.catalog.members().len());
-        for member in admitted.catalog.members() {
-            let path = RelativePath::new(member.path())
-                .expect("catalog admits portable relative member paths");
-            let bytes = directory
-                .open_file(&path)
-                .map_err(RuntimeContentError::Host)?
-                .read_to_end_bounded(member.digest().length())
-                .map_err(RuntimeContentError::Host)?;
-            if ContentDigest::of_bytes(&bytes) != member.digest() {
-                return Err(RuntimeContentError::MemberDigestMismatch);
-            }
-            members.push(bytes);
-        }
-        Ok(admitted.publish(
-            EncodedBacking::Captured(members.into_boxed_slice()),
             retained,
         ))
     }

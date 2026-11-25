@@ -17,7 +17,7 @@ use super::{ProjectSceneResidency, ResidencyAuthority, failure, rejected};
 use crate::project_content::ProjectSourceContent;
 use crate::{
     runtime_content::{RuntimeContentMemberKind, RuntimeContentScene},
-    startup_scene::{CurrentSceneOwner, current_scene_bindings, current_scene_inspection_bindings},
+    startup_scene::{CurrentScene, current_scene_bindings, current_scene_inspection_bindings},
 };
 
 /// Inspects one Immediate Scene dependency retained by the current Host content generation.
@@ -117,7 +117,7 @@ fn current_dependency(
             "Current Scene receipt does not belong to this World's identity domain",
         )));
     }
-    let current = world.resource::<CurrentSceneOwner>();
+    let current = world.resource::<CurrentScene>();
     if !current.matches_component_bindings(bindings) {
         return Err(rejected(failure(
             "scene.current.component-bindings-mismatch",

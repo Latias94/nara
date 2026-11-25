@@ -137,7 +137,7 @@ fn retain_stock_input(
     frame: Res<FrameExecutionStart>,
     time: Res<FixedTime>,
     settings: Res<RuntimeTimeSettings>,
-    current: CurrentScene,
+    current: Res<CurrentScene>,
     snapshot: Res<GameSnapshot>,
     cameras: Query<&Camera2d>,
     mut state: ResMut<CaptureState>,

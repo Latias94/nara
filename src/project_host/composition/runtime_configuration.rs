@@ -137,7 +137,7 @@ pub fn resolve_runtime_configuration(
         .map_err(RuntimeConfigurationPlanError::Capabilities)?;
     let plugins = configured_profile_plugins(
         configuration,
-        crate::product::ProjectProfilePlugins::new(configuration, capabilities.normalized),
+        crate::product::ProjectProfilePlugins::new(configuration, capabilities.normalized()),
     );
     let resolved = resolve_runtime_composition(
         configuration,

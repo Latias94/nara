@@ -15,7 +15,10 @@ mod sections;
 mod settings;
 pub mod validation;
 
-pub use capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
+pub use capability::{
+    ProductCapability, ProductCapabilitySet, RuntimeCapabilityAdmission, RuntimeCapabilityError,
+    RuntimeCapabilityErrorKind, RuntimePreset, admit_runtime_capabilities,
+};
 pub use render::{
     EffectiveRenderSettings, EffectiveWorldCanvas, ProjectRenderManifest,
     ProjectWorldCanvasManifest,

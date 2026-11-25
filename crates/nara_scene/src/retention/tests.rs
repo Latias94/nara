@@ -636,5 +636,80 @@ fn bound_candidate_retention_charges_the_containing_source_and_envelope() {
         long_bytes - short_bytes,
         long.source_key().retained_bytes() - short.source_key().retained_bytes(),
     );
-    assert!(direct_startup_scene_retained_bytes(&short).unwrap() > short_bytes);
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn runtime_retention_charges_unused_definitions() {
+    use crate::{RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentBindings};
+    use nara_reflect::{
+        ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+        PersistentComponentSchemaOwnerId,
+    };
+
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("local"))]);
+    let key = SourceDocumentKey::named(
+        "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+        "retention.runtime-definitions",
+        SourceDocumentKind::Scene,
+    )
+    .unwrap();
+    let cook = |alias: &str, initial: &str| {
+        let owner = ComponentSchemaOwnerSnapshot::admit(
+            PersistentComponentSchemaOwnerId::try_new("test.retention.runtime-data").unwrap(),
+            ComponentSchemaCatalog {
+                components: vec![
+                    ComponentSchema::new(
+                        ComponentTypeId::new("test.retention.Unused"),
+                        alias,
+                        ComponentSchemaVersion::ONE,
+                    )
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                    .with_fields([ComponentFieldSchema::required(
+                        ComponentFieldId::new("value"),
+                        "Value",
+                        ComponentFieldPath::empty(),
+                        ComponentValueKind::String,
+                    )
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)])
+                    .with_authoring_initial_value(ComponentValue::String(initial.to_owned())),
+                ],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        let bindings = SceneComponentBindings::new(registry.clone(), [owner]).unwrap();
+        let report = bindings.compile_scene(&document, &InMemoryPrefabSourceResolver::new());
+        assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+        let compiled = report.candidate.unwrap().bind_source(key.clone());
+        RuntimeSceneCandidate::cook(
+            &compiled,
+            &bindings,
+            nara_asset::ProjectAssetDatabase::default().resolver(&nara_asset::AssetPathScope::ROOT),
+            RuntimeSceneLimits::default(),
+        )
+        .unwrap()
+    };
+    let short = cook("Short", "x");
+    let long_alias = "A longer unused definition alias";
+    let long = cook(long_alias, "x");
+    let initial = "A retained creation template independent of the document";
+    let template = cook("Short", initial);
+    assert_eq!(short.document(), long.document());
+    assert_eq!(short.canonical_provenance(), long.canonical_provenance());
+    assert_eq!(short.canonical_provenance().len(), 1);
+    assert_eq!(
+        runtime_startup_scene_retained_bytes(&long).unwrap()
+            - runtime_startup_scene_retained_bytes(&short).unwrap(),
+        long_alias.len() - "Short".len()
+    );
+    assert_eq!(
+        runtime_startup_scene_retained_bytes(&template).unwrap()
+            - runtime_startup_scene_retained_bytes(&short).unwrap(),
+        initial.len() - "x".len()
+    );
 }

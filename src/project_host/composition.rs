@@ -31,15 +31,13 @@ use nara_reflect::{
 };
 use nara_scene::runtime_configuration::{
     EffectiveRuntimeConfiguration, ProductCapability, ProductCapabilitySet,
+    RuntimeCapabilityAdmission, admit_runtime_capabilities,
 };
+pub use nara_scene::runtime_configuration::{RuntimeCapabilityError, RuntimeCapabilityErrorKind};
 use nara_scene::{SceneComponentBindingError, SceneComponentBindings};
 
-mod capabilities;
 mod runtime_configuration;
 
-use capabilities::RuntimeCapabilityAdmission;
-pub(super) use capabilities::validate_runtime_capabilities;
-pub use capabilities::{RuntimeCapabilityError, RuntimeCapabilityErrorKind};
 pub use runtime_configuration::{
     RuntimeConfigurationPlan, RuntimeConfigurationPlanError, resolve_runtime_configuration,
 };
@@ -83,6 +81,12 @@ pub const fn compiled_product_capabilities() -> CompiledProductCapabilities {
     #[cfg(feature = "render-wgpu")]
     let capabilities = capabilities.with(ProductCapability::RenderWgpu);
     CompiledProductCapabilities(capabilities)
+}
+
+pub(super) fn validate_runtime_capabilities(
+    settings: &EffectiveRuntimeConfiguration,
+) -> Result<RuntimeCapabilityAdmission, RuntimeCapabilityError> {
+    admit_runtime_capabilities(settings, compiled_product_capabilities().capabilities())
 }
 
 /// Opaque identity of one authorized project root, manifest byte sequence, and selected profile.
@@ -155,29 +159,29 @@ impl ProjectSettingsCandidate {
 
     #[must_use]
     pub const fn explicit_capabilities(&self) -> ProductCapabilitySet {
-        self.capabilities.explicit
+        self.capabilities.explicit()
     }
 
     #[must_use]
     pub const fn implied_capabilities(&self) -> ProductCapabilitySet {
         self.capabilities
-            .normalized
-            .difference(self.capabilities.explicit)
+            .normalized()
+            .difference(self.capabilities.explicit())
     }
 
     #[must_use]
     pub const fn normalized_capabilities(&self) -> ProductCapabilitySet {
-        self.capabilities.normalized
+        self.capabilities.normalized()
     }
 
     #[must_use]
     pub const fn required_capabilities(&self) -> ProductCapabilitySet {
-        self.capabilities.required
+        self.capabilities.required()
     }
 
     #[must_use]
     pub const fn compiled_capabilities(&self) -> CompiledProductCapabilities {
-        self.capabilities.compiled
+        CompiledProductCapabilities(self.capabilities.compiled())
     }
 }
 
@@ -190,11 +194,11 @@ impl fmt::Debug for ProjectSettingsCandidate {
             .field("manifest_digest", &self.manifest_digest)
             .field("runtime_preset", &self.settings.runtime_preset)
             .field("profile_present", &self.settings.profile_name.is_some())
-            .field("explicit", &self.capabilities.explicit)
+            .field("explicit", &self.capabilities.explicit())
             .field("implied", &self.implied_capabilities())
-            .field("normalized", &self.capabilities.normalized)
-            .field("required", &self.capabilities.required)
-            .field("compiled", &self.capabilities.compiled)
+            .field("normalized", &self.capabilities.normalized())
+            .field("required", &self.capabilities.required())
+            .field("compiled", &self.compiled_capabilities())
             .finish()
     }
 }
@@ -819,11 +823,11 @@ fn resolve_runtime_composition(
     {
         request.recipe = request
             .recipe
-            .with_profile_capabilities(capabilities.normalized);
+            .with_profile_capabilities(capabilities.normalized());
     }
     if let Some(plugin) = request
         .recipe
-        .unsupported_default_plugin(capabilities.normalized)
+        .unsupported_default_plugin(capabilities.normalized())
     {
         return Err(CompositionError::UnsupportedDefaultConfiguration { plugin }.into());
     }
@@ -900,9 +904,9 @@ fn resolve_runtime_composition(
     Ok(ResolvedRuntimeComposition {
         configuration: RuntimeConfigurationPlan {
             settings: settings.clone(),
-            compiled: capabilities.compiled,
-            explicit: capabilities.explicit,
-            normalized: capabilities.normalized,
+            compiled: CompiledProductCapabilities(capabilities.compiled()),
+            explicit: capabilities.explicit(),
+            normalized: capabilities.normalized(),
             required,
             plugin_plan,
             schema_validation,
@@ -918,7 +922,7 @@ fn resolve_product_requirements(
     capabilities: RuntimeCapabilityAdmission,
     plugin_plan: &PluginPlan,
 ) -> Result<ProductCapabilitySet, CompositionError> {
-    let mut required = capabilities.required;
+    let mut required = capabilities.required();
     for entry in plugin_plan.entries() {
         for declared in entry.declaration().requires_product_capabilities {
             let Some(capability) = product_capability(*declared) else {
@@ -927,13 +931,13 @@ fn resolve_product_requirements(
                     capability: *declared,
                 });
             };
-            if !capabilities.normalized.contains(capability) {
+            if !capabilities.normalized().contains(capability) {
                 return Err(CompositionError::UnrequestedProductCapability {
                     plugin: entry.plugin_id(),
                     capability,
                 });
             }
-            if !capabilities.compiled.capabilities().contains(capability) {
+            if !capabilities.compiled().contains(capability) {
                 return Err(CompositionError::UncompiledProductCapability {
                     plugin: entry.plugin_id(),
                     capability,
@@ -956,7 +960,7 @@ fn resolve_product_requirements(
             continue;
         }
 
-        let requested_alternatives = alternatives.intersection(capabilities.normalized);
+        let requested_alternatives = alternatives.intersection(capabilities.normalized());
         if requested_alternatives.is_empty() {
             return Err(CompositionError::UnrequestedProductCapabilityAlternatives {
                 plugin: entry.plugin_id(),
@@ -964,7 +968,7 @@ fn resolve_product_requirements(
             });
         }
         for capability in requested_alternatives.iter() {
-            if !capabilities.compiled.capabilities().contains(capability) {
+            if !capabilities.compiled().contains(capability) {
                 return Err(CompositionError::UncompiledProductCapability {
                     plugin: entry.plugin_id(),
                     capability,

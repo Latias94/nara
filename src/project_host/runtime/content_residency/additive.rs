@@ -67,7 +67,7 @@ impl Additions {
 
 pub(in crate::project_host::runtime) fn admits_processed_addition(
     residency: &ProjectSceneResidency,
-    current: &CurrentSceneOwner,
+    current: &CurrentScene,
     product: AssetProductRef,
 ) -> bool {
     let Some(root) = current.hosted_runtime_scene() else {

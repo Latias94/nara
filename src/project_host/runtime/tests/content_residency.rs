@@ -345,7 +345,7 @@ fn limits() -> SceneProductTransactionLimits {
 }
 
 fn replace(world: &mut World, snapshot: &ProjectContentSnapshot) -> SpawnedSceneInstance {
-    let before = world.resource::<CurrentSceneOwner>().receipt().clone();
+    let before = world.resource::<CurrentScene>().receipt().clone();
     let report = replace_scene(
         world,
         &before,
@@ -357,22 +357,22 @@ fn replace(world: &mut World, snapshot: &ProjectContentSnapshot) -> SpawnedScene
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let receipt = report.instance.unwrap();
     assert_ne!(receipt.instance_id(), before.instance_id());
-    assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &receipt);
+    assert_eq!(world.resource::<CurrentScene>().receipt(), &receipt);
     assert_eq!(
-        world.resource::<CurrentSceneOwner>().source(),
+        world.resource::<CurrentScene>().source(),
         snapshot.compiled_scene()
     );
     receipt
 }
 
 fn commit_scene(world: &mut World, request: ProjectSceneRequestId) {
-    let before = world.resource::<CurrentSceneOwner>().receipt().clone();
+    let before = world.resource::<CurrentScene>().receipt().clone();
     let report = commit_prepared_project_scene(world, request, limits(), &[], |_| {});
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let receipt = report.instance.unwrap();
     assert_ne!(receipt.instance_id(), before.instance_id());
     assert_eq!(receipt.domain_id(), before.domain_id());
-    assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &receipt);
+    assert_eq!(world.resource::<CurrentScene>().receipt(), &receipt);
     ProjectScenes::scope(world, |scenes| {
         assert_eq!(
             scenes.state(request),
@@ -645,7 +645,7 @@ fn hosted_residency_hands_off_shared_pixels_retires_old_only_and_preserves_forei
         replace(world, &empty);
         assert!(
             world
-                .resource::<CurrentSceneOwner>()
+                .resource::<CurrentScene>()
                 .receipt()
                 .entity_ids()
                 .is_empty()
@@ -675,7 +675,7 @@ fn hosted_scene_replacement_recovers_revoked_tileset_in_the_same_world() {
     let (original, record, tile, original_version, image_bindings) = fixture
         .host
         .with_running_world(|world| {
-            let original = world.resource::<CurrentSceneOwner>().receipt().clone();
+            let original = world.resource::<CurrentScene>().receipt().clone();
             let (tile, record, _) = world
                 .resource::<TileSetAssets>()
                 .sources()
@@ -716,7 +716,7 @@ fn hosted_scene_replacement_recovers_revoked_tileset_in_the_same_world() {
             let states = world.resource::<AssetStates>();
             assert!(states.state(tile.id()).unwrap().usable_version().is_none());
             assert!(states.published_slot_revision(tile.id()).is_none());
-            assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &original);
+            assert_eq!(world.resource::<CurrentScene>().receipt(), &original);
             assert!(matches!(
                 original.resolve(world, &terrain),
                 EntityLookup::Resolved(_)
@@ -756,7 +756,7 @@ fn hosted_scene_replacement_recovers_revoked_tileset_in_the_same_world() {
                 .any(|diag| diag.code().as_str() == "project.scene.asset-catalog-conflict")
         );
         assert_eq!(
-            world.resource::<CurrentSceneOwner>().receipt(),
+            world.resource::<CurrentScene>().receipt(),
             &original_for_conflict
         );
         assert_eq!(
@@ -775,7 +775,7 @@ fn hosted_scene_replacement_recovers_revoked_tileset_in_the_same_world() {
     let recovery = fixture.prepare_scene("restored.scene.json");
     let expected_record = record.clone();
     fixture.step(move |world| {
-        assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &original);
+        assert_eq!(world.resource::<CurrentScene>().receipt(), &original);
         ProjectScenes::scope(world, |scenes| {
             let prepared = scenes.prepared(recovery).unwrap();
             assert_eq!(prepared.expected_instance(), &original);
@@ -808,7 +808,7 @@ fn hosted_scene_replacement_recovers_revoked_tileset_in_the_same_world() {
     assert_eq!(revoked_retention, no_tile_pixels);
 
     let published_version = |world: &World| {
-        let receipt = world.resource::<CurrentSceneOwner>().receipt();
+        let receipt = world.resource::<CurrentScene>().receipt();
         assert_eq!(receipt.domain_id(), domain);
         let EntityLookup::Resolved(entity) = receipt.resolve(world, &terrain) else {
             panic!("the replacement Scene must contain its Tilemap");
@@ -855,7 +855,7 @@ fn hosted_scene_replacement_recovers_revoked_tileset_in_the_same_world() {
     write_tileset(&fixture.project, TileAtlasLayout::grid(Vec2::ONE, 1, 1));
     let reentry = fixture.prepare_scene("restored.scene.json");
     fixture.step(move |world| {
-        let receipt = world.resource::<CurrentSceneOwner>().receipt();
+        let receipt = world.resource::<CurrentScene>().receipt();
         assert_eq!(receipt.domain_id(), domain);
         let states = world.resource::<AssetStates>();
         assert_eq!(
@@ -999,8 +999,8 @@ impl PublicationBaseline {
             .collect();
         let events = world.resource::<AssetEvents>();
         Self {
-            receipt: world.resource::<CurrentSceneOwner>().receipt().clone(),
-            source: world.resource::<CurrentSceneOwner>().source() as *const CompiledSceneDocument
+            receipt: world.resource::<CurrentScene>().receipt().clone(),
+            source: world.resource::<CurrentScene>().source() as *const CompiledSceneDocument
                 as usize,
             entities: world.entities().len(),
             server: world.resource::<AssetServer>().clone(),
@@ -1070,7 +1070,7 @@ fn hosted_residency_rejects_atlas_retention_stale_and_foreign_image_authority_be
         let b = fixture.load("b.scene.json");
         let budget = fixture.loader.budget_host();
         fixture.step(move |world| {
-            let current = world.resource::<CurrentSceneOwner>().receipt().clone();
+            let current = world.resource::<CurrentScene>().receipt().clone();
             let retained = budget
                 .snapshot()
                 .active(ProjectContentBudgetKind::RetainedBytes);
@@ -1097,7 +1097,7 @@ fn hosted_residency_rejects_atlas_retention_stale_and_foreign_image_authority_be
                     .get_mut(shared)
                     .is_some()
             );
-            let current = world.resource::<CurrentSceneOwner>().receipt().clone();
+            let current = world.resource::<CurrentScene>().receipt().clone();
             assert_rejected(world, &current, &b, "project.scene.image-ownership-changed");
         });
         fixture.close();
@@ -1140,13 +1140,13 @@ fn hosted_residency_rejects_atlas_retention_stale_and_foreign_image_authority_be
             .unwrap();
         world.resource_mut::<AssetStates>().set_loading(handle.id());
         assert!(world.resource::<Assets<ImageAsset>>().get(handle).is_none());
-        let current = world.resource::<CurrentSceneOwner>().receipt().clone();
+        let current = world.resource::<CurrentScene>().receipt().clone();
         assert_rejected(world, &current, &b, "project.scene.image-ownership-changed");
     });
     // A fresh instance makes the old receipt stale without changing project asset ownership.
     let b = fixture.load("b.scene.json");
     fixture.step(move |world| {
-        let stale = world.resource::<CurrentSceneOwner>().receipt().clone();
+        let stale = world.resource::<CurrentScene>().receipt().clone();
         let report = crate::startup_scene::restart_current_scene_with_product(
             world,
             &stale,
@@ -1180,7 +1180,7 @@ fn hosted_residency_rejects_tileset_owner_remove_observer_before_callback_or_pub
             },
         );
         world.flush();
-        let current = world.resource::<CurrentSceneOwner>().receipt().clone();
+        let current = world.resource::<CurrentScene>().receipt().clone();
         assert_rejected(
             world,
             &current,
@@ -1250,7 +1250,7 @@ fn hosted_residency_rejects_a_replaced_empty_image_store_before_retired_product_
     fixture.step(move |world| {
         let handle = image_handle(world, SHARED_ID);
         replace(world, &empty);
-        let expected = world.resource::<CurrentSceneOwner>().receipt().clone();
+        let expected = world.resource::<CurrentScene>().receipt().clone();
         assert_eq!(
             world
                 .resource::<AssetStates>()
@@ -1310,9 +1310,9 @@ fn hosted_empty_scene_replacement_needs_no_asset_event_resource_when_no_publicat
         world.insert_resource(events);
         let receipt = result.unwrap();
         assert_ne!(receipt.instance_id(), before.receipt.instance_id());
-        assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &receipt);
+        assert_eq!(world.resource::<CurrentScene>().receipt(), &receipt);
         assert_eq!(
-            world.resource::<CurrentSceneOwner>().source(),
+            world.resource::<CurrentScene>().source(),
             empty.compiled_scene()
         );
         let after = PublicationBaseline::capture(world);

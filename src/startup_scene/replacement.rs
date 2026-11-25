@@ -11,7 +11,7 @@ use nara_scene::{
 };
 
 use super::{
-    CurrentSceneOwner, RetainedSceneCandidate, SceneSource, StartupSceneActivationAuthority,
+    CurrentScene, RetainedSceneCandidate, SceneSource, StartupSceneActivationAuthority,
     StartupSceneActivationPhase,
 };
 use std::sync::Arc;
@@ -101,7 +101,7 @@ where
             "Unload active project Scene additions before restarting the retained primary Scene",
         );
     }
-    let owner = world.resource::<CurrentSceneOwner>();
+    let owner = world.resource::<CurrentScene>();
     if source
         .as_ref()
         .is_some_and(|source| source.is_content_managed() || owner.source.is_content_managed())
@@ -111,13 +111,13 @@ where
             "Hosted Scene replacement requires content residency preparation",
         );
     }
-    if crate::ecs::transaction::validate_resource_scope::<CurrentSceneOwner>(world).is_err() {
+    if crate::ecs::transaction::validate_resource_scope::<CurrentScene>(world).is_err() {
         return rejected(
             "scene.current.owner-lifecycle-unsupported",
             "Current Scene ownership cannot run lifecycle effects during replacement",
         );
     }
-    world.resource_scope(|world, mut owner: Mut<CurrentSceneOwner>| {
+    world.resource_scope(|world, mut owner: Mut<CurrentScene>| {
         let source = source.map_or_else(|| Arc::clone(&owner.source), Arc::new);
         if !source.matches_component_bindings(&bindings) {
             return rejected(
@@ -193,7 +193,7 @@ pub(crate) fn current_scene_bindings(
             "Current Scene replacement requires completed startup",
         ));
     }
-    let Some(owner) = world.get_resource::<CurrentSceneOwner>() else {
+    let Some(owner) = world.get_resource::<CurrentScene>() else {
         return Err(rejected(
             "scene.current.owner-missing",
             "Current Scene ownership is unavailable",

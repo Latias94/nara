@@ -558,8 +558,6 @@ impl ProjectContentSnapshot {
             Some(self.content_stamp()),
             self.inner._runtime_lease.clone(),
             self.inner._generation_lease.clone(),
-            startup_scene_retained_bytes(&self.inner.sources.scenes.selected.compiled)
-                .expect("an admitted Scene already has a valid retained-byte plan"),
             Arc::clone(&self.inner.schema_authority),
         )
     }

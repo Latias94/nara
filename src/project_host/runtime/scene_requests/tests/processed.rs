@@ -55,7 +55,7 @@ fn processed_scene_refuses_source_notifications_and_rescans_without_admitting_io
             assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
             assert!(
                 world
-                    .resource::<CurrentSceneOwner>()
+                    .resource::<CurrentScene>()
                     .hosted_runtime_base()
                     .unwrap()
                     .same_base(&base)
@@ -173,7 +173,7 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
                     CurrentScene::get(world).unwrap().source_content_stamp(),
                     None
                 );
-                let mut current_access = SystemState::<CurrentScene>::new(world);
+                let mut current_access = SystemState::<Res<CurrentScene>>::new(world);
                 assert_eq!(
                     current_access.get(world).unwrap().source_content_stamp(),
                     None
@@ -374,7 +374,7 @@ fn processed_managed_travel_publishes_content_and_retains_request_authority() {
                 );
                 assert!(scenes.acknowledge(request));
             });
-            let current = world.resource::<CurrentSceneOwner>();
+            let current = world.resource::<CurrentScene>();
             assert_ne!(current.receipt().instance_id(), expected.instance_id());
             assert_eq!(current.source().roots(), [entity("later")]);
             assert!(current.is_content_managed());
@@ -414,7 +414,7 @@ fn processed_hosted_custody_requires_residency_and_preserves_independent_replace
         Arc::new(Context::Processed { base: base.clone() }),
         hosted,
         move |world| {
-            let current = world.resource::<CurrentSceneOwner>();
+            let current = world.resource::<CurrentScene>();
             assert!(current.is_content_managed());
             #[cfg(feature = "runtime-2d")]
             assert!(!current.is_project_backed());
@@ -444,7 +444,7 @@ fn processed_hosted_custody_requires_residency_and_preserves_independent_replace
         startup.scene_source(),
         move |world| {
             world.insert_resource(pools());
-            let current = world.resource::<CurrentSceneOwner>();
+            let current = world.resource::<CurrentScene>();
             assert!(!current.is_content_managed());
             assert!(current.hosted_runtime_base().is_none());
             let expected = current.receipt().clone();
@@ -585,7 +585,7 @@ impl ProcessedFixture {
     }
 
     fn open(&self, limits: RuntimeContentLimits) -> RuntimeContentBase {
-        RuntimeContentBase::open(
+        RuntimeContentBase::capture_test_directory(
             &open_explicit_product_project_root(&self.root).unwrap(),
             &self.expected,
             crate::ProductRecipe::new(),

@@ -694,7 +694,7 @@ impl Fixture {
     }
 
     fn open(&self, reversed: bool, limits: RuntimeContentLimits) -> RuntimeContentBase {
-        RuntimeContentBase::open(
+        RuntimeContentBase::capture_test_directory(
             &open_explicit_product_project_root(&self.root).unwrap(),
             &self.expected,
             self.recipes[usize::from(reversed)].clone(),
@@ -1174,7 +1174,7 @@ fn headless_session_publishes_the_original_cpu_closure_and_retires_it() {
 
     use crate::{
         project_host::{HeadlessSession, ProjectDomainAssets},
-        startup_scene::{CurrentScene, CurrentSceneOwner},
+        startup_scene::CurrentScene,
     };
 
     let fixture = Fixture::new();
@@ -1196,7 +1196,7 @@ fn headless_session_publishes_the_original_cpu_closure_and_retires_it() {
             assert_eq!(y.payload[0], Y);
 
             let current = CurrentScene::get(world).unwrap();
-            let owner = world.resource::<CurrentSceneOwner>();
+            let owner = world.resource::<CurrentScene>();
             let admitted = owner.hosted_runtime_scene().unwrap();
             assert!(admitted.base().same_base(&base));
             assert_eq!(admitted.product(), base.catalog().startup_scene());

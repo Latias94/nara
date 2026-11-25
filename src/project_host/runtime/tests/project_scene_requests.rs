@@ -209,7 +209,7 @@ fn observe(document: &CompiledSceneDocument) -> SceneObservation {
 }
 
 fn current(world: &mut World) -> (SceneObservation, SpawnedSceneInstance) {
-    let mut access = SystemState::<CurrentScene>::new(world);
+    let mut access = SystemState::<Res<CurrentScene>>::new(world);
     let current = access.get_mut(world).unwrap();
     (observe(current.source()), current.receipt().clone())
 }
