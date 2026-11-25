@@ -6,7 +6,7 @@ use nara_asset::AssetProductRef;
 #[cfg(feature = "runtime-2d")]
 use nara_asset::AssetRef;
 #[cfg(feature = "runtime-2d")]
-use nara_render::image::{ImageAsset, ImageDomain};
+use nara_asset::image::{ImageAsset, ImageDomain};
 #[cfg(feature = "runtime-2d")]
 use nara_render::material::{Material2dAsset, Material2dDomain};
 #[cfg(feature = "runtime-2d")]

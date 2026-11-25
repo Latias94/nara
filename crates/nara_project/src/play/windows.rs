@@ -35,6 +35,8 @@ use windows_sys::Win32::{
     },
 };
 
+use crate::windows_command_line::encode_command_line;
+
 pub(super) struct Process {
     job: OwnedHandle,
     leader: OwnedHandle,
@@ -79,7 +81,7 @@ pub(super) fn spawn(
 ) -> io::Result<Process> {
     let application = wide(executable.as_os_str())?;
     let directory = wide(directory.as_os_str())?;
-    let mut command_line = command_line(executable, arguments)?;
+    let mut command_line = encode_command_line(executable, arguments)?;
     let job = create_job()?;
     let (stdin, stdin_writer) = io::pipe()?;
     drop(stdin_writer);
@@ -258,53 +260,6 @@ fn wide(value: &OsStr) -> io::Result<Vec<u16>> {
     }
     units.push(0);
     Ok(units)
-}
-
-fn command_line(executable: &Path, arguments: &[OsString]) -> io::Result<Vec<u16>> {
-    const QUOTE: u16 = b'"' as u16;
-    const BACKSLASH: u16 = b'\\' as u16;
-
-    let mut line = Vec::new();
-    for argument in
-        std::iter::once(executable.as_os_str()).chain(arguments.iter().map(OsString::as_os_str))
-    {
-        if !line.is_empty() {
-            line.push(b' ' as u16);
-        }
-        line.push(QUOTE);
-        let mut backslashes = 0;
-        for unit in argument.encode_wide() {
-            match unit {
-                0 => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "process argument contains a NUL",
-                    ));
-                }
-                BACKSLASH => backslashes += 1,
-                _ => {
-                    let count = if unit == QUOTE {
-                        backslashes * 2 + 1
-                    } else {
-                        backslashes
-                    };
-                    line.extend(std::iter::repeat_n(BACKSLASH, count));
-                    line.push(unit);
-                    backslashes = 0;
-                }
-            }
-        }
-        line.extend(std::iter::repeat_n(BACKSLASH, backslashes * 2));
-        line.push(QUOTE);
-    }
-    if line.len() >= 32_767 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Windows command line exceeds 32,767 UTF-16 code units",
-        ));
-    }
-    line.push(0);
-    Ok(line)
 }
 
 fn check(result: i32) -> io::Result<()> {

@@ -9,6 +9,8 @@ use std::{
 use crate::fs::ContentDigest;
 #[cfg(feature = "runtime-2d")]
 use nara_asset::AssetRef;
+#[cfg(feature = "runtime-2d")]
+use nara_asset::image::ImageDomain;
 #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
 use nara_asset::{AssetProductRef, AssetRuntimeError};
 #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
@@ -22,8 +24,6 @@ use nara_reflect::ComponentTypeId;
 use nara_reflect::{
     ComponentValueRef, asset_reference_decode_work_bytes, decode_asset_reference_value,
 };
-#[cfg(feature = "runtime-2d")]
-use nara_render::image::ImageDomain;
 #[cfg(feature = "runtime-2d")]
 use nara_render::material::{Material2dAsset, Material2dDeclaration, Material2dDomain};
 #[cfg(feature = "runtime-2d")]

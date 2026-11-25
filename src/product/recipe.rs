@@ -475,10 +475,10 @@ impl ProductRecipe {
         definition: crate::runtime_content::RuntimeCodecDefinitionId,
     ) -> Result<Self, ProductRecipeError>
     where
-        C: nara_asset::RuntimeAssetCodec<nara_render::image::ImageAsset>,
+        C: nara_asset::RuntimeAssetCodec<nara_asset::image::ImageAsset>,
     {
         self.runtime_codecs
-            .add::<nara_render::image::ImageDomain, C>(
+            .add::<nara_asset::image::ImageDomain, C>(
                 definition,
                 crate::runtime_content::RuntimeCodecRole::Image,
             )?;

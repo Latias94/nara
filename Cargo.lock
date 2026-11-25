@@ -2019,7 +2019,6 @@ dependencies = [
  "nara_window",
  "raw-window-handle",
  "ron",
- "rustix 1.1.4",
  "serde",
  "serde_json",
  "static_assertions",
@@ -2052,14 +2051,17 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "blake3",
+ "image",
  "nara_app",
  "nara_core",
  "nara_ecs",
  "notify",
+ "png",
  "ron",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tracing",
  "uuid",
 ]
 
@@ -2179,6 +2181,7 @@ dependencies = [
  "nara_input",
  "nara_reflect",
  "nara_scene",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "tempfile",

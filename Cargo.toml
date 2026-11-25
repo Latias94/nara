@@ -127,20 +127,13 @@ toml = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 
-[target.'cfg(windows)'.dependencies]
+[target.'cfg(windows)'.dev-dependencies]
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
-    "Win32_Globalization",
-    "Win32_Security",
     "Win32_Storage_FileSystem",
-    "Win32_System_Console",
-    "Win32_System_IO",
-    "Win32_System_Pipes",
-    "Win32_System_Threading",
-], optional = true }
-
-[target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
-rustix = { workspace = true, features = ["net"], optional = true }
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 bevy_ecs.workspace = true
@@ -219,8 +212,6 @@ serde = [
 project-runtime = [
     "runtime-core",
     "dep:blake3",
-    "dep:rustix",
-    "dep:windows-sys",
     "nara_asset/pack",
     "nara_core/fs-capabilities",
     "nara_scene/runtime-catalog",
@@ -236,16 +227,10 @@ project-workflow = [
     "dep:getrandom",
     "dep:uuid",
     "dep:toml",
+    "nara_asset/artifact-build",
 ]
 project-workflow-cargo-facts = ["project-workflow", "nara_project/cargo-facts"]
-project-tooling = [
-    "project-workflow-cargo-facts",
-    "windows-sys?/Win32_System_JobObjects",
-    "windows-sys?/Win32_Security_Cryptography",
-    "rustix?/event",
-    "rustix?/fs",
-    "rustix?/process",
-]
+project-tooling = ["project-workflow-cargo-facts", "nara_project/product-process"]
 
 [[example]]
 name = "windowed_clear"

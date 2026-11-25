@@ -22,10 +22,6 @@ pub use nara_window::winit::{
     WinitEventLoop, WinitInputActivation, WinitKeyboardContinuationError,
 };
 
-#[cfg(windows)]
-#[doc(hidden)]
-pub mod process_image;
-
 #[cfg(feature = "project-tooling")]
 mod file_publication;
 

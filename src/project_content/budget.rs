@@ -6,8 +6,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use nara_asset::image::ImageImportLimits;
 use nara_core::{ByteLimit, ItemLimit};
-use nara_render::image::ImageImportLimits;
 use nara_scene::{SceneCompilationLimits, SceneFileLimits};
 
 use super::ProjectContentRevision;

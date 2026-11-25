@@ -23,6 +23,10 @@ use std::{
 };
 
 use crate::fs::{ContentDigest, DirectoryCapability, FsError, FsOperation, RelativePath};
+use nara_asset::image::{
+    ImageAsset, ImageBytesImportRequest, ImageImportError, ImageImportMemoryPlan,
+    ImageImportSettings, ImageImporter, ImageImporterCreateError,
+};
 use nara_asset::{
     AssetMetaCandidate, AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetPathScope,
     AssetProductRef, AssetRecord, AssetRef, AssetReferenceDemand, AssetReferenceResolver,
@@ -39,10 +43,6 @@ use nara_reflect::{
     asset_reference::{
         AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
     },
-};
-use nara_render::image::{
-    ImageAsset, ImageBytesImportRequest, ImageImportError, ImageImportMemoryPlan,
-    ImageImportSettings, ImageImporter, ImageImporterCreateError,
 };
 use nara_render::tilemap::{
     TileSetSource, TileSetSourceFileLimits, TilemapMembershipError, tilemap_membership_work_bytes,

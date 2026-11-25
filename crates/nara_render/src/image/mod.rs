@@ -1,41 +1,32 @@
-//! Backend-neutral image assets and PNG-first importing.
+//! Image asset APIs and renderer-facing image snapshots.
 //!
-//! Image content and Runtime codecs need no App/ECS installation. `render-prepare` adds captured
-//! resource values; `runtime` enables PNG import/reload services and, with `render-prepare`, the
-//! automatic preparation plugin. The independent `serde` feature enables serialization.
+//! Asset types, CPU codecs and source import services are re-exported from [`nara_asset::image`].
+//! `render-prepare` adds captured resource values. Combining it with `image-runtime` enables
+//! automatic preparation from published assets.
 
-mod budget;
 mod content;
-mod cook;
-#[cfg(feature = "image-runtime")]
-mod import;
-mod limits;
 #[cfg(any(feature = "render-prepare", test))]
 mod prepare;
-#[cfg(feature = "image-runtime")]
-mod reload;
-mod runtime;
 
-pub use budget::{ImageImportBudgetHost, ImageImportBudgetSnapshot};
 pub use content::{ImageContentError, ImageContentSnapshot};
-pub use cook::{
-    ImageCookError, ImageCookLimits, ImageCookSettings, ImageCookTarget, ImageOversizePolicy,
-    cook_runtime_image,
-};
+#[cfg(feature = "serde")]
+pub use nara_asset::image::ImageRuntimeCodec;
 #[cfg(feature = "image-runtime")]
-pub use import::{
-    AdmittedImageImport, ImageBytesImportRequest, ImageFileImportRequest, ImageImportError,
-    ImageImportStage, ImageImportedAsset, ImageImporter, ImageImporterCreateError,
-    ImagePngFailureKind, ImagePublicationFailureKind, ImageSourceDirectory, ImageSourceFailureKind,
-    ImageUnsupportedFeature, UnpublishedImageImport,
-};
-pub use limits::{
-    IMAGE_IMPORT_MEMORY_PLAN_VERSION, ImageImportBudgetError, ImageImportLimitKind,
-    ImageImportLimits, ImageImportLimitsError, ImageImportMemoryPlan,
+pub use nara_asset::image::{
+    AdmittedImageImport, IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID,
+    IMAGE_SOURCE_PLUGIN_DECLARATION, IMAGE_SOURCE_PLUGIN_ID, ImageBytesImportRequest,
+    ImageFileImportRequest, ImageImportError, ImageImportStage, ImageImportedAsset, ImageImporter,
+    ImageImporterCreateError, ImagePlugin, ImagePngFailureKind, ImagePublicationFailureKind,
+    ImageReloadError, ImageReloadStats, ImageSourceDirectory, ImageSourceFailureKind,
+    ImageSourcePlugin, ImageUnsupportedFeature, UnpublishedImageImport, source_plugin,
 };
 pub use nara_asset::image::{
-    ImageAsset, ImageAssetCreateError, ImageColorSpace, ImageContentHash, ImageExtent, ImageFormat,
-    ImageImportSettings, ImageSourceMetadata, ImageSourceMetadataCreateError,
+    IMAGE_IMPORT_MEMORY_PLAN_VERSION, ImageAsset, ImageAssetCreateError, ImageColorSpace,
+    ImageContentHash, ImageCookError, ImageCookLimits, ImageCookSettings, ImageCookTarget,
+    ImageDomain, ImageExtent, ImageFormat, ImageImportBudgetError, ImageImportBudgetHost,
+    ImageImportBudgetSnapshot, ImageImportLimitKind, ImageImportLimits, ImageImportLimitsError,
+    ImageImportMemoryPlan, ImageImportSettings, ImageOversizePolicy, ImageSourceMetadata,
+    ImageSourceMetadataCreateError, cook_runtime_image,
 };
 #[cfg(all(feature = "image-runtime", feature = "render-prepare"))]
 pub use prepare::runtime::{
@@ -47,19 +38,3 @@ pub use prepare::{
     PreparedImageResource, PreparedImageSnapshot, PreparedImages, image_content_hash,
     image_resource_key,
 };
-#[cfg(feature = "image-runtime")]
-pub use reload::{
-    IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID, IMAGE_SOURCE_PLUGIN_DECLARATION,
-    IMAGE_SOURCE_PLUGIN_ID, ImagePlugin, ImageReloadError, ImageReloadStats, ImageSourcePlugin,
-    source_plugin,
-};
-pub use runtime::ImageDomain;
-#[cfg(feature = "serde")]
-pub use runtime::ImageRuntimeCodec;
-
-#[cfg(test)]
-#[path = "asset/tests.rs"]
-mod asset_tests;
-
-#[cfg(all(test, feature = "image-runtime"))]
-mod tests;

@@ -9,6 +9,9 @@ use super::{
 };
 use crate::image::ImageAsset;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug, Default, Resource)]
 pub struct ImagePrepareStats {
     pub prepared: u32,

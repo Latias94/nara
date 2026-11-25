@@ -27,6 +27,9 @@ uuid = { workspace = true, optional = true, features = ["v4"] }
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc = { version = "0.2", optional = true }
 
+[target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
+rustix = { workspace = true, features = ["event", "fs", "process"], optional = true }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, optional = true, features = [
     "Win32_Foundation",
@@ -39,6 +42,15 @@ windows-sys = { workspace = true, optional = true, features = [
 [features]
 default = ["workflow"]
 cargo-facts = ["nara_core/fs-capabilities"]
+product-process = [
+    "dep:rustix",
+    "dep:windows-sys",
+    "nara_core/fs-capabilities",
+    "windows-sys/Win32_Globalization",
+    "windows-sys/Win32_Security_Cryptography",
+    "windows-sys/Win32_Storage_FileSystem",
+    "windows-sys/Win32_System_IO",
+]
 workflow = ["dep:ctrlc", "dep:libc", "dep:nara_input", "dep:nara_reflect", "dep:uuid", "dep:windows-sys"]
 
 [[bin]]

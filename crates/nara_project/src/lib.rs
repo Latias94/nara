@@ -25,11 +25,15 @@ mod path;
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 pub mod play;
+#[cfg(feature = "product-process")]
+pub mod process;
 mod profile;
 mod render;
 mod runtime_configuration;
 mod sections;
 mod validation;
+#[cfg(all(windows, any(feature = "product-process", feature = "workflow")))]
+mod windows_command_line;
 #[cfg(all(
     feature = "workflow",
     any(target_os = "linux", target_os = "macos", windows)

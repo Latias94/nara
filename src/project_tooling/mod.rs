@@ -20,12 +20,12 @@ mod bootstrap;
 pub mod cargo_build;
 pub mod host_fs;
 pub mod player_package;
-pub mod process;
 pub mod project_cook;
 mod protocol;
 mod schema;
 
 pub use bootstrap::{ProjectToolInvocationError, invoke_project_tool};
+pub use nara_project::process;
 pub use protocol::{
     ProjectToolDiagnostic, ProjectToolDiagnosticLoss, ProjectToolFailure, ProjectToolFailureStage,
     ProjectToolRepairHint,

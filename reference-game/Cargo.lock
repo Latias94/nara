@@ -1576,13 +1576,11 @@ dependencies = [
  "nara_scene",
  "nara_ui",
  "nara_window",
- "rustix 1.1.4",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "toml",
  "uuid",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1618,6 +1616,7 @@ dependencies = [
  "nara_app",
  "nara_core",
  "nara_ecs",
+ "png",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1697,10 +1696,12 @@ dependencies = [
  "nara_core",
  "nara_ecs",
  "nara_scene",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "toml",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1750,7 +1751,6 @@ dependencies = [
  "nara_scene",
  "nara_ui",
  "nara_window",
- "png",
  "pollster",
  "ron",
  "serde",

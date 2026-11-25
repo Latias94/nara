@@ -22,7 +22,6 @@ nara_reflect = { workspace = true, optional = true }
 nara_scene = { workspace = true, optional = true }
 nara_ui = { workspace = true, optional = true, default-features = false }
 nara_window.workspace = true
-png = { version = "=0.18.1", optional = true }
 pollster = { workspace = true, optional = true }
 ron = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
@@ -34,6 +33,7 @@ wgpu = { workspace = true, optional = true }
 image.workspace = true
 nara_input.workspace = true
 nara_app = { workspace = true, features = ["diagnostics", "tasks"] }
+png = "=0.18.1"
 raw-window-handle.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
@@ -60,7 +60,7 @@ serde = [
     "nara_window/serde",
 ]
 image = []
-image-runtime = ["image", "runtime", "nara_core/fs-capabilities", "nara_app/tasks", "dep:png"]
+image-runtime = ["image", "runtime", "nara_asset/image-import"]
 render-prepare = ["image"]
 material = ["image", "dep:encase", "dep:glam", "dep:naga", "dep:nara_ecs", "dep:nara_material_derive"]
 material-asset = ["material", "serde"]
