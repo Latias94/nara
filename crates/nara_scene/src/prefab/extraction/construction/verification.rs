@@ -135,7 +135,7 @@ pub(in crate::prefab::extraction) fn verify_source_split(
         let mut expected = before.clone();
         if cut.membership.entities.binary_search(&index).is_ok() {
             let (_, after) = moved.claim(&before.id, work)?;
-            let mut rewrite = |reference: &nara_identity::EntityReference,
+            let mut rewrite = |reference: &nara_ecs::identity::EntityReference,
                                work: &mut ExtractionWork| {
                 let rewritten = inputs.rewrite(reference, work)?;
                 work.own_reference(rewritten)
@@ -153,7 +153,7 @@ pub(in crate::prefab::extraction) fn verify_source_split(
             destinations.push(RecordDestination::Extracted);
         } else {
             let (_, after) = retained.claim(&before.id, work)?;
-            let mut rewrite = |reference: &nara_identity::EntityReference,
+            let mut rewrite = |reference: &nara_ecs::identity::EntityReference,
                                work: &mut ExtractionWork| {
                 let rewritten = relocation
                     .retained_reference(original, reference, |bytes| work.admit(bytes))?;

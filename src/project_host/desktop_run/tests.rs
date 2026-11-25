@@ -5,7 +5,7 @@ use std::sync::{
 };
 
 use nara_app::{
-    App, RuntimeAdmissionReservation, RuntimeCloseParticipant, RuntimeCloseParticipantError,
+    App, RuntimeCandidate, RuntimeCloseParticipant, RuntimeCloseParticipantError,
     RuntimeCloseParticipantId, RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl,
     RuntimeControlRequestResult, RuntimeInstance, RuntimeObligationLedger,
 };
@@ -143,9 +143,7 @@ fn actual_close_evidence(mode: CloseFailureMode) -> RuntimeCloseEvidence {
             RuntimeClosePolicy::default()
         }
     };
-    let mut runtime = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(App::new().seal().unwrap(), obligations, policy)
+    let mut runtime = RuntimeCandidate::admit(App::new().seal().unwrap(), obligations, policy)
         .unwrap()
         .complete_startup()
         .unwrap()
@@ -380,17 +378,15 @@ fn terminal_close_evidence() -> RuntimeCloseEvidence {
 }
 
 fn stopped_runtime(app: App, obligations: RuntimeObligationLedger) -> RuntimeInstance {
-    let mut runtime = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            obligations,
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap()
-        .complete_startup()
-        .unwrap()
-        .promote();
+    let mut runtime = RuntimeCandidate::admit(
+        app.seal().unwrap(),
+        obligations,
+        RuntimeClosePolicy::default(),
+    )
+    .unwrap()
+    .complete_startup()
+    .unwrap()
+    .promote();
     assert!(matches!(
         runtime.request_control(RuntimeControl::Stop),
         RuntimeControlRequestResult::Accepted(_)
@@ -455,7 +451,7 @@ fn stopped_desktop_fault_keeps_the_real_close_time_identity() {
         diagnostics
             .iter()
             .filter(|diagnostic| diagnostic.severity()
-                == nara_diagnostic::DiagnosticSeverity::Error)
+                == nara_core::diagnostic::DiagnosticSeverity::Error)
             .count(),
         1
     );

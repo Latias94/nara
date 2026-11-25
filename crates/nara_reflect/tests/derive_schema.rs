@@ -1,7 +1,7 @@
+use nara_ecs::identity::{EntityReference, SceneEntityId};
 use nara_ecs::{
     Component, Resource, World, bevy_ecs::lifecycle::HookContext, bevy_ecs::world::DeferredWorld,
 };
-use nara_identity::{EntityReference, SceneEntityId};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentNumericDomain, ComponentRegistryBuilder, ComponentRegistryError,
@@ -426,6 +426,8 @@ fn persistent_probe_on_add(_world: DeferredWorld<'_>, _context: HookContext) {}
 struct InvalidProviderSchema;
 
 impl PersistentComponentProvider for InvalidProviderSchema {
+    const COMPONENT_ID: &'static str = "invalid component id";
+
     fn persistent_component_schema() -> ComponentSchema {
         ComponentSchema::new(
             ComponentTypeId::new("invalid component id"),
@@ -553,6 +555,82 @@ fn generated_empty_markers_register_and_round_trip_empty_maps() {
         .expect("empty marker schemas must reject unknown values");
     assert!(error.to_string().contains("unknown"));
     assert!(error.to_string().contains("not declared by schema"));
+}
+
+#[test]
+fn app_registered_schemas_share_core_registry_composition() {
+    use nara_app::{App, RuntimeInstance};
+    use nara_reflect::{ComponentRegistryPlugin, RegisterSchema, component_registry};
+
+    let mut app = App::new();
+    app.add_plugins(ComponentRegistryPlugin)
+        .unwrap()
+        .register_schema::<GeneratedProbe>()
+        .unwrap()
+        .register_schema::<SecondGeneratedProbe>()
+        .unwrap();
+    let runtime = RuntimeInstance::start(app).unwrap();
+    let registry = component_registry(runtime.world()).unwrap();
+    for id in [
+        GeneratedProbe::COMPONENT_ID,
+        SecondGeneratedProbe::COMPONENT_ID,
+    ] {
+        assert!(registry.schema(&ComponentTypeId::new(id)).is_some());
+    }
+}
+
+#[derive(Component, PersistentComponent)]
+#[nara(
+    id = "nara.test.SecondGeneratedProbe",
+    version = 1,
+    alias = "Second probe",
+    component_capabilities(scene),
+    field_capabilities(scene)
+)]
+struct SecondGeneratedProbe {}
+
+#[test]
+fn scene_codec_checks_requirements_before_implicit_insertion() {
+    use nara_ecs::bevy_ecs::{lifecycle::Add, observer::On};
+
+    let mut registry = ComponentRegistryBuilder::new();
+    registry
+        .register_persistent_component_with_required_components(
+            RequiredPersistentProbe::persistent_component_schema(),
+            RequiredPersistentProbe::__decode_persistent_component,
+            RequiredPersistentProbe::__encode_persistent_component,
+        )
+        .unwrap();
+    let snapshot = registry.freeze().unwrap();
+    let id = ComponentTypeId::new(RequiredPersistentProbe::COMPONENT_ID);
+    let value = ComponentValue::map([("value", ComponentValue::I64(42))]);
+
+    let mut world = World::new();
+    let target = world.spawn_empty().id();
+    snapshot
+        .preflight_component(&id, &value)
+        .unwrap()
+        .apply(&mut world, target)
+        .unwrap();
+    assert_eq!(
+        world.get::<RequiredPersistentProbe>(target).unwrap().value,
+        42
+    );
+    assert!(world.get::<ImplicitDependency>(target).is_some());
+
+    let mut world = World::new();
+    let target = world.spawn_empty().id();
+    world.add_observer(|_: On<Add<ImplicitDependency>>| panic!("must reject before applying"));
+    let error = snapshot
+        .preflight_component(&id, &value)
+        .unwrap()
+        .apply(&mut world, target)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        ComponentCodecError::PersistentApplyRejected { .. }
+    ));
+    assert!(world.get::<RequiredPersistentProbe>(target).is_none());
 }
 
 #[test]

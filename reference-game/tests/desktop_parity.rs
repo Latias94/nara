@@ -7,15 +7,13 @@ use std::time::Duration;
 
 use nara::{
     advanced_prelude::materialize_startup_scene,
-    app::{
-        RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
-    },
-    gameplay::{GameplayCommandQueue, GameplayCommandSubmission},
+    app::{RuntimeCandidate, RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger},
+    ecs::Command,
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
     prelude::FixedTime,
     project_host::{ProjectContentLoader, ProjectSettingsCandidate, RuntimePlan},
 };
-use nara_reference_game::{MovementDirection, WaveSnapshot, movement_command};
+use nara_reference_game::{MovementDirection, WaveCommand, WaveSnapshot, movement_command};
 use project_content_fixture::{
     desktop_candidate_plan_and_root, headless_wave_candidate_plan_and_root, stop_runtime,
 };
@@ -43,14 +41,6 @@ fn physical_desktop_and_direct_headless_commands_remain_equal_through_terminal()
         .unwrap()
         .unwrap();
     desktop.drive(Duration::ZERO).unwrap();
-    assert_eq!(
-        desktop
-            .world()
-            .resource::<GameplayCommandQueue>()
-            .stats()
-            .pending_commands,
-        1,
-    );
 
     let headless_fixed_step = headless.world().resource::<FixedTime>().timestep();
     let desktop_fixed_step = desktop.world().resource::<FixedTime>().timestep();
@@ -75,29 +65,26 @@ fn runtime_with_scene(
     candidate: ProjectSettingsCandidate,
     plan: RuntimePlan,
     root: nara::fs::DirectoryCapability,
-    commands: Vec<GameplayCommandSubmission>,
+    commands: Vec<WaveCommand>,
 ) -> RuntimeInstance {
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
     let source = snapshot.scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
-    let mut runtime = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            sealed,
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
+    let mut runtime = RuntimeCandidate::admit(
+        sealed,
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::default(),
+    )
+    .unwrap();
     runtime
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {
                 let report = materialize_startup_scene(world, source)
                     .expect("the retained parity scene should materialize");
                 assert!(!report.has_errors(), "{report:#?}");
-                let mut queue = world.resource_mut::<GameplayCommandQueue>();
                 for command in commands {
-                    queue.submit(command).unwrap();
+                    command.apply(world).unwrap();
                 }
             });
         })

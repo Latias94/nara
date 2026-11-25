@@ -11,13 +11,13 @@ use nara_asset::{
     Handle, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_ecs::{Component, Entity, World};
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, EntityLookup, EntityReference, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference, SpawnedSceneInstance,
     WorldIdentityDomain, adopt_identity_entity, register_persistent_identity,
     spawn_identity_entity,
 };
+use nara_ecs::{Component, Entity, World};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldPathSegment, ComponentFieldSchema, ComponentRegistryPlugin,
@@ -632,7 +632,7 @@ fn data_coverage_refusal_precedes_native_encoding_and_preserves_the_world() {
     let before_count = world.iter_entities().count();
     let before_tick = world.read_change_tick();
     let before_roots = world
-        .resource::<nara_hierarchy::HierarchyRoots>()
+        .resource::<nara_scene::hierarchy::HierarchyRoots>()
         .iter()
         .collect::<Vec<_>>();
     let before_data = {
@@ -659,7 +659,7 @@ fn data_coverage_refusal_precedes_native_encoding_and_preserves_the_world() {
         );
         assert_eq!(
             world
-                .resource::<nara_hierarchy::HierarchyRoots>()
+                .resource::<nara_scene::hierarchy::HierarchyRoots>()
                 .iter()
                 .collect::<Vec<_>>(),
             before_roots,

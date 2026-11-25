@@ -10,15 +10,15 @@ use std::sync::{
 };
 
 use nara_asset::{AssetRef, AssetServer, ProjectAssetDatabase};
-use nara_diagnostic::DiagnosticReport;
+use nara_core::diagnostic::DiagnosticReport;
+use nara_ecs::identity::WorldIdentityDomain;
 use nara_ecs::{Component, World};
-use nara_hierarchy::HierarchyRoots;
-use nara_identity::WorldIdentityDomain;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentPropertyPath, ComponentRegistryBuilder, ComponentSchema, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueKind,
 };
+use nara_scene::hierarchy::HierarchyRoots;
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabComponentIntent, PrefabDocument, PrefabEntityTarget,
     PrefabInstance, PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent, PrefabSourceResolver,

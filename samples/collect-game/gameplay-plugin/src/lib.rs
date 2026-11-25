@@ -4,31 +4,31 @@
 mod input;
 mod walking;
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use nara::{
-    ProductRecipeError, SchemaContribution,
+    ProductConfiguration, ProductRecipe, ProductRecipeError, SchemaContribution,
     advanced_prelude::add_startup_scene_activation_systems,
-    app::{PluginCategory, PluginDeclaration, PluginError, PluginId, PluginSchemaProviderId},
-    ecs::{Entity, Or, With, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs},
-    gameplay::{
-        GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,
-        GameplayCommandPayload, GameplayCommandSet, GameplayCommandSourceSequence,
-        GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
-        GameplayCommandValue,
+    app::{
+        PluginCategory, PluginDeclaration, PluginError, PluginId, PluginSchemaProviderId,
+        RuntimeFaultReporter, StartupStage,
     },
+    ecs::{Commands, Entity, Or, With, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs},
     prelude::{
         App, Color, Component, CoreStage, FixedTime, FixedUpdateSet, PersistentComponent, Plugin,
-        Query, Res, ResMut, Resource, Transform2d, Vec2, add_fixed_transform_input_systems,
-        add_fixed_transform_projection_systems,
+        Query, Res, ResMut, Resource, Transform2d, Vec2,
     },
     reflect::{
         ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
         ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
     },
     render::Camera2d,
+    scene::TRANSFORM_COMPONENTS_PLUGIN_ID,
+    scene::fixed_spatial::{
+        FIXED_SPATIAL_PLUGIN_ID, FixedSpatialSnapshot2d, add_fixed_transform_input_systems,
+        add_fixed_transform_projection_systems,
+    },
     sprite::Sprite,
-    transform::FixedSpatialSnapshot2d,
 };
 use walking::{WalkingState, capture_movement_parents, collect_targets, move_player};
 
@@ -45,13 +45,11 @@ const PROVIDER: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefin
 const DECLARATION: PluginDeclaration = PluginDeclaration::new(PLUGIN_ID, PluginCategory::Runtime)
     .requires_plugins(&[
         nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID,
-        nara::transform::TRANSFORM_PLUGIN_ID,
-        nara::gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
+        TRANSFORM_COMPONENTS_PLUGIN_ID,
+        FIXED_SPATIAL_PLUGIN_ID,
         nara::advanced_prelude::STARTUP_SCENE_ACTIVATION_PLUGIN_ID,
     ])
     .provides_schema(&[PROVIDER_ID]);
-const MOVE: &str = "collect-game.move-v1";
-const RESET: &str = "collect-game.reset-v1";
 const VICTORY: Color = Color::rgb(0.06, 0.30, 0.16);
 
 /// Authored movement speed in world units per second.
@@ -126,27 +124,25 @@ impl Plugin for CollectGamePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let faults = app.world().resource::<RuntimeFaultReporter>().clone();
         app.insert_resource(GameState::default())?
-            .insert_resource(GameSnapshot::default())?;
+            .insert_resource(GameSnapshot::default())?
+            .init_resource::<CollectionInput>()?
+            .init_resource::<CollectionScript>()?;
         add_startup_scene_activation_systems(app, initialize)?;
         add_fixed_transform_input_systems(app, capture_movement_parents)?;
         app.add_systems(
             CoreStage::FixedUpdate,
-            consume_commands.in_set(GameplayCommandSet::Consume),
-        )?
-        .add_systems(
-            CoreStage::FixedUpdate,
-            move_player
-                .after(GameplayCommandSet::Consume)
+            (consume_controls, move_player)
+                .chain()
                 .in_set(FixedUpdateSet::Simulate),
         )?;
-        add_fixed_transform_projection_systems(
-            app,
-            collect_targets.before(GameplayCommandSet::Capture),
-        )?;
+        add_fixed_transform_projection_systems(app, collect_targets.before(capture))?;
         app.add_systems(
             CoreStage::FixedUpdate,
-            capture.in_set(GameplayCommandSet::Capture),
+            capture
+                .in_set(FixedUpdateSet::Finalize)
+                .run_if(move || faults.fault().is_none()),
         )?;
         Ok(())
     }
@@ -195,29 +191,22 @@ fn initialize(
         .collect();
 }
 
-fn consume_commands(
-    batch: Res<GameplayCommandBatch>,
+fn consume_controls(
+    time: Res<FixedTime>,
+    mut input: ResMut<CollectionInput>,
+    mut script: ResMut<CollectionScript>,
     mut state: ResMut<GameState>,
     mut transforms: Query<&mut Transform2d>,
     mut sprites: Query<&mut Sprite>,
     mut cameras: Query<&mut Camera2d>,
 ) {
-    for command in batch.commands() {
-        match command.command_type().as_str() {
-            MOVE => {
-                if let (
-                    Some(GameplayCommandValue::I64(direction)),
-                    Some(GameplayCommandValue::Bool(pressed)),
-                ) = (
-                    command.payload().get("direction"),
-                    command.payload().get("pressed"),
-                ) && let Ok(direction) = usize::try_from(*direction)
-                    && let Some(held) = state.held.get_mut(direction)
-                {
-                    *held = *pressed;
-                }
+    let scheduled = script.0.remove(&time.tick()).unwrap_or_default();
+    for control in input.0.drain(..).chain(scheduled) {
+        match control {
+            CollectionControl::Move { direction, pressed } => {
+                state.held[direction as usize] = pressed;
             }
-            RESET => {
+            CollectionControl::Reset => {
                 for baseline in &state.baseline {
                     if let Ok(mut transform) = transforms.get_mut(baseline.entity) {
                         *transform = baseline.transform;
@@ -239,7 +228,6 @@ fn consume_commands(
                 state.resets += 1;
                 println!("collect_game: reset");
             }
-            _ => {}
         }
     }
 }
@@ -279,7 +267,7 @@ fn capture(
 }
 
 /// The four semantic directions used by both keys and headless commands.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Direction {
     Left,
     Right,
@@ -287,48 +275,101 @@ pub enum Direction {
     Down,
 }
 
-#[must_use]
-pub fn movement(direction: Direction, pressed: bool) -> GameplayCommandDraft {
-    let mut payload = GameplayCommandPayload::new();
-    payload
-        .insert("direction", GameplayCommandValue::I64(direction as i64))
-        .expect("the static direction payload is valid");
-    payload
-        .insert("pressed", GameplayCommandValue::Bool(pressed))
-        .expect("the static button payload is valid");
-    GameplayCommandDraft::new(GameplayCommandTypeId::new(MOVE).expect("the movement ID is valid"))
-        .with_payload(payload)
+#[derive(Clone, Copy, Debug)]
+pub enum CollectionControl {
+    Move { direction: Direction, pressed: bool },
+    Reset,
+}
+
+#[derive(Default, Resource)]
+struct CollectionInput(Vec<CollectionControl>);
+
+impl CollectionInput {
+    fn push(&mut self, control: CollectionControl) -> Result<(), BevyError> {
+        const MAX_PENDING_CONTROLS: usize = 4_096;
+        if self.0.len() == MAX_PENDING_CONTROLS {
+            return Err(BevyError::error("too many pending collection controls"));
+        }
+        self.0.push(control);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Default, Resource)]
+struct CollectionScript(BTreeMap<u64, Vec<CollectionControl>>);
+
+impl ProductConfiguration for CollectionScript {
+    fn write_canonical(&self, output: &mut Vec<u8>) {
+        for (tick, controls) in &self.0 {
+            for control in controls {
+                output.extend_from_slice(&tick.to_le_bytes());
+                match *control {
+                    CollectionControl::Move { direction, pressed } => {
+                        output.extend_from_slice(&[0, direction as u8, u8::from(pressed)]);
+                    }
+                    CollectionControl::Reset => output.extend_from_slice(&[1, 0, 0]),
+                }
+            }
+        }
+    }
+}
+
+struct CollectionScriptPlugin(CollectionScript);
+
+impl Plugin for CollectionScriptPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        const DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("collect-game.script"),
+            PluginCategory::Runtime,
+        )
+        .requires_plugins(&[PLUGIN_ID]);
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let script = self.0.clone();
+        app.add_systems(StartupStage::Runtime, move |mut commands: Commands| {
+            commands.insert_resource(script.clone());
+        })?;
+        Ok(())
+    }
+}
+
+pub fn with_collection_script(
+    recipe: ProductRecipe,
+    controls: impl IntoIterator<Item = (u64, CollectionControl)>,
+) -> Result<ProductRecipe, ProductRecipeError> {
+    let mut script = CollectionScript::default();
+    for (tick, control) in controls {
+        script.0.entry(tick).or_default().push(control);
+    }
+    if script.0.is_empty() {
+        return Ok(recipe);
+    }
+    recipe.add_configured_plugin(script, |script| CollectionScriptPlugin(script.clone()))
 }
 
 #[must_use]
-pub fn reset() -> GameplayCommandDraft {
-    GameplayCommandDraft::new(GameplayCommandTypeId::new(RESET).expect("the reset ID is valid"))
+pub const fn movement(direction: Direction, pressed: bool) -> CollectionControl {
+    CollectionControl::Move { direction, pressed }
+}
+
+#[must_use]
+pub const fn reset() -> CollectionControl {
+    CollectionControl::Reset
 }
 
 /// A short reproducible walk through the authored level; optional reset proves restoration.
 #[must_use]
-pub fn demonstration_commands(with_reset: bool) -> Vec<GameplayCommandSubmission> {
-    let mut drafts = vec![
+pub fn demonstration_commands(with_reset: bool) -> Vec<(u64, CollectionControl)> {
+    let mut controls = vec![
         (1, movement(Direction::Right, true)),
         (61, movement(Direction::Right, false)),
     ];
     if with_reset {
-        drafts.push((65, reset()));
+        controls.push((65, reset()));
     }
-    drafts
-        .into_iter()
-        .enumerate()
-        .map(|(sequence, (tick, draft))| {
-            GameplayCommandSubmission::new(
-                GameplayCommandTick::new(tick).expect("demonstration ticks are positive"),
-                GameplayCommandIngressSource::external("collect-game.demo")
-                    .expect("the source ID is valid"),
-                GameplayCommandSourceSequence::new(sequence as u64 + 1)
-                    .expect("sequences are positive"),
-                draft,
-            )
-        })
-        .collect()
+    controls
 }
 
 #[cfg(feature = "desktop")]

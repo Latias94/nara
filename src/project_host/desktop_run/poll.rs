@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use nara_app::AppExit;
-use nara_winit::{WinitRunProgress, WinitSession};
+use nara_window::winit::{WinitRunProgress, WinitSession};
 
 use super::{DesktopRun, DesktopRunState};
 

@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
+use nara_core::source::{AssetSourcePath, SourceDocumentKey, SourceDocumentKind, StableAssetId};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit, SourceUniverseId};
-use nara_identity::{
-    AssetSourcePath, AuthoredEntityReference, AuthoredReferenceTarget, PersistentRuntimeId,
+use nara_ecs::identity::{
+    AuthoredEntityReference, AuthoredReferenceTarget, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference, PrefabEntityOrigin,
-    PrefabInstanceHop, ReferenceInputId, SceneEntityId, SourceDocumentKey, SourceDocumentKind,
-    StableAssetId,
+    PrefabInstanceHop, ReferenceInputId, SceneEntityId,
 };
 
 use super::{

@@ -4,13 +4,11 @@
 //! [`RuntimeProbe`] is narrower still: it adds exactly one non-replayable definition over an
 //! ordinary [`ProductRecipe`] and cannot carry schema providers or profile edits.
 
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+use crate::fs::DirectoryCapability;
 use nara_app::PluginDefinition;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use nara_ecs::Resource;
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
-use nara_fs::DirectoryCapability;
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
-use nara_gameplay::GameplayCommandSubmission;
 
 use super::composition::{
     RuntimePluginOverlay, resolve_product_recipe_with_overlay, runtime_plugin_overlay,
@@ -82,12 +80,11 @@ pub fn headless_run_with_probe<O>(
     project_root: DirectoryCapability,
     intent: HeadlessRunIntent<O>,
     probe: RuntimeProbe,
-    commands: Vec<GameplayCommandSubmission>,
 ) -> HeadlessRun<O>
 where
     O: Resource + Clone,
 {
-    HeadlessRun::new_with_overlay(project_root, intent, probe.into_overlay(), commands)
+    HeadlessRun::new_with_overlay(project_root, intent, probe.into_overlay())
 }
 
 /// Creates one desktop product action with a single non-replayable probe overlay.

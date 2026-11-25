@@ -1,7 +1,7 @@
 //! Owned Scene preparation and the final exclusive publication tail.
 
-use nara_hierarchy::{__private::PreparedHierarchyBatch, HierarchyOperation};
-use nara_reflect::__private::PreparedComponentApplyBatch;
+use crate::hierarchy::{HierarchyOperation, PreparedHierarchyBatch};
+use nara_reflect::persistent_apply::PreparedComponentApplyBatch;
 
 use super::*;
 use crate::product_transaction::PreparedSceneProductResources;
@@ -134,7 +134,7 @@ impl PreparedScenePublication {
             })?;
         }
         validate_hierarchy(world).map_err(|_| changed())?;
-        nara_identity::__private::validate_registered_identity_support_topology(
+        nara_ecs::identity::domain::validate_registered_identity_support_topology(
             world,
             self.retired_entities.iter().copied(),
         )
@@ -465,7 +465,7 @@ impl PreparedScenePublication {
             return Ok(());
         }
         let has_relationship = candidates.iter().copied().any(|entity| {
-            world.get::<Parent>(entity).is_some()
+            world.get::<ChildOf>(entity).is_some()
                 || world.get::<Children>(entity).is_some()
                 || world
                     .get_resource::<HierarchyRoots>()
@@ -507,15 +507,15 @@ mod tests {
     };
     use nara_asset::{AssetRef, AssetServer, Handle};
     use nara_core::ItemLimit;
+    use nara_ecs::identity::{
+        EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId,
+        PersistentRuntimeReference, WorldIdentityDomain, spawn_identity_entity,
+    };
     use nara_ecs::{
         Resource,
         bevy_ecs::lifecycle::{Despawn, HookContext},
         bevy_ecs::observer::On,
         bevy_ecs::world::DeferredWorld,
-    };
-    use nara_identity::{
-        EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId,
-        PersistentRuntimeReference, WorldIdentityDomain, spawn_identity_entity,
     };
     use nara_reflect::{
         __macro_support::{decode_persistent_field, encode_persistent_field},

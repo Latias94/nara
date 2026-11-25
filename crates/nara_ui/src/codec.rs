@@ -1,3 +1,9 @@
+use crate::kernel::{
+    UiActionId, UiAlign, UiBorder, UiBrush, UiColor, UiColorRole, UiCornerRadii, UiDimension,
+    UiEdges, UiFlexDirection, UiJustify, UiLayer, UiOverflow, UiPositionMode, UiSemanticRole,
+    UiStyle, UiTextAlignment, UiTextOverflow, UiThemePalette,
+};
+use nara_asset::image::ImageAsset;
 use nara_asset::{AssetRecord, AssetRef, AssetServer, AssetSourceKind, AssetSourcePath, Handle};
 use nara_ecs::World;
 use nara_reflect::{
@@ -8,13 +14,7 @@ use nara_reflect::{
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueRef,
     PreparedComponentCandidate,
 };
-use nara_render::image::ImageAsset;
 use nara_scene::PrefabDocument;
-use nara_ui_kernel::{
-    UiActionId, UiAlign, UiBorder, UiBrush, UiColor, UiColorRole, UiCornerRadii, UiDimension,
-    UiEdges, UiFlexDirection, UiJustify, UiLayer, UiOverflow, UiPositionMode, UiSemanticRole,
-    UiStyle, UiTextAlignment, UiTextOverflow, UiThemePalette,
-};
 
 use crate::{UiButton, UiButtonVisuals, UiNode, UiRoot, UiSemantics, UiText, UiTheme, UiVisual};
 

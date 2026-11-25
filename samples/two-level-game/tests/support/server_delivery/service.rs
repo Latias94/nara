@@ -7,12 +7,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara::{
-    gameplay::GameplayCommandKey,
-    project_tooling::process::{
-        SupervisedBootstrapChannel, SupervisedProcessCleanupReceipt,
-        SupervisedProductEnvironmentPolicy, SupervisedProductProcessCommand,
-    },
+use two_level_game::command::CommandKey;
+
+use nara::project_tooling::process::{
+    SupervisedBootstrapChannel, SupervisedProcessCleanupReceipt,
+    SupervisedProductEnvironmentPolicy, SupervisedProductProcessCommand,
 };
 use serde_json::{Value, json};
 use two_level_game::{
@@ -566,7 +565,7 @@ fn assert_gameplay_rejection(custody: &mut Custody, executable: &Path) {
     let rejections = &settled["gameplay_rejections"];
     assert_eq!(rejections["count"], 1, "{settled}");
     let latest = &rejections["latest"];
-    let key: GameplayCommandKey = serde_json::from_value(latest["key"].clone()).unwrap();
+    let key: CommandKey = serde_json::from_value(latest["key"].clone()).unwrap();
     assert_eq!(key.tick().get(), restore_tick);
     assert_eq!(key.source_sequence().get(), 1);
     assert_eq!(key.source().id().unwrap().as_str(), SOURCE);

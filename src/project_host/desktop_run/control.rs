@@ -1,14 +1,10 @@
 use nara_app::{
     RuntimeControl, RuntimeControlRequestResult, RuntimeControlStatus, RuntimeControlTicket,
-    RuntimeFault, RuntimeGeneration, RuntimeScopeError, RuntimeState, RuntimeTimeContinuation,
-    RuntimeTimeContinuationError,
+    RuntimeGeneration, RuntimeScopeError, RuntimeScopeOutcome, RuntimeState,
+    RuntimeTimeContinuation, RuntimeTimeContinuationError,
 };
-use nara_diagnostic::DiagnosticReport;
-use nara_ecs::World;
-use nara_gameplay::{
-    GameplayCommandKey, GameplayCommandRejection, GameplayCommandSubmission,
-    submit_gameplay_driver_command,
-};
+use nara_core::diagnostic::DiagnosticReport;
+use nara_ecs::{World, bevy_ecs::system::Command};
 
 use super::{DesktopNativeRun, DesktopRun, DesktopRunState};
 
@@ -21,19 +17,8 @@ pub enum DesktopControlError {
     NotPaused,
     #[error("the desktop Runtime control was rejected: {0:?}")]
     ControlRejected(nara_app::RuntimeControlRejection),
-    #[error("the desktop semantic command was rejected: {0}")]
-    CommandRejected(GameplayCommandRejection),
-    #[error("the desktop Runtime faulted after semantic-command admission")]
-    CommandFault {
-        outcome: Result<GameplayCommandKey, GameplayCommandRejection>,
-        fault: RuntimeFault,
-    },
     #[error("the desktop managed driver scope refused entry: {0}")]
     DriverScope(RuntimeScopeError),
-    #[error("the desktop managed driver operation was unavailable")]
-    DriverUnavailable,
-    #[error("the desktop managed operation observed a Runtime fault")]
-    RuntimeFault(RuntimeFault),
     #[error("the desktop product authority validation failed")]
     Authority(DiagnosticReport),
     #[error("the original desktop native operation failed: {0}")]
@@ -41,7 +26,7 @@ pub enum DesktopControlError {
     #[error(transparent)]
     TimeContinuation(#[from] RuntimeTimeContinuationError),
     #[error(transparent)]
-    KeyboardContinuation(#[from] nara_winit::WinitKeyboardContinuationError),
+    KeyboardContinuation(#[from] nara_window::winit::WinitKeyboardContinuationError),
 }
 
 impl DesktopRun {
@@ -50,13 +35,13 @@ impl DesktopRun {
     /// The cloneable handle requests no App frame and grants no Runtime/input authority.
     /// It is revoked during original retirement and cannot wake a successor session.
     #[must_use]
-    pub fn maintenance_wake(&self) -> Option<nara_winit::WinitMaintenanceWake> {
+    pub fn maintenance_wake(&self) -> Option<nara_window::winit::WinitMaintenanceWake> {
         self.live_native().ok()?.session.maintenance_wake()
     }
 
     /// Returns the cadence of the retained original native session, when constructed.
     #[must_use]
-    pub fn control_flow(&self) -> Option<nara_winit::WinitControlFlow> {
+    pub fn control_flow(&self) -> Option<nara_window::winit::WinitControlFlow> {
         match &self.state {
             DesktopRunState::Native(native) => Some(native.session.control_flow()),
             _ => None,
@@ -71,7 +56,7 @@ impl DesktopRun {
     /// frame work when selected from Wait; neither transition resets elapsed time.
     pub fn set_control_flow(
         &mut self,
-        control_flow: nara_winit::WinitControlFlow,
+        control_flow: nara_window::winit::WinitControlFlow,
     ) -> Result<(), DesktopControlError> {
         self.live_native_mut()?
             .session
@@ -251,7 +236,7 @@ impl DesktopRun {
     /// An unresolved result retains the original paused game and its native input isolation.
     pub fn request_input_activation(
         &mut self,
-    ) -> Result<nara_winit::WinitInputActivation, DesktopControlError> {
+    ) -> Result<nara_window::winit::WinitInputActivation, DesktopControlError> {
         self.capture(|_| ())?;
         self.live_native_mut()?
             .session
@@ -260,7 +245,7 @@ impl DesktopRun {
     }
 
     #[must_use]
-    pub fn input_activation(&self) -> Option<nara_winit::WinitInputActivation> {
+    pub fn input_activation(&self) -> Option<nara_window::winit::WinitInputActivation> {
         match &self.state {
             DesktopRunState::Native(native) => Some(native.session.input_activation()),
             _ => None,
@@ -269,42 +254,26 @@ impl DesktopRun {
 
     /// Preserves an asynchronous activation refusal or original post-operation fault.
     #[must_use]
-    pub fn input_activation_error(&self) -> Option<&nara_winit::WinitKeyboardContinuationError> {
+    pub fn input_activation_error(
+        &self,
+    ) -> Option<&nara_window::winit::WinitKeyboardContinuationError> {
         match &self.state {
             DesktopRunState::Native(native) => native.session.input_activation_error(),
             _ => None,
         }
     }
 
-    /// Admits one command through the original typed gameplay driver port and requests a frame.
+    /// Applies a game-owned ECS command and schedules an App frame.
     ///
-    /// A normal refusal preserves the live game. A fault discovered after admission returns the
-    /// actual command outcome together with that fault; it never implies rollback.
-    pub fn submit(
+    /// The returned output remains authoritative if the runtime observes a fault afterward.
+    pub fn apply_command<C: Command>(
         &mut self,
-        command: GameplayCommandSubmission,
-    ) -> Result<GameplayCommandKey, DesktopControlError> {
-        let result = self
-            .live_native_mut()?
+        command: C,
+    ) -> Result<RuntimeScopeOutcome<C::Out>, DesktopControlError> {
+        self.live_native_mut()?
             .session
-            .__with_driver_scope(|scope| submit_gameplay_driver_command(scope, command))
-            .map_err(DesktopControlError::DriverScope)?;
-        let output = match result.output {
-            Ok(output) => output,
-            Err(_) => {
-                return Err(match result.post_operation_fault {
-                    Some(fault) => DesktopControlError::RuntimeFault(fault),
-                    None => DesktopControlError::DriverUnavailable,
-                });
-            }
-        };
-        if let Some(fault) = result.post_operation_fault {
-            return Err(DesktopControlError::CommandFault {
-                outcome: output,
-                fault,
-            });
-        }
-        output.map_err(DesktopControlError::CommandRejected)
+            .apply_command(command)
+            .map_err(DesktopControlError::DriverScope)
     }
 
     /// Reveals only the original live native window selected to start hidden.
@@ -320,7 +289,10 @@ impl DesktopRun {
             return Err(DesktopControlError::Unavailable);
         };
         if self.close_requested
-            || !matches!(native.progress, nara_winit::WinitRunProgress::Running)
+            || !matches!(
+                native.progress,
+                nara_window::winit::WinitRunProgress::Running
+            )
             || native.session.runtime().fault().is_some()
             || !matches!(
                 native.session.runtime().state(),

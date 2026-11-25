@@ -4,19 +4,21 @@ use std::time::{Duration, Instant};
 
 use nara::{
     advanced_prelude::CurrentScene,
-    gameplay::LocalGameplayCommands,
     prelude::{Res, ResMut, Resource},
 };
 
 use super::{GamePhase, GameSnapshot, Scenario, commands::*};
-use crate::levels::{LevelId, LevelKey};
+use crate::{
+    command::{CommandSchedule, ServerCommand},
+    levels::{LevelId, LevelKey},
+};
 
 #[derive(Debug)]
 enum Step {
     Walk(u32),
     Marker(u64),
     Level {
-        command: &'static str,
+        command: ServerCommand,
         key: LevelKey,
         score: u32,
         visible: usize,
@@ -100,7 +102,7 @@ pub(super) fn drive(
     mut verifier: ResMut<Verification>,
     snapshot: Res<GameSnapshot>,
     current: Option<CurrentScene>,
-    mut commands: ResMut<LocalGameplayCommands>,
+    mut commands: ResMut<CommandSchedule>,
 ) {
     verifier.driver_calls = verifier.driver_calls.saturating_add(1);
     if verifier.complete
@@ -122,14 +124,14 @@ pub(super) fn drive(
         let command = match step {
             Step::Walk(_) => movement(1, true),
             Step::Marker(_) => action(MARKER),
-            Step::Level { command, .. } => action(command),
+            Step::Level { command, .. } => action(command.clone()),
             Step::Save => action(SAVE),
         };
         println!(
             "two_level_verify: dispatch stage={} step={step:?} snapshot={snapshot:?}",
             verifier.index
         );
-        if let Err(error) = commands.push(command) {
+        if let Err(error) = commands.push_local(command) {
             verifier.failure = Some(error.to_string());
             return;
         }
@@ -150,7 +152,7 @@ pub(super) fn drive(
                         Some("walk collected an unexpected number of pickups".into());
                     return;
                 }
-                if let Err(error) = commands.push(movement(1, false)) {
+                if let Err(error) = commands.push_local(movement(1, false)) {
                     verifier.failure = Some(error.to_string());
                     return;
                 }

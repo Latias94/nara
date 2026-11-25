@@ -1,6 +1,6 @@
 use std::fmt;
 
-use nara_diagnostic::{
+use nara_core::diagnostic::{
     DiagnosticField, DiagnosticFieldKey, DiagnosticReport, DiagnosticSeverity, DiagnosticValueRef,
     PublicDiagnosticIdentifier,
 };
@@ -307,7 +307,7 @@ impl ProjectToolFailure {
             ),
             Error::Stale => (
                 "project.tool.schema-stale",
-                "The declared authoring schema bundle is missing or stale; run nara schema <project-directory> --write with the same profile",
+                "The declared authoring schema bundle is missing or stale. Refresh it with the compiled project's schema tool using the same profile",
             ),
             Error::Binding => (
                 "project.tool.schema-binding-rejected",
@@ -509,18 +509,13 @@ impl fmt::Display for ProjectToolFailure {
                     write!(formatter, " under the project Scene root `{root}`")?;
                 }
             }
-            write!(
-                formatter,
-                "\nrepair: nara repair startup-scene <project-directory>"
-            )?;
+            write!(formatter, "\nrepair: select an existing startup Scene")?;
             if hint.profile_selected {
-                write!(
-                    formatter,
-                    " --profile {}",
-                    hint.profile.as_deref().unwrap_or("<name>")
-                )?;
+                match &hint.profile {
+                    Some(profile) => write!(formatter, " for profile `{profile}`")?,
+                    None => write!(formatter, " for the selected profile")?,
+                }
             }
-            write!(formatter, " --replacement <scenes-root-relative-scene>")?;
         }
         if self.loss != ProjectToolDiagnosticLoss::default() {
             write!(
@@ -649,7 +644,7 @@ fn valid_summary(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
+    use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
 
     fn classified() -> ProjectToolFailure {
         ProjectToolFailure::classified(
@@ -765,7 +760,7 @@ mod tests {
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "\u{1f980}tail",
         );
-        let settings = nara_diagnostic::DiagnosticReportSettings::default()
+        let settings = nara_core::diagnostic::DiagnosticReportSettings::default()
             .with_summary_byte_limit(crate::core::ByteLimit::new(1024).unwrap())
             .unwrap();
         let mut report = DiagnosticReport::new(settings);
@@ -780,7 +775,7 @@ mod tests {
         assert_eq!(failure.loss().removed_summary_bytes, 8);
         assert!(!failure.loss().source_incomplete);
 
-        let settings = nara_diagnostic::DiagnosticReportSettings::new(
+        let settings = nara_core::diagnostic::DiagnosticReportSettings::new(
             crate::core::ItemLimit::new(1).unwrap(),
             crate::core::ByteLimit::new(1024).unwrap(),
         )

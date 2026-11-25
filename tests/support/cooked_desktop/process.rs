@@ -269,10 +269,10 @@ impl Drop for NativeProcess {
     fn drop(&mut self) {
         if !self.retire_normally(Duration::from_secs(30)) {
             eprintln!(
-                "retaining original native custody without forced termination: {}",
+                "normal native cleanup remained incomplete: {}",
                 self.diagnostics()
             );
-            std::mem::forget(self.owner.take());
+            drop(self.owner.take());
         }
     }
 }

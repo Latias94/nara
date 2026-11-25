@@ -10,12 +10,12 @@ use std::{
 
 use nara_app::{
     App, PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition, PluginDefinitionKey,
-    PluginId, PluginPlan, PluginPlanFingerprint, RuntimeAdmissionReservation,
-    RuntimeCandidateRetirementState, RuntimeCloseContext, RuntimeCloseEvidence,
-    RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
-    RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl, RuntimeFault, RuntimeFaultKind,
-    RuntimeFaultReporter, RuntimeGeneration, RuntimeInstance, RuntimeObligationLedger,
-    RuntimeScheduleError, RuntimeState, drive_runtime_quarantine, runtime_quarantine_status,
+    PluginId, PluginPlan, PluginPlanFingerprint, RuntimeCandidate, RuntimeCandidateRetirementState,
+    RuntimeCloseContext, RuntimeCloseEvidence, RuntimeCloseParticipant,
+    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeClosePolicy,
+    RuntimeCloseProgress, RuntimeControl, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
+    RuntimeGeneration, RuntimeInstance, RuntimeObligationLedger, RuntimeScheduleError,
+    RuntimeState,
 };
 use nara_ecs::{Res, ResMut, Resource, ScheduleLabel, bevy_ecs::error::BevyError};
 
@@ -45,7 +45,6 @@ fn definitions_and_world_free_runtime_handles_remain_transportable() {
     assert_send_sync::<PluginConfigurationFingerprint>();
     assert_send_sync::<PluginPlan>();
     assert_send_sync::<PluginPlanFingerprint>();
-    assert_send_sync::<RuntimeAdmissionReservation>();
     assert_send_sync::<RuntimeCloseEvidence>();
     assert_send_sync::<RuntimeControl>();
     assert_send_sync::<RuntimeFaultReporter>();
@@ -86,22 +85,19 @@ fn independent_threads_construct_and_close_their_own_non_send_worlds() {
                     drops: Arc::clone(&drops),
                     _thread_local: Rc::new(()),
                 });
-                let mut runtime = RuntimeAdmissionReservation::try_acquire()
-                    .unwrap()
-                    .admit(
-                        app.seal().unwrap(),
-                        RuntimeObligationLedger::new(),
-                        RuntimeClosePolicy::default(),
-                    )
-                    .unwrap()
-                    .complete_startup()
-                    .unwrap()
-                    .promote();
+                let mut runtime = RuntimeCandidate::admit(
+                    app.seal().unwrap(),
+                    RuntimeObligationLedger::new(),
+                    RuntimeClosePolicy::default(),
+                )
+                .unwrap()
+                .complete_startup()
+                .unwrap()
+                .promote();
                 runtime.drive(Duration::ZERO).unwrap();
                 runtime.finish().unwrap();
 
                 assert_eq!(*drops.lock().unwrap(), [owner_thread, owner_thread]);
-                assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
                 owner_thread
             })
         })
@@ -137,7 +133,7 @@ impl RuntimeCloseParticipant for WaitForRelease {
 }
 
 #[test]
-fn quarantine_retires_non_send_world_on_its_constructing_thread() {
+fn explicit_retirement_drops_the_non_send_world_on_its_constructing_thread() {
     thread::spawn(|| {
         let owner_thread = thread::current().id();
         let drops = Arc::new(Mutex::new(Vec::new()));
@@ -162,20 +158,18 @@ fn quarantine_retires_non_send_world_on_its_constructing_thread() {
         .unwrap();
         let mut retirement = runtime.begin_retirement();
         let progress = retirement.drive_retirement();
-        drop(retirement);
-        let retained = runtime_quarantine_status().current_thread_retained();
         let drops_before_release = drops.lock().unwrap().clone();
 
         released.store(true, Ordering::Release);
-        let drained = drive_runtime_quarantine();
+        let finished = retirement.drive_retirement();
+        drop(retirement);
 
         assert_eq!(
             progress,
             RuntimeCandidateRetirementState::RetirementIncomplete
         );
-        assert_eq!(retained, 1);
         assert!(drops_before_release.is_empty());
-        assert_eq!(drained.current_thread_retained(), 0);
+        assert_eq!(finished, RuntimeCandidateRetirementState::Retired);
         assert_eq!(*drops.lock().unwrap(), [owner_thread]);
     })
     .join()
@@ -289,7 +283,7 @@ fn explicit_custom_schedule_checks_authority_before_and_after_its_systems() {
         app.init_resource::<CustomRuns>().unwrap();
         app.insert_resource(CustomAuthority(Arc::clone(&authority)))
             .unwrap();
-        app.__install_runtime_authority_validator(
+        app.register_runtime_validator(
             PluginId::new("nara.test.custom-schedule.authority"),
             Arc::new(move |_, _| {
                 if authority_check.load(Ordering::Acquire) {

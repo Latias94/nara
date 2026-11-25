@@ -92,35 +92,28 @@ cargo run --features desktop --bin desktop -- --verify-first-present
 The final command opens the real Winit/WGPU product, requires one exact presented frame, and exits
 through normal runtime cleanup.
 
-Check, schema refresh, Export, and startup-Scene Repair build the existing headless executable and enter its explicit
-tool mode before gameplay. Define custom systems, persistent components, and migrations once in
-`product_recipe()` with `SchemaContribution`; the same recipe serves all targets and strict tools.
+`nara check .` reads the saved project. Tools that need strict native content admission can call
+`nara::project_tooling::invoke_project_tool`. It builds the existing headless executable and enters
+its tool mode before gameplay. Define custom systems, persistent components, and migrations once in
+`product_recipe()` with `SchemaContribution`. All targets and compiled tools use that recipe.
 The starter recipe explicitly registers the stock `ImageRuntimeCodec` with definition
 `nara.starter.desktop-2d.image`, revision 1. Keep that registration when adding game contributions so
 Cook and Player agree on Image decoding.
 
-The generated `package.metadata.nara.project-tool-protocol = 1` declares that entry contract. Superseded
-entry/response shapes are unsupported; both the headless entry and CLI use this current contract.
+The generated `package.metadata.nara.project-tool-protocol = 1` declares that entry contract.
 Project Rust and Cargo code remain trusted native code. The base Headless profile builds its
 reduced tool. Checking a profile that requests desktop capabilities enables the `desktop` Cargo
 feature, including when you give that profile another name.
 
-After changing persistent component definitions or their contributions, refresh the declared
-data-only schema bundle before validating the scene and prefab data:
-
-```text
-nara schema . --check
-nara schema . --write
-nara schema . --check
-```
-
-Schema Check reports a missing or stale bundle without changing it. Schema Write atomically
-publishes the bundle generated from `product_recipe()` at `authoring.schema_bundle`; it does not
-start gameplay or rewrite Scene/Prefab records. Pass `--profile desktop` when checking or writing
-that profile's schema.
+After changing persistent component definitions or their contributions, call
+`invoke_project_tool` with `ProjectToolRequest::Schema` to refresh the saved bundle.
+Set `write` to `false` to check for staleness or to `true` to publish the schema from
+`product_recipe()` at `authoring.schema_bundle`. Set `profile` to `Some("desktop".into())` when
+checking or writing the desktop profile's bundle.
 
 After creating another Scene, such as `scenes/level-b.scene.json`, declare it in `nara.toml` so
-Check and Export include it and its admitted Prefab, Image, TileSet, and metadata dependencies:
+compiled Check and source-carrying Export include its admitted Prefab, Image, TileSet, and metadata
+dependencies:
 
 ```toml
 [content]
@@ -194,11 +187,9 @@ continues through the original run owner until it completes. `starter_player: ok
 
 ### Source-carrying Export
 
-Publish and accept a source-carrying declared-content candidate into an absent destination:
-
-```text
-nara export . --parent .. --destination candidate-before-repair
-```
+An authoring tool can publish and accept a source-carrying declared-content candidate by passing
+`ProjectToolRequest::Export` to `invoke_project_tool`. Choose a new destination under an existing
+output parent.
 
 The candidate's `bin/headless` and `bin/desktop --verify-first-present` executables resolve the
 sibling `project/` tree, so they can be launched from an unrelated working directory without this
@@ -206,19 +197,9 @@ checkout or a Rust toolchain. Add `.exe` to the executable names on Windows.
 
 To exercise explicit recovery, move `scenes/startup.scene.json` and its `.meta` sidecar to
 `scenes/repaired.scene.json` and `scenes/repaired.scene.json.meta`. Update the metadata's authored
-path to `repaired.scene.json` while retaining its stable asset ID, then run:
-
-```text
-nara check .
-nara repair startup-scene . --replacement repaired.scene.json
-nara check .
-cargo run --bin headless
-cargo run --features desktop --bin desktop -- --verify-first-present
-nara export . --parent .. --destination candidate-after-repair
-```
-
-Repair updates only the selected startup Scene after a fresh authoritative check. It does not infer
-renames or rewrite arbitrary asset references.
+path to `repaired.scene.json` while retaining its stable asset ID. The typed `check_project` API
+returns the missing startup issue consumed by `repair_startup_scene`. Supply `repaired.scene.json`
+as the replacement. Recheck and launch both products before publishing the next candidate.
 
 This export is a source-carrying declared-content development and verification candidate. It is not
 a complete project backup, cooked/source-free build, formal release package, Editor workflow, or

@@ -3,29 +3,20 @@ use std::time::Duration;
 use nara::{
     app::RuntimeInstance,
     core::ByteLimit,
-    gameplay::{
-        GameplayActionPlugin, GameplayCommandPayload, GameplayCommandPlugin, GameplayCommandQueue,
-        GameplayCommandTypeId, GameplayCommandValue,
-    },
     input::{
-        ActionBinding, ActionContextDefinition, ActionMap, ActionMapFileCandidate,
-        ButtonDriverInput, InputPlugin, KeyCode, SemanticActions, apply_keyboard_driver_input,
+        ActionBinding, ActionContextDefinition, ActionMap, ActionMapFileCandidate, ActionValue,
+        ButtonDriverInput, InputPlugin, KeyCode, SemanticActionCause, apply_keyboard_driver_input,
     },
 };
 use serde_json::{Value, json};
 
 use super::*;
+use crate::command::{SemanticCommand, ServerCommand};
 
 const AUTHORED_INPUT: &[u8] = include_bytes!("../../../input/explorer.actions.json");
 
 #[test]
-fn movement_commands_are_semantic_and_do_not_install_physical_bindings() {
-    let app = semantic_input_app();
-    assert!(!app.world().contains_resource::<ActionMaps>());
-    let commands = app.world().resource::<ActionCommandMap>();
-    assert_eq!(commands.bindings().len(), 16);
-    let context = ActionContext::gameplay();
-
+fn movement_intents_follow_semantic_edges_from_the_primary_gameplay_context() {
     for (direction, name) in [
         "two-level-game.move-a",
         "two-level-game.move-d",
@@ -35,65 +26,48 @@ fn movement_commands_are_semantic_and_do_not_install_physical_bindings() {
     .into_iter()
     .enumerate()
     {
-        let id = ActionId::new(name).unwrap();
-        for (offset, (phase, pressed)) in
-            [(ActionPhase::Started, true), (ActionPhase::Released, false)]
-                .into_iter()
-                .enumerate()
-        {
-            let mut payload = GameplayCommandPayload::new();
-            payload
-                .insert("direction", GameplayCommandValue::I64(direction as i64))
-                .unwrap();
-            payload
-                .insert("pressed", GameplayCommandValue::Bool(pressed))
-                .unwrap();
-            let expected = ActionCommandBinding::new(
-                id.clone(),
-                phase,
-                GameplayCommandTypeId::new("two-level-game.move").unwrap(),
-            )
-            .with_payload(payload);
+        for (phase, pressed) in [(ActionPhase::Started, true), (ActionPhase::Released, false)] {
+            let mut outcome = semantic_outcome(name, phase);
+            let Some(GameCommand::Player(command)) = gameplay_intent(&outcome, false) else {
+                panic!("missing movement intent for {outcome:?}");
+            };
             assert_eq!(
-                commands.bindings().get(direction * 2 + offset),
-                Some(&expected),
+                command,
+                ServerCommand::Gameplay(SemanticCommand::Move { direction, pressed }),
             );
-            assert_eq!(
-                commands
-                    .matching_bindings(InputSeatId::PRIMARY, &id, &context, phase)
-                    .collect::<Vec<_>>(),
-                vec![&expected],
-            );
+            outcome.seat = InputSeatId::new(1);
+            assert!(gameplay_intent(&outcome, false).is_none());
+            outcome.seat = InputSeatId::PRIMARY;
+            outcome.context = ActionContext::new("menu").unwrap();
+            assert!(gameplay_intent(&outcome, false).is_none());
         }
+        assert!(gameplay_intent(&semantic_outcome(name, ActionPhase::Changed), false).is_none());
     }
 }
 
 #[test]
-fn one_shot_commands_keep_their_semantic_ids_and_complete_drafts() {
-    let app = semantic_input_app();
-    let commands = app.world().resource::<ActionCommandMap>();
-    for (offset, (name, command)) in [
-        ("two-level-game.e", "two-level-game.travel"),
-        ("two-level-game.q", "two-level-game.instance"),
-        ("two-level-game.m", "two-level-game.marker"),
-        ("two-level-game.k", "two-level-game.save"),
-        ("two-level-game.l", "two-level-game.restore"),
-        ("two-level-game.r", "two-level-game.retry"),
-        ("two-level-game.b", "two-level-game.side-room"),
-        ("two-level-game.g", "two-level-game.lookout"),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        assert_eq!(
-            commands.bindings().get(8 + offset),
-            Some(&ActionCommandBinding::new(
-                ActionId::new(name).unwrap(),
-                ActionPhase::Started,
-                GameplayCommandTypeId::new(command).unwrap(),
-            )),
-        );
+fn one_shot_actions_enqueue_typed_intents_only_on_press() {
+    for (name, expected) in [
+        ("two-level-game.e", TRAVEL),
+        ("two-level-game.q", INSTANCE),
+        ("two-level-game.m", MARKER),
+        ("two-level-game.k", SAVE),
+        ("two-level-game.l", RESTORE),
+        ("two-level-game.r", RETRY),
+        ("two-level-game.b", SIDE_ROOM),
+        ("two-level-game.g", LOOKOUT),
+    ] {
+        let started = semantic_outcome(name, ActionPhase::Started);
+        let Some(GameCommand::Player(command)) = gameplay_intent(&started, false) else {
+            panic!("missing intent for {started:?}");
+        };
+        assert_eq!(command, expected);
+        assert!(gameplay_intent(&semantic_outcome(name, ActionPhase::Released), false).is_none());
     }
+    assert!(matches!(
+        gameplay_intent(&semantic_outcome(SAVE_ACTION, ActionPhase::Started), true),
+        Some(GameCommand::RoundSave)
+    ));
 }
 
 #[test]
@@ -186,7 +160,7 @@ fn authored_defaults_decode_with_intrinsic_primary_identity_and_original_keys() 
 #[cfg(feature = "gamepad")]
 #[test]
 fn authored_controller_buttons_use_the_backend_portable_codes() {
-    use nara_gilrs::GamepadButton;
+    use nara::input::GamepadButton;
 
     let candidate = default_candidate();
     for (name, button) in [
@@ -367,8 +341,7 @@ fn multiple_keyboard_sources_start_and_drive_gameplay_but_refuse_exact_capture()
     });
     let mut app = App::new();
     app.add_plugin(InputPlugin).unwrap();
-    app.add_plugin(GameplayCommandPlugin::default()).unwrap();
-    app.add_plugin(GameplayActionPlugin).unwrap();
+    app.init_resource::<CommandSchedule>().unwrap();
     app.insert_resource(ActionMaps::new(map_from_candidate(candidate)))
         .unwrap();
     GameInputPlugin.build(&mut app).unwrap();
@@ -392,7 +365,7 @@ fn multiple_keyboard_sources_start_and_drive_gameplay_but_refuse_exact_capture()
     assert_eq!(
         runtime
             .world()
-            .resource::<GameplayCommandQueue>()
+            .resource::<CommandSchedule>()
             .stats()
             .accepted,
         1,
@@ -504,11 +477,16 @@ fn capture_refuses_nonbutton_movement_transforms_with_gamepad_alternatives() {
     assert_capture_refused(&world_with_candidate(candidate), "keyboard Button");
 }
 
-fn semantic_input_app() -> App {
-    let mut app = App::new();
-    app.insert_resource(ActionCommandMap::default()).unwrap();
-    GameInputPlugin.build(&mut app).unwrap();
-    app
+fn semantic_outcome(name: &str, phase: ActionPhase) -> SemanticActionOutcome {
+    SemanticActionOutcome {
+        seat: InputSeatId::PRIMARY,
+        action: ActionId::new(name).unwrap(),
+        context: ActionContext::gameplay(),
+        phase,
+        value: ActionValue::Button(phase != ActionPhase::Released),
+        cause: SemanticActionCause::PhysicalInput,
+        provenance: None,
+    }
 }
 
 fn default_candidate() -> ActionMapFileCandidate {

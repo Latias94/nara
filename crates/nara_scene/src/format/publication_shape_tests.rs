@@ -2,7 +2,7 @@ use super::*;
 use crate::{SceneEntityPlacement, ScenePlacement, ScenePlacementParent};
 use nara_asset::AssetRef;
 use nara_core::SerdeShapeError;
-use nara_identity::{
+use nara_ecs::identity::{
     EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
 };
 use nara_reflect::{
@@ -306,9 +306,10 @@ fn publication_shape_certificate_proves_reference_forms_against_the_complete_ora
 
 #[test]
 fn inline_source_key_origins_defaults_and_arguments_match_the_complete_shape_oracle() {
-    use nara_identity::{
-        AssetSourcePath, AuthoredEntityReference, AuthoredReferenceTarget, PrefabEntityOrigin,
-        PrefabInstanceHop, ReferenceInputId, SourceDocumentKey, SourceDocumentKind,
+    use nara_core::source::{AssetSourcePath, SourceDocumentKey, SourceDocumentKind};
+    use nara_ecs::identity::{
+        AuthoredEntityReference, AuthoredReferenceTarget, PrefabEntityOrigin, PrefabInstanceHop,
+        ReferenceInputId,
     };
 
     let universe = "e3818e8d-e2d8-4f67-a82f-55074d3614b2".parse().unwrap();

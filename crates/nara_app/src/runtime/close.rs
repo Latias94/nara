@@ -6,9 +6,9 @@
 use std::{
     collections::BTreeSet,
     fmt::{self, Debug, Display, Formatter},
-    time::Instant,
 };
 
+use bevy_platform::time::Instant;
 use nara_ecs::World;
 use thiserror::Error;
 

@@ -10,24 +10,22 @@ mod systems;
 #[cfg(feature = "desktop")]
 mod ui;
 mod ui_observation;
+mod wave_input;
 
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroU64};
 
 use nara::{
     ProductRecipe, ProductRecipeError, SchemaContribution,
     advanced_prelude::add_startup_scene_activation_systems,
-    app::{PluginCategory, PluginDeclaration, PluginError, PluginId, PluginSchemaProviderId},
+    app::{
+        PluginCategory, PluginDeclaration, PluginError, PluginId, PluginSchemaProviderId,
+        RuntimeFaultReporter, StartupStage,
+    },
     ecs::{SystemSet, schedule::IntoScheduleConfigs},
     fs::DirectoryCapability,
-    gameplay::{
-        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandKey,
-        GameplayCommandPayload, GameplayCommandSet, GameplayCommandSourceSequence,
-        GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
-        GameplayCommandValue,
-    },
     prelude::{
         App, ComponentRegistryBuilder, CoreStage, FixedUpdateSet, PersistentComponentProvider,
-        Plugin, Resource, Vec2, add_fixed_transform_projection_systems,
+        Plugin, Resource, Vec2,
     },
     project_host::{HeadlessRun, HeadlessRunIntent},
     reflect::{
@@ -36,10 +34,16 @@ use nara::{
         ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
         ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     },
+    scene::{
+        TRANSFORM_COMPONENTS_PLUGIN_ID,
+        fixed_spatial::{
+            FIXED_SPATIAL_PLUGIN_ID, FixedSpatialPlugin, add_fixed_transform_projection_systems,
+        },
+    },
 };
 
 #[cfg(feature = "desktop")]
-use nara::project_host::{DesktopRun, DesktopRunIntent};
+use nara::project_host::DesktopRunIntent;
 
 pub use components::{
     EnemyRole, Health, InitialHealth, InitialVelocity2d, PlayerRole, ProjectileDamage,
@@ -64,6 +68,8 @@ pub use ui_observation::{
     ReferenceProductObservation, ReferenceUiObservation, ReferenceUiPhysicalRect,
     ReferenceUiPresentationObservation, ReferenceUiRect,
 };
+pub use wave_input::{WaveCommand, wave_retry_request_count, with_wave_script};
+use wave_input::{WaveInput, WaveIntent, finish_wave_input, prepare_wave_input};
 
 pub const REFERENCE_GAME_PLUGIN_ID: PluginId = PluginId::new("reference-game.gameplay");
 pub const REFERENCE_WAVE_PLUGIN_ID: PluginId = PluginId::new("reference-game.wave");
@@ -87,27 +93,25 @@ pub const REFERENCE_GAME_SCHEMA_PROVIDER: ComponentSchemaProviderDefinition =
     .with_predecessor(reference_game_schema_v4);
 const REFERENCE_GAME_REQUIREMENTS: &[PluginId] = &[
     nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID,
-    nara::transform::TRANSFORM_PLUGIN_ID,
+    TRANSFORM_COMPONENTS_PLUGIN_ID,
     nara::advanced_prelude::STARTUP_SCENE_ACTIVATION_PLUGIN_ID,
 ];
 pub const REFERENCE_GAME_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(REFERENCE_GAME_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(REFERENCE_GAME_REQUIREMENTS)
         .provides_schema(&[REFERENCE_GAME_SCHEMA_PROVIDER_ID]);
-const REFERENCE_WAVE_REQUIREMENTS: &[PluginId] = &[
-    REFERENCE_GAME_PLUGIN_ID,
-    nara::gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
-];
 const REFERENCE_WAVE_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(REFERENCE_WAVE_PLUGIN_ID, PluginCategory::Runtime)
-        .requires_plugins(REFERENCE_WAVE_REQUIREMENTS);
-const REFERENCE_PROJECT_OUTCOME_REQUIREMENTS: &[PluginId] = &[
-    REFERENCE_GAME_PLUGIN_ID,
-    nara::gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
-];
+        .requires_plugins(&[REFERENCE_GAME_PLUGIN_ID, FIXED_SPATIAL_PLUGIN_ID]);
 const REFERENCE_PROJECT_OUTCOME_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(REFERENCE_PROJECT_OUTCOME_PLUGIN_ID, PluginCategory::Runtime)
-        .requires_plugins(REFERENCE_PROJECT_OUTCOME_REQUIREMENTS);
+        .requires_plugins(&[REFERENCE_GAME_PLUGIN_ID, FIXED_SPATIAL_PLUGIN_ID]);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+pub enum ReferenceWaveSet {
+    Consume,
+    Capture,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
 enum ReferenceWaveCaptureSet {
@@ -169,42 +173,64 @@ impl Plugin for ReferenceWavePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.configure_sets(
-            CoreStage::FixedUpdate,
-            (
-                ReferenceWaveCaptureSet::Snapshot,
-                ReferenceWaveCaptureSet::Presentation,
-            )
-                .chain()
-                .in_set(GameplayCommandSet::Capture),
-        )?
-        .add_systems(
-            CoreStage::FixedUpdate,
-            systems::begin_wave_tick
-                .in_set(FixedUpdateSet::Simulate)
-                .before(GameplayCommandSet::Consume),
-        )?
-        .add_systems(
-            CoreStage::FixedUpdate,
-            (
-                systems::consume_retry_commands,
-                systems::consume_movement_commands,
-            )
-                .chain()
-                .in_set(GameplayCommandSet::Consume),
-        )?
-        .add_systems(
-            CoreStage::FixedUpdate,
-            (
-                systems::validate_wave_topology,
-                systems::pursue_scene_players,
-                systems::move_scene_players,
-                systems::move_wave_projectiles,
-            )
-                .chain()
-                .after(GameplayCommandSet::Consume)
-                .in_set(ReferenceSpatialSet::Mutate),
-        )?;
+        let faults = app.world().resource::<RuntimeFaultReporter>().clone();
+        let capture_faults = faults.clone();
+        app.init_resource::<WaveInput>()?
+            .configure_sets(
+                CoreStage::FixedUpdate,
+                (
+                    ReferenceWaveSet::Consume.in_set(FixedUpdateSet::Simulate),
+                    ReferenceWaveSet::Capture
+                        .in_set(FixedUpdateSet::Finalize)
+                        .run_if(move || capture_faults.fault().is_none()),
+                ),
+            )?
+            .add_systems(
+                CoreStage::FixedUpdate,
+                (
+                    prepare_wave_input.in_set(FixedUpdateSet::Prepare),
+                    finish_wave_input
+                        .in_set(FixedUpdateSet::Finalize)
+                        .after(ReferenceWaveSet::Capture)
+                        .run_if(move || faults.fault().is_none()),
+                ),
+            )?
+            .configure_sets(
+                CoreStage::FixedUpdate,
+                (
+                    ReferenceWaveCaptureSet::Snapshot,
+                    ReferenceWaveCaptureSet::Presentation,
+                )
+                    .chain()
+                    .in_set(ReferenceWaveSet::Capture),
+            )?
+            .add_systems(
+                CoreStage::FixedUpdate,
+                systems::begin_wave_tick
+                    .in_set(FixedUpdateSet::Simulate)
+                    .before(ReferenceWaveSet::Consume),
+            )?
+            .add_systems(
+                CoreStage::FixedUpdate,
+                (
+                    systems::consume_retry_commands,
+                    systems::consume_movement_commands,
+                )
+                    .chain()
+                    .in_set(ReferenceWaveSet::Consume),
+            )?
+            .add_systems(
+                CoreStage::FixedUpdate,
+                (
+                    systems::validate_wave_topology,
+                    systems::pursue_scene_players,
+                    systems::move_scene_players,
+                    systems::move_wave_projectiles,
+                )
+                    .chain()
+                    .after(ReferenceWaveSet::Consume)
+                    .in_set(ReferenceSpatialSet::Mutate),
+            )?;
         add_fixed_transform_projection_systems(
             app,
             (
@@ -234,7 +260,9 @@ impl Plugin for ReferenceProjectOutcomePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let faults = app.world().resource::<RuntimeFaultReporter>().clone();
         app.insert_resource(ReferenceProjectSnapshot::default())?
+            .add_systems(StartupStage::Runtime, systems::seed_project_first_tick)?
             .add_systems(
                 CoreStage::FixedUpdate,
                 (
@@ -247,11 +275,13 @@ impl Plugin for ReferenceProjectOutcomePlugin {
             )?
             .add_systems(
                 CoreStage::FixedUpdate,
-                systems::observe_project_commands.in_set(GameplayCommandSet::Consume),
+                systems::observe_project_first_tick.in_set(FixedUpdateSet::Simulate),
             )?
             .add_systems(
                 CoreStage::FixedUpdate,
-                systems::capture_project_snapshot.in_set(GameplayCommandSet::Capture),
+                systems::capture_project_snapshot
+                    .in_set(FixedUpdateSet::Finalize)
+                    .run_if(move || faults.fault().is_none()),
             )?;
         Ok(())
     }
@@ -269,6 +299,7 @@ pub fn reference_game_contribution()
 /// authority; the Host owns those operations when the recipe is passed to a product action.
 pub fn project_recipe() -> Result<ProductRecipe, ProductRecipeError> {
     ProductRecipe::new()
+        .add_plugin::<FixedSpatialPlugin>()?
         .add_contribution(reference_game_contribution()?)?
         .add_plugin::<ReferenceProjectOutcomePlugin>()
 }
@@ -276,6 +307,7 @@ pub fn project_recipe() -> Result<ProductRecipe, ProductRecipeError> {
 /// Creates the deterministic wave recipe shared by the headless and desktop launch paths.
 pub fn wave_recipe() -> Result<ProductRecipe, ProductRecipeError> {
     ProductRecipe::new()
+        .add_plugin::<FixedSpatialPlugin>()?
         .add_contribution(reference_game_contribution()?)?
         .add_plugin::<ReferenceWavePlugin>()?
         .add_plugin::<ReferenceRuntimeUiPlugin>()
@@ -291,10 +323,6 @@ fn project_recipe_or_panic() -> ProductRecipe {
     project_recipe().expect("the reference project recipe is statically valid")
 }
 
-fn wave_recipe_or_panic() -> ProductRecipe {
-    wave_recipe().expect("the reference wave recipe is statically valid")
-}
-
 #[cfg(feature = "desktop")]
 fn desktop_wave_recipe_or_panic() -> ProductRecipe {
     desktop_wave_recipe().expect("the reference desktop recipe is statically valid")
@@ -306,12 +334,7 @@ pub fn project_headless_run(
     project_root: DirectoryCapability,
     fixed_ticks: NonZeroU32,
 ) -> HeadlessRun<ReferenceProjectSnapshot> {
-    HeadlessRun::from_recipe(
-        project_root,
-        project_recipe_or_panic(),
-        fixed_ticks,
-        vec![project_first_tick_command()],
-    )
+    HeadlessRun::from_recipe(project_root, project_recipe_or_panic(), fixed_ticks)
 }
 
 /// Runs the bundled deterministic wave until a terminal outcome or the fixed-tick limit.
@@ -344,25 +367,9 @@ pub fn bundled_wave_run_with_completed_tick_observer(
     )
 }
 
-/// Runs the ordinary bundled wave while retaining the immutable Runtime UI observation captured
-/// after each complete frame.
-#[doc(hidden)]
-#[must_use]
-pub fn bundled_wave_product_run_with_completed_tick_observer(
-    project_root: DirectoryCapability,
-    maximum_fixed_ticks: NonZeroU32,
-    observer: impl Fn(&WaveSnapshot) + Send + 'static,
-) -> HeadlessRun<ReferenceProductObservation> {
-    HeadlessRun::new(
-        project_root,
-        HeadlessRunIntent::new(maximum_fixed_ticks)
-            .with_recipe(wave_recipe_or_panic())
-            .stop_when(move |observation: &ReferenceProductObservation| {
-                observer(observation.wave());
-                observation.wave().is_terminal()
-            }),
-        bundled_wave_commands(),
-    )
+/// Composes the wave and its bundled movement script for deterministic headless play.
+pub fn bundled_wave_recipe() -> Result<ProductRecipe, ProductRecipeError> {
+    scripted_wave_recipe(bundled_wave_commands())
 }
 
 /// Runs one owned typed semantic-command buffer until the wave terminates or reaches its tick limit.
@@ -370,33 +377,35 @@ pub fn bundled_wave_product_run_with_completed_tick_observer(
 pub fn wave_headless_run(
     project_root: DirectoryCapability,
     maximum_fixed_ticks: NonZeroU32,
-    commands: Vec<GameplayCommandSubmission>,
+    commands: Vec<WaveCommand>,
 ) -> HeadlessRun<WaveSnapshot> {
     HeadlessRun::new(
         project_root,
-        wave_headless_intent(maximum_fixed_ticks),
-        commands,
+        HeadlessRunIntent::new(maximum_fixed_ticks)
+            .with_recipe(
+                scripted_wave_recipe(commands).expect("the reference wave recipe is valid"),
+            )
+            .stop_when(WaveSnapshot::is_terminal),
     )
 }
 
 fn wave_headless_run_with_completed_tick_observer(
     project_root: DirectoryCapability,
     maximum_fixed_ticks: NonZeroU32,
-    commands: Vec<GameplayCommandSubmission>,
+    commands: Vec<WaveCommand>,
     observer: impl Fn(&WaveSnapshot) + Send + 'static,
 ) -> HeadlessRun<WaveSnapshot> {
     HeadlessRun::new(
         project_root,
-        wave_headless_intent_with_completed_tick_observer(maximum_fixed_ticks, observer),
-        commands,
+        HeadlessRunIntent::new(maximum_fixed_ticks)
+            .with_recipe(
+                scripted_wave_recipe(commands).expect("the reference wave recipe is valid"),
+            )
+            .stop_when(move |snapshot: &WaveSnapshot| {
+                observer(snapshot);
+                snapshot.is_terminal()
+            }),
     )
-}
-
-/// Creates the bundled manually playable desktop product action.
-#[cfg(feature = "desktop")]
-#[must_use]
-pub fn bundled_desktop_run(project_root: DirectoryCapability) -> DesktopRun {
-    DesktopRun::new(project_root, wave_desktop_intent())
 }
 
 /// Creates the desktop profile intent over the same committed wave content closure.
@@ -411,26 +420,18 @@ pub fn wave_desktop_intent() -> DesktopRunIntent {
 /// Creates the complete wave run intent over the committed project content.
 #[must_use]
 pub fn wave_headless_intent(maximum_fixed_ticks: NonZeroU32) -> HeadlessRunIntent<WaveSnapshot> {
-    base_wave_headless_intent(maximum_fixed_ticks).stop_when(WaveSnapshot::is_terminal)
+    HeadlessRunIntent::new(maximum_fixed_ticks)
+        .with_recipe(wave_recipe().expect("the reference wave recipe is valid"))
+        .stop_when(WaveSnapshot::is_terminal)
 }
 
-fn wave_headless_intent_with_completed_tick_observer(
-    maximum_fixed_ticks: NonZeroU32,
-    observer: impl Fn(&WaveSnapshot) + Send + 'static,
-) -> HeadlessRunIntent<WaveSnapshot> {
-    base_wave_headless_intent(maximum_fixed_ticks).stop_when(move |snapshot| {
-        observer(snapshot);
-        snapshot.is_terminal()
-    })
-}
-
-fn base_wave_headless_intent(maximum_fixed_ticks: NonZeroU32) -> HeadlessRunIntent<WaveSnapshot> {
-    HeadlessRunIntent::new(maximum_fixed_ticks).with_recipe(wave_recipe_or_panic())
+fn scripted_wave_recipe(commands: Vec<WaveCommand>) -> Result<ProductRecipe, ProductRecipeError> {
+    with_wave_script(wave_recipe()?, commands)
 }
 
 /// Returns the semantic movement task bundled into the first headless playable.
 #[must_use]
-pub fn bundled_wave_commands() -> Vec<GameplayCommandSubmission> {
+pub fn bundled_wave_commands() -> Vec<WaveCommand> {
     vec![
         movement_command(1, 1, MovementDirection::Left)
             .expect("the bundled movement command has non-zero ordering values"),
@@ -442,83 +443,28 @@ pub fn movement_command(
     tick: u64,
     sequence: u64,
     direction: MovementDirection,
-) -> Result<GameplayCommandSubmission, MovementCommandError> {
-    let tick = GameplayCommandTick::new(tick).ok_or(MovementCommandError::ZeroTick)?;
-    let sequence =
-        GameplayCommandSourceSequence::new(sequence).ok_or(MovementCommandError::ZeroSequence)?;
-    Ok(GameplayCommandSubmission::new(
+) -> Result<WaveCommand, MovementCommandError> {
+    let tick = NonZeroU64::new(tick).ok_or(MovementCommandError::ZeroTick)?;
+    let sequence = NonZeroU64::new(sequence).ok_or(MovementCommandError::ZeroSequence)?;
+    Ok(WaveCommand::new(
         tick,
-        GameplayCommandIngressSource::test(resources::COMMAND_SOURCE)
-            .expect("the movement command source is engine-owned and valid"),
         sequence,
-        movement_draft(direction),
+        WaveIntent::Move {
+            direction,
+            pressed: true,
+        },
     ))
 }
 
 /// Creates one trusted semantic Retry command for adapters, tests, replay, or AI drivers.
-pub fn retry_command(
-    tick: u64,
-    sequence: u64,
-) -> Result<GameplayCommandSubmission, RetryCommandError> {
-    let tick = GameplayCommandTick::new(tick).ok_or(RetryCommandError::ZeroTick)?;
-    let sequence =
-        GameplayCommandSourceSequence::new(sequence).ok_or(RetryCommandError::ZeroSequence)?;
-    Ok(GameplayCommandSubmission::new(
+pub fn retry_command(tick: u64, sequence: u64) -> Result<WaveCommand, RetryCommandError> {
+    let tick = NonZeroU64::new(tick).ok_or(RetryCommandError::ZeroTick)?;
+    let sequence = NonZeroU64::new(sequence).ok_or(RetryCommandError::ZeroSequence)?;
+    Ok(WaveCommand::new(
         tick,
-        GameplayCommandIngressSource::test(resources::COMMAND_SOURCE)
-            .expect("the retry command source is engine-owned and valid"),
         sequence,
-        retry_draft(),
+        WaveIntent::Retry { ui_sequence: None },
     ))
-}
-
-fn movement_draft(direction: MovementDirection) -> GameplayCommandDraft {
-    movement_intent_draft(direction, true)
-}
-
-#[cfg(feature = "desktop")]
-fn movement_release_draft(direction: MovementDirection) -> GameplayCommandDraft {
-    movement_intent_draft(direction, false)
-}
-
-fn movement_intent_draft(direction: MovementDirection, pressed: bool) -> GameplayCommandDraft {
-    let (x, y) = direction.velocity();
-    let mut payload = GameplayCommandPayload::new();
-    payload
-        .insert(resources::MOVE_X_FIELD, GameplayCommandValue::I64(x))
-        .expect("the engine-owned movement payload is bounded");
-    payload
-        .insert(resources::MOVE_Y_FIELD, GameplayCommandValue::I64(y))
-        .expect("the engine-owned movement payload is bounded");
-    payload
-        .insert(
-            resources::MOVE_PRESSED_FIELD,
-            GameplayCommandValue::Bool(pressed),
-        )
-        .expect("the engine-owned movement payload is bounded");
-    GameplayCommandDraft::new(
-        GameplayCommandTypeId::new(resources::MOVE_COMMAND_TYPE)
-            .expect("the movement command type is engine-owned and valid"),
-    )
-    .with_payload(payload)
-}
-
-fn retry_draft() -> GameplayCommandDraft {
-    GameplayCommandDraft::new(
-        GameplayCommandTypeId::new(resources::RETRY_COMMAND_TYPE)
-            .expect("the retry command type is engine-owned and valid"),
-    )
-}
-
-fn retry_draft_for_ui_action(sequence: u64) -> GameplayCommandDraft {
-    let mut payload = GameplayCommandPayload::new();
-    payload
-        .insert(
-            resources::RETRY_UI_ACTION_SEQUENCE_FIELD,
-            GameplayCommandValue::String(sequence.to_string()),
-        )
-        .expect("the engine-owned Retry cause payload is bounded");
-    retry_draft().with_payload(payload)
 }
 
 /// Creates the reference game's project-backed run intent.
@@ -527,21 +473,6 @@ pub fn project_headless_intent(
     fixed_ticks: NonZeroU32,
 ) -> HeadlessRunIntent<ReferenceProjectSnapshot> {
     HeadlessRunIntent::new(fixed_ticks).with_recipe(project_recipe_or_panic())
-}
-
-/// Returns the first semantic input used by the committed reference task.
-#[must_use]
-pub fn project_first_tick_command() -> GameplayCommandSubmission {
-    GameplayCommandSubmission::new(
-        GameplayCommandTick::new(1).expect("the reference command tick is non-zero"),
-        GameplayCommandIngressSource::test(REFERENCE_FIRST_TICK_COMMAND_SOURCE)
-            .expect("the reference command source is engine-owned and valid"),
-        GameplayCommandSourceSequence::new(1).expect("the reference command sequence is non-zero"),
-        GameplayCommandDraft::new(
-            GameplayCommandTypeId::new(REFERENCE_FIRST_TICK_COMMAND_TYPE)
-                .expect("the reference command type is engine-owned and valid"),
-        ),
-    )
 }
 
 fn reference_game_schema_v1() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError>
@@ -671,8 +602,9 @@ pub struct ReferenceProjectSnapshot {
     pub enemy_hit_points: i64,
     pub weapon_remaining_ticks: u64,
     pub commands_seen: u64,
-    pub first_command_key: Option<GameplayCommandKey>,
-    pub first_command_type: Option<GameplayCommandTypeId>,
+    pub first_command_tick: Option<u64>,
+    pub first_command_source: Option<&'static str>,
+    pub first_command_type: Option<&'static str>,
     pub runtime_only_entities: u64,
     pub unbound_gameplay_components: u64,
 }

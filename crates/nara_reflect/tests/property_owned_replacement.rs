@@ -2,11 +2,11 @@ use std::mem::size_of;
 
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_reflect::{
-    __private::ComponentPropertyAdmissionError, ComponentCodecError, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldSchema, ComponentPropertyError, ComponentPropertyKey,
-    ComponentPropertyPath, ComponentPropertyStep, ComponentSchema, ComponentSchemaVersion,
-    ComponentShapeMember, ComponentTypeId, ComponentValue, ComponentValueKind,
-    ComponentValueMaterializationLimits, ComponentValueShape, replace_component_property,
+    ComponentCodecError, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+    ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep,
+    ComponentSchema, ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId, ComponentValue,
+    ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
+    property::ComponentPropertyAdmissionError, replace_component_property,
     resolve_component_property, validate_component_value,
 };
 

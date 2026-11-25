@@ -1,13 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use nara_ecs::{Entity, World};
-use nara_hierarchy::Children;
-use nara_scene::SceneEntitySource;
-use nara_ui_kernel::{
+use crate::kernel::{
     UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiKey, UiKeyError, UiLocalKey,
     UiRootDiagnostic, UiRootKey,
 };
-use nara_ui_widgets::{UiButton as KernelButton, UiButtonState, UiWidgetError};
+use crate::widgets::{UiButton as KernelButton, UiButtonState, UiWidgetError};
+use nara_ecs::{Entity, World};
+use nara_scene::{SceneEntitySource, spatial::Children};
 use thiserror::Error;
 
 use crate::{
@@ -64,7 +63,7 @@ pub(super) fn project_authoring(
     let mut roots = Vec::new();
     let mut root_keys = BTreeSet::new();
     let mut identities = PersistentKeyProjection::default();
-    let maximum_roots = nara_ui_kernel::UiLimits::default().max_roots();
+    let maximum_roots = crate::kernel::UiLimits::default().max_roots();
     for entity in ordered_entities.iter().copied() {
         let Some(root) = world.get::<UiRoot>(entity).copied() else {
             continue;
@@ -131,8 +130,7 @@ pub(super) fn project_authoring(
         let Some(node) = world.get::<UiNode>(entity).copied() else {
             let message = "Every UiRoot entity must also carry UiNode authoring data";
             push_diagnostic(diagnostics, "root-node-missing", message);
-            builder = nara_ui_kernel::__private::with_rejected_root(
-                builder,
+            builder = builder.with_rejected_root(
                 root_key,
                 root.layer(),
                 0,
@@ -175,8 +173,7 @@ pub(super) fn project_authoring(
                 if matches!(error, ProjectionError::NodeLimitExceeded { .. }) {
                     return None;
                 }
-                builder = nara_ui_kernel::__private::with_rejected_root(
-                    builder,
+                builder = builder.with_rejected_root(
                     root_key,
                     root.layer(),
                     source_node_count,
@@ -211,7 +208,7 @@ fn count_projected_root_nodes(
         }
         admit_projected_node(&mut projected_nodes, maximum_nodes)?;
         if let Some(children) = world.get::<Children>(entity) {
-            pending.extend(children.iter().rev());
+            pending.extend(children.iter().rev().copied());
         }
     }
     Ok(projected_nodes)
@@ -256,7 +253,7 @@ fn project_root<'a>(
     projected_nodes: &mut usize,
     maximum_nodes: usize,
     diagnostics: &mut Vec<UiAdapterDiagnostic>,
-) -> Result<nara_ui_kernel::UiRoot, ProjectionError> {
+) -> Result<crate::kernel::UiRoot, ProjectionError> {
     admit_projected_node(projected_nodes, maximum_nodes)?;
 
     if world.get::<UiButton>(entity).is_some() {
@@ -267,7 +264,7 @@ fn project_root<'a>(
         );
         return Err(ProjectionError::RootButtonUnsupported);
     }
-    let mut projected = nara_ui_kernel::UiRoot::new(root_key.clone(), root.layer(), node.style());
+    let mut projected = crate::kernel::UiRoot::new(root_key.clone(), root.layer(), node.style());
     if let Some(visual) = world.get::<UiVisual>(entity) {
         projected = projected.with_visual(visual.kernel());
     }
@@ -304,7 +301,7 @@ fn project_children<'a>(
     maximum_nodes: usize,
     diagnostics: &mut Vec<UiAdapterDiagnostic>,
     depth: usize,
-) -> Result<Vec<nara_ui_kernel::UiNode>, ProjectionError> {
+) -> Result<Vec<crate::kernel::UiNode>, ProjectionError> {
     if depth > MAX_PROJECTION_DEPTH {
         return Err(ProjectionError::DepthLimitExceeded {
             maximum: MAX_PROJECTION_DEPTH,
@@ -314,7 +311,7 @@ fn project_children<'a>(
         return Ok(Vec::new());
     };
     let mut projected = Vec::new();
-    for child in children.iter() {
+    for &child in children.iter() {
         if world.get::<UiRoot>(child).is_some() {
             continue;
         }
@@ -384,7 +381,7 @@ fn project_children<'a>(
             buttons.insert(key, description);
             authored
         } else {
-            let mut authored = nara_ui_kernel::UiNode::new(node.style());
+            let mut authored = crate::kernel::UiNode::new(node.style());
             if let Some(local_key) = local_key {
                 authored = authored.with_key(local_key);
             }

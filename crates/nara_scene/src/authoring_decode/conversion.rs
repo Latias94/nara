@@ -7,10 +7,11 @@
 use nara_reflect::ComponentValueKind;
 use std::mem::size_of;
 
-use nara_reflect::__private::{
-    AssetReferenceCollectionError, EntityReferencePlanError,
-    collect_declared_effective_asset_references_with_admission,
-    plan_declared_entity_references_with_admission,
+use nara_reflect::{
+    asset_reference::{
+        AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
+    },
+    entity_reference::{EntityReferencePlanError, plan_declared_entity_references_with_admission},
 };
 
 use super::*;

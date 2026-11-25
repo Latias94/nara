@@ -44,12 +44,16 @@ impl Fixture {
 
     fn with_kind(count: usize, kind: AssetSourceKind) -> Self {
         let mut app = App::new();
-        app.insert_resource(
-            nara_tasks::TaskPools::inline_for_tests(nara_tasks::TaskPoolConfig::default()).unwrap(),
-        )
-        .unwrap();
+        app
+            .insert_resource(
+                nara_app::tasks::TaskPools::inline_for_tests(
+                    nara_app::tasks::TaskPoolConfig::default(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
         app.add_plugins((
-            nara_tasks::TaskPlugin::default(),
+            nara_app::tasks::TaskPlugin::default(),
             AssetPlugin,
             AssetSourcePlugin,
         ))

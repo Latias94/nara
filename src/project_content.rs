@@ -22,23 +22,23 @@ use std::{
     sync::Arc,
 };
 
+use crate::fs::{ContentDigest, DirectoryCapability, FsError, FsOperation, RelativePath};
 use nara_asset::{
     AssetMetaCandidate, AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetPathScope,
     AssetProductRef, AssetRecord, AssetRef, AssetReferenceDemand, AssetReferenceResolver,
     AssetSourceKind, AssetSourcePath, ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::ByteLimit;
-use nara_diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
-    PublicDiagnosticIdentifier, SafeSummary,
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
+    PublicDiagnosticIdentifier, ReportDiagnostic as Diagnostic, SafeSummary,
 };
-use nara_fs::{ContentDigest, DirectoryCapability, FsError, FsOperation, RelativePath};
 use nara_reflect::{
-    __private::{
-        AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
-    },
     ComponentValueMaterializationLimits, DeclaredAssetReference, DeclaredAssetReferenceError,
     SchemaCompositionFingerprint,
+    asset_reference::{
+        AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
+    },
 };
 use nara_render::image::{
     ImageAsset, ImageBytesImportRequest, ImageImportError, ImageImportMemoryPlan,
@@ -95,7 +95,7 @@ use scenes::pending_scene_source_work_bytes;
 pub(crate) use source_observations::{ProjectSceneLoadAttempt, ProjectSourceObservations};
 use source_readiness::SourceReadiness;
 
-// nara_fs relative traversal retains at most one intermediate handle while opening the next, and
+// Capability-based traversal retains at most one intermediate handle while opening the next, and
 // bounded reads clone the opened file for the reader. Reserve both slots before either operation.
 const RELATIVE_OPEN_HANDLE_PEAK: usize = 2;
 // Exact Linux traversal additionally holds an independent native directory cursor.
@@ -4188,17 +4188,17 @@ mod tests {
         },
     };
 
+    use crate::fs::{
+        CapabilityRights, ContentDigest, DirectoryCapability, HostCapabilityOptions, RelativePath,
+        TrustMode,
+    };
     use nara_app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
     use nara_asset::{
         AssetMeta, AssetMetaIdentity, AssetPath, AssetProductRef, AssetRef, AssetSourceKind,
         AssetSourcePath, ImportedProductId, StableAssetId,
     };
     use nara_core::ByteLimit;
-    use nara_fs::{
-        CapabilityRights, ContentDigest, DirectoryCapability, HostCapabilityOptions, RelativePath,
-        TrustMode,
-    };
-    use nara_identity::SceneEntityId;
+    use nara_ecs::identity::SceneEntityId;
     use nara_reflect::{
         AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
         ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,

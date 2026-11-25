@@ -136,7 +136,7 @@ impl RuntimeContentBase {
 
 #[cfg(feature = "desktop-winit")]
 pub(super) fn validate_startup_keyboard(input: &ActionMapAsset) -> Result<(), RuntimeContentError> {
-    nara_winit::validate_action_map_keyboard(input.definition()).map_err(|binding| {
+    nara_window::winit::validate_action_map_keyboard(input.definition()).map_err(|binding| {
         RuntimeContentError::UnsupportedKeyboardBinding {
             product: input.product(),
             binding,

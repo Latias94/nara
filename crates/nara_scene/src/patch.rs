@@ -2,8 +2,8 @@
 use std::collections::BTreeMap;
 
 use nara_asset::{AssetRef, AssetReferenceResolver};
+use nara_core::diagnostic::{DiagnosticReport, ReportDiagnostic as Diagnostic};
 use nara_core::{ByteLimit, ItemLimit};
-use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::{
     ComponentCapability, ComponentDecodeContext, ComponentFieldId, ComponentFieldPath,
     ComponentFieldPathSegment, ComponentFieldSchema, ComponentProjectionError,
@@ -965,7 +965,7 @@ pub(crate) fn bounded_expanded_component_records_cost<'a>(
             }),
         ) {
             cost.structural_logical_bytes = cost.structural_logical_bytes.saturating_add(key_bytes);
-            let value_cost = nara_reflect::__private::validate_value_materialization_budget(
+            let value_cost = nara_reflect::effective::validate_value_materialization_budget(
                 value,
                 value_limits.remaining(cost.value_cost.nodes(), cost.logical_bytes()),
             )

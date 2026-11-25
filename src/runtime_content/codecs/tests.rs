@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::fs::ContentDigest;
 use nara_asset::{AssetReferenceDemand, AssetRuntimeError, ImportedProductId, StableAssetId};
 use nara_core::ByteLimit;
-use nara_fs::ContentDigest;
 
 use super::*;
 

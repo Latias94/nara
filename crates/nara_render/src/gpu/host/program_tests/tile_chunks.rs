@@ -15,10 +15,7 @@ use nara_app::{App, CoreStage, RealTime, RuntimeInstance};
 use nara_asset::{AssetEvents, AssetStates, Assets, Handle};
 use nara_core::{Color, Vec2};
 use nara_ecs::{Query, Res, ResMut};
-use nara_hierarchy::{
-    HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
-};
-use nara_transform::Transform2d;
+use nara_scene::spatial::Transform2d;
 use std::{sync::Arc, time::Duration};
 
 const BLACK: [u8; 4] = [0, 0, 0, 255];
@@ -33,8 +30,7 @@ fn native_stock_tile_chunks_upload_only_changed_instances() {
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
-        nara_hierarchy::HierarchyPlugin,
-        nara_transform::TransformPlugin,
+        nara_scene::spatial::SpatialPlugin,
         crate::RenderComponentsPlugin,
         crate::RenderPlugin::default(),
         crate::image::ImagePreparePlugin,
@@ -59,18 +55,16 @@ fn native_stock_tile_chunks_upload_only_changed_instances() {
     let image_target = RenderImage2d::allocate_handle().unwrap();
     let target = RenderImagePacket::new(image_target, Extent2d::new(64, 64).unwrap()).unwrap();
     let world = app.world_mut().unwrap();
-    let camera = world
-        .spawn((
-            Camera2d {
-                target: RenderTarget::Image(image_target),
-                viewport: Some(ViewportRect::new(0, 0, 64, 64).unwrap()),
-                viewport_height: 64.0,
-                clear_color: Some(Color::BLACK),
-                ..Default::default()
-            },
-            Transform2d::default(),
-        ))
-        .id();
+    world.spawn((
+        Camera2d {
+            target: RenderTarget::Image(image_target),
+            viewport: Some(ViewportRect::new(0, 0, 64, 64).unwrap()),
+            viewport_height: 64.0,
+            clear_color: Some(Color::BLACK),
+            ..Default::default()
+        },
+        Transform2d::default(),
+    ));
     let lower_cells = [TileCoord::new(0, 31), TileCoord::new(1, 31)];
     let upper_cells = [TileCoord::new(0, 32), TileCoord::new(1, 32)];
     let mut tilemap = Tilemap::new(Vec2::splat(4.0)).with_tileset(tileset);
@@ -84,12 +78,6 @@ fn native_stock_tile_chunks_upload_only_changed_instances() {
             Transform2d::from_translation(Vec2::new(-16.0, -128.0)),
         ))
         .id();
-    HierarchyWriter::new(world)
-        .apply_batch(&[camera, tilemap].map(|entity| HierarchyOperation::Place {
-            entity,
-            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-        }))
-        .unwrap();
     app.add_systems(
         CoreStage::Update,
         move |time: Res<RealTime>,

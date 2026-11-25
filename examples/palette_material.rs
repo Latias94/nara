@@ -64,7 +64,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         materials.prepare_update(MATERIAL_ID, std::slice::from_ref(&shader_path), read_shader)?;
     materials.publish(&prepared, read_shader)?;
     app.insert_resource(materials)?;
-    app.insert_resource(nara::transform::FixedTransformInterpolation)?;
     app.add_systems(StartupStage::Scene, setup_scene)?;
     app.add_systems(
         CoreStage::FixedUpdate,

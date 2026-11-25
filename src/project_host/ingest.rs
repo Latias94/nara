@@ -1,11 +1,11 @@
 use std::{fmt, io::Read};
 
-use nara_diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
-    PublicDiagnosticIdentifier, SafeSummary,
-};
-use nara_fs::{
+use crate::fs::{
     ContentDigest, FileCapability, FileIdentity, FsError, FsOperation, PathValidationError,
+};
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
+    PublicDiagnosticIdentifier, ReportDiagnostic as Diagnostic, SafeSummary,
 };
 use nara_project::{
     DEFAULT_MANIFEST_BYTE_LIMIT, EffectiveProjectSettings, EffectiveRuntimeConfiguration,
@@ -334,7 +334,7 @@ pub(super) fn validate_runtime_capabilities(
 fn project_settings_lineage(
     manifest: ContentDigest,
     profile: Option<&str>,
-    project_root_identity: Option<nara_fs::FileIdentity>,
+    project_root_identity: Option<crate::fs::FileIdentity>,
 ) -> ProjectSettingsLineage {
     let profile = profile.map(|profile| ContentDigest::of_bytes(profile.as_bytes()));
     let mut framed = Vec::with_capacity(96);

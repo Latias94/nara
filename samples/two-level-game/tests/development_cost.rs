@@ -256,12 +256,11 @@ fn production_desktop_records_complete_no_edit_body_and_structure_costs() {
             }
         }));
         if let Err(cleanup) = cleanup {
-            let root = fixture.root.clone();
-            std::mem::forget((host, fixture));
             eprintln!(
-                "development cost retains original cleanup owners at {}",
-                root.display()
+                "development cost: explicit cleanup failed for {}",
+                fixture.root.display()
             );
+            drop(host);
             resume_unwind(cleanup);
         }
         drop(host);

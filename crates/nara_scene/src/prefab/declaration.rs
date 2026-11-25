@@ -1,7 +1,7 @@
 //! Source declaration selectors and disposable compilation observations.
 
 use nara_reflect::{
-    __private::component_values_exactly_match, ComponentSchemaVersion, ComponentTypeId,
+    ComponentSchemaVersion, ComponentTypeId, schema::component_values_exactly_match,
 };
 
 use crate::{

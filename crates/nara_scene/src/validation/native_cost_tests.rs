@@ -1,8 +1,8 @@
 use std::convert::Infallible;
 
 use nara_core::{ByteLimit, ItemLimit};
-use nara_identity::{AuthoredEntityReference, ReferenceInputId};
-use nara_reflect::__private::{
+use nara_ecs::identity::{AuthoredEntityReference, ReferenceInputId};
+use nara_reflect::effective::{
     EffectiveValueAdmissionError, freeze_component_defaults,
     validate_native_component_value_references_with_admission,
 };

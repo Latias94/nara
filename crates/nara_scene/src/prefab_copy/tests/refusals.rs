@@ -210,9 +210,10 @@ fn dormant_unknown_future_or_wrong_owner_records_still_refuse_copying() {
 #[test]
 fn persistent_references_and_absent_reference_defaults_are_refused() {
     let persistent = nara_reflect::EntityReference::Persistent {
-        entity: nara_identity::PersistentRuntimeReference {
-            namespace: nara_identity::PersistentRuntimeNamespaceId::new("test.external").unwrap(),
-            entity: nara_identity::PersistentRuntimeId::parse_str(
+        entity: nara_ecs::identity::PersistentRuntimeReference {
+            namespace: nara_ecs::identity::PersistentRuntimeNamespaceId::new("test.external")
+                .unwrap(),
+            entity: nara_ecs::identity::PersistentRuntimeId::parse_str(
                 "00000000-0000-4000-8000-000000000033",
             )
             .unwrap(),

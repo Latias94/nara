@@ -31,8 +31,10 @@ use nara::{
         ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
         ComponentSchemaVersion, ComponentTypeId,
     },
-    scene::{SCENE_COMPONENTS_PLUGIN_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER_ID},
-    transform::{TRANSFORM_SCHEMA_PROVIDER_ID, TransformPlugin},
+    scene::{
+        SCENE_COMPONENTS_PLUGIN_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER_ID,
+        TRANSFORM_SCHEMA_PROVIDER_ID, TransformComponentsPlugin,
+    },
 };
 
 #[cfg(all(
@@ -1010,7 +1012,7 @@ fn product_recipe_rejects_duplicate_plugins_and_mismatched_provider_declarations
     );
 
     let error = SchemaContribution::<CountedSchemaProviderPlugin>::for_default([
-        nara::transform::TRANSFORM_SCHEMA_PROVIDER,
+        nara::scene::TRANSFORM_SCHEMA_PROVIDER,
     ])
     .unwrap_err();
     assert!(matches!(
@@ -1213,7 +1215,7 @@ fn file_backed_schema_provider_callbacks_run_once_in_the_private_candidate() {
     COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
-    let request = project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+    let request = project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
         PluginDefinition::for_default::<CountedSchemaProviderPlugin>(),
     );
     let mut providers = built_in_schema_providers();
@@ -1249,7 +1251,7 @@ fn distinct_definitions_for_one_owner_reject_before_selected_callbacks() {
     COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
-    let request = project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+    let request = project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
         PluginDefinition::for_default::<CountedSchemaProviderPlugin>(),
     );
     let mut providers = built_in_schema_providers();
@@ -1303,9 +1305,10 @@ fn schema_source_failure_rejects_before_any_selected_callback() {
     ] {
         COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
         COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
-        let request = project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
-            PluginDefinition::for_default::<CountedSchemaProviderPlugin>(),
-        );
+        let request = project_runtime_plugins(&candidate)
+            .insert_after::<TransformComponentsPlugin>(PluginDefinition::for_default::<
+                CountedSchemaProviderPlugin,
+            >());
         let mut providers = built_in_schema_providers();
         providers.extend([
             counted_schema_provider(),
@@ -1456,13 +1459,14 @@ fn validation_rejection_and_panic_have_direct_and_file_backed_parity() {
         assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 0);
 
         COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
-        let request = project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
-            PluginDefinition::infallible::<ReceiptValidatingSchemaProviderPlugin, _>(
-                nara::app::PluginDefinitionId::new("test.schema-provider.validation-parity", 1),
-                configuration,
-                move || ReceiptValidatingSchemaProviderPlugin { provider },
-            ),
-        );
+        let request =
+            project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
+                PluginDefinition::infallible::<ReceiptValidatingSchemaProviderPlugin, _>(
+                    nara::app::PluginDefinitionId::new("test.schema-provider.validation-parity", 1),
+                    configuration,
+                    move || ReceiptValidatingSchemaProviderPlugin { provider },
+                ),
+            );
         let mut providers = built_in_schema_providers();
         providers.push(provider);
         let file_error = resolve_runtime_plan(&candidate, request, providers).unwrap_err();
@@ -1519,15 +1523,16 @@ fn file_backed_candidate_rejects_divergent_binding_codec_and_migration_receipts(
             empty_schema_catalog_source,
             panic_schema_provider,
         );
-        let request = project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
-            PluginDefinition::infallible::<ReceiptValidatingSchemaProviderPlugin, _>(
-                nara::app::PluginDefinitionId::new("test.schema-provider.receipt-check", 1),
-                configuration,
-                move || ReceiptValidatingSchemaProviderPlugin {
-                    provider: candidate_provider,
-                },
-            ),
-        );
+        let request =
+            project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
+                PluginDefinition::infallible::<ReceiptValidatingSchemaProviderPlugin, _>(
+                    nara::app::PluginDefinitionId::new("test.schema-provider.receipt-check", 1),
+                    configuration,
+                    move || ReceiptValidatingSchemaProviderPlugin {
+                        provider: candidate_provider,
+                    },
+                ),
+            );
         let mut providers = built_in_schema_providers();
         providers.push(admitted);
         let plan = resolve_runtime_plan(&candidate, request, providers).unwrap();
@@ -1582,7 +1587,7 @@ fn compiled_but_unrequested_plugin_capability_rejects_in_composition_phase() {
 
     let error = resolve_runtime_plan(
         &candidate,
-        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+        project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
             PluginDefinition::for_default::<ProductCapabilityPlugin>(),
         ),
         built_in_schema_providers(),
@@ -1612,7 +1617,7 @@ fn unknown_plugin_product_capability_rejects_in_composition_phase() {
 
     let error = resolve_runtime_plan(
         &candidate,
-        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+        project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
             PluginDefinition::for_default::<UnknownProductCapabilityPlugin>(),
         ),
         built_in_schema_providers(),
@@ -1635,7 +1640,7 @@ fn unrequested_product_capability_alternatives_reject_as_one_normalized_clause()
 
     let error = resolve_runtime_plan(
         &candidate,
-        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+        project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
             PluginDefinition::for_default::<AnyProductCapabilityPlugin>(),
         ),
         built_in_schema_providers(),
@@ -1661,7 +1666,7 @@ fn all_of_and_any_of_product_requirements_are_combined_with_logical_and() {
 
     let error = resolve_runtime_plan(
         &candidate,
-        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+        project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
             PluginDefinition::for_default::<AllAndAnyProductCapabilityPlugin>(),
         ),
         built_in_schema_providers(),
@@ -1684,7 +1689,7 @@ fn all_of_clause_rejects_even_when_the_any_of_clause_matches() {
 
     let error = resolve_runtime_plan(
         &candidate,
-        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+        project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
             PluginDefinition::for_default::<MissingAllWithMatchingAnyProductCapabilityPlugin>(),
         ),
         built_in_schema_providers(),
@@ -1707,7 +1712,7 @@ fn unknown_product_capability_alternative_rejects_even_when_another_alternative_
 
     let error = resolve_runtime_plan(
         &candidate,
-        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+        project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
             PluginDefinition::for_default::<UnknownAnyProductCapabilityPlugin>(),
         ),
         built_in_schema_providers(),
@@ -1749,7 +1754,7 @@ requested = ["runtime-2d"]
 
     let plan = resolve_runtime_plan(
         &candidate,
-        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+        project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
             PluginDefinition::for_default::<AnyProductCapabilityPlugin>(),
         ),
         built_in_schema_providers(),
@@ -1788,7 +1793,7 @@ requested = ["runtime-2d", "runtime-ui"]
 
     let plan = resolve_runtime_plan(
         &candidate,
-        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+        project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
             PluginDefinition::for_default::<AnyProductCapabilityPlugin>(),
         ),
         built_in_schema_providers(),
@@ -1936,8 +1941,9 @@ fn missing_schema_provider_rejects_before_a_plan_is_published_and_can_be_correct
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
     let plugins = || {
-        project_runtime_plugins(&candidate)
-            .insert_after::<TransformPlugin>(PluginDefinition::for_default::<SchemaProviderPlugin>())
+        project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
+            PluginDefinition::for_default::<SchemaProviderPlugin>(),
+        )
     };
 
     let error =
@@ -2143,7 +2149,9 @@ fn multiple_plugins_may_select_one_identical_schema_provider() {
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
     let request = project_runtime_plugins(&candidate)
-        .insert_after::<TransformPlugin>(PluginDefinition::for_default::<SchemaProviderPlugin>())
+        .insert_after::<TransformComponentsPlugin>(PluginDefinition::for_default::<
+            SchemaProviderPlugin,
+        >())
         .insert_after::<SchemaProviderPlugin>(PluginDefinition::for_default::<
             SecondSchemaProviderPlugin,
         >());
@@ -2170,8 +2178,9 @@ fn multiple_plugins_may_select_one_identical_schema_provider() {
 fn schema_provider_callback_rejection_preserves_the_composition_phase() {
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
-    let request = project_runtime_plugins(&candidate)
-        .insert_after::<TransformPlugin>(PluginDefinition::for_default::<SchemaProviderPlugin>());
+    let request = project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
+        PluginDefinition::for_default::<SchemaProviderPlugin>(),
+    );
     let mut providers = built_in_schema_providers();
     providers.push(ComponentSchemaProviderDefinition::new(
         TEST_SCHEMA_OWNER_ID,
@@ -2197,7 +2206,7 @@ fn schema_provider_panic_is_typed_and_a_corrected_binding_can_retry() {
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
     let request = || {
-        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+        project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
             PluginDefinition::for_default::<SchemaProviderPlugin>(),
         )
     };
@@ -2232,8 +2241,9 @@ fn schema_provider_panic_is_typed_and_a_corrected_binding_can_retry() {
 fn owner_candidate_freeze_failure_does_not_publish_a_runtime_plan() {
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
-    let request = project_runtime_plugins(&candidate)
-        .insert_after::<TransformPlugin>(PluginDefinition::for_default::<SchemaProviderPlugin>());
+    let request = project_runtime_plugins(&candidate).insert_after::<TransformComponentsPlugin>(
+        PluginDefinition::for_default::<SchemaProviderPlugin>(),
+    );
     let mut providers = built_in_schema_providers();
     providers.push(ComponentSchemaProviderDefinition::new(
         TEST_SCHEMA_OWNER_ID,

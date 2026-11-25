@@ -12,8 +12,10 @@ use nara::{
         process::SupervisedProcessCommand,
         project_cook::project_rust_input_inventory,
     },
-    project_workflow::cargo::CargoBuildSelection,
+    project_workflow::{ProjectStarter, cargo::CargoBuildSelection},
 };
+
+use crate::authored_project::create_authored_project;
 
 use super::super::{
     command,
@@ -60,25 +62,12 @@ impl Project {
         let mut custody = Custody::create(checkout.parent().unwrap());
         let parent = custody.directory("independent author");
         let tools = CargoBuildTools::discover_in(&checkout).unwrap();
-        let created = custody.tool(
-            command(
-                Path::new(env!("CARGO_BIN_EXE_nara")),
-                &parent,
-                &tools,
-                &target,
-            )
-            .arguments(["new", "desktop-2d/v2", PROJECT_SLUG, "--parent"])
-            .argument(&parent)
-            .argument("--local-checkout")
-            .argument(&checkout),
-            RUN_TIMEOUT,
+        let root = create_authored_project(
+            &checkout,
+            &parent,
+            PROJECT_SLUG,
+            ProjectStarter::Desktop2dV2,
         );
-        created.assert_success();
-        assert_eq!(
-            created.stdout.trim(),
-            format!("Created {PROJECT_SLUG} from desktop-2d/v2.")
-        );
-        let root = parent.join(PROJECT_SLUG).canonicalize().unwrap();
         assert!(root.starts_with(&custody.root) && !root.starts_with(&checkout));
         let cargo = read_toml(&root.join("Cargo.toml"));
         let cargo_package_name = cargo["package"]["name"].as_str().unwrap().to_owned();
@@ -111,27 +100,6 @@ impl Project {
             binaries,
             cwd,
         }
-    }
-
-    pub(super) fn cli(&mut self, operation: &str, flags: &[&str]) -> Output {
-        self.invoke_cli(operation, flags, BUILD_TIMEOUT)
-    }
-
-    fn invoke_cli(&mut self, operation: &str, flags: &[&str], timeout: Duration) -> Output {
-        let output = self.custody.tool(
-            command(
-                Path::new(env!("CARGO_BIN_EXE_nara")),
-                &self.root,
-                &self.tools,
-                &self.target,
-            )
-            .argument(operation)
-            .argument(&self.root)
-            .arguments(flags.iter().copied()),
-            timeout,
-        );
-        assert!(!output.stdout.contains("push_proof "));
-        output
     }
 
     pub(super) fn build(&mut self, bin: &str, installed: &str, features: &[&str]) -> PathBuf {
@@ -233,23 +201,25 @@ impl Project {
     }
 
     #[cfg(target_os = "windows")]
-    pub(super) fn export_candidate(&mut self) -> PathBuf {
+    pub(super) fn export_candidate(&self) -> PathBuf {
+        use nara::project_tooling::{ProjectToolRequest, ProjectToolSummary, invoke_project_tool};
+
         let parent = self.custody.directory("source export output");
-        let output = self.invoke_cli(
-            "export",
-            &[
-                "--parent",
-                parent.to_str().unwrap(),
-                "--destination",
-                EXPORT_DESTINATION,
-            ],
-            Duration::from_secs(30 * 60),
-        );
-        output.assert_success();
+        let summary = invoke_project_tool(ProjectToolRequest::Export {
+            project: self.root.clone(),
+            parent: parent.clone(),
+            destination: EXPORT_DESTINATION.into(),
+        })
+        .unwrap();
         assert!(
-            output
-                .stdout
-                .contains("through 2 exact product observations.")
+            matches!(
+                summary,
+                ProjectToolSummary::Exported {
+                    product_observations: 2,
+                    ..
+                }
+            ),
+            "{summary:?}"
         );
         parent.join(EXPORT_DESTINATION)
     }

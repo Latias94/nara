@@ -10,6 +10,7 @@ use std::sync::{
 
 use nara_app::{App, RuntimeInstance, StartupStage};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
+use nara_ecs::identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_ecs::{
     Component, Entity, Resource, World,
     bevy_ecs::{
@@ -18,7 +19,6 @@ use nara_ecs::{
         world::DeferredWorld,
     },
 };
-use nara_identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistryBuilder, ComponentRegistryPlugin, ComponentSchema, ComponentSchemaCatalog,

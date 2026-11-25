@@ -8,9 +8,9 @@ mod property_limits;
 mod reference_paths;
 
 use nara_asset::AssetRef;
+use nara_core::diagnostic::{DiagnosticValueRef, ReportDiagnostic as Diagnostic};
 use nara_core::{ByteLimit, ItemLimit};
-use nara_diagnostic::{Diagnostic, DiagnosticValueRef};
-use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
+use nara_ecs::identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentPropertyPath, ComponentRegistryError, ComponentRegistrySnapshot, ComponentSchema,
@@ -836,8 +836,8 @@ fn assert_omitted_default_node_budget(
     #[cfg(feature = "serde")]
     {
         use crate::{
-            __private::{AuthoringAdapterReceipt, try_compile_authoring_scene_with_loader},
             AuthoringSchemaBasis, PrefabSourceResolver, ResolvedPrefabSource,
+            authoring::{AuthoringAdapterReceipt, try_compile_authoring_scene_with_loader},
         };
         use nara_reflect::{AuthoringSchemaBundle, AuthoringSchemaBundleOwner};
         use std::{convert::Infallible, sync::Arc};

@@ -225,7 +225,7 @@ impl MarkerDefinition {
                 || roots.contains(entity) != is_root
                 || world
                     .get::<Children>(entity)
-                    .map_or(&[][..], Children::as_slice)
+                    .map_or(&[][..], |children| &**children)
                     != children.as_slice()
             {
                 return Err(

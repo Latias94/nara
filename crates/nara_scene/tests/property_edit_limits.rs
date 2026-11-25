@@ -10,11 +10,12 @@ use nara_reflect::{
     ComponentValueKind, ComponentValueShape, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringPropertyEdit,
-    AuthoringSchemaBasis, MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringSession, PrefabDocument,
-    PrefabDocumentCandidate, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneFileBudgetKind, SceneFileLimits,
-    SceneFormatError, ScenePatchOperation, SchemaReclassificationKind, SchemaReclassificationWork,
+    AuthoringDocumentSource, AuthoringPropertyEdit, AuthoringSchemaBasis,
+    MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
+    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityRecord, SceneFileBudgetKind, SceneFileLimits, SceneFormatError,
+    ScenePatchOperation, SchemaReclassificationKind, SchemaReclassificationWork,
+    authoring::AuthoringAdapterReceipt,
 };
 
 fn id() -> SceneEntityId {
@@ -230,15 +231,16 @@ fn failed_property_batch_identifies_the_rejected_operation_without_leaking_keys(
     let diagnostic = report.diagnostics.iter().next().unwrap();
     assert!(diagnostic.fields().iter().any(|field| {
         field.key().as_str() == "operation-index"
-            && field.value() == nara_diagnostic::DiagnosticValueRef::Unsigned(1)
+            && field.value() == nara_core::diagnostic::DiagnosticValueRef::Unsigned(1)
     }));
     assert!(diagnostic.fields().iter().any(|field| {
         field.key().as_str() == "property-error-kind"
-            && field.value() == nara_diagnostic::DiagnosticValueRef::Identifier("member-not-found")
+            && field.value()
+                == nara_core::diagnostic::DiagnosticValueRef::Identifier("member-not-found")
     }));
     assert!(diagnostic.fields().iter().any(|field| {
         field.key().as_str() == "property-step-index"
-            && field.value() == nara_diagnostic::DiagnosticValueRef::Unsigned(0)
+            && field.value() == nara_core::diagnostic::DiagnosticValueRef::Unsigned(0)
     }));
     assert_eq!(session.document(), &document());
     assert_eq!(session.revision(), revision);
@@ -269,7 +271,8 @@ fn property_rejections_distinguish_version_and_missing_map_entry_without_private
         assert!(report.diagnostics.iter().any(|diagnostic| {
             diagnostic.fields().iter().any(|field| {
                 field.key().as_str() == "property-error-kind"
-                    && field.value() == nara_diagnostic::DiagnosticValueRef::Identifier(expected)
+                    && field.value()
+                        == nara_core::diagnostic::DiagnosticValueRef::Identifier(expected)
             })
         }));
         let debug = format!("{:?}", report.diagnostics);
@@ -708,7 +711,8 @@ fn assert_range_report(report: &nara_scene::ScenePatchReport) {
             .fields()
             .iter()
             .any(|field| field.key().as_str() == "component-field-id"
-                && field.value() == nara_diagnostic::DiagnosticValueRef::Identifier("weights"))
+                && field.value()
+                    == nara_core::diagnostic::DiagnosticValueRef::Identifier("weights"))
     );
     assert!(!format!("{:?}", report.diagnostics).contains("private-key"));
 }

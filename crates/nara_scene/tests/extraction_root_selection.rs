@@ -1,13 +1,13 @@
 //! Public root-selection continuity across branch extraction, with a separate forest control.
 
 use nara_asset::AssetRef;
-use nara_diagnostic::DiagnosticValueRef;
+use nara_core::diagnostic::DiagnosticValueRef;
 use nara_ecs::World;
-use nara_hierarchy::{Children, HierarchyRoots, Parent};
-use nara_identity::EntityLookup;
+use nara_ecs::identity::EntityLookup;
 use nara_reflect::{
     ComponentRegistryBuilder, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
 };
+use nara_scene::hierarchy::{Children, HierarchyRoots, Parent};
 use nara_scene::{
     CompiledSceneDocument, InMemoryPrefabSourceResolver, Name, PrefabAddition, PrefabDocument,
     PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceBinding,
@@ -462,7 +462,7 @@ fn addition_root_with_a_suppressed_source_namesake_normalizes_through_nested_roo
     assert!(
         world
             .get::<Children>(runtime)
-            .map_or(&[][..], Children::as_slice)
+            .map_or(&[][..], |children| &children[..])
             .is_empty()
     );
     let runtime_source = world.get::<SceneEntitySource>(runtime).unwrap();

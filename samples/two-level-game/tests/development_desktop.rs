@@ -205,11 +205,11 @@ fn production_desktop_host_adopts_real_edits_after_exact_restored_presentation()
     let closed = close_to_completion(&mut host);
     let foreign_closed = close_to_completion(&mut foreign);
     if !closed || !foreign_closed {
-        let root = fixture.root.clone();
-        std::mem::forget((host, foreign, fixture));
+        drop(host);
+        drop(foreign);
         panic!(
-            "desktop development retains incomplete original cleanup at {}",
-            root.display()
+            "desktop development did not complete original cleanup at {}",
+            fixture.root.display()
         );
     }
     for report in host.retirements() {

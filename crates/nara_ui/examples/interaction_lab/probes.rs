@@ -3,8 +3,8 @@ use std::{error::Error, sync::Arc};
 use nara_core::Vec2;
 use nara_ecs::World;
 use nara_input::{
-    __InputDriverEvent, ActionPhase, ButtonDriverInput, InputPointerId, InputSeatId, InputTimeline,
-    InputWindowEvent, InputWindowId, KeyCode, MouseButton, PointerDriverInput,
+    ActionPhase, ButtonDriverInput, InputAdmission, InputIngressError, InputPointerId, InputSeatId,
+    InputTimeline, InputWindowEvent, InputWindowId, KeyCode, MouseButton, PointerDriverInput,
 };
 use nara_ui::{
     advanced::{
@@ -224,16 +224,15 @@ pub(super) fn activate_accessibility(
 }
 
 pub(super) fn invalidate_geometry(app: &mut LabRuntime) -> Result<(), Box<dyn Error>> {
-    admit_input(
-        app,
-        __InputDriverEvent::Window {
-            window: PRIMARY_WINDOW,
-            seat: InputSeatId::PRIMARY,
-            event: InputWindowEvent::Resized {
+    admit_input(app, |timeline| {
+        timeline.admit_window_event(
+            PRIMARY_WINDOW,
+            InputSeatId::PRIMARY,
+            InputWindowEvent::Resized {
                 logical_size: Vec2::new(640.0, 360.0),
             },
-        },
-    )?;
+        )
+    })?;
     app.tick()?;
     Ok(())
 }
@@ -254,14 +253,9 @@ fn admit_keyboard(
     app: &mut LabRuntime,
     input: ButtonDriverInput<KeyCode>,
 ) -> Result<(), Box<dyn Error>> {
-    admit_input(
-        app,
-        __InputDriverEvent::Keyboard {
-            window: PRIMARY_WINDOW,
-            seat: InputSeatId::PRIMARY,
-            input,
-        },
-    )
+    admit_input(app, |timeline| {
+        timeline.admit_keyboard(PRIMARY_WINDOW, InputSeatId::PRIMARY, input)
+    })
 }
 
 fn admit_pointer(
@@ -269,15 +263,14 @@ fn admit_pointer(
     window: InputWindowId,
     position: Vec2,
 ) -> Result<(), Box<dyn Error>> {
-    admit_input(
-        app,
-        __InputDriverEvent::Pointer {
+    admit_input(app, |timeline| {
+        timeline.admit_pointer(
             window,
-            seat: InputSeatId::PRIMARY,
-            pointer: InputPointerId::PRIMARY,
-            input: PointerDriverInput::Moved(position),
-        },
-    )
+            InputSeatId::PRIMARY,
+            InputPointerId::PRIMARY,
+            PointerDriverInput::Moved(position),
+        )
+    })
 }
 
 fn admit_primary_button(
@@ -285,23 +278,24 @@ fn admit_primary_button(
     window: InputWindowId,
     input: ButtonDriverInput<MouseButton>,
 ) -> Result<(), Box<dyn Error>> {
-    admit_input(
-        app,
-        __InputDriverEvent::Mouse {
-            window,
-            seat: InputSeatId::PRIMARY,
-            pointer: InputPointerId::PRIMARY,
-            input,
-        },
-    )
+    admit_input(app, |timeline| {
+        timeline.admit_mouse_button(window, InputSeatId::PRIMARY, InputPointerId::PRIMARY, input)
+    })
 }
 
-fn admit_input(app: &mut LabRuntime, input: __InputDriverEvent) -> Result<(), Box<dyn Error>> {
-    let output = app
-        .runtime_mut()
-        .with_driver_scope(|scope| scope.__apply_port::<InputTimeline>(input))?
-        .output??;
-    assert_eq!(output.admission.admitted(), 1);
+fn admit_input(
+    app: &mut LabRuntime,
+    operation: impl FnOnce(&mut InputTimeline) -> Result<InputAdmission, InputIngressError>,
+) -> Result<(), Box<dyn Error>> {
+    let outcome = app.runtime_mut().with_driver_scope(|scope| {
+        scope.with_world_mut(|world| operation(&mut world.resource_mut::<InputTimeline>()))
+    })?;
+    if let Some(fault) = outcome.post_operation_fault {
+        return Err(Box::new(nara_app::AppRunError::managed_runtime_fault(
+            &fault,
+        )));
+    }
+    assert_eq!(outcome.output?.admitted(), 1);
     Ok(())
 }
 

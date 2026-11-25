@@ -27,7 +27,7 @@ use nara::{
         ComponentCapability, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
         ComponentSchemaVersion, ComponentTypeId, PersistentComponentSchemaOwnerId,
     },
-    transform::TRANSFORM_SCHEMA_PROVIDER_ID,
+    scene::TRANSFORM_SCHEMA_PROVIDER_ID,
 };
 
 #[cfg(feature = "runtime-input")]
@@ -624,7 +624,7 @@ fn runtime_configuration_uses_the_actual_compiled_capability_ceiling() {
 #[test]
 fn runtime_configuration_enforces_the_same_unsupported_default_gate() {
     let font = nara::ui::FontFace::from_bytes(
-        include_bytes!("../crates/nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+        include_bytes!("../crates/nara_ui/tests/text/fixtures/FiraMono-Medium.ttf").to_vec(),
         0,
     )
     .unwrap();

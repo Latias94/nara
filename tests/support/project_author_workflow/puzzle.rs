@@ -32,7 +32,7 @@ pub fn accept() {
     let mut project = Project::create();
     let lockfile = project.root.join("Cargo.lock");
     assert!(!lockfile.exists());
-    project.cli("check", &[]).assert_success();
+    super::check(&project.root, None).unwrap();
     assert!(lockfile.is_file());
     let starter_headless = project.build("headless", "starter-headless", &[]);
     let starter = project.run(&starter_headless, |command| command);
@@ -57,20 +57,15 @@ pub fn accept() {
 
     let game_edit = Instant::now();
     source::install_puzzle(&project.root);
-    let stale = project.cli("schema", &["--check"]);
-    assert!(
-        !stale.receipt.exit().success() && stale.stderr.contains("missing or stale"),
-        "stdout={}\nstderr={}",
-        stale.stdout,
-        stale.stderr
-    );
+    let stale = super::project_failure(super::schema(&project.root, None, false).unwrap_err());
+    assert_eq!(stale.code(), "project.tool.schema-stale");
     assert_eq!(
         fs::read(project.root.join(source::SCHEMA)).unwrap(),
         initial_schema
     );
-    project.cli("schema", &["--write"]).assert_success();
-    project.cli("schema", &["--check"]).assert_success();
-    project.cli("check", &[]).assert_success();
+    assert!(super::schema(&project.root, None, true).unwrap());
+    assert!(!super::schema(&project.root, None, false).unwrap());
+    super::check(&project.root, None).unwrap();
     source::assert_puzzle_schema(&project.root);
 
     let puzzle_headless = project.build("headless", "puzzle-headless", &[]);
@@ -126,7 +121,7 @@ pub fn accept() {
     let input_edit_to_result = input_edit.elapsed();
     let unbound = run_source(&mut project, &puzzle_headless, "keyboard");
     source::assert_snapshots(&unbound.stdout, None, 0);
-    project.cli("check", &[]).assert_success();
+    super::check(&project.root, None).unwrap();
     assert_eq!(snapshot(&project.root, PUZZLE_FILES), puzzle_files);
     assert_eq!(
         snapshot(&project.root, RETAINED_STARTER_FILES),
@@ -178,7 +173,7 @@ pub fn accept() {
 #[cfg(target_os = "windows")]
 pub fn accept_native() {
     let mut project = Project::create();
-    assert_desktop_keyboard_check(&mut project);
+    assert_desktop_keyboard_check(&project);
     let headless = project.build("headless", "headless-with-desktop-feature", &["desktop"]);
     let started = project.run(&headless, |command| command);
     assert_line(&started, "starter_headless: ok fixed_ticks=1");
@@ -197,9 +192,7 @@ pub fn accept_native() {
     let desktop_entry = project.root.join("src/bin/desktop.rs");
     let generated = fs::read(&desktop_entry).unwrap();
     source::install_puzzle(&project.root);
-    project
-        .cli("schema", &["--write", "--profile", "desktop"])
-        .assert_success();
+    assert!(super::schema(&project.root, Some("desktop"), true).unwrap());
     source::assert_puzzle_schema(&project.root);
     assert_eq!(fs::read(desktop_entry).unwrap(), generated);
     verify_first_present(&mut project, "puzzle-desktop");
@@ -216,7 +209,7 @@ pub fn accept_native() {
 }
 
 #[cfg(target_os = "windows")]
-fn assert_desktop_keyboard_check(project: &mut Project) {
+fn assert_desktop_keyboard_check(project: &Project) {
     let input_path = project.root.join(source::INPUT_MAP);
     let initial_input = fs::read(&input_path).unwrap();
     for key in [';', ']'] {
@@ -225,9 +218,7 @@ fn assert_desktop_keyboard_check(project: &mut Project) {
             source::rebind_keyboard_right(&initial_input, key),
         )
         .unwrap();
-        project
-            .cli("check", &["--profile", "desktop"])
-            .assert_success();
+        super::check(&project.root, Some("desktop")).unwrap();
     }
 
     fs::write(
@@ -235,29 +226,16 @@ fn assert_desktop_keyboard_check(project: &mut Project) {
         source::rebind_keyboard_right(&initial_input, DESKTOP_UNSUPPORTED_KEY),
     )
     .unwrap();
-    let rejected = project.cli("check", &["--profile", "desktop"]);
-    assert_eq!(
-        rejected.receipt.exit().code(),
-        Some(1),
-        "stdout={}\nstderr={}",
-        rejected.stdout,
-        rejected.stderr
-    );
-    let location = rejected
-        .stderr
-        .lines()
-        .skip_while(|line| {
-            !line.starts_with("project.content.input-unsupported-keyboard-binding: ")
-        })
-        .nth(1);
-    let expected_location = format!("  at {}", source::INPUT_MAP);
-    assert_eq!(
-        location,
-        Some(expected_location.as_str()),
-        "{}",
-        rejected.stderr
-    );
-    project.cli("check", &[]).assert_success();
+    let rejected =
+        super::project_failure(super::check(&project.root, Some("desktop")).unwrap_err());
+    assert_eq!(rejected.code(), "project.tool.content-rejected");
+    let diagnostic = rejected
+        .diagnostics()
+        .iter()
+        .find(|entry| entry.code() == "project.content.input-unsupported-keyboard-binding")
+        .expect("desktop Check must reject the authored keyboard binding");
+    assert_eq!(diagnostic.project_path(), Some(source::INPUT_MAP));
+    super::check(&project.root, None).unwrap();
     fs::write(input_path, initial_input).unwrap();
 }
 

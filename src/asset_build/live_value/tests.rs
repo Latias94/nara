@@ -8,13 +8,13 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
 use nara_asset::{
     AssetDomain, AssetImportError, AssetImportLimits, AssetImportSource, AssetProductRef,
     AssetRuntimeError, AssetRuntimeLimits, ImportedProductId, SourceAssetImporter, StableAssetId,
 };
+use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
 use nara_core::{ByteLimit, FormatKind, FormatVersion, ItemLimit};
-use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
-use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
 
 use super::*;
 use crate::asset_build::{

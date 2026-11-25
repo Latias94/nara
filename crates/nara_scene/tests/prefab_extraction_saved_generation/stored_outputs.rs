@@ -1,7 +1,7 @@
 //! Independent fresh-basis admission of fixed stored inputs and outputs, without reconstruction.
 
 use super::*;
-use nara_identity::ReferenceInputId;
+use nara_ecs::identity::ReferenceInputId;
 
 struct Stored {
     request: PrefabExtractionRequest,

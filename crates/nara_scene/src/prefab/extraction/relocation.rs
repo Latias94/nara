@@ -5,7 +5,7 @@
 
 use std::{borrow::Cow, mem::size_of};
 
-use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
+use nara_ecs::identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
 
 use crate::{
     PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceBinding, PrefabInstanceHop,

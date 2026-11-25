@@ -39,24 +39,24 @@ use std::{
     sync::Arc,
 };
 
+use crate::fs::{ContentDigest, DirectoryCapability, FileCapability, FsError, RelativePath};
 use nara_asset::{
     AssetDomain, AssetProductRef, AssetRef, AssetReferenceDemand, AssetRuntimeError,
     RuntimeAssetCodec,
 };
 use nara_core::ByteLimit;
-use nara_fs::{ContentDigest, DirectoryCapability, FileCapability, FsError, RelativePath};
 use nara_project::RuntimeConfigurationError;
 use nara_reflect::{
-    __private::{
+    DeclaredAssetReferenceError,
+    asset_reference::{
         AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
     },
-    DeclaredAssetReferenceError,
 };
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneDocumentCandidate, RuntimeSceneError, RuntimeSceneLimits,
 };
 #[cfg(all(feature = "runtime-ui", not(feature = "runtime-2d")))]
-use nara_ui::__private::UI_VISUAL_IMAGE_FIELD_ID;
+use nara_ui::prefab_authoring::UI_VISUAL_IMAGE_FIELD_ID;
 
 use crate::{
     ProductRecipe,
@@ -241,7 +241,7 @@ pub enum RuntimeContentError {
     #[cfg(feature = "desktop-winit")]
     UnsupportedKeyboardBinding {
         product: AssetProductRef,
-        binding: nara_winit::UnsupportedKeyboardBinding,
+        binding: nara_window::winit::UnsupportedKeyboardBinding,
     },
     #[cfg(feature = "runtime-2d")]
     TileSet(nara_render::tilemap::TileSetDescriptorError),

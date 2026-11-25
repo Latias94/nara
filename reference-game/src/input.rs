@@ -1,15 +1,17 @@
 use nara::{
+    app::{FixedUpdateSet, RealTime},
     core::ByteLimit,
-    gameplay::{ActionCommandBinding, ActionCommandMap},
+    ecs::{Res, ResMut, Resource, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs},
     input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapError,
-        ActionMapLimits, ActionMaps, ActionPhase, KeyCode,
+        ActionMapLimits, ActionMaps, ActionPhase, InputSeatId, InputSet, KeyCode, SemanticActions,
     },
-    prelude::{App, PluginError},
+    prelude::{App, CoreStage, PluginError},
 };
 
 use crate::{
-    MovementDirection, REFERENCE_DESKTOP_PLUGIN_ID, movement_draft, movement_release_draft,
+    MovementDirection, REFERENCE_DESKTOP_PLUGIN_ID,
+    wave_input::{WaveInput, WaveIntent, prepare_wave_input},
 };
 
 const MOVE_LEFT_ACTION: &str = "reference-game.move-left";
@@ -64,25 +66,51 @@ pub(crate) fn install_desktop_input(app: &mut App) -> Result<(), PluginError> {
             .expect("action-map state allowance is nonzero"),
     )
     .map_err(action_map_error)?;
-    app.insert_resource(ActionMaps::new(action_map))?;
+    app.insert_resource(ActionMaps::new(action_map))?
+        .init_resource::<MovementInputFrame>()?
+        .add_systems(
+            CoreStage::PreUpdate,
+            collect_movement.after(InputSet::ResolveActions),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            collect_movement
+                .in_set(FixedUpdateSet::Prepare)
+                .before(prepare_wave_input),
+        )?;
+    Ok(())
+}
 
-    {
-        let world = app.world_mut()?;
-        let mut command_map = world.resource_mut::<ActionCommandMap>();
-        for (id, _, _, direction) in bindings {
-            bind_movement(
-                &mut command_map,
-                id,
-                ActionPhase::Started,
-                movement_draft(direction),
-            )?;
-            bind_movement(
-                &mut command_map,
-                id,
-                ActionPhase::Released,
-                movement_release_draft(direction),
-            )?;
+#[derive(Default, Resource)]
+struct MovementInputFrame(Option<u64>);
+
+fn collect_movement(
+    time: Res<RealTime>,
+    mut frame: ResMut<MovementInputFrame>,
+    actions: Res<SemanticActions>,
+    mut input: ResMut<WaveInput>,
+) -> Result<(), BevyError> {
+    if frame.0 == Some(time.frame) {
+        return Ok(());
+    }
+    frame.0 = Some(time.frame);
+    for action in actions.as_slice() {
+        if action.seat != InputSeatId::PRIMARY || action.context != ActionContext::gameplay() {
+            continue;
         }
+        let direction = match action.action.as_str() {
+            MOVE_LEFT_ACTION => MovementDirection::Left,
+            MOVE_RIGHT_ACTION => MovementDirection::Right,
+            MOVE_UP_ACTION => MovementDirection::Up,
+            MOVE_DOWN_ACTION => MovementDirection::Down,
+            _ => continue,
+        };
+        let pressed = match action.phase {
+            ActionPhase::Started => true,
+            ActionPhase::Released => false,
+            _ => continue,
+        };
+        input.push(WaveIntent::Move { direction, pressed })?;
     }
     Ok(())
 }
@@ -92,24 +120,6 @@ fn action_map_error(error: ActionMapError) -> PluginError {
         plugin: REFERENCE_DESKTOP_PLUGIN_ID,
         message: error.to_string(),
     }
-}
-
-fn bind_movement(
-    command_map: &mut ActionCommandMap,
-    action: &'static str,
-    phase: ActionPhase,
-    command: nara::gameplay::GameplayCommandDraft,
-) -> Result<(), PluginError> {
-    command_map
-        .bind(ActionCommandBinding::from_command(
-            action_id(action),
-            phase,
-            command,
-        ))
-        .map_err(|_| PluginError::SetupFailed {
-            plugin: REFERENCE_DESKTOP_PLUGIN_ID,
-            message: "desktop action-command mapping was rejected".to_owned(),
-        })
 }
 
 fn action_id(id: &'static str) -> ActionId {

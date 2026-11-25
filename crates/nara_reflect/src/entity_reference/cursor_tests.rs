@@ -1,17 +1,19 @@
 use std::collections::BTreeMap;
 
-use nara_identity::{
-    AssetSourcePath, AuthoredEntityReference, AuthoredReferenceTarget, PersistentRuntimeId,
+use nara_core::source::{
+    AssetSourcePath, SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin,
+};
+use nara_ecs::identity::{
+    AuthoredEntityReference, AuthoredReferenceTarget, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference, PrefabEntityOrigin,
-    PrefabInstanceHop, ReferenceInputId, SceneEntityId, SourceDocumentKey, SourceDocumentKind,
-    SourceDocumentOrigin,
+    PrefabInstanceHop, ReferenceInputId, SceneEntityId,
 };
 
 use super::*;
 use crate::{
-    __private::{FrozenComponentDefaults, freeze_component_defaults},
     ComponentFieldPathSegment as Segment, ComponentSchemaVersion, ComponentTypeId,
     ComponentValueMaterializationLimits,
+    effective::{FrozenComponentDefaults, freeze_component_defaults},
 };
 
 fn limits(nodes: usize, bytes: usize, depth: usize) -> EntityReferenceTraversalLimits {

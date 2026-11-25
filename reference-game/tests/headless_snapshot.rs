@@ -9,6 +9,7 @@ use nara::{
 };
 use nara_reference_game::{
     EnemySnapshot, ProjectileSnapshot, WaveOutcome, bundled_wave_commands, wave_headless_intent,
+    wave_recipe, with_wave_script,
 };
 use project_content_fixture::{load_project_content, project_root_capability};
 
@@ -16,7 +17,8 @@ use project_content_fixture::{load_project_content, project_root_capability};
 fn authoritative_snapshot_uses_sorted_instance_local_identities() {
     let maximum = NonZeroU32::new(3).unwrap();
     let intent = wave_headless_intent(maximum).stop_when(|snapshot| snapshot.tick == 3);
-    let mut run = HeadlessRun::new(project_root_capability(), intent, bundled_wave_commands());
+    let recipe = with_wave_script(wave_recipe().unwrap(), bundled_wave_commands()).unwrap();
+    let mut run = HeadlessRun::new(project_root_capability(), intent.with_recipe(recipe));
     let snapshot = loop {
         let report = run.execute_bounded();
         match report.outcome() {

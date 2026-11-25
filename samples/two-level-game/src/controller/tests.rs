@@ -1,5 +1,7 @@
-use nara::{ProductConfiguration, ProductRecipe, ProductRecipeEntryKind, ProductRecipeError};
-use nara_gilrs::{GILRS_INPUT_PLUGIN_ID, GamepadRoute, GilrsInputPlugin};
+use nara::{
+    ProductConfiguration, ProductRecipe, ProductRecipeEntryKind, ProductRecipeError,
+    input::{GILRS_INPUT_PLUGIN_ID, GamepadRoute, GilrsInputPlugin},
+};
 
 use super::with_gilrs_input;
 

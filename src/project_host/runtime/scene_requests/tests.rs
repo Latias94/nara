@@ -5,18 +5,18 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara_core::ItemLimit;
-use nara_ecs::bevy_ecs::system::SystemState;
 #[cfg(feature = "runtime-2d")]
-use nara_fs::{
+use crate::fs::{
     CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
 };
-use nara_identity::SceneEntityId;
+use nara_app::tasks::TaskPoolConfig;
+use nara_core::ItemLimit;
+use nara_ecs::bevy_ecs::system::SystemState;
+use nara_ecs::identity::SceneEntityId;
 #[cfg(feature = "runtime-2d")]
 use nara_project::ProductCapability;
 use nara_project::{RuntimeConfiguration, RuntimePreset};
 use nara_scene::{CompiledSceneDocument, SceneDocument, SceneEntityRecord};
-use nara_tasks::TaskPoolConfig;
 
 #[cfg(all(feature = "runtime-2d", target_os = "linux"))]
 use std::fs::File;
@@ -72,7 +72,7 @@ fn source_requests_reject_undeclared_paths_without_queuing_work() {
             world
                 .resource::<TaskPools>()
                 .stats()
-                .for_kind(nara_tasks::TaskPoolKind::Io)
+                .for_kind(nara_app::tasks::TaskPoolKind::Io)
                 .admitted,
             0,
         );
@@ -424,7 +424,7 @@ fn inline_pool_rejects_scene_io_without_queuing_or_loading() {
     assert_eq!(
         pools
             .stats()
-            .for_kind(nara_tasks::TaskPoolKind::Io)
+            .for_kind(nara_app::tasks::TaskPoolKind::Io)
             .admitted,
         0
     );
@@ -660,9 +660,12 @@ fn with_context_world_and_startup(
     app.add_plugins(nara_reflect::preloaded_component_registry_plugin(native))
         .unwrap()
         .add_plugins((
-            nara_scene::SceneComponentsPlugin,
-            nara_hierarchy::HierarchyPlugin,
-            nara_transform::TransformPlugin,
+            (
+                nara_scene::SceneComponentsPlugin,
+                nara_scene::hierarchy::HierarchyPlugin,
+                nara_scene::TransformComponentsPlugin,
+                nara_scene::SpatialPlugin,
+            ),
             #[cfg(feature = "runtime-2d")]
             nara_render::RenderComponentsPlugin,
             #[cfg(feature = "runtime-2d")]
@@ -687,14 +690,12 @@ fn with_context_world_and_startup(
             }
         })
         .unwrap();
-    let mut candidate = nara_app::RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            nara_app::RuntimeObligationLedger::new(),
-            nara_app::RuntimeClosePolicy::default(),
-        )
-        .unwrap();
+    let mut candidate = nara_app::RuntimeCandidate::admit(
+        app.seal().unwrap(),
+        nara_app::RuntimeObligationLedger::new(),
+        nara_app::RuntimeClosePolicy::default(),
+    )
+    .unwrap();
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut World| {

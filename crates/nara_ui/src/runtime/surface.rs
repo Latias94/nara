@@ -1,8 +1,8 @@
-use nara_input::{InputPointerId, InputRouteStamp, InputSeatId, InputWindowId};
-use nara_ui_kernel::{
+use crate::kernel::{
     UiEnvironment, UiEnvironmentError, UiSurfaceContentTransform, UiSurfaceGenerations,
     UiSurfaceId, UiSurfaceRetirementToken,
 };
+use nara_input::{InputPointerId, InputRouteStamp, InputSeatId, InputWindowId};
 use thiserror::Error;
 
 const INITIAL_SURFACE_GENERATION: u64 = 1;

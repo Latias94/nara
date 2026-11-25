@@ -1,9 +1,6 @@
 use super::*;
 use nara_app::{FixedUpdateSet, RuntimeControl, RuntimeControlRequestResult};
 use nara_core::Mat3;
-use nara_transform::{
-    FixedTransformInterpolation, SpatialSnapshotPhase, presented_spatial_snapshot,
-};
 
 const TIMESTEP: Duration = Duration::from_millis(20);
 
@@ -17,7 +14,6 @@ fn moving_camera_app() -> App {
     let mut app = render_app(true);
     app.insert_resource(FixedTime::new(TIMESTEP).unwrap())
         .unwrap();
-    app.insert_resource(FixedTransformInterpolation).unwrap();
     app.add_systems(
         CoreStage::FixedUpdate,
         advance_camera.in_set(FixedUpdateSet::Simulate),
@@ -34,21 +30,15 @@ fn parented_camera_presents_signed_scale_changes_without_suppressing_singular_fa
     let midpoint = TIMESTEP + TIMESTEP / 2;
     let mut rotation_equivalent = None;
     for (scale, angle, expected_center, mirrored) in [
-        (Vec2::new(-1.0, 1.0), 0.0, Vec2::new(7.0, 0.0), true),
-        (Vec2::new(1.0, -1.0), 0.0, Vec2::new(13.0, 0.0), true),
-        (Vec2::splat(-1.0), 0.0, Vec2::new(10.0, -3.0), false),
-        (
-            Vec2::ONE,
-            std::f32::consts::PI,
-            Vec2::new(10.0, -3.0),
-            false,
-        ),
+        (Vec2::new(-1.0, 1.0), 0.0, Vec2::new(17.0, 0.0), true),
+        (Vec2::new(1.0, -1.0), 0.0, Vec2::new(23.0, 0.0), true),
+        (Vec2::splat(-1.0), 0.0, Vec2::new(17.0, 0.0), false),
+        (Vec2::ONE, std::f32::consts::PI, Vec2::new(17.0, 0.0), false),
         (Vec2::new(0.0, 1.0), 0.0, Vec2::ZERO, false),
     ] {
         let mut app = render_app(true);
         app.insert_resource(FixedTime::new(TIMESTEP).unwrap())
             .unwrap();
-        app.insert_resource(FixedTransformInterpolation).unwrap();
         let world = app.world_mut().unwrap();
         let parent = world.spawn(Transform2d::IDENTITY).id();
         let camera = world
@@ -65,6 +55,7 @@ fn parented_camera_presents_signed_scale_changes_without_suppressing_singular_fa
                     translation: Vec2::new(20.0, 0.0),
                     rotation: angle,
                     scale,
+                    ..Transform2d::IDENTITY
                 };
             })
             .in_set(FixedUpdateSet::Simulate),
@@ -100,7 +91,6 @@ fn parented_camera_presents_signed_scale_changes_without_suppressing_singular_fa
         assert_eq!(mid.unwrap().frame().unwrap().status.fixed_tick, 1);
         let sample = assert_current_sample(&runtime);
         assert_eq!(sample.render().interpolation_alpha(), 0.5);
-        assert!(sample.spatial_interpolated());
         let packet = capture_packet(&runtime);
         let view = &packet.views()[0];
         assert_eq!(view.id, first.views()[0].id);
@@ -132,13 +122,12 @@ fn parented_camera_presents_signed_scale_changes_without_suppressing_singular_fa
 }
 
 #[test]
-fn exact_fixed_cut_uses_one_parent_and_child_camera_basis() {
+fn fixed_motion_captures_one_parent_and_child_camera_basis() {
     let large = 2.0_f32.powi(40);
     let small = large.recip();
     let mut app = render_app(true);
     app.insert_resource(FixedTime::new(TIMESTEP).unwrap())
         .unwrap();
-    app.insert_resource(FixedTransformInterpolation).unwrap();
     let world = app.world_mut().unwrap();
     let parent = world
         .spawn(Transform2d {
@@ -186,27 +175,26 @@ fn exact_fixed_cut_uses_one_parent_and_child_camera_basis() {
         0.0
     );
     let boundary = capture_packet(&runtime);
-    assert_eq!(boundary.views()[0].mapping, initial.views()[0].mapping);
-    assert_eq!(boundary.views()[0].id, initial.views()[0].id);
-    runtime.drive(TIMESTEP / 2).unwrap();
-    let interior = capture_packet(&runtime);
     assert!(
-        interior.views()[0]
+        boundary.views()[0]
             .mapping
             .clip_to_world_matrix()
             .determinant()
             < 0.0
     );
+    assert_eq!(boundary.views()[0].id, initial.views()[0].id);
+    runtime.drive(TIMESTEP / 2).unwrap();
+    let interior = capture_packet(&runtime);
+    assert_eq!(interior.views()[0].mapping, boundary.views()[0].mapping);
     assert_eq!(interior.views()[0].id, initial.views()[0].id);
     runtime.finish().unwrap();
 }
 
 #[test]
-fn parented_camera_preserves_a_non_singular_subnormal_midpoint() {
+fn parented_camera_preserves_a_non_singular_basis_with_subnormal_local_scale() {
     let mut app = render_app(true);
     app.insert_resource(FixedTime::new(TIMESTEP).unwrap())
         .unwrap();
-    app.insert_resource(FixedTransformInterpolation).unwrap();
     let world = app.world_mut().unwrap();
     let parent = world
         .spawn(Transform2d {
@@ -277,20 +265,6 @@ fn assert_current_sample(runtime: &RuntimeInstance) -> CapturedRenderTime {
     assert_eq!(sample.fixed(), *world.resource::<FixedTime>());
     assert_eq!(sample.render(), *world.resource::<RenderTime>());
     assert_eq!(sample.settings(), *world.resource::<RuntimeTimeSettings>());
-    assert_eq!(
-        sample.spatial_stamp(),
-        presented_spatial_snapshot(world).unwrap().stamp().unwrap()
-    );
-    assert_eq!(sample.spatial_stamp().frame, sample.real().frame);
-    assert_eq!(sample.spatial_stamp().tick, sample.fixed().tick());
-    assert_eq!(
-        sample.spatial_stamp().runtime_generation,
-        Some(runtime.generation())
-    );
-    assert_eq!(
-        sample.spatial_stamp().phase,
-        SpatialSnapshotPhase::Presented
-    );
     sample
 }
 
@@ -317,7 +291,6 @@ fn extraction_captures_original_scaled_clocks_with_zero_and_multiple_fixed_ticks
     assert_eq!(first.fixed().steps_this_frame(), 0);
     assert_eq!(first.render().remainder(), TIMESTEP / 2);
     assert_eq!(first.render().interpolation_alpha(), 0.5);
-    assert!(!first.spatial_interpolated());
     let old_packet = capture_packet(&runtime);
     let old_views = old_packet.views().to_vec();
     assert_eq!(old_packet.captured_time(), Some(first));
@@ -333,14 +306,13 @@ fn extraction_captures_original_scaled_clocks_with_zero_and_multiple_fixed_ticks
     assert_eq!(second.fixed().elapsed(), TIMESTEP * 2);
     assert_eq!(second.render().remainder(), TIMESTEP / 2);
     assert_eq!(second.settings().time_scale(), 0.5);
-    assert!(second.spatial_interpolated());
     let next_packet = capture_packet(&runtime);
     assert_eq!(next_packet.captured_time(), Some(second));
     assert!(
         next_packet.views()[0]
             .mapping
             .clip_to_world(Vec2::ZERO)
-            .abs_diff_eq(Vec2::new(1.5, 0.0), 1.0e-5)
+            .abs_diff_eq(Vec2::new(2.0, 0.0), 1.0e-5)
     );
     assert_eq!(old_packet.captured_time(), Some(first));
     assert_eq!(old_packet.views(), old_views.as_slice());
@@ -382,9 +354,8 @@ fn changing_timestep_in_update_preserves_the_completed_view_clock_and_pose() {
     assert_eq!(clock.fixed().remainder(), before.fixed_remainder);
     assert_eq!(clock.fixed().debt(), Duration::ZERO);
     assert_eq!(clock.render().interpolation_alpha(), 0.75);
-    assert!(clock.spatial_interpolated());
     let center = old.views()[0].mapping.clip_to_world(Vec2::ZERO);
-    assert!(center.abs_diff_eq(Vec2::new(1.75, 0.0), 1.0e-5));
+    assert!(center.abs_diff_eq(Vec2::new(2.0, 0.0), 1.0e-5));
 
     let after = runtime.drive(Duration::ZERO).unwrap();
     let after = after.frame().unwrap().status;
@@ -396,13 +367,12 @@ fn changing_timestep_in_update_preserves_the_completed_view_clock_and_pose() {
     assert_eq!(clock_after.fixed().delta(), TIMESTEP / 2);
     assert_eq!(clock_after.fixed().remainder(), Duration::from_millis(5));
     assert_eq!(clock_after.render().interpolation_alpha(), 0.5);
-    assert!(clock_after.spatial_interpolated());
     let new = capture_packet(&runtime);
     assert!(
         new.views()[0]
             .mapping
             .clip_to_world(Vec2::ZERO)
-            .abs_diff_eq(Vec2::new(2.5, 0.0), 1.0e-5)
+            .abs_diff_eq(Vec2::new(3.0, 0.0), 1.0e-5)
     );
     runtime.finish().unwrap();
     assert_eq!(old.captured_time(), Some(clock));
@@ -413,7 +383,7 @@ fn changing_timestep_in_update_preserves_the_completed_view_clock_and_pose() {
 fn pause_and_exact_step_retain_the_sample_until_the_next_extract() {
     let mut runtime = RuntimeInstance::start(moving_camera_app()).unwrap();
     runtime.drive(TIMESTEP * 2 + TIMESTEP / 2).unwrap();
-    assert!(assert_current_sample(&runtime).spatial_interpolated());
+    assert_eq!(assert_current_sample(&runtime).fixed().tick(), 2);
 
     assert!(matches!(
         runtime.request_control(RuntimeControl::Pause),
@@ -427,7 +397,6 @@ fn pause_and_exact_step_retain_the_sample_until_the_next_extract() {
     assert_eq!(paused.fixed().tick(), 2);
     assert_eq!(paused.fixed().steps_this_frame(), 0);
     assert_eq!(paused.render().interpolation_alpha(), 0.5);
-    assert!(!paused.spatial_interpolated());
     let paused_views = runtime.world().resource::<ExtractedViews>().clone();
     let paused_packet = capture_packet(&runtime);
     assert_eq!(paused_packet.frame_index(), 2);
@@ -467,7 +436,6 @@ fn pause_and_exact_step_retain_the_sample_until_the_next_extract() {
         after_step.render().interpolation_alpha(),
         paused.render().interpolation_alpha()
     );
-    assert!(!after_step.spatial_interpolated());
     assert_eq!(after_step_packet.frame_index(), 3);
     assert_ne!(after_step_packet.frame_index(), after_step.real().frame);
     assert_eq!(after_step_packet.captured_time(), Some(after_step));
@@ -509,7 +477,6 @@ fn elapsed_resume_after_exact_step_captures_the_settled_pose_and_retains_it() {
     assert_eq!(sample.fixed().tick(), 3);
     assert_eq!(sample.fixed().remainder(), TIMESTEP / 2);
     assert_eq!(sample.render().interpolation_alpha(), 0.5);
-    assert!(!sample.spatial_interpolated());
     let packet = capture_packet(&runtime);
     assert_eq!(packet.captured_time(), Some(sample));
     let center = packet.views()[0].mapping.clip_to_world(Vec2::ZERO);
@@ -661,6 +628,7 @@ fn matrix_accessors_preserve_the_captured_affine_projection_and_inverse() {
         translation: Vec2::new(27.0, -13.0),
         rotation: 0.7,
         scale: Vec2::new(2.0, 0.5),
+        ..Transform2d::IDENTITY
     }
     .matrix();
     let mapping = ViewMapping2d::orthographic(

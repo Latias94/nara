@@ -7,22 +7,24 @@ use std::{
     },
 };
 
+use nara_core::source::{AssetSourcePath, SourceDocumentKey, SourceDocumentKind, StableAssetId};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit, SourceUniverseId};
-use nara_ecs::{Component, World};
-use nara_identity::{
-    AssetSourcePath, AuthoredEntityReference, AuthoredReferenceTarget, PersistentRuntimeId,
+use nara_ecs::identity::{
+    AuthoredEntityReference, AuthoredReferenceTarget, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference, PrefabEntityOrigin,
-    PrefabInstanceHop, ReferenceInputId, SceneEntityId, SourceDocumentKey, SourceDocumentKind,
-    StableAssetId,
+    PrefabInstanceHop, ReferenceInputId, SceneEntityId,
 };
+use nara_ecs::{Component, World};
 
 use crate::{
-    __private::{
+    effective::{
         effective_component_value_owned_with_default_overrides,
         effective_component_value_with_admission, effective_component_value_with_budget,
         effective_component_value_with_default_overrides_with_budget,
-        plan_declared_entity_references, plan_declared_entity_references_with_admission,
         validate_native_component_value_references_with_limits,
+    },
+    entity_reference::{
+        plan_declared_entity_references, plan_declared_entity_references_with_admission,
     },
     *,
 };
@@ -244,9 +246,9 @@ fn native_persistent_reference_work_retains_text_width_uuid_cost() {
     );
     assert_eq!(
         result,
-        Err(__private::EntityReferencePlanError::Admission(
-            "persistent work refused"
-        )),
+        Err(
+            crate::entity_reference::EntityReferencePlanError::Admission("persistent work refused")
+        ),
     );
 }
 
@@ -602,9 +604,7 @@ fn declared_planner_admits_full_route_before_owned_paths_and_keeps_exact_limits(
     );
     assert_eq!(
         result,
-        Err(__private::EntityReferencePlanError::Admission(
-            "route refused"
-        )),
+        Err(crate::entity_reference::EntityReferencePlanError::Admission("route refused")),
     );
 }
 

@@ -11,7 +11,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use nara_fs::{
+use crate::fs::{
     DirectoryCapability, DirectorySyncReceipt, DirectorySyncTier, ExpectedTarget, FileCapability,
     FsError, FsOperation, LockGuarantee, LockMode, LockedFileCapability, RelativeComponent,
     ReplaceReceipt, TemporaryFileFailure,
@@ -28,7 +28,7 @@ use super::{
 
 const LOCK_NAME: &str = "artifact-store.lock";
 const INDEX_NAME: &str = "artifact-index.json";
-// nara_fs digest verification uses a bounded 64 KiB buffer. One operation reuses this logical
+// Capability-based digest verification uses a bounded 64 KiB buffer. One operation reuses this logical
 // scratch allowance across sequential reads, hashing and capability-name construction.
 const OPERATION_SCRATCH: usize = 64 * 1024 + 4096;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -316,7 +316,8 @@ impl ArtifactBuildStore {
             group,
             index: publication,
             directory_sync: None,
-            directory_sync_tier: match nara_fs::platform_capability_matrix().directory_sync_tier() {
+            directory_sync_tier: match crate::fs::platform_capability_matrix().directory_sync_tier()
+            {
                 DirectorySyncTier::Unsupported => DirectorySyncTier::Unsupported,
                 _ => DirectorySyncTier::Unproven,
             },

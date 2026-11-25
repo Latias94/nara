@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 #[cfg(feature = "runtime-2d")]
 use nara_asset::{AssetEvents, AssetStates, Assets, Handle};
 use nara_asset::{AssetProductRef, ImportedProductId};
-use nara_diagnostic::DiagnosticReport;
+use nara_core::diagnostic::DiagnosticReport;
 #[cfg(feature = "runtime-2d")]
 use nara_render::image::ImageAsset;
 #[cfg(feature = "runtime-2d")]
@@ -99,7 +99,7 @@ pub(in crate::project_host::runtime) fn activate_addition(
     content: &PreparedSceneContent,
     occurrence: &SceneOccurrenceKey,
 ) -> Result<SceneSpawnReport, SceneSpawnReport> {
-    nara_hierarchy::__private::prepare_mutation_baseline(world);
+    nara_scene::hierarchy::prepare_mutation_baseline(world);
     let bindings = current_scene_bindings(world, expected)?;
     if !content.shares_component_bindings(&bindings) {
         return Err(rejected(failure(
@@ -173,7 +173,7 @@ pub(in crate::project_host::runtime) fn activate_addition(
         )
         .map_err(rejected)?;
         if !tilesets.inputs.is_empty()
-            && nara_ecs::__private::validate_resource_scope::<TileSetAssets>(world).is_err()
+            && transaction::validate_resource_scope::<TileSetAssets>(world).is_err()
         {
             return Err(rejected(lifecycle_unsupported()));
         }
@@ -327,7 +327,7 @@ pub fn unload_project_scene_addition(
     world: &mut World,
     expected: &SpawnedSceneInstance,
 ) -> Result<usize, DiagnosticReport> {
-    nara_hierarchy::__private::prepare_mutation_baseline(world);
+    nara_scene::hierarchy::prepare_mutation_baseline(world);
     let additions = &world
         .get_resource::<ProjectSceneResidency>()
         .ok_or_else(addition_mismatch)?
@@ -350,7 +350,7 @@ pub fn unload_project_scene_addition(
     #[cfg(feature = "runtime-2d")]
     if !prepared.retirement.tilesets.is_empty() {
         stock::validate_tileset_resources(world).map_err(|fault| fault.diagnostics)?;
-        if nara_ecs::__private::validate_resource_scope::<TileSetAssets>(world).is_err() {
+        if transaction::validate_resource_scope::<TileSetAssets>(world).is_err() {
             return Err(lifecycle_unsupported().diagnostics);
         }
         return world.resource_scope(|world, mut owner: Mut<TileSetAssets>| {
@@ -404,7 +404,7 @@ impl PreparedUnload {
                 .map(|receipt| receipt.handle().id())
                 .collect::<BTreeSet<_>>(),
         );
-        let count = if nara_scene::__private::scene_instance_retired(world, expected) {
+        let count = if nara_scene::advanced::scene_instance_retired(world, expected) {
             0
         } else {
             retire_and_despawn_scene_instance(world, expected)?
@@ -469,7 +469,7 @@ fn prepare_retirement(
     let remaining = additions.active[..index]
         .iter()
         .chain(&additions.active[index + 1..])
-        .filter(|other| !nara_scene::__private::scene_instance_retired(world, &other.receipt))
+        .filter(|other| !nara_scene::advanced::scene_instance_retired(world, &other.receipt))
         .collect::<Vec<_>>();
     let mut retiring_catalog = Vec::new();
     if let Some(source) = active._source.asset_resolution() {
@@ -555,7 +555,7 @@ fn validate_catalogue(world: &World) -> Result<&ProjectAssetDatabase, HostFault>
     let database = world
         .get_resource::<ProjectAssetDatabase>()
         .ok_or_else(resources_missing)?;
-    if nara_ecs::__private::validate_resource_scope::<ProjectAssetDatabase>(world).is_err() {
+    if transaction::validate_resource_scope::<ProjectAssetDatabase>(world).is_err() {
         return Err(failure(
             "project.scene.residency-lifecycle-unsupported",
             "Scene asset catalogue cannot run lifecycle effects during publication",

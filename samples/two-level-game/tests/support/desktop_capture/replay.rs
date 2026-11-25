@@ -43,9 +43,7 @@ pub fn replay_and_check(
     let mut host = WgpuRenderHost::offscreen();
     let result = replay(&mut host, frame, expected);
     let retired = retire(&mut host);
-    if retired.is_err() {
-        std::mem::forget(host);
-    }
+    drop(host);
     match (result, retired) {
         (Ok(output), Ok(())) => Ok(output),
         (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),

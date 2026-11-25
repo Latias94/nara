@@ -2,19 +2,19 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::fs::DirectoryCapability;
 use nara_app::{
     App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
     PluginProductCapability, PluginShutdownContext, PluginShutdownObligationId,
     RuntimeCloseParticipantId, RuntimeFaultDetail, StartupStage,
 };
-use nara_asset::{AssetPathScope, AssetSourceChangeKind, AssetSourceRoot};
-use nara_asset_watch::{
+use nara_asset::watch::{
     AssetWatchEventQueue, AssetWatchLifecycleStats, AssetWatchPath, AssetWatchQueueLimits,
     AssetWatchQueueStats, AssetWatchRuntime, AssetWatchRuntimeObserver, AssetWatchTranslator,
     AssetWatcher,
 };
+use nara_asset::{AssetPathScope, AssetSourceChangeKind, AssetSourceRoot};
 use nara_ecs::{Mut, Res, Resource, World, schedule::IntoScheduleConfigs};
-use nara_fs::DirectoryCapability;
 
 use super::{HostFault, ProjectScenes, scene_requests::poll_project_scene_requests};
 use crate::{
@@ -34,9 +34,9 @@ const DECLARATION: PluginDeclaration =
     PluginDeclaration::new(PROJECT_SCENE_WATCH_PLUGIN_ID, PluginCategory::Asset)
         .requires_plugins(&[
             crate::startup_scene::STARTUP_SCENE_ACTIVATION_PLUGIN_ID,
-            nara_tasks::TASK_PLUGIN_ID,
+            nara_app::tasks::TASK_PLUGIN_ID,
         ])
-        .conflicts(&[nara_asset_watch::ASSET_WATCH_PLUGIN_ID])
+        .conflicts(&[nara_asset::watch::ASSET_WATCH_PLUGIN_ID])
         .requires_product_capabilities(&[
             PluginProductCapability::new("runtime-2d"),
             PluginProductCapability::new("asset-watch"),
@@ -438,7 +438,7 @@ fn poll_source_watch(world: &mut World) -> Result<(), nara_ecs::bevy_ecs::error:
     if !world.contains_resource::<SourceWatchDriver>() {
         return Ok(());
     }
-    if nara_ecs::__private::validate_resource_scope::<SourceWatchDriver>(world).is_err() {
+    if crate::ecs::transaction::validate_resource_scope::<SourceWatchDriver>(world).is_err() {
         let mut driver = world.resource_mut::<SourceWatchDriver>();
         driver.current = None;
         driver.rescan_pending = true;

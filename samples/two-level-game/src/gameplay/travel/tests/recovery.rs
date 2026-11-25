@@ -9,7 +9,6 @@ use nara::{
     app::{PluginCategory, PluginDeclaration, PluginId, RealTime},
     asset::Assets,
     ecs::{Entity, World, schedule::IntoScheduleConfigs},
-    gameplay::{GameplayCommandSet, LocalGameplayCommands, add_local_gameplay_command_systems},
     hierarchy::{
         Children, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
         HierarchyWriter, Parent,
@@ -27,16 +26,16 @@ use nara::{
 };
 
 use crate::{
+    command::{CommandSchedule, CommandSet, ServerCommand},
     gameplay::{
         ActiveLevel, GamePhase, GameSnapshot, Progress, Session,
+        commands::{INSTANCE, MARKER, RETRY, TRAVEL, action},
         travel::{DynamicMarker, MarkerInstance},
     },
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
     markers::MarkerLink,
     save::Checkpoint,
 };
-
-use super::super::{INSTANCE, MARKER, RETRY, TRAVEL, action};
 
 #[derive(Clone, Copy, Default)]
 enum Step {
@@ -76,7 +75,7 @@ struct Baseline {
 struct Recovery {
     retire: bool,
     step: Step,
-    command: Option<&'static str>,
+    command: Option<ServerCommand>,
     retry_sent: bool,
     baseline: Option<Baseline>,
     foreign: Option<WorldEntityToken>,
@@ -104,19 +103,23 @@ impl<const RETIRE: bool> Plugin for RecoveryProbe<RETIRE> {
             retire: RETIRE,
             ..Recovery::default()
         })?;
-        add_local_gameplay_command_systems(app, dispatch)?;
+        app.add_systems(
+            CoreStage::PreUpdate,
+            dispatch.in_set(CommandSet::FrameInput),
+        )?;
         app.add_systems(
             CoreStage::FixedUpdate,
-            observe.after(GameplayCommandSet::Capture),
+            dispatch.in_set(CommandSet::FrameInput),
         )?;
+        app.add_systems(CoreStage::FixedUpdate, observe.after(CommandSet::Capture))?;
         Ok(())
     }
 }
 
-fn dispatch(mut recovery: ResMut<Recovery>, mut commands: ResMut<LocalGameplayCommands>) {
+fn dispatch(mut recovery: ResMut<Recovery>, mut commands: ResMut<CommandSchedule>) {
     if let Some(command) = recovery.command.take() {
-        commands.push(action(command)).unwrap();
         recovery.retry_sent |= command == RETRY;
+        commands.push_local(action(command)).unwrap();
     }
     std::thread::yield_now();
 }
@@ -204,6 +207,7 @@ fn observe(world: &mut World) {
                         translation: Vec2::new(70.0, 80.0),
                         rotation: 1.0,
                         scale: Vec2::splat(3.0),
+                        z: 0.0,
                     };
                 }
                 recovery.step = Step::Faulted;
@@ -245,6 +249,7 @@ fn observe(world: &mut World) {
                             translation: Vec2::new(70.0, 80.0),
                             rotation: 1.0,
                             scale: Vec2::splat(3.0),
+                            z: 0.0,
                         }
                     );
                 }
@@ -401,8 +406,12 @@ fn assert_marker(world: &mut World, id: u64) -> MarkerGraph {
     assert_eq!(child_sprite, &expected);
     assert!(world.get::<Parent>(root).is_none());
     assert_eq!(world.get::<Parent>(child).unwrap().parent(), root);
-    assert_eq!(world.get::<Children>(root).unwrap().as_slice(), &[child]);
-    assert!(world.get::<Children>(child).is_none_or(Children::is_empty));
+    assert_eq!(&**world.get::<Children>(root).unwrap(), &[child]);
+    assert!(
+        world
+            .get::<Children>(child)
+            .is_none_or(|children| children.is_empty())
+    );
     let roots = world.resource::<HierarchyRoots>();
     assert!(roots.contains(root));
     assert!(!roots.contains(child));
@@ -549,7 +558,7 @@ fn run_recovery<const RETIRE: bool>() {
         HeadlessRunIntent::frames(NonZeroU32::new(200_000).unwrap(), Duration::from_millis(20))
             .with_recipe(recipe)
             .stop_when(|recovery: &Recovery| recovery.complete);
-    let mut run = HeadlessRun::new(crate::open_project_root().unwrap(), intent, Vec::new());
+    let mut run = HeadlessRun::new(crate::open_project_root().unwrap(), intent);
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let report = run.execute_bounded();

@@ -3,13 +3,12 @@ use std::{collections::BTreeMap, mem::size_of};
 use nara_asset::{AssetProductRef, AssetRef, AssetReferenceResolver, ImportedProductId};
 use nara_core::{ByteLimit, ItemLimit};
 use nara_reflect::{
-    __private::{
-        AssetReferenceCollectionError, EntityReferencePlanError,
-        collect_declared_effective_asset_references_with_admission,
-        plan_declared_entity_references_with_admission,
-    },
     ComponentFieldPathSegment, ComponentTypeId, ComponentValueMaterializationLimits,
     DeclaredAssetReference, EntityReference, EntityReferenceTraversalLimits,
+    asset_reference::{
+        AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
+    },
+    entity_reference::{EntityReferencePlanError, plan_declared_entity_references_with_admission},
     rewrite_declared_asset_references_with_admission,
 };
 

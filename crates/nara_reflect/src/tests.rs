@@ -2,28 +2,28 @@ use std::{cell::Cell, collections::BTreeMap};
 
 use nara_asset::{AssetRef, AssetServer};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
+use nara_ecs::identity::{
+    PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference, SceneEntityId,
+    WorldIdentityDomain, WorldIdentityDomainSettings, spawn_identity_entity,
+};
 use nara_ecs::{
     Component, Resource, World,
     bevy_ecs::lifecycle::{Add, HookContext},
     bevy_ecs::observer::On,
     bevy_ecs::world::DeferredWorld,
 };
-use nara_identity::{
-    PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference, SceneEntityId,
-    WorldIdentityDomain, WorldIdentityDomainSettings, spawn_identity_entity,
-};
 
-use crate::__private::plan_declared_entity_references;
+use crate::entity_reference::plan_declared_entity_references;
 
 use super::*;
 
-#[derive(Clone, Component, Reflect)]
+#[derive(Clone, Component)]
 struct Position {
     x: f32,
     y: f32,
 }
 
-#[derive(Clone, Component, Reflect)]
+#[derive(Clone, Component)]
 struct Velocity {
     dx: f32,
     dy: f32,
@@ -1836,7 +1836,7 @@ fn parallel_fork_remap_rewrites_reflected_reference_candidates_atomically() {
     );
 
     let authored = EntityReference::Authored {
-        reference: nara_identity::AuthoredEntityReference::source(
+        reference: nara_ecs::identity::AuthoredEntityReference::source(
             SceneEntityId::new("player").unwrap(),
         ),
     };
@@ -1852,7 +1852,7 @@ fn parallel_fork_remap_rewrites_reflected_reference_candidates_atomically() {
             locator_remap.references(),
         ),
         Err(ComponentEntityReferenceRewriteError::Rewrite {
-            error: nara_identity::IdentityRemapError::MissingEntityReferenceSource { reference },
+            error: nara_ecs::identity::IdentityRemapError::MissingEntityReferenceSource { reference },
             ..
         }) if reference == authored
     ));
@@ -1865,7 +1865,7 @@ fn parallel_fork_remap_rewrites_reflected_reference_candidates_atomically() {
 #[cfg(feature = "serde")]
 #[test]
 fn entity_reference_component_values_have_canonical_serde_shapes() {
-    use nara_identity::{
+    use nara_ecs::identity::{
         PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
     };
 

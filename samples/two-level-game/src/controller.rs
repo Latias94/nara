@@ -1,6 +1,6 @@
 //! Optional native controller configuration shared by source and cooked game recipes.
 
-struct GamepadConfiguration(nara_gilrs::GilrsInputPlugin);
+struct GamepadConfiguration(nara::input::GilrsInputPlugin);
 
 impl nara::ProductConfiguration for GamepadConfiguration {
     fn write_canonical(&self, output: &mut Vec<u8>) {
@@ -35,8 +35,8 @@ impl nara::ProductConfiguration for GamepadConfiguration {
 pub fn with_gilrs_input(
     recipe: nara::ProductRecipe,
 ) -> Result<nara::ProductRecipe, nara::ProductRecipeError> {
-    let configuration = GamepadConfiguration(nara_gilrs::GilrsInputPlugin::new(Some(
-        nara_gilrs::GamepadRoute::new(
+    let configuration = GamepadConfiguration(nara::input::GilrsInputPlugin::new(Some(
+        nara::input::GamepadRoute::new(
             nara::input::InputWindowId::new(1),
             nara::input::InputSeatId::PRIMARY,
         ),

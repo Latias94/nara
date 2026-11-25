@@ -11,6 +11,8 @@ mod hud;
 #[cfg(feature = "play-flow")]
 pub use hud::{PlayFlowHud, with_play_flow_hud};
 
+#[cfg(feature = "gamepad")]
+use nara::input::GamepadButton;
 use nara::{
     ProductRecipe, ProductRecipeError,
     advanced_prelude::{CurrentScene, StartupSceneActivationSet},
@@ -19,20 +21,18 @@ use nara::{
         RuntimeFrameStatus, RuntimeTimeSettings, StartupStage,
     },
     ecs::{World, schedule::IntoScheduleConfigs},
-    gameplay::add_local_gameplay_command_systems,
     identity::SceneInstanceId,
     input::{
         ActionBinding, ActionContext, ActionContextDefinition, ActionId, ActionMapBindings,
         ActionMapBuilder, ActionMapDefinition, ActionMapError, ActionMapLimits, ActionMaps,
-        ActionPhase, InputBinding, InputSeatId, KeyCode, SemanticActions,
+        ActionPhase, InputBinding, InputSeatId, InputSet, KeyCode, SemanticActions,
     },
     prelude::{App, CoreStage, Plugin, PluginError, Resource},
 };
-#[cfg(feature = "gamepad")]
-use nara_gilrs::GamepadButton;
 
 use super::{ActiveLevel, GamePhase, Progress, Session, input, travel};
 use crate::{
+    command::CommandSet,
     levels::{LevelId, LevelKey},
     save::{Checkpoint, CheckpointLocation},
 };
@@ -279,7 +279,16 @@ impl Plugin for PlayFlowPlugin {
             StartupStage::Runtime,
             initialize.after(StartupSceneActivationSet),
         )?;
-        add_local_gameplay_command_systems(app, read_input)?;
+        app.add_systems(
+            CoreStage::PreUpdate,
+            read_input
+                .in_set(CommandSet::FrameInput)
+                .after(InputSet::ResolveActions),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            read_input.in_set(CommandSet::FrameInput),
+        )?;
         app.add_systems(CoreStage::Update, advance)?;
         app.add_systems(
             CoreStage::Last,
@@ -299,7 +308,6 @@ fn action(name: &str) -> ActionId {
 
 fn initialize(world: &mut World) -> Result<(), nara::ecs::bevy_ecs::error::BevyError> {
     install_controls(world).map_err(|error| error.fault_detail().into_bevy_error())?;
-    input::install_round_save_binding(world);
     if world.resource::<Session>().initialized {
         enter(world, FlowPhase::Title);
     } else {

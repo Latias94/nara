@@ -113,13 +113,13 @@ macro_rules! each_source {
     ($basis:expr, |$candidate:ident, $fork:ident, $session:ident| $body:block) => {{
         {
             let $candidate = scene_candidate($basis);
-            let $fork = fork_published_authoring_scene_document;
+            let $fork = PublishedAuthoringSceneDocument::fork;
             type $session = SceneAuthoringSession;
             $body
         }
         {
             let $candidate = prefab_candidate($basis);
-            let $fork = fork_published_authoring_prefab_document;
+            let $fork = PublishedAuthoringPrefabDocument::fork;
             type $session = PrefabAuthoringSession;
             $body
         }

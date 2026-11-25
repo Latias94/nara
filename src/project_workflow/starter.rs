@@ -1,10 +1,10 @@
 use std::fmt::{self, Debug, Formatter};
 
+use crate::fs::{ContentDigest, PathValidationError, RelativeComponent};
 use nara_asset::{
     AssetMeta, AssetMetaIdentity, AssetPath, AssetProductRef, AssetSourceKind, ImportedProductId,
     StableAssetId,
 };
-use nara_fs::{ContentDigest, PathValidationError, RelativeComponent};
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMapBuilder, ActionMapFileCandidate,
     ActionMapLimits, GamepadButton, KeyCode,
@@ -391,7 +391,7 @@ const PROJECT_DIRECTORIES: [ProjectDirectory; 7] = [
 
 const AUTHORING_SCHEMA_PROVIDERS: [ComponentSchemaProviderDefinition; 6] = [
     nara_scene::SCENE_COMPONENTS_SCHEMA_PROVIDER,
-    nara_transform::TRANSFORM_SCHEMA_PROVIDER,
+    nara_scene::TRANSFORM_SCHEMA_PROVIDER,
     nara_render::RENDER_SCHEMA_PROVIDER,
     nara_render::sprite::SPRITE_SCHEMA_PROVIDER,
     nara_render::tilemap::TILEMAP_SCHEMA_PROVIDER,
@@ -403,15 +403,10 @@ pub(super) fn build_creation_plan(
     slug: ProjectSlug,
     identities: StarterSourceIdentities,
     dependency_manifest_fragment: &str,
-    creation_command_arguments: &str,
     dependency_receipt: NaraDependencyReceipt,
 ) -> Result<ProjectCreationPlan, &'static str> {
-    let cargo_manifest = render_cargo_manifest(
-        starter,
-        identities.universe,
-        dependency_manifest_fragment,
-        &dependency_receipt,
-    );
+    let cargo_manifest =
+        render_cargo_manifest(starter, identities.universe, dependency_manifest_fragment);
     let project_manifest = render_project_manifest(starter, &slug, identities.universe);
     let startup_metadata = AssetMeta::new(
         AssetMetaIdentity::new(
@@ -430,12 +425,7 @@ pub(super) fn build_creation_plan(
     let authoring_schema_bundle_json = authoring_schema_bundle
         .to_json_string()
         .map_err(|_| "starter authoring schema bundle could not be encoded")?;
-    let author_guide = render_author_guide(
-        starter,
-        &slug,
-        dependency_manifest_fragment,
-        creation_command_arguments,
-    );
+    let author_guide = render_author_guide(starter, &slug, dependency_manifest_fragment);
     product_contract::validate(
         starter,
         &slug,
@@ -546,7 +536,6 @@ fn render_author_guide(
     starter: ProjectStarter,
     slug: &ProjectSlug,
     dependency_manifest_fragment: &str,
-    creation_command_arguments: &str,
 ) -> String {
     let body = match starter {
         ProjectStarter::Desktop2dV1 => AUTHOR_GUIDE_BODY,
@@ -554,8 +543,7 @@ fn render_author_guide(
     };
     let id = starter.id();
     format!(
-        "# {} author guide\n\n## Pinned identity\n\n- Starter: `{id}`\n- Nara dependency: `{dependency_manifest_fragment}`\n\n## Creation command\n\nRun this PowerShell command from the authorized destination parent. Local paths use literal quoting:\n\n```powershell\nnara new {id} {} --parent . {creation_command_arguments}\n```\n\n{body}",
-        slug.as_str(),
+        "# {} author guide\n\n## Pinned identity\n\n- Starter: `{id}`\n- Nara dependency: `{dependency_manifest_fragment}`\n\n{body}",
         slug.as_str(),
     )
 }

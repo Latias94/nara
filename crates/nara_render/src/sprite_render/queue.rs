@@ -49,6 +49,7 @@ pub fn queue_sprites(
                 target: view.target,
                 kind: SpriteBatchKind::from_extracted(queueable.sprite.kind),
                 layer: queueable.sprite.layer,
+                world_z: queueable.sprite.world_z,
                 sort_key: queueable.sprite.sort_key,
                 world_sort_y: queueable.sprite.world_sort_y,
                 material: queueable.material,
@@ -193,13 +194,14 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
 }
 
 pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSpriteItem) -> Ordering {
-    (left.view_order, left.view_index, left.layer, left.sort_key)
-        .cmp(&(
-            right.view_order,
-            right.view_index,
-            right.layer,
-            right.sort_key,
-        ))
+    (left.view_order, left.view_index)
+        .cmp(&(right.view_order, right.view_index))
+        .then_with(|| {
+            let left_depth = f64::from(left.layer) + f64::from(left.world_z);
+            let right_depth = f64::from(right.layer) + f64::from(right.world_z);
+            left_depth.total_cmp(&right_depth)
+        })
+        .then_with(|| left.sort_key.cmp(&right.sort_key))
         .then_with(|| {
             let left_y = if left.world_sort_y == 0.0 {
                 0.0

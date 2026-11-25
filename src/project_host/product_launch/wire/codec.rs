@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use nara_fs::ContentDigest;
+use crate::fs::ContentDigest;
 
 use super::{MAX_SUPERVISED_DESKTOP_EXECUTABLE_BYTES, SupervisedDesktopWireError};
 

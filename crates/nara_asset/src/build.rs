@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use nara_core::ByteLimit;
-use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
+use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
 
 use crate::{
     AssetImportError, AssetImportSource, AssetMetaIdentityCandidate, AssetPath, AssetProductRef,

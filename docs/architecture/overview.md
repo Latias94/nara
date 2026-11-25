@@ -7,8 +7,8 @@ for implementation order and phase gates. The `legacy/v0-imgui-reference` tag pr
 ## Products
 
 - **Game** runs on Winit with `nara_render` drawing directly to the swapchain. The scene clears the
-  target and `nara_ui` loads it for the HUD pass before presentation. Shipping games link neither
-  editor tooling nor Open-GPUI.
+  target. The renderer loads that target for the HUD pass using layout and paint data from
+  `nara_ui`. Shipping games link neither editor tooling nor Open-GPUI.
 - **Editor** uses Open-GPUI Mode A for desktop windows, events, IME, AccessKit, and floating
   `dockspace` panes. A single WGPU device and queue serve the UI and Nara viewport passes. The
   editor imports pooled viewport textures without copying them. The standalone game launched by Play
@@ -18,8 +18,8 @@ for implementation order and phase gates. The `legacy/v0-imgui-reference` tag pr
 
 | Layer | Owners |
 | --- | --- |
-| Headless core | `nara_core` owns math, linear color, IDs, VFS, and diagnostics. `nara_ecs` exposes Bevy ECS and tasks. `nara_app` owns plugins, schedules, and fixed steps. `nara_reflect` and its derive crate own Schema and field access. `nara_asset` owns async asset loading and hot reload. `nara_scene` owns scene and prefab data and 2D transforms. |
-| Game runtime | `nara_input` owns physical input and action mapping. `nara_render` and its material derive crate own WGPU passes, textures, materials, sprites, animation, and tilemaps. `nara_ui` owns game layout, text, and HUD rendering. `nara_audio` owns the game audio API. `nara_physics2d` owns Rapier integration. `nara_window` owns the standalone Winit runner. |
+| Headless core | `nara_core` owns math, linear color, durable identity values, VFS, and diagnostic data. `nara_ecs` exposes Bevy ECS and world entity identity. `nara_app` owns plugins, schedules, fixed steps, task pools, and runtime diagnostics. `nara_reflect` and its derive crate own Schema and field access. `nara_asset` owns async asset loading and hot reload. `nara_scene` owns scene and prefab data and 2D transforms. |
+| Game runtime | `nara_input` owns physical input and action mapping. `nara_render` and its material derive crate own WGPU passes, textures, materials, sprites, animation, tilemaps, and HUD presentation. `nara_ui` owns game layout, text, widgets, and HUD paint data. `nara_audio` owns the game audio API. `nara_physics2d` owns Rapier integration. `nara_window` owns the standalone Winit runner. |
 | Game facade | Root `nara` exposes `DefaultPlugins` and `prelude` with a target of fewer than 1,000 lines. |
 | Workflow and editor | `nara_project` owns headless project tooling, the `nara` CLI, Schema discovery, Cook, Export, and supervised Play. `nara_editor_core` owns synchronous editing, selection, gestures, Undo, drafts, and registry. `nara_editor` owns the Open-GPUI shell and integrates `dockspace`, Dialogue Graph, and Design Kit v0.4. |
 

@@ -5,14 +5,11 @@ use std::{
 
 use nara::{
     asset::{AssetMeta, AssetMetaIdentity, AssetPath, AssetSourceKind, StableAssetId},
-    fs::RelativePath,
     project::{NativeDocumentIdentity, ProjectManifest},
-    project_tooling::host_fs,
-    project_workflow::{
-        LocalDependencyRelation, NaraDependencySource, ProjectCreationOutcome,
-        ProjectCreationRequest, ProjectSlug, ProjectStarter, prepare_desktop_2d_project,
-    },
+    project_workflow::ProjectStarter,
 };
+
+use crate::authored_project::create_authored_project;
 
 const PROJECT_SLUG: &str = "collect-game";
 const TEMPLATE_README: &str = include_str!("../../../starters/desktop-2d/v1/README.md");
@@ -30,41 +27,8 @@ pub struct Project {
 
 impl Project {
     pub fn create(checkout: &Path, parent: &Path) -> Self {
-        let project_root = parent.join(PROJECT_SLUG);
-        let ancestor = checkout.parent().unwrap();
-        let relative = RelativePath::new(
-            parent
-                .strip_prefix(ancestor)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .replace('\\', "/"),
-        )
-        .unwrap();
-        let shared = host_fs::writable_directory(ancestor).unwrap();
-        let parent = shared.open_directory(&relative).unwrap();
-        let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
-            ProjectStarter::Desktop2dV1,
-            parent,
-            ProjectSlug::new(PROJECT_SLUG).unwrap(),
-            NaraDependencySource::local(LocalDependencyRelation::new(
-                shared,
-                Some(RelativePath::new(checkout.file_name().unwrap()).unwrap()),
-                Some(relative),
-            )),
-        ))
-        .unwrap();
-        let ProjectCreationOutcome::Created(receipt) = prepared.publish() else {
-            panic!("the original creation owner must publish each new game");
-        };
-        let root = project_root.canonicalize().unwrap();
-        assert!(
-            receipt
-                .project_root()
-                .same_object(&host_fs::readable_directory(&root).unwrap())
-                .unwrap()
-        );
-        drop(receipt);
+        let root =
+            create_authored_project(checkout, parent, PROJECT_SLUG, ProjectStarter::Desktop2dV1);
         assert!(!root.starts_with(checkout));
         let generated_cargo = read_toml(&root.join("Cargo.toml"));
         let generated_entries = ["build.rs", "src/bin/cook.rs", "src/bin/player.rs"]

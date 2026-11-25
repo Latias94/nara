@@ -3,6 +3,7 @@ use std::{
     cell::Cell,
     collections::VecDeque,
     fmt::{self, Debug, Display, Formatter},
+    panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     sync::{
         Arc, Mutex, MutexGuard, OnceLock,
         atomic::{AtomicU64, Ordering},
@@ -14,7 +15,9 @@ use nara_ecs::{
     Command, Mut, Resource, World,
     bevy_ecs::change_detection::Tick,
     bevy_ecs::component::Mutable,
-    bevy_ecs::error::{BevyError, ErrorHandler, FallbackErrorHandler},
+    bevy_ecs::error::{
+        BevyError, ErrorContext, ErrorHandler, FallbackErrorHandler, Severity, match_severity,
+    },
     bevy_ecs::lifecycle::HookContext,
     bevy_ecs::schedule::InternedScheduleLabel,
     bevy_ecs::world::DeferredWorld,
@@ -28,7 +31,6 @@ use crate::{
 };
 
 mod close;
-mod fault_route;
 mod owner;
 mod time_continuation;
 
@@ -36,20 +38,15 @@ pub use close::{
     RuntimeClosePendingParticipant, RuntimeObligationLedger, RuntimeObligationLedgerError,
     RuntimeObligationRegistrationError,
 };
-use fault_route::{FaultRouteReservation, FaultRouteToken};
 pub(super) use owner::{RuntimeOwner, RuntimeOwnerState};
-pub use owner::{RuntimeQuarantineStatus, drive_runtime_quarantine, runtime_quarantine_status};
 
 const MAX_RETAINED_CONTROL_RESULTS: usize = 32;
 const DEFAULT_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 static NEXT_RUNTIME_GENERATION: AtomicU64 = AtomicU64::new(1);
 
-/// Hidden product plumbing for one engine-owned domain authority checked at App and managed
-/// runtime safe points. App composes domain guards in installation order and stops at the first
-/// fault; each owning domain retains its identity and fault reporter.
-#[doc(hidden)]
-pub type __RuntimeAuthorityValidator =
+/// A read-only plugin check at application setup and managed runtime boundaries.
+pub type RuntimeValidator =
     dyn Fn(&World, Option<RuntimeGeneration>) -> Result<(), RuntimeFault> + Send + Sync;
 
 #[derive(Debug, Default, Resource)]
@@ -123,10 +120,7 @@ fn record_fault_bridge_structure_change(mut world: DeferredWorld<'_>, _context: 
     let Some(mut revision) = world.get_resource_mut::<RuntimeFaultBridgeRevision>() else {
         return;
     };
-    revision.0 = revision
-        .0
-        .checked_add(1)
-        .unwrap_or_else(|| std::process::abort());
+    revision.0 = revision.0.wrapping_add(1);
 }
 
 pub(crate) fn initialize_runtime_fault_bridge(world: &mut World, reporter: RuntimeFaultReporter) {
@@ -257,8 +251,6 @@ pub enum RuntimeFaultKind {
     RunCondition,
     Command,
     Observer,
-    GameplayLifecycle,
-    LocalIntentLoss,
     RequiredTask,
     RequiredService,
 }
@@ -482,23 +474,6 @@ impl RuntimeFaultReporter {
         Arc::ptr_eq(&self.cell, &reporter.cell)
     }
 
-    /// Checks the current World reporter against a domain's retained admission reporter.
-    ///
-    /// Missing or replaced reporters record an authority fault on the retained reporter, even
-    /// when the replacement has no fault. This checks reporter identity and sticky fault state;
-    /// App still owns validation of the complete fault bridge and its mutation epoch.
-    #[doc(hidden)]
-    pub fn __validate_world_reporter(&self, current: Option<&Self>) -> Result<(), RuntimeFault> {
-        if let Some(fault) = self.fault() {
-            return Err(fault);
-        }
-        if current.is_some_and(|reporter| self.has_authority(reporter)) {
-            Ok(())
-        } else {
-            Err(record_runtime_fault_bridge_authority_fault(self))
-        }
-    }
-
     /// Records the first fault and returns whether this call won that race.
     pub fn report(&self, fault: RuntimeFault) -> bool {
         let _state = lock_unpoisoned(&self.cell.state);
@@ -712,8 +687,8 @@ pub struct RuntimeCloseContext<'world> {
     world: &'world mut World,
 }
 
-/// First-party platform bridge for one typed operation under managed fault authority.
-#[doc(hidden)]
+/// Short-lived ECS access for a runtime adapter. Use [`Self::state`] to decide which of the
+/// adapter's operations are available during retirement.
 pub struct RuntimeDriverScope<'world> {
     world: &'world mut World,
     state: RuntimeState,
@@ -723,36 +698,6 @@ pub struct RuntimeDriverScope<'world> {
 enum DriverScopeAuthorityPolicy {
     Full,
     FaultRetirement,
-}
-
-/// First-party workspace plumbing for a typed managed-runtime operation.
-///
-/// Implementations define the complete input and output surface for their own resource. Rust's
-/// orphan rules prevent downstream adapters from adding driver access to an engine-owned resource.
-/// This is intentionally hidden and may be replaced without a compatibility migration; it is not
-/// the public shared Adapter contract tracked by OQ-038.
-/// Coordinated operations require explicit configuration through [`App::__register_driver_port`].
-#[doc(hidden)]
-pub trait __RuntimeDriverPort: Resource<Mutability = Mutable> {
-    type Input;
-    type Output;
-
-    #[must_use]
-    fn accepts_driver_state(state: RuntimeState) -> bool {
-        matches!(state, RuntimeState::Running | RuntimeState::Paused)
-    }
-
-    #[must_use]
-    fn accepts_driver_input(state: RuntimeState, _input: &Self::Input) -> bool {
-        Self::accepts_driver_state(state)
-    }
-
-    fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output;
-}
-
-#[derive(Resource)]
-struct RegisteredDriverPort<R: __RuntimeDriverPort> {
-    apply: fn(&mut World, R::Input) -> Result<R::Output, (RuntimeWorldAccessError, R::Input)>,
 }
 
 /// Short-lived command application while a runtime candidate is still unpublished.
@@ -771,11 +716,8 @@ pub enum RuntimeWorldAccessError {
     ProtectedType { type_name: &'static str },
     #[error("runtime scoped resource {type_name} is missing")]
     MissingResource { type_name: &'static str },
-    #[error("runtime driver port {type_name} is unavailable while runtime state is {state:?}")]
-    PortUnavailable {
-        type_name: &'static str,
-        state: RuntimeState,
-    },
+    #[error("runtime operation is unavailable while the runtime is {state:?}")]
+    Unavailable { state: RuntimeState },
 }
 
 fn ensure_scoped_type_is_unprotected<T: 'static>() -> Result<(), RuntimeWorldAccessError> {
@@ -793,83 +735,20 @@ fn ensure_scoped_type_is_unprotected<T: 'static>() -> Result<(), RuntimeWorldAcc
 }
 
 impl RuntimeDriverScope<'_> {
-    fn validate_port_input<R: __RuntimeDriverPort>(
-        &self,
-        input: &R::Input,
-    ) -> Result<(), RuntimeWorldAccessError> {
-        if R::accepts_driver_input(self.state, input) {
-            Ok(())
-        } else {
-            Err(RuntimeWorldAccessError::PortUnavailable {
-                type_name: type_name::<R>(),
-                state: self.state,
-            })
-        }
+    /// Returns the runtime state under which the driver operation was admitted.
+    #[must_use]
+    pub const fn state(&self) -> RuntimeState {
+        self.state
     }
 
-    #[doc(hidden)]
-    pub fn __apply_port<R: __RuntimeDriverPort>(
-        &mut self,
-        input: R::Input,
-    ) -> Result<R::Output, RuntimeWorldAccessError> {
-        self.__apply_owned_port::<R>(input)
-            .map_err(|(error, _)| error)
+    /// Applies an owned ECS command inside this driver operation and returns its output.
+    pub fn apply_command<C: Command>(&mut self, command: C) -> C::Out {
+        command.apply(self.world)
     }
 
-    /// Applies one typed port operation while preserving an owned input on admission failure.
-    ///
-    /// This is reserved for move-only Host authorities that must never be dropped merely because
-    /// the Runtime state changed or the expected first-party port is unavailable.
-    #[doc(hidden)]
-    pub fn __apply_owned_port<R: __RuntimeDriverPort>(
-        &mut self,
-        input: R::Input,
-    ) -> Result<R::Output, (RuntimeWorldAccessError, R::Input)> {
-        if let Err(error) = self.validate_port_input::<R>(&input) {
-            return Err((error, input));
-        }
-        if !self.world.contains_resource::<R>() {
-            return Err((
-                RuntimeWorldAccessError::MissingResource {
-                    type_name: type_name::<R>(),
-                },
-                input,
-            ));
-        }
-        if let Some(registered) = self.world.get_resource::<RegisteredDriverPort<R>>() {
-            let apply = registered.apply;
-            apply(self.world, input)
-        } else {
-            Ok(self.world.resource_mut::<R>().apply_driver_input(input))
-        }
-    }
-}
-
-impl App {
-    /// Configures one first-party, resource-typed operation that coordinates runtime resources.
-    ///
-    /// Registration occurs before configuration is frozen. Runtime callers can only select this
-    /// configured operation or a resource-local trait method; they cannot supply a World callback.
-    /// The operation returns owned input on rejection so move-only Host responsibilities survive.
-    #[doc(hidden)]
-    pub fn __register_driver_port<R: __RuntimeDriverPort>(
-        &mut self,
-        apply: fn(&mut World, R::Input) -> Result<R::Output, (RuntimeWorldAccessError, R::Input)>,
-    ) -> Result<&mut Self, crate::PluginError> {
-        self.ensure_configuration_mutation_allowed()?;
-        if self
-            .owner
-            .world
-            .contains_resource::<RegisteredDriverPort<R>>()
-        {
-            return Err(crate::PluginError::DuplicateDriverPort {
-                type_name: type_name::<R>(),
-            });
-        }
-        self.owner
-            .world
-            .insert_resource(RegisteredDriverPort::<R> { apply });
-        Ok(self)
+    /// Runs an exclusive, synchronous adapter operation.
+    pub fn with_world_mut<R>(&mut self, operation: impl FnOnce(&mut World) -> R) -> R {
+        operation(self.world)
     }
 }
 
@@ -897,7 +776,7 @@ pub struct RuntimeScopeOutcome<R> {
 /// Failure before a short-lived managed runtime scope invokes its operation.
 ///
 /// Healthy scopes verify the canonical fault reporter and fallback error handler around the
-/// operation. Runtime-managed fault resources are unavailable through scoped mutable access.
+/// operation. Scoped resource helpers reject edits to runtime-managed fault resources.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum RuntimeScopeError {
     #[error("runtime world access is unavailable while runtime state is {state:?}")]
@@ -922,22 +801,9 @@ impl RuntimeCloseContext<'_> {
         self.world
     }
 
-    /// Applies one configured typed operation under closing admission.
-    ///
-    /// The operation uses the same registered dispatch as a Runtime driver scope. State or
-    /// resource admission failure returns the original owned input without invoking the port.
-    /// This context belongs to a retained close participant; it does not permit driver access
-    /// after the Runtime has stopped.
-    #[doc(hidden)]
-    pub fn __apply_owned_port<P: __RuntimeDriverPort>(
-        &mut self,
-        input: P::Input,
-    ) -> Result<P::Output, (RuntimeWorldAccessError, P::Input)> {
-        RuntimeDriverScope {
-            world: &mut *self.world,
-            state: RuntimeState::Stopping,
-        }
-        .__apply_owned_port::<P>(input)
+    /// Runs an exclusive ECS operation for the registered close participant.
+    pub fn with_world_mut<R>(&mut self, operation: impl FnOnce(&mut World) -> R) -> R {
+        operation(self.world)
     }
 
     pub fn get_resource_mut<R: Resource<Mutability = Mutable>>(
@@ -974,7 +840,7 @@ impl RuntimeCloseContext<'_> {
 /// Owns waitable cleanup driven on the thread that constructs the runtime's App.
 ///
 /// Participants may own local controllers as well as Send worker state. Registration, retirement,
-/// quarantine and destruction retain the owner thread; callbacks do not gain an executor or an
+/// Destruction stays on the owner thread. Callbacks do not gain an executor or an
 /// external event pump. The Host must keep any required parent authority available until close ends.
 ///
 /// Register a fixed dependent aggregate as one typed owner. Its `begin_close` quiesces admission
@@ -1013,56 +879,6 @@ impl RuntimeClosePolicy {
     #[must_use]
     pub const fn timeout(self) -> Duration {
         self.timeout
-    }
-}
-
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
-#[doc(hidden)]
-pub enum RuntimeAdmissionReservationError {
-    #[error("managed runtime fault-route capacity is exhausted")]
-    CapacityExhausted,
-}
-
-/// Move-only capacity reservation for one managed runtime fault route.
-///
-/// Acquire this value before transferring a sealed App or close obligations. Once admission starts,
-/// every failure retains the route together with the runtime owner until retirement completes.
-/// This is a first-party Host bridge; ordinary callers use [`RuntimeInstance::start`].
-#[doc(hidden)]
-#[must_use = "a runtime admission reservation must be admitted or released"]
-pub struct RuntimeAdmissionReservation {
-    route: Option<FaultRouteReservation>,
-}
-
-impl Debug for RuntimeAdmissionReservation {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("RuntimeAdmissionReservation")
-            .field("active", &self.route.is_some())
-            .finish_non_exhaustive()
-    }
-}
-
-impl RuntimeAdmissionReservation {
-    pub fn try_acquire() -> Result<Self, RuntimeAdmissionReservationError> {
-        let route = FaultRouteReservation::try_acquire()
-            .ok_or(RuntimeAdmissionReservationError::CapacityExhausted)?;
-        Ok(Self { route: Some(route) })
-    }
-
-    pub fn admit(
-        mut self,
-        sealed: SealedApp,
-        obligations: RuntimeObligationLedger,
-        close_policy: RuntimeClosePolicy,
-    ) -> Result<RuntimeCandidate, RuntimeAdmissionFailure> {
-        RuntimeCandidate::admit_reserved(self.take_route(), sealed, obligations, close_policy)
-    }
-
-    fn take_route(&mut self) -> FaultRouteReservation {
-        self.route
-            .take()
-            .expect("runtime admission reservation transfers its route once")
     }
 }
 
@@ -1243,8 +1059,8 @@ impl RuntimeCandidate {
         self.owner.plugin_failure_report.as_ref()
     }
 
-    fn admit_reserved(
-        reservation: FaultRouteReservation,
+    /// Prepares a configured world for host setup before running startup systems.
+    pub fn admit(
         sealed: SealedApp,
         obligations: RuntimeObligationLedger,
         close_policy: RuntimeClosePolicy,
@@ -1253,8 +1069,6 @@ impl RuntimeCandidate {
         let mut owner = app.owner;
         owner.close_policy = close_policy;
         let obligation_error = owner.prepend_host_obligations(obligations).err();
-        let reporter = owner.reporter().clone();
-        owner.fault_route = Some(reservation.activate(reporter));
         let admission_error = if owner.plugin_lifecycle != PluginLifecycleState::Ready {
             Some(RuntimeAdmissionError::AppNotReady {
                 state: owner.plugin_lifecycle,
@@ -1265,18 +1079,10 @@ impl RuntimeCandidate {
         if let Some(error) = admission_error {
             return Err(RuntimeAdmissionFailure::new(error, owner));
         }
-        let route_handler = owner
-            .fault_route
-            .as_ref()
-            .expect("an admitted runtime owner retains its activated fault route")
-            .handler();
-        owner.bind_managed_runtime_error_handler(route_handler);
-        let generation = match allocate_generation() {
+        let generation = match initialize_world(&mut owner) {
             Ok(generation) => generation,
             Err(error) => return Err(RuntimeAdmissionFailure::new(error, owner)),
         };
-        owner.managed_runtime_generation = Some(generation);
-        owner.world.insert_resource(generation);
 
         Ok(Self { owner, generation })
     }
@@ -1318,43 +1124,7 @@ impl RuntimeCandidate {
     }
 
     pub fn complete_startup(mut self) -> Result<ReadyRuntimeCandidate, RuntimeCandidateFailure> {
-        let reporter = self.owner.reporter().clone();
-        let bridge_epoch = match self.owner.begin_fault_bridge_epoch() {
-            Ok(epoch) => epoch,
-            Err(fault) => {
-                return Err(RuntimeCandidateFailure::new(
-                    self.owner,
-                    self.generation,
-                    fault,
-                ));
-            }
-        };
-        if let Some(fault) = reporter.fault() {
-            return Err(RuntimeCandidateFailure::new(
-                self.owner,
-                self.generation,
-                fault,
-            ));
-        }
-        let fault_route = self.owner.fault_route_token();
-        let startup =
-            with_runtime_system_fault_capture(fault_route, || self.owner.complete_startup_once());
-        let fault = match startup {
-            Ok(Ok(())) => None,
-            Ok(Err(error)) => Some(RuntimeFault::app(error)),
-            Err(fault) => Some(fault),
-        }
-        .or_else(|| reporter.fault())
-        .or_else(|| {
-            self.owner
-                .prepare_managed_runtime()
-                .err()
-                .map(RuntimeFault::app)
-        })
-        .or_else(|| self.owner.validate_managed_runtime_authority().err())
-        .or_else(|| self.owner.validate_fault_bridge_epoch(bridge_epoch).err());
-
-        if let Some(fault) = fault {
+        if let Err(fault) = start_world(&mut self.owner) {
             return Err(RuntimeCandidateFailure::new(
                 self.owner,
                 self.generation,
@@ -1369,13 +1139,74 @@ impl RuntimeCandidate {
     }
 }
 
-/// Retryable ownership of an App that will not proceed to managed execution.
+fn initialize_world(
+    owner: &mut RuntimeOwnerState,
+) -> Result<RuntimeGeneration, RuntimeAdmissionError> {
+    if let Some(generation) = owner.managed_runtime_generation {
+        return Ok(generation);
+    }
+    let generation = allocate_generation()?;
+    owner.bind_managed_runtime_error_handler(handle_execution_error);
+    owner.managed_runtime_generation = Some(generation);
+    owner.world.insert_resource(generation);
+    Ok(generation)
+}
+
+fn start_world(owner: &mut RuntimeOwner) -> Result<(), RuntimeFault> {
+    let bridge_epoch = owner.begin_fault_bridge_epoch()?;
+    if let Some(fault) = owner.reporter().fault() {
+        return Err(fault);
+    }
+    capture_execution_error(|| owner.complete_startup_once())?.map_err(RuntimeFault::app)?;
+    if let Some(fault) = owner.reporter().fault() {
+        return Err(fault);
+    }
+    owner.prepare_managed_runtime().map_err(RuntimeFault::app)?;
+    owner.validate_managed_runtime_authority()?;
+    owner.validate_fault_bridge_epoch(bridge_epoch)
+}
+
+pub(crate) fn start_app(app: &mut App) -> Result<(), AppRunError> {
+    if app.owner.managed_runtime_generation.is_some() {
+        return app
+            .owner
+            .validate_managed_runtime_authority()
+            .map_err(|fault| AppRunError::managed_runtime_fault(&fault));
+    }
+    app.seal_internal()
+        .map_err(|error| AppRunError::plugin(error, app.plugin_failure_report().cloned()))?;
+    initialize_world(&mut app.owner).map_err(|error| AppRunError::runner(error.to_string()))?;
+    start_world(&mut app.owner).map_err(|fault| {
+        let fault = app.owner.reporter().record_canonical(fault);
+        AppRunError::managed_runtime_fault(&fault)
+    })
+}
+
+pub(crate) fn drive_app(
+    owner: &mut RuntimeOwner,
+    operation: impl FnOnce(&mut RuntimeOwnerState) -> Result<AppFrameOutcome, AppRunError>,
+) -> Result<AppFrameOutcome, AppRunError> {
+    let bridge_epoch = owner.begin_fault_bridge_epoch();
+    let frame = (|| {
+        let bridge_epoch = bridge_epoch?;
+        let frame = capture_execution_error(|| operation(owner))?.map_err(RuntimeFault::app)?;
+        owner.validate_fault_bridge_epoch(bridge_epoch)?;
+        if let Some(fault) = owner.reporter().fault() {
+            return Err(fault);
+        }
+        Ok(frame)
+    })();
+    frame.map_err(|fault| {
+        let fault = owner.reporter().record_canonical(fault);
+        AppRunError::managed_runtime_fault(&fault)
+    })
+}
+
+/// Retryable shutdown of an App that is no longer being driven.
 ///
 /// Configured Apps and failed managed construction retain every registered close participant.
 /// Retained-only plan preparation may fail before an App exists and therefore start complete.
 /// Transfer itself does not poll close callbacks; the owner thread drives physical retirement.
-/// Dropping incomplete custody retains the existing process quarantine fallback.
-#[doc(hidden)]
 #[must_use = "failed runtime preparation retains close authority until cleanup completes"]
 pub struct RuntimePreparationRetirement {
     owner: Option<RuntimeOwner>,
@@ -1414,22 +1245,19 @@ impl RuntimePreparationRetirement {
         Self { owner: Some(owner) }
     }
 
-    pub(crate) fn from_reserved_app(
-        app: App,
-        mut reservation: RuntimeAdmissionReservation,
-        close_policy: RuntimeClosePolicy,
-    ) -> Self {
-        let mut owner = app.owner;
-        owner.close_policy = close_policy;
-        owner.fault_route = Some(reservation.take_route().activate(owner.reporter().clone()));
-        let route_handler = owner
-            .fault_route
-            .as_ref()
-            .expect("a reserved preparation owner retains its activated fault route")
-            .handler();
-        owner.bind_managed_runtime_error_handler(route_handler);
-        owner.begin_close();
-        Self { owner: Some(owner) }
+    pub(crate) fn finish(mut self) -> Result<RuntimeCloseEvidence, Self> {
+        let Some(owner) = &mut self.owner else {
+            return Ok(RuntimeCloseEvidence::default());
+        };
+        owner.finish_close_attempt();
+        let evidence = owner.close_evidence();
+        if owner.close_state() == RuntimeCandidateRetirementState::Retired
+            && !evidence.has_terminal_failure()
+        {
+            Ok(evidence.clone())
+        } else {
+            Err(self)
+        }
     }
 
     #[must_use]
@@ -2031,8 +1859,6 @@ impl RuntimeScheduleError {
 
 #[derive(Debug, Error)]
 pub enum RuntimeStartError {
-    #[error("runtime capacity reservation failed: {0}")]
-    Reservation(#[source] RuntimeAdmissionReservationError),
     #[error("runtime configuration failed: {0}")]
     Preparation(#[source] crate::PluginError),
     #[error("runtime admission failed: {0}")]
@@ -2227,31 +2053,21 @@ impl RuntimeInstance {
                 app.owner,
             ));
         }
-        let reservation = match RuntimeAdmissionReservation::try_acquire() {
-            Ok(reservation) => reservation,
-            Err(error) => {
-                return Err(RuntimeStartFailure::new(
-                    RuntimeStartError::Reservation(error),
-                    RuntimePreparationRetirement::from_app(app, close_policy),
-                ));
-            }
-        };
         if let Err(error) = app.seal_internal() {
             return Err(RuntimeStartFailure::new(
                 RuntimeStartError::Preparation(error),
-                RuntimePreparationRetirement::from_reserved_app(app, reservation, close_policy),
+                RuntimePreparationRetirement::from_app(app, close_policy),
             ));
         }
-        reservation
-            .admit(
-                SealedApp { app },
-                RuntimeObligationLedger::new(),
-                close_policy,
-            )
-            .map_err(|mut failure| {
-                let error = RuntimeStartError::Admission(failure.error());
-                RuntimeStartFailure::from_owner(error, failure.take_owner())
-            })
+        RuntimeCandidate::admit(
+            SealedApp { app },
+            RuntimeObligationLedger::new(),
+            close_policy,
+        )
+        .map_err(|mut failure| {
+            let error = RuntimeStartError::Admission(failure.error());
+            RuntimeStartFailure::from_owner(error, failure.take_owner())
+        })
     }
 
     fn from_promotion(
@@ -2389,10 +2205,7 @@ impl RuntimeInstance {
             return Err(RuntimeScheduleError::Missing { schedule });
         }
 
-        let fault_route = self.owner.fault_route_token();
-        let result = with_runtime_system_fault_capture(fault_route, || {
-            self.owner.run_managed_schedule(schedule)
-        });
+        let result = capture_execution_error(|| self.owner.run_managed_schedule(schedule));
         let fault = match result {
             Ok(Ok(())) => self.owner.reporter().fault(),
             Ok(Err(error)) => Some(RuntimeFault::app(error)),
@@ -2411,17 +2224,38 @@ impl RuntimeInstance {
         &mut self.owner.world
     }
 
-    /// Grants a platform or Host one short-lived managed runtime scope.
+    /// Applies a game-owned command to the live ECS world and returns its typed output.
     ///
-    /// The scope admits only typed, resource-local driver ports and applies each port's runtime
-    /// state gate. It exposes neither the `World` nor generic resource access. A runtime carrying
-    /// a prior fault still permits ports that explicitly accept its current state so the driver can
-    /// retire surfaces and other owned services; the existing fault remains sticky and observable.
-    /// This fault-retirement path deliberately does not revalidate the general runtime authority:
-    /// that authority may be the reason the runtime was isolated, while the typed port remains the
-    /// only operation available to release its owned native state. The
-    /// hidden cross-crate carrier is pre-1.0 plumbing, not the shared Adapter contract tracked by
-    /// OQ-038.
+    /// A fault observed after the command returns travels with that output. The caller can
+    /// reconcile the result before following the runtime's fault policy.
+    pub fn apply_command<C: Command>(
+        &mut self,
+        command: C,
+    ) -> Result<RuntimeScopeOutcome<C::Out>, RuntimeScopeError> {
+        let state = self.state();
+        if !matches!(state, RuntimeState::Running | RuntimeState::Paused) {
+            return Err(RuntimeScopeError::Unavailable { state });
+        }
+        let result = self
+            .owner
+            .capture_driver_scope(DriverScopeAuthorityPolicy::Full, |world| {
+                command.apply(world)
+            });
+        if result.as_ref().is_err()
+            || result
+                .as_ref()
+                .is_ok_and(|outcome| outcome.post_operation_fault.is_some())
+        {
+            self.execution_fault_delivered.set(true);
+        }
+        result.map_err(|fault| RuntimeScopeError::Faulted { fault })
+    }
+
+    /// Runs a short-lived operation for a runtime adapter, such as a native window or renderer.
+    ///
+    /// Adapters can settle outstanding native work when the runtime is faulted or closing. Only
+    /// the adapter's retirement operations should run then. The original fault remains observable.
+    /// Use [`Self::apply_command`] for game writes, which require a running or paused runtime.
     ///
     /// # Errors
     ///
@@ -2429,7 +2263,6 @@ impl RuntimeInstance {
     /// Returns [`RuntimeScopeError::Faulted`] when entry authority cannot be established. The
     /// operation is not invoked on either error. A normal return retains its output together with
     /// any post-operation fault; reconcile the output before following fault policy.
-    #[doc(hidden)]
     pub fn with_driver_scope<R>(
         &mut self,
         operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> R,
@@ -2459,31 +2292,6 @@ impl RuntimeInstance {
             self.execution_fault_delivered.set(true);
         }
         result.map_err(|fault| RuntimeScopeError::Faulted { fault })
-    }
-
-    /// Applies a typed port while retaining its input until scope entry succeeds.
-    ///
-    /// The outer error returns an uninvoked input. Once invoked, both a port rejection (including
-    /// its input) and a port output remain inside the returned scope outcome, even after a fault.
-    /// An unwinding operation retains the existing unwind behavior, not an input-return guarantee.
-    #[doc(hidden)]
-    #[allow(clippy::type_complexity)]
-    pub fn __with_owned_driver_port<P: __RuntimeDriverPort>(
-        &mut self,
-        input: P::Input,
-    ) -> Result<
-        RuntimeScopeOutcome<Result<P::Output, (RuntimeWorldAccessError, P::Input)>>,
-        (RuntimeScopeError, P::Input),
-    > {
-        let mut owned = Some(input);
-        match self.with_driver_scope(|scope| {
-            scope.__apply_owned_port::<P>(
-                owned.take().expect("an admitted port takes its input once"),
-            )
-        }) {
-            Ok(outcome) => Ok(outcome),
-            Err(error) => Err((error, owned.expect("an uninvoked scope retains its input"))),
-        }
     }
 
     /// Requests one safe-point control operation.
@@ -2812,8 +2620,7 @@ impl RuntimeInstance {
             Ok(epoch) => epoch,
             Err(fault) => return Err(self.enter_fault(fault)),
         };
-        let fault_route = self.owner.fault_route_token();
-        let result = with_runtime_system_fault_capture(fault_route, || match mode {
+        let result = capture_execution_error(|| match mode {
             RuntimeFrameMode::Running => self.owner.run_managed_frame(real_delta),
             RuntimeFrameMode::Paused => self.owner.run_paused_frame(real_delta),
         });
@@ -2831,10 +2638,7 @@ impl RuntimeInstance {
             Ok(epoch) => epoch,
             Err(fault) => return Err(self.enter_fault(fault)),
         };
-        let fault_route = self.owner.fault_route_token();
-        let result = with_runtime_system_fault_capture(fault_route, || {
-            self.owner.run_exact_fixed_tick(real_delta)
-        });
+        let result = capture_execution_error(|| self.owner.run_exact_fixed_tick(real_delta));
         match result {
             Ok(result) => self.finish_app_drive(result, bridge_epoch),
             Err(fault) => Err(self.enter_fault(fault)),
@@ -2930,12 +2734,37 @@ fn runtime_fault_bridge_authority_fault() -> RuntimeFault {
     )
 }
 
-fn with_runtime_system_fault_capture<R>(
-    fault_route: Option<FaultRouteToken>,
-    operation: impl FnOnce() -> R,
-) -> Result<R, RuntimeFault> {
-    let _execution = fault_route.map(FaultRouteToken::enter).transpose()?;
-    Ok(operation())
+struct ExecutionFault(RuntimeFault);
+
+fn handle_execution_error(error: BevyError, context: ErrorContext) {
+    if error.severity() != Severity::Error {
+        match_severity(error, context);
+        return;
+    }
+    let kind = match context {
+        ErrorContext::System { .. } => RuntimeFaultKind::System,
+        ErrorContext::RunCondition { .. } => RuntimeFaultKind::RunCondition,
+        ErrorContext::Command { .. } => RuntimeFaultKind::Command,
+        ErrorContext::Observer { .. } => RuntimeFaultKind::Observer,
+    };
+    let source = "nara.ecs.fallible-execution";
+    let fault = error.downcast_ref::<RuntimeExecutionError>().map_or_else(
+        || RuntimeFault::engine(kind, source),
+        |error| RuntimeFault::engine_with_detail(kind, source, error.detail()),
+    );
+    // Bevy's handler is a function pointer. Its executor propagates an unwind back to the
+    // schedule caller, including when the failure originates on a worker.
+    resume_unwind(Box::new(ExecutionFault(fault)));
+}
+
+fn capture_execution_error<R>(operation: impl FnOnce() -> R) -> Result<R, RuntimeFault> {
+    match catch_unwind(AssertUnwindSafe(operation)) {
+        Ok(output) => Ok(output),
+        Err(payload) => match payload.downcast::<ExecutionFault>() {
+            Ok(fault) => Err(fault.0),
+            Err(payload) => resume_unwind(payload),
+        },
+    }
 }
 
 #[cfg(test)]
@@ -3051,24 +2880,6 @@ mod tests {
     #[derive(Event)]
     struct ObserverInitializationProbe;
 
-    #[derive(Resource)]
-    struct UnconfiguredDriverPort;
-
-    impl __RuntimeDriverPort for UnconfiguredDriverPort {
-        type Input = Arc<AtomicBool>;
-        type Output = ();
-
-        fn apply_driver_input(&mut self, _input: Self::Input) {}
-    }
-
-    fn mark_configured_driver_call(
-        _world: &mut World,
-        called: Arc<AtomicBool>,
-    ) -> Result<(), (RuntimeWorldAccessError, Arc<AtomicBool>)> {
-        called.store(true, Ordering::SeqCst);
-        Ok(())
-    }
-
     #[derive(Debug)]
     struct OwnedDriverInput {
         drops: Arc<AtomicUsize>,
@@ -3081,19 +2892,7 @@ mod tests {
         }
     }
 
-    #[derive(Resource)]
-    struct OwnedInputPort;
-
-    impl __RuntimeDriverPort for OwnedInputPort {
-        type Input = Box<OwnedDriverInput>;
-        type Output = Box<OwnedDriverInput>;
-
-        fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output {
-            input
-        }
-    }
-
-    fn fault_after_owned_port_input(
+    fn fault_after_driver_input(
         world: &mut World,
         input: Box<OwnedDriverInput>,
     ) -> Result<Box<OwnedDriverInput>, (RuntimeWorldAccessError, Box<OwnedDriverInput>)> {
@@ -3101,7 +2900,7 @@ mod tests {
             .resource::<RuntimeFaultReporter>()
             .report(RuntimeFault::engine(
                 RuntimeFaultKind::RequiredService,
-                "nara.test.owned-port",
+                "nara.test.driver-input",
             ));
         if input.reject {
             Err((
@@ -3116,116 +2915,7 @@ mod tests {
     }
 
     #[derive(Resource)]
-    struct ClosingInputPort;
-
-    impl __RuntimeDriverPort for ClosingInputPort {
-        type Input = Box<OwnedDriverInput>;
-        type Output = Box<OwnedDriverInput>;
-
-        fn accepts_driver_state(state: RuntimeState) -> bool {
-            state == RuntimeState::Stopping
-        }
-
-        fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
-            panic!("closing must use this port's configured dispatch")
-        }
-    }
-
-    fn apply_closing_input(
-        _world: &mut World,
-        input: Box<OwnedDriverInput>,
-    ) -> Result<Box<OwnedDriverInput>, (RuntimeWorldAccessError, Box<OwnedDriverInput>)> {
-        if input.reject {
-            Err((
-                RuntimeWorldAccessError::MissingResource {
-                    type_name: "fixture",
-                },
-                input,
-            ))
-        } else {
-            Ok(input)
-        }
-    }
-
-    #[test]
-    fn close_context_uses_registered_dispatch_and_returns_domain_rejections_unchanged() {
-        let mut app = App::new();
-        app.insert_resource(ClosingInputPort).unwrap();
-        app.__register_driver_port::<ClosingInputPort>(apply_closing_input)
-            .unwrap();
-        for reject in [false, true] {
-            let drops = Arc::new(AtomicUsize::new(0));
-            let input = Box::new(OwnedDriverInput {
-                drops: drops.clone(),
-                reject,
-            });
-            let original = std::ptr::from_ref(&*input);
-            let mut context = RuntimeCloseContext {
-                world: app.world_mut().unwrap(),
-            };
-            let result = context.__apply_owned_port::<ClosingInputPort>(input);
-            let returned = match result {
-                Ok(input) => {
-                    assert!(!reject);
-                    input
-                }
-                Err((error, input)) => {
-                    assert!(reject);
-                    assert_eq!(
-                        error,
-                        RuntimeWorldAccessError::MissingResource {
-                            type_name: "fixture"
-                        }
-                    );
-                    input
-                }
-            };
-            assert_eq!(original, std::ptr::from_ref(&*returned));
-            assert_eq!(drops.load(Ordering::SeqCst), 0);
-            drop(returned);
-            assert_eq!(drops.load(Ordering::SeqCst), 1);
-        }
-    }
-
-    #[test]
-    fn close_context_keeps_owned_input_on_state_and_resource_admission_refusal() {
-        let mut app = App::new();
-        app.insert_resource(OwnedInputPort).unwrap();
-        let drops = Arc::new(AtomicUsize::new(0));
-        let input = Box::new(OwnedDriverInput {
-            drops: drops.clone(),
-            reject: false,
-        });
-        let original = std::ptr::from_ref(&*input);
-        let mut context = RuntimeCloseContext {
-            world: app.world_mut().unwrap(),
-        };
-        let (error, input) = context
-            .__apply_owned_port::<OwnedInputPort>(input)
-            .unwrap_err();
-        assert_eq!(
-            error,
-            RuntimeWorldAccessError::PortUnavailable {
-                type_name: type_name::<OwnedInputPort>(),
-                state: RuntimeState::Stopping,
-            }
-        );
-        assert_eq!(original, std::ptr::from_ref(&*input));
-        assert_eq!(drops.load(Ordering::SeqCst), 0);
-        let (error, input) = context
-            .__apply_owned_port::<ClosingInputPort>(input)
-            .unwrap_err();
-        assert_eq!(
-            error,
-            RuntimeWorldAccessError::MissingResource {
-                type_name: type_name::<ClosingInputPort>(),
-            }
-        );
-        assert_eq!(original, std::ptr::from_ref(&*input));
-        assert_eq!(drops.load(Ordering::SeqCst), 0);
-        drop(input);
-        assert_eq!(drops.load(Ordering::SeqCst), 1);
-    }
+    struct CloseReady;
 
     struct OwnedInputClose {
         input: Option<Box<OwnedDriverInput>>,
@@ -3233,19 +2923,11 @@ mod tests {
 
     impl OwnedInputClose {
         fn drive(&mut self, context: &mut RuntimeCloseContext<'_>) -> RuntimeCloseProgress {
-            let input = self
-                .input
-                .take()
-                .expect("pending close retains its original input");
-            match context.__apply_owned_port::<ClosingInputPort>(input) {
-                Ok(input) => {
-                    drop(input);
-                    RuntimeCloseProgress::Complete
-                }
-                Err((_, input)) => {
-                    self.input = Some(input);
-                    RuntimeCloseProgress::Pending
-                }
+            if context.world().contains_resource::<CloseReady>() {
+                drop(self.input.take().expect("pending close retains its input"));
+                RuntimeCloseProgress::Complete
+            } else {
+                RuntimeCloseProgress::Pending
             }
         }
     }
@@ -3267,12 +2949,12 @@ mod tests {
     }
 
     #[test]
-    fn stopped_waits_for_the_close_participants_original_owned_port_input() {
+    fn stopped_waits_for_the_close_participants_original_owned_input() {
         let drops = Arc::new(AtomicUsize::new(0));
         let mut obligations = RuntimeObligationLedger::new();
         obligations
             .register(
-                RuntimeCloseParticipantId::new("nara.test.owned-port-logical-close"),
+                RuntimeCloseParticipantId::new("nara.test.owned-input-logical-close"),
                 OwnedInputClose {
                     input: Some(Box::new(OwnedDriverInput {
                         drops: drops.clone(),
@@ -3282,15 +2964,9 @@ mod tests {
             )
             .unwrap();
         let mut app = App::new_with_runtime_obligations(obligations);
-        app.insert_resource(ClosingInputPort).unwrap();
-        app.__register_driver_port::<ClosingInputPort>(apply_closing_input)
-            .unwrap();
+        app.insert_resource(CloseReady).unwrap();
         let mut runtime = RuntimeInstance::start(app).unwrap();
-        let port = runtime
-            .owner
-            .world
-            .remove_resource::<ClosingInputPort>()
-            .unwrap();
+        let ready = runtime.owner.world.remove_resource::<CloseReady>().unwrap();
         assert!(matches!(
             runtime.request_control(RuntimeControl::Stop),
             RuntimeControlRequestResult::Accepted(_)
@@ -3304,7 +2980,7 @@ mod tests {
             RuntimeState::Stopping
         );
         assert_eq!(drops.load(Ordering::SeqCst), 0);
-        runtime.owner.world.insert_resource(port);
+        runtime.owner.world.insert_resource(ready);
         assert_eq!(
             runtime.drive(Duration::ZERO).unwrap().state(),
             RuntimeState::Stopped
@@ -3319,13 +2995,9 @@ mod tests {
     }
 
     #[test]
-    fn owned_driver_port_retains_success_and_rejection_after_a_fault() {
+    fn driver_scope_retains_success_and_rejection_after_a_fault() {
         for reject in [false, true] {
-            let mut app = App::new();
-            app.insert_resource(OwnedInputPort).unwrap();
-            app.__register_driver_port::<OwnedInputPort>(fault_after_owned_port_input)
-                .unwrap();
-            let mut runtime = RuntimeInstance::start(app).unwrap();
+            let mut runtime = RuntimeInstance::start(App::new()).unwrap();
             let drops = Arc::new(AtomicUsize::new(0));
             let input = Box::new(OwnedDriverInput {
                 drops: drops.clone(),
@@ -3334,7 +3006,9 @@ mod tests {
             let original = std::ptr::from_ref(&*input);
 
             let outcome = runtime
-                .__with_owned_driver_port::<OwnedInputPort>(input)
+                .with_driver_scope(|scope| {
+                    scope.with_world_mut(|world| fault_after_driver_input(world, input))
+                })
                 .unwrap();
             let fault = outcome.post_operation_fault.unwrap();
             let returned = match outcome.output {
@@ -3358,12 +3032,8 @@ mod tests {
     }
 
     #[test]
-    fn owned_driver_port_returns_input_before_invocation_when_entry_authority_is_missing() {
-        let mut app = App::new();
-        app.insert_resource(OwnedInputPort).unwrap();
-        app.__register_driver_port::<OwnedInputPort>(fault_after_owned_port_input)
-            .unwrap();
-        let mut runtime = RuntimeInstance::start(app).unwrap();
+    fn driver_scope_refuses_invocation_when_entry_authority_is_missing() {
+        let mut runtime = RuntimeInstance::start(App::new()).unwrap();
         runtime
             .owner
             .world
@@ -3374,14 +3044,17 @@ mod tests {
             reject: false,
         });
         let original = std::ptr::from_ref(&*input);
+        let mut input = Some(input);
 
-        let (error, returned) = runtime
-            .__with_owned_driver_port::<OwnedInputPort>(input)
+        let error = runtime
+            .with_driver_scope(|scope| {
+                scope.with_world_mut(|world| fault_after_driver_input(world, input.take().unwrap()))
+            })
             .unwrap_err();
         let fault = runtime.fault().cloned();
         assert!(runtime.finish().unwrap().is_empty());
 
-        assert_eq!(original, std::ptr::from_ref(&*returned));
+        assert_eq!(original, std::ptr::from_ref(input.as_deref().unwrap()));
         assert_eq!(drops.load(Ordering::SeqCst), 0);
         assert_eq!(
             error.fault().unwrap().kind(),
@@ -3391,7 +3064,7 @@ mod tests {
             fault.unwrap().kind(),
             RuntimeFaultKind::FaultReporterAuthority
         );
-        drop(returned);
+        drop(input);
         assert_eq!(drops.load(Ordering::SeqCst), 1);
     }
 
@@ -3430,103 +3103,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_driver_resource_cannot_run_a_configured_world_operation() {
-        let mut app = App::new();
-        app.__register_driver_port::<UnconfiguredDriverPort>(mark_configured_driver_call)
-            .unwrap();
-        let mut runtime = RuntimeInstance::start(app).unwrap();
-        let called = Arc::new(AtomicBool::new(false));
-
-        let result = runtime
-            .with_driver_scope(|scope| scope.__apply_port::<UnconfiguredDriverPort>(called.clone()))
-            .unwrap()
-            .output;
-
-        assert_eq!(
-            result,
-            Err(RuntimeWorldAccessError::MissingResource {
-                type_name: type_name::<UnconfiguredDriverPort>(),
-            })
-        );
-        assert!(!called.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn installed_driver_resource_does_not_select_an_unconfigured_world_operation() {
-        let mut app = App::new();
-        app.insert_resource(UnconfiguredDriverPort).unwrap();
-        let mut runtime = RuntimeInstance::start(app).unwrap();
-        let called = Arc::new(AtomicBool::new(false));
-
-        runtime
-            .with_driver_scope(|scope| scope.__apply_port::<UnconfiguredDriverPort>(called.clone()))
-            .unwrap()
-            .output
-            .unwrap();
-
-        assert!(!called.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn configured_driver_operation_is_unique_and_frozen_before_execution() {
-        let mut app = App::new();
-        app.insert_resource(UnconfiguredDriverPort).unwrap();
-        app.__register_driver_port::<UnconfiguredDriverPort>(mark_configured_driver_call)
-            .unwrap();
-        assert!(matches!(
-            app.__register_driver_port::<UnconfiguredDriverPort>(mark_configured_driver_call),
-            Err(crate::PluginError::DuplicateDriverPort { .. })
-        ));
-        app.seal_internal().unwrap();
-        assert!(matches!(
-            app.__register_driver_port::<UnconfiguredDriverPort>(mark_configured_driver_call),
-            Err(crate::PluginError::AppSealed)
-        ));
-        let mut runtime = RuntimeInstance::start(app).unwrap();
-        let called = Arc::new(AtomicBool::new(false));
-
-        runtime
-            .with_driver_scope(|scope| scope.__apply_port::<UnconfiguredDriverPort>(called.clone()))
-            .unwrap()
-            .output
-            .unwrap();
-
-        assert!(called.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn configured_driver_rejection_returns_the_original_owned_input() {
-        fn reject(
-            _world: &mut World,
-            input: Arc<AtomicBool>,
-        ) -> Result<(), (RuntimeWorldAccessError, Arc<AtomicBool>)> {
-            Err((
-                RuntimeWorldAccessError::MissingResource {
-                    type_name: "fixture",
-                },
-                input,
-            ))
-        }
-        let mut app = App::new();
-        app.insert_resource(UnconfiguredDriverPort).unwrap();
-        app.__register_driver_port::<UnconfiguredDriverPort>(reject)
-            .unwrap();
-        let mut runtime = RuntimeInstance::start(app).unwrap();
-        let input = Arc::new(AtomicBool::new(false));
-
-        let (_, returned) = runtime
-            .with_driver_scope(|scope| {
-                scope.__apply_owned_port::<UnconfiguredDriverPort>(input.clone())
-            })
-            .unwrap()
-            .output
-            .unwrap_err();
-
-        assert!(Arc::ptr_eq(&input, &returned));
-    }
-
-    #[test]
-    fn admission_observer_initialization_unwind_retains_host_close_obligations() {
+    fn admission_observer_initialization_unwind_releases_host_close_obligations() {
         let begins = Arc::new(AtomicUsize::new(0));
         let drops = Arc::new(AtomicUsize::new(0));
         let mut obligations = RuntimeObligationLedger::new();
@@ -3548,19 +3125,10 @@ mod tests {
         app.add_observer(|_: On<ObserverInitializationProbe>| {})
             .unwrap();
         let sealed = app.seal().unwrap();
-        let reservation = RuntimeAdmissionReservation::try_acquire().unwrap();
-
         let outcome = catch_unwind(AssertUnwindSafe(|| {
-            reservation.admit(sealed, obligations, RuntimeClosePolicy::default())
+            RuntimeCandidate::admit(sealed, obligations, RuntimeClosePolicy::default())
         }));
-        let begins_before_retirement = begins.load(Ordering::SeqCst);
-        let drops_before_retirement = drops.load(Ordering::SeqCst);
-        let quarantine = drive_runtime_quarantine();
-
         assert!(outcome.is_err());
-        assert_eq!(begins_before_retirement, 0);
-        assert_eq!(drops_before_retirement, 0);
-        assert_eq!(quarantine.current_thread_retained(), 0);
         assert_eq!(begins.load(Ordering::SeqCst), 1);
         assert_eq!(drops.load(Ordering::SeqCst), 1);
     }
@@ -3618,7 +3186,6 @@ mod tests {
         drop(app);
 
         assert!(joined.load(Ordering::SeqCst));
-        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
     }
 
     #[test]

@@ -110,10 +110,10 @@ impl MaterialShaderArtifact {
     /// `fixed_delta` is the original `FixedTime.delta` of the latest tick;
     /// `fixed_steps` is its original `steps_this_frame`, including zero.
     /// `fixed_timestep`, `time_scale` and `paused` retain the original settings.
-    /// `interpolation_alpha` is the original `RenderTime` value, while
-    /// `spatial_interpolated` reports whether spatial interpolation actually ran.
-    /// Availability, pause and spatial flags use `0u`/`1u`; `_reserved0` and
-    /// `_reserved1` are engine-owned padding. These View values are independent
+    /// `interpolation_alpha` is the original `RenderTime` value. `spatial_interpolated`
+    /// is retained at its existing uniform offset and set to `0u` by the stock renderer.
+    /// Availability and pause flags use `0u`/`1u`. `_reserved0` and `_reserved1` are
+    /// engine-owned padding. These View values are independent
     /// of authored material parameters and do not create pipeline variants.
     ///
     /// Both the supplied source and the complete assembled source are limited

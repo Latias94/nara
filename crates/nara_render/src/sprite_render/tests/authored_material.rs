@@ -305,7 +305,6 @@ fn authored_sprite_and_tilemap_capture_current_product_and_retain_a_after_b_and_
             Transform2d::default(),
         ))
         .id();
-    place_roots(world, &[authored, direct, stock]);
     assets.install(&mut app);
     let mut successor = Some(asset_b);
     app.add_systems(
@@ -458,7 +457,6 @@ fn authored_publication_allows_last_good_and_rejects_invalidated_overwritten_or_
             Transform2d::default(),
         ))
         .id();
-    place_roots(world, &[entity, direct, stock]);
     assets.install(&mut app);
     app.add_systems(
         CoreStage::Update,
@@ -590,7 +588,6 @@ fn authored_capture_rejects_another_product_published_into_the_selected_material
     .unwrap();
     let mut app = sprite_app();
     let entity = spawn_authored(app.world_mut().unwrap(), authored);
-    place_roots(app.world_mut().unwrap(), &[entity]);
     assets.install(&mut app);
     app.add_systems(
         CoreStage::Update,
@@ -692,7 +689,6 @@ fn authored_default_and_override_textures_require_actual_product_and_published_s
         .unwrap();
         let mut app = sprite_app();
         let entity = spawn_authored(app.world_mut().unwrap(), authored);
-        place_roots(app.world_mut().unwrap(), &[entity]);
         assets.install(&mut app);
         app.add_systems(
             CoreStage::Update,
@@ -805,7 +801,6 @@ fn value_only_edit_reuses_generation_and_explicit_texture_override_replaces_miss
     .unwrap();
     let mut app = sprite_app();
     let entity = spawn_authored(app.world_mut().unwrap(), first);
-    place_roots(app.world_mut().unwrap(), &[entity]);
     assets.install(&mut app);
     app.add_systems(
         CoreStage::Update,
@@ -951,10 +946,9 @@ fn invalid_authored_assignments_skip_only_their_entities_without_claiming_or_res
     let missing_count = invalid.len() as u32 + 1;
     let mut app = sprite_app();
     let world = app.world_mut().unwrap();
-    let mut roots = invalid
-        .into_iter()
-        .map(|authored| spawn_authored(world, authored))
-        .collect::<Vec<_>>();
+    for authored in invalid {
+        spawn_authored(world, authored);
+    }
     let ambiguous = spawn_authored(world, valid.clone());
     let mut tilemap = Tilemap::new(Vec2::ONE);
     tilemap.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(0)));
@@ -962,7 +956,6 @@ fn invalid_authored_assignments_skip_only_their_entities_without_claiming_or_res
     world
         .entity_mut(ambiguous)
         .insert((tilemap, expected.clone()));
-    roots.push(ambiguous);
     let healthy = spawn_authored(world, valid);
     let stock = world
         .spawn((
@@ -970,8 +963,6 @@ fn invalid_authored_assignments_skip_only_their_entities_without_claiming_or_res
             Transform2d::default(),
         ))
         .id();
-    roots.extend([healthy, stock]);
-    place_roots(world, &roots);
     assets.install(&mut app);
     let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(Duration::ZERO).unwrap();
@@ -1044,8 +1035,7 @@ fn noncanonical_default_references_reject_even_when_every_texture_is_overridden(
         )
         .unwrap();
         let mut app = sprite_app();
-        let entity = spawn_authored(app.world_mut().unwrap(), authored);
-        place_roots(app.world_mut().unwrap(), &[entity]);
+        spawn_authored(app.world_mut().unwrap(), authored);
         assets.install(&mut app);
         let mut runtime = RuntimeInstance::start(app).unwrap();
         runtime.drive(Duration::ZERO).unwrap();
@@ -1088,7 +1078,7 @@ fn missing_optional_material_resources_preserve_code_first_and_stock_extraction(
             .unwrap();
         let mut app = sprite_app();
         let world = app.world_mut().unwrap();
-        let unavailable = spawn_authored(world, authored);
+        spawn_authored(world, authored);
         let direct = world
             .spawn((
                 Sprite::from_color(Vec2::ONE, Color::WHITE),
@@ -1102,7 +1092,6 @@ fn missing_optional_material_resources_preserve_code_first_and_stock_extraction(
                 Transform2d::default(),
             ))
             .id();
-        place_roots(world, &[unavailable, direct, stock]);
         assets.install(&mut app);
         if missing_store {
             app.world_mut()

@@ -1,8 +1,8 @@
 use nara_asset::AssetRef;
-use nara_identity::SceneEntityId;
+use nara_ecs::identity::SceneEntityId;
 
 use super::*;
-use crate::__private::{
+use crate::asset_reference::{
     AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
     collect_declared_field_asset_references_with_admission,
     collect_declared_value_asset_references_with_admission,

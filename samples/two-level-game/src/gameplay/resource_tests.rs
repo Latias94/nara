@@ -5,12 +5,7 @@ use super::*;
     reason = "reuse the original public game and physical cleanup helper"
 )]
 mod support {
-    mod two_level_game {
-        pub use crate::{
-            GamePhase, GameSnapshot, capture_resume, levels, open_explicit_project_root,
-            open_project_root, product_recipe, resume,
-        };
-    }
+    use crate as two_level_game;
 
     include!("../../tests/support/resume_gameplay.rs");
 }

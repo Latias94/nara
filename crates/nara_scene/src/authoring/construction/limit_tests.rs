@@ -13,11 +13,11 @@ use super::{
     MAX_AUTHORING_FIELD_VALUE_NODES,
 };
 use crate::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringPropertyEdit,
-    AuthoringSchemaBasis, MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringSession, PrefabDocument,
-    PrefabDocumentCandidate, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
+    AuthoringDocumentSource, AuthoringPropertyEdit, AuthoringSchemaBasis,
+    MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
+    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, ScenePlacement, ScenePlacementParent, authoring::AuthoringAdapterReceipt,
 };
 
 const FIELDS: [&str; 10] = [

@@ -39,7 +39,7 @@ impl PreparedFieldCandidate<'_> {
 
     pub(super) fn validate_prefab_shape(
         mut self,
-        inputs: &BTreeSet<nara_identity::ReferenceInputId>,
+        inputs: &BTreeSet<nara_ecs::identity::ReferenceInputId>,
     ) -> Result<Self, crate::SceneFormatError> {
         // Move the nominal projection through its own format boundary; no second value tree.
         let prefab = PrefabDocument {
@@ -61,7 +61,7 @@ impl PreparedFieldCandidate<'_> {
 
     pub(super) fn validate_prefab_shape_with_admission(
         mut self,
-        inputs: &BTreeSet<nara_identity::ReferenceInputId>,
+        inputs: &BTreeSet<nara_ecs::identity::ReferenceInputId>,
         admit: &mut reclassification::AdmissionCallback<'_>,
     ) -> Result<Self, ScenePatchReport> {
         admit("prefab-inputs", retention::prefab_inputs_bytes(inputs))?;

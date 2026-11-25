@@ -3,13 +3,13 @@ use super::*;
 #[path = "activity_scopes/comparison.rs"]
 mod comparison;
 
+use nara_app::tasks::{
+    TaskFacilities, TaskPlugin, TaskReturnState, TaskScopeCloseReport, TaskShutdownReport,
+};
 use nara_app::{
     RuntimeClosePolicy, RuntimeControl, RuntimeControlFailure, RuntimeControlRequestResult,
     RuntimeControlStatus, RuntimeDriveError, RuntimeInstance, RuntimeObligationLedger,
     RuntimeState,
-};
-use nara_tasks::{
-    TaskFacilities, TaskPlugin, TaskReturnState, TaskScopeCloseReport, TaskShutdownReport,
 };
 
 fn shared_image_app(
@@ -22,9 +22,6 @@ fn shared_image_app(
     let mut app = App::new();
     // Register the managed scope before installing any task facade or consumer.
     app.add_plugin(TaskPlugin::shared(Arc::clone(facilities)))
-        .unwrap();
-    app.init_resource::<ImagePipelinePort>().unwrap();
-    app.__register_driver_port::<ImagePipelinePort>(ImagePipelinePort::apply_driver_input_in_world)
         .unwrap();
     app.add_plugins((
         (nara_asset::AssetPlugin, nara_asset::AssetSourcePlugin),
@@ -416,7 +413,7 @@ fn incomplete_image_runtime_stop_preserves_sibling_reload_and_shared_workers() {
     assert_eq!(held.return_observer().state(), TaskReturnState::Returned);
     assert!(matches!(
         held.try_take(),
-        Some(nara_tasks::TaskTerminal::Cancelled(TaskCancellation {
+        Some(nara_app::tasks::TaskTerminal::Cancelled(TaskCancellation {
             reason: TaskCancellationReason::ScopeClosed,
             before_start: false,
         }))

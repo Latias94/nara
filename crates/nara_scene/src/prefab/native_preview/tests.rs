@@ -1,8 +1,7 @@
 use super::*;
 use nara_app::PluginSchemaProviderId;
-use nara_diagnostic::{Diagnostic, DiagnosticValueRef};
+use nara_core::diagnostic::{DiagnosticValueRef, ReportDiagnostic as Diagnostic};
 use nara_reflect::{
-    __private::{register_resolved_schema_provider, resolve_schema_provider},
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId,
@@ -12,9 +11,9 @@ use nara_reflect::{
 };
 
 use crate::{
-    __private::AuthoringAdapterReceipt,
     AuthoringRecordReadiness, AuthoringSchemaBasis, PrefabInstance, ResolvedPrefabSource,
     SceneComponentRecord,
+    authoring::AuthoringAdapterReceipt,
     authoring_preview::{AuthoringPreviewOmissionLocation, AuthoringPreviewOmissionReason},
 };
 
@@ -120,18 +119,16 @@ fn provider(
 fn registry(provider: Option<ComponentSchemaProviderDefinition>) -> ComponentRegistrySnapshot {
     let mut registry = ComponentRegistryBuilder::new();
     if let Some(provider) = provider {
-        register_resolved_schema_provider(
-            &mut registry,
-            resolve_schema_provider(provider).unwrap(),
-        )
-        .unwrap();
+        registry
+            .register_resolved_schema_provider(provider.resolve().unwrap())
+            .unwrap();
     }
     registry.freeze().unwrap()
 }
 
 fn basis(provider: ComponentSchemaProviderDefinition, include_data: bool) -> AuthoringSchemaBasis {
     let native = AuthoringSchemaBundle::from_trusted_provider_definitions([provider]).unwrap();
-    let resolved = resolve_schema_provider(provider).unwrap();
+    let resolved = provider.resolve().unwrap();
     let coverage: BTreeSet<_> = resolved
         .current()
         .catalog()

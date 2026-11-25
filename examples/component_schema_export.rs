@@ -1,7 +1,7 @@
 use nara::{
     prelude::*, render::register_render_components, scene::register_scene_components,
-    sprite::register_sprite_components, tilemap::register_tilemap_components,
-    transform::register_transform_components,
+    scene::register_transform_components, sprite::register_sprite_components,
+    tilemap::register_tilemap_components,
 };
 
 fn main() {

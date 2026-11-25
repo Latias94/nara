@@ -7,13 +7,13 @@ use std::{
 };
 
 use nara_app::{
-    App, CoreStage, FixedTime, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
-    PluginLifecycleState, PluginShutdownContext, PluginShutdownObligationId, RealTime, RenderTime,
-    RuntimeCandidateRetirementState, RuntimeCloseContext, RuntimeCloseParticipant,
-    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeClosePolicy,
-    RuntimeCloseProgress, RuntimeControl, RuntimeControlRequestResult, RuntimeInstance,
-    RuntimeObligationLedger, RuntimeScheduleError, RuntimeStartError, RuntimeState,
-    ScheduleGraphError, StartupStage, VirtualTime,
+    App, AppExit, AppExitRequests, CoreStage, FixedTime, Plugin, PluginCategory, PluginDeclaration,
+    PluginError, PluginId, PluginLifecycleState, PluginShutdownContext, PluginShutdownObligationId,
+    RealTime, RenderTime, RuntimeCandidateRetirementState, RuntimeCloseContext,
+    RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
+    RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl, RuntimeControlRequestResult,
+    RuntimeInstance, RuntimeObligationLedger, RuntimeScheduleError, RuntimeStartError,
+    RuntimeState, ScheduleGraphError, StartupStage, VirtualTime,
 };
 use nara_ecs::{
     Commands, DetectChanges, Res, ResMut, Resource,
@@ -40,6 +40,50 @@ enum DomainSet {
 struct DomainTrace(Vec<&'static str>);
 
 #[test]
+fn app_drives_fixed_ticks_and_frames_in_the_same_world() {
+    let mut app = App::new();
+    app.init_resource::<DomainTrace>().unwrap();
+    app.add_systems(StartupStage::Scene, |mut trace: ResMut<DomainTrace>| {
+        trace.0.push("startup");
+    })
+    .unwrap();
+    app.add_systems(CoreStage::FixedUpdate, |mut trace: ResMut<DomainTrace>| {
+        trace.0.push("fixed");
+    })
+    .unwrap();
+    app.add_systems(
+        CoreStage::Update,
+        |mut trace: ResMut<DomainTrace>, mut exit: ResMut<AppExitRequests>| {
+            trace.0.push("update");
+            exit.request_exit();
+        },
+    )
+    .unwrap();
+
+    let step = Duration::from_millis(20);
+    let first = app.step_fixed(step).unwrap().status;
+    assert_eq!(first.fixed_tick, 1);
+    assert_eq!(first.fixed_elapsed, step);
+    let second = app.step_fixed(step).unwrap().status;
+    assert_eq!(second.fixed_tick, 2);
+    assert_eq!(second.fixed_elapsed, step * 2);
+    assert_eq!(
+        app.world().resource::<FixedTime>().timestep(),
+        FixedTime::DEFAULT_TIMESTEP
+    );
+    assert_eq!(
+        app.world().resource::<DomainTrace>().0,
+        ["startup", "fixed", "fixed"]
+    );
+    assert_eq!(app.run().unwrap(), AppExit::Requested);
+    assert_eq!(
+        app.world().resource::<DomainTrace>().0,
+        ["startup", "fixed", "fixed", "update"]
+    );
+    assert!(!app.finish().unwrap().has_terminal_failure());
+}
+
+#[test]
 fn automatic_intent_preparation_runs_once_per_frame_and_exact_step_but_not_paused_maintenance() {
     let mut app = App::new();
     app.init_resource::<DomainTrace>().unwrap();
@@ -47,12 +91,9 @@ fn automatic_intent_preparation_runs_once_per_frame_and_exact_step_but_not_pause
         trace.0.push("pre-update");
     })
     .unwrap();
-    app.add_systems(
-        nara_app::__private::FrameIntent,
-        |mut trace: ResMut<DomainTrace>| {
-            trace.0.push("intent");
-        },
-    )
+    app.add_systems(nara_app::FrameIntent, |mut trace: ResMut<DomainTrace>| {
+        trace.0.push("intent");
+    })
     .unwrap();
     app.add_systems(CoreStage::FixedUpdate, |mut trace: ResMut<DomainTrace>| {
         trace.0.push("fixed");
@@ -393,8 +434,8 @@ fn explicit_custom_schedule_rejects_builtin_missing_pending_and_paused_entries()
         .map(|schedule| schedule.intern())
         .chain(CoreStage::ALL.into_iter().map(|schedule| schedule.intern()))
         .chain([
-            nara_app::__private::FrameIntent.intern(),
-            nara_app::__private::FrameCleanup.intern(),
+            nara_app::FrameIntent.intern(),
+            nara_app::FrameCleanup.intern(),
         ])
     {
         assert_eq!(

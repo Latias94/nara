@@ -6,8 +6,8 @@ use std::{
 
 use nara_asset::AssetRef;
 use nara_core::{ByteLimit, ItemLimit};
-use nara_identity::{AuthoredEntityReference, EntityReference};
-use nara_reflect::{__private::component_values_exactly_match, ComponentValueRef};
+use nara_ecs::identity::{AuthoredEntityReference, EntityReference};
+use nara_reflect::{ComponentValueRef, schema::component_values_exactly_match};
 
 use super::*;
 use crate::{
@@ -56,6 +56,7 @@ pub struct PrefabComponentApplyRequest<'a> {
     pub compilation: SceneCompilationOptions,
 }
 
+/// A failure to resolve or prepare the source edits for a prefab component apply.
 #[derive(Debug)]
 pub enum PrefabComponentApplyPreparationError<E> {
     InvalidDestination,

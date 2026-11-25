@@ -32,19 +32,14 @@ fn main() -> ExitCode {
                 snapshot.initialized
             }
     });
-    let report = match HeadlessProductRun::<GameSnapshot>::new(
-        env!("CARGO_MANIFEST_DIR"),
-        intent,
-        Vec::new(),
-    )
-    .run()
-    {
-        Ok(report) => report,
-        Err(error) => {
-            eprintln!("project source: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let report =
+        match HeadlessProductRun::<GameSnapshot>::new(env!("CARGO_MANIFEST_DIR"), intent).run() {
+            Ok(report) => report,
+            Err(error) => {
+                eprintln!("project source: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
     match report.outcome() {
         HeadlessRunOutcome::Completed(snapshot) => {
             if snapshot.error.is_some()

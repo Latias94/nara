@@ -1,11 +1,11 @@
 use std::{alloc::Layout, collections::HashSet, mem::size_of, sync::Arc};
 
 use crate::{RenderResourceSnapshot, RenderTarget};
-use nara_text::{GlyphPlacement, GlyphRasterKey, TextLayout};
-use nara_ui_kernel::{
+use nara_ui::kernel::{
     UiEnvironment, UiFrame, UiImageId, UiMesh, UiPaintPrimitive, UiPhysicalRect, UiPoint, UiRect,
     UiResolvedBrush,
 };
+use nara_ui::text::{GlyphPlacement, GlyphRasterKey, TextLayout};
 
 use crate::hud::{
     UiGlyphAtlasPageSnapshot, UiPacketBorder, UiPacketFill, UiPacketImage, UiPacketMesh,
@@ -449,7 +449,7 @@ fn map_image_error(error: UiPreparedImageError) -> UiPresentationContentError {
 struct GlyphAppendContext<'a> {
     content_rect: UiRect,
     clip: Option<UiPacketRect>,
-    color: nara_ui_kernel::UiColor,
+    color: nara_ui::kernel::UiColor,
     environment: UiEnvironment,
     atlas: &'a GlyphAtlas,
     limits: UiPresentationLimits,

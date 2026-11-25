@@ -11,13 +11,13 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    __private::AuthoringAdapterReceipt,
     AuthoringDocumentReadiness, AuthoringDocumentSource, AuthoringRecordReadiness,
     PrefabComponentIntent, PrefabComponentSetMode, PrefabDocumentCandidate, PrefabEntityTarget,
     PrefabInstance, PrefabOverlay, ResolvedPrefabSource, SceneComponentRecord,
     SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
     ScenePatchOperation, ScenePlacement, ScenePlacementParent, SourceDocumentKey,
     SourceDocumentKind,
+    authoring::AuthoringAdapterReceipt,
     authoring::{
         SceneAuthoringContentState, SceneAuthoringHistoryCost, SceneAuthoringHistoryEntry,
         SceneAuthoringHistoryLimits,

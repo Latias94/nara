@@ -8,18 +8,16 @@ use std::{
 use nara::{
     ProductRecipe,
     app::{FixedTime, RuntimeState},
-    gameplay::{
-        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandPayload,
-        GameplayCommandQueue, GameplayCommandQueueStats, GameplayCommandSourceSequence,
-        GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
-        GameplayCommandValue,
-    },
     identity::{SceneInstanceId, WorldIdentityDomain, WorldIdentityDomainId},
     project_host::{HeadlessSession, HeadlessSessionClose},
     tasks::{TaskPools, TaskReturnState},
 };
 use two_level_game::{
     GamePhase, GameSnapshot, capture_resume,
+    command::{
+        CommandSchedule, CommandSequence, CommandSource, CommandStats, CommandTick, GameCommand,
+        ScheduledCommand, SemanticCommand, ServerCommand,
+    },
     levels::AUTHORED_LEVEL_MEMBERS,
     open_explicit_project_root, open_project_root, product_recipe,
     resume::{ResumeState, encode_resume},
@@ -45,7 +43,7 @@ pub struct FrozenGame {
     pub generation: u64,
     pub instance: SceneInstanceId,
     pub domain: WorldIdentityDomainId,
-    pub queue: GameplayCommandQueueStats,
+    pub queue: CommandStats,
 }
 
 impl Game {
@@ -102,9 +100,9 @@ impl Game {
         snapshot
     }
 
-    pub fn queue(&self) -> GameplayCommandQueueStats {
+    pub fn queue(&self) -> CommandStats {
         self.session
-            .observe(|world| world.resource::<GameplayCommandQueue>().stats())
+            .observe(|world| world.resource::<CommandSchedule>().stats())
             .unwrap()
     }
 
@@ -161,7 +159,7 @@ impl Game {
                 .session
                 .observe(|world| {
                     (
-                        world.resource::<GameplayCommandQueue>().is_idle(),
+                        world.resource::<CommandSchedule>().is_idle(),
                         world.resource::<TaskPools>().return_state(),
                     )
                 })
@@ -189,21 +187,21 @@ impl Game {
         }
     }
 
-    pub fn submit(&mut self, command: GameplayCommandDraft) {
+    pub fn submit(&mut self, command: GameCommand) {
         self.submit_at(self.tick().checked_add(1).unwrap(), command);
     }
 
-    pub fn submit_at(&mut self, tick: u64, command: GameplayCommandDraft) {
+    pub fn submit_at(&mut self, tick: u64, command: GameCommand) {
         assert_eq!(self.session.state(), Some(RuntimeState::Paused));
         self.sequence = self.sequence.checked_add(1).unwrap();
-        let submission = GameplayCommandSubmission::new(
-            GameplayCommandTick::new(tick).unwrap(),
-            GameplayCommandIngressSource::external("two-level-game.resume-gameplay-test").unwrap(),
-            GameplayCommandSourceSequence::new(self.sequence).unwrap(),
+        let submission = ScheduledCommand::new(
+            CommandTick::new(tick).unwrap(),
+            CommandSource::external("two-level-game.resume-gameplay-test").unwrap(),
+            CommandSequence::new(self.sequence).unwrap(),
             command,
         );
-        let key = submission.key();
-        assert_eq!(self.session.submit(submission).unwrap(), key);
+        let key = submission.key().clone();
+        assert_eq!(submission.submit_headless(&mut self.session).unwrap(), key);
     }
 
     pub fn step(&mut self) -> GameSnapshot {
@@ -213,7 +211,7 @@ impl Game {
         self.settle()
     }
 
-    pub fn command(&mut self, command: GameplayCommandDraft) -> GameSnapshot {
+    pub fn command(&mut self, command: GameCommand) -> GameSnapshot {
         self.submit(command);
         self.step()
     }
@@ -268,19 +266,26 @@ impl Drop for Game {
     }
 }
 
-pub fn action(id: &str) -> GameplayCommandDraft {
-    GameplayCommandDraft::new(GameplayCommandTypeId::new(id).unwrap())
+pub fn action(id: &str) -> GameCommand {
+    GameCommand::Player(match id {
+        TRAVEL => ServerCommand::Gameplay(SemanticCommand::Travel),
+        INSTANCE => ServerCommand::Gameplay(SemanticCommand::Instance),
+        MARKER => ServerCommand::Gameplay(SemanticCommand::Marker),
+        "two-level-game.retry" => ServerCommand::Gameplay(SemanticCommand::Retry),
+        "two-level-game.save" => ServerCommand::Save,
+        "two-level-game.restore" => ServerCommand::Restore,
+        "two-level-game.side-room" => ServerCommand::SideRoom,
+        "two-level-game.lookout" => ServerCommand::Lookout,
+        _ => panic!("unknown test action {id}"),
+    })
 }
 
-pub fn movement(direction: i64, pressed: bool) -> GameplayCommandDraft {
-    let mut payload = GameplayCommandPayload::new();
-    payload
-        .insert("direction", GameplayCommandValue::I64(direction))
-        .unwrap();
-    payload
-        .insert("pressed", GameplayCommandValue::Bool(pressed))
-        .unwrap();
-    action("two-level-game.move").with_payload(payload)
+pub fn movement(direction: i64, pressed: bool) -> GameCommand {
+    SemanticCommand::Move {
+        direction: usize::try_from(direction).unwrap(),
+        pressed,
+    }
+    .intent()
 }
 
 pub struct ProjectCopy {

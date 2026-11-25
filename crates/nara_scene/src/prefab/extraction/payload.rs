@@ -2,21 +2,25 @@
 
 use std::{borrow::Cow, mem::size_of};
 
-use nara_identity::EntityReference;
+use nara_ecs::identity::EntityReference;
 use nara_reflect::{
-    __private::{
-        ComponentPropertyAdmissionError, ComponentValueAdmissionError,
-        EffectiveValueAdmissionError, EntityReferencePlanError,
-        admit_declared_entity_reference_plan_rewrite,
-        effective_component_value_with_default_overrides_with_admission,
-        plan_declared_entity_references_with_admission,
-        plan_declared_value_entity_references_with_admission,
-        resolve_component_property_schema_claim_with_admission,
-        validate_component_property_value_with_admission, validate_component_value_with_admission,
-    },
     ComponentCapability, ComponentEntityReferenceRewriteError, ComponentFieldSchema,
     ComponentPropertyPath, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueShape,
+    effective::{
+        EffectiveValueAdmissionError,
+        effective_component_value_with_default_overrides_with_admission,
+    },
+    entity_reference::{
+        EntityReferencePlanError, admit_declared_entity_reference_plan_rewrite,
+        plan_declared_entity_references_with_admission,
+        plan_declared_value_entity_references_with_admission,
+    },
+    property::{
+        ComponentPropertyAdmissionError, resolve_component_property_schema_claim_with_admission,
+        validate_component_property_value_with_admission,
+    },
+    registry::{ComponentValueAdmissionError, validate_component_value_with_admission},
 };
 
 use super::{ExtractionError, ExtractionWork};

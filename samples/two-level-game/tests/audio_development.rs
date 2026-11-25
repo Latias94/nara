@@ -475,15 +475,14 @@ fn production_audible_development_adopts_real_edits_after_original_audio_retirem
         }
     }));
     if let Err(cleanup) = cleanup {
-        let root = fixture.root.clone();
-        std::mem::forget((host, fixture, input));
         eprintln!(
-            "audible development retains original Host, source/work copies and native \
-             input/foreground owner at {}",
-            root.display(),
+            "audible development: explicit cleanup failed for {}",
+            fixture.root.display(),
         );
+        drop(host);
+        drop(input);
         if let Err(original) = result {
-            eprintln!("original trajectory failed before its retained cleanup: {cleanup:?}");
+            eprintln!("original trajectory and explicit cleanup both failed: {cleanup:?}");
             resume_unwind(original);
         }
         resume_unwind(cleanup);
@@ -584,11 +583,10 @@ fn a_failed_game_close_preserves_its_error_without_blocking_physically_retired_a
         b
     }));
     if !close_to_completion(&mut host) {
-        let root = fixture.root.clone();
-        std::mem::forget((host, fixture));
+        drop(host);
         panic!(
-            "failed-predecessor control retains original cleanup owners at {}",
-            root.display()
+            "failed-predecessor control did not complete original cleanup at {}",
+            fixture.root.display()
         );
     }
     if let Ok(active) = &result {

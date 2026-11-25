@@ -542,7 +542,7 @@ fn contract_error(error: PersistentFileContractError) -> RuntimeSceneError {
 
 fn json_error(error_value: serde_json::Error) -> RuntimeSceneError {
     use crate::diagnostics::{error, with_public_u64};
-    let mut diagnostics = nara_diagnostic::DiagnosticReport::default();
+    let mut diagnostics = nara_core::diagnostic::DiagnosticReport::default();
     diagnostics.push(with_public_u64(
         with_public_u64(
             error(

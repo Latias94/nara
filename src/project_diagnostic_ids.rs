@@ -1,4 +1,4 @@
-use nara_fs::FsOperation;
+use crate::fs::FsOperation;
 
 pub(crate) const fn fs_operation_id(operation: FsOperation) -> &'static str {
     match operation {

@@ -71,15 +71,18 @@ fn build_variant(placement: DevelopmentPlacement, variant: Variant) -> BuiltVari
     let started = Instant::now();
     let executable = match build_executable(&request, |_| Ok(())) {
         Ok(executable) => executable,
-        Err(failure) => {
+        Err(mut failure) => {
             let message = format!("{failure:?}");
-            if matches!(&failure, CargoBuildFailure::CleanupIncomplete(_)) {
+            if let CargoBuildFailure::CleanupIncomplete(custody) = &mut failure
+                && let Err(error) = custody.retry_cleanup()
+            {
                 eprintln!(
-                    "notification comparison retains original build custody at {}: {message}",
+                    "notification comparison could not reap the original build (pid {:?}) for {}: {error}",
+                    custody.process_id(),
                     fixture.root.display(),
                 );
-                std::mem::forget((failure, fixture));
             }
+            drop(failure);
             panic!("actual notification comparison build failed: {message}");
         }
     };
@@ -124,6 +127,16 @@ fn build_variant(placement: DevelopmentPlacement, variant: Variant) -> BuiltVari
         original_source,
         build,
     }
+}
+
+fn release_fixtures(variants: [BuiltVariant; 2]) -> [Value; 2] {
+    let roots = variants.each_ref().map(|built| built.fixture.root.clone());
+    drop(variants);
+    roots.map(|root| {
+        json!({
+            "root": root, "removed_by_original_fixture": !root.exists(),
+        })
+    })
 }
 
 fn assert_only_interval_changed(variants: &[BuiltVariant; 2]) {
@@ -250,7 +263,7 @@ fn public_hosts_compare_native_request_notifications_with_periodic_reconciliatio
                 }));
                 if !matches!(&cleanup, Ok(true)) {
                     eprintln!(
-                        "notification comparison retains original Host and source/work owners at {}: {:?}",
+                        "notification comparison: explicit cleanup failed for {}: {:?}",
                         built.fixture.root.display(),
                         host.cleanup_error(),
                     );
@@ -263,20 +276,17 @@ fn public_hosts_compare_native_request_notifications_with_periodic_reconciliatio
                     ));
                     record.finish_cleanup(&host, nanos(cleanup_started.elapsed()), false);
                     runs.push(record);
-                    let retained: Vec<_> = variants
-                        .iter()
-                        .map(|built| built.fixture.root.clone())
-                        .collect();
+                    drop(host);
+                    fixture_cleanup.extend(release_fixtures(variants));
                     let report = json!({
                         "format": 1, "started_unix_ns": started_unix_ns, "finished_unix_ns": timestamp(),
                         "platform": format!("windows-{}", std::env::consts::ARCH),
                         "outer_debug_assertions": cfg!(debug_assertions), "protocol_version": protocol::PROTOCOL_VERSION,
                         "setup": setup, "builds": builds, "runs": runs, "fixture_cleanup": fixture_cleanup,
-                        "accepted": false, "partial": true, "retained_until_process_exit": retained,
-                        "failures": ["original cleanup failed; original Host and Fixture owners retained"],
+                        "accepted": false, "partial": true,
+                        "failures": ["explicit cleanup of the original Host did not complete"],
                         "method": measurement::method(),
                     });
-                    std::mem::forget((host, variants));
                     let saved = write_report(&output, &report);
                     if let Err(error) = &saved {
                         eprintln!(
@@ -303,16 +313,7 @@ fn public_hosts_compare_native_request_notifications_with_periodic_reconciliatio
                 runs.push(record);
             }
         }
-        let roots: Vec<_> = variants
-            .iter()
-            .map(|built| built.fixture.root.clone())
-            .collect();
-        drop(variants);
-        fixture_cleanup.extend(roots.into_iter().map(|root| {
-            json!({
-                "root": root, "removed_by_original_fixture": !root.exists(),
-            })
-        }));
+        fixture_cleanup.extend(release_fixtures(variants));
     }
     let (summaries, mut failures) = measurement::evaluate(&runs);
     for cleanup in &fixture_cleanup {

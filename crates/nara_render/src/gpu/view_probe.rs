@@ -9,10 +9,7 @@ use crate::{
 };
 use nara_app::{App, RuntimeInstance};
 use nara_core::{Color, Vec2};
-use nara_hierarchy::{
-    HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
-};
-use nara_transform::Transform2d;
+use nara_scene::spatial::Transform2d;
 
 pub(crate) fn capture_split_sprite_views(
     material: Option<crate::material::Material2dBinding>,
@@ -20,8 +17,7 @@ pub(crate) fn capture_split_sprite_views(
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
-        nara_hierarchy::HierarchyPlugin,
-        nara_transform::TransformPlugin,
+        nara_scene::spatial::SpatialPlugin,
         crate::RenderComponentsPlugin,
         crate::RenderPlugin::default(),
         crate::image::ImagePreparePlugin,
@@ -33,38 +29,29 @@ pub(crate) fn capture_split_sprite_views(
     let descriptor = RenderImagePacket::new(image, Extent2d::new(64, 64).unwrap()).unwrap();
     let generation = RenderFrameSourceGeneration::try_acquire().unwrap();
     let world = app.world_mut().unwrap();
-    let mut entities = Vec::new();
-    entities.push(
-        world
-            .spawn((
-                Camera2d {
-                    target,
-                    viewport: Some(ViewportRect::new(32, 0, 32, 64).unwrap()),
-                    viewport_height: 64.0,
-                    order: 1,
-                    ..Default::default()
-                },
-                Transform2d {
-                    translation: Vec2::new(100.0, 0.0),
-                    rotation: std::f32::consts::FRAC_PI_2,
-                    ..Default::default()
-                },
-            ))
-            .id(),
-    );
-    entities.push(
-        world
-            .spawn((
-                Camera2d {
-                    target,
-                    viewport: Some(ViewportRect::new(0, 0, 32, 64).unwrap()),
-                    viewport_height: 64.0,
-                    ..Default::default()
-                },
-                Transform2d::default(),
-            ))
-            .id(),
-    );
+    world.spawn((
+        Camera2d {
+            target,
+            viewport: Some(ViewportRect::new(32, 0, 32, 64).unwrap()),
+            viewport_height: 64.0,
+            order: 1,
+            ..Default::default()
+        },
+        Transform2d {
+            translation: Vec2::new(100.0, 0.0),
+            rotation: std::f32::consts::FRAC_PI_2,
+            ..Default::default()
+        },
+    ));
+    world.spawn((
+        Camera2d {
+            target,
+            viewport: Some(ViewportRect::new(0, 0, 32, 64).unwrap()),
+            viewport_height: 64.0,
+            ..Default::default()
+        },
+        Transform2d::default(),
+    ));
     for (x, color) in [
         (0.0, Color::rgb(1.0, 0.0, 0.0)),
         (100.0, Color::rgb(0.0, 1.0, 0.0)),
@@ -76,19 +63,7 @@ pub(crate) fn capture_split_sprite_views(
         if let Some(material) = &material {
             entity.insert(material.clone());
         }
-        entities.push(entity.id());
     }
-    HierarchyWriter::new(world)
-        .apply_batch(
-            &entities
-                .into_iter()
-                .map(|entity| HierarchyOperation::Place {
-                    entity,
-                    placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-                })
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
     let mut runtime = RuntimeInstance::start(app).unwrap();
     let driven = runtime.drive(Duration::ZERO);
     let snapshot = if driven.is_ok() {

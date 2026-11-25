@@ -343,10 +343,10 @@ pub(crate) fn entity_reference_dynamic_bytes(reference: &EntityReference) -> Opt
         }
         EntityReference::Authored { reference } => {
             let bytes = match &reference.target {
-                nara_identity::AuthoredReferenceTarget::Entity(entity) => {
+                nara_ecs::identity::AuthoredReferenceTarget::Entity(entity) => {
                     provenance_string_bytes(entity.entity().as_str())?
                 }
-                nara_identity::AuthoredReferenceTarget::Input(input) => {
+                nara_ecs::identity::AuthoredReferenceTarget::Input(input) => {
                     provenance_string_bytes(input.as_str())?
                 }
             }
@@ -379,11 +379,11 @@ pub(super) fn contextual_defaults_bytes(
 }
 
 pub(crate) fn prefab_inputs_bytes(
-    inputs: &BTreeSet<nara_identity::ReferenceInputId>,
+    inputs: &BTreeSet<nara_ecs::identity::ReferenceInputId>,
 ) -> Option<usize> {
     inputs.iter().try_fold(0usize, |bytes, input| {
         bytes
-            .checked_add(TREE_ENTRY_BYTES + size_of::<nara_identity::ReferenceInputId>())?
+            .checked_add(TREE_ENTRY_BYTES + size_of::<nara_ecs::identity::ReferenceInputId>())?
             .checked_add(provenance_string_bytes(input.as_str())?)
     })
 }

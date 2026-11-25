@@ -612,7 +612,7 @@ impl UnboundScenePublication {
             &self.claims,
             std::mem::take(&mut self.diagnostics),
         )?;
-        nara_identity::__private::validate_registered_identity_support_topology(world, [])
+        nara_ecs::identity::domain::validate_registered_identity_support_topology(world, [])
             .map_err(|_| {
                 preparation_rejection(
                     "scene.identity-support-ineligible",
@@ -627,7 +627,7 @@ impl UnboundScenePublication {
                         "Scene runtime projections would run unsupported lifecycle work",
                     )
                 })?;
-            nara_hierarchy::__private::validate_fresh_construction_topology(
+            crate::hierarchy::validate_fresh_construction_topology(
                 world,
                 self.preflight
                     .entities
@@ -1057,17 +1057,19 @@ impl UnboundScenePublication {
         let _prepared_hierarchy = match prepare_construction_batch(world, hierarchy_operations) {
             Ok(prepared) => prepared,
             Err(error) => {
-                diagnostics.push(if error == nara_hierarchy::HierarchyError::LifecycleWork {
-                    diagnostic_error(
-                        "scene.runtime-projection-ineligible",
-                        "Scene runtime projections would run unsupported lifecycle work",
-                    )
-                } else {
-                    diagnostic_error(
-                        "scene.hierarchy-publication-failed",
-                        "Validated scene hierarchy could not be prepared",
-                    )
-                });
+                diagnostics.push(
+                    if error == crate::hierarchy::HierarchyError::LifecycleWork {
+                        diagnostic_error(
+                            "scene.runtime-projection-ineligible",
+                            "Scene runtime projections would run unsupported lifecycle work",
+                        )
+                    } else {
+                        diagnostic_error(
+                            "scene.hierarchy-publication-failed",
+                            "Validated scene hierarchy could not be prepared",
+                        )
+                    },
+                );
                 rollback_spawn_transaction(world, &spawned_entities);
                 return Err(SceneSpawnReport {
                     instance: None,
@@ -1118,12 +1120,12 @@ impl UnboundScenePublication {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use crate::hierarchy::CompletedHierarchyProjection;
     use nara_asset::AssetServer;
     use nara_ecs::{
         Commands,
         bevy_ecs::{lifecycle::Remove, observer::On},
     };
-    use nara_hierarchy::__private::CompletedHierarchyProjection;
 
     use super::*;
 

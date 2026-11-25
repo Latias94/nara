@@ -173,11 +173,11 @@ mod tests {
 
     use crate::hud::UiPaintPacket;
     use crate::{RenderFrameSourceGeneration, RenderTarget, ViewportRect};
-    use nara_text::bundled_font_face;
-    use nara_ui_kernel::{
+    use nara_ui::kernel::{
         UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiLayer, UiLocalKey,
         UiNode, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiTheme, UiVisual,
     };
+    use nara_ui::text::bundled_font_face;
     use nara_window::WindowId;
 
     use super::*;

@@ -22,7 +22,7 @@ pub(super) fn validate_complete_value<'value>(
     } else {
         check_contextual_record(schema, record, limits, admission)
             .map_err(|error| contextual_record_rejection(schema, error))?;
-        nara_reflect::__private::effective_component_value_with_default_overrides_with_budget(
+        nara_reflect::effective::effective_component_value_with_default_overrides_with_budget(
             schema,
             record.value(),
             &record.contextual_defaults,
@@ -57,7 +57,7 @@ pub(super) fn validate_property_read_index(
     value: &ComponentValue,
     admission: &mut Option<&mut reclassification::ClassificationCallback<'_>>,
 ) -> Result<Option<Arc<ComponentPropertyReadIndex>>, AuthoringDocumentPublicationError> {
-    use nara_reflect::__private::{
+    use nara_reflect::registry::{
         ComponentValueAdmissionError, index_component_property_reads,
         index_component_property_reads_with_admission,
     };
@@ -194,10 +194,10 @@ pub(super) fn check_contextual_record(
         },
     )
     .map_err(|error| match error {
-        nara_reflect::__private::EffectiveValueAdmissionError::Value(error) => {
+        nara_reflect::effective::EffectiveValueAdmissionError::Value(error) => {
             ContextualRecordError::Value(error)
         }
-        nara_reflect::__private::EffectiveValueAdmissionError::Admission(error) => {
+        nara_reflect::effective::EffectiveValueAdmissionError::Admission(error) => {
             ContextualRecordError::Admission(error)
         }
     })?;
@@ -218,7 +218,7 @@ pub(super) fn check_contextual_record(
             }
         }
         let field = selected.expect("contextual defaults retain admitted root IDs");
-        nara_reflect::__private::plan_declared_value_entity_references_with_admission::<(), _>(
+        nara_reflect::entity_reference::plan_declared_value_entity_references_with_admission::<(), _>(
             field,
             field.shape(),
             value,
@@ -236,10 +236,10 @@ pub(super) fn check_contextual_record(
             },
         )
         .map_err(|error| match error {
-            nara_reflect::__private::EntityReferencePlanError::Reference(error) => {
+            nara_reflect::entity_reference::EntityReferencePlanError::Reference(error) => {
                 ContextualRecordError::Reference(error)
             }
-            nara_reflect::__private::EntityReferencePlanError::Admission(error) => {
+            nara_reflect::entity_reference::EntityReferencePlanError::Admission(error) => {
                 ContextualRecordError::Admission(error)
             }
         })?;

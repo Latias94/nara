@@ -8,7 +8,6 @@ use nara_asset::{AssetPathScope, ProjectAssetDatabase};
 use super::*;
 
 /// One actual lookup association in a captured configuration. Source identity stays physical.
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct PrefabExtractionBinding {
     pub reference: AssetRef,
@@ -17,7 +16,6 @@ pub struct PrefabExtractionBinding {
 
 /// Actual immutable asset catalogue and authored alias scope for one compilation environment.
 /// Its capture owner admits catalogue retention before transferring this shared observation.
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct PrefabExtractionAssets {
     pub database: Arc<ProjectAssetDatabase>,
@@ -35,7 +33,6 @@ impl PrefabExtractionAssets {
 /// Membership is a sorted unique list of request-local source indices. Existing bindings must
 /// remain exact; new bindings can select only the proposed Q. The Host separately proves that
 /// Q and its metadata are visible in this environment. Names locate refusals, never sources.
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct PrefabExtractionEnvironment {
     pub name: String,

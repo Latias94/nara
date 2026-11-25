@@ -9,9 +9,9 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    __private::AuthoringAdapterReceipt, PrefabAddition, PrefabComponentSetMode, PrefabDocument,
-    PrefabInstance, PrefabInstanceClaim, PrefabOverlay, PrefabPropertyClaim, SceneDocument,
-    SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+    PrefabAddition, PrefabComponentSetMode, PrefabDocument, PrefabInstance, PrefabInstanceClaim,
+    PrefabOverlay, PrefabPropertyClaim, SceneDocument, SceneEntityId, SceneEntityRecord,
+    SourceDocumentKey, SourceDocumentKind, authoring::AuthoringAdapterReceipt,
 };
 
 fn id(value: &str) -> SceneEntityId {

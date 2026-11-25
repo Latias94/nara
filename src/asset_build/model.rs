@@ -2,9 +2,9 @@
 
 use std::{fmt, sync::Arc};
 
+use crate::fs::{ContentDigest, FileLockError, FsError, TemporaryFileFailure};
 use nara_asset::{AssetProductRef, AssetReferenceDemand, AssetSourcePath};
 use nara_core::{ByteLimit, FormatKind, FormatVersion, ItemLimit};
-use nara_fs::{ContentDigest, FileLockError, FsError, TemporaryFileFailure};
 use serde::{Deserialize, Serialize};
 
 /// Exact byte identity, never an authored Product or a recipe identity.
@@ -196,7 +196,7 @@ pub enum ArtifactBuildError {
     Stale,
     Aborted,
     Panicked,
-    Domain(Box<nara_diagnostic::Diagnostic>),
+    Domain(Box<nara_core::diagnostic::ReportDiagnostic>),
     Codec(nara_asset::AssetRuntimeError),
     Image(nara_render::image::ImageImportError),
     Cook(nara_render::image::ImageCookError),

@@ -90,7 +90,7 @@ fn hosted_project_restart_updates_current_receipt_without_replacing_resident_sou
     >());
     let startup_revision = snapshot.revision();
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     host.complete_start(&mut attempt).unwrap();
 
     host.drive_running_runtime(Duration::ZERO).unwrap();

@@ -111,11 +111,13 @@ impl Drop for Custody {
             && !process.retire_normally(Duration::from_secs(30))
         {
             eprintln!(
-                "retaining unresolved original process and owned fixture: {}",
+                "desktop cleanup remained incomplete; retaining the fixture: {}",
                 process.diagnostics()
             );
-            std::mem::forget(self.process.take());
-            std::mem::forget(self.fixture.take());
+            drop(self.process.take());
+            if let Some(fixture) = self.fixture.take() {
+                fixture.retain_tree();
+            }
         }
     }
 }

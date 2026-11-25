@@ -6,7 +6,7 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use nara_identity::EntityReference;
+use nara_ecs::identity::EntityReference;
 
 use crate::{
     codec::ComponentCodecError,
@@ -596,9 +596,10 @@ impl Error for ComponentValueError {}
 
 #[cfg(test)]
 mod cost_traversal_tests {
-    use nara_identity::{
+    use nara_core::source::{SourceDocumentKey, SourceDocumentKind, StableAssetId};
+    use nara_ecs::identity::{
         AuthoredEntityReference, EntityReference, PrefabEntityOrigin, PrefabInstanceHop,
-        SceneEntityId, SourceDocumentKey, SourceDocumentKind, StableAssetId,
+        SceneEntityId,
     };
 
     use super::{ComponentValue, ComponentValueCost};

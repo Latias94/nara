@@ -62,7 +62,7 @@ fn data_only_interval_rejection_retains_engine_code_and_root_without_nested_map_
         None,
     )])
     .unwrap();
-    let adapter = nara_scene::__private::AuthoringAdapterReceipt::from_schema_owner(
+    let adapter = nara_scene::authoring::AuthoringAdapterReceipt::from_schema_owner(
         &bundle.owners()[0],
         &Default::default(),
     )
@@ -94,7 +94,8 @@ fn data_only_interval_rejection_retains_engine_code_and_root_without_nested_map_
             .fields()
             .iter()
             .any(|field| field.key().as_str() == "component-field-id"
-                && field.value() == nara_diagnostic::DiagnosticValueRef::Identifier("weights"))
+                && field.value()
+                    == nara_core::diagnostic::DiagnosticValueRef::Identifier("weights"))
     );
     assert!(
         diagnostic
@@ -102,7 +103,7 @@ fn data_only_interval_rejection_retains_engine_code_and_root_without_nested_map_
             .iter()
             .any(|field| field.key().as_str() == "scene-context-code"
                 && field.value()
-                    == nara_diagnostic::DiagnosticValueRef::Identifier(
+                    == nara_core::diagnostic::DiagnosticValueRef::Identifier(
                         "scene.authoring-component-value-invalid"
                     ))
     );
@@ -316,7 +317,7 @@ fn authoring_preview_projects_only_exact_available_direct_records() {
     let scene_manifest_before = published_scene.unavailable_manifest().clone();
 
     let published_scene_preview =
-        nara_scene::__private::project_published_authoring_scene_preview(&published_scene);
+        nara_scene::authoring::project_published_authoring_scene_preview(&published_scene);
 
     assert_eq!(published_scene.document(), &scene_before);
     assert_eq!(
@@ -340,26 +341,26 @@ fn authoring_preview_projects_only_exact_available_direct_records() {
     assert_eq!(published_scene_preview.omissions().len(), 2);
     assert!(matches!(
         published_scene_preview.omissions()[0].location(),
-        nara_scene::__private::AuthoringPreviewOmissionLocation::DirectEntityComponent {
+        nara_scene::authoring::AuthoringPreviewOmissionLocation::DirectEntityComponent {
             entity: omitted_entity,
             component,
         } if omitted_entity == &entity && component.as_str() == "nara.scene.Visibility"
     ));
     assert_eq!(
         published_scene_preview.omissions()[0].reason(),
-        nara_scene::__private::AuthoringPreviewOmissionReason::RecordUnavailable(
+        nara_scene::authoring::AuthoringPreviewOmissionReason::RecordUnavailable(
             AuthoringRecordReadiness::KnownUnbound
         )
     );
     assert!(matches!(
         published_scene_preview.omissions()[1].location(),
-        nara_scene::__private::AuthoringPreviewOmissionLocation::NestedPrefab {
+        nara_scene::authoring::AuthoringPreviewOmissionLocation::NestedPrefab {
             entity: omitted_entity,
         } if omitted_entity == &entity
     ));
     assert_eq!(
         published_scene_preview.omissions()[1].reason(),
-        nara_scene::__private::AuthoringPreviewOmissionReason::NestedPrefabUnsupported
+        nara_scene::authoring::AuthoringPreviewOmissionReason::NestedPrefabUnsupported
     );
     assert!(
         scene_before.entities[0]
@@ -373,7 +374,7 @@ fn authoring_preview_projects_only_exact_available_direct_records() {
 
     let scene_session = SceneAuthoringSession::from_published_authoring_document(published_scene);
     let scene_session_preview =
-        nara_scene::__private::project_authoring_scene_session_preview(&scene_session).unwrap();
+        nara_scene::authoring::project_authoring_scene_session_preview(&scene_session).unwrap();
 
     assert_eq!(scene_session.document(), &scene_before);
     assert_eq!(
@@ -392,7 +393,7 @@ fn authoring_preview_projects_only_exact_available_direct_records() {
     let prefab_before = published_prefab.document().clone();
     let prefab_manifest_before = published_prefab.unavailable_manifest().clone();
     let published_prefab_preview =
-        nara_scene::__private::project_published_authoring_prefab_preview(&published_prefab);
+        nara_scene::authoring::project_published_authoring_prefab_preview(&published_prefab);
 
     assert_eq!(published_prefab.document(), &prefab_before);
     assert_eq!(
@@ -416,7 +417,7 @@ fn authoring_preview_projects_only_exact_available_direct_records() {
     let prefab_session =
         PrefabAuthoringSession::from_published_authoring_document(published_prefab);
     let prefab_session_preview =
-        nara_scene::__private::project_authoring_prefab_session_preview(&prefab_session).unwrap();
+        nara_scene::authoring::project_authoring_prefab_session_preview(&prefab_session).unwrap();
 
     assert_eq!(prefab_session.document(), &prefab_before);
     assert_eq!(
@@ -631,7 +632,7 @@ fn available_field_edit_preserves_known_unbound_manifest_across_reopen() {
     assert_eq!(diagnostic.code().as_str(), "scene.authoring-known-unbound");
     assert_eq!(
         diagnostic.severity(),
-        nara_diagnostic::DiagnosticSeverity::Warning
+        nara_core::diagnostic::DiagnosticSeverity::Warning
     );
 
     let mut session = SceneAuthoringSession::from_published_authoring_document(published);
@@ -869,9 +870,10 @@ fn strict_compilation_rejects_degraded_scene_and_prefab_before_world_mutation() 
     assert_eq!(prefab.readiness(), AuthoringDocumentReadiness::Degraded);
 
     let mut registry = ComponentRegistryBuilder::new();
-    let provider =
-        nara_reflect::__private::resolve_schema_provider(SCENE_COMPONENTS_SCHEMA_PROVIDER).unwrap();
-    nara_reflect::__private::register_resolved_schema_provider(&mut registry, provider).unwrap();
+    let provider = SCENE_COMPONENTS_SCHEMA_PROVIDER.resolve().unwrap();
+    registry
+        .register_resolved_schema_provider(provider)
+        .unwrap();
     let registry = registry.freeze().unwrap();
     let world = World::new();
     let before = world.iter_entities().count();
@@ -1070,16 +1072,15 @@ fn unknown_component_value_tag_rejects_before_authoring_candidate() {
 
 fn cross_component_authoring_fixture() -> (
     AuthoringSchemaBundle,
-    nara_scene::__private::AuthoringAdapterReceipt,
+    nara_scene::authoring::AuthoringAdapterReceipt,
     SceneDocument,
     ScenePatchDocument,
 ) {
     let (bundle, _) = scene_bundle_and_name_adapter();
-    let resolved =
-        nara_reflect::__private::resolve_schema_provider(SCENE_COMPONENTS_SCHEMA_PROVIDER).unwrap();
+    let resolved = SCENE_COMPONENTS_SCHEMA_PROVIDER.resolve().unwrap();
     let name = component_id("nara.scene.Name");
     let visibility = component_id("nara.scene.Visibility");
-    let adapter = nara_scene::__private::AuthoringAdapterReceipt::from_trusted_provider(
+    let adapter = nara_scene::authoring::AuthoringAdapterReceipt::from_trusted_provider(
         resolved.contribution_receipt(),
         "nara.scene.first-party-authoring-adapter",
         1,
@@ -1125,10 +1126,9 @@ fn cross_component_authoring_fixture() -> (
 
 fn scene_bundle_and_name_adapter() -> (
     AuthoringSchemaBundle,
-    nara_scene::__private::AuthoringAdapterReceipt,
+    nara_scene::authoring::AuthoringAdapterReceipt,
 ) {
-    let resolved =
-        nara_reflect::__private::resolve_schema_provider(SCENE_COMPONENTS_SCHEMA_PROVIDER).unwrap();
+    let resolved = SCENE_COMPONENTS_SCHEMA_PROVIDER.resolve().unwrap();
     let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
         persistent_owner(SCENE_COMPONENTS_SCHEMA_OWNER_ID.as_str()),
         resolved.current().catalog().clone(),
@@ -1137,7 +1137,7 @@ fn scene_bundle_and_name_adapter() -> (
             .map(|record| record.catalog().clone()),
     )])
     .unwrap();
-    let adapter = nara_scene::__private::AuthoringAdapterReceipt::from_trusted_provider(
+    let adapter = nara_scene::authoring::AuthoringAdapterReceipt::from_trusted_provider(
         resolved.contribution_receipt(),
         "nara.scene.first-party-authoring-adapter",
         1,

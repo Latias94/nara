@@ -3,7 +3,7 @@
 use std::{error::Error, fmt};
 
 use nara_core::ByteLimit;
-use nara_diagnostic::Diagnostic;
+use nara_core::diagnostic::ReportDiagnostic as Diagnostic;
 
 use crate::{AssetProductRef, AssetReferenceDemand, ImportedProductId};
 

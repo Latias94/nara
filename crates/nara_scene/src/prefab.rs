@@ -6,8 +6,8 @@ use std::{
 };
 
 use nara_asset::{AssetRecord, AssetRef, AssetReferenceResolver, StableAssetId};
+use nara_core::diagnostic::DiagnosticReport;
 use nara_core::{ByteLimit, ItemLimit};
-use nara_diagnostic::DiagnosticReport;
 #[cfg(feature = "serde")]
 use nara_reflect::ComponentDecodeContext;
 use nara_reflect::{
@@ -71,7 +71,7 @@ pub struct PrefabDocument {
         feature = "serde",
         serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")
     )]
-    pub inputs: std::collections::BTreeSet<nara_identity::ReferenceInputId>,
+    pub inputs: std::collections::BTreeSet<nara_ecs::identity::ReferenceInputId>,
     pub placements: Vec<crate::SceneEntityPlacement>,
     pub entities: Vec<SceneEntityRecord>,
 }
@@ -320,7 +320,7 @@ impl PrefabInstance {
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PrefabReferenceArguments {
     pub base: SourceDocumentKey,
-    pub values: BTreeMap<nara_identity::ReferenceInputId, nara_identity::EntityReference>,
+    pub values: BTreeMap<nara_ecs::identity::ReferenceInputId, nara_ecs::identity::EntityReference>,
 }
 
 /// Resolves a lookup request to its admitted source identity and immutable document together.
@@ -912,14 +912,14 @@ pub struct SceneCompilationReport {
 /// Callers cannot replace the candidate or clear omissions before native preview restriction:
 ///
 /// ```compile_fail,E0616
-/// use nara_scene::__private::AuthoringSceneCompilationReport;
+/// use nara_scene::authoring::AuthoringSceneCompilationReport;
 /// fn replace_candidate(report: &mut AuthoringSceneCompilationReport) {
 ///     report.candidate = None;
 /// }
 /// ```
 ///
 /// ```compile_fail,E0616
-/// use nara_scene::__private::AuthoringSceneCompilationReport;
+/// use nara_scene::authoring::AuthoringSceneCompilationReport;
 /// fn clear_omissions(report: &mut AuthoringSceneCompilationReport) {
 ///     report.omissions.clear();
 /// }
@@ -972,7 +972,7 @@ impl AuthoringSceneCompilationReport {
     ///
     /// ```compile_fail,E0382
     /// use nara_reflect::ComponentRegistrySnapshot;
-    /// use nara_scene::__private::AuthoringSceneCompilationReport;
+    /// use nara_scene::authoring::AuthoringSceneCompilationReport;
     /// fn reuse_report(
     ///     report: AuthoringSceneCompilationReport,
     ///     registry: &ComponentRegistrySnapshot,
@@ -1055,6 +1055,7 @@ impl AuthoringNativePreview {
     }
 }
 
+/// A component omitted from native preview during authoring compilation.
 #[cfg(feature = "serde")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthoringSceneCompilationOmission {
@@ -1064,6 +1065,7 @@ pub struct AuthoringSceneCompilationOmission {
     pub reason: AuthoringSceneCompilationOmissionReason,
 }
 
+/// Why authoring compilation omitted a component from native preview.
 #[cfg(feature = "serde")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthoringSceneCompilationOmissionReason {
@@ -1136,7 +1138,6 @@ where
 
 /// The composition and surviving-reference outcome for one saved Prefab.
 #[cfg(feature = "serde")]
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct AuthoringSavedPrefabValidationReport {
     pub diagnostics: DiagnosticReport,
@@ -1149,7 +1150,6 @@ pub struct AuthoringSavedPrefabValidationReport {
 /// the captured Schema and loader. A declared Input reached at the standalone root
 /// is deferred until an actual instance supplies its arguments.
 #[cfg(feature = "serde")]
-#[doc(hidden)]
 pub fn try_validate_authoring_saved_prefab_with_loader<F, E>(
     document: &PrefabDocument,
     basis: &crate::AuthoringSchemaBasis,
@@ -1183,7 +1183,6 @@ where
 /// An actual containing source, borrowed without a Scene-shaped surrogate.
 #[cfg(feature = "serde")]
 #[derive(Debug, Clone, Copy)]
-#[doc(hidden)]
 pub enum SourceDocumentInput<'a> {
     Scene(&'a SceneDocument),
     Prefab(&'a PrefabDocument),
@@ -1204,13 +1203,13 @@ pub(crate) struct ComponentApplyScope<'a> {
 #[derive(Clone, Copy)]
 pub(crate) enum SelectedInstanceConsumer<'a> {
     Conversion {
-        reference_queries: &'a [nara_identity::AuthoredEntityReference],
+        reference_queries: &'a [nara_ecs::identity::AuthoredEntityReference],
         initial_reference_work: (usize, usize),
     },
     Inspection,
     ComponentApply {
         scope: ComponentApplyScope<'a>,
-        reference_queries: &'a [nara_identity::AuthoredEntityReference],
+        reference_queries: &'a [nara_ecs::identity::AuthoredEntityReference],
         initial_reference_work: (usize, usize),
     },
 }
@@ -1225,7 +1224,7 @@ pub(crate) struct SelectedInstanceFragment {
     pub(crate) provenance: crate::SceneEntityProvenanceMap,
     pub(crate) targets: BTreeMap<PrefabEntityTarget, SceneEntityId>,
     pub(crate) reference_targets:
-        BTreeMap<nara_identity::AuthoredEntityReference, nara_identity::EntityReference>,
+        BTreeMap<nara_ecs::identity::AuthoredEntityReference, nara_ecs::identity::EntityReference>,
 }
 
 #[cfg(feature = "serde")]
@@ -1234,7 +1233,7 @@ pub(crate) struct SelectedInstanceCompilation {
     pub(crate) fragment: Option<SelectedInstanceFragment>,
     pub(crate) inspection: Option<inspection::CapturedPrefabInspection>,
     pub(crate) component_apply_references:
-        BTreeMap<nara_identity::AuthoredEntityReference, nara_identity::EntityReference>,
+        BTreeMap<nara_ecs::identity::AuthoredEntityReference, nara_ecs::identity::EntityReference>,
     pub(crate) diagnostics: DiagnosticReport,
     pub(crate) failure: Option<SceneCompilationFailure>,
     pub(crate) omissions: Vec<AuthoringSceneCompilationOmission>,
@@ -1825,7 +1824,7 @@ where
         &mut self,
         placements: &[crate::SceneEntityPlacement],
         entities: &[SceneEntityRecord],
-        inputs: Option<&BTreeSet<nara_identity::ReferenceInputId>>,
+        inputs: Option<&BTreeSet<nara_ecs::identity::ReferenceInputId>>,
     ) -> SceneCompilationReport {
         let (candidate, failure) =
             self.compile_source_with_terminal(placements, entities, inputs, Self::seal_document);
@@ -1841,7 +1840,7 @@ where
         &mut self,
         placements: &[crate::SceneEntityPlacement],
         entities: &[SceneEntityRecord],
-        inputs: Option<&BTreeSet<nara_identity::ReferenceInputId>>,
+        inputs: Option<&BTreeSet<nara_ecs::identity::ReferenceInputId>>,
         terminal: impl FnOnce(&mut Self, SceneDraft) -> Option<T>,
     ) -> (Option<T>, Option<SceneCompilationFailure>) {
         if !self.reserve_provenance_bytes(
@@ -2412,7 +2411,7 @@ fn prefab_expansion_budget_diagnostic(
     maximum: usize,
     entity: Option<&SceneEntityId>,
     source: Option<&AssetRef>,
-) -> nara_diagnostic::Diagnostic {
+) -> nara_core::diagnostic::ReportDiagnostic {
     let mut diagnostic = with_public_u64(
         with_public_u64(
             with_public_locator(

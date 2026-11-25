@@ -17,10 +17,7 @@ use crate::{
 use nara_app::{App, RuntimeInstance};
 use nara_asset::{AssetEvents, AssetStates, Assets};
 use nara_core::{Color as LinearColor, Vec2};
-use nara_hierarchy::{
-    HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
-};
-use nara_transform::Transform2d;
+use nara_scene::spatial::Transform2d;
 use nara_window::{Window, WindowResolution};
 
 const CAMERA_CLEAR: LinearColor = LinearColor::rgba(0.8, 0.4, 0.2, 0.25);
@@ -165,8 +162,7 @@ fn captured_stock(
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
-        nara_hierarchy::HierarchyPlugin,
-        nara_transform::TransformPlugin,
+        nara_scene::spatial::SpatialPlugin,
         crate::RenderComponentsPlugin,
         crate::RenderPlugin { world_canvas },
         crate::image::ImagePreparePlugin,
@@ -208,22 +204,17 @@ fn captured_stock(
         MATERIAL_FRAGMENT,
     );
     let world = app.world_mut().unwrap();
-    let mut entities = Vec::new();
     for (order, color) in [(0, LinearColor::rgba(0.75, 0.125, 0.5, 0.625)), (1, clear)] {
-        entities.push(
-            world
-                .spawn((
-                    Camera2d {
-                        target: RenderTarget::Window(window.id),
-                        viewport: Some(ViewportRect::new(0, 0, 32, 16).unwrap()),
-                        viewport_height: 16.0,
-                        clear_color: Some(color),
-                        order,
-                    },
-                    Transform2d::default(),
-                ))
-                .id(),
-        );
+        world.spawn((
+            Camera2d {
+                target: RenderTarget::Window(window.id),
+                viewport: Some(ViewportRect::new(0, 0, 32, 16).unwrap()),
+                viewport_height: 16.0,
+                clear_color: Some(color),
+                order,
+            },
+            Transform2d::default(),
+        ));
     }
     if draw_sprites {
         let tint = LinearColor::rgba(0.5, 0.75, 0.25, 0.5);
@@ -265,20 +256,8 @@ fn captured_stock(
                 };
                 entity.insert(material_binding(generation, parameters, textures[0]));
             }
-            entities.push(entity.id());
         }
     }
-    HierarchyWriter::new(world)
-        .apply_batch(
-            &entities
-                .into_iter()
-                .map(|entity| HierarchyOperation::Place {
-                    entity,
-                    placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-                })
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
     let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(std::time::Duration::ZERO).unwrap();
     let packet = build_render_frame_packet_with_world_canvas(

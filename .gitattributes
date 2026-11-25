@@ -20,6 +20,6 @@ reference-game/tests/fixtures/*.json text eol=lf
 reference-game/assets/**/*.meta text eol=lf
 
 # The pinned upstream Fira license is preserved byte-for-byte, including its source whitespace.
-crates/nara_text/assets/FiraSans-LICENSE.txt -text whitespace=-trailing-space
+crates/nara_ui/assets/FiraSans-LICENSE.txt -text whitespace=-trailing-space
 # The test font license has explicitly documented LF-normalized provenance.
-crates/nara_text/tests/fixtures/FiraMono-LICENSE text eol=lf
+crates/nara_ui/tests/text/fixtures/FiraMono-LICENSE text eol=lf

@@ -1,31 +1,32 @@
 use std::{collections::BTreeMap, convert::Infallible};
 
 use nara_asset::{AssetDatabaseError, AssetReferenceResolver};
-use nara_ecs::{
-    __private::{
-        PersistentComponentMetadataError, PersistentLifecycleEvent, PersistentObserverScope,
-        validate_registered_persistent_component_apply,
-    },
-    Component, Entity, World,
-    bevy_ecs::{lifecycle, world::WorldId},
-};
-use nara_identity::{
+use nara_ecs::identity::{
     EntityLookup, EntityReference, IdentityDomainError, RuntimeEntityReference, SceneInstanceId,
     WorldIdentityDomain,
 };
-use nara_reflect::{
-    __private::{
-        EffectiveValueAdmissionError, NativeValueMetrics,
-        effective_component_value_in_place_with_default_overrides,
-        validate_explicit_component_value,
-        validate_native_component_value_references_with_admission,
-        validate_value_materialization_budget,
+use nara_ecs::{
+    Component, Entity, World,
+    bevy_ecs::{lifecycle, world::WorldId},
+    transaction::{
+        PersistentComponentMetadataError, PersistentLifecycleEvent, PersistentObserverScope,
+        validate_registered_persistent_component_apply,
     },
+};
+use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentRegistryAuthorityError, ComponentSchema,
     ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     ComponentValueCost, ComponentValueMaterializationLimits, ComponentValueRef,
     DeclaredAssetReferenceError, collect_declared_asset_references_from_schema_with_limits,
-    component_registry, component_registry_is_installed, validate_component_registry_authority,
+    component_registry, component_registry_is_installed,
+    effective::{
+        EffectiveValueAdmissionError, NativeValueMetrics,
+        effective_component_value_in_place_with_default_overrides,
+        validate_native_component_value_references_with_admission,
+        validate_value_materialization_budget,
+    },
+    registry::validate_explicit_component_value,
+    validate_component_registry_authority,
 };
 
 use crate::{
@@ -393,7 +394,7 @@ impl SceneComponentBindings {
             .ok_or_else(|| SceneDataComponentError::BindingUnavailable {
                 component: component.clone(),
             })?;
-        nara_reflect::__private::validate_schema_capabilities(schema, [ComponentCapability::Scene])
+        nara_reflect::registry::validate_schema_capabilities(schema, [ComponentCapability::Scene])
             .map_err(|_| SceneDataComponentError::SchemaInvalid {
                 component: component.clone(),
             })?;
@@ -682,7 +683,7 @@ fn validate_carrier_lifecycle(
 #[cfg(test)]
 mod tests {
     use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-    use nara_identity::{AuthoredEntityReference, ReferenceInputId, SceneEntityId};
+    use nara_ecs::identity::{AuthoredEntityReference, ReferenceInputId, SceneEntityId};
     use nara_reflect::{
         ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistryBuilder,
         ComponentSchemaCatalog, ComponentValueKind, ComponentValueShape,

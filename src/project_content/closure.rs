@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity};
+use crate::fs::{ContentDigest, DirectoryCapability, FileIdentity};
 use nara_project::ProjectPath;
 use nara_reflect::SchemaCompositionFingerprint;
 

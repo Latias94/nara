@@ -13,7 +13,7 @@ use nara_app::{
     RuntimeCandidateRetirementState, RuntimeCloseContext, RuntimeCloseParticipant,
     RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeClosePolicy,
     RuntimeCloseProgress, RuntimeInstance, RuntimeObligationLedger, RuntimeStartError,
-    StartupStage, runtime_quarantine_status,
+    StartupStage,
 };
 use nara_ecs::NonSend;
 
@@ -138,7 +138,6 @@ pub(super) fn assert_parallel_refused_before_startup(expected: ExecutionProfileE
     assert_eq!(trace.drops, [driver]);
     drop(trace);
 
-    let quarantine_before = runtime_quarantine_status().current_thread_retained();
     let gate = CloseGate::default();
     let (mut app, start_trace) = tracked_app();
     app.set_execution_profile(ExecutionProfile::Parallel)
@@ -188,8 +187,4 @@ pub(super) fn assert_parallel_refused_before_startup(expected: ExecutionProfileE
     assert!(trace.startup.is_empty());
     assert!(trace.update.is_empty());
     assert_eq!(trace.drops, [driver]);
-    assert_eq!(
-        runtime_quarantine_status().current_thread_retained(),
-        quarantine_before
-    );
 }

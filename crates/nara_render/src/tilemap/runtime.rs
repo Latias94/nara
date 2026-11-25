@@ -195,13 +195,13 @@ mod codec {
     use nara_asset::{
         AssetReferenceDemand, AssetRuntimeError, AssetRuntimeLimits, RuntimeAssetCodec,
     };
+    use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
     use nara_core::{
         ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, ItemLimit,
         PersistentFileContract, PersistentFileContractError, PersistentFileDecodeError,
         PersistentFileEnvelope, PersistentFileHeader, SerdeShapeLimits,
         decode_persistent_file_with_preflight, preflight_serde_shape,
     };
-    use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
     use serde::{Deserialize, Serialize};
     use serde_json::Value;
 

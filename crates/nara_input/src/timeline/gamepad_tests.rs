@@ -1,10 +1,11 @@
-use nara_app::__RuntimeDriverPort;
+use nara_app::{App, RuntimeInstance};
 use nara_core::Vec2;
 
 use super::*;
 use crate::{
-    ActionMap, ActionMaps, AxisValue, ButtonDriverInput, ButtonTransitionPhase, InputBinding,
-    KeyCode, MouseButton, semantic::ActionStaging,
+    ActionMap, ActionMaps, AxisValue, ButtonDriverInput, ButtonInputDriverError,
+    ButtonTransitionPhase, InputBinding, InputPlugin, KeyCode, MouseButton, PointerDriverInput,
+    semantic::ActionStaging,
 };
 
 const WINDOW: InputWindowId = InputWindowId::new(1);
@@ -640,7 +641,7 @@ fn changed_axes_and_neutral_wait_for_original_ui_disposition_after_route_replace
         );
         if consumed {
             timeline
-                .__finalize_ui_entry(
+                .finalize_ui_entry(
                     pressed.first_sequence().unwrap(),
                     InputUiDisposition::Consumed,
                 )
@@ -755,35 +756,30 @@ fn terminal_sequence_headroom_includes_connections_and_axis_neutralization() {
 
 #[test]
 fn driver_connections_capture_origin_and_preserve_keyboard_and_mouse_outputs() {
-    let mut timeline = InputTimeline::default();
-    let output = timeline
-        .apply_driver_input(__InputDriverEvent::ConnectSyntheticGamepad {
-            window: InputWindowId::UNSPECIFIED,
-            seat: SEAT,
-            gamepad: 5,
+    let window = InputWindowId::UNSPECIFIED;
+    let mut app = App::new();
+    app.add_plugin(InputPlugin).unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    let outcome = runtime
+        .with_driver_scope(|scope| -> Result<_, ButtonInputDriverError> {
+            let connection = connect_synthetic_gamepad_input(scope, window, SEAT, 5)?;
+            assert_eq!(
+                apply_gamepad_button_input(scope, &connection, 0, ButtonTransitionPhase::Pressed)?
+                    .admitted(),
+                1
+            );
+            assert_eq!(
+                apply_gamepad_axis_input(scope, &connection, 0, value(0.5))?.admitted(),
+                1
+            );
+            assert_eq!(disconnect_gamepad_input(scope, &connection)?.admitted(), 3);
+            Ok(connection)
         })
         .unwrap();
-    assert_eq!(output.admission.admitted(), 1);
-    let connection = output.gamepad_connection.unwrap();
-    for event in [
-        __InputDriverEvent::GamepadButton {
-            connection: connection.clone(),
-            button: 0,
-            phase: ButtonTransitionPhase::Pressed,
-        },
-        __InputDriverEvent::GamepadAxis {
-            connection: connection.clone(),
-            axis: 0,
-            value: value(0.5),
-        },
-        __InputDriverEvent::DisconnectGamepad {
-            connection: connection.clone(),
-        },
-    ] {
-        let output = timeline.apply_driver_input(event).unwrap();
-        assert!(output.gamepad_connection.is_none());
-        assert!(output.released_keys.is_empty() && output.released_mouse_buttons.is_empty());
-    }
+    assert!(outcome.post_operation_fault.is_none());
+    let connection = outcome.output.unwrap();
+    let timeline = runtime.world().resource::<InputTimeline>();
+    assert_eq!(timeline.entries().count(), 6);
     assert!(
         timeline
             .entries()
@@ -795,29 +791,17 @@ fn driver_connections_capture_origin_and_preserve_keyboard_and_mouse_outputs() {
             .all(|entry| entry.gamepad_connection_generation()
                 == Some(connection.connection_generation()))
     );
-    timeline
-        .apply_driver_input(__InputDriverEvent::SyntheticKeyboard {
-            input: ButtonDriverInput::Press(KeyCode::Enter),
+    let outcome = runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Enter))?;
+            apply_mouse_driver_input(scope, ButtonDriverInput::Press(MouseButton::Left))?;
+            apply_pointer_driver_input(scope, PointerDriverInput::Moved(Vec2::new(1.0, 2.0)))?;
+            apply_window_input_driver_event(scope, window, SEAT, InputWindowEvent::SurfaceRetired)
         })
         .unwrap();
-    timeline
-        .apply_driver_input(__InputDriverEvent::SyntheticMouse {
-            input: ButtonDriverInput::Press(MouseButton::Left),
-        })
-        .unwrap();
-    timeline
-        .apply_driver_input(__InputDriverEvent::SyntheticPointer {
-            input: crate::PointerDriverInput::Moved(Vec2::new(1.0, 2.0)),
-        })
-        .unwrap();
-    let output = timeline
-        .apply_driver_input(__InputDriverEvent::Window {
-            window: InputWindowId::UNSPECIFIED,
-            seat: SEAT,
-            event: InputWindowEvent::SurfaceRetired,
-        })
-        .unwrap();
-    assert_eq!(output.released_keys, [KeyCode::Enter]);
-    assert_eq!(output.released_mouse_buttons, [MouseButton::Left]);
-    assert!(output.gamepad_connection.is_none());
+    assert!(outcome.post_operation_fault.is_none());
+    let (_, released_keys, released_mouse_buttons) = outcome.output.unwrap();
+    assert_eq!(released_keys, [KeyCode::Enter]);
+    assert_eq!(released_mouse_buttons, [MouseButton::Left]);
+    runtime.finish().unwrap();
 }

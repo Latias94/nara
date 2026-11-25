@@ -12,7 +12,7 @@ use std::{
     ptr::null_mut,
 };
 
-use nara_fs::RestrictiveCapabilityHandleLease;
+use crate::fs::RestrictiveCapabilityHandleLease;
 use windows_sys::Win32::{
     Foundation::{HANDLE, RtlNtStatusToDosError},
     Globalization::{CSTR_EQUAL, CompareStringOrdinal},
@@ -266,7 +266,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use nara_fs::{
+    use crate::fs::{
         CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativeComponent, TrustMode,
     };
     use windows_sys::Win32::{

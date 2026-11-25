@@ -14,14 +14,13 @@ use nara::{
         WGPU_STOCK_POLICY_PLUGIN_ID, WGPU_STOCK_SPRITE_PLUGIN_ID, WgpuPolicyCaptureSet,
         WgpuRenderInput, WgpuStockPolicy, take_captured_policy_batch,
     },
-    scene::SceneEntitySource,
+    scene::{SceneEntitySource, fixed_spatial::presented_spatial_snapshot},
     sprite::Sprite,
     sprite_render::batching::{
         ExtractedSpriteKind, ExtractedSprites, QueuedSpriteItems, SpriteBatchKind, SpriteBatches,
         SpriteInstance,
     },
     tilemap::{TileSet, TileSetAssets, TileSetContentReceipt, Tilemap},
-    transform::presented_spatial_snapshot,
     window::{
         Window, WindowResolution,
         backend::{BackendWindowHandles, WindowPresentationRequirement},

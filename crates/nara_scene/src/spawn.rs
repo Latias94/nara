@@ -9,19 +9,17 @@ pub use projection::SceneProjection;
 use publication::PreparedScenePublication;
 pub use publication::StagedSceneReplacement;
 
+use crate::hierarchy::{
+    ChildOf, Children, HierarchyRoots, prepare_construction_batch, prepare_mutation_baseline,
+    validate_hierarchy,
+};
 use nara_asset::AssetReferenceResolver;
-use nara_diagnostic::DiagnosticReport;
-use nara_ecs::{
-    __private::LifecycleFreeInsertionPlan, __private::prepare_lifecycle_free_despawn,
-    __private::validate_registered_persistent_component_apply, Component, Entity, World,
-    bevy_ecs::component::ComponentId,
-};
-use nara_hierarchy::{
-    __private::{prepare_construction_batch, prepare_mutation_baseline},
-    Children, HierarchyRoots, Parent, validate_hierarchy,
-};
-use nara_identity::{
-    __private::{
+use nara_core::diagnostic::DiagnosticReport;
+use nara_ecs::identity::{
+    EntityLookup, IdentityDomainError, RuntimeEntityReference, SceneInstanceId,
+    SpawnedSceneInstance, TombstoneCause, WorldEntityToken, WorldIdentityDomain,
+    WorldIdentityDomainId, WorldIdentityDomainSettings, adopt_identity_entity,
+    domain::{
         AdditionalRetirementIdentityError, IdentitySupportTopologyError,
         PreparedSceneInstanceRegistration, PreparedSceneInstanceReplacement,
         PreparedSceneInstanceRetirement, prepare_exact_entity_retirement,
@@ -30,18 +28,23 @@ use nara_identity::{
         prepare_registered_scene_projection_epoch_retirement,
         validate_additional_retirement_identity_axes, validate_identity_support_topology,
     },
-    EntityLookup, IdentityDomainError, RuntimeEntityReference, SceneInstanceId,
-    SpawnedSceneInstance, TombstoneCause, WorldEntityToken, WorldIdentityDomain,
-    WorldIdentityDomainId, WorldIdentityDomainSettings, adopt_identity_entity,
+};
+use nara_ecs::{
+    Component, Entity, World,
+    bevy_ecs::component::ComponentId,
+    transaction::{
+        LifecycleFreeInsertionPlan, PersistentComponentMetadataError,
+        prepare_lifecycle_free_despawn, validate_registered_persistent_component_apply,
+    },
 };
 use nara_reflect::{
-    __private::{
+    ComponentCodecError, ComponentRegistrySnapshot, ComponentTypeId,
+    ComponentValueMaterializationLimits,
+    persistent_apply::{
         UnboundComponentApplyBatch, declare_persistent_apply_targets,
         validate_declared_persistent_apply_targets, validate_fresh_persistent_component_apply,
         validate_persistent_apply_support_topology, validate_registered_persistent_apply_targets,
     },
-    ComponentCodecError, ComponentRegistrySnapshot, ComponentTypeId,
-    ComponentValueMaterializationLimits,
 };
 
 use crate::{
@@ -1533,7 +1536,7 @@ fn rollback_spawn_transaction(world: &mut World, spawned_entities: &[Entity]) {
     }
 
     let has_relationship = live_entities.iter().copied().any(|entity| {
-        world.get::<Parent>(entity).is_some()
+        world.get::<ChildOf>(entity).is_some()
             || world.get::<Children>(entity).is_some()
             || world
                 .get_resource::<HierarchyRoots>()
@@ -1558,7 +1561,7 @@ fn rollback_spawn_transaction(world: &mut World, spawned_entities: &[Entity]) {
 fn validate_scene_source_support(
     world: &mut World,
     targets: &[Entity],
-) -> Result<(), nara_ecs::__private::PersistentComponentMetadataError> {
+) -> Result<(), PersistentComponentMetadataError> {
     world.register_component::<SceneEntitySource>();
     world.flush();
     for target in targets {

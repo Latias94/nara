@@ -3,14 +3,13 @@ use std::time::Duration;
 use nara_app::{App, RuntimeDriverScope, RuntimeInstance, RuntimeState, RuntimeTimeSettings};
 use nara_core::ByteLimit;
 use nara_input::{
-    __private::{InputEndpointClaim, claim_input_endpoint},
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
     ActionMaps, ButtonDriverInput, ButtonInputDriverError, ButtonTransitionPhase, InputAdmission,
     InputEventKind, InputEventOrigin, InputIngressError, InputLimits, InputPlugin, InputSeatId,
     InputTimeline, InputTimelineEntry, InputWindowEvent, InputWindowId, KeyCode,
     KeyboardActionBinding, KeyboardHold, apply_claimed_keyboard_driver_input,
     apply_window_input_driver_event, capture_keyboard_holds, connect_input_endpoint,
-    restore_keyboard_holds,
+    restore_keyboard_holds, timeline::InputEndpointClaim,
 };
 
 const WINDOW: InputWindowId = InputWindowId::new(41);
@@ -76,8 +75,11 @@ fn runtime(limits: InputLimits) -> (RuntimeInstance, InputEndpointClaim) {
     })
     .unwrap();
     maintain(&mut runtime);
-    let claim =
-        claim_input_endpoint(runtime.world().resource::<InputTimeline>(), WINDOW, SEAT).unwrap();
+    let claim = runtime
+        .world()
+        .resource::<InputTimeline>()
+        .claim_endpoint(WINDOW, SEAT)
+        .unwrap();
     (runtime, claim)
 }
 
@@ -151,8 +153,11 @@ fn nominal_claim_is_checked_before_empty_foreign_retired_or_recycled_input() {
     })
     .unwrap();
     maintain(&mut receiver);
-    let replacement =
-        claim_input_endpoint(receiver.world().resource::<InputTimeline>(), WINDOW, SEAT).unwrap();
+    let replacement = receiver
+        .world()
+        .resource::<InputTimeline>()
+        .claim_endpoint(WINDOW, SEAT)
+        .unwrap();
     assert_ne!(original, replacement);
     for input in [
         ButtonDriverInput::Press(KEYS[1]),
@@ -205,12 +210,11 @@ fn claimed_edges_preserve_exact_endpoint_and_restored_member_origin() {
         connect_input_endpoint(scope, other_window, SEAT)
     })
     .unwrap();
-    let other = claim_input_endpoint(
-        runtime.world().resource::<InputTimeline>(),
-        other_window,
-        SEAT,
-    )
-    .unwrap();
+    let other = runtime
+        .world()
+        .resource::<InputTimeline>()
+        .claim_endpoint(other_window, SEAT)
+        .unwrap();
     let other_press = admit(&mut runtime, &other, ButtonDriverInput::Press(KEYS[1])).unwrap();
     let press = admit(&mut runtime, &claim, ButtonDriverInput::Press(KEYS[0])).unwrap();
     let release = admit(&mut runtime, &claim, ButtonDriverInput::Release(KEYS[1])).unwrap();

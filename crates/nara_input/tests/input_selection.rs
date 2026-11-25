@@ -2,8 +2,8 @@ use std::sync::mpsc;
 
 use nara_app::{
     App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginError, PluginId,
-    PluginPlan, RuntimeAdmissionReservation, RuntimeCandidate, RuntimeCandidateRetirementState,
-    RuntimeCandidateScope, RuntimeClosePolicy, RuntimeObligationLedger, StartupStage,
+    PluginPlan, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeCandidateScope,
+    RuntimeClosePolicy, RuntimeObligationLedger, StartupStage,
 };
 use nara_core::ByteLimit;
 use nara_ecs::{Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
@@ -58,7 +58,6 @@ fn candidate(with_input: bool) -> RuntimeCandidate {
     }
     .unwrap();
     plan.instantiate_runtime_candidate(
-        RuntimeAdmissionReservation::try_acquire().unwrap(),
         RuntimeObligationLedger::new(),
         RuntimeClosePolicy::default(),
     )
@@ -181,7 +180,6 @@ fn original_selected_bindings_survive_an_actual_startup_map_replacement() {
     .unwrap();
     let mut candidate = plan
         .instantiate_runtime_candidate(
-            RuntimeAdmissionReservation::try_acquire().unwrap(),
             RuntimeObligationLedger::new(),
             RuntimeClosePolicy::default(),
         )
@@ -261,14 +259,12 @@ fn an_explicit_default_collection_before_input_plugin_refuses_file_selection() {
     let mut app = App::new();
     app.insert_resource(ActionMaps::default()).unwrap();
     app.add_plugin(InputPlugin).unwrap();
-    let mut candidate = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
+    let mut candidate = RuntimeCandidate::admit(
+        app.seal().unwrap(),
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::default(),
+    )
+    .unwrap();
     let result = with_scope(&mut candidate, |scope| {
         finalize_input_selection(scope, Some(action_map("file.jump", KeyCode::Space)))
     });
@@ -298,14 +294,12 @@ fn a_transferred_default_collection_before_input_plugin_refuses_file_selection()
     app.insert_resource(transferred).unwrap();
     app.add_plugins((InputPlugin, StartupObserverPlugin))
         .unwrap();
-    let mut receiver = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
+    let mut receiver = RuntimeCandidate::admit(
+        app.seal().unwrap(),
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::default(),
+    )
+    .unwrap();
     let result = with_scope(&mut receiver, |scope| {
         finalize_input_selection(scope, Some(action_map("file.jump", KeyCode::Space)))
     });

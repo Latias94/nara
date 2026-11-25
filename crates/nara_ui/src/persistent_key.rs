@@ -1,13 +1,13 @@
 use std::collections::{BTreeMap, btree_map::Entry};
 
+use crate::kernel::{UiKeyError, UiOpaqueId, UiPersistentIdentity};
 use nara_scene::{
     PrefabProjectionPath, PrefabProjectionStep, SceneEntityId, SceneEntityProvenance,
     SceneEntitySource, SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
     SourceDocumentOrigin,
 };
-use nara_ui_kernel::{UiKeyError, UiOpaqueId, UiPersistentIdentity};
 
-const MAX_BYTES: usize = nara_ui_kernel::MAX_UI_KEY_BYTES;
+const MAX_BYTES: usize = crate::kernel::MAX_UI_KEY_BYTES;
 const MAX_PROJECTION_STEPS: usize = 32;
 
 #[derive(Default)]

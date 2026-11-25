@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{AssetProductRef, ImportedProductId};
-use nara_identity::{AssetPathError, AssetSourcePath, StableAssetId, StableAssetIdError};
+use nara_core::source::{AssetPathError, AssetSourcePath, StableAssetId, StableAssetIdError};
 
 static NEXT_RUNTIME_ASSET_ID: AtomicU64 = AtomicU64::new(1);
 

@@ -1,9 +1,9 @@
 //! Schema-relative property pins evaluated against one immutable inherited value.
 
-use nara_identity::AuthoredEntityReference;
+use nara_ecs::identity::AuthoredEntityReference;
 use std::collections::BTreeMap;
 
-use nara_reflect::__private::{
+use nara_reflect::property::{
     ComponentPropertyAdmissionError, resolve_component_property_storage_path_with_admission,
 };
 use nara_reflect::{
@@ -245,7 +245,7 @@ pub(super) fn prepare_claims(
                 .or(field.default_value())
         {
             candidate =
-                nara_reflect::__private::effective_component_value_owned_with_default_overrides(
+                nara_reflect::effective::effective_component_value_owned_with_default_overrides(
                     schema,
                     candidate,
                     contextual_defaults,
@@ -289,7 +289,7 @@ pub(super) fn apply_claims(
     let mut value = prepared.value;
     for replacement in prepared.replacements {
         for (relative, target) in replacement.references {
-            let nara_identity::AuthoredReferenceTarget::Entity(entity) = target.target else {
+            let nara_ecs::identity::AuthoredReferenceTarget::Entity(entity) = target.target else {
                 return Err(SceneCompilationFailureKind::Reference);
             };
             let target = targets
@@ -309,9 +309,11 @@ pub(super) fn apply_claims(
             value
                 .replace_path(
                     &path,
-                    ComponentValue::EntityReference(nara_identity::EntityReference::SceneLocal {
-                        entity: target.clone(),
-                    }),
+                    ComponentValue::EntityReference(
+                        nara_ecs::identity::EntityReference::SceneLocal {
+                            entity: target.clone(),
+                        },
+                    ),
                 )
                 .map_err(|_| SceneCompilationFailureKind::Reference)?;
         }
@@ -327,7 +329,7 @@ fn effective_value<'value>(
     limits: ComponentValueMaterializationLimits,
 ) -> Result<std::borrow::Cow<'value, ComponentValue>, SceneCompilationFailureKind> {
     let (value, _) =
-        nara_reflect::__private::effective_component_value_with_default_overrides_with_budget(
+        nara_reflect::effective::effective_component_value_with_default_overrides_with_budget(
             schema,
             value,
             contextual_defaults,

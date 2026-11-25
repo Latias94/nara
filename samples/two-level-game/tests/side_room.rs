@@ -22,11 +22,10 @@ use nara::{
         AssetSourceKind, AssetStates, AssetVersion, Assets, Handle, ProjectAssetDatabase,
     },
     ecs::{
-        World,
+        Command, World,
         bevy_ecs::{lifecycle::HookContext, world::DeferredWorld},
         schedule::IntoScheduleConfigs,
     },
-    gameplay::{GameplayCommandBatch, GameplayCommandSet},
     identity::{EntityLookup, SceneEntityId, SpawnedSceneInstance, WorldIdentityDomain},
     image::ImageAsset,
     material::{
@@ -42,7 +41,9 @@ use nara::{
 };
 use support::{DEADLINE, Game, MARKER, MAX_WALK_STEPS, ProjectCopy, TRAVEL, action, movement};
 use two_level_game::{
-    GamePhase, GameSnapshot, RunOptions, SideRoomPhase, capture_resume, configured_recipe,
+    GamePhase, GameSnapshot, RunOptions, SideRoomPhase, capture_resume,
+    command::CommandSet,
+    configured_recipe,
     levels::{LevelId, LevelKey},
     region_material, region_tileset,
     side_room::{LOOKOUT_RELIC, RELIC, image_product},
@@ -462,7 +463,7 @@ fn parented_relic_uses_its_completed_world_position_for_pickup() {
                 let EntityLookup::Resolved(entity) = room.resolve(world, &relic) else {
                     panic!("the relic must resolve in the added room");
                 };
-                nara::transform::historical_spatial_snapshot(world)
+                nara::scene::fixed_spatial::historical_spatial_snapshot(world)
                     .unwrap()
                     .global(entity)
                     .unwrap()
@@ -537,7 +538,7 @@ fn last_tileset_user_unload_refuses_before_retirement_when_asset_events_are_scop
     let material = resident_material(&game).unwrap();
     let retained = room_tileset(&game, &side, region_tileset::SIDE_ROOM_FLOOR);
 
-    let refused = game.command(action(UNLOAD_WITHOUT_ASSET_EVENTS));
+    let refused = run_retirement_probe(&mut game, RetirementAction::UnloadWithoutAssetEvents);
     assert_eq!(room_phases(&refused), room_phases(&before));
     assert_eq!(refused.current_instance, before.current_instance);
     assert_eq!(room_receipt(&game, RELIC).0, side);
@@ -1059,7 +1060,7 @@ fn a_missing_shared_image_catalog_record_rejects_a_second_room_without_publicati
     assert_eq!(record.source_kind(), &AssetSourceKind::Image);
     let mut missing_catalog = catalog.clone();
     assert!(missing_catalog.remove_exact(&record));
-    game.command(action(REMOVE_ROOM_IMAGE_RECORD));
+    run_retirement_probe(&mut game, RetirementAction::RemoveImageRecord);
     game.session
         .observe(|world| {
             assert_eq!(
@@ -1104,7 +1105,7 @@ fn a_missing_shared_image_catalog_record_rejects_a_second_room_without_publicati
     assert_eq!(resident(&game, image_product()), Some(relic_image));
     assert_eq!(resident(&game, meadow), Some(primary_image));
 
-    game.command(action(RESTORE_ROOM_IMAGE_RECORD));
+    run_retirement_probe(&mut game, RetirementAction::RestoreImageRecord);
     game.session
         .observe(|world| assert_eq!(world.resource::<ProjectAssetDatabase>(), &catalog))
         .unwrap();
@@ -1181,7 +1182,7 @@ fn host_close_releases_shared_images_after_another_room_is_retired_directly() {
         })
         .unwrap();
 
-    let retired = game.command(action(RETIRE_SIDE_ROOM));
+    let retired = run_retirement_probe(&mut game, RetirementAction::RetireSideRoom);
     assert_eq!(room_phases(&retired), (Open, Open));
     assert_retired(&game, &side);
     assert_eq!(room_receipt(&game, LOOKOUT_RELIC).0, lookout);
@@ -1325,10 +1326,10 @@ fn travel_rejection_keeps_both_rooms_and_successful_travel_and_restore_retire_th
     assert_retained(&game, rejected);
     fs::write(cavern_file, cavern_bytes).unwrap();
 
-    game.command(action(TOGGLE_RETIREMENT_BLOCK));
+    run_retirement_probe(&mut game, RetirementAction::ToggleRetirementBlock);
     let rejected = rejected_travel(&mut game, "level commit rejected");
     assert_retained(&game, rejected);
-    game.command(action(TOGGLE_RETIREMENT_BLOCK));
+    run_retirement_probe(&mut game, RetirementAction::ToggleRetirementBlock);
 
     let cavern = Some(LevelKey::main(LevelId::Cavern));
     let entered = game.command(action(TRAVEL));
@@ -1411,14 +1412,43 @@ fn travel_rejection_keeps_both_rooms_and_successful_travel_and_restore_retire_th
     game.close();
 }
 
-const TOGGLE_RETIREMENT_BLOCK: &str = "two-level-game.test-toggle-retirement-block";
-const REMOVE_ROOM_IMAGE_RECORD: &str = "two-level-game.test-remove-room-image-record";
-const RESTORE_ROOM_IMAGE_RECORD: &str = "two-level-game.test-restore-room-image-record";
-const RETIRE_SIDE_ROOM: &str = "two-level-game.test-retire-side-room";
-const UNLOAD_WITHOUT_ASSET_EVENTS: &str = "two-level-game.test-unload-without-asset-events";
+enum RetirementAction {
+    ToggleRetirementBlock,
+    RemoveImageRecord,
+    RestoreImageRecord,
+    RetireSideRoom,
+    UnloadWithoutAssetEvents,
+}
+
+impl Command for RetirementAction {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        assert!(
+            world
+                .resource_mut::<RetirementProbe>()
+                .pending
+                .replace(self)
+                .is_none()
+        );
+    }
+}
+
+fn run_retirement_probe(game: &mut Game, action: RetirementAction) -> GameSnapshot {
+    let outcome = game.session.apply_command(action).unwrap();
+    assert!(outcome.post_operation_fault.is_none());
+    let snapshot = game.step();
+    game.session
+        .observe(|world| {
+            assert!(world.resource::<RetirementProbe>().pending.is_none());
+        })
+        .unwrap();
+    snapshot
+}
 
 #[derive(Default, Resource)]
 struct RetirementProbe {
+    pending: Option<RetirementAction>,
     removed_image: Option<AssetRecord>,
     retired: Option<SpawnedSceneInstance>,
 }
@@ -1437,80 +1467,73 @@ impl Plugin for RetirementProbe {
         app.init_resource::<RetirementProbe>()?;
         app.add_systems(
             CoreStage::FixedUpdate,
-            (toggle_retirement_block, edit_room_residency)
-                .chain()
-                .in_set(GameplayCommandSet::Capture),
+            edit_room_residency.in_set(CommandSet::Capture),
         )?;
         Ok(())
     }
 }
 
 fn edit_room_residency(world: &mut World) {
-    let commands = world
-        .resource::<GameplayCommandBatch>()
-        .commands()
-        .iter()
-        .map(|command| command.command_type().as_str().to_owned())
-        .collect::<Vec<_>>();
-    for command in commands {
-        match command.as_str() {
-            REMOVE_ROOM_IMAGE_RECORD => {
-                assert!(world.resource::<RetirementProbe>().removed_image.is_none());
-                let record = world
-                    .resource::<ProjectAssetDatabase>()
-                    .record_for_stable_id(image_product().source())
-                    .unwrap()
-                    .clone();
-                assert_eq!(record.source_kind(), &AssetSourceKind::Image);
-                assert!(
-                    world
-                        .resource_mut::<ProjectAssetDatabase>()
-                        .remove_exact(&record)
-                );
-                world.resource_mut::<RetirementProbe>().removed_image = Some(record);
-            }
-            RESTORE_ROOM_IMAGE_RECORD => {
-                let record = world
-                    .resource_mut::<RetirementProbe>()
-                    .removed_image
-                    .take()
-                    .unwrap();
+    let Some(action) = world.resource_mut::<RetirementProbe>().pending.take() else {
+        return;
+    };
+    match action {
+        RetirementAction::ToggleRetirementBlock => toggle_retirement_block(world),
+        RetirementAction::RemoveImageRecord => {
+            assert!(world.resource::<RetirementProbe>().removed_image.is_none());
+            let record = world
+                .resource::<ProjectAssetDatabase>()
+                .record_for_stable_id(image_product().source())
+                .unwrap()
+                .clone();
+            assert_eq!(record.source_kind(), &AssetSourceKind::Image);
+            assert!(
                 world
                     .resource_mut::<ProjectAssetDatabase>()
-                    .insert(record)
-                    .unwrap();
-            }
-            RETIRE_SIDE_ROOM => {
-                let receipt = original_side_room(world);
-                assert_eq!(
-                    retire_and_despawn_scene_instance(world, &receipt).unwrap(),
-                    receipt.len()
-                );
-                world.resource_mut::<RetirementProbe>().retired = Some(receipt);
-            }
-            UNLOAD_WITHOUT_ASSET_EVENTS => {
-                let receipt = original_side_room(world);
-                let identities = world.resource::<WorldIdentityDomain>().stats();
-                let catalog = world.resource::<ProjectAssetDatabase>().clone();
-                world.resource_scope(|world, events: nara::ecs::Mut<AssetEvents>| {
-                    assert!(!world.contains_resource::<AssetEvents>());
-                    let before = events.len();
-                    let report = unload_project_scene_addition(world, &receipt).unwrap_err();
-                    assert!(report.iter().any(|entry| {
-                        entry.code().as_str() == "project.scene.residency-unavailable"
-                    }));
-                    assert_eq!(events.len(), before);
-                    for id in receipt.entity_ids() {
-                        assert!(matches!(
-                            receipt.resolve(world, id),
-                            EntityLookup::Resolved(_)
-                        ));
-                    }
-                    assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identities);
-                    assert_eq!(world.resource::<ProjectAssetDatabase>(), &catalog);
-                });
-            }
-            _ => {}
+                    .remove_exact(&record)
+            );
+            world.resource_mut::<RetirementProbe>().removed_image = Some(record);
+        }
+        RetirementAction::RestoreImageRecord => {
+            let record = world
+                .resource_mut::<RetirementProbe>()
+                .removed_image
+                .take()
+                .unwrap();
+            world
+                .resource_mut::<ProjectAssetDatabase>()
+                .insert(record)
+                .unwrap();
+        }
+        RetirementAction::RetireSideRoom => {
+            let receipt = original_side_room(world);
+            assert_eq!(
+                retire_and_despawn_scene_instance(world, &receipt).unwrap(),
+                receipt.len()
+            );
+            world.resource_mut::<RetirementProbe>().retired = Some(receipt);
+        }
+        RetirementAction::UnloadWithoutAssetEvents => {
+            let receipt = original_side_room(world);
+            let identities = world.resource::<WorldIdentityDomain>().stats();
+            let catalog = world.resource::<ProjectAssetDatabase>().clone();
+            world.resource_scope(|world, events: nara::ecs::Mut<AssetEvents>| {
+                assert!(!world.contains_resource::<AssetEvents>());
+                let before = events.len();
+                let report = unload_project_scene_addition(world, &receipt).unwrap_err();
+                assert!(report.iter().any(|entry| {
+                    entry.code().as_str() == "project.scene.residency-unavailable"
+                }));
+                assert_eq!(events.len(), before);
+                for id in receipt.entity_ids() {
+                    assert!(matches!(
+                        receipt.resolve(world, id),
+                        EntityLookup::Resolved(_)
+                    ));
+                }
+                assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identities);
+                assert_eq!(world.resource::<ProjectAssetDatabase>(), &catalog);
+            });
         }
     }
 }
@@ -1535,14 +1558,6 @@ struct RetirementBlock;
 fn retirement_hook(_: DeferredWorld<'_>, _: HookContext) {}
 
 fn toggle_retirement_block(world: &mut World) {
-    if !world
-        .resource::<GameplayCommandBatch>()
-        .commands()
-        .iter()
-        .any(|command| command.command_type().as_str() == TOGGLE_RETIREMENT_BLOCK)
-    {
-        return;
-    }
     let lookout = world
         .iter_entities()
         .find(|entity| {

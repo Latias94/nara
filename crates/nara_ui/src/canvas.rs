@@ -2,19 +2,19 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
-use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValueRef,
-};
-use nara_scene::{SceneComponentRecord, SceneEntityId, SceneOccurrenceKey, SourceDocumentKey};
-use nara_text::bundled_font_face;
-use nara_ui_kernel::{
+use crate::kernel::{
     UiAuthoringError, UiAuthoringSnapshotBuilder, UiCompileError, UiCompiler, UiEnvironment,
     UiEnvironmentError, UiFrame, UiKey, UiKeyError, UiLocalKey, UiOpaqueId, UiRootKey,
     UiRootStatus, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId,
     UiTheme as KernelTheme,
 };
-use nara_ui_widgets::{UiButton as KernelButton, UiButtonState};
+use crate::text::bundled_font_face;
+use crate::widgets::{UiButton as KernelButton, UiButtonState};
+use nara_reflect::{
+    ComponentCodecError, ComponentDecodeContext, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValueRef,
+};
+use nara_scene::{SceneComponentRecord, SceneEntityId, SceneOccurrenceKey, SourceDocumentKey};
 use thiserror::Error;
 
 use crate::authoring_model::{
@@ -187,7 +187,7 @@ fn build_root(
     projection: &UiAuthoringProjection,
     source_by_key: &mut BTreeMap<UiKey, SceneEntityId>,
     assets: &mut ComponentDecodeContext<'_>,
-) -> Result<nara_ui_kernel::UiRoot, UiAuthoringCanvasCompileError> {
+) -> Result<crate::kernel::UiRoot, UiAuthoringCanvasCompileError> {
     let entity = node.entity();
     if component(projection, entity, UiAuthoringComponentKind::Button).is_some() {
         return Err(UiAuthoringCanvasCompileError::RootButtonUnsupported {
@@ -211,7 +211,7 @@ fn build_root(
     insert_source_key(source_by_key, source_key, entity)?;
 
     let mut authored =
-        nara_ui_kernel::UiRoot::new(root_key.clone(), root.layer(), authored_node.style());
+        crate::kernel::UiRoot::new(root_key.clone(), root.layer(), authored_node.style());
     if let Some(visual) = decode_optional(
         projection,
         entity,
@@ -254,7 +254,7 @@ fn build_children(
     root_key: &UiRootKey,
     source_by_key: &mut BTreeMap<UiKey, SceneEntityId>,
     assets: &mut ComponentDecodeContext<'_>,
-) -> Result<Vec<nara_ui_kernel::UiNode>, UiAuthoringCanvasCompileError> {
+) -> Result<Vec<crate::kernel::UiNode>, UiAuthoringCanvasCompileError> {
     let mut children = Vec::new();
     for child in projection
         .hierarchy()
@@ -280,7 +280,7 @@ fn build_node(
     root_key: &UiRootKey,
     source_by_key: &mut BTreeMap<UiKey, SceneEntityId>,
     assets: &mut ComponentDecodeContext<'_>,
-) -> Result<nara_ui_kernel::UiNode, UiAuthoringCanvasCompileError> {
+) -> Result<crate::kernel::UiNode, UiAuthoringCanvasCompileError> {
     let entity = hierarchy_node.entity();
     let node = decode_required(
         projection,
@@ -300,7 +300,7 @@ fn build_node(
         codec::decode_button,
     )?
     else {
-        let mut authored = nara_ui_kernel::UiNode::new(node.style()).with_key(local_key);
+        let mut authored = crate::kernel::UiNode::new(node.style()).with_key(local_key);
         if let Some(visual) = decode_optional(
             projection,
             entity,
@@ -493,22 +493,22 @@ pub enum UiAuthoringCanvasCompileError {
     #[error(transparent)]
     Environment(#[from] UiEnvironmentError),
     #[error(transparent)]
-    Style(#[from] nara_ui_kernel::UiStyleError),
+    Style(#[from] crate::kernel::UiStyleError),
     #[error(transparent)]
-    Widget(#[from] nara_ui_widgets::UiWidgetError),
+    Widget(#[from] crate::widgets::UiWidgetError),
     #[error(transparent)]
     Compile(#[from] UiCompileError),
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::kernel::{
+        UiColor, UiPoint, UiRect, UiSafeAreaInsets, UiSize, UiStyle, UiSurfaceContentTransform,
+    };
     use nara_reflect::ComponentValue;
     use nara_scene::{
         PrefabDocument, PrefabEntityTarget, SceneComponentRecord, SceneEntityId,
         SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
-    };
-    use nara_ui_kernel::{
-        UiColor, UiPoint, UiRect, UiSafeAreaInsets, UiSize, UiStyle, UiSurfaceContentTransform,
     };
 
     use super::*;
@@ -634,7 +634,7 @@ mod tests {
         let mut app = nara_app::App::new();
         app.add_plugins((
             nara_reflect::ComponentRegistryPlugin,
-            nara_hierarchy::HierarchyPlugin,
+            nara_scene::hierarchy::HierarchyPlugin,
             nara_input::InputPlugin,
             crate::UiPlugin::default(),
         ))
@@ -704,19 +704,15 @@ mod tests {
 
     #[test]
     fn canvas_binds_root_node_and_button_images_through_actual_context() {
+        use crate::kernel::{UiActionId, UiImageId, UiLayer, UiPaintPrimitive, UiResolvedBrush};
+        use nara_asset::image::ImageAsset;
         use nara_asset::{
-            AssetEvents, AssetPathScope, AssetProductRef, AssetRecord, AssetRef, AssetServer,
-            AssetSourceKind, AssetSourcePath, AssetStates, Assets, ImportedProductId,
-            ProjectAssetDatabase, StableAssetId,
+            AssetPathScope, AssetProductRef, AssetRecord, AssetRef, AssetServer, AssetSourceKind,
+            AssetSourcePath, ImportedProductId, ProjectAssetDatabase, StableAssetId,
         };
-        use nara_render::image::{
-            ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, PreparedImageSnapshot,
-        };
-        use nara_ui_kernel::{UiActionId, UiImageId, UiLayer, UiPaintPrimitive, UiResolvedBrush};
         let scope = AssetPathScope::under(AssetSourcePath::new("custom/assets/images").unwrap());
         let local = AssetRef::path(format!("{}.png", "a".repeat(244))).unwrap();
         let source: StableAssetId = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f".parse().unwrap();
-        let primary = AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap();
         let auxiliary = AssetProductRef::new(
             source,
             ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap(),
@@ -727,39 +723,12 @@ mod tests {
             scope.resolve(local.as_path().unwrap()),
             AssetSourceKind::Image,
         );
-        assert!(record.path().as_str().len() > nara_ui_kernel::MAX_UI_KEY_BYTES);
+        assert!(record.path().as_str().len() > crate::kernel::MAX_UI_KEY_BYTES);
         let mut database = ProjectAssetDatabase::default();
         database.insert(record.clone()).unwrap();
         let mut server = AssetServer::new();
         let primary_handle = server.reserve_record::<ImageAsset>(&record).unwrap();
         let auxiliary_handle = server.reserve_product::<ImageAsset>(auxiliary).unwrap();
-        let mut images = Assets::default();
-        let mut states = AssetStates::default();
-        let mut events = AssetEvents::default();
-        let mut snapshots = Vec::new();
-        for (handle, product, pixels) in [
-            (primary_handle, primary, [240, 0, 0, 255]),
-            (auxiliary_handle, auxiliary, [0, 240, 0, 255]),
-        ] {
-            images
-                .commit_loaded(
-                    handle,
-                    ImageAsset::from_product(
-                        product,
-                        ImageExtent::new(1, 1),
-                        ImageFormat::Rgba8,
-                        ImageColorSpace::Srgb,
-                        pixels.to_vec(),
-                    )
-                    .unwrap(),
-                    &mut states,
-                    &mut events,
-                    None,
-                    None,
-                )
-                .unwrap();
-            snapshots.push(PreparedImageSnapshot::capture(handle, &images, &states).unwrap());
-        }
         let mut database = Some(database);
         let source_key = SourceDocumentKey::named(
             "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap(),
@@ -773,9 +742,12 @@ mod tests {
             1,
         );
         let mut compiler = UiAuthoringCanvasCompiler::new().unwrap();
-        for (index, reference) in [local, AssetRef::product(auxiliary)]
-            .into_iter()
-            .enumerate()
+        for (index, (handle, reference)) in [
+            (primary_handle, local),
+            (auxiliary_handle, AssetRef::product(auxiliary)),
+        ]
+        .into_iter()
+        .enumerate()
         {
             if index == 1 {
                 drop(database.take());
@@ -836,9 +808,7 @@ mod tests {
                     &mut assets,
                 )
                 .unwrap();
-            let snapshot = &snapshots[index];
-            let expected =
-                UiImageId::external::<ImageAsset>(snapshot.identity().key().asset_id().raw());
+            let expected = UiImageId::external::<ImageAsset>(handle.id().raw());
             let image_ids = candidate
                 .frame()
                 .paint()
@@ -852,17 +822,6 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
             assert_eq!(image_ids, vec![&expected, &expected, &expected]);
-            let mut prepared = nara_render::hud::UiPreparedImages::new();
-            prepared.insert(expected, snapshot.clone());
-            let packet = nara_render::hud::UiPresentationPlanner::default()
-                .plan(
-                    Arc::clone(candidate.frame()),
-                    nara_render::RenderTarget::Window(nara_window::WindowId::PRIMARY),
-                    &prepared,
-                )
-                .unwrap();
-            assert_eq!(packet.images().len(), 1);
-            assert_eq!(packet.images()[0].snapshot(), snapshot);
         }
     }
 

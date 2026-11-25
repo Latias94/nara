@@ -4,7 +4,6 @@
 //! resource values; `runtime` enables PNG import/reload services and, with `render-prepare`, the
 //! automatic preparation plugin. The independent `serde` feature enables serialization.
 
-mod asset;
 mod budget;
 mod content;
 mod cook;
@@ -16,12 +15,7 @@ mod prepare;
 #[cfg(feature = "image-runtime")]
 mod reload;
 mod runtime;
-mod settings;
 
-pub use asset::{
-    ImageAsset, ImageAssetCreateError, ImageColorSpace, ImageContentHash, ImageExtent, ImageFormat,
-    ImageSourceMetadata, ImageSourceMetadataCreateError,
-};
 pub use budget::{ImageImportBudgetHost, ImageImportBudgetSnapshot};
 pub use content::{ImageContentError, ImageContentSnapshot};
 pub use cook::{
@@ -38,6 +32,10 @@ pub use import::{
 pub use limits::{
     IMAGE_IMPORT_MEMORY_PLAN_VERSION, ImageImportBudgetError, ImageImportLimitKind,
     ImageImportLimits, ImageImportLimitsError, ImageImportMemoryPlan,
+};
+pub use nara_asset::image::{
+    ImageAsset, ImageAssetCreateError, ImageColorSpace, ImageContentHash, ImageExtent, ImageFormat,
+    ImageImportSettings, ImageSourceMetadata, ImageSourceMetadataCreateError,
 };
 #[cfg(all(feature = "image-runtime", feature = "render-prepare"))]
 pub use prepare::runtime::{
@@ -58,7 +56,10 @@ pub use reload::{
 pub use runtime::ImageDomain;
 #[cfg(feature = "serde")]
 pub use runtime::ImageRuntimeCodec;
-pub use settings::ImageImportSettings;
+
+#[cfg(test)]
+#[path = "asset/tests.rs"]
+mod asset_tests;
 
 #[cfg(all(test, feature = "image-runtime"))]
 mod tests;

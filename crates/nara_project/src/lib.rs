@@ -1,4 +1,4 @@
-//! Project manifest parsing, validation, and effective settings lowering.
+//! Project manifests, runtime settings, and native project workflows.
 
 // Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
 pub const CURRENT_PROJECT_SCHEMA_VERSION: u32 = 1;
@@ -21,14 +21,25 @@ mod authoring;
 mod capability;
 mod content;
 mod defaults;
+pub mod delivery;
 mod effective;
 mod manifest;
 mod path;
+#[cfg(all(
+    feature = "workflow",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+pub mod play;
 mod profile;
 mod render;
 mod runtime_configuration;
 mod sections;
 mod validation;
+#[cfg(all(
+    feature = "workflow",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+pub mod workflow;
 
 pub use authoring::{
     MAX_PROJECT_AUTHORING_RECOVERY_PATH_BYTES, ProjectAuthoringRecovery,

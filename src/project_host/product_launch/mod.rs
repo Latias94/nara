@@ -1,9 +1,6 @@
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use std::time::Duration;
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
-use nara_diagnostic::DiagnosticReport;
-
 #[cfg(feature = "runtime-core")]
 mod child;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
@@ -25,18 +22,6 @@ mod wire;
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 const PRODUCT_CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
-
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
-fn exit_for_incomplete_product_cleanup(
-    run_diagnostics: &DiagnosticReport,
-    cleanup_diagnostics: &DiagnosticReport,
-) -> ! {
-    eprintln!("product runtime cleanup exceeded its bounded deadline");
-    eprintln!("{run_diagnostics:#?}");
-    eprintln!("{cleanup_diagnostics:#?}");
-    // Exit before TLS quarantine destruction; the OS reclaims live process resources.
-    std::process::exit(1);
-}
 
 #[cfg(feature = "runtime-core")]
 #[doc(hidden)]

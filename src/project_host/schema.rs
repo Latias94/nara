@@ -1,6 +1,6 @@
 use std::io;
 
-use nara_fs::{ContentDigest, DirectoryCapability, FsError, RelativePath};
+use crate::fs::{ContentDigest, DirectoryCapability, FsError, RelativePath};
 use nara_reflect::{AuthoringSchemaBundle, AuthoringSchemaBundleLimits};
 
 use super::{
@@ -159,7 +159,7 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use nara_fs::CapabilityRights;
+    use crate::fs::CapabilityRights;
     use nara_reflect::{
         AuthoringSchemaBundleOwner, ComponentSchema, ComponentSchemaCatalog,
         ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId,

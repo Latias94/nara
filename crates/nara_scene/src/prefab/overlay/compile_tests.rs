@@ -6,8 +6,8 @@ mod failure_tests;
 use std::{convert::Infallible, sync::Arc};
 
 use nara_asset::AssetRef;
+use nara_core::diagnostic::DiagnosticValueRef;
 use nara_core::{ByteLimit, ItemLimit};
-use nara_diagnostic::DiagnosticValueRef;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
@@ -954,7 +954,7 @@ fn effective_reference_work_is_shared_across_components_even_when_no_assets_are_
     )
     .unwrap();
     assert!(
-        nara_reflect::__private::freeze_component_defaults_with_admission(
+        nara_reflect::effective::freeze_component_defaults_with_admission(
             schema,
             &value,
             &Default::default(),
@@ -965,27 +965,27 @@ fn effective_reference_work_is_shared_across_components_even_when_no_assets_are_
         .is_none()
     );
     assert!(
-        nara_reflect::__private::component_defaults_are_explicit_with_admission(
+        nara_reflect::effective::component_defaults_are_explicit_with_admission(
             schema,
             &value,
             &mut admit_unit,
         )
         .unwrap()
     );
-    nara_reflect::__private::validate_native_component_value_references_with_admission(
+    nara_reflect::effective::validate_native_component_value_references_with_admission(
         &value,
         Default::default(),
         &mut admit_unit,
     )
     .unwrap();
-    nara_reflect::__private::validate_explicit_component_value_with_admission(
+    nara_reflect::registry::validate_explicit_component_value_with_admission(
         schema,
         (&value).into(),
         &mut admit_unit,
     )
     .unwrap();
     let (references, pending_entities) =
-        nara_reflect::__private::collect_effective_references_with_admission(
+        nara_reflect::asset_reference::collect_effective_references_with_admission(
             schema,
             ComponentSchemaVersion::ONE,
             &value,
@@ -997,7 +997,7 @@ fn effective_reference_work_is_shared_across_components_even_when_no_assets_are_
     pending_entities
         .finish_with_admission::<(), Infallible>(&mut admit_unit)
         .unwrap();
-    nara_reflect::__private::plan_declared_entity_references_with_admission::<(), Infallible>(
+    nara_reflect::entity_reference::plan_declared_entity_references_with_admission::<(), Infallible>(
         schema,
         &value,
         Default::default(),

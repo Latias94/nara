@@ -1,39 +1,12 @@
 use super::*;
 use crate::frame::build_render_frame_packet_for_source;
-use nara_app::{__RuntimeDriverPort, RuntimeControl, RuntimeControlRequestResult};
+use nara_app::{RuntimeControl, RuntimeControlRequestResult};
 use nara_ecs::{IntoSystem, bevy_ecs::system::System};
+use nara_scene::spatial::Visibility;
 
-type WorldEdit = Box<dyn FnOnce(&mut World)>;
-
-#[derive(Default, Resource)]
-struct ViewTestPort;
-
-impl __RuntimeDriverPort for ViewTestPort {
-    type Input = WorldEdit;
-    type Output = ();
-
-    fn apply_driver_input(&mut self, _input: Self::Input) {
-        unreachable!("the configured test port owns the World edit")
-    }
-}
-
-fn lifecycle_app(with_window: bool) -> App {
-    let mut app = render_app(with_window);
-    app.init_resource::<ViewTestPort>().unwrap();
-    app.__register_driver_port::<ViewTestPort>(|world, edit| {
-        edit(world);
-        Ok(())
-    })
-    .unwrap();
-    app
-}
-
-fn edit_world(runtime: &mut RuntimeInstance, edit: impl FnOnce(&mut World) + 'static) {
-    let outcome = runtime
-        .with_driver_scope(|scope| scope.__apply_port::<ViewTestPort>(Box::new(edit)))
-        .unwrap();
+fn edit_world(runtime: &mut RuntimeInstance, edit: impl FnOnce(&mut World) + Send + 'static) {
+    let outcome = runtime.apply_command(edit).unwrap();
     assert!(outcome.post_operation_fault.is_none());
-    outcome.output.unwrap();
 }
 
 fn camera_view(runtime: &RuntimeInstance, camera: Entity) -> ExtractedView {
@@ -47,8 +20,36 @@ fn camera_view(runtime: &RuntimeInstance, camera: Entity) -> ExtractedView {
 }
 
 #[test]
+fn hidden_camera_recovers_its_view_identity_after_a_visibility_override() {
+    let mut app = render_app(true);
+    let world = app.world_mut().unwrap();
+    let parent = world.spawn(Visibility::Inherited).id();
+    let camera = world
+        .spawn((Camera2d::default(), Transform2d::IDENTITY, ChildOf(parent)))
+        .id();
+    let mut runtime = start_runtime(app);
+    runtime.drive(Duration::ZERO).unwrap();
+    let id = camera_view(&runtime, camera).id;
+
+    edit_world(&mut runtime, move |world| {
+        world.entity_mut(parent).insert(Visibility::Hidden);
+    });
+    runtime.drive(Duration::ZERO).unwrap();
+    assert!(runtime.world().resource::<ExtractedViews>().is_empty());
+
+    edit_world(&mut runtime, move |world| {
+        world.entity_mut(camera).insert(Visibility::Visible);
+    });
+    runtime.drive(Duration::ZERO).unwrap();
+    let restored = camera_view(&runtime, camera);
+    assert_eq!(restored.id, id);
+    assert_eq!(restored.load, ViewLoadOp::Clear(Color::BLACK));
+    runtime.finish().unwrap();
+}
+
+#[test]
 fn camera_edits_order_resize_target_and_pause_preserve_view_identity() {
-    let mut app = lifecycle_app(true);
+    let mut app = render_app(true);
     let world = app.world_mut().unwrap();
     let camera = world
         .spawn((Camera2d::default(), Transform2d::default()))
@@ -127,7 +128,7 @@ fn camera_edits_order_resize_target_and_pause_preserve_view_identity() {
 
 #[test]
 fn split_viewports_follow_the_window_extent_and_recover_their_original_layout() {
-    let mut app = lifecycle_app(true);
+    let mut app = render_app(true);
     let world = app.world_mut().unwrap();
     let authored_right = ViewportRect::new(640, 0, 640, 720).unwrap();
     let right = world
@@ -217,7 +218,7 @@ fn split_viewports_follow_the_window_extent_and_recover_their_original_layout() 
 
 #[test]
 fn explicit_world_canvas_viewports_are_clipped_to_the_raster_and_skip_a_zero_window() {
-    let mut app = lifecycle_app(true);
+    let mut app = render_app(true);
     let world = app.world_mut().unwrap();
     let canvas = WorldCanvas::new(200, 100).unwrap();
     world.insert_resource(canvas);
@@ -277,7 +278,7 @@ fn explicit_world_canvas_viewports_are_clipped_to_the_raster_and_skip_a_zero_win
 
 #[test]
 fn missing_zero_and_filtered_targets_preserve_the_camera_lifetime() {
-    let mut app = lifecycle_app(false);
+    let mut app = render_app(false);
     let camera = app
         .world_mut()
         .unwrap()
@@ -358,7 +359,7 @@ fn missing_zero_and_filtered_targets_preserve_the_camera_lifetime() {
 
 #[test]
 fn camera_removal_readdition_and_despawn_retire_only_their_own_view() {
-    let mut app = lifecycle_app(true);
+    let mut app = render_app(true);
     let world = app.world_mut().unwrap();
     let camera = world
         .spawn((Camera2d::default(), Transform2d::default()))
@@ -414,7 +415,7 @@ fn camera_removal_readdition_and_despawn_retire_only_their_own_view() {
 
 #[test]
 fn camera_readdition_while_filtered_starts_a_new_lifetime_before_visibility_returns() {
-    let mut app = lifecycle_app(false);
+    let mut app = render_app(false);
     let camera = app
         .world_mut()
         .unwrap()
@@ -447,7 +448,7 @@ struct HiddenCamera;
 fn default_query_filters_do_not_retire_camera_membership() {
     use nara_ecs::bevy_ecs::entity_disabling::Disabled;
 
-    let mut app = lifecycle_app(true);
+    let mut app = render_app(true);
     let world = app.world_mut().unwrap();
     world.register_disabling_component::<HiddenCamera>();
     let camera = world

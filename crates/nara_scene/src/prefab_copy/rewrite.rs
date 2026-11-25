@@ -1,19 +1,23 @@
 //! Schema interpretation and explicit source-fact substitution for complete Prefab documents.
 
 use nara_reflect::{
-    __private::{
-        AssetReferenceCollectionError, ComponentPropertyAdmissionError,
-        ComponentValueAdmissionError, EntityReferencePlanError,
-        collect_declared_effective_asset_references_with_admission,
-        collect_declared_value_asset_references_with_admission,
-        effective_component_value_with_default_overrides_with_budget,
-        plan_declared_entity_references_with_admission, plan_declared_value_entity_references,
-        resolve_component_property_schema_claim_with_admission,
-        validate_component_value_with_admission,
-    },
     AssetReferenceRewriteError, ComponentEntityReferenceRewriteError, ComponentFieldSchema,
     ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueShape,
-    DeclaredAssetReference, EntityReference, rewrite_declared_asset_references_with_admission,
+    DeclaredAssetReference, EntityReference,
+    asset_reference::{
+        AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
+        collect_declared_value_asset_references_with_admission,
+    },
+    effective::effective_component_value_with_default_overrides_with_budget,
+    entity_reference::{
+        EntityReferencePlanError, plan_declared_entity_references_with_admission,
+        plan_declared_value_entity_references,
+    },
+    property::{
+        ComponentPropertyAdmissionError, resolve_component_property_schema_claim_with_admission,
+    },
+    registry::{ComponentValueAdmissionError, validate_component_value_with_admission},
+    rewrite_declared_asset_references_with_admission,
 };
 
 use super::{CopyBudget, CopyMapping, PrefabCopyError, PrefabCopySchemaError};
@@ -94,8 +98,8 @@ fn copy_record(
         |nodes, bytes, allocated| budget.charge(nodes, bytes, allocated),
     )
     .map_err(|error| match error {
-        nara_reflect::__private::EffectiveValueAdmissionError::Admission(error) => error,
-        nara_reflect::__private::EffectiveValueAdmissionError::Value(error) => {
+        nara_reflect::effective::EffectiveValueAdmissionError::Admission(error) => error,
+        nara_reflect::effective::EffectiveValueAdmissionError::Value(error) => {
             value_error(source, error)
         }
     })?;

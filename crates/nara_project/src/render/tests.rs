@@ -1,5 +1,5 @@
 use crate::{EffectiveWorldCanvas, ProjectManifest, ProjectPath, ProjectProfileError};
-use nara_diagnostic::{Diagnostic, DiagnosticValueRef};
+use nara_core::diagnostic::{DiagnosticValueRef, ReportDiagnostic as Diagnostic};
 
 fn diagnostic_field(diagnostic: &Diagnostic) -> Option<&str> {
     diagnostic.fields().iter().find_map(|field| {

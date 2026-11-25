@@ -9,10 +9,13 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use nara_diagnostic::{DiagnosticCode, SafeSummary};
+use nara_core::diagnostic::{DiagnosticCode, SafeSummary};
 use nara_ecs::{
-    __private::{PersistentComponentMetadataError, validate_persistent_component_registration},
     Component, Entity, World,
+    transaction::{
+        PersistentComponentMetadataError, SceneComponentRequirements,
+        validate_persistent_component_registration,
+    },
 };
 
 use crate::{
@@ -674,6 +677,7 @@ struct FnComponentCodec<T, Preflight, Encode> {
     preflight: Preflight,
     encode: Encode,
     component: PhantomData<fn() -> T>,
+    requirements: Option<Arc<SceneComponentRequirements>>,
 }
 
 impl<T, Preflight, Encode> ComponentCodec for FnComponentCodec<T, Preflight, Encode>
@@ -701,7 +705,11 @@ where
         value: ComponentValueRef<'_>,
         context: &mut ComponentDecodeContext<'_>,
     ) -> Result<ErasedPreparedComponentCandidate, ComponentCodecError> {
-        (self.preflight)(value, context).map(PreparedComponentCandidate::erase)
+        (self.preflight)(value, context).map(|value| {
+            let mut prepared = value.erase();
+            prepared.requirements = self.requirements.clone();
+            prepared
+        })
     }
 
     fn encode_with_context(
@@ -727,7 +735,6 @@ type ComponentValidator = dyn for<'value, 'context> Fn(
 
 struct NativeComponentBinding {
     rust_type_path: &'static str,
-    validate_registration: fn() -> Result<(), PersistentComponentMetadataError>,
     validate: Option<Box<ComponentValidator>>,
     codec: Box<dyn ComponentCodec>,
 }
@@ -1031,12 +1038,13 @@ impl fmt::Debug for ComponentRegistrySnapshot {
 /// Transient identity witness for one exact frozen registry snapshot.
 ///
 /// The witness neither retains nor exposes schema bindings, codecs, or migrations.
-#[doc(hidden)]
 #[derive(Clone)]
 pub struct ComponentRegistrySnapshotWitness(Weak<RegistryData>);
 
 impl ComponentRegistrySnapshotWitness {
-    pub(crate) fn matches(&self, snapshot: &ComponentRegistrySnapshot) -> bool {
+    /// Checks whether this is the original snapshot.
+    #[must_use]
+    pub fn matches(&self, snapshot: &ComponentRegistrySnapshot) -> bool {
         Weak::ptr_eq(&self.0, &Arc::downgrade(&snapshot.0))
     }
 }
@@ -1145,7 +1153,8 @@ impl ComponentRegistrySnapshot {
         ))
     }
 
-    pub(crate) fn witness(&self) -> ComponentRegistrySnapshotWitness {
+    /// Captures snapshot identity without retaining its schema or codecs.
+    pub fn witness(&self) -> ComponentRegistrySnapshotWitness {
         ComponentRegistrySnapshotWitness(Arc::downgrade(&self.0))
     }
 
@@ -1192,7 +1201,7 @@ impl ComponentRegistrySnapshot {
         value: impl Into<ComponentValueRef<'a>>,
         context: &mut ComponentDecodeContext<'_>,
     ) -> Result<(), ComponentCodecError> {
-        self.diagnose_component_with_context(id, value, context)
+        self.diagnose_component_with_context(id, value.into(), context)
             .map(drop)
     }
 
@@ -1201,13 +1210,13 @@ impl ComponentRegistrySnapshot {
     /// Scene uses this when the current context requires fresh admission. An explicit validator
     /// returns `None`; fallback preflight returns `Some` bound to this exact registry definition.
     /// The caller retains fallback candidates for the original diagnostic batch lifetime.
-    pub(crate) fn diagnose_component_with_context<'a>(
+    pub fn diagnose_component_with_context(
         &self,
         id: &ComponentTypeId,
-        value: impl Into<ComponentValueRef<'a>>,
+        value: ComponentValueRef<'_>,
         context: &mut ComponentDecodeContext<'_>,
     ) -> Result<Option<PreparedComponent>, ComponentCodecError> {
-        self.with_admitted_component_value(id, value.into(), context, |binding, value, context| {
+        self.with_admitted_component_value(id, value, context, |binding, value, context| {
             binding.diagnose_with_context(id, value, context)
         })
     }
@@ -1259,7 +1268,7 @@ impl ComponentRegistrySnapshot {
     /// limits, or established the existing immutable Runtime definition contract. This operation
     /// does not select defaults or repeat value admission. Codec/domain checks and its original
     /// decode context remain active; the result retains the original component binding.
-    pub(crate) fn preflight_admitted_component_with_context(
+    pub fn preflight_admitted_component_with_context(
         &self,
         id: &ComponentTypeId,
         value: ComponentValueRef<'_>,
@@ -1278,7 +1287,7 @@ impl ComponentRegistrySnapshot {
     /// current limits. Dispatch preserves the original context. An explicit validator returns
     /// `None`; fallback preflight returns `Some` for the caller to retain for the original
     /// diagnostic batch lifetime. It grants no authority to skip later preparation or apply.
-    pub(crate) fn validate_admitted_component_with_context(
+    pub fn validate_admitted_component_with_context(
         &self,
         id: &ComponentTypeId,
         value: ComponentValueRef<'_>,
@@ -1360,7 +1369,9 @@ impl ComponentRegistrySnapshot {
     }
 }
 
-pub(crate) fn component_snapshot_matches_runtime_type(
+/// Compares a schema binding with the native component registered in this world.
+#[must_use]
+pub fn component_snapshot_matches_runtime_type(
     snapshot: &ComponentRegistrySnapshot,
     world: &World,
     component: &ComponentTypeId,
@@ -1502,8 +1513,8 @@ impl ComponentRegistryBuilder {
         self.register_resolved_schema_provider(resolved)
     }
 
-    #[doc(hidden)]
-    pub(crate) fn register_resolved_schema_provider(
+    /// Registers an already resolved provider and its validated schema catalogs.
+    pub fn register_resolved_schema_provider(
         &mut self,
         resolved: ResolvedComponentSchemaProvider,
     ) -> Result<&mut Self, ComponentRegistryError> {
@@ -1660,6 +1671,36 @@ impl ComponentRegistryBuilder {
         )
     }
 
+    /// Registers a typed codec whose component has intrinsic Bevy requirements.
+    ///
+    /// Requirements are trusted derived or default state. Their declared shape is checked
+    /// again when applying the codec. Hooks, observers, and additional runtime requirements
+    /// are rejected before the scene changes.
+    pub fn register_persistent_component_with_required_components<T, Decode, Encode>(
+        &mut self,
+        schema: ComponentSchema,
+        decode: Decode,
+        encode: Encode,
+    ) -> Result<&mut Self, ComponentRegistryError>
+    where
+        T: Component,
+        Decode: for<'a> Fn(ComponentValueRef<'a>) -> Result<T, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
+        Encode: Fn(&T) -> Result<ComponentValue, ComponentCodecError> + Send + Sync + 'static,
+    {
+        let requirements = SceneComponentRequirements::for_component::<T>()
+            .map_err(|error| map_persistent_metadata_error(schema.id(), error))?;
+        self.register_persistent_component_codec_internal::<T, _, _>(
+            schema,
+            None,
+            Some(Arc::new(requirements)),
+            move |value, _| decode(value).map(PreparedComponentCandidate::insert),
+            move |component, _, _| encode(component),
+        )
+    }
+
     /// Registers deferred preparation and encoding for exactly one component type.
     ///
     /// A candidate for a different component is rejected by Rust, before registration or decode:
@@ -1763,7 +1804,7 @@ impl ComponentRegistryBuilder {
             + 'static,
     {
         self.register_persistent_component_codec_internal::<T, _, _>(
-            schema, None, preflight, encode,
+            schema, None, None, preflight, encode,
         )
     }
 
@@ -1818,6 +1859,7 @@ impl ComponentRegistryBuilder {
         self.register_persistent_component_codec_internal::<T, _, _>(
             schema,
             Some(Box::new(validate)),
+            None,
             preflight,
             encode,
         )
@@ -1827,6 +1869,7 @@ impl ComponentRegistryBuilder {
         &mut self,
         schema: ComponentSchema,
         validate: Option<Box<ComponentValidator>>,
+        requirements: Option<Arc<SceneComponentRequirements>>,
         preflight: Preflight,
         encode: Encode,
     ) -> Result<&mut Self, ComponentRegistryError>
@@ -1851,7 +1894,8 @@ impl ComponentRegistryBuilder {
     {
         let id = schema.id.clone();
         let data = self.raw_building_mut()?;
-        validate_persistent_registration::<T>(data, &schema)?;
+        validate_persistent_schema(data, &schema)?;
+        validate_native_binding::<T>(data, &id, requirements.is_none())?;
 
         let rust_type_id = TypeId::of::<T>();
         let path_index = SchemaPathIndex::from_schema(&schema);
@@ -1862,12 +1906,12 @@ impl ComponentRegistryBuilder {
             id,
             NativeComponentBinding {
                 rust_type_path: std::any::type_name::<T>(),
-                validate_registration: validate_persistent_component_registration::<T>,
                 validate,
                 codec: Box::new(FnComponentCodec::<T, _, _> {
                     preflight,
                     encode,
                     component: PhantomData,
+                    requirements,
                 }),
             },
         );
@@ -1940,12 +1984,12 @@ impl ComponentRegistryBuilder {
             id.clone(),
             NativeComponentBinding {
                 rust_type_path: std::any::type_name::<T>(),
-                validate_registration: validate_persistent_component_registration::<T>,
                 validate: None,
                 codec: Box::new(FnComponentCodec::<T, _, _> {
                     preflight,
                     encode,
                     component: PhantomData,
+                    requirements: None,
                 }),
             },
         );
@@ -2377,13 +2421,20 @@ fn validate_persistent_registration<T: Component>(
     data: &RegistryData,
     schema: &ComponentSchema,
 ) -> Result<(), ComponentRegistryError> {
+    validate_persistent_schema(data, schema)?;
+    validate_native_binding::<T>(data, schema.id(), true)
+}
+
+fn validate_persistent_schema(
+    data: &RegistryData,
+    schema: &ComponentSchema,
+) -> Result<(), ComponentRegistryError> {
     if data.path_indexes.contains_key(schema.id()) {
         return Err(ComponentRegistryError::DuplicateComponentId(
             schema.id().clone(),
         ));
     }
-    validate_schema(schema)?;
-    validate_native_binding::<T>(data, schema.id(), true)
+    validate_schema(schema)
 }
 
 type TypeIndex = BTreeMap<ComponentTypeId, usize>;
@@ -2396,14 +2447,10 @@ fn validate_registry(
     let catalog = prepare_catalog_candidate(data.catalog.clone(), data.previous_catalog.as_ref())?;
 
     for schema in &catalog.components {
-        let Some(binding) = data.bindings.get(&schema.id) else {
+        if !data.bindings.contains_key(&schema.id) {
             return Err(ComponentRegistryError::MissingNativeBinding {
                 component_id: schema.id.clone(),
             });
-        };
-        if schema.has_capability(ComponentCapability::Scene) {
-            (binding.validate_registration)()
-                .map_err(|error| map_persistent_metadata_error(&schema.id, error))?;
         }
     }
 

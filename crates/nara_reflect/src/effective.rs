@@ -1133,7 +1133,7 @@ impl MaterializationBudget<'_> {
                             reference
                                 .through
                                 .len()
-                                .saturating_mul(size_of::<nara_identity::PrefabInstanceHop>()),
+                                .saturating_mul(size_of::<nara_ecs::identity::PrefabInstanceHop>()),
                         )?;
                     }
                 }
@@ -1234,7 +1234,7 @@ mod budget_tests {
 
     #[test]
     fn reference_discovery_reuses_the_admitted_value_allowance_and_original_work_refusal() {
-        use crate::__private::{
+        use crate::asset_reference::{
             AssetReferenceCollectionError,
             collect_declared_effective_asset_references_with_admission,
         };

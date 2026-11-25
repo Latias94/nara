@@ -1,15 +1,15 @@
 use std::{collections::BTreeMap, convert::Infallible};
 
 use nara_reflect::{
-    __private::{
-        ComponentValueAdmissionError, FrozenComponentDefaults, freeze_component_defaults,
-        validate_component_value_with_admission, validate_explicit_component_value,
-        validate_explicit_component_value_with_admission,
-    },
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentNumericBound,
     ComponentNumericDomain, ComponentNumericInterval, ComponentSchema, ComponentSchemaVersion,
     ComponentShapeMember, ComponentTypeId, ComponentValue, ComponentValueKind,
     ComponentValueMaterializationLimits, ComponentValueRef, ComponentValueShape,
+    effective::{FrozenComponentDefaults, freeze_component_defaults},
+    registry::{
+        ComponentValueAdmissionError, validate_component_value_with_admission,
+        validate_explicit_component_value, validate_explicit_component_value_with_admission,
+    },
     validate_component_value_with_limits,
 };
 

@@ -1,15 +1,15 @@
 use std::{collections::BTreeSet, time::Duration};
 
-use nara_app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeSettings};
-use nara_core::{ByteLimit, ItemLimit, SourceUniverseId, TimeLimit};
-use nara_diagnostic::{
-    DiagnosticReport, MAX_RUNTIME_DIAGNOSTIC_ENTRIES, RuntimeDiagnosticsSettings,
-};
-use nara_tasks::{
+use nara_app::tasks::{
     MAX_TASK_POOL_PENDING_PER_KIND, MAX_TASK_POOL_PENDING_TOTAL, MAX_TASK_POOL_THREADS_PER_KIND,
     MAX_TASK_POOL_THREADS_TOTAL, MAX_TASK_SHUTDOWN_PHASE_TIMEOUT, MAX_TASK_SHUTDOWN_TOTAL_TIMEOUT,
     TaskKindConfig, TaskPoolConfig, TaskPoolKind, TaskShutdownPolicy,
 };
+use nara_app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeSettings};
+use nara_core::diagnostic::{
+    DiagnosticReport, MAX_RUNTIME_DIAGNOSTIC_ENTRIES, RuntimeDiagnosticsSettings,
+};
+use nara_core::{ByteLimit, ItemLimit, SourceUniverseId, TimeLimit};
 use serde::{Deserialize, Serialize};
 
 use crate::MAX_PROJECT_UI_LOGICAL_EXTENT;

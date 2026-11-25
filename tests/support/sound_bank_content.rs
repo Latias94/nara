@@ -206,10 +206,10 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         if !self.close() && self.session.is_some() {
             eprintln!(
-                "retaining unresolved SoundBank Host and copied source at {}",
+                "SoundBank Host cleanup remained incomplete; copied source: {}",
                 self.root.display()
             );
-            std::mem::forget(self.session.take());
+            drop(self.session.take());
             return;
         }
         if self.root.exists() {

@@ -8,7 +8,7 @@ mod prefab_source;
 use std::{convert::Infallible, sync::Arc};
 
 use nara_asset::AssetRef;
-use nara_identity::EntityReference;
+use nara_ecs::identity::EntityReference;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
@@ -16,17 +16,17 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::{
-        AuthoringAdapterReceipt, AuthoringPreviewOmissionLocation, AuthoringPreviewOmissionReason,
-        AuthoringSceneCompilationOmission, AuthoringSceneCompilationOmissionReason,
-        AuthoringSceneCompilationParts, AuthoringSceneCompilationReport,
-        try_compile_authoring_scene_with_loader,
-    },
     AuthoringDocumentSource, AuthoringRecordReadiness, AuthoringSchemaBasis, ExpandedSceneDocument,
     ExpandedSceneEntity, PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget,
     PrefabInstance, PrefabProjectionStep, PublishedAuthoringPrefabDocument, ResolvedPrefabSource,
     SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
     SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
+    authoring::{
+        AuthoringAdapterReceipt, AuthoringPreviewOmissionLocation, AuthoringPreviewOmissionReason,
+        AuthoringSceneCompilationOmission, AuthoringSceneCompilationOmissionReason,
+        AuthoringSceneCompilationParts, AuthoringSceneCompilationReport,
+        try_compile_authoring_scene_with_loader,
+    },
 };
 
 fn id(name: &str) -> SceneEntityId {
@@ -287,7 +287,7 @@ fn native_preview_loses_available_component_data_and_declared_references() {
     );
     let provenance = candidate.provenance().clone();
 
-    let nara_scene::__private::AuthoringNativePreview {
+    let nara_scene::authoring::AuthoringNativePreview {
         candidate: preview,
         omissions,
         ..
@@ -410,7 +410,7 @@ fn unavailable_selected_record_is_an_omission_even_before_native_preview_filteri
     );
     let provenance = candidate.provenance().clone();
 
-    let nara_scene::__private::AuthoringNativePreview {
+    let nara_scene::authoring::AuthoringNativePreview {
         candidate: preview,
         omissions,
         ..

@@ -20,7 +20,7 @@ static NEXT_PRESENTATION_ATTEMPT_ID: AtomicU64 = AtomicU64::new(1);
 pub(super) enum HeadlessTestOutcome {
     Presented {
         commit: OneShotPresentationCommit,
-        authority: Box<nara_ui::__private::UiPreparedPresentationAuthority>,
+        authority: Box<nara_ui::presentation::UiPreparedPresentationAuthority>,
     },
     ContentRejected {
         attempt: UiPresentationAttemptIdentity,
@@ -83,8 +83,11 @@ impl HeadlessTestPresenter {
         assert!(!packet.primitives().is_empty());
         let epoch = nara_render::hud::UiPresentationEpoch::new(presentation_epoch)
             .ok_or("the headless presenter requires a non-zero presentation epoch")?;
-        let authority =
-            nara_ui::__private::prepare_ui_presentation(world, packet.frame(), presentation_epoch)?;
+        let authority = nara_ui::presentation::prepare_ui_presentation(
+            world,
+            packet.frame(),
+            presentation_epoch,
+        )?;
         let prepared = nara_render::hud::presentation::prepare_backend_submission(
             nara_render::hud::UiPresentationAttemptId::new(
                 NEXT_PRESENTATION_ATTEMPT_ID.fetch_add(1, Ordering::Relaxed),
@@ -148,11 +151,11 @@ pub(super) fn commit_headless_test_outcome(
             let accepted = nara_render::hud::presentation::discard_ui_backend_acceptance(commit);
             let identity = accepted.packet().identity();
             if !Arc::ptr_eq(&accepted.packet().frame(), authority.frame()) {
-                nara_ui::__private::supersede_prepared_ui_presentation(world, *authority);
+                nara_ui::presentation::supersede_prepared_ui_presentation(world, *authority);
                 return Err("backend acceptance did not retain the exact prepared frame".into());
             }
-            match nara_ui::__private::commit_prepared_ui_presentation(world, *authority) {
-                nara_ui::__private::UiPresentationCommit::Committed(receipt) => {
+            match nara_ui::presentation::commit_prepared_ui_presentation(world, *authority) {
+                nara_ui::presentation::UiPresentationCommit::Committed(receipt) => {
                     assert_eq!(receipt.surface_id(), identity.surface_id());
                     assert_eq!(receipt.frame_revision(), identity.frame_revision());
                     assert_eq!(receipt.route_revision(), identity.route_revision());
@@ -166,7 +169,7 @@ pub(super) fn commit_headless_test_outcome(
                     );
                     Ok(Some(receipt))
                 }
-                nara_ui::__private::UiPresentationCommit::Invalidated { .. } => Ok(None),
+                nara_ui::presentation::UiPresentationCommit::Invalidated { .. } => Ok(None),
             }
         }
         HeadlessTestOutcome::ContentRejected { .. } => Ok(None),

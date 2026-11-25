@@ -121,14 +121,14 @@ pub(super) fn construct_source_split<'source>(
 
     let mut inputs = MovedReferenceInputs::new(&relocation);
     {
-        let mut rewrite_moved = |reference: &nara_identity::EntityReference,
+        let mut rewrite_moved = |reference: &nara_ecs::identity::EntityReference,
                                  work: &mut ExtractionWork| {
             let rewritten = inputs.rewrite(reference, |bytes| work.admit(bytes))?;
             work.own_reference(rewritten)
         };
         rewrite_entities(&mut moved, &relocation, basis, work, &mut rewrite_moved)?;
     }
-    let mut rewrite_retained = |reference: &nara_identity::EntityReference,
+    let mut rewrite_retained = |reference: &nara_ecs::identity::EntityReference,
                                 work: &mut ExtractionWork| {
         let rewritten =
             relocation.retained_reference(original, reference, |bytes| work.admit(bytes))?;
@@ -204,9 +204,9 @@ fn rewrite_entities(
     basis: &AuthoringSchemaBasis,
     work: &mut ExtractionWork,
     rewrite: &mut impl FnMut(
-        &nara_identity::EntityReference,
+        &nara_ecs::identity::EntityReference,
         &mut ExtractionWork,
-    ) -> Result<nara_identity::EntityReference, ExtractionError>,
+    ) -> Result<nara_ecs::identity::EntityReference, ExtractionError>,
 ) -> Result<(), ExtractionError> {
     for entity in entities {
         work.visit(1, entity.id.as_str().len(), 0)?;

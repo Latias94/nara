@@ -11,11 +11,11 @@ use std::{
 };
 
 use nara_asset::AssetReferenceResolver;
-use nara_diagnostic::DiagnosticReport;
+use nara_core::diagnostic::DiagnosticReport;
 use nara_reflect::{
-    __private::NativeValueMetrics, ComponentCodecError, ComponentDecodeContext, ComponentSchema,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueCost,
-    ComponentValueMaterializationLimits, ComponentValueRef, PersistentComponentSchemaOwnerId,
+    ComponentCodecError, ComponentDecodeContext, ComponentSchema, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueCost, ComponentValueMaterializationLimits,
+    ComponentValueRef, PersistentComponentSchemaOwnerId, effective::NativeValueMetrics,
 };
 
 use crate::{

@@ -2,6 +2,7 @@
 
 use std::{error::Error, fmt};
 
+use nara_core::AssetId;
 use uuid::Uuid;
 
 use crate::StableAssetId;
@@ -54,9 +55,9 @@ impl fmt::Display for ImportedProductId {
 ///
 /// Paths, package origin, encoded content and mount/residency generations do not participate in
 /// equality. This reference neither loads a product nor supplies publication authority.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AssetProductRef {
-    source: StableAssetId,
+    source: AssetId,
     product: ImportedProductId,
 }
 
@@ -65,20 +66,28 @@ impl AssetProductRef {
         source: StableAssetId,
         product: ImportedProductId,
     ) -> Result<Self, AssetProductIdentityError> {
-        if source.as_uuid().is_nil() {
-            return Err(AssetProductIdentityError::NilSource);
-        }
+        let source = AssetId::try_from(source).map_err(|_| AssetProductIdentityError::NilSource)?;
         Ok(Self { source, product })
     }
 
     #[must_use]
     pub const fn source(self) -> StableAssetId {
-        self.source
+        StableAssetId::from_uuid(self.source.as_uuid())
     }
 
     #[must_use]
     pub const fn product(self) -> ImportedProductId {
         self.product
+    }
+}
+
+impl fmt::Debug for AssetProductRef {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AssetProductRef")
+            .field("source", &StableAssetId::from(self.source))
+            .field("product", &self.product)
+            .finish()
     }
 }
 
@@ -203,7 +212,7 @@ mod wire {
     impl Serialize for AssetProductRef {
         fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
             let mut record = serializer.serialize_struct("AssetProductRef", 2)?;
-            record.serialize_field("source", &self.source)?;
+            record.serialize_field("source", &self.source())?;
             record.serialize_field("product", &self.product)?;
             record.end()
         }

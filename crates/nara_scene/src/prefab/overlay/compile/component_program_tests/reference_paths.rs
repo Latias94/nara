@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::SceneCompilationFailureKind;
-use nara_identity::{
+use nara_ecs::identity::{
     PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
 };
 use nara_reflect::{

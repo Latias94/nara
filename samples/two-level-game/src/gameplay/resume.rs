@@ -5,8 +5,8 @@ mod capture;
 mod desktop;
 mod processed;
 
-use std::collections::BTreeMap;
 use std::time::Duration;
+use std::{collections::BTreeMap, num::NonZeroU64};
 
 #[cfg(feature = "desktop")]
 use nara::project_host::DesktopControlError;
@@ -15,12 +15,6 @@ use nara::{advanced_prelude::CurrentScene, project_host::ProjectSceneContentStam
 use nara::{
     app::{FixedTime, RuntimeState, RuntimeTimeContinuation, RuntimeTimeSettings},
     ecs::World,
-    gameplay::{
-        GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,
-        GameplayCommandPayload, GameplayCommandQueue, GameplayCommandSourceSequence,
-        GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
-        GameplayCommandValue,
-    },
     prelude::{App, PluginError, Resource, Transform2d, Vec2},
     project_host::{HeadlessSession, HeadlessSessionError},
 };
@@ -29,6 +23,7 @@ use super::{GamePhase, Progress, Session, fail, player, side_room, travel};
 #[cfg(feature = "local-player")]
 use crate::resume::encode_resume;
 use crate::{
+    command::{CommandSchedule, CommandSource, CommandSubmitError, GameCommand, ScheduledCommand},
     levels::LevelId,
     resume::{
         LevelContentStamp, ResumeCompatibility, ResumeError, ResumeState, RuntimeTimeState,
@@ -49,7 +44,6 @@ pub use desktop::restore_desktop_resume;
 pub use processed::{
     capture_processed_resume, claim_processed_checkpoint, restore_processed_resume,
 };
-pub(super) const RESTORE_STATE: &str = "two-level-game.resume-state";
 const RESUME_SOURCE: &str = "two-level-game.resume";
 
 /// Exact reconstruction refusal. A separate candidate never modifies the retained incumbent.
@@ -57,6 +51,8 @@ const RESUME_SOURCE: &str = "two-level-game.resume";
 pub enum GameResumeError {
     #[error(transparent)]
     Session(#[from] HeadlessSessionError),
+    #[error(transparent)]
+    Command(#[from] CommandSubmitError),
     #[cfg(feature = "desktop")]
     #[error(transparent)]
     Desktop(#[from] DesktopControlError),
@@ -131,13 +127,13 @@ fn supported_service(id: &str, local_player: bool) -> bool {
             | "nara.tasks"
             | "nara.asset"
             | "nara.transform"
-            | "nara.gameplay.commands"
+            | "nara.scene.spatial"
+            | "nara.scene.fixed-spatial"
             | "nara.startup-scene-activation"
     ) || if local_player {
         matches!(
             id,
             "nara.input"
-                | "nara.gameplay.actions"
                 | "nara.material2d"
                 | "nara.render-components"
                 | "nara.window"
@@ -279,6 +275,7 @@ fn player_pose<C>(state: &ResumeState<C>) -> Transform2d {
         translation: Vec2::from_array(state.player.translation),
         rotation: state.player.rotation,
         scale: Vec2::from_array(state.player.scale),
+        z: 0.0,
     }
 }
 
@@ -342,13 +339,13 @@ pub fn request_resume(
     let bytes = encode_resume(state)?;
     session.capture(fresh_candidate)??;
     session.capture(|world| validate_current_placement(world, state))??;
-    enter_headless_resume(session, state.runtime_time, restore_command(bytes)?)
+    enter_headless_resume(session, state.runtime_time, restore_command(bytes))
 }
 
 fn enter_headless_resume(
     session: &mut HeadlessSession,
     time: RuntimeTimeState,
-    command: GameplayCommandSubmission,
+    command: ScheduledCommand,
 ) -> Result<(), GameResumeError> {
     session.restore_time_continuation(time.to_continuation()?)?;
     if session.frame(Duration::ZERO)?.is_some() {
@@ -356,7 +353,7 @@ fn enter_headless_resume(
             "candidate exited during time continuation maintenance".into(),
         ));
     }
-    session.submit(command)?;
+    command.submit_headless(session)?;
     if session.step()?.is_some() || session.state() != Some(RuntimeState::Paused) {
         return Err(GameResumeError::Ineligible(
             "candidate exited during reconstruction entry".into(),
@@ -387,26 +384,18 @@ fn fresh_runtime(world: &World) -> Result<(), GameResumeError> {
     Ok(())
 }
 
-fn restore_command(bytes: Vec<u8>) -> Result<GameplayCommandSubmission, GameResumeError> {
-    let text = String::from_utf8(bytes).expect("resume encoding is UTF-8 JSON");
-    let mut payload = GameplayCommandPayload::new();
-    payload
-        .insert("state", GameplayCommandValue::String(text))
-        .map_err(|error| GameResumeError::Ineligible(error.to_string()))?;
-    Ok(GameplayCommandSubmission::new(
-        GameplayCommandTick::new(1).unwrap(),
-        GameplayCommandIngressSource::external(RESUME_SOURCE).unwrap(),
-        GameplayCommandSourceSequence::new(1).unwrap(),
-        GameplayCommandDraft::new(GameplayCommandTypeId::new(RESTORE_STATE).unwrap())
-            .with_payload(payload),
-    ))
+fn restore_command(bytes: Vec<u8>) -> ScheduledCommand {
+    ScheduledCommand::new(
+        NonZeroU64::MIN,
+        CommandSource::external(RESUME_SOURCE).expect("fixed resume producer"),
+        NonZeroU64::MIN,
+        GameCommand::Resume(bytes.into()),
+    )
 }
 
-pub(super) fn begin_from_command(
-    world: &mut World,
-    payload: &GameplayCommandPayload,
-) -> Result<(), String> {
-    let batch = world.resource::<GameplayCommandBatch>();
+pub(super) fn begin_from_command(world: &mut World, encoded: &[u8]) -> Result<(), String> {
+    let schedule = world.resource::<CommandSchedule>();
+    let batch = schedule.current();
     if world.resource::<FixedTime>().tick() != 1
         || !world.resource::<RuntimeTimeSettings>().paused()
         || world.resource::<Session>().clock.ticks != 0
@@ -414,26 +403,13 @@ pub(super) fn begin_from_command(
         || world.resource::<ResumeControl>().rejected
         || is_pending(world)
         || batch.len() != 1
-        || world
-            .resource::<GameplayCommandQueue>()
-            .stats()
-            .pending_commands
-            != 0
+        || schedule.stats().pending_commands != 0
     {
         return Err("resume command requires one isolated fresh-runtime transaction".into());
     }
-    let command = &batch.commands()[0];
-    if command
-        .source()
-        .id()
-        .is_none_or(|id| id.as_str() != RESUME_SOURCE)
-        || !matches!(
-            command.source(),
-            nara::gameplay::GameplayCommandSource::External { .. }
-        )
+    let command = &batch[0];
+    if !command.source().is_external(RESUME_SOURCE)
         || command.source_sequence().get() != 1
-        || command.target().is_some()
-        || payload.len() != 1
         || !world
             .resource::<super::storage::Storage>()
             .is_unconfigured()
@@ -442,11 +418,8 @@ pub(super) fn begin_from_command(
             "resume command requires its original isolated ingress and no open SaveSlot".into(),
         );
     }
-    let Some(GameplayCommandValue::String(encoded)) = payload.get("state") else {
-        return Err("resume command lacks its bounded state".into());
-    };
     let (activation, facts) = if world.resource::<Session>().local_player {
-        let state = decode_resume(encoded.as_bytes()).map_err(|error| error.to_string())?;
+        let state = decode_resume(encoded).map_err(|error| error.to_string())?;
         #[cfg(feature = "local-player")]
         {
             let current = CurrentScene::get(world)
@@ -470,8 +443,7 @@ pub(super) fn begin_from_command(
             facts,
         )
     } else {
-        let state =
-            decode_processed_resume(encoded.as_bytes()).map_err(|error| error.to_string())?;
+        let state = decode_processed_resume(encoded).map_err(|error| error.to_string())?;
         if !state.pending.is_empty()
             || state.checkpoint.is_some()
             || capture::hosted_catalog(world).map_err(|error| error.to_string())?

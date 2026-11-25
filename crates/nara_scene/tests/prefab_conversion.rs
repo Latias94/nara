@@ -16,7 +16,7 @@ use std::{
 };
 
 use nara_asset::AssetRef;
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference,
 };
@@ -27,15 +27,15 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringSchemaBasis,
-    LocalizedPrefabEntity, PrefabAddition, PrefabAuthoringSession, PrefabConversionError,
-    PrefabConversionReceipt, PrefabConversionRequest, PrefabDocument, PrefabDocumentCandidate,
-    PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabOverlay,
-    PrefabProjectionStep, PreparedPrefabConversion, PreparedScenePrefabConversion,
-    ResolvedPrefabSource, SceneAuthoringSession, SceneCompilationWorkingSet, SceneComponentRecord,
-    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement,
-    SceneEntityProvenance, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
-    ScenePatchReport, ScenePlacement, ScenePlacementParent, ScenePrefabConversionRequest,
+    AuthoringDocumentSource, AuthoringSchemaBasis, LocalizedPrefabEntity, PrefabAddition,
+    PrefabAuthoringSession, PrefabConversionError, PrefabConversionReceipt,
+    PrefabConversionRequest, PrefabDocument, PrefabDocumentCandidate, PrefabEntityOrigin,
+    PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabOverlay, PrefabProjectionStep,
+    PreparedPrefabConversion, PreparedScenePrefabConversion, ResolvedPrefabSource,
+    SceneAuthoringSession, SceneCompilationWorkingSet, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityProvenance,
+    SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement,
+    ScenePlacementParent, ScenePrefabConversionRequest, authoring::AuthoringAdapterReceipt,
 };
 
 fn id(name: &str) -> SceneEntityId {

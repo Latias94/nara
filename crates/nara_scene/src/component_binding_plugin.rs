@@ -83,9 +83,7 @@ struct SceneComponentBindingsBuildSeed {
 }
 
 fn next_revision(revision: u64) -> u64 {
-    revision
-        .checked_add(1)
-        .unwrap_or_else(|| std::process::abort())
+    revision.wrapping_add(1)
 }
 
 fn record_bindings_structure_change(mut world: DeferredWorld<'_>, _context: HookContext) {
@@ -302,7 +300,7 @@ impl Plugin for SceneComponentBindingsPlugin {
             generation: OnceLock::new(),
         });
         app.insert_resource(SceneComponentBindingsAuthority(Arc::clone(&authority)))?;
-        app.__install_runtime_authority_validator(
+        app.register_runtime_validator(
             SCENE_COMPONENT_BINDINGS_PLUGIN_ID,
             Arc::new(move |world, generation| authority.validate_runtime(world, generation)),
         )?;

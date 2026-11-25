@@ -4,12 +4,12 @@ mod compiled_scene;
 use std::{mem::size_of, sync::Arc};
 
 use nara_asset::{AssetRef, AssetSourcePath, StableAssetId};
+use nara_core::diagnostic::{DiagnosticReport, DiagnosticValueRef};
 use nara_core::{ByteLimit, SourceUniverseId};
-use nara_diagnostic::{DiagnosticReport, DiagnosticValueRef};
 use nara_ecs::World;
-use nara_hierarchy::HierarchyRoots;
-use nara_identity::WorldIdentityDomain;
+use nara_ecs::identity::WorldIdentityDomain;
 use nara_reflect::ComponentRegistrySnapshot;
+use nara_scene::hierarchy::HierarchyRoots;
 use nara_scene::{
     PrefabAddition, PrefabDocument, PrefabEntityTarget, PrefabInstance, PrefabOverlay,
     PrefabProjectionStep, PrefabSourceResolver, ResolvedPrefabSource, SceneCompilationBudgetKind,
@@ -177,7 +177,8 @@ fn instance_addition_origin_survives_nested_anchors_suppression_and_runtime_publ
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let instance = report.instance.unwrap();
     for (materialized, provenance) in candidate.canonical_provenance() {
-        let nara_identity::EntityLookup::Resolved(entity) = instance.resolve(&world, materialized)
+        let nara_ecs::identity::EntityLookup::Resolved(entity) =
+            instance.resolve(&world, materialized)
         else {
             panic!("missing materialized entity");
         };
@@ -715,7 +716,7 @@ fn default_provenance_rejection_before_source_binding_preserves_world_and_identi
         .as_ref()
         .unwrap()
         .resolve(&world, &id("existing"));
-    let nara_identity::EntityLookup::Resolved(existing_entity) = before_lookup else {
+    let nara_ecs::identity::EntityLookup::Resolved(existing_entity) = before_lookup else {
         panic!("existing Scene entity did not resolve: {before_lookup:?}");
     };
     let before_source = world

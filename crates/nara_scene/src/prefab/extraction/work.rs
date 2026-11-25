@@ -3,16 +3,16 @@
 use std::{borrow::Cow, mem::size_of};
 
 use nara_core::{ByteLimit, ItemLimit};
-use nara_identity::{AuthoredReferenceTarget, EntityReference};
+use nara_ecs::identity::{AuthoredReferenceTarget, EntityReference};
 use nara_reflect::{
-    __private::{
-        ComponentPropertyAdmissionError, resolve_component_property_schema_claim_with_admission,
-        validate_component_property_value_with_admission,
-    },
     ComponentCapability, ComponentCodecError, ComponentEntityReferenceRewriteError,
     ComponentPropertyError, ComponentPropertyPath, ComponentPropertyReadBudget, ComponentTypeId,
     ComponentValueCost, ComponentValueMaterializationLimits, ComponentValueRef,
     EntityReferenceTraversalLimits,
+    property::{
+        ComponentPropertyAdmissionError, resolve_component_property_schema_claim_with_admission,
+        validate_component_property_value_with_admission,
+    },
 };
 
 use super::{SourceCut, SourceDocumentInput};
@@ -39,7 +39,7 @@ pub(crate) enum ExtractionError {
     Property(ComponentPropertyError),
     Reference(Box<ComponentEntityReferenceRewriteError<ExtractionError>>),
     Compilation {
-        diagnostics: nara_diagnostic::DiagnosticReport,
+        diagnostics: nara_core::diagnostic::DiagnosticReport,
         failure: Option<crate::SceneCompilationFailure>,
         omissions: Vec<crate::prefab::AuthoringSceneCompilationOmission>,
     },

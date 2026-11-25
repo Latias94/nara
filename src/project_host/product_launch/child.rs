@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, FsError};
+use crate::fs::{ContentDigest, DirectoryCapability, FileIdentity, FsError};
 
 use super::platform::{
     InheritedBootstrapEndpoint, InheritedBootstrapRead, inherited_bootstrap_endpoint,
@@ -543,7 +543,7 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
+    use crate::fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
     use nara_project::ProjectPath;
 
     use super::*;

@@ -8,7 +8,7 @@
 //! A caller holding a platform-enforced exclusive manifest lock must arrange its readable
 //! readiness observation through that lock's owner. This gate never bypasses a failed disk read.
 
-use nara_fs::FileCapability;
+use crate::fs::FileCapability;
 use nara_project::DEFAULT_MANIFEST_BYTE_LIMIT;
 
 use crate::project_host::{

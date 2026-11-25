@@ -8,14 +8,14 @@ use std::{
     },
 };
 
+use nara_ecs::identity::{EntityLookup, WorldIdentityDomain};
 use nara_ecs::{Component, World};
-use nara_hierarchy::HierarchyRoots;
-use nara_identity::{EntityLookup, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueKind,
 };
+use nara_scene::hierarchy::HierarchyRoots;
 use nara_scene::{
     InMemoryPrefabSourceResolver, SceneComponentRecord, SceneDocument, SceneEntityId,
     SceneEntityRecord, SceneEntitySource, SceneOccurrenceKey, SourceDocumentKey,

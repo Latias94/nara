@@ -1,4 +1,4 @@
-#![cfg(all(feature = "serde", feature = "runtime-2d"))]
+#![cfg(all(feature = "project-runtime", feature = "serde", feature = "runtime-2d"))]
 
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
@@ -159,7 +159,7 @@ pending_capacity = 8
     let intent = HeadlessRunIntent::frames(NonZeroU32::new(1).unwrap(), Duration::ZERO)
         .with_profile("delivery")
         .with_recipe(recipe);
-    let mut run = HeadlessRun::<ConfigurationObservation>::new(root, intent, Vec::new());
+    let mut run = HeadlessRun::<ConfigurationObservation>::new(root, intent);
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let report = run.execute_bounded();

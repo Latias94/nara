@@ -35,11 +35,12 @@ fn image_record(path: &str, stable_id: StableAssetId) -> AssetRecord {
 
 fn install_asset_plugin(app: &mut App) {
     app.insert_resource(
-        nara_tasks::TaskPools::inline_for_tests(nara_tasks::TaskPoolConfig::default()).unwrap(),
+        nara_app::tasks::TaskPools::inline_for_tests(nara_app::tasks::TaskPoolConfig::default())
+            .unwrap(),
     )
     .unwrap();
     app.add_plugins((
-        nara_tasks::TaskPlugin::default(),
+        nara_app::tasks::TaskPlugin::default(),
         AssetPlugin,
         AssetSourcePlugin,
     ))
@@ -64,7 +65,7 @@ fn native_assets_run_without_source_resources_or_task_pools() {
     assert!(!world.contains_resource::<AssetReloadDiagnostics>());
     assert!(!world.contains_resource::<AssetLoadGenerations>());
     assert!(!world.contains_resource::<AssetSourceRoot>());
-    assert!(!world.contains_resource::<nara_tasks::TaskPools>());
+    assert!(!world.contains_resource::<nara_app::tasks::TaskPools>());
     runtime.finish().unwrap();
 }
 

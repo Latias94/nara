@@ -376,7 +376,7 @@ pub(super) fn asset_references(
     limits: nara_reflect::EntityReferenceTraversalLimits,
     admission: &mut Option<&mut ClassificationCallback<'_>>,
 ) -> Result<Vec<DeclaredAssetReference>, AuthoringDocumentPublicationError> {
-    nara_reflect::__private::collect_declared_effective_asset_references_with_admission(
+    nara_reflect::asset_reference::collect_declared_effective_asset_references_with_admission(
         schema,
         version,
         value,
@@ -392,8 +392,8 @@ pub(super) fn asset_references(
         },
     )
     .map_err(|error| match error {
-        nara_reflect::__private::AssetReferenceCollectionError::Admission(report) => report,
-        nara_reflect::__private::AssetReferenceCollectionError::Reference(_) => {
+        nara_reflect::asset_reference::AssetReferenceCollectionError::Admission(report) => report,
+        nara_reflect::asset_reference::AssetReferenceCollectionError::Reference(_) => {
             rejection(with_public_locator(
                 diagnostic_error(
                     "scene.authoring-declared-asset-reference-invalid",
@@ -420,8 +420,8 @@ pub(super) fn effective_value<'value>(
     complete_value::check_contextual_record(schema, record, limits, admission)
         .map_err(|error| complete_value::contextual_record_rejection(schema, error))?;
     selected_effective_value(schema, record, limits, admission).map_err(|error| match error {
-        nara_reflect::__private::EffectiveValueAdmissionError::Admission(report) => report,
-        nara_reflect::__private::EffectiveValueAdmissionError::Value(error) => {
+        nara_reflect::effective::EffectiveValueAdmissionError::Admission(report) => report,
+        nara_reflect::effective::EffectiveValueAdmissionError::Value(error) => {
             rejection(with_codec_error(
                 with_public_locator(
                     diagnostic_error(
@@ -446,9 +446,9 @@ pub(super) fn selected_effective_value<'value>(
     admission: &mut Option<&mut ClassificationCallback<'_>>,
 ) -> Result<
     std::borrow::Cow<'value, ComponentValue>,
-    nara_reflect::__private::EffectiveValueAdmissionError<AuthoringDocumentPublicationError>,
+    nara_reflect::effective::EffectiveValueAdmissionError<AuthoringDocumentPublicationError>,
 > {
-    nara_reflect::__private::effective_component_value_with_default_overrides_with_admission(
+    nara_reflect::effective::effective_component_value_with_default_overrides_with_admission(
         schema,
         record.value(),
         &record.contextual_defaults,
@@ -497,7 +497,7 @@ pub(super) fn validate_source_local_references(
         ))
     };
     let plan = if admission.is_some() {
-        nara_reflect::__private::plan_declared_entity_references_with_admission::<(), _>(
+        nara_reflect::entity_reference::plan_declared_entity_references_with_admission::<(), _>(
             schema,
             effective,
             limits,
@@ -512,12 +512,14 @@ pub(super) fn validate_source_local_references(
             },
         )
         .map_err(|error| match error {
-            nara_reflect::__private::EntityReferencePlanError::Admission(report) => report,
-            nara_reflect::__private::EntityReferencePlanError::Reference(_) => invalid(),
+            nara_reflect::entity_reference::EntityReferencePlanError::Admission(report) => report,
+            nara_reflect::entity_reference::EntityReferencePlanError::Reference(_) => invalid(),
         })?
     } else {
-        nara_reflect::__private::plan_declared_entity_references::<()>(schema, effective, limits)
-            .map_err(|_| invalid())?
+        nara_reflect::entity_reference::plan_declared_entity_references::<()>(
+            schema, effective, limits,
+        )
+        .map_err(|_| invalid())?
     };
     plan.visit(effective, |_, reference| {
         reference
@@ -536,8 +538,8 @@ pub(super) fn validate_reference_grammar(
     admission: &mut Option<&mut ClassificationCallback<'_>>,
 ) -> Result<(), AuthoringDocumentPublicationError> {
     check_reference_grammar(schema, value, limits, admission).map_err(|error| match error {
-        nara_reflect::__private::EntityReferencePlanError::Admission(report) => report,
-        nara_reflect::__private::EntityReferencePlanError::Reference(_) => {
+        nara_reflect::entity_reference::EntityReferencePlanError::Admission(report) => report,
+        nara_reflect::entity_reference::EntityReferencePlanError::Reference(_) => {
             rejection(with_public_locator(
                 diagnostic_error(
                     "scene.authoring-reference-grammar-invalid",
@@ -557,9 +559,9 @@ pub(super) fn check_reference_grammar(
     admission: &mut Option<&mut ClassificationCallback<'_>>,
 ) -> Result<
     (),
-    nara_reflect::__private::EntityReferencePlanError<(), AuthoringDocumentPublicationError>,
+    nara_reflect::entity_reference::EntityReferencePlanError<(), AuthoringDocumentPublicationError>,
 > {
-    nara_reflect::__private::plan_declared_entity_references_with_admission::<(), _>(
+    nara_reflect::entity_reference::plan_declared_entity_references_with_admission::<(), _>(
         schema,
         value,
         limits,
@@ -818,9 +820,10 @@ pub(super) fn diagnostics_bytes(entries: &[UnavailableRecordManifestEntry]) -> O
             .checked_add(dynamic)?
             .checked_add(fields)?
             .checked_add(
-                (draft_slots + fields).checked_mul(size_of::<nara_diagnostic::DiagnosticField>())?,
+                (draft_slots + fields)
+                    .checked_mul(size_of::<nara_core::diagnostic::DiagnosticField>())?,
             )?
-            .checked_add(size_of::<nara_diagnostic::Diagnostic>())
+            .checked_add(size_of::<nara_core::diagnostic::ReportDiagnostic>())
     })
 }
 

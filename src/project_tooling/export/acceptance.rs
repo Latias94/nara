@@ -11,9 +11,9 @@ use std::{
 use crate::{
     fs::{ContentDigest, FsError},
     project_workflow::{
-        __private::ProjectExportProductAgreement, ProjectExportBinaryTarget,
-        ProjectExportBuildError, ProjectExportMemberKind, ProjectExportMemberReceipt,
-        ProjectExportPlanReceipt, StartupContentClosureReceipt,
+        ProjectExportBinaryTarget, ProjectExportBuildError, ProjectExportMemberKind,
+        ProjectExportMemberReceipt, ProjectExportPlanReceipt, ProjectExportProductAgreement,
+        StartupContentClosureReceipt,
     },
 };
 use serde_json::Value;
@@ -32,6 +32,7 @@ static NEXT_PRODUCT_ATTEMPT: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug)]
 pub(crate) struct ProductProcessObservationReceipt {
+    #[cfg(test)]
     attempt: String,
     target: ProjectExportBinaryTarget,
     executable_digest: ContentDigest,
@@ -43,6 +44,7 @@ pub(crate) struct ProductProcessObservationReceipt {
     observation_digest: ContentDigest,
 }
 
+#[cfg(test)]
 impl ProductProcessObservationReceipt {
     pub(crate) fn attempt(&self) -> &str {
         &self.attempt
@@ -83,7 +85,9 @@ impl ProductProcessObservationReceipt {
     pub(crate) const fn observation_digest(&self) -> ContentDigest {
         self.observation_digest
     }
+}
 
+impl ProductProcessObservationReceipt {
     pub(super) fn into_product_agreement(
         self,
     ) -> Result<ProjectExportProductAgreement, ProjectExportBuildError> {
@@ -355,6 +359,7 @@ fn observe_product_command(
             let bytes = read_observation(target, &observation)?;
             validate_observation(&expected, &attempt, &bytes)?;
             return Ok(ProductProcessObservationReceipt {
+                #[cfg(test)]
                 attempt,
                 target,
                 executable_digest,

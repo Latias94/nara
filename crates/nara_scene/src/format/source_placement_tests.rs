@@ -201,7 +201,7 @@ fn raw_decode_retains_routed_intent_without_opening_or_certifying_its_targets() 
     let mut prefab = PrefabDocument::new(source.placements.clone(), source.entities.clone());
     prefab
         .inputs
-        .insert(nara_identity::ReferenceInputId::new("external").unwrap());
+        .insert(nara_ecs::identity::ReferenceInputId::new("external").unwrap());
     for candidate in [
         PrefabDocumentCandidate::decode_json_str(&prefab.to_json_string().unwrap()).unwrap(),
         PrefabDocumentCandidate::decode_ron_str(&prefab.to_ron_string().unwrap()).unwrap(),

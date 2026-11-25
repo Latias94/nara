@@ -328,8 +328,7 @@ fn run_case(case: Case) {
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
-        nara_hierarchy::HierarchyPlugin,
-        nara_transform::TransformPlugin,
+        nara_scene::spatial::SpatialPlugin,
         nara_render::RenderComponentsPlugin,
         nara_render::RenderPlugin::default(),
         nara_window::WindowPlugin::default(),
@@ -347,7 +346,7 @@ fn run_case(case: Case) {
     if case != Case::NoViews {
         app.world_mut().unwrap().spawn((
             nara_render::Camera2d::default(),
-            nara_transform::Transform2d::default(),
+            nara_scene::spatial::Transform2d::default(),
         ));
     }
     seed_backend_frame(app.world_mut().unwrap());
@@ -370,17 +369,15 @@ fn run_case(case: Case) {
     )
     .unwrap();
     app.add_systems(CoreStage::Last, consume_ui).unwrap();
-    let mut runtime = nara_app::RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            nara_app::RuntimeObligationLedger::new(),
-            Default::default(),
-        )
-        .unwrap()
-        .complete_startup()
-        .unwrap()
-        .promote();
+    let mut runtime = nara_app::RuntimeCandidate::admit(
+        app.seal().unwrap(),
+        nara_app::RuntimeObligationLedger::new(),
+        Default::default(),
+    )
+    .unwrap()
+    .complete_startup()
+    .unwrap()
+    .promote();
     for _ in 0..consume_after {
         runtime.drive(std::time::Duration::ZERO).unwrap();
     }
@@ -401,7 +398,7 @@ fn seed_backend_frame(world: &mut World) {
         UiPresentationRoute, prepare_backend_submission, replace_ui_backend_frame,
         replace_ui_presentation_routes, snapshot_ui_paint_packets,
     };
-    use nara_ui_kernel::{
+    use nara_ui::kernel::{
         UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiLayer, UiLocalKey,
         UiNode, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiTheme, UiVisual,
     };
@@ -422,14 +419,17 @@ fn seed_backend_frame(world: &mut World) {
         .build()
         .unwrap();
     let surface = UiSurfaceId::new(1).unwrap();
-    let frame = UiCompiler::new(nara_text::bundled_font_face().unwrap(), Default::default())
-        .unwrap()
-        .compile(
-            &snapshot,
-            UiEnvironment::new(surface, 16.0, 16.0, 1.0, 1, 1, 1, 1).unwrap(),
-            UiTheme::default(),
-        )
-        .unwrap();
+    let frame = UiCompiler::new(
+        nara_ui::text::bundled_font_face().unwrap(),
+        Default::default(),
+    )
+    .unwrap()
+    .compile(
+        &snapshot,
+        UiEnvironment::new(surface, 16.0, 16.0, 1.0, 1, 1, 1, 1).unwrap(),
+        UiTheme::default(),
+    )
+    .unwrap();
     replace_ui_presentation_routes(
         world,
         [UiPresentationRoute::new(surface, WindowId::PRIMARY).unwrap()],

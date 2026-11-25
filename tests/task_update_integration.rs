@@ -65,7 +65,7 @@ fn asset_plugin_owns_the_complete_task_update_chain() {
 #[test]
 fn foundational_app_and_task_modules_do_not_own_asset_phase_vocabulary() {
     let app_source = include_str!("../crates/nara_app/src/lib.rs");
-    let task_source = include_str!("../crates/nara_tasks/src/runtime.rs");
+    let task_source = include_str!("../crates/nara_app/src/tasks/mod.rs");
 
     assert!(!app_source.contains("TaskUpdateSet"));
     assert!(!app_source.contains("AssetTaskUpdateSet"));

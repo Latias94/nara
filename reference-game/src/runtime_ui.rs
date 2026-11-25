@@ -1,12 +1,14 @@
 use nara::ecs::schedule::IntoScheduleConfigs;
 use nara::{
     app::{
-        CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
-        PluginProductCapability, PluginShutdownContext, PluginShutdownObligationId, RuntimeFault,
-        RuntimeFaultKind, RuntimeFaultReporter,
+        CoreStage, FixedUpdateSet, Plugin, PluginCategory, PluginDeclaration, PluginError,
+        PluginId, PluginProductCapability, PluginShutdownContext, PluginShutdownObligationId,
+        RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
     },
-    ecs::{Commands, Component, Entity, Mut, Query, Res, ResMut, Resource, system::SystemParam},
-    gameplay::{LocalGameplayCommands, add_local_gameplay_command_systems},
+    ecs::{
+        Commands, Component, Entity, Mut, Query, Res, ResMut, Resource, bevy_ecs::error::BevyError,
+        system::SystemParam,
+    },
     scene::SceneEntitySource,
     ui::{
         UiActionConsumerId, UiActionCursor, UiActionId, UiActionJournal, UiButton, UiDimension,
@@ -18,11 +20,11 @@ use crate::{
     ReferenceWaveCaptureSet, WaveOutcome, WaveRetryPhase, WaveRetryRejection, WaveRetryStatus,
     WaveSnapshot,
     resources::WaveRunOwner,
-    retry_draft_for_ui_action,
     ui_observation::{
         ReferenceProductObservation, capture_reference_product_observation,
         reference_ui_source_entity,
     },
+    wave_input::{WaveInput, WaveIntent, prepare_wave_input},
 };
 
 pub const REFERENCE_RUNTIME_UI_PLUGIN_ID: PluginId = PluginId::new("reference-game.runtime-ui");
@@ -34,7 +36,6 @@ const REFERENCE_RUNTIME_UI_SHUTDOWN_OBLIGATION: PluginShutdownObligationId =
 
 const REFERENCE_RUNTIME_UI_REQUIREMENTS: &[PluginId] = &[
     crate::REFERENCE_WAVE_PLUGIN_ID,
-    nara::gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
     nara::input::INPUT_PLUGIN_ID,
     nara::ui::UI_PLUGIN_ID,
 ];
@@ -59,13 +60,19 @@ impl Plugin for ReferenceRuntimeUiPlugin {
     fn build(&self, app: &mut nara::prelude::App) -> Result<(), PluginError> {
         app.insert_resource(ReferenceHudProjection::default())?;
         app.insert_resource(ReferenceProductObservation::default())?;
-        add_local_gameplay_command_systems(app, collect_retry_intents)?;
-        app.add_systems(
-            CoreStage::FixedUpdate,
-            (project_runtime_ui, capture_reference_product_observation)
-                .chain()
-                .in_set(ReferenceWaveCaptureSet::Presentation),
-        )?;
+        app.add_systems(CoreStage::PreUpdate, collect_retry_intents)?
+            .add_systems(
+                CoreStage::FixedUpdate,
+                collect_retry_intents
+                    .in_set(FixedUpdateSet::Prepare)
+                    .before(prepare_wave_input),
+            )?
+            .add_systems(
+                CoreStage::FixedUpdate,
+                (project_runtime_ui, capture_reference_product_observation)
+                    .chain()
+                    .in_set(ReferenceWaveCaptureSet::Presentation),
+            )?;
         let consumer = UiActionConsumerId::new(REFERENCE_UI_ACTION_CONSUMER)
             .map_err(|error| setup_error(error.to_string()))?;
         if app.world().contains_resource::<ReferenceUiActionCursor>() {
@@ -312,9 +319,9 @@ fn collect_retry_intents(
     mut ui_actions: ResMut<UiActionJournal>,
     ui_cursor: Res<ReferenceUiActionCursor>,
     context: ReferenceRetryIntentContext<'_, '_>,
-    mut commands: ResMut<LocalGameplayCommands>,
+    mut input: ResMut<WaveInput>,
     faults: Res<RuntimeFaultReporter>,
-) {
+) -> Result<(), BevyError> {
     let retry_action = context.authored_retry_action();
     let (semantic_sequence, last_sequence) = match ui_actions.pending(&ui_cursor.0) {
         Ok(pending) => (
@@ -333,20 +340,15 @@ fn collect_retry_intents(
                 RuntimeFaultKind::System,
                 "reference-game.ui-action-cursor",
             ));
-            return;
+            return Ok(());
         }
     };
     let retry_is_eligible =
         context.snapshot.is_terminal() && context.retry.phase() != WaveRetryPhase::Pending;
-    if retry_is_eligible
-        && let Some(sequence) = semantic_sequence
-        && commands.push(retry_draft_for_ui_action(sequence)).is_err()
-    {
-        faults.report(RuntimeFault::engine(
-            RuntimeFaultKind::LocalIntentLoss,
-            "reference-game.retry-intent",
-        ));
-        return;
+    if retry_is_eligible && let Some(sequence) = semantic_sequence {
+        input.push(WaveIntent::Retry {
+            ui_sequence: Some(sequence),
+        })?;
     }
     if let Some(sequence) = last_sequence
         && ui_actions.acknowledge(&ui_cursor.0, sequence).is_err()
@@ -356,6 +358,7 @@ fn collect_retry_intents(
             "reference-game.ui-action-acknowledgement",
         ));
     }
+    Ok(())
 }
 
 fn setup_error(message: String) -> PluginError {

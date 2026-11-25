@@ -11,9 +11,9 @@ Organize Nara around the headless core, game runtime, and project and editor lay
   of UI frameworks. Only the desktop shell wires these pieces together.
 - Use the same WGPU source, revision, and version across Nara and Open-GPUI. The v2 baseline pins
   WGPU 30.0.0 to `cddb2f5d80dc0009b2ef6767635140cacf90a007`. Require one `wgpu` package identity
-  per lockfile and compare the complete sources. Run `cargo tree -d -p wgpu` to detect an
-  ambiguous package selection and inspect its dependency tree, which can list transitively duplicated
-  dependencies such as `hashbrown`.
+  per lockfile and compare the complete sources. Run
+  `cargo tree --locked --workspace --all-features --invert wgpu --depth 1` to detect an ambiguous
+  package selection and list the workspace packages that use WGPU.
 - Use the normal crate APIs or consolidate the owners when crates need shared internals. Eliminate
   `pub mod __private`, first-party anti-tamper hooks, manual byte budgets, and private fault routing.
 - Express library failures as errors and retain ordinary resource lifetimes. Eliminate

@@ -18,9 +18,12 @@ use nara::{
         PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabProjectionStep,
         SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityPlacement,
         SceneEntityRecord, SceneEntitySource, SceneOccurrenceKey, ScenePlacement,
-        ScenePlacementParent, SourceDocumentKey, SourceDocumentKind, spawn_scene,
+        ScenePlacementParent, SourceDocumentKey, SourceDocumentKind, SpatialPlugin,
+        TransformComponentsPlugin,
+        fixed_spatial::{CapturedTransform2d, FixedSpatialPlugin, historical_spatial_snapshot},
+        spatial::{GlobalTransform2d as EcsGlobalTransform2d, Transform2d},
+        spawn_scene,
     },
-    transform::{GlobalTransform2d, Transform2d, TransformPlugin, historical_spatial_snapshot},
 };
 
 #[derive(Resource)]
@@ -116,6 +119,7 @@ fn spawn_fixture(world: &mut World) {
                     translation: Vec2::new(1000.0, -2000.0),
                     rotation: -FRAC_PI_2,
                     scale: Vec2::new(7.0, 11.0),
+                    z: 0.0,
                 },
             ),
             transform_entity(
@@ -134,6 +138,7 @@ fn spawn_fixture(world: &mut World) {
             translation: Vec2::new(20.0, -10.0),
             rotation: 0.0,
             scale: Vec2::new(3.0, 2.0),
+            z: 0.0,
         },
     );
     branch_root.prefab = Some(PrefabInstance::root(
@@ -172,6 +177,7 @@ fn spawn_fixture(world: &mut World) {
             translation: Vec2::new(5.0, 7.0),
             rotation: FRAC_PI_2,
             scale: Vec2::new(2.0, 3.0),
+            z: 0.0,
         },
     );
     let instance = PrefabInstance::root(
@@ -196,6 +202,7 @@ fn spawn_fixture(world: &mut World) {
                     translation: Vec2::new(10.0, 20.0),
                     rotation: FRAC_PI_2,
                     scale: Vec2::splat(2.0),
+                    z: 0.0,
                 },
             ),
             replaced,
@@ -250,7 +257,7 @@ fn resolve(world: &World, instance: &SpawnedSceneInstance, id: &SceneEntityId) -
     }
 }
 
-fn assert_global(global: GlobalTransform2d, origin: Vec2, axes: [Vec2; 2]) {
+fn assert_global(global: CapturedTransform2d, origin: Vec2, axes: [Vec2; 2]) {
     for (actual, expected) in [
         (global.translation(), origin),
         (global.matrix().transform_vector2(Vec2::X), axes[0]),
@@ -266,8 +273,14 @@ fn assert_global(global: GlobalTransform2d, origin: Vec2, axes: [Vec2; 2]) {
 #[test]
 fn nested_root_bound_prefabs_propagate_real_transforms_without_wrappers() {
     let mut app = App::new();
-    app.add_plugins((ComponentRegistryPlugin, HierarchyPlugin, TransformPlugin))
-        .unwrap();
+    app.add_plugins((
+        ComponentRegistryPlugin,
+        HierarchyPlugin,
+        TransformComponentsPlugin,
+        SpatialPlugin,
+        FixedSpatialPlugin,
+    ))
+    .unwrap();
     app.add_systems(StartupStage::Scene, spawn_fixture).unwrap();
     let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(Duration::ZERO).unwrap();
@@ -288,13 +301,14 @@ fn nested_root_bound_prefabs_propagate_real_transforms_without_wrappers() {
         ["z-replaced", "a-inherited"].map(|name| resolve(world, &materialized.instance, &id(name)));
     assert_eq!(world.resource::<HierarchyRoots>().as_slice(), &[stage]);
     assert!(world.get::<Parent>(stage).is_none());
-    assert_eq!(world.get::<Children>(stage).unwrap().as_slice(), anchors);
+    assert_eq!(&**world.get::<Children>(stage).unwrap(), anchors);
     assert_eq!(
         world.get::<Transform2d>(anchors[0]),
         Some(&Transform2d {
             translation: Vec2::new(5.0, 7.0),
             rotation: FRAC_PI_2,
             scale: Vec2::new(2.0, 3.0),
+            z: 0.0,
         }),
     );
     assert_eq!(
@@ -303,6 +317,7 @@ fn nested_root_bound_prefabs_propagate_real_transforms_without_wrappers() {
             translation: Vec2::new(20.0, -10.0),
             rotation: 0.0,
             scale: Vec2::new(3.0, 2.0),
+            z: 0.0,
         }),
     );
 
@@ -343,7 +358,7 @@ fn nested_root_bound_prefabs_propagate_real_transforms_without_wrappers() {
             .each_ref()
             .map(|id| resolve(world, &materialized.instance, id));
         assert_eq!(world.get::<Parent>(anchor).unwrap().parent(), stage);
-        assert_eq!(world.get::<Children>(anchor).unwrap().as_slice(), children);
+        assert_eq!(&**world.get::<Children>(anchor).unwrap(), children);
         let source = world.get::<SceneEntitySource>(anchor).unwrap();
         assert_eq!(source.entity_id, id(["z-replaced", "a-inherited"][index]));
         assert!(source.provenance().projection_path().is_none());
@@ -352,14 +367,22 @@ fn nested_root_bound_prefabs_propagate_real_transforms_without_wrappers() {
             assert!(
                 world
                     .get::<Children>(child)
-                    .is_none_or(|children| children.as_slice().is_empty())
+                    .is_none_or(|children| children.is_empty())
             );
         }
         for (entity, origin) in [anchor, children[0], children[1], children[2]]
             .into_iter()
             .zip(origins)
         {
-            assert_global(snapshot.global(entity).unwrap(), origin, axes);
+            let global = snapshot.global(entity).unwrap();
+            assert_global(global, origin, axes);
+            assert!(
+                world
+                    .get::<EcsGlobalTransform2d>(entity)
+                    .unwrap()
+                    .matrix()
+                    .abs_diff_eq(global.matrix(), 0.0001)
+            );
         }
     }
     runtime.finish().unwrap();

@@ -54,8 +54,10 @@ fn physical_play_flow_presents_ui_and_retires_the_original_native_run() {
             }
         }
         if Instant::now() >= deadline + Duration::from_secs(15) {
-            std::mem::forget(process);
-            panic!("original play-flow process retains incomplete physical cleanup: {failure:?}");
+            drop(process);
+            panic!(
+                "original play-flow process did not complete explicit physical cleanup: {failure:?}"
+            );
         }
         thread::sleep(Duration::from_millis(10));
     }

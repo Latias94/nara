@@ -325,7 +325,7 @@ fn recursive_intervals_report_the_stable_root_without_dynamic_keys_or_values() {
                 (
                     "target",
                     ComponentValue::EntityReference(nara_reflect::EntityReference::SceneLocal {
-                        entity: nara_identity::SceneEntityId::new("target").unwrap(),
+                        entity: nara_ecs::identity::SceneEntityId::new("target").unwrap(),
                     }),
                 ),
                 ("amount", ComponentValue::f64(amount).unwrap()),
@@ -334,7 +334,7 @@ fn recursive_intervals_report_the_stable_root_without_dynamic_keys_or_values() {
     };
     for (amount, accepted) in [(1.0, true), (0.0, false)] {
         assert_eq!(
-            nara_reflect::__private::plan_declared_entity_references::<()>(
+            nara_reflect::entity_reference::plan_declared_entity_references::<()>(
                 &references,
                 &with_reference(amount),
                 nara_reflect::EntityReferenceTraversalLimits::default(),

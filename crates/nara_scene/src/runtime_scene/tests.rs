@@ -251,7 +251,7 @@ fn frozen_data_preparation_keeps_selected_defaults_and_cook_owns_explicit_values
         spawned.diagnostics
     );
     let instance = spawned.instance.unwrap();
-    let nara_identity::EntityLookup::Resolved(entity) = instance.resolve(&world, &id("root"))
+    let nara_ecs::identity::EntityLookup::Resolved(entity) = instance.resolve(&world, &id("root"))
     else {
         panic!("prepared frozen data must retain its complete entity")
     };
@@ -721,10 +721,12 @@ fn nested_entity_references_remap_through_the_declared_plan_and_keep_persistent_
         .find(|(_, origin)| origin.projection_path().is_some())
         .unwrap();
     let persistent = EntityReference::Persistent {
-        entity: nara_identity::PersistentRuntimeReference::new(
-            nara_identity::PersistentRuntimeNamespaceId::new("game.saved").unwrap(),
-            nara_identity::PersistentRuntimeId::parse_str("00000000-0000-4000-8000-000000000056")
-                .unwrap(),
+        entity: nara_ecs::identity::PersistentRuntimeReference::new(
+            nara_ecs::identity::PersistentRuntimeNamespaceId::new("game.saved").unwrap(),
+            nara_ecs::identity::PersistentRuntimeId::parse_str(
+                "00000000-0000-4000-8000-000000000056",
+            )
+            .unwrap(),
         ),
     };
     let mut claims = copy_claims(&original);
@@ -1668,9 +1670,9 @@ fn raw_decode_and_admission_never_invoke_native_codecs() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 
     for reference in [
-        nara_identity::AuthoredEntityReference::source(id("outside")),
-        nara_identity::AuthoredEntityReference::input(
-            nara_identity::ReferenceInputId::new("required-input").unwrap(),
+        nara_ecs::identity::AuthoredEntityReference::source(id("outside")),
+        nara_ecs::identity::AuthoredEntityReference::input(
+            nara_ecs::identity::ReferenceInputId::new("required-input").unwrap(),
         ),
     ] {
         for metadata in [false, true] {
@@ -1703,7 +1705,7 @@ fn raw_decode_and_admission_never_invoke_native_codecs() {
                     diagnostic.fields().iter().any(|field| {
                         field.key().as_str() == "codec-error-kind"
                             && field.value()
-                                == nara_diagnostic::DiagnosticValueRef::Identifier(
+                                == nara_core::diagnostic::DiagnosticValueRef::Identifier(
                                     "unresolved-authored-reference",
                                 )
                     })

@@ -66,6 +66,7 @@ fn assert_scene_geometry(game: &Game, inner_x: f32) {
                         translation: Vec2::from_array(translation),
                         rotation: 0.0,
                         scale: Vec2::ONE,
+                        z: 0.0,
                     })
                 );
                 assert_eq!(

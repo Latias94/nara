@@ -8,14 +8,14 @@ use nara::{
         apply_keyboard_driver_input_at, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
         apply_window_input_driver_event, connect_synthetic_gamepad_input, disconnect_gamepad_input,
     },
-    prelude::{FixedTime, Vec2},
+    prelude::{FixedTime, Vec2, World},
     ui::{
         UiAccessibilityInput, UiSeatId, UiSemanticRole,
         advanced::{active_ui_surface_slots, ui_semantic_snapshot},
     },
 };
 use nara_reference_game::WaveSnapshot;
-use nara_ui_kernel::{UiPoint, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform};
+use nara_ui::kernel::{UiPoint, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform};
 
 use super::{
     REFERENCE_RETRY_ACTION,
@@ -126,14 +126,14 @@ pub(super) fn activate_component_accessibility(runtime: &mut RuntimeInstance) {
         retry.key().clone(),
         action,
     );
-    runtime
-        .with_driver_scope(|scope| queue_component_accessibility_input(scope, input))
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
+    let outcome = runtime
+        .with_driver_scope(|scope| {
+            scope.apply_command(move |world: &mut World| {
+                queue_component_accessibility_input(world, input);
+            })
         })
-        .unwrap()
         .unwrap();
+    assert!(outcome.post_operation_fault.is_none());
 }
 
 pub(super) fn inject_keyboard(runtime: &mut RuntimeInstance, key: KeyCode) {
@@ -271,14 +271,14 @@ pub(super) fn resize(runtime: &mut RuntimeInstance, width: u32, height: u32) {
         1.0,
     )
     .expect("the resized target should produce one exact content transform");
-    runtime
-        .with_driver_scope(|scope| queue_component_surface_update(scope, transform))
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
+    let outcome = runtime
+        .with_driver_scope(|scope| {
+            scope.apply_command(move |world: &mut World| {
+                queue_component_surface_update(world, transform);
+            })
         })
-        .unwrap()
         .unwrap();
+    assert!(outcome.post_operation_fault.is_none());
 }
 
 pub(super) fn mouse(runtime: &mut RuntimeInstance, input: ButtonDriverInput<MouseButton>) {

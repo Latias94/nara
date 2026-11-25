@@ -1640,7 +1640,7 @@ mod tests {
 
     #[cfg(feature = "hud-runtime")]
     fn ui_packet() -> Arc<UiPaintPacket> {
-        use nara_ui_kernel::{
+        use nara_ui::kernel::{
             UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiLayer, UiLocalKey,
             UiNode, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiTheme, UiVisual,
         };
@@ -1662,10 +1662,13 @@ mod tests {
             .unwrap();
         let environment =
             UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 16.0, 16.0, 1.0, 1, 1, 1, 1).unwrap();
-        let frame = UiCompiler::new(nara_text::bundled_font_face().unwrap(), Default::default())
-            .unwrap()
-            .compile(&snapshot, environment, UiTheme::default())
-            .unwrap();
+        let frame = UiCompiler::new(
+            nara_ui::text::bundled_font_face().unwrap(),
+            Default::default(),
+        )
+        .unwrap()
+        .compile(&snapshot, environment, UiTheme::default())
+        .unwrap();
         crate::hud::UiPresentationPlanner::default()
             .plan(
                 frame,

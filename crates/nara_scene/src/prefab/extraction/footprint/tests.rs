@@ -3,18 +3,18 @@
 use std::{collections::HashMap, sync::Arc};
 
 use nara_core::{ByteLimit, ItemLimit};
-use nara_identity::{AuthoredEntityReference, EntityReference, ReferenceInputId};
+use nara_ecs::identity::{AuthoredEntityReference, EntityReference, ReferenceInputId};
 use nara_reflect::{
     AuthoringSchemaBundle, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
 };
 
 use super::{SourceContextFootprint::*, *};
 use crate::{
-    __private::{PrefabExtractionBinding, PrefabExtractionEnvironment},
     AuthoringSchemaBasis, PrefabAddition, PrefabDocument, PrefabEntityOrigin, PrefabInstanceClaim,
     PrefabInstanceHop, PrefabOverlay, PrefabReferenceArguments, ResolvedPrefabSource,
     SceneCompilationLimits, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
     ScenePlacement, SourceDocumentKind,
+    authoring::{PrefabExtractionBinding, PrefabExtractionEnvironment},
 };
 
 fn id(value: &str) -> SceneEntityId {

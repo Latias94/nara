@@ -65,6 +65,7 @@ pub struct Fixture {
     host: String,
     inputs: Vec<String>,
     pending_cleanup: RefCell<Vec<SupervisedProcessOwner>>,
+    preserve_tree: bool,
 }
 
 impl Fixture {
@@ -120,6 +121,7 @@ impl Fixture {
             host: String::new(),
             inputs: Vec::new(),
             pending_cleanup: RefCell::new(Vec::new()),
+            preserve_tree: false,
         };
         fixture.host = fixture.probe_host();
         for directory in ["src", "assets", "scenes", "prefabs", "schema", "input"] {
@@ -137,7 +139,7 @@ impl Fixture {
         );
         let absolute = serde_json::to_string(fixture.repository.to_str().unwrap()).unwrap();
         let mut manifest = manifest.replacen(original, &format!("path = {absolute}"), 1);
-        for dependency in ["nara_rapier2d", "nara_render", "nara_gilrs"] {
+        for dependency in ["nara_physics2d", "nara_render"] {
             let original = format!("path = \"../../crates/{dependency}\"");
             assert_eq!(
                 manifest.matches(&original).count(),
@@ -321,7 +323,7 @@ impl Fixture {
                         assert!(!features.contains(&forbidden), "{line}");
                     }
                 }
-                "nara_winit" | "wgpu" | "winit" => {
+                "wgpu" | "winit" => {
                     renderer = true;
                     assert!(
                         desktop,
@@ -536,16 +538,18 @@ impl Drop for Fixture {
             }
         });
         if !self.pending_cleanup.get_mut().is_empty() {
-            let pending = std::mem::take(self.pending_cleanup.get_mut());
-            let count = pending.len();
-            std::mem::forget(pending);
+            let count = self.pending_cleanup.get_mut().len();
+            self.pending_cleanup.get_mut().clear();
             eprintln!(
-                "continuity retains {count} unresolved native owners and their tree at {} until test-process exit",
+                "continuity cleanup remained unresolved for {count} native owners; fixture: {}",
                 self.root.display(),
             );
             if !std::thread::panicking() {
                 panic!("continuity native cleanup remains incomplete after outer retry");
             }
+            return;
+        }
+        if self.preserve_tree {
             return;
         }
         let Ok(resolved) = self.root.canonicalize() else {
@@ -571,6 +575,12 @@ impl Drop for Fixture {
                 resolved.display()
             );
         }
+    }
+}
+
+impl Fixture {
+    pub(super) fn retain_tree(mut self) {
+        self.preserve_tree = true;
     }
 }
 

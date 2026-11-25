@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use nara_identity::{AuthoredEntityReference, EntityReference};
-use nara_reflect::__private::plan_declared_value_entity_references;
+use nara_ecs::identity::{AuthoredEntityReference, EntityReference};
+use nara_reflect::entity_reference::plan_declared_value_entity_references;
 use nara_reflect::{
     ComponentEntityReferenceRewriteError, ComponentFieldPath, ComponentFieldSchema, ComponentValue,
     ComponentValueMaterializationLimits, ComponentValueShape,

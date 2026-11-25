@@ -64,7 +64,7 @@ pub fn feature_closure(graph: &str, player: PlayerSelection) {
             }
             "nara_render" => ui = features.contains(&"hud-runtime"),
             "cpal" => audio = true,
-            "nara_gilrs" => gamepad = true,
+            "nara_input" => gamepad = features.contains(&"gamepad"),
             _ => {}
         }
     }

@@ -1,8 +1,8 @@
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_identity::AuthoredEntityReference;
+use nara_ecs::identity::AuthoredEntityReference;
 use nara_reflect::{
-    __private::component_values_exactly_match, ComponentCapability, ComponentFieldPathSegment,
-    ComponentPropertyStep,
+    ComponentCapability, ComponentFieldPathSegment, ComponentPropertyStep,
+    schema::component_values_exactly_match,
 };
 
 use super::*;
@@ -14,6 +14,7 @@ use crate::{
     provenance::provenance_string_bytes,
 };
 
+/// An observed override and its destination for applying a prefab property.
 #[derive(Debug)]
 pub struct ObservedPrefabPropertyApply {
     target: PrefabEntityTarget,
@@ -96,6 +97,7 @@ impl ObservedPrefabPropertyApply {
     }
 }
 
+/// A failure to select or prepare an apply operation for an inspected prefab property.
 #[derive(Debug)]
 pub enum AuthoringPrefabPropertyApplyError {
     Read(AuthoringReadError),
@@ -121,7 +123,6 @@ impl From<AuthoringPrefabValueError> for AuthoringPrefabPropertyApplyError {
 
 impl AuthoringPrefabInstanceSnapshot {
     /// Observes promotion of the exact stored claim used for the containing source's Revert.
-    #[doc(hidden)]
     pub fn plan_property_apply(
         &self,
         target: &PrefabEntityTarget,
@@ -260,7 +261,6 @@ impl AuthoringPrefabInstanceSnapshot {
     }
 
     /// Confirms that the same source record now supplies the unchanged effective property.
-    #[doc(hidden)]
     pub fn verifies_property_apply(
         &self,
         edit: &ObservedPrefabPropertyApply,
@@ -323,7 +323,6 @@ impl AuthoringPrefabInstanceSnapshot {
 impl PrefabAuthoringSession {
     /// Prepares the destination's ordinary edit on the supplied revision and observed Schema.
     /// The caller binds this session to the inspected canonical source and prepares the Revert.
-    #[doc(hidden)]
     pub fn prepare_prefab_property_apply(
         &self,
         base_revision: SceneAuthoringRevision,

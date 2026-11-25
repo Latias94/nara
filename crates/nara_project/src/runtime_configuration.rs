@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use nara_app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeSettings};
 use nara_asset::{AssetProductRef, ImportedProductId};
-use nara_diagnostic::DiagnosticReport;
+use nara_core::diagnostic::DiagnosticReport;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

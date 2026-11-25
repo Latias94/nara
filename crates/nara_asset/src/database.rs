@@ -4,11 +4,11 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-#[cfg(feature = "runtime")]
-use nara_ecs::Resource;
-use nara_identity::{
+use nara_core::source::{
     SourceDocumentBindingError, SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin,
 };
+#[cfg(feature = "runtime")]
+use nara_ecs::Resource;
 
 use crate::{AssetPath, AssetPathScope, AssetRef, AssetSourcePath, StableAssetId};
 

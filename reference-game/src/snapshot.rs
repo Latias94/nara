@@ -4,8 +4,9 @@ use nara::{
     app::RuntimeFaultReporter,
     ecs::{Entity, With, bevy_ecs::error::BevyError, system::SystemParam},
     prelude::{FixedTime, Query, Res, ResMut, Resource, Transform2d, Vec2},
-    scene::{SceneEntitySource, advanced::SceneProductResource},
-    transform::FixedSpatialSnapshot2d,
+    scene::{
+        SceneEntitySource, advanced::SceneProductResource, fixed_spatial::FixedSpatialSnapshot2d,
+    },
 };
 
 use crate::{

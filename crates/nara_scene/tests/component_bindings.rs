@@ -10,7 +10,7 @@ use std::{collections::BTreeSet, convert::Infallible};
 
 use nara_asset::AssetRef;
 use nara_core::ItemLimit;
-use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
+use nara_ecs::identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentPropertyPath, ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchema,

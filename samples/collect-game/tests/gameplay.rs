@@ -8,15 +8,12 @@ use std::{
 };
 
 use collect_gameplay::{
-    Collectible, Direction, GameSnapshot, PlayerConfig, demonstration_commands, movement, reset,
+    Collectible, CollectionControl, Direction, GameSnapshot, PlayerConfig, demonstration_commands,
+    movement, reset, with_collection_script,
 };
 use nara::{
     core::Vec2,
     fs::DirectoryCapability,
-    gameplay::{
-        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandSourceSequence,
-        GameplayCommandSubmission, GameplayCommandTick,
-    },
     project_host::{HeadlessRun, HeadlessRunOutcome},
     reflect::{ComponentTypeId, ComponentValue, PersistentComponentProvider},
     scene::{
@@ -48,7 +45,7 @@ fn custom_creation_templates_keep_the_current_float_wire_contract() {
     }
 }
 
-fn run(ticks: u32, commands: Vec<GameplayCommandSubmission>) -> GameSnapshot {
+fn run(ticks: u32, commands: Vec<(u64, CollectionControl)>) -> GameSnapshot {
     run_project(
         nara_game::open_project_root().expect("open sample source"),
         ticks,
@@ -59,13 +56,13 @@ fn run(ticks: u32, commands: Vec<GameplayCommandSubmission>) -> GameSnapshot {
 fn run_project(
     project_root: DirectoryCapability,
     ticks: u32,
-    commands: Vec<GameplayCommandSubmission>,
+    commands: Vec<(u64, CollectionControl)>,
 ) -> GameSnapshot {
     let mut run = HeadlessRun::<GameSnapshot>::from_recipe(
         project_root,
-        nara_game::product_recipe().expect("construct sample product recipe"),
+        with_collection_script(nara_game::product_recipe().unwrap(), commands)
+            .expect("construct sample product recipe"),
         NonZeroU32::new(ticks).unwrap(),
-        commands,
     );
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -129,24 +126,12 @@ impl SourceProject {
     fn run(
         &self,
         ticks: u32,
-        drafts: impl IntoIterator<Item = (u64, GameplayCommandDraft)>,
+        controls: impl IntoIterator<Item = (u64, CollectionControl)>,
     ) -> GameSnapshot {
-        let commands = drafts
-            .into_iter()
-            .enumerate()
-            .map(|(index, (tick, draft))| {
-                GameplayCommandSubmission::new(
-                    GameplayCommandTick::new(tick).unwrap(),
-                    GameplayCommandIngressSource::test("sample.source-fixture").unwrap(),
-                    GameplayCommandSourceSequence::new(index as u64 + 1).unwrap(),
-                    draft,
-                )
-            })
-            .collect();
         run_project(
             nara_game::open_explicit_project_root(&self.0).expect("open temporary sample source"),
             ticks,
-            commands,
+            controls.into_iter().collect(),
         )
     }
 }
@@ -497,15 +482,7 @@ fn reset_restores_positions_targets_and_color_without_removing_authored_entities
 fn releasing_a_direction_stops_movement() {
     let commands = [(1, true), (6, false)]
         .into_iter()
-        .enumerate()
-        .map(|(index, (tick, pressed))| {
-            GameplayCommandSubmission::new(
-                GameplayCommandTick::new(tick).unwrap(),
-                GameplayCommandIngressSource::test("sample.release").unwrap(),
-                GameplayCommandSourceSequence::new(index as u64 + 1).unwrap(),
-                movement(Direction::Right, pressed),
-            )
-        })
+        .map(|(tick, pressed)| (tick, movement(Direction::Right, pressed)))
         .collect();
     let stopped = run(10, commands);
     assert!((stopped.player.x - (-100.0)).abs() < 0.001);

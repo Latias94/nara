@@ -1,6 +1,6 @@
 use std::{error::Error, sync::Arc, time::Duration};
 
-use nara_app::{__RuntimeDriverPort, App, RuntimeInstance, RuntimeWorldAccessError};
+use nara_app::{App, AppRunError, RuntimeInstance};
 use nara_ecs::{Mut, Resource, World};
 use nara_ui::{
     advanced::{
@@ -21,7 +21,6 @@ impl LabRuntime {
         app.insert_resource(LabDriver {
             presenter: HeadlessInteractionPresenter::new(),
         })?;
-        app.__register_driver_port::<LabDriver>(LabDriver::apply_driver_input_in_world)?;
         Ok(Self {
             runtime: RuntimeInstance::start(app)?,
         })
@@ -89,13 +88,16 @@ impl LabRuntime {
         &mut self,
         operation: LabOperation,
     ) -> Result<Option<UiPresentationReceipt>, Box<dyn Error>> {
-        self.runtime
-            .with_driver_scope(|scope| scope.__apply_port::<LabDriver>(operation))?
-            .output?
+        let outcome = self.runtime.with_driver_scope(|scope| {
+            scope.with_world_mut(|world| LabDriver::apply(world, operation))
+        })?;
+        if let Some(fault) = outcome.post_operation_fault {
+            return Err(Box::new(AppRunError::managed_runtime_fault(&fault)));
+        }
+        outcome.output
     }
 }
 
-// This example's concrete operations cannot replace runtime authority or expose its World.
 enum LabOperation {
     Present { frame: Arc<UiFrame>, epoch: u64 },
     SetPrimaryButton(UiButton),
@@ -110,24 +112,12 @@ struct LabDriver {
     presenter: HeadlessInteractionPresenter,
 }
 
-impl __RuntimeDriverPort for LabDriver {
-    type Input = LabOperation;
-    type Output = Result<Option<UiPresentationReceipt>, Box<dyn Error>>;
-
-    fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
-        Err("lab operations require the coordinated driver port".into())
-    }
-}
-
 impl LabDriver {
-    fn apply_driver_input_in_world(
+    fn apply(
         world: &mut World,
         input: LabOperation,
-    ) -> Result<
-        Result<Option<UiPresentationReceipt>, Box<dyn Error>>,
-        (RuntimeWorldAccessError, LabOperation),
-    > {
-        Ok(world.resource_scope(|world, mut driver: Mut<Self>| {
+    ) -> Result<Option<UiPresentationReceipt>, Box<dyn Error>> {
+        world.resource_scope(|world, mut driver: Mut<Self>| {
             match input {
                 LabOperation::Present { frame, epoch } => {
                     return driver.presenter.present(world, frame, epoch).map(Some);
@@ -163,6 +153,6 @@ impl LabDriver {
                 }
             }
             Ok(None)
-        }))
+        })
     }
 }

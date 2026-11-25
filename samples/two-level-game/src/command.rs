@@ -1,9 +1,21 @@
 //! The closed semantic vocabulary shared by development control and source-game replay.
 
-use nara::gameplay::{GameplayCommandDraft, GameplayCommandEnvelope, GameplayCommandValue};
+use std::sync::Arc;
+
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::gameplay::commands;
+mod schedule;
+use crate::RunOptions;
+#[cfg(all(test, feature = "local-player"))]
+pub(crate) use schedule::with_test_script;
+pub use schedule::{
+    CommandKey, CommandRejection, CommandSchedule, CommandSequence, CommandSet, CommandSource,
+    CommandSourceId, CommandStats, CommandSubmitError, CommandTick, MAX_COMMAND_TICK_OFFSET,
+    MAX_SCHEDULED_COMMANDS, ScheduledCommand,
+};
+pub(crate) use schedule::{
+    acknowledge_commands, mark_frame_input, needs_frame_input, prepare_commands,
+};
 
 /// External producer ID for commands submitted by the cooked Server.
 pub const SERVER_COMMAND_SOURCE: &str = "two-level-game.server";
@@ -55,42 +67,19 @@ impl SemanticCommand {
         Ok(())
     }
 
-    /// Builds the existing gameplay command after semantic admission.
-    pub(crate) fn draft(&self) -> GameplayCommandDraft {
-        match self {
-            Self::Move { direction, pressed } => commands::movement(*direction, *pressed),
-            Self::Marker => commands::action(commands::MARKER),
-            Self::Travel => commands::action(commands::TRAVEL),
-            Self::Instance => commands::action(commands::INSTANCE),
-            Self::Retry => commands::action(commands::RETRY),
-        }
+    pub fn intent(&self) -> GameCommand {
+        GameCommand::Player(ServerCommand::Gameplay(self.clone()))
     }
 
-    /// Decodes only exact game commands, with no target or unrepresented payload fields.
     #[cfg(any(feature = "development", test))]
-    pub(crate) fn from_envelope(envelope: &GameplayCommandEnvelope) -> Result<Self, String> {
-        if envelope.command_type().as_str() == commands::MOVE {
-            let (direction, pressed) = decode_movement(envelope)?;
-            return Ok(Self::Move { direction, pressed });
+    pub(crate) fn from_scheduled(command: &ScheduledCommand) -> Result<Self, String> {
+        match command.intent() {
+            GameCommand::Player(ServerCommand::Gameplay(command)) => {
+                command.validate()?;
+                Ok(command.clone())
+            }
+            _ => Err("recording contains an unsupported game operation".into()),
         }
-        if envelope.target().is_some() {
-            return Err("semantic game commands cannot have a target".into());
-        }
-        let payload = envelope.payload();
-        if !payload.is_empty() {
-            return Err("semantic game actions require an empty payload".into());
-        }
-        semantic_action(envelope.command_type().as_str())
-    }
-}
-
-fn semantic_action(kind: &str) -> Result<SemanticCommand, String> {
-    match kind {
-        commands::MARKER => Ok(SemanticCommand::Marker),
-        commands::TRAVEL => Ok(SemanticCommand::Travel),
-        commands::INSTANCE => Ok(SemanticCommand::Instance),
-        commands::RETRY => Ok(SemanticCommand::Retry),
-        kind => Err(format!("unsupported semantic game command {kind}")),
     }
 }
 
@@ -113,57 +102,16 @@ impl ServerCommand {
         }
     }
 
-    /// Lowers an operator command through the game's existing fixed-step command vocabulary.
-    pub fn into_draft(self) -> Result<GameplayCommandDraft, String> {
+    pub fn into_intent(self) -> Result<GameCommand, String> {
         self.validate()?;
-        let action = match self {
-            Self::Gameplay(command) => return Ok(command.draft()),
-            Self::SideRoom => commands::SIDE_ROOM,
-            Self::Lookout => commands::LOOKOUT,
-            Self::Save => commands::SAVE,
-            Self::Restore => commands::RESTORE,
-        };
-        Ok(commands::action(action))
-    }
-
-    pub(crate) fn from_draft(draft: &GameplayCommandDraft) -> Result<Self, String> {
-        if draft.command_type().as_str() == commands::MOVE {
-            let (direction, pressed) = decode_movement_draft(draft)?;
-            return Ok(Self::Gameplay(SemanticCommand::Move { direction, pressed }));
-        }
-        if draft.target().is_some() || !draft.payload().is_empty() {
-            return Err("semantic server actions require an empty payload and no target".into());
-        }
-        Ok(match draft.command_type().as_str() {
-            commands::SIDE_ROOM => Self::SideRoom,
-            commands::LOOKOUT => Self::Lookout,
-            commands::SAVE => Self::Save,
-            commands::RESTORE => Self::Restore,
-            kind => Self::Gameplay(semantic_action(kind)?),
-        })
+        Ok(GameCommand::Player(self))
     }
 }
 
-pub(crate) fn decode_movement(envelope: &GameplayCommandEnvelope) -> Result<(usize, bool), String> {
-    decode_movement_draft(envelope.command())
-}
-
-fn decode_movement_draft(draft: &GameplayCommandDraft) -> Result<(usize, bool), String> {
-    if draft.target().is_some() {
-        return Err("semantic game commands cannot have a target".into());
-    }
-    let payload = draft.payload();
-    let (Some(GameplayCommandValue::I64(direction)), Some(GameplayCommandValue::Bool(pressed))) =
-        (payload.get("direction"), payload.get("pressed"))
-    else {
-        return Err("movement requires an integer direction and boolean pressed".into());
-    };
-    if payload.len() != 2 {
-        return Err("movement contains unrepresented payload fields".into());
-    }
-    let direction = usize::try_from(*direction)
-        .ok()
-        .filter(|direction| *direction < 4)
-        .ok_or_else(|| "movement direction must be in 0..4".to_owned())?;
-    Ok((direction, *pressed))
+#[derive(Clone, Debug)]
+pub enum GameCommand {
+    Player(ServerCommand),
+    RoundSave,
+    Launch(RunOptions),
+    Resume(Arc<[u8]>),
 }

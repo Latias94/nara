@@ -1,6 +1,6 @@
 use std::{mem::size_of, sync::Arc};
 
-use nara_identity::ReferenceInputId;
+use nara_ecs::identity::ReferenceInputId;
 
 use crate::{
     AuthoringDocumentKind, AuthoringDocumentReadmission, AuthoringEntityView,

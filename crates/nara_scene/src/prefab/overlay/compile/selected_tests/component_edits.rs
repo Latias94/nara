@@ -2,14 +2,14 @@ use nara_reflect::ComponentPropertyReadBudget;
 
 use super::*;
 use crate::{
-    __private::{
-        AuthoringPrefabComponentEditError as EditError, AuthoringPrefabInspectionError,
-        try_inspect_authoring_prefab_instance_with_loader,
-    },
     AuthoringDocumentSource, AuthoringPrefabComponentOverrideKind, AuthoringPrefabInstanceSnapshot,
     AuthoringPrefabPropertyValue, AuthoringPrefabRecordOrigin, PrefabComponentEdit,
     PrefabComponentSetMode, PrefabDeclarationLimits, PrefabDeclarationSource, PrefabOverlaySlot,
     SceneAuthoringSession, SceneDocumentCandidate,
+    authoring::{
+        AuthoringPrefabComponentEditError as EditError, AuthoringPrefabInspectionError,
+        try_inspect_authoring_prefab_instance_with_loader,
+    },
 };
 
 #[path = "component_apply.rs"]

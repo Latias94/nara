@@ -1,10 +1,13 @@
 //! Resource-complete backend-neutral paint packets for immutable UI frames.
 //!
 //! CPU planning, captured Image resources and the surface presenter need no App/ECS installation.
-//! The `runtime` feature adds the existing game/runtime plugin and World exchange.
+//! `hud-runtime` adds the renderer plugin and World exchange. `hud-presentation` joins the UI
+//! runtime to that exchange and commits exact backend acceptances to presented input.
 
 mod atlas;
 mod backend;
+#[cfg(feature = "hud-presentation")]
+mod bridge;
 #[cfg(feature = "hud-runtime")]
 mod integration;
 mod limits;
@@ -15,6 +18,13 @@ mod surface;
 mod surface_tests;
 
 pub use backend::UiPresentationIntegrationError;
+#[cfg(feature = "hud-presentation")]
+pub use bridge::{
+    PresentedUiObservation, UI_PRESENTATION_BRIDGE_PLUGIN_DECLARATION,
+    UI_PRESENTATION_BRIDGE_PLUGIN_ID, UiPresentationBridgePlugin, latest_presented_ui_observation,
+};
+#[cfg(all(feature = "hud-presentation", feature = "wgpu"))]
+pub use bridge::{PresentedUiWgpuFacts, UiPostHostConnection};
 #[cfg(feature = "hud-runtime")]
 pub use integration::{
     UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiPaintCompileStats, UiRenderPlugin,

@@ -809,9 +809,7 @@ fn borrowed_property_revert_checks_storage_and_session_incarnation() {
             )
             .unwrap()
             .publish();
-    let sibling = SceneAuthoringSession::from_published_authoring_document(
-        crate::__private::fork_published_authoring_scene_document(&published),
-    );
+    let sibling = SceneAuthoringSession::from_published_authoring_document(published.fork());
     let session = SceneAuthoringSession::from_published_authoring_document(published);
     let guard = nested_path(&[PrefabInstancePathSegment::InstanceClaim { index: 0 }]);
     let leaf = nested_path(&[PrefabInstancePathSegment::InstanceClaim { index: 1 }]);

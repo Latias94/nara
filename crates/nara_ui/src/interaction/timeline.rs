@@ -1,11 +1,11 @@
-use nara_core::Vec2;
-use nara_input::{
-    ButtonTransitionPhase, GamepadButton, InputEventKind, InputTimelineEntry, KeyCode, MouseButton,
-};
-use nara_ui_kernel::{
+use crate::kernel::{
     UiActivationSource, UiButtonPhase, UiInputEvent, UiNavigation, UiPoint, UiPointerButton,
     UiPointerId, UiPointerInput, UiRouteStamp, UiSeatId, UiSurfaceContentTransform,
     UiSurfaceGenerations, UiSurfaceId,
+};
+use nara_core::Vec2;
+use nara_input::{
+    ButtonTransitionPhase, GamepadButton, InputEventKind, InputTimelineEntry, KeyCode, MouseButton,
 };
 
 use crate::runtime::UiRuntimeState;
@@ -253,11 +253,11 @@ fn project_key(seat: UiSeatId, key: KeyCode, phase: ButtonTransitionPhase) -> Op
             seat,
             source: UiActivationSource::Keyboard,
         }),
-        KeyCode::Character('\t') => Some(UiInputEvent::Navigate {
+        KeyCode::Tab => Some(UiInputEvent::Navigate {
             seat,
             direction: UiNavigation::Next,
         }),
-        KeyCode::Escape | KeyCode::Character(_) | KeyCode::IntlBackslash => None,
+        _ => None,
     }
 }
 

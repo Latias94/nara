@@ -991,11 +991,8 @@ impl Drop for DevelopmentHost {
             return;
         }
         if self.close() == RetirementStatus::Pending {
-            let retained = std::mem::take(&mut self.retiring);
-            let build = self.last_build_failure.take();
-            std::mem::forget((retained, build));
             eprintln!(
-                "game development Host still owns incomplete cleanup: {:?}",
+                "game development Host explicit cleanup is incomplete: {:?}",
                 self.cleanup_error
             );
         }

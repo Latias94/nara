@@ -213,7 +213,7 @@ fn validate(
     work: &mut AuthoredSchemaUpgradeWork,
 ) -> Result<(), ScenePatchReport> {
     match kind {
-        SourceDocumentKind::Scene => crate::__private::validate_authored_upgrade_scene_transition(
+        SourceDocumentKind::Scene => validate_authored_upgrade_scene_transition(
             original,
             successor,
             AuthoringDocumentSource::new(AssetRef::path("scenes/recovery.scene.json").unwrap()),
@@ -227,7 +227,7 @@ fn validate(
                 PrefabDocument::new(original.placements.clone(), original.entities.clone());
             let successor =
                 PrefabDocument::new(successor.placements.clone(), successor.entities.clone());
-            crate::__private::validate_authored_upgrade_prefab_transition(
+            validate_authored_upgrade_prefab_transition(
                 &original,
                 &successor,
                 AuthoringDocumentSource::new(

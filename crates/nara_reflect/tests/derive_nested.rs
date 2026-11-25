@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
 use nara_core::Vec2;
+use nara_ecs::identity::{EntityReference, SceneEntityId};
 use nara_ecs::{Component, World};
-use nara_identity::{EntityReference, SceneEntityId};
 use nara_reflect::{
     AssetReferenceDemand, ComponentCapability, ComponentFieldPath, ComponentNumericDomain,
     ComponentRegistryBuilder, ComponentRegistryError, ComponentTypeId, ComponentValue,

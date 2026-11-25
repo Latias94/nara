@@ -4,9 +4,9 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use crate::fs::ContentDigest;
 use nara_asset::{Assets, ImportedProductId, ProjectAssetDatabase, StableAssetId};
-use nara_fs::ContentDigest;
-use nara_identity::SceneEntityId;
+use nara_ecs::identity::SceneEntityId;
 use nara_project::{RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneLimits, SceneDocument, SceneEntityRecord, SourceDocumentKey,

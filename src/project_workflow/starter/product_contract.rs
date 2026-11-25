@@ -1,5 +1,5 @@
+use crate::fs::ContentDigest;
 use nara_asset::{AssetMetaIdentity, AssetMetaIdentityCandidate};
-use nara_fs::ContentDigest;
 use nara_project::{
     NativeDocumentIdentity, ProductCapability, ProductCapabilitySet, ProjectExecutionContract,
     ProjectManifest, ProjectPresentMode, RuntimePreset, SourceUniverseId,
@@ -22,7 +22,7 @@ const DESKTOP_NARA_FEATURES: [&str; 4] = [
     "nara/presentation-2d",
     "nara/desktop-winit",
     "nara/render-wgpu",
-    "dep:nara_gilrs",
+    "nara/gamepad",
 ];
 
 pub(super) struct ProductContractSources<'a> {
@@ -40,7 +40,6 @@ pub(super) fn render_cargo_manifest(
     starter: ProjectStarter,
     source_universe: SourceUniverseId,
     dependency: &str,
-    receipt: &NaraDependencyReceipt,
 ) -> String {
     let package_name = cargo_package_name(source_universe);
     let desktop = desktop_features(starter)
@@ -48,17 +47,6 @@ pub(super) fn render_cargo_manifest(
         .map(|feature| format!("\"{feature}\""))
         .collect::<Vec<_>>()
         .join(", ");
-    let gamepad_dependency = if starter.has_action_map() {
-        let coordinate = gilrs_local_path(receipt).map_or_else(
-            || dependency.to_owned(),
-            |path| format!("path = {}", Value::String(path)),
-        );
-        format!(
-            "\n[target.'cfg(windows)'.dependencies]\nnara_gilrs = {{ {coordinate}, optional = true }}\n"
-        )
-    } else {
-        String::new()
-    };
     format!(
         r#"[package]
 name = "{package_name}"
@@ -101,7 +89,7 @@ path = "src/bin/cook.rs"
 [[bin]]
 name = "player"
 path = "src/bin/player.rs"
-{gamepad_dependency}"#,
+"#,
         dependency, HEADLESS_NARA_FEATURES[0], HEADLESS_NARA_FEATURES[1], HEADLESS_NARA_FEATURES[2]
     )
 }
@@ -296,7 +284,7 @@ fn validate_cargo_manifest(
     let root = value
         .as_table()
         .ok_or("generated Cargo manifest root is not a table")?;
-    if root.len() != 6 + usize::from(starter.has_action_map()) {
+    if root.len() != 6 {
         return Err("generated Cargo manifest contains an unexpected top-level section");
     }
     let package = root
@@ -376,9 +364,6 @@ fn validate_cargo_manifest(
             }
         }
     }
-    if starter.has_action_map() {
-        validate_gamepad_dependency(root.get("target"), dependency_table, dependency)?;
-    }
 
     let features = root
         .get("features")
@@ -457,51 +442,4 @@ fn desktop_features(starter: ProjectStarter) -> &'static [&'static str] {
     } else {
         &DESKTOP_NARA_FEATURES[..3]
     }
-}
-
-fn gilrs_local_path(receipt: &NaraDependencyReceipt) -> Option<String> {
-    receipt
-        .local_cargo_path()
-        .map(|path| format!("{}/crates/nara_gilrs", path.trim_end_matches('/')))
-}
-
-fn validate_gamepad_dependency(
-    target: Option<&Value>,
-    engine: &toml::Table,
-    receipt: &NaraDependencyReceipt,
-) -> Result<(), &'static str> {
-    let invalid = "generated Windows gamepad dependency disagrees with the starter";
-    let targets = target.and_then(Value::as_table).ok_or(invalid)?;
-    let windows = targets
-        .get("cfg(windows)")
-        .and_then(Value::as_table)
-        .ok_or(invalid)?;
-    let dependencies = windows
-        .get("dependencies")
-        .and_then(Value::as_table)
-        .ok_or(invalid)?;
-    let gilrs = dependencies
-        .get("nara_gilrs")
-        .and_then(Value::as_table)
-        .ok_or(invalid)?;
-    let coordinate_matches = match receipt.kind() {
-        NaraDependencySourceKind::LocalCheckout => {
-            gilrs.len() == 2
-                && gilrs.get("path").and_then(Value::as_str) == gilrs_local_path(receipt).as_deref()
-        }
-        NaraDependencySourceKind::ImmutableGit => {
-            gilrs.len() == 3
-                && gilrs.get("git") == engine.get("git")
-                && gilrs.get("rev") == engine.get("rev")
-        }
-    };
-    if targets.len() != 1
-        || windows.len() != 1
-        || dependencies.len() != 1
-        || gilrs.get("optional").and_then(Value::as_bool) != Some(true)
-        || !coordinate_matches
-    {
-        return Err(invalid);
-    }
-    Ok(())
 }

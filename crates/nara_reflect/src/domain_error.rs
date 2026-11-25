@@ -2,7 +2,7 @@
 
 use std::{error::Error, fmt};
 
-use nara_diagnostic::{DiagnosticCode, SafeSummary};
+use nara_core::diagnostic::{DiagnosticCode, SafeSummary};
 
 use crate::ComponentFieldId;
 

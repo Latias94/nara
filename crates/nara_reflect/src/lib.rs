@@ -1,32 +1,27 @@
 //! Reflection and schema metadata boundary for nara data-facing components.
 //!
-//! Nara's component registry owns semantic Schemas, native bindings and codecs. Native dynamic
-//! reflection is independent: callers can own a [`bevy_reflect::TypeRegistry`] directly without
-//! admitting a Nara Schema. The Bevy types and derives below remain available for that adapter.
+//! Nara's component registry owns semantic Schemas, native bindings and codecs.
 
-pub use bevy_reflect;
-pub use bevy_reflect::prelude::*;
-
-mod asset_reference;
+pub mod asset_reference;
 mod authoring;
 #[cfg(feature = "serde")]
 mod authoring_bundle;
 mod codec;
 mod domain_error;
-mod effective;
-mod entity_reference;
+pub mod effective;
+pub mod entity_reference;
 #[cfg(feature = "serde")]
 mod format;
 mod inventory;
 mod migration;
 mod numeric_interval;
 mod path;
-mod persistent_apply;
+pub mod persistent_apply;
 mod plugin;
-mod property;
-mod provider;
-mod registry;
-mod schema;
+pub mod property;
+pub mod provider;
+pub mod registry;
+pub mod schema;
 mod schema_owner;
 mod value;
 mod value_ref;
@@ -68,7 +63,7 @@ pub use format::{
 };
 pub use migration::{ComponentMigrationError, MigratedComponentValue};
 pub use nara_asset::AssetReferenceDemand;
-pub use nara_identity::EntityReference;
+pub use nara_ecs::identity::EntityReference;
 pub use nara_reflect_derive::PersistentComponent;
 pub use numeric_interval::{ComponentNumericBound, ComponentNumericInterval};
 pub use path::{ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment};
@@ -79,10 +74,13 @@ pub use persistent_apply::{
 pub use plugin::{
     COMPONENT_REGISTRY_PLUGIN_ID, COMPONENT_REGISTRY_PLUGIN_REQUIREMENT,
     ComponentRegistryAuthorityError, ComponentRegistryPlugin, PreloadedComponentRegistryPlugin,
-    component_registry, component_registry_is_installed, preloaded_component_registry_plugin,
-    register_schema_provider_for_plugin, report_component_registry_authority_fault,
-    validate_component_registry_authority, validate_schema_provider_for_plugin,
+    RegisterSchema, component_registry, component_registry_is_installed,
+    preloaded_component_registry_plugin, register_schema_provider_for_plugin,
+    report_component_registry_authority_fault, validate_component_registry_authority,
+    validate_schema_provider_for_plugin,
 };
+#[cfg(feature = "serde")]
+pub use plugin::{SchemaExportError, schema_json};
 pub use property::{
     ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath,
     ComponentPropertyReadBudget, ComponentPropertySchemaClaim, ComponentPropertyStep,
@@ -129,146 +127,6 @@ pub mod __macro_support {
     };
 }
 
-#[doc(hidden)]
-pub mod __private {
-    pub use crate::asset_reference::{
-        AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
-        collect_declared_field_asset_references_with_admission,
-        collect_declared_value_asset_references_with_admission,
-        collect_effective_references_with_admission,
-    };
-    pub use crate::effective::{
-        EffectiveValueAdmissionError, FrozenComponentDefaults, NativeValueMetrics,
-        component_defaults_are_explicit_with_admission, component_field_default_requires_context,
-        component_field_default_requires_context_with_admission,
-        effective_component_value_in_place_with_default_overrides,
-        effective_component_value_owned_with_default_overrides,
-        effective_component_value_with_admission, effective_component_value_with_budget,
-        effective_component_value_with_default_overrides,
-        effective_component_value_with_default_overrides_with_admission,
-        effective_component_value_with_default_overrides_with_budget, freeze_component_defaults,
-        freeze_component_defaults_with_admission,
-        validate_native_component_value_references_with_admission,
-        validate_native_component_value_references_with_limits,
-        validate_value_materialization_budget,
-    };
-    pub use crate::entity_reference::{
-        DeclaredEntityReferencePlan, EntityReferencePlanError, PendingDeclaredEntityReferences,
-        admit_declared_entity_reference_plan_rewrite, admit_declared_entity_reference_plan_visit,
-        plan_declared_entity_references, plan_declared_entity_references_with_admission,
-        plan_declared_value_entity_references,
-        plan_declared_value_entity_references_with_admission,
-    };
-    pub use crate::persistent_apply::{
-        PreparedComponentApplyBatch, UnboundComponentApplyBatch, declare_persistent_apply_targets,
-        validate_declared_persistent_apply_targets, validate_fresh_persistent_component_apply,
-        validate_persistent_apply_support_topology, validate_persistent_export_coverage,
-        validate_registered_persistent_apply_targets,
-    };
-    pub use crate::property::{
-        ComponentPropertyAdmissionError, ComponentPropertyReadIndex,
-        read_admitted_component_property_in_root, resolve_admitted_component_property_parent,
-        resolve_component_property_schema_claim_with_admission,
-        resolve_component_property_storage_path_with_admission,
-        validate_component_property_value_with_admission,
-    };
-    pub use crate::provider::{
-        ComponentSchemaOwnerRecord, ResolvedComponentSchemaProvider,
-        scene_component_composition_fingerprint,
-    };
-    pub use crate::registry::{
-        ComponentRegistrySnapshotWitness, ComponentValueAdmissionError,
-        index_component_property_defaults, index_component_property_reads,
-        index_component_property_reads_with_admission, validate_component_value_with_admission,
-        validate_explicit_component_value, validate_explicit_component_value_with_admission,
-        validate_schema_capabilities,
-    };
-    pub use crate::schema::{component_values_exactly_match, exact_component_value_witness};
-
-    use crate::{
-        ComponentRegistryBuilder, ComponentRegistryError, ComponentRegistrySnapshot,
-        ComponentSchemaProviderDefinition,
-    };
-
-    pub fn resolve_schema_provider(
-        provider: ComponentSchemaProviderDefinition,
-    ) -> Result<ResolvedComponentSchemaProvider, ComponentRegistryError> {
-        provider.resolve()
-    }
-
-    pub fn register_resolved_schema_provider(
-        registry: &mut ComponentRegistryBuilder,
-        provider: ResolvedComponentSchemaProvider,
-    ) -> Result<&mut ComponentRegistryBuilder, ComponentRegistryError> {
-        registry.register_resolved_schema_provider(provider)
-    }
-
-    pub fn component_registry_snapshot_witness(
-        snapshot: &ComponentRegistrySnapshot,
-    ) -> ComponentRegistrySnapshotWitness {
-        snapshot.witness()
-    }
-
-    pub fn component_registry_snapshot_witness_matches(
-        witness: &ComponentRegistrySnapshotWitness,
-        snapshot: &ComponentRegistrySnapshot,
-    ) -> bool {
-        witness.matches(snapshot)
-    }
-
-    /// Scene-only dispatch after complete receiving admission against this exact registry.
-    /// Standalone dynamic input uses `ComponentRegistrySnapshot::preflight_component_with_context`.
-    pub fn preflight_admitted_component_with_context(
-        snapshot: &ComponentRegistrySnapshot,
-        component: &crate::ComponentTypeId,
-        value: crate::ComponentValueRef<'_>,
-        context: &mut crate::ComponentDecodeContext<'_>,
-    ) -> Result<crate::PreparedComponent, crate::ComponentCodecError> {
-        snapshot.preflight_admitted_component_with_context(component, value, context)
-    }
-
-    /// Scene-only diagnostic dispatch after complete receiving admission against this registry.
-    ///
-    /// The caller must have admitted this exact effective value under the current limits.
-    /// Standalone dynamic input uses `ComponentRegistrySnapshot::validate_component_with_context`.
-    /// The original binding's validator runs, or its original preflight runs exactly once and the
-    /// bound candidate is returned for the caller to retain for the original diagnostic batch
-    /// lifetime. Explicit validation returns `None`. Later preparation and apply retain their checks.
-    pub fn validate_admitted_component_with_context(
-        snapshot: &ComponentRegistrySnapshot,
-        component: &crate::ComponentTypeId,
-        value: crate::ComponentValueRef<'_>,
-        context: &mut crate::ComponentDecodeContext<'_>,
-    ) -> Result<Option<crate::PreparedComponent>, crate::ComponentCodecError> {
-        snapshot.validate_admitted_component_with_context(component, value, context)
-    }
-
-    /// Scene diagnostic dispatch with complete dynamic-input admission under the current context.
-    ///
-    /// Uses the same admission as standalone preflight, including defaults, Native references,
-    /// coverage and current limits. Explicit validation returns `None`; original fallback preflight
-    /// returns `Some` for the caller to retain for the original diagnostic batch lifetime.
-    pub fn diagnose_component_with_context(
-        snapshot: &ComponentRegistrySnapshot,
-        component: &crate::ComponentTypeId,
-        value: crate::ComponentValueRef<'_>,
-        context: &mut crate::ComponentDecodeContext<'_>,
-    ) -> Result<Option<crate::PreparedComponent>, crate::ComponentCodecError> {
-        snapshot.diagnose_component_with_context(component, value, context)
-    }
-
-    pub fn component_snapshot_matches_runtime_type(
-        snapshot: &ComponentRegistrySnapshot,
-        world: &nara_ecs::World,
-        component: &crate::ComponentTypeId,
-        runtime: nara_ecs::bevy_ecs::component::ComponentId,
-    ) -> bool {
-        crate::registry::component_snapshot_matches_runtime_type(
-            snapshot, world, component, runtime,
-        )
-    }
-}
-
 pub mod prelude {
     pub use crate::{
         AssetReferenceDemand, ComponentApplyContext, ComponentCapability,
@@ -294,7 +152,6 @@ pub mod prelude {
         resolve_component_property_with_limits, rewrite_declared_entity_references,
         validate_component_value,
     };
-    pub use bevy_reflect::prelude::*;
 }
 
 #[cfg(test)]

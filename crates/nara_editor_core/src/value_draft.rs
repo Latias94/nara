@@ -7,7 +7,7 @@ use std::{
 };
 
 use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
-use nara_identity::{EntityReference, SceneEntityId};
+use nara_ecs::identity::{EntityReference, SceneEntityId};
 use nara_reflect::{
     ComponentValue, ComponentValueKind, ComponentValueShape, decode_asset_reference_value,
     encode_asset_reference_value,
@@ -443,7 +443,7 @@ pub fn parse_scalar(shape: &ComponentValueShape, text: &str) -> Result<Component
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_identity::AuthoredEntityReference;
+    use nara_ecs::identity::AuthoredEntityReference;
     use nara_reflect::{ComponentFieldId, ComponentNumericDomain, ComponentShapeMember};
 
     #[test]

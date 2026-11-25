@@ -1,0 +1,20 @@
+[package]
+name = "nara_audio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+bevy_ecs.workspace = true
+kira = { version = "0.12.6", default-features = false, features = ["ogg", "pcm", "vorbis", "wav"] }
+nara_asset = { workspace = true, features = ["runtime"] }
+nara_core.workspace = true
+nara_scene.workspace = true
+# The Ogg reader also parses FLAC metadata, a feature missing from its Symphonia 0.6 manifest.
+symphonia-metadata = { version = "0.6", default-features = false, features = ["flac"] }
+thiserror.workspace = true
+
+[features]
+default = []
+device = ["kira/cpal"]

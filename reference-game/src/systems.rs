@@ -11,7 +11,6 @@ use nara::{
         Entity, Mut, With, Without, bevy_ecs::entity::EntityHashSet, bevy_ecs::error::BevyError,
         bevy_ecs::system::SystemState, system::SystemParam,
     },
-    gameplay::{GameplayCommandBatch, GameplayCommandValue},
     hierarchy::{
         Children, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
         HierarchyWriter, Parent,
@@ -19,27 +18,32 @@ use nara::{
     identity::{EntityLookup, SpawnedSceneInstance, WorldEntityToken, spawn_identity_entity},
     prelude::{
         Commands, Component, ComponentSchema, ComponentTypeId, FixedTime,
-        PersistentComponentProvider, Query, Res, ResMut, SceneEntityId, Transform2d, Vec2, World,
+        PersistentComponentProvider, Query, Res, ResMut, Resource, SceneEntityId, Transform2d,
+        Vec2, World,
     },
     scene::{
         CompiledSceneDocument, CompiledSceneEntity, SceneEntitySource,
-        advanced::SceneProductRetirement, retire_and_despawn_scene_entity,
+        advanced::SceneProductRetirement,
+        fixed_spatial::{
+            FixedSpatialSnapshot2d, HistoricalSpatialSnapshot2d, fixed_spatial_snapshot,
+        },
+        retire_and_despawn_scene_entity,
     },
-    transform::{FixedSpatialSnapshot2d, HistoricalSpatialSnapshot2d, fixed_spatial_snapshot},
 };
 
 use crate::{
     EnemyRole, Health, InitialHealth, InitialVelocity2d, PlayerRole, ProjectileDamage,
-    ProjectileLifetime, ProjectileRole, ReferenceProjectSnapshot, RuntimeOnlyTag, Velocity2d,
+    ProjectileLifetime, ProjectileRole, REFERENCE_FIRST_TICK_COMMAND_SOURCE,
+    REFERENCE_FIRST_TICK_COMMAND_TYPE, ReferenceProjectSnapshot, RuntimeOnlyTag, Velocity2d,
     WaveSpawn, Weapon, WeaponCooldown,
     resources::{
         ENEMY_CONTACT_DAMAGE, KILL_SCORE, MAX_WAVE_ENEMIES, MAX_WAVE_PROJECTILES,
-        MAX_WAVE_SCENE_ENTITIES, MOVE_COMMAND_TYPE, MOVE_PRESSED_FIELD, MOVE_X_FIELD, MOVE_Y_FIELD,
-        MovementDirection, MovementIntent, PROJECTILE_TTL_TICKS, ProjectileId, RETRY_COMMAND_TYPE,
-        RETRY_UI_ACTION_SEQUENCE_FIELD, WaveRetryRejection, WaveRetryStatus, WaveRunBaseline,
-        WaveRunGeneration, WaveRunOwner, WaveState,
+        MAX_WAVE_SCENE_ENTITIES, MovementIntent, PROJECTILE_TTL_TICKS, ProjectileId,
+        WaveRetryRejection, WaveRetryStatus, WaveRunBaseline, WaveRunGeneration, WaveRunOwner,
+        WaveState,
     },
     snapshot::{WaveOutcome, WaveSnapshot},
+    wave_input::{WaveInput, WaveIntent},
 };
 
 struct PreparedReferenceRun {
@@ -395,18 +399,11 @@ pub(crate) fn begin_wave_tick(world: &mut World) -> Result<(), BevyError> {
 
 pub(crate) fn consume_retry_commands(world: &mut World) -> Result<(), BevyError> {
     let (ui_action_sequence, has_duplicate) = {
-        let batch = world.resource::<GameplayCommandBatch>();
-        let mut retry_commands = batch
-            .iter()
-            .filter(|command| command.command_type().as_str() == RETRY_COMMAND_TYPE);
-        let Some(first_retry) = retry_commands.next() else {
+        let mut requests = world.resource::<WaveInput>().retry_requests();
+        let Some(ui_sequence) = requests.next() else {
             return Ok(());
         };
-        let ui_action_sequence = match first_retry.payload().get(RETRY_UI_ACTION_SEQUENCE_FIELD) {
-            Some(GameplayCommandValue::String(sequence)) => sequence.parse().ok(),
-            _ => None,
-        };
-        (ui_action_sequence, retry_commands.next().is_some())
+        (ui_sequence, requests.next().is_some())
     };
 
     let generation = world.resource::<WaveRunGeneration>().get();
@@ -501,7 +498,7 @@ fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
 }
 
 pub(crate) fn consume_movement_commands(
-    batch: Res<GameplayCommandBatch>,
+    input: Res<WaveInput>,
     owner: Res<WaveRunOwner>,
     mut state: ResMut<WaveState>,
     mut movement: ResMut<MovementIntent>,
@@ -512,17 +509,15 @@ pub(crate) fn consume_movement_commands(
     }
 
     let result = (|| {
-        let commands = batch
-            .commands()
+        let mut moves = input
+            .current()
             .iter()
-            .filter(|command| command.command_type().as_str() == MOVE_COMMAND_TYPE);
-        let mut changed = false;
-        // Validate the immutable batch before changing the installed resource.
-        for command in commands.clone() {
-            movement_intent(command.payload())?;
-            changed = true;
-        }
-        if !changed {
+            .filter_map(|intent| match *intent {
+                WaveIntent::Move { direction, pressed } => Some((direction, pressed)),
+                WaveIntent::Retry { .. } => None,
+            })
+            .peekable();
+        if moves.peek().is_none() {
             return Ok(());
         }
 
@@ -538,51 +533,13 @@ pub(crate) fn consume_movement_commands(
         let Some(mut velocity) = player else {
             return Err(BevyError::error(ReferenceSimulationError::MissingPlayer));
         };
-        for command in commands {
-            let command = movement_intent(command.payload())
-                .expect("the immutable movement batch was validated before mutation");
-            movement.apply(command.direction, command.pressed);
+        for (direction, pressed) in moves {
+            movement.apply(direction, pressed);
         }
         velocity.value = movement.velocity();
         Ok(())
     })();
     state.reject_on_error(result)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct MovementIntentCommand {
-    direction: MovementDirection,
-    pressed: bool,
-}
-
-fn movement_intent(
-    payload: &nara::gameplay::GameplayCommandPayload,
-) -> Result<MovementIntentCommand, BevyError> {
-    if payload.len() != 3 {
-        return Err(BevyError::error(
-            ReferenceSimulationError::InvalidMovementCommand,
-        ));
-    }
-    let (
-        Some(GameplayCommandValue::I64(x)),
-        Some(GameplayCommandValue::I64(y)),
-        Some(GameplayCommandValue::Bool(pressed)),
-    ) = (
-        payload.get(MOVE_X_FIELD),
-        payload.get(MOVE_Y_FIELD),
-        payload.get(MOVE_PRESSED_FIELD),
-    )
-    else {
-        return Err(BevyError::error(
-            ReferenceSimulationError::InvalidMovementCommand,
-        ));
-    };
-    let direction = MovementDirection::from_velocity(*x, *y)
-        .ok_or_else(|| BevyError::error(ReferenceSimulationError::InvalidMovementCommand))?;
-    Ok(MovementIntentCommand {
-        direction,
-        pressed: *pressed,
-    })
 }
 
 #[allow(
@@ -1388,7 +1345,7 @@ fn expired_projectile_placements(
         let (owner, siblings) = if let Some(parent) = parent {
             (
                 HierarchyPlacementOwner::Parent { parent },
-                world.get::<Children>(parent).map(Children::as_slice),
+                world.get::<Children>(parent).map(|children| &**children),
             )
         } else {
             (
@@ -1485,7 +1442,7 @@ mod projectile_retirement_tests {
             world.resource::<HierarchyRoots>().as_slice(),
             &[lead, parent, middle, tail]
         );
-        assert_eq!(world.get::<Children>(parent).unwrap().as_slice(), &[child]);
+        assert_eq!(&**world.get::<Children>(parent).unwrap(), &[child]);
         for token in [first, second, last, child_first, child_last] {
             assert!(HierarchyPlacement::current(&world, token.entity()).is_none());
             assert!(world.get_entity(token.entity()).is_ok());
@@ -1651,7 +1608,6 @@ enum ReferenceSimulationError {
     MissingEnemy,
     MissingWaveSpawn,
     EnemyPopulationChanged,
-    InvalidMovementCommand,
     MissingEnemyTarget,
     DuplicateEnemyTarget,
     IdentityRetirement,
@@ -1683,7 +1639,6 @@ impl fmt::Display for ReferenceSimulationError {
             Self::MissingEnemy => "reference wave has no enemy roster",
             Self::MissingWaveSpawn => "reference wave enemy has no spawn schedule",
             Self::EnemyPopulationChanged => "reference wave enemy roster changed during execution",
-            Self::InvalidMovementCommand => "reference wave movement command is invalid",
             Self::MissingEnemyTarget => "reference wave enemy target is missing",
             Self::DuplicateEnemyTarget => "reference wave enemy target identity is duplicated",
             Self::IdentityRetirement => "reference wave identity retirement failed",
@@ -1706,19 +1661,26 @@ impl fmt::Display for ReferenceSimulationError {
 
 impl Error for ReferenceSimulationError {}
 
-pub(crate) fn observe_project_commands(
-    batch: Res<GameplayCommandBatch>,
+#[derive(Resource)]
+pub(crate) struct ProjectFirstTick;
+
+pub(crate) fn seed_project_first_tick(mut commands: Commands) {
+    commands.insert_resource(ProjectFirstTick);
+}
+
+pub(crate) fn observe_project_first_tick(
+    mut commands: Commands,
+    time: Res<FixedTime>,
+    first: Option<Res<ProjectFirstTick>>,
     mut snapshot: ResMut<ReferenceProjectSnapshot>,
 ) {
-    if snapshot.first_command_key.is_none()
-        && let Some(command) = batch.commands().first()
-    {
-        snapshot.first_command_key = Some(command.key().clone());
-        snapshot.first_command_type = Some(command.command_type().clone());
+    if first.is_some() {
+        snapshot.first_command_tick = Some(time.tick());
+        snapshot.first_command_source = Some(REFERENCE_FIRST_TICK_COMMAND_SOURCE);
+        snapshot.first_command_type = Some(REFERENCE_FIRST_TICK_COMMAND_TYPE);
+        snapshot.commands_seen += 1;
+        commands.remove_resource::<ProjectFirstTick>();
     }
-    snapshot.commands_seen = snapshot
-        .commands_seen
-        .saturating_add(u64::try_from(batch.commands().len()).unwrap_or(u64::MAX));
 }
 
 #[derive(SystemParam)]

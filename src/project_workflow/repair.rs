@@ -4,11 +4,11 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use nara_diagnostic::DiagnosticReport;
-use nara_fs::{
+use crate::fs::{
     ContentDigest, ExpectedTarget, FsError, LockMode, RelativeComponent, RelativePath,
     ReplaceReceipt, StageStatus, TemporaryFileFailure,
 };
+use nara_core::diagnostic::DiagnosticReport;
 use nara_project::{
     DEFAULT_MANIFEST_BYTE_LIMIT, ProjectManifest, ProjectManifestMutationError,
     ProjectManifestWriteError, ProjectPath,
@@ -333,7 +333,7 @@ pub fn repair_startup_scene(
         return Err(ProjectStartupSceneRepairError::TemporaryFile(
             TemporaryFileFailure::with_cleanup(
                 FsError::Io {
-                    operation: nara_fs::FsOperation::Write,
+                    operation: crate::fs::FsOperation::Write,
                     source,
                 },
                 temporary.into_cleanup(),
@@ -354,7 +354,7 @@ pub fn repair_startup_scene(
         return Err(ProjectStartupSceneRepairError::TemporaryFile(
             TemporaryFileFailure::with_cleanup(
                 FsError::Unproven {
-                    operation: nara_fs::FsOperation::SyncFile,
+                    operation: crate::fs::FsOperation::SyncFile,
                     proof: "manifest candidate lacks required synchronization",
                 },
                 temporary.into_cleanup(),
@@ -463,7 +463,7 @@ fn check_request(issue: &ProjectStartupSceneIssue) -> ProjectCheckRequest {
 }
 
 fn verify_manifest_digest(
-    manifest: &nara_fs::LockedFileCapability,
+    manifest: &crate::fs::LockedFileCapability,
     expected: ContentDigest,
 ) -> Result<(), ProjectStartupSceneRepairError> {
     match manifest.verify_digest(expected, DEFAULT_MANIFEST_BYTE_LIMIT) {
@@ -505,8 +505,8 @@ fn startup_scene_digest(
 }
 
 fn create_temporary(
-    parent: &nara_fs::DirectoryCapability,
-) -> Result<nara_fs::TemporaryFile, TemporaryFileFailure> {
+    parent: &crate::fs::DirectoryCapability,
+) -> Result<crate::fs::TemporaryFile, TemporaryFileFailure> {
     for _ in 0..TEMPORARY_NAME_ATTEMPTS {
         let sequence = NEXT_TEMPORARY_NAME.fetch_add(1, Ordering::Relaxed);
         let name = RelativeComponent::new(format!(
@@ -521,7 +521,7 @@ fn create_temporary(
         }
     }
     Err(FsError::AlreadyExists {
-        operation: nara_fs::FsOperation::CreateTemporary,
+        operation: crate::fs::FsOperation::CreateTemporary,
     }
     .into())
 }

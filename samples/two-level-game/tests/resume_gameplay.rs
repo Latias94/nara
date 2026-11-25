@@ -13,6 +13,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use two_level_game::command::GameCommand;
+
 use nara::{
     advanced_prelude::CurrentScene,
     app::{
@@ -24,7 +26,6 @@ use nara::{
         AssetSourceKind, Assets, SourceAssetImporter, StableAssetId, allocate_anonymous_handle,
     },
     core::ByteLimit,
-    gameplay::GameplayCommandDraft,
     identity::{EntityLookup, SceneEntityId},
     material::{
         AlphaMode2d, Material2d, Material2dAsset, Material2dDeclaration, Material2dDomain,
@@ -297,11 +298,7 @@ fn compare_games(original: &Game, candidate: &Game) -> ResumeState {
     state
 }
 
-fn command_pair(
-    original: &mut Game,
-    candidate: &mut Game,
-    command: GameplayCommandDraft,
-) -> ResumeState {
+fn command_pair(original: &mut Game, candidate: &mut Game, command: GameCommand) -> ResumeState {
     original.command(command.clone());
     candidate.command(command);
     compare_games(original, candidate)
@@ -492,6 +489,7 @@ fn capture_refuses_future_commands_without_consuming_the_original_queue() {
     let before = original.snapshot();
     let prior_queue = original.queue();
     original.submit_at(tick + 3, action(MARKER));
+    original.maintenance();
     let pending = original.queue();
     assert_eq!(pending.accepted, prior_queue.accepted + 1);
     assert_eq!(pending.pending_commands, 1);
@@ -749,6 +747,7 @@ fn resume_requires_a_fresh_candidate_with_an_empty_original_command_queue() {
     let retained = original.frozen();
     let mut candidate = Game::source();
     candidate.submit(movement(1, true));
+    candidate.maintenance();
     let pending = candidate.queue();
     assert!(matches!(
         request_resume(&mut candidate.session, &state),
@@ -946,7 +945,7 @@ impl Plugin for TimeInitializationGuard {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.__install_runtime_authority_validator(
+        app.register_runtime_validator(
             Self::declaration().id,
             std::sync::Arc::new(|world, _| {
                 if world.resource::<FixedTime>().remainder() == Duration::from_millis(13) {
@@ -1005,8 +1004,8 @@ fn headless_time_initialization_preserves_applied_fault_and_closes_the_original_
                 std::thread::sleep(Duration::from_millis(1))
             }
             HeadlessSessionClose::Pending => {
-                std::mem::forget(session);
-                panic!("original faulted Host cleanup remains retained");
+                drop(session);
+                panic!("original faulted Host did not complete explicit cleanup");
             }
             terminal => break terminal,
         }

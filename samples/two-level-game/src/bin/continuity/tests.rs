@@ -68,13 +68,13 @@ fn desktop_execution_controls_refuse_headless_without_consuming_commands_or_clos
 fn expired_step_after_admission_cannot_be_consumed_by_a_successor_request() {
     let mut game = game();
     let before = game.snapshot().unwrap();
-    let command = GameplayCommandSubmission::new(
-        GameplayCommandTick::new(1).unwrap(),
-        GameplayCommandIngressSource::external("two-level-game.continuity").unwrap(),
-        GameplayCommandSourceSequence::new(1).unwrap(),
+    let command = ScheduledCommand::new(
+        CommandTick::new(1).unwrap(),
+        CommandSource::external("two-level-game.continuity").unwrap(),
+        CommandSequence::new(1).unwrap(),
         command_draft(SemanticCommand::Marker).unwrap(),
     );
-    game.session.submit(command).unwrap();
+    command.submit_headless(&mut game.session).unwrap();
     game.sequence = 1;
     assert!(
         game.complete_step(Instant::now() - Duration::from_nanos(1))
@@ -95,10 +95,7 @@ fn expired_step_after_admission_cannot_be_consumed_by_a_successor_request() {
     assert_eq!(after.markers, before.markers);
     assert_eq!(
         game.session
-            .observe(|world| world
-                .resource::<nara::gameplay::GameplayCommandQueue>()
-                .stats()
-                .pending_commands)
+            .observe(|world| world.resource::<CommandSchedule>().stats().pending_commands)
             .unwrap(),
         1
     );

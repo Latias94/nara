@@ -97,15 +97,6 @@ impl Failure {
     }
 }
 
-/// Keeps unresolved temporary-file custody alive until process exit, including failed stdout.
-impl Drop for Failure {
-    fn drop(&mut self) {
-        if let Some(publication) = self.publication.take() {
-            (*publication).retain_cleanup_until_exit();
-        }
-    }
-}
-
 impl Arguments {
     fn parse(mut arguments: impl Iterator<Item = OsString>) -> Result<Self, Failure> {
         let operation = match arguments.next().as_deref().and_then(|value| value.to_str()) {

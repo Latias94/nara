@@ -21,7 +21,7 @@ mod probes;
 #[path = "support/desktop_run.rs"]
 mod desktop_run;
 
-use driver::{GalleryDriverInput, GalleryDriverOutput, GalleryDriverPort};
+use driver::{GalleryDriverInput, GalleryDriverOutput};
 use fixture::{GalleryImage, capture_prepared_image, setup_gallery, surface_id};
 use presenter::HeadlessTestPresenter;
 use probes::assert_owned_packet;
@@ -93,10 +93,6 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
         .world_mut()?
         .resource_mut::<UiActionJournal>()
         .register_consumer(UiActionConsumerId::new("presentation-gallery")?)?;
-    app.insert_resource(GalleryDriverPort)?;
-    app.__register_driver_port::<GalleryDriverPort>(
-        GalleryDriverPort::apply_driver_input_in_world,
-    )?;
     let mut runtime = RuntimeInstance::start(app)?;
     runtime.drive(Duration::ZERO)?;
 

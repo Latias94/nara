@@ -46,14 +46,12 @@ use nara_window::{
 use crate::gpu::frame::WgpuUiSubmissionState;
 
 fn admit_runtime(app: App) -> nara_app::RuntimeCandidate {
-    nara_app::RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            nara_app::RuntimeObligationLedger::new(),
-            nara_app::RuntimeClosePolicy::default(),
-        )
-        .unwrap()
+    nara_app::RuntimeCandidate::admit(
+        app.seal().unwrap(),
+        nara_app::RuntimeObligationLedger::new(),
+        nara_app::RuntimeClosePolicy::default(),
+    )
+    .unwrap()
 }
 
 fn take_captured_frame(runtime: &mut nara_app::RuntimeInstance) -> WgpuRuntimeCapture {
@@ -67,8 +65,7 @@ fn take_captured_frame(runtime: &mut nara_app::RuntimeInstance) -> WgpuRuntimeCa
 fn install_render_foundation(app: &mut App, with_window: bool) {
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
-        nara_hierarchy::HierarchyPlugin,
-        nara_transform::TransformPlugin,
+        nara_scene::spatial::SpatialPlugin,
         crate::RenderComponentsPlugin,
         crate::RenderPlugin::default(),
     ))
@@ -294,7 +291,7 @@ fn inject_second_camera_after_capture(
             viewport: Some(crate::ViewportRect::new(0, 0, 16, 16).unwrap()),
             ..Default::default()
         },
-        nara_transform::Transform2d::default(),
+        nara_scene::spatial::Transform2d::default(),
     ));
 }
 
@@ -346,20 +343,10 @@ fn compiled_but_uninstalled_sprite_contribution_does_not_collect_domain_batches(
     app.add_systems(CoreStage::Last, observe_uninstalled_sprite_contribution)
         .unwrap();
     let world = app.world_mut().unwrap();
-    let entity = world
-        .spawn((
-            crate::sprite::Sprite::from_color(nara_core::Vec2::ONE, Color::WHITE),
-            nara_transform::Transform2d::default(),
-        ))
-        .id();
-    nara_hierarchy::HierarchyWriter::new(world)
-        .apply_batch(&[nara_hierarchy::HierarchyOperation::Place {
-            entity,
-            placement: nara_hierarchy::HierarchyPlacement::last(
-                nara_hierarchy::HierarchyPlacementOwner::Root,
-            ),
-        }])
-        .unwrap();
+    world.spawn((
+        crate::sprite::Sprite::from_color(nara_core::Vec2::ONE, Color::WHITE),
+        nara_scene::spatial::Transform2d::default(),
+    ));
     let candidate = admit_runtime(app);
     let mut runtime = candidate.complete_startup().unwrap().promote();
 
@@ -387,7 +374,7 @@ fn compiled_but_uninstalled_ui_contribution_does_not_drain_the_backend_frame() {
         UiPresentationRoute, replace_ui_backend_frame, replace_ui_presentation_routes,
         snapshot_ui_paint_packets,
     };
-    use nara_ui_kernel::UiSurfaceId;
+    use nara_ui::kernel::UiSurfaceId;
 
     let mut app = App::new();
     install_render_foundation(&mut app, false);
@@ -463,7 +450,7 @@ fn replacement_before_ui_collection_cannot_take_original_permissions() {
         UiPresentationRoute, replace_ui_backend_frame, replace_ui_presentation_routes,
         snapshot_ui_paint_packets,
     };
-    use nara_ui_kernel::UiSurfaceId;
+    use nara_ui::kernel::UiSurfaceId;
 
     let mut app = App::new();
     install_test_plugins(&mut app, false);
@@ -540,7 +527,7 @@ fn blocked_ui_collection_keeps_the_existing_transaction_and_next_frame_available
         UiPresentationRoute, replace_ui_backend_frame, replace_ui_presentation_routes,
         snapshot_ui_paint_packets,
     };
-    use nara_ui_kernel::UiSurfaceId;
+    use nara_ui::kernel::UiSurfaceId;
 
     let mut app = App::new();
     install_render_foundation(&mut app, true);
@@ -558,7 +545,7 @@ fn blocked_ui_collection_keeps_the_existing_transaction_and_next_frame_available
     .unwrap();
     app.world_mut().unwrap().spawn((
         crate::Camera2d::default(),
-        nara_transform::Transform2d::default(),
+        nara_scene::spatial::Transform2d::default(),
     ));
 
     let world = app.world_mut().unwrap();
@@ -656,7 +643,7 @@ fn managed_shutdown_returns_buffered_ui_permissions_before_world_destruction() {
         replace_ui_presentation_routes, snapshot_ui_paint_packets,
     };
     use nara_app::{RuntimeControl, RuntimeControlRequestResult};
-    use nara_ui_kernel::UiSurfaceId;
+    use nara_ui::kernel::UiSurfaceId;
 
     let mut app = App::new();
     install_render_foundation(&mut app, true);
@@ -672,7 +659,7 @@ fn managed_shutdown_returns_buffered_ui_permissions_before_world_destruction() {
     let world = app.world_mut().unwrap();
     world.spawn((
         crate::Camera2d::default(),
-        nara_transform::Transform2d::default(),
+        nara_scene::spatial::Transform2d::default(),
     ));
     let primary_window_id = world.resource::<PrimaryWindowId>().0;
     replace_ui_presentation_routes(
@@ -843,7 +830,7 @@ fn exact_fixed_step_does_not_require_app_and_render_frame_counters_to_match() {
     install_test_plugins(&mut app, true);
     app.world_mut().unwrap().spawn((
         crate::Camera2d::default(),
-        nara_transform::Transform2d::default(),
+        nara_scene::spatial::Transform2d::default(),
     ));
     let candidate = admit_runtime(app);
     let mut runtime = candidate.complete_startup().unwrap().promote();
@@ -907,7 +894,7 @@ fn captured_topology_is_immutable_and_next_frame_rejects_before_surface_work() {
         .unwrap();
     app.world_mut().unwrap().spawn((
         crate::Camera2d::default(),
-        nara_transform::Transform2d::default(),
+        nara_scene::spatial::Transform2d::default(),
     ));
     app.add_systems(
         CoreStage::Render,
@@ -1514,12 +1501,12 @@ pub(super) fn admit_ui_attempt(
 }
 
 #[cfg(feature = "hud-runtime")]
-fn ui_outcome_frame() -> Arc<nara_ui_kernel::UiFrame> {
-    use nara_text::bundled_font_face;
-    use nara_ui_kernel::{
+fn ui_outcome_frame() -> Arc<nara_ui::kernel::UiFrame> {
+    use nara_ui::kernel::{
         UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiLayer, UiLocalKey,
         UiNode, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiText, UiTheme, UiVisual,
     };
+    use nara_ui::text::bundled_font_face;
 
     let snapshot = UiAuthoringSnapshotBuilder::new(1)
         .with_root(
@@ -1611,7 +1598,7 @@ fn stock_ui_input(
     .unwrap();
     app.world_mut().unwrap().spawn((
         crate::Camera2d::default(),
-        nara_transform::Transform2d::default(),
+        nara_scene::spatial::Transform2d::default(),
     ));
     let mut runtime = admit_runtime(app).complete_startup().unwrap().promote();
     runtime.drive(std::time::Duration::ZERO).unwrap();

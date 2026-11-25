@@ -104,7 +104,7 @@ fn derive_ecs_label(input: TokenStream, trait_name: &str) -> TokenStream {
 
 fn ecs_path() -> Result<Path> {
     let facade = facade_path()?;
-    Ok(parse_quote!(#facade::__private::bevy_ecs))
+    Ok(parse_quote!(#facade::bevy_ecs))
 }
 
 fn facade_path() -> Result<Path> {

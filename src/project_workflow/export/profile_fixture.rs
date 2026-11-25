@@ -98,7 +98,7 @@ pub(super) fn write_flag_scene(scenes: &Path, reference: AssetRef) {
         ("sort_key", ComponentValue::I64(0)),
     ]);
     let scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-        nara_identity::SceneEntityId::new("flag").unwrap(),
+        nara_ecs::identity::SceneEntityId::new("flag").unwrap(),
     )
     .with_component(
         ComponentTypeId::new("nara.transform.Transform2d"),

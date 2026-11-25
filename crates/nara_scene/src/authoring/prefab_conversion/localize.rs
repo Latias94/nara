@@ -4,13 +4,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use nara_asset::{AssetRef, AssetReferenceResolver};
 use nara_reflect::{
-    __private::{
+    ComponentEntityReferenceRewriteError, ComponentValue, ComponentValueMaterializationLimits,
+    EntityReference,
+    entity_reference::{
         DeclaredEntityReferencePlan, EntityReferencePlanError,
         plan_declared_entity_references_with_admission,
         plan_declared_value_entity_references_with_admission,
     },
-    ComponentEntityReferenceRewriteError, ComponentValue, ComponentValueMaterializationLimits,
-    EntityReference,
 };
 
 use super::work::ConversionWork;

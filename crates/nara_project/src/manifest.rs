@@ -1,10 +1,10 @@
 use std::{collections::BTreeMap, fmt};
 
+use nara_core::diagnostic::{DiagnosticReport, ReportDiagnostic as Diagnostic};
 use nara_core::{
     ByteLimit, DepthLimit, ItemLimit, SerdeShapeError, SerdeShapeLimits, SerdeShapePreflightError,
     preflight_serde_shape,
 };
-use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use serde::{Deserialize, Serialize};
 
 use crate::content::ProjectContentManifest;

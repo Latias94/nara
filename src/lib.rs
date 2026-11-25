@@ -5,27 +5,68 @@ pub use nara_app as app;
 #[cfg(feature = "runtime-core")]
 pub use nara_asset as asset;
 #[cfg(feature = "asset-watch")]
-pub use nara_asset_watch as asset_watch;
+pub use nara_asset::watch as asset_watch;
+#[cfg(feature = "audio")]
+pub use nara_audio as audio;
 #[cfg(feature = "runtime-core")]
 pub use nara_core as core;
 #[cfg(feature = "runtime-core")]
-pub use nara_diagnostic as diagnostic;
+pub mod diagnostic {
+    //! Bounded reports and application diagnostics.
+
+    pub use nara_app::diagnostics::{
+        DIAGNOSTICS_PLUGIN_DECLARATION, DIAGNOSTICS_PLUGIN_ID, DiagnosticCleanupSet,
+        DiagnosticDedupePolicy, DiagnosticsPlugin, PressureDraftError, PressureMeasurement,
+        PressureMetricKind, PressurePublishOutcome, PressurePublishRejection,
+        PressureSettingsError, PressureStats, PressureUnit, RuntimeDiagnosticDraft,
+        RuntimeDiagnosticEntry, RuntimeDiagnosticFilter, RuntimeDiagnosticFilterError,
+        RuntimeDiagnostics, RuntimeDiagnosticsSnapshot, RuntimeDiagnosticsStats,
+        RuntimePressureRetention, RuntimePressureSettings, RuntimePressureSnapshot,
+        RuntimePressureSnapshotDraft, RuntimePressureSnapshots, RuntimePressureSnapshotsSnapshot,
+        RuntimePublishOutcome, RuntimePublishRejection, RuntimeTracingCursor,
+        emit_diagnostic_to_tracing, emit_report_to_tracing, plugin,
+    };
+    pub use nara_core::diagnostic::{
+        DiagnosticBuildError, DiagnosticCode, DiagnosticDomain, DiagnosticField,
+        DiagnosticFieldClass, DiagnosticFieldKey, DiagnosticProducer, DiagnosticReport,
+        DiagnosticReportMergeOutcome, DiagnosticReportOutcome, DiagnosticReportRejection,
+        DiagnosticReportSettings, DiagnosticReportStats, DiagnosticSettingsError,
+        DiagnosticSeverity, DiagnosticTruncation, DiagnosticValueRef, IdentityError,
+        IdentityErrorReason, MAX_DIAGNOSTIC_DRAFT_FIELDS, MAX_DIAGNOSTIC_DRAFT_TEXT_BYTES,
+        MAX_RUNTIME_DIAGNOSTIC_BYTES, MAX_RUNTIME_DIAGNOSTIC_ENTRIES, MAX_SAFE_STATIC_TEXT_BYTES,
+        PressureMetricId, PressureSourceId, PublicDiagnosticIdentifier, ReportDiagnostic,
+        ReportDiagnostic as Diagnostic, RuntimeDiagnosticRetention, RuntimeDiagnosticsSettings,
+        SafeDisplayText, SafeSummary, SafeTextError, SafeTextErrorReason,
+    };
+
+    pub mod prelude {
+        pub use super::{
+            Diagnostic, DiagnosticCode, DiagnosticDedupePolicy, DiagnosticDomain, DiagnosticField,
+            DiagnosticFieldClass, DiagnosticFieldKey, DiagnosticProducer, DiagnosticReport,
+            DiagnosticReportSettings, DiagnosticSeverity, DiagnosticsPlugin, PressureMeasurement,
+            PressureMetricId, PressureMetricKind, PressureSourceId, PressureUnit,
+            PublicDiagnosticIdentifier, ReportDiagnostic, RuntimeDiagnosticDraft,
+            RuntimeDiagnosticEntry, RuntimeDiagnosticFilter, RuntimeDiagnosticRetention,
+            RuntimeDiagnostics, RuntimeDiagnosticsSettings, RuntimePressureSettings,
+            RuntimePressureSnapshotDraft, RuntimePressureSnapshots, SafeDisplayText, SafeSummary,
+            plugin,
+        };
+    }
+}
+#[cfg(feature = "project-runtime")]
+pub use nara_core::vfs::capabilities as fs;
 #[cfg(feature = "runtime-core")]
 pub use nara_ecs as ecs;
 #[cfg(feature = "runtime-core")]
-pub use nara_fs as fs;
-#[cfg(feature = "runtime-core")]
-pub use nara_gameplay as gameplay;
-#[cfg(feature = "runtime-core")]
-pub use nara_hierarchy as hierarchy;
+pub use nara_scene::hierarchy;
 #[cfg(feature = "runtime-core")]
 pub mod identity {
     //! Stable identity surface exposed by the Nara product facade.
     //!
-    //! Workspace-internal prepared transaction ports remain owned by the engine crates and are
-    //! intentionally not reachable through this ordinary facade.
+    //! Scene lifetime transactions are available through `nara::ecs::identity::domain`.
 
-    pub use nara_identity::{
+    pub use nara_core::identity::{AssetId, DocumentId, EntityUuid, UuidIdError};
+    pub use nara_ecs::identity::{
         AuthoredEntityReference, AuthoredReferenceTarget, EntityIdentityAxis, EntityLookup,
         EntityReference, EntityReferenceCost, EntityReferenceRemap, IdentityAllocationError,
         IdentityDomainError, IdentityDomainStats, IdentityRemapError, IdentityTombstone,
@@ -42,9 +83,13 @@ pub mod identity {
         spawn_identity_entity,
     };
 }
+#[cfg(feature = "runtime-core")]
+pub use nara_app::tasks;
 #[cfg(feature = "runtime-input")]
 pub use nara_input as input;
-#[cfg(feature = "runtime-core")]
+#[cfg(feature = "physics-2d")]
+pub use nara_physics2d as physics2d;
+#[cfg(feature = "project-runtime")]
 pub use nara_project as project;
 #[cfg(feature = "runtime-core")]
 pub use nara_reflect as reflect;
@@ -73,10 +118,6 @@ pub use nara_render::sprite_render;
 pub use nara_render::tilemap;
 #[cfg(feature = "runtime-core")]
 pub use nara_scene as scene;
-#[cfg(feature = "runtime-core")]
-pub use nara_tasks as tasks;
-#[cfg(feature = "runtime-core")]
-pub use nara_transform as transform;
 #[cfg(feature = "runtime-ui")]
 pub use nara_ui as ui;
 #[cfg(feature = "presentation-ui")]
@@ -90,18 +131,21 @@ pub mod ui_render {
     /// Explicit packet/compiler boundary for Host, backend, and product-verification integrations.
     pub mod advanced {
         #[cfg(feature = "render-wgpu")]
-        pub use crate::ui_presentation::PresentedUiWgpuFacts;
-        pub use crate::ui_presentation::{PresentedUiObservation, latest_presented_ui_observation};
+        pub use nara_render::hud::PresentedUiWgpuFacts;
         pub use nara_render::hud::advanced::*;
+        pub use nara_render::hud::{PresentedUiObservation, latest_presented_ui_observation};
     }
 }
 #[cfg(feature = "runtime-window")]
 pub use nara_window as window;
 #[cfg(feature = "desktop-winit")]
-pub use nara_winit as winit;
+pub use nara_window::winit;
 
-#[cfg(feature = "runtime-core")]
+#[cfg(feature = "project-runtime")]
 pub mod project_host;
+
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+mod desktop_presentation;
 
 #[cfg(feature = "project-workflow")]
 pub mod project_workflow;
@@ -112,36 +156,33 @@ pub mod asset_build;
 #[cfg(feature = "project-tooling")]
 pub mod project_tooling;
 
-#[cfg(all(test, feature = "runtime-core", not(feature = "project-tooling")))]
+#[cfg(all(test, feature = "project-runtime", not(feature = "project-tooling")))]
 #[path = "project_tooling/host_fs.rs"]
 mod test_host_fs;
 
 #[cfg(all(test, feature = "runtime-core", feature = "project-tooling"))]
 use project_tooling::host_fs as test_host_fs;
 
-#[cfg(feature = "runtime-core")]
+#[cfg(feature = "project-runtime")]
 mod project_diagnostic_ids;
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(all(feature = "project-runtime", feature = "runtime-2d", feature = "serde"))]
 mod project_content;
 
-#[cfg(all(feature = "runtime-core", feature = "serde"))]
+#[cfg(all(feature = "project-runtime", feature = "serde"))]
 mod project_assets;
 
-#[cfg(all(feature = "runtime-core", feature = "serde"))]
+#[cfg(all(feature = "project-runtime", feature = "serde"))]
 pub mod runtime_content;
 
-#[cfg(feature = "runtime-core")]
+#[cfg(feature = "project-runtime")]
 mod scene_retention;
 
-#[cfg(all(feature = "runtime-core", feature = "serde"))]
+#[cfg(all(feature = "project-runtime", feature = "serde"))]
 mod scene_format_diagnostic;
 
-#[cfg(feature = "runtime-core")]
+#[cfg(feature = "project-runtime")]
 mod startup_scene;
-
-#[cfg(feature = "presentation-ui")]
-mod ui_presentation;
 
 #[cfg(feature = "runtime-core")]
 #[doc(hidden)]
@@ -165,10 +206,11 @@ pub use product::RuntimeUiPlugins;
 #[cfg(feature = "render-wgpu")]
 pub use product::WgpuBackendPlugins;
 #[cfg(feature = "runtime-core")]
+pub use product::{DefaultPlugins, HeadlessRuntimePlugins, MinimalPlugins, ServerPlugins};
+#[cfg(feature = "project-runtime")]
 pub use product::{
-    HeadlessRuntimePlugins, MinimalPlugins, ProductConfiguration, ProductRecipe,
-    ProductRecipeEntry, ProductRecipeEntryKind, ProductRecipeError, SchemaContribution,
-    ServerPlugins,
+    ProductConfiguration, ProductRecipe, ProductRecipeEntry, ProductRecipeEntryKind,
+    ProductRecipeError, SchemaContribution,
 };
 
 #[cfg(feature = "runtime-core")]
@@ -181,62 +223,87 @@ pub mod prelude {
     pub use crate::Runtime2dPlugins;
     #[cfg(feature = "runtime-ui")]
     pub use crate::RuntimeUiPlugins;
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(all(feature = "project-runtime", feature = "runtime-2d", feature = "serde"))]
     pub use crate::project_host::ProjectSceneSourceUpdateStatus;
-    #[cfg(feature = "serde")]
+    #[cfg(all(feature = "project-runtime", feature = "serde"))]
     pub use crate::project_host::{
         PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
         ProjectSceneRequestState, ProjectScenes,
     };
-    #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "asset-watch"))]
+    #[cfg(all(
+        feature = "project-runtime",
+        feature = "runtime-2d",
+        feature = "serde",
+        feature = "asset-watch"
+    ))]
     pub use crate::project_host::{
         ProjectSceneWatchConfigurationError, ProjectSceneWatchPlugin, ProjectSceneWatchState,
         ProjectSceneWatchStatus,
     };
+    pub use crate::{DefaultPlugins, HeadlessRuntimePlugins, MinimalPlugins, ServerPlugins};
+    #[cfg(feature = "project-runtime")]
     pub use crate::{
-        HeadlessRuntimePlugins, MinimalPlugins, ProductConfiguration, ProductRecipe,
-        ProductRecipeEntry, ProductRecipeEntryKind, ProductRecipeError, SchemaContribution,
-        ServerPlugins,
+        ProductConfiguration, ProductRecipe, ProductRecipeEntry, ProductRecipeEntryKind,
+        ProductRecipeError, SchemaContribution,
     };
+    pub use nara_app::CoreStage::{
+        Extract as RenderExtract, First, FixedUpdate, Last, PostUpdate, PreUpdate, Update,
+    };
+    pub use nara_app::StartupStage::Scene as Startup;
     pub use nara_app::{
-        AddPluginsError, App, AppExit, AppRunError, CoreStage, FixedCatchUpPolicy, FixedTime,
-        FixedUpdateSet, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginGroup,
-        PluginId, RealTime, RuntimeInstance, RuntimeStartFailure, RuntimeState,
+        AddPluginsError, App, AppExit, AppExitRequests, AppRunError, CoreStage, FixedCatchUpPolicy,
+        FixedTime, FixedUpdateSet, Plugin, PluginCategory, PluginDeclaration, PluginError,
+        PluginGroup, PluginId, RealTime, RuntimeInstance, RuntimeStartFailure, RuntimeState,
         RuntimeTimeSettings, StartupStage, VirtualTime,
     };
     pub use nara_asset::{
         Asset, AssetId, AssetPath, AssetRef, AssetServer, Assets, Handle, StableAssetId,
     };
+    #[cfg(feature = "audio")]
+    pub use nara_audio::{
+        AudioClip, AudioFinished, AudioListener, AudioMixer, AudioPlayback, AudioPlayer,
+        SpatialAudio,
+    };
     pub use nara_core::{Color, Vec2, Vec3};
+    pub use nara_ecs::identity::{
+        EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
+        PersistentRuntimeReference, RuntimeEntityReference, SceneEntityId,
+    };
     pub use nara_ecs::{
         Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, SystemParam, World,
     };
     #[cfg(feature = "runtime-input")]
-    pub use nara_gameplay::{ActionCommandBinding, ActionCommandMap, GameplayActionPlugin};
-    pub use nara_gameplay::{
-        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandKey,
-        GameplayCommandPayload, GameplayCommandSource, GameplayCommandSourceId,
-        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
-        GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
-        LocalGameplayCommandError, LocalGameplayCommands, add_local_gameplay_command_systems,
-    };
-    pub use nara_hierarchy::{Children, HierarchyPlugin, Parent};
-    pub use nara_identity::{
-        EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
-        PersistentRuntimeReference, RuntimeEntityReference, SceneEntityId,
-    };
-    #[cfg(feature = "runtime-input")]
     pub use nara_input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionMaps, ActionOutcome,
-        ActionOutcomes, ActionPhase, ActionValue, ButtonInput, ButtonTransition,
-        ButtonTransitionPhase, InputBinding, KeyCode, MouseButton, PointerState,
-        SemanticActionCause, SemanticActionOutcome, SemanticActions,
+        ActionOutcomes, ActionPhase, ActionState, ActionValue, AxisDirection, ButtonInput,
+        ButtonTransition, ButtonTransitionPhase, GamepadAxis, GamepadInput, GamepadInputKind,
+        ImeEvent, ImeEventKind, InputBinding, KeyCode, MouseButton, MouseWheel, MouseWheelUnit,
+        PointerState, SemanticActionCause, SemanticActionOutcome, SemanticActions, TextInput,
+        TouchInput, TouchPhase,
+    };
+    #[cfg(feature = "physics-2d")]
+    pub use nara_physics2d::{
+        Collider2d, CollisionEvent, Physics2dPlugin, Physics2dSet, PhysicsPose2d, PhysicsWorld2d,
+        RigidBody2d, Sensor2d, Teleport2d, TopDownCharacter,
     };
     pub use nara_reflect::{
         ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
         ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchema,
         ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-        ComponentValueShape, PersistentComponent, PersistentComponentProvider,
+        ComponentValueShape, PersistentComponent, PersistentComponentProvider, RegisterSchema,
+    };
+    pub use nara_scene::fixed_spatial::{
+        FixedInputSpatialSnapshot2d, FixedSpatialPlugin, FixedSpatialSnapshot2d,
+        HistoricalSpatialSnapshot2d, PresentedSpatialSnapshot2d, SpatialSnapshot2d,
+        SpatialSnapshotError, SpatialSnapshotPhase, SpatialSnapshotStamp,
+        add_fixed_transform_input_systems, add_fixed_transform_projection_systems,
+        add_presented_transform_projection_systems, fixed_input_spatial_snapshot,
+        fixed_spatial_snapshot, historical_spatial_snapshot, presented_spatial_snapshot,
+    };
+    pub use nara_scene::hierarchy::{Children, HierarchyPlugin, Parent};
+    pub use nara_scene::spatial::{
+        ChildOf, GlobalTransform2d, InheritedVisibility, SpatialPlugin, SpatialSet, Transform2d,
+        TransformComponentsPlugin, Visibility,
     };
     pub use nara_scene::{
         CompiledSceneCandidate, CompiledSceneComponent, CompiledSceneDocument, CompiledSceneEntity,
@@ -244,16 +311,8 @@ pub mod prelude {
         PrefabInstanceBinding, PreparedScene, SceneAuthoringSession, SceneComponentRecord,
         SceneDocument, SceneEntityPlacement, SceneEntityRecord, SceneOccurrenceKey,
         ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
-        ScenePlacementSlot, SourceDocumentKey, SourceDocumentKind, Visibility, export_live_scene,
+        ScenePlacementSlot, SourceDocumentKey, SourceDocumentKind, export_live_scene,
         prepare_scene, prepare_scene_replacement, spawn_scene,
-    };
-    pub use nara_transform::{
-        FixedInputSpatialSnapshot2d, FixedSpatialSnapshot2d, GlobalTransform2d,
-        HistoricalSpatialSnapshot2d, PresentedSpatialSnapshot2d, SpatialSnapshot2d,
-        SpatialSnapshotError, SpatialSnapshotPhase, SpatialSnapshotStamp, Transform2d,
-        TransformPlugin, add_fixed_transform_input_systems, add_fixed_transform_projection_systems,
-        add_presented_transform_projection_systems, fixed_input_spatial_snapshot,
-        fixed_spatial_snapshot, historical_spatial_snapshot, presented_spatial_snapshot,
     };
 
     #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
@@ -304,12 +363,33 @@ pub mod prelude {
 
 #[cfg(feature = "runtime-core")]
 pub mod advanced_prelude {
+    pub use crate::diagnostic::{
+        Diagnostic, DiagnosticBuildError, DiagnosticCode, DiagnosticDedupePolicy, DiagnosticDomain,
+        DiagnosticField, DiagnosticFieldClass, DiagnosticFieldKey, DiagnosticProducer,
+        DiagnosticReport, DiagnosticReportSettings, DiagnosticSeverity, DiagnosticsPlugin,
+        PressureMeasurement, PressureMetricId, PressureMetricKind, PressureSourceId, PressureUnit,
+        PublicDiagnosticIdentifier, ReportDiagnostic, RuntimeDiagnosticDraft,
+        RuntimeDiagnosticEntry, RuntimeDiagnosticFilter, RuntimeDiagnosticRetention,
+        RuntimeDiagnostics, RuntimeDiagnosticsSettings, RuntimePressureSettings,
+        RuntimePressureSnapshotDraft, RuntimePressureSnapshots, SafeDisplayText, SafeSummary,
+    };
     pub use crate::prelude::*;
-    #[cfg(feature = "serde")]
+    #[cfg(all(feature = "project-runtime", feature = "serde"))]
     pub use crate::project_host::advanced::{
         ManagedSceneDomain, ManagedSceneDomainAttempt, ManagedSceneDomainError,
         ManagedSceneDomainId, ManagedSceneDomainPhase, ManagedSceneDomainPreparation,
         ManagedSceneDomains, begin_prepared_project_scene_travel, commit_prepared_project_scene,
+    };
+    pub use nara_app::tasks::{
+        OrderedTaskReadySnapshot, OrderedTaskResults, OrderedTaskTerminal, TaskCancellation,
+        TaskCancellationReason, TaskCancellationToken, TaskCoalesceKey, TaskCompletionCutoff,
+        TaskCompletionCutoffError, TaskConfigError, TaskDescriptor, TaskDomainKey, TaskFacilities,
+        TaskFailure, TaskHandle, TaskId, TaskInlineRunReport, TaskKindConfig, TaskOrderKey,
+        TaskOverloadPolicy, TaskPlugin, TaskPoolConfig, TaskPoolError, TaskPoolKind,
+        TaskPoolShutdownReport, TaskPoolStats, TaskPools, TaskReadySnapshotError, TaskRejectReason,
+        TaskRejection, TaskReturnObserver, TaskReturnState, TaskScope, TaskScopeCloseReport,
+        TaskShutdownPolicy, TaskShutdownReport, TaskSpawnOutcome, TaskSpawnRequest, TaskStats,
+        TaskTerminal, TaskTerminalState,
     };
     pub use nara_app::{
         AppExitRequests, AppFrameOutcome, EditedPluginGroup, FixedTimeError, PluginCategory,
@@ -335,18 +415,8 @@ pub mod advanced_prelude {
         ImportDependencyRole, ImportRecipe, ImportRecipeDigest, ImportSettingsHash, ImporterId,
         LoadState, ProjectAssetDatabase, SourceHash, StableAssetIdGenerationError,
     };
-    pub use nara_core::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
-    pub use nara_diagnostic::{
-        Diagnostic, DiagnosticBuildError, DiagnosticCode, DiagnosticDedupePolicy, DiagnosticDomain,
-        DiagnosticField, DiagnosticFieldClass, DiagnosticFieldKey, DiagnosticProducer,
-        DiagnosticReport, DiagnosticReportSettings, DiagnosticSeverity, DiagnosticsPlugin,
-        PressureMeasurement, PressureMetricId, PressureMetricKind, PressureSourceId, PressureUnit,
-        PublicDiagnosticIdentifier, RuntimeDiagnosticDraft, RuntimeDiagnosticEntry,
-        RuntimeDiagnosticFilter, RuntimeDiagnosticRetention, RuntimeDiagnostics,
-        RuntimeDiagnosticsSettings, RuntimePressureSettings, RuntimePressureSnapshotDraft,
-        RuntimePressureSnapshots, SafeDisplayText, SafeSummary,
-    };
-    pub use nara_fs::{
+    #[cfg(feature = "project-runtime")]
+    pub use nara_core::vfs::capabilities::{
         CapabilityGeneration, CapabilityReader, CapabilityRights, CapabilitySessionId,
         ConflictProtection, ContentDigest, DigestLimit, DirectoryCapability,
         DirectoryEntryObservation, DirectorySyncReceipt, DirectorySyncTier, DurabilityProgress,
@@ -357,14 +427,8 @@ pub mod advanced_prelude {
         PublicationSourceBinding, RelativeComponent, RelativePath, ReplaceReceipt, ResolutionTier,
         StageStatus, TemporaryFile, TrustMode, platform_capability_matrix,
     };
-    pub use nara_gameplay::{
-        GameplayCommandBatch, GameplayCommandEnvelope, GameplayCommandIdError,
-        GameplayCommandLifecycleError, GameplayCommandLimitKind, GameplayCommandPayloadError,
-        GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandQueueSettings,
-        GameplayCommandQueueStats, GameplayCommandRejection, GameplayCommandSet,
-        GameplayCommandSettingsError, LocalGameplayCommandError, LocalGameplayCommands,
-    };
-    pub use nara_identity::{
+    pub use nara_core::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
+    pub use nara_ecs::identity::{
         EntityIdentityAxis, EntityLookup, IdentityDomainError, IdentityDomainStats,
         IdentityTombstone, IdentityTombstoneSubject, SceneIdentitySnapshot, SceneInstanceId,
         SpawnedSceneInstance, TombstoneCause, WorldEntityLocator, WorldEntityLocatorRemap,
@@ -383,19 +447,8 @@ pub mod advanced_prelude {
         SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
         replace_expanded_scene_with_product, replace_expanded_scene_with_product_and_reservations,
     };
-    pub use nara_tasks::{
-        OrderedTaskReadySnapshot, OrderedTaskResults, OrderedTaskTerminal, TaskCancellation,
-        TaskCancellationReason, TaskCancellationToken, TaskCoalesceKey, TaskCompletionCutoff,
-        TaskCompletionCutoffError, TaskConfigError, TaskDescriptor, TaskDomainKey, TaskFacilities,
-        TaskFailure, TaskHandle, TaskId, TaskInlineRunReport, TaskKindConfig, TaskOrderKey,
-        TaskOverloadPolicy, TaskPlugin, TaskPoolConfig, TaskPoolError, TaskPoolKind,
-        TaskPoolShutdownReport, TaskPoolStats, TaskPools, TaskReadySnapshotError, TaskRejectReason,
-        TaskRejection, TaskReturnObserver, TaskReturnState, TaskScope, TaskScopeCloseReport,
-        TaskShutdownPolicy, TaskShutdownReport, TaskSpawnOutcome, TaskSpawnRequest, TaskStats,
-        TaskTerminal, TaskTerminalState,
-    };
 
-    #[cfg(feature = "runtime-core")]
+    #[cfg(feature = "project-runtime")]
     pub use crate::startup_scene::{
         CurrentScene, CurrentSceneView, STARTUP_SCENE_ACTIVATION_PLUGIN_ID, SceneSource,
         SceneSourceError, SceneSourceView, StartupSceneActivationPlugin, StartupSceneActivationSet,
@@ -405,7 +458,7 @@ pub mod advanced_prelude {
     };
 
     #[cfg(feature = "asset-watch")]
-    pub use nara_asset_watch::{
+    pub use nara_asset::watch::{
         AssetWatchError, AssetWatchEvent, AssetWatchEventKind, AssetWatchEventQueue,
         AssetWatchEventSender, AssetWatchPlugin, AssetWatchQueueDrain, AssetWatchQueueLimits,
         AssetWatchQueueSendError, AssetWatchQueueStats, AssetWatchRuntimeState,
@@ -482,21 +535,20 @@ pub mod backend_prelude {
     pub use nara_render::gpu::{
         WGPU_STOCK_UI_PLUGIN_DECLARATION, WGPU_STOCK_UI_PLUGIN_ID, WgpuStockUiPlugin,
     };
+    #[cfg(feature = "desktop-winit")]
+    pub use nara_window::winit::{WinitControlFlow, WinitRunner};
     #[cfg(feature = "runtime-window")]
     pub use nara_window::{
         PresentMode, PrimaryWindow, PrimaryWindowId, Window, WindowCloseRequest,
         WindowCloseRequests, WindowEvent, WindowEvents, WindowId, WindowMode, WindowPlugin,
         WindowResolution, apply_window_event, push_window_event,
     };
-    #[cfg(feature = "desktop-winit")]
-    pub use nara_winit::{WinitControlFlow, WinitRunner};
 }
 
 #[cfg(all(test, feature = "runtime-core"))]
 mod tests {
     use super::*;
     use nara_app::{App, FixedCatchUpPolicy, PluginGroup, PluginGroupId};
-    use nara_ecs::schedule::IntoScheduleConfigs;
 
     #[test]
     fn minimal_plugins_install_only_headless_core_resources() {
@@ -510,48 +562,33 @@ mod tests {
         assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
     }
 
+    #[cfg(feature = "runtime-input")]
     #[test]
-    fn headless_runtime_plugins_install_semantic_command_resources() {
+    fn headless_runtime_plugins_install_local_input() {
         let mut app = App::new();
         app.add_plugins(HeadlessRuntimePlugins).unwrap();
-
-        assert!(
-            app.world()
-                .contains_resource::<nara_gameplay::GameplayCommandQueue>()
-        );
-        #[cfg(feature = "runtime-input")]
-        {
-            assert!(app.world().contains_resource::<nara_input::PointerState>());
-            assert!(
-                app.world()
-                    .contains_resource::<nara_gameplay::ActionCommandMap>()
-            );
-        }
+        assert!(app.world().contains_resource::<nara_input::ActionState>());
     }
 
     #[test]
-    fn server_plugins_install_command_runtime_without_desktop_or_raw_input() {
+    fn server_plugins_omit_desktop_and_raw_input() {
         let mut app = App::new();
         app.add_plugins(ServerPlugins).unwrap();
 
         assert!(
             app.world()
-                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
+                .contains_resource::<crate::diagnostic::RuntimeDiagnostics>()
         );
         assert!(
             app.world()
-                .contains_resource::<nara_diagnostic::RuntimePressureSnapshots>()
-        );
-        assert!(
-            app.world()
-                .contains_resource::<nara_gameplay::GameplayCommandQueue>()
+                .contains_resource::<crate::diagnostic::RuntimePressureSnapshots>()
         );
         assert!(app.world().contains_resource::<nara_asset::AssetServer>());
         assert!(
             app.world()
-                .resource::<nara_tasks::TaskPools>()
+                .resource::<nara_app::tasks::TaskPools>()
                 .config()
-                .kind(nara_tasks::TaskPoolKind::Io)
+                .kind(nara_app::tasks::TaskPoolKind::Io)
                 .workers()
                 .get()
                 > 0
@@ -578,142 +615,6 @@ mod tests {
         );
     }
 
-    #[derive(Debug, Default, nara_ecs::Resource)]
-    struct ObservedServerCommands(Vec<(u64, Vec<nara_gameplay::GameplayCommandEnvelope>)>);
-
-    fn observe_server_commands(
-        batch: nara_ecs::Res<nara_gameplay::GameplayCommandBatch>,
-        fixed_time: nara_ecs::Res<nara_app::FixedTime>,
-        mut observed: nara_ecs::ResMut<ObservedServerCommands>,
-    ) {
-        observed
-            .0
-            .push((fixed_time.tick(), batch.commands().to_vec()));
-    }
-
-    #[test]
-    fn server_plugins_retain_manual_commands_until_their_authoritative_tick() {
-        let mut app = App::new();
-        app.add_plugins(ServerPlugins).unwrap();
-        app.insert_resource(ObservedServerCommands::default())
-            .expect("server observation resource should install")
-            .add_systems(
-                nara_app::CoreStage::FixedUpdate,
-                observe_server_commands.in_set(nara_gameplay::GameplayCommandSet::Consume),
-            )
-            .expect("server observation system should install");
-        app.world_mut()
-            .expect("a configured app should allow world mutation")
-            .resource_mut::<nara_gameplay::GameplayCommandQueue>()
-            .submit(nara_gameplay::GameplayCommandSubmission::new(
-                nara_gameplay::GameplayCommandTick::new(1).unwrap(),
-                nara_gameplay::GameplayCommandIngressSource::external("test-server").unwrap(),
-                nara_gameplay::GameplayCommandSourceSequence::new(1).unwrap(),
-                nara_gameplay::GameplayCommandDraft::new(
-                    nara_gameplay::GameplayCommandTypeId::new("server.tick").unwrap(),
-                ),
-            ))
-            .unwrap();
-
-        let mut app = nara_app::RuntimeInstance::start(app).unwrap();
-        app.drive(std::time::Duration::ZERO).unwrap();
-
-        #[cfg(feature = "runtime-input")]
-        assert!(
-            !app.world()
-                .contains_resource::<nara_input::ActionOutcomes>()
-        );
-        assert!(
-            app.world()
-                .resource::<ObservedServerCommands>()
-                .0
-                .is_empty()
-        );
-        assert_eq!(
-            app.world()
-                .resource::<nara_gameplay::GameplayCommandQueue>()
-                .stats()
-                .pending_commands,
-            1
-        );
-
-        app.drive(nara_app::FixedTime::DEFAULT_TIMESTEP).unwrap();
-
-        assert_eq!(
-            app.world().resource::<ObservedServerCommands>().0[0].1[0]
-                .command_type()
-                .as_str(),
-            "server.tick"
-        );
-        assert!(
-            app.world()
-                .resource::<nara_gameplay::GameplayCommandQueue>()
-                .is_idle()
-        );
-    }
-
-    fn run_server_command_stream(
-        reverse_arrival: bool,
-    ) -> Vec<(u64, Vec<nara_gameplay::GameplayCommandEnvelope>)> {
-        let mut app = App::new();
-        app.add_plugins(ServerPlugins).unwrap();
-        app.insert_resource(ObservedServerCommands::default())
-            .unwrap()
-            .add_systems(
-                nara_app::CoreStage::FixedUpdate,
-                observe_server_commands.in_set(nara_gameplay::GameplayCommandSet::Consume),
-            )
-            .unwrap();
-
-        let mut submissions = vec![
-            nara_gameplay::GameplayCommandSubmission::new(
-                nara_gameplay::GameplayCommandTick::new(1).unwrap(),
-                nara_gameplay::GameplayCommandIngressSource::external("peer-b").unwrap(),
-                nara_gameplay::GameplayCommandSourceSequence::new(2).unwrap(),
-                nara_gameplay::GameplayCommandDraft::new(
-                    nara_gameplay::GameplayCommandTypeId::new("move.b").unwrap(),
-                ),
-            ),
-            nara_gameplay::GameplayCommandSubmission::new(
-                nara_gameplay::GameplayCommandTick::new(1).unwrap(),
-                nara_gameplay::GameplayCommandIngressSource::external("peer-a").unwrap(),
-                nara_gameplay::GameplayCommandSourceSequence::new(3).unwrap(),
-                nara_gameplay::GameplayCommandDraft::new(
-                    nara_gameplay::GameplayCommandTypeId::new("move.a").unwrap(),
-                ),
-            ),
-            nara_gameplay::GameplayCommandSubmission::new(
-                nara_gameplay::GameplayCommandTick::new(2).unwrap(),
-                nara_gameplay::GameplayCommandIngressSource::external("peer-a").unwrap(),
-                nara_gameplay::GameplayCommandSourceSequence::new(1).unwrap(),
-                nara_gameplay::GameplayCommandDraft::new(
-                    nara_gameplay::GameplayCommandTypeId::new("move.next").unwrap(),
-                ),
-            ),
-        ];
-        if reverse_arrival {
-            submissions.reverse();
-        }
-        {
-            let mut queue = app
-                .world_mut()
-                .unwrap()
-                .resource_mut::<nara_gameplay::GameplayCommandQueue>();
-            for submission in submissions {
-                queue.submit(submission).unwrap();
-            }
-        }
-
-        let mut app = nara_app::RuntimeInstance::start(app).unwrap();
-        app.drive(nara_app::FixedTime::DEFAULT_TIMESTEP * 2)
-            .unwrap();
-        #[cfg(feature = "runtime-input")]
-        assert_server_omits_input(app.world());
-        #[cfg(feature = "runtime-window")]
-        assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
-        app.world().resource::<ObservedServerCommands>().0.clone()
-    }
-
     #[cfg(feature = "runtime-input")]
     fn assert_server_omits_input(world: &nara_ecs::World) {
         assert!(!world.contains_resource::<nara_input::PointerState>());
@@ -721,67 +622,24 @@ mod tests {
         assert!(!world.contains_resource::<nara_input::ButtonInput<nara_input::MouseButton>>());
         assert!(!world.contains_resource::<nara_input::ActionMaps>());
         assert!(!world.contains_resource::<nara_input::ActionOutcomes>());
-        assert!(!world.contains_resource::<nara_gameplay::ActionCommandMap>());
-    }
-
-    #[test]
-    fn server_plugins_admit_the_same_command_stream_in_canonical_order() {
-        let forward = run_server_command_stream(false);
-        let reverse = run_server_command_stream(true);
-        assert_eq!(forward, reverse);
-        assert_eq!(forward.len(), 2);
-        assert_eq!(forward[0].0, 1);
-        assert_eq!(forward[1].0, 2);
-        assert_eq!(forward[0].1.len(), 2);
-        assert_eq!(forward[1].1.len(), 1);
-        assert_eq!(
-            forward[0]
-                .1
-                .iter()
-                .map(|command| { (command.source().clone(), command.source_sequence().get()) })
-                .collect::<Vec<_>>(),
-            [
-                (
-                    nara_gameplay::GameplayCommandSource::external("peer-a").unwrap(),
-                    3,
-                ),
-                (
-                    nara_gameplay::GameplayCommandSource::external("peer-b").unwrap(),
-                    2,
-                ),
-            ]
-        );
-        assert_eq!(
-            (
-                forward[1].1[0].source().clone(),
-                forward[1].1[0].source_sequence().get(),
-            ),
-            (
-                nara_gameplay::GameplayCommandSource::external("peer-a").unwrap(),
-                1,
-            )
-        );
-        assert_eq!(
-            forward[0]
-                .1
-                .iter()
-                .map(|command| command.command_type().as_str())
-                .collect::<Vec<_>>(),
-            ["move.a", "move.b"]
-        );
-        assert_eq!(forward[1].1[0].command_type().as_str(), "move.next");
     }
 
     #[test]
     fn server_plugins_preserve_explicit_task_plugin_configuration() {
         let mut app = App::new();
         let one = nara_core::ItemLimit::new(1).unwrap();
-        let config = nara_tasks::TaskPoolConfig::threaded(one, one, one).unwrap();
-        app.add_plugins(ServerPlugins.edit().configure(nara_tasks::plugin(config)))
-            .unwrap();
+        let config = nara_app::tasks::TaskPoolConfig::threaded(one, one, one).unwrap();
+        app.add_plugins(
+            ServerPlugins
+                .edit()
+                .configure(nara_app::tasks::plugin(config)),
+        )
+        .unwrap();
 
         assert_eq!(
-            *app.world().resource::<nara_tasks::TaskPools>().config(),
+            *app.world()
+                .resource::<nara_app::tasks::TaskPools>()
+                .config(),
             config
         );
     }
@@ -790,20 +648,24 @@ mod tests {
     fn server_tick_does_not_wait_for_a_running_worker() {
         let mut app = App::new();
         let one = nara_core::ItemLimit::new(1).unwrap();
-        let config = nara_tasks::TaskPoolConfig::threaded(one, one, one).unwrap();
-        app.add_plugins(ServerPlugins.edit().configure(nara_tasks::plugin(config)))
-            .unwrap();
+        let config = nara_app::tasks::TaskPoolConfig::threaded(one, one, one).unwrap();
+        app.add_plugins(
+            ServerPlugins
+                .edit()
+                .configure(nara_app::tasks::plugin(config)),
+        )
+        .unwrap();
 
         let (started_sender, started_receiver) = std::sync::mpsc::sync_channel(0);
         let (release_sender, release_receiver) = std::sync::mpsc::sync_channel(1);
         let mut handle = app
             .world()
-            .resource::<nara_tasks::TaskPools>()
+            .resource::<nara_app::tasks::TaskPools>()
             .spawn(
-                nara_tasks::TaskPoolKind::Io,
-                nara_tasks::TaskSpawnRequest::new(
+                nara_app::tasks::TaskPoolKind::Io,
+                nara_app::tasks::TaskSpawnRequest::new(
                     0,
-                    nara_tasks::TaskDomainKey::new(0x5345_5256_4552),
+                    nara_app::tasks::TaskDomainKey::new(0x5345_5256_4552),
                 ),
                 move |_| {
                     started_sender.send(()).unwrap();

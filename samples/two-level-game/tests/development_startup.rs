@@ -295,12 +295,11 @@ fn production_hosts_record_independent_initial_startup() {
             let cleanup = match cleanup {
                 Ok(cleanup) => cleanup,
                 Err(panic) => {
-                    let root = fixture.root.clone();
-                    std::mem::forget((host, fixture));
                     eprintln!(
-                        "development startup retains original owners at {}",
-                        root.display()
+                        "development startup: explicit cleanup failed for {}",
+                        fixture.root.display()
                     );
+                    drop(host);
                     resume_unwind(panic);
                 }
             };

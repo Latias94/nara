@@ -3,16 +3,16 @@ use std::{
     sync::Arc,
 };
 
-use nara_ecs::Resource;
-use nara_input::__private::InputEndpointClaim;
-use nara_input::{InputRouteStamp as PresentedInputRouteStamp, InputTimeline};
-use nara_text::FontFace;
-use nara_ui_kernel::{
+use crate::kernel::{
     UiCompileError, UiCompiler, UiDispatchBatch, UiDispatchError, UiDispatchOutcome, UiEnvironment,
     UiFrame, UiInputEvent, UiInteractionSession, UiKey, UiLimits, UiPresentationReceipt,
     UiRouteStamp, UiSeatId, UiSemanticSnapshot, UiSurfaceRetirementToken, UiTheme,
 };
-use nara_ui_widgets::{UiButtonState, UiIntentBatch};
+use crate::text::FontFace;
+use crate::widgets::{UiButtonState, UiIntentBatch};
+use nara_ecs::Resource;
+use nara_input::timeline::InputEndpointClaim;
+use nara_input::{InputRouteStamp as PresentedInputRouteStamp, InputTimeline};
 use thiserror::Error;
 
 use super::{
@@ -138,7 +138,7 @@ pub(crate) struct UiSurfaceRuntime {
     compiler: UiCompiler,
     candidate: Option<UiCompiledCandidate>,
     presented: UiPresentedHistory,
-    presentation_authority: nara_ui_kernel::__private::UiFrameJournalAuthority,
+    presentation_authority: crate::kernel::UiFrameJournalAuthority,
     interaction: UiInteractionSession,
     reducers: BTreeMap<UiKey, UiButtonState>,
     // Outstanding prepared snapshots keep the previous allocation alive, preventing identity reuse.
@@ -616,7 +616,7 @@ fn interaction_facts_match(probe: &UiFrame, final_frame: &UiFrame) -> bool {
 pub(crate) struct UiRuntimeState {
     font: FontFace,
     limits: UiLimits,
-    surfaces: BTreeMap<nara_ui_kernel::UiSurfaceId, UiSurfaceRuntime>,
+    surfaces: BTreeMap<crate::kernel::UiSurfaceId, UiSurfaceRuntime>,
     targets: UiSurfaceTargetIndex,
     identities: UiSurfaceIdentityLedger,
     next_source_revision: u64,
@@ -636,7 +636,7 @@ impl UiRuntimeState {
 
     pub(crate) fn surface_snapshot(
         &self,
-        surface_id: nara_ui_kernel::UiSurfaceId,
+        surface_id: crate::kernel::UiSurfaceId,
     ) -> Option<UiSurfaceSlotSnapshot> {
         self.surfaces
             .get(&surface_id)
@@ -645,27 +645,27 @@ impl UiRuntimeState {
 
     pub(crate) fn surface(
         &self,
-        surface_id: nara_ui_kernel::UiSurfaceId,
+        surface_id: crate::kernel::UiSurfaceId,
     ) -> Option<&UiSurfaceRuntime> {
         self.surfaces.get(&surface_id)
     }
 
     pub(crate) fn surface_mut(
         &mut self,
-        surface_id: nara_ui_kernel::UiSurfaceId,
+        surface_id: crate::kernel::UiSurfaceId,
     ) -> Option<&mut UiSurfaceRuntime> {
         self.surfaces.get_mut(&surface_id)
     }
 
     pub(super) fn surfaces(
         &self,
-    ) -> impl Iterator<Item = (&nara_ui_kernel::UiSurfaceId, &UiSurfaceRuntime)> {
+    ) -> impl Iterator<Item = (&crate::kernel::UiSurfaceId, &UiSurfaceRuntime)> {
         self.surfaces.iter()
     }
 
     pub(super) fn active_surfaces_mut(
         &mut self,
-    ) -> impl Iterator<Item = (&nara_ui_kernel::UiSurfaceId, &mut UiSurfaceRuntime)> {
+    ) -> impl Iterator<Item = (&crate::kernel::UiSurfaceId, &mut UiSurfaceRuntime)> {
         self.surfaces
             .iter_mut()
             .filter(|(_, surface)| surface.is_active())
@@ -701,8 +701,7 @@ impl UiRuntimeState {
         }
         let target = self.targets.prepare_install(slot)?;
         let endpoint = slot.endpoint();
-        let input_endpoint =
-            nara_input::__private::claim_input_endpoint(input, endpoint.window(), endpoint.seat())?;
+        let input_endpoint = input.claim_endpoint(endpoint.window(), endpoint.seat())?;
         let runtime = UiSurfaceRuntime::new(slot, input_endpoint, self.font.clone(), self.limits)
             .map_err(UiAdapterError::RuntimeSetup)?;
         Ok(UiPreparedSurfaceInstall { runtime, target })
@@ -734,7 +733,7 @@ impl UiRuntimeState {
 
     pub(super) fn prepare_surface_suspension(
         &self,
-        surface_id: nara_ui_kernel::UiSurfaceId,
+        surface_id: crate::kernel::UiSurfaceId,
         reason: UiSurfaceSuspensionReason,
     ) -> Result<Option<(UiPreparedSurfaceSlotUpdate, UiSurfaceSuspension)>, UiAdapterError> {
         let runtime = self
@@ -762,9 +761,9 @@ impl UiRuntimeState {
 
     pub(super) fn prepare_surface_restoration(
         &self,
-        surface_id: nara_ui_kernel::UiSurfaceId,
+        surface_id: crate::kernel::UiSurfaceId,
         endpoint: super::UiSurfaceEndpoint,
-        transform: nara_ui_kernel::UiSurfaceContentTransform,
+        transform: crate::kernel::UiSurfaceContentTransform,
         input: &InputTimeline,
     ) -> Result<UiPreparedSurfaceSlotUpdate, UiAdapterError> {
         let runtime = self
@@ -779,8 +778,7 @@ impl UiRuntimeState {
             });
         }
         let restored = runtime.slot().availability_successor(endpoint, transform)?;
-        let input_endpoint =
-            nara_input::__private::claim_input_endpoint(input, endpoint.window(), endpoint.seat())?;
+        let input_endpoint = input.claim_endpoint(endpoint.window(), endpoint.seat())?;
         self.prepare_surface_slot_update(restored, UiSurfaceAvailability::Active, input_endpoint)
     }
 
@@ -801,7 +799,7 @@ impl UiRuntimeState {
 
     pub(super) fn prepare_surface_retirement(
         &self,
-        surface_id: nara_ui_kernel::UiSurfaceId,
+        surface_id: crate::kernel::UiSurfaceId,
     ) -> Result<Option<UiPreparedSurfaceRetirement>, UiAdapterError> {
         let Some(runtime) = self.surface(surface_id) else {
             return Ok(None);
@@ -830,14 +828,14 @@ impl UiRuntimeState {
         prepared.retirement
     }
 
-    pub(crate) fn is_retired(&self, surface_id: nara_ui_kernel::UiSurfaceId) -> bool {
+    pub(crate) fn is_retired(&self, surface_id: crate::kernel::UiSurfaceId) -> bool {
         self.identities.is_retired(surface_id)
     }
 
     pub(crate) fn retirement(
         &self,
-        surface_id: nara_ui_kernel::UiSurfaceId,
-    ) -> Option<nara_ui_kernel::UiSurfaceRetirementToken> {
+        surface_id: crate::kernel::UiSurfaceId,
+    ) -> Option<crate::kernel::UiSurfaceRetirementToken> {
         self.identities.retirement(surface_id)
     }
 }

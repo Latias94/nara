@@ -11,15 +11,15 @@ mod tests;
 
 use std::{error::Error, fmt, fmt::Write as _, mem::size_of};
 
+use crate::fs::ContentDigest;
 use nara_asset::{
     AssetDomain, AssetProductRef, AssetRef, AssetReferenceDemand, AssetReferenceResolver,
     RuntimeAssetCodec,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
-use nara_fs::ContentDigest;
 use nara_input::{ActionMapAsset, ActionMapDomain, ActionMapRuntimeCodec};
 use nara_project::RuntimeConfiguration;
-use nara_reflect::__private::{
+use nara_reflect::asset_reference::{
     AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
 };
 use nara_render::image::{ImageAsset, ImageDomain, ImageRuntimeCodec};

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use nara_diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
-    PublicDiagnosticIdentifier, SafeSummary,
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
+    PublicDiagnosticIdentifier, ReportDiagnostic as Diagnostic, SafeSummary,
 };
 
 use crate::path::{ProjectPath, ProjectPathError};

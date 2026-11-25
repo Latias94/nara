@@ -271,9 +271,7 @@ fn incomplete_coverage_stale_receipts_and_catalog_only_churn_refuse() {
 
 #[test]
 fn creation_metadata_never_rebinds_native_receipts_even_with_the_data_adapter_name() {
-    let provider =
-        nara_reflect::__private::resolve_schema_provider(crate::SCENE_COMPONENTS_SCHEMA_PROVIDER)
-            .unwrap();
+    let provider = crate::SCENE_COMPONENTS_SCHEMA_PROVIDER.resolve().unwrap();
     let id = owner(crate::SCENE_COMPONENTS_SCHEMA_OWNER_ID.as_str());
     let previous = ComponentSchemaOwnerSnapshot::admit(
         id.clone(),

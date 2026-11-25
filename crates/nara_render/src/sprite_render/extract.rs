@@ -1,13 +1,16 @@
-use std::sync::Arc;
+use std::{cmp::Reverse, sync::Arc};
 
 use crate::image::{ImageAsset, ImageContentSnapshot, PreparedImageSnapshot};
 use crate::material::{Material2d, Material2dAsset, Material2dBinding};
 use crate::sprite::Sprite;
 use crate::tilemap::{TileCoord, TileIndex, TileSet, Tilemap};
 use nara_asset::{AssetRef, AssetServer, AssetStates, Assets, Handle};
-use nara_core::{Color, Mat3, Vec2};
-use nara_ecs::{Entity, Query, Res, ResMut, Resource, bevy_ecs::error::BevyError};
-use nara_transform::PresentedSpatialSnapshot2d;
+use nara_core::{Affine2, Color, Vec2};
+use nara_ecs::bevy_ecs::{
+    entity::EntityHashSet, entity_disabling::Disabled, error::BevyError, query::Allow,
+};
+use nara_ecs::{Entity, Or, Query, Res, ResMut, Resource, With};
+use nara_scene::spatial::{ChildOf, Children, GlobalTransform2d, InheritedVisibility};
 
 use crate::sprite_render::{
     ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
@@ -18,52 +21,105 @@ use crate::sprite_render::{
 pub(crate) struct ExtractedSpriteScratch {
     sprites: ExtractedSprites,
     stats: SpriteRenderStats,
+    branches: EntityHashSet,
+    pending: Vec<Entity>,
 }
+
+type SpriteSources<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Option<&'static Sprite>,
+        Option<&'static Tilemap>,
+        Option<&'static Material2dBinding>,
+        Option<&'static Material2d>,
+        Option<&'static GlobalTransform2d>,
+        Option<&'static InheritedVisibility>,
+    ),
+    Or<(With<Sprite>, With<Tilemap>)>,
+>;
+
+type SourceHierarchy<'w, 's> =
+    Query<'w, 's, (Option<&'static ChildOf>, Option<&'static Children>), Allow<Disabled>>;
+
+#[derive(Debug, thiserror::Error)]
+#[error("sprite or tilemap entity {0:?} has no GlobalTransform2d")]
+struct MissingGlobalTransform(Entity);
 
 pub(crate) fn extract_sprites(
     mut extracted: ResMut<ExtractedSprites>,
     mut stats: ResMut<SpriteRenderStats>,
     mut scratch: ResMut<ExtractedSpriteScratch>,
-    spatial: PresentedSpatialSnapshot2d,
-    sprites: Query<(
-        Entity,
-        &Sprite,
-        Option<&Material2dBinding>,
-        Option<&Material2d>,
-    )>,
-    tilemaps: Query<(
-        Entity,
-        &Tilemap,
-        Option<&Material2dBinding>,
-        Option<&Material2d>,
-    )>,
+    sources: SpriteSources,
+    hierarchy: SourceHierarchy,
     materials: Option<Res<Assets<Material2dAsset>>>,
     tilesets: Option<Res<Assets<TileSet>>>,
     server: Option<Res<AssetServer>>,
     states: Option<Res<AssetStates>>,
     images: Option<Res<Assets<ImageAsset>>>,
 ) -> Result<(), BevyError> {
-    let hierarchy_order = spatial.order().map_err(BevyError::error)?;
-    for (entity, ..) in sprites.iter() {
-        spatial.structural_index(entity).map_err(BevyError::error)?;
-        spatial.global(entity).map_err(BevyError::error)?;
-    }
-    for (entity, ..) in tilemaps.iter() {
-        spatial.structural_index(entity).map_err(BevyError::error)?;
-        spatial.global(entity).map_err(BevyError::error)?;
-    }
+    let scratch = &mut *scratch;
     scratch.sprites.clear();
     scratch.stats = SpriteRenderStats::default();
+    scratch.branches.clear();
+    scratch.pending.clear();
 
-    for entity in hierarchy_order.iter().copied() {
-        let sprite = sprites.get(entity).ok();
-        let tilemap = tilemaps.get(entity).ok();
-        let Some((binding, authored)) = sprite
-            .map(|(_, _, binding, authored)| (binding, authored))
-            .or_else(|| tilemap.map(|(_, _, binding, authored)| (binding, authored)))
+    for (mut entity, _, _, _, _, global, visibility) in &sources {
+        if visibility.is_some_and(|visibility| !visibility.get()) {
+            continue;
+        }
+        if global.is_none() {
+            return Err(BevyError::error(MissingGlobalTransform(entity)));
+        }
+        while scratch.branches.insert(entity) {
+            let parent = hierarchy
+                .get(entity)
+                .ok()
+                .and_then(|(parent, _)| parent)
+                .map(ChildOf::parent)
+                .filter(|parent| hierarchy.contains(*parent));
+            let Some(parent) = parent else {
+                scratch.pending.push(entity);
+                break;
+            };
+            entity = parent;
+        }
+    }
+    scratch
+        .pending
+        .sort_unstable_by_key(|entity| Reverse(entity.index_u32()));
+
+    while !scratch.branches.is_empty() {
+        if scratch.pending.is_empty() {
+            scratch.pending.extend(scratch.branches.iter().copied());
+            scratch
+                .pending
+                .sort_unstable_by_key(|entity| Reverse(entity.index_u32()));
+        }
+        let Some(entity) = scratch.pending.pop() else {
+            break;
+        };
+        if !scratch.branches.remove(&entity) {
+            continue;
+        }
+        if let Ok((_, Some(children))) = hierarchy.get(entity) {
+            scratch.pending.extend(
+                children
+                    .iter()
+                    .rev()
+                    .copied()
+                    .filter(|child| scratch.branches.contains(child)),
+            );
+        }
+        let Ok((_, sprite, tilemap, binding, authored, Some(global), visibility)) =
+            sources.get(entity)
         else {
             continue;
         };
+        if visibility.is_some_and(|visibility| !visibility.get()) {
+            continue;
+        }
         let material = match extract_material(
             binding,
             authored,
@@ -83,16 +139,15 @@ pub(crate) fn extract_sprites(
                 continue;
             }
         };
-        let matrix = spatial.global(entity).map_err(BevyError::error)?.matrix();
-        if let Some((entity, sprite, ..)) = sprite {
+        if let Some(sprite) = sprite {
             let source_order = scratch.sprites.len() as u64;
-            let mut extracted = extract_sprite(entity, sprite, matrix, source_order);
+            let mut extracted = extract_sprite(entity, sprite, global, source_order);
             extracted.material_extension = material.clone();
             scratch.sprites.push(extracted);
             scratch.stats.extracted_sprites = scratch.stats.extracted_sprites.saturating_add(1);
         }
 
-        let Some((entity, tilemap, ..)) = tilemap else {
+        let Some(tilemap) = tilemap else {
             continue;
         };
         let tileset = tilemap.tileset.and_then(|handle| {
@@ -111,7 +166,7 @@ pub(crate) fn extract_sprites(
         scratch
             .sprites
             .add_tile_chunks(entity, tilemap.chunk_revisions());
-        let mut context = TilemapExtractionContext::new(entity, tilemap, tileset, matrix);
+        let mut context = TilemapExtractionContext::new(entity, tilemap, tileset, global);
         for (coord, cell) in tilemap.cells() {
             let source_order = scratch.sprites.len() as u64;
             let Some(mut extracted_cell) =
@@ -234,12 +289,13 @@ fn capture_material(
 }
 
 #[must_use]
-pub fn extract_sprite(
+fn extract_sprite(
     entity: Entity,
     sprite: &Sprite,
-    matrix: Mat3,
+    global: &GlobalTransform2d,
     source_order: u64,
 ) -> ExtractedSprite {
+    let affine = global.affine();
     let local_center = -sprite.anchor.normalized * sprite.size;
     let local_x_axis = Vec2::new(sprite.size.x * 0.5, 0.0);
     let local_y_axis = Vec2::new(0.0, sprite.size.y * 0.5);
@@ -260,15 +316,16 @@ pub fn extract_sprite(
             .texture_region
             .map(TextureUvRect::from_texture_region)
             .unwrap_or(TextureUvRect::FULL),
-        world_center: matrix.transform_point2(local_center),
-        world_x_axis: matrix.transform_vector2(local_x_axis),
-        world_y_axis: matrix.transform_vector2(local_y_axis),
+        world_center: affine.transform_point2(local_center),
+        world_x_axis: affine.transform_vector2(local_x_axis),
+        world_y_axis: affine.transform_vector2(local_y_axis),
         color: sprite.material.tint,
         layer: sprite.layer,
+        world_z: global.z(),
         sort_key: sprite.sort_key,
         world_sort_y: sprite
             .y_sort_anchor
-            .map_or(0.0, |anchor| matrix.transform_point2(anchor).y),
+            .map_or(0.0, |anchor| affine.transform_point2(anchor).y),
     }
 }
 
@@ -276,7 +333,8 @@ struct TilemapExtractionContext<'a> {
     entity: Entity,
     tilemap: &'a Tilemap,
     tileset: Option<&'a TileSet>,
-    matrix: Mat3,
+    affine: Affine2,
+    world_z: f32,
     material: ExtractedSpriteMaterial,
     image_content: Option<&'a ImageContentSnapshot>,
     world_x_axis: Vec2,
@@ -289,7 +347,7 @@ impl<'a> TilemapExtractionContext<'a> {
         entity: Entity,
         tilemap: &'a Tilemap,
         tileset: Option<&'a TileSet>,
-        matrix: Mat3,
+        global: &GlobalTransform2d,
     ) -> Self {
         let material = tileset
             .map(|tileset| {
@@ -305,16 +363,18 @@ impl<'a> TilemapExtractionContext<'a> {
         let tile_size = tilemap.tile_size;
         let local_x_axis = Vec2::new(tile_size.x * 0.5, 0.0);
         let local_y_axis = Vec2::new(0.0, tile_size.y * 0.5);
+        let affine = global.affine();
 
         Self {
             entity,
             tilemap,
             tileset,
-            matrix,
+            affine,
+            world_z: global.z(),
             material,
             image_content: tileset.and_then(TileSet::image_content),
-            world_x_axis: matrix.transform_vector2(local_x_axis),
-            world_y_axis: matrix.transform_vector2(local_y_axis),
+            world_x_axis: affine.transform_vector2(local_x_axis),
+            world_y_axis: affine.transform_vector2(local_y_axis),
             cached_region: None,
         }
     }
@@ -355,14 +415,15 @@ impl<'a> TilemapExtractionContext<'a> {
             image_content: self.image_content.cloned(),
             material_extension: None,
             texture_region: texture_region.unwrap_or(TextureUvRect::FULL),
-            world_center: self.matrix.transform_point2(local_center),
+            world_center: self.affine.transform_point2(local_center),
             world_x_axis: self.world_x_axis,
             world_y_axis: self.world_y_axis,
             color: multiply_color(self.material.tint, color),
             layer: self.tilemap.layer.index,
+            world_z: self.world_z,
             sort_key: self.tilemap.sort_key,
             world_sort_y: self.tilemap.y_sort_anchor.map_or(0.0, |anchor| {
-                self.matrix.transform_point2(local_center + anchor).y
+                self.affine.transform_point2(local_center + anchor).y
             }),
         })
     }

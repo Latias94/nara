@@ -1,6 +1,6 @@
 use super::*;
 use crate::{PrefabAuthoringSession, SceneAuthoringHistoryLimits, SceneAuthoringSession};
-use nara_identity::{
+use nara_ecs::identity::{
     PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
 };
 use nara_reflect::{
@@ -396,12 +396,13 @@ fn source_local_entity_reference_field_edit_is_atomic_and_round_trips_history_an
     assert_eq!(scene.revision(), baseline_revision);
     assert_eq!(scene.history_status(), baseline_history);
 
-    let persistent = ComponentValue::EntityReference(nara_identity::EntityReference::Persistent {
-        entity: PersistentRuntimeReference::new(
-            PersistentRuntimeNamespaceId::new("test.world").unwrap(),
-            PersistentRuntimeId::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
-        ),
-    });
+    let persistent =
+        ComponentValue::EntityReference(nara_ecs::identity::EntityReference::Persistent {
+            entity: PersistentRuntimeReference::new(
+                PersistentRuntimeNamespaceId::new("test.world").unwrap(),
+                PersistentRuntimeId::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+            ),
+        });
     let persistent_edit = AuthoringFieldEdit::single(
         id("z"),
         component(),

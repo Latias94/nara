@@ -19,7 +19,7 @@
       "destination": "LICENSE-APACHE"
     },
     {
-      "source": "crates/nara_text/assets/FiraSans-LICENSE.txt",
+      "source": "crates/nara_ui/assets/FiraSans-LICENSE.txt",
       "destination": "FiraSans-LICENSE.txt"
     }
   ],

@@ -37,7 +37,6 @@ fn start(app: App) -> Result<RuntimeInstance, String> {
             let deadline = Instant::now() + Duration::from_secs(10);
             while failure.drive_retirement() != RuntimeCandidateRetirementState::Retired {
                 if Instant::now() >= deadline {
-                    std::mem::forget(failure);
                     return Err(format!(
                         "{message}; original startup cleanup remains incomplete"
                     ));
@@ -62,7 +61,6 @@ fn finish(runtime: RuntimeInstance) -> Result<(), String> {
             let deadline = Instant::now() + Duration::from_secs(10);
             while retirement.drive_retirement() != RuntimeCandidateRetirementState::Retired {
                 if Instant::now() >= deadline {
-                    std::mem::forget(retirement);
                     return Err("original audio Runtime cleanup remains incomplete".into());
                 }
                 thread::yield_now();
@@ -256,8 +254,8 @@ fn a_later_startup_failure_retires_the_original_opened_audio_device() {
     let deadline = Instant::now() + Duration::from_secs(10);
     while failure.drive_retirement() != RuntimeCandidateRetirementState::Retired {
         if Instant::now() >= deadline {
-            std::mem::forget(failure);
-            panic!("failed startup still owns incomplete native audio retirement");
+            drop(failure);
+            panic!("failed startup did not complete original native audio retirement");
         }
         thread::yield_now();
     }

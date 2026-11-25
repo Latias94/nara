@@ -533,8 +533,8 @@ impl ComponentSchemaProviderDefinition {
         ComponentSchemaProviderReceipt::new(self.id, self.binding)
     }
 
-    #[doc(hidden)]
-    pub(crate) fn resolve(self) -> Result<ResolvedComponentSchemaProvider, ComponentRegistryError> {
+    /// Loads and validates the provider's current catalog and optional predecessor.
+    pub fn resolve(self) -> Result<ResolvedComponentSchemaProvider, ComponentRegistryError> {
         if !self.owner.is_valid() {
             return Err(ComponentRegistryError::InvalidSchemaOwnerId { owner: self.owner });
         }
@@ -798,7 +798,7 @@ fn load_source(
 }
 
 fn feed_len(hasher: &mut blake3::Hasher, length: usize) {
-    let length = u64::try_from(length).unwrap_or_else(|_| std::process::abort());
+    let length = length as u64;
     feed_bytes(hasher, &length.to_le_bytes());
 }
 

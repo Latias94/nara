@@ -54,8 +54,8 @@ fn production_ready_accepts_playing_after_delayed_resume_confirmation() {
             }
         }
         if Instant::now() >= deadline + Duration::from_secs(15) {
-            std::mem::forget(process);
-            panic!("original readiness process retains incomplete cleanup: {failure:?}");
+            drop(process);
+            panic!("original readiness process did not complete explicit cleanup: {failure:?}");
         }
         thread::sleep(Duration::from_millis(10));
     }

@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use nara_ui_kernel::{UiFrame, UiInteractionSession, UiKey};
-use nara_ui_widgets::{UiButton, UiButtonState};
+use crate::kernel::{UiFrame, UiInteractionSession, UiKey};
+use crate::widgets::{UiButton, UiButtonState};
 use thiserror::Error;
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]

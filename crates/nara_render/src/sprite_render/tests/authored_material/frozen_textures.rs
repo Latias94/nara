@@ -58,20 +58,18 @@ fn authored_textures_freeze_before_prepare_share_across_cells_and_views_and_reco
         .unwrap();
     let mut app = sprite_app();
     let world = app.world_mut().unwrap();
-    let cameras = [0, 1].map(|order| {
-        world
-            .spawn((
-                Camera2d {
-                    order,
-                    target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
-                    viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
-                    viewport_height: 100.0,
-                    ..Camera2d::default()
-                },
-                Transform2d::default(),
-            ))
-            .id()
-    });
+    for order in [0, 1] {
+        world.spawn((
+            Camera2d {
+                order,
+                target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
+                viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
+                viewport_height: 100.0,
+                ..Camera2d::default()
+            },
+            Transform2d::default(),
+        ));
+    }
     let entity = spawn_authored(world, authored);
     let mut tilemap = Tilemap::new(Vec2::ONE);
     tilemap.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(0)));
@@ -83,7 +81,6 @@ fn authored_textures_freeze_before_prepare_share_across_cells_and_views_and_reco
             Transform2d::default(),
         ))
         .id();
-    place_roots(world, &[cameras[0], cameras[1], entity, stock]);
     assets.install(&mut app);
     app.add_systems(
         CoreStage::Extract,

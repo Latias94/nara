@@ -2,7 +2,7 @@
 
 use nara_app::RuntimeGeneration;
 use nara_asset::AssetSourceChange;
-use nara_identity::{SceneInstanceId, SpawnedSceneInstance, WorldIdentityDomainId};
+use nara_ecs::identity::{SceneInstanceId, SpawnedSceneInstance, WorldIdentityDomainId};
 
 use crate::project_content::{ProjectContentClosureReceipt, ProjectSourceObservations};
 

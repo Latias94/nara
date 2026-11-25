@@ -131,7 +131,7 @@ macro_rules! conversion_owner {
                             document.inputs.iter().try_fold(0usize, |bytes, input| {
                                 bytes
                                     .checked_add(
-                                        std::mem::size_of::<nara_identity::ReferenceInputId>()
+                                        std::mem::size_of::<nara_ecs::identity::ReferenceInputId>()
                                             + 6 * std::mem::size_of::<usize>(),
                                     )?
                                     .checked_add(crate::provenance::provenance_string_bytes(

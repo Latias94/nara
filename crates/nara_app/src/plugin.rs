@@ -339,8 +339,6 @@ pub enum PluginError {
     },
     #[error("App configuration is sealed")]
     AppSealed,
-    #[error("runtime driver operation for {type_name} was registered more than once")]
-    DuplicateDriverPort { type_name: &'static str },
     #[error("raw mutable access to engine-owned schedules is forbidden")]
     RawBuiltInScheduleMutationForbidden,
     #[error("schedule compatibility validation failed: {0}")]

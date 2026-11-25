@@ -11,10 +11,10 @@ use nara_reflect::{
     effective_component_value,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringFieldEdit,
-    PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate, SceneAuthoringSession,
-    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation,
+    AuthoringDocumentSource, AuthoringFieldEdit, PrefabAuthoringSession, PrefabDocument,
+    PrefabDocumentCandidate, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, authoring::AuthoringAdapterReceipt,
 };
 
 fn component() -> ComponentTypeId {

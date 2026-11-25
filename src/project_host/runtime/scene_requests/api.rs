@@ -233,7 +233,7 @@ impl ProjectScenes<'_> {
     /// Retains live watcher handle counts through Runtime close.
     #[cfg(all(feature = "runtime-2d", feature = "asset-watch"))]
     #[must_use]
-    pub fn source_watch_observer(&self) -> Option<nara_asset_watch::AssetWatchRuntimeObserver> {
+    pub fn source_watch_observer(&self) -> Option<nara_asset::watch::AssetWatchRuntimeObserver> {
         self.source_watch
             .as_deref()
             .map(|driver| driver.retirement())
@@ -723,7 +723,7 @@ fn commit_ready_project_scene(
             "Project Scene request authority is unavailable",
         );
     }
-    if nara_ecs::__private::validate_resource_scope::<RequestOwner>(world).is_err() {
+    if crate::ecs::transaction::validate_resource_scope::<RequestOwner>(world).is_err() {
         return rejected(
             "project.scene.request-lifecycle-unsupported",
             "Scene request ownership cannot run lifecycle effects during commit",
@@ -831,7 +831,7 @@ where
             "Project Scene request authority is unavailable",
         ));
     }
-    if nara_ecs::__private::validate_resource_scope::<RequestOwner>(world).is_err() {
+    if crate::ecs::transaction::validate_resource_scope::<RequestOwner>(world).is_err() {
         return Err(rejected(
             "project.scene.request-lifecycle-unsupported",
             "Scene request ownership cannot run lifecycle effects during preparation",

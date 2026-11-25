@@ -11,7 +11,6 @@ use nara_app::{
 use nara_core::ByteLimit;
 use nara_ecs::{Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
 use nara_input::{
-    __private::{InputEndpointClaim, claim_input_endpoint},
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBindings, ActionMapBuilder,
     ActionMapLimits, ActionMaps, ActionOutcome, ActionOutcomes, ActionPhase, ActionValue,
     ButtonDriverInput, ButtonInput, ButtonInputDriverError, ButtonTransition,
@@ -22,6 +21,7 @@ use nara_input::{
     SemanticActionOutcome, SemanticActions, apply_keyboard_driver_input,
     apply_keyboard_driver_input_at, apply_window_input_driver_event, capture_keyboard_holds,
     connect_input_endpoint, reconcile_keyboard_holds, restore_keyboard_holds,
+    timeline::InputEndpointClaim,
 };
 
 const WINDOW: InputWindowId = InputWindowId::new(1);
@@ -228,8 +228,11 @@ fn paused_runtime_with(
         connect_input_endpoint(scope, WINDOW, SEAT)
     })
     .unwrap();
-    let claim =
-        claim_input_endpoint(runtime.world().resource::<InputTimeline>(), WINDOW, SEAT).unwrap();
+    let claim = runtime
+        .world()
+        .resource::<InputTimeline>()
+        .claim_endpoint(WINDOW, SEAT)
+        .unwrap();
     // First observes the original map/context lifetime even though gameplay remains paused.
     paused_frame(&mut runtime);
     assert_settled(&runtime, NONE);
@@ -692,7 +695,10 @@ fn release_all_keeps_synthetic_or_platform_trigger_separate_from_restored_member
     ] {
         let (mut runtime, _, _) = paused_runtime();
         // InputPlugin already owns the default endpoint; claiming it must not reconnect it.
-        let claim = claim_input_endpoint(runtime.world().resource::<InputTimeline>(), window, SEAT)
+        let claim = runtime
+            .world()
+            .resource::<InputTimeline>()
+            .claim_endpoint(window, SEAT)
             .unwrap();
         let admission = restore(&mut runtime, &claim, holds([true, false, false, false])).unwrap();
         paused_frame(&mut runtime);
@@ -1292,8 +1298,11 @@ fn foreign_and_recycled_endpoint_claims_cannot_admit_into_the_receiving_runtime(
         connect_input_endpoint(scope, WINDOW, SEAT)
     })
     .unwrap();
-    let fresh =
-        claim_input_endpoint(runtime.world().resource::<InputTimeline>(), WINDOW, SEAT).unwrap();
+    let fresh = runtime
+        .world()
+        .resource::<InputTimeline>()
+        .claim_endpoint(WINDOW, SEAT)
+        .unwrap();
     paused_frame(&mut runtime);
     assert_eq!(
         restore(&mut runtime, &stale, holds(ALL)),
@@ -1316,15 +1325,14 @@ fn foreign_and_recycled_endpoint_claims_cannot_admit_into_the_receiving_runtime(
 }
 
 #[test]
-fn registered_restore_port_refuses_running_and_stopping_without_mutation() {
+fn restore_refuses_running_and_stopping_without_mutation() {
     let (mut runtime, claim, _) = paused_runtime();
     control(&mut runtime, RuntimeControl::Resume, RuntimeState::Running);
     assert!(matches!(
         restore(&mut runtime, &claim, holds(ALL)),
         Err(KeyboardContinuationError::WorldAccess(
-            RuntimeWorldAccessError::PortUnavailable {
+            RuntimeWorldAccessError::Unavailable {
                 state: RuntimeState::Running,
-                ..
             },
         )),
     ));
@@ -1340,9 +1348,8 @@ fn registered_restore_port_refuses_running_and_stopping_without_mutation() {
     assert!(matches!(
         restore(&mut runtime, &claim, holds(ALL)),
         Err(KeyboardContinuationError::WorldAccess(
-            RuntimeWorldAccessError::PortUnavailable {
+            RuntimeWorldAccessError::Unavailable {
                 state: RuntimeState::Stopping,
-                ..
             },
         )),
     ));

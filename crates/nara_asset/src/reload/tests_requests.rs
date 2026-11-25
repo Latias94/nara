@@ -512,23 +512,23 @@ fn reload_request_item_limit_rejects_excess_work_without_retention() {
         };
         assert_eq!(
             field("source-kind").value(),
-            nara_diagnostic::DiagnosticValueRef::Identifier("image")
+            nara_core::diagnostic::DiagnosticValueRef::Identifier("image")
         );
         assert_eq!(
             field("limit").value(),
-            nara_diagnostic::DiagnosticValueRef::Unsigned(1)
+            nara_core::diagnostic::DiagnosticValueRef::Unsigned(1)
         );
         assert_eq!(
             field("attempted").value(),
-            nara_diagnostic::DiagnosticValueRef::Unsigned(2)
+            nara_core::diagnostic::DiagnosticValueRef::Unsigned(2)
         );
         assert_eq!(
             field("error-detail").class(),
-            nara_diagnostic::DiagnosticFieldClass::Sensitive
+            nara_core::diagnostic::DiagnosticFieldClass::Sensitive
         );
         assert_eq!(
             field("error-detail").value(),
-            nara_diagnostic::DiagnosticValueRef::Redacted
+            nara_core::diagnostic::DiagnosticValueRef::Redacted
         );
     }
     runtime.finish().unwrap();

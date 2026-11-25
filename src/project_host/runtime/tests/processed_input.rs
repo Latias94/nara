@@ -1,9 +1,9 @@
+use crate::fs::ContentDigest;
 use nara_asset::{
     AssetPathScope, AssetProductRef, ImportedProductId, ProjectAssetDatabase, RuntimeAssetCodec,
 };
 use nara_core::{FormatKind, FormatVersion};
-use nara_fs::ContentDigest;
-use nara_identity::SceneEntityId;
+use nara_ecs::identity::SceneEntityId;
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapAsset, ActionMapBindings,
     ActionMapBuilder, ActionMapDomain, ActionMapLimits, ActionMapRuntimeCodec, ActionMaps,
@@ -247,7 +247,7 @@ fn processed_startup_and_deep_validation_share_the_selected_stock_keyboard() {
     }
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
     let error = host
-        .begin_processed_start(desktop_base.clone(), vec![])
+        .begin_processed_start(desktop_base.clone())
         .err()
         .unwrap();
     let diagnostic = error.diagnostics.iter().next().unwrap();
@@ -440,7 +440,7 @@ fn processed_selection_is_visible_in_first_startup_from_the_captured_base_withou
         fs::remove_file(fixture.root.join(path)).unwrap();
     }
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_processed_start(base.clone(), vec![]).unwrap();
+    let mut attempt = host.begin_processed_start(base.clone()).unwrap();
     let expected = selected_input(&attempt).bindings();
     let prepared = host.prepare_start(&mut attempt).unwrap();
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
@@ -496,7 +496,7 @@ fn an_explicit_empty_code_map_refuses_processed_selection_before_startup() {
     let base = fixture.open();
     let baseline = retained_charge(&base);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_processed_start(base.clone(), vec![]).unwrap();
+    let mut attempt = host.begin_processed_start(base.clone()).unwrap();
     let error = host.prepare_start(&mut attempt).err().unwrap();
     assert_eq!(
         first_code(&error.diagnostics),
@@ -525,7 +525,7 @@ fn another_seats_explicit_map_preserves_processed_primary_selection() {
     let base = fixture.open();
     let baseline = retained_charge(&base);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_processed_start(base.clone(), vec![]).unwrap();
+    let mut attempt = host.begin_processed_start(base.clone()).unwrap();
     let expected = selected_input(&attempt).bindings();
     let prepared = host.prepare_start(&mut attempt).unwrap();
     let world = prepared.runtime.runtime().unwrap().world();
@@ -561,7 +561,7 @@ fn input_attempt_stamp_refuses_new_acquisition_missing_selection_and_equal_catal
     assert!(!base.same_base(&foreign));
     let baseline = retained_charge(&base);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_processed_start(base.clone(), vec![]).unwrap();
+    let mut attempt = host.begin_processed_start(base.clone()).unwrap();
     let original = selected_input(&attempt).clone();
     let replacement = base.acquire_startup_input().unwrap().unwrap();
     assert_eq!(original.product(), replacement.product());
@@ -596,7 +596,7 @@ fn failed_startup_retains_global_input_until_host_retirement_then_refunds_all_ch
     let base = fixture.open();
     let baseline = retained_charge(&base);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_processed_start(base.clone(), vec![]).unwrap();
+    let mut attempt = host.begin_processed_start(base.clone()).unwrap();
     let error = host.prepare_start(&mut attempt).err().unwrap();
     assert_eq!(first_code(&error.diagnostics), "project.run.startup-failed");
     let ProjectHostSlot::Cleaning { owner, .. } = &host.slot else {
@@ -626,13 +626,13 @@ fn cancelled_attempt_and_aborted_prepared_start_release_input_in_the_existing_ow
     let base = fixture.open();
     let baseline = retained_charge(&base);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let attempt = host.begin_processed_start(base.clone(), vec![]).unwrap();
+    let attempt = host.begin_processed_start(base.clone()).unwrap();
     assert!(retained_charge(&base) > baseline);
     drop(attempt);
     assert!(!host.has_runtime_custody());
     assert_eq!(retained_charge(&base), baseline);
 
-    let mut attempt = host.begin_processed_start(base.clone(), vec![]).unwrap();
+    let mut attempt = host.begin_processed_start(base.clone()).unwrap();
     let prepared = host.prepare_start(&mut attempt).unwrap();
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
     host.abort_prepared_start(prepared);
@@ -666,10 +666,7 @@ fn processed_input_context_budget_survives_the_codec_and_host_diagnostic_bridges
     let base = fixture.open();
     let baseline = retained_charge(&base);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let error = host
-        .begin_processed_start(base.clone(), vec![])
-        .err()
-        .unwrap();
+    let error = host.begin_processed_start(base.clone()).err().unwrap();
     assert_eq!(
         first_code(&error.diagnostics),
         "project.run.runtime-content-rejected"
@@ -702,7 +699,7 @@ fn processed_input_state_budget_keeps_exact_host_numbers_and_cleanup_custody() {
     let base = fixture.open();
     let baseline = retained_charge(&base);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_processed_start(base.clone(), vec![]).unwrap();
+    let mut attempt = host.begin_processed_start(base.clone()).unwrap();
     let required_state = ActionMap::required_state_bytes();
     let before = retained_charge(&base);
     let limit = RuntimeContentLimits::default().retained_bytes().get();

@@ -6,8 +6,8 @@ mod compiled_scene;
 use std::convert::Infallible;
 
 use nara_asset::AssetRef;
+use nara_ecs::identity::{AuthoredEntityReference, EntityReference};
 use nara_ecs::{Component, World};
-use nara_identity::{AuthoredEntityReference, EntityReference};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentPropertyPath, ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion,

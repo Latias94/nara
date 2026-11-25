@@ -10,11 +10,11 @@ See the [strategy](STRATEGY.md), [architecture](docs/architecture/overview.md), 
 
 ## Current Product Slice
 
-The repository currently includes:
-
-- a fallible `App`, plugin composition, schedules, fixed time, tasks, and managed runtime lifecycle;
+- `App`, `DefaultPlugins`, deterministic fixed stepping, and a native Winit runner;
+- ECS hierarchy, transform propagation, typed input, 2D physics, and audio;
 - versioned scene, prefab, schema, asset, and project-manifest data;
-- headless and Winit/wgpu desktop product Hosts;
+- a headless project CLI for project creation, validation, Schema discovery, supervised Play, Cook,
+  and Export;
 - a deterministic 2D reference game with sprites, input, HUD, and headless and desktop entry points;
 - shared format and image data in `tests/fixtures/`, with game-facing coverage in `reference-game`
   and `samples/two-level-game`.
@@ -49,8 +49,26 @@ cargo run --manifest-path reference-game/Cargo.toml --locked --features desktop 
 See [`reference-game/README.md`](reference-game/README.md) for the gameplay controls, project data,
 and standalone candidate layout.
 
-Create and edit a standalone project with the CLI by following the
-[first 2D game guide](docs/guides/first-2d-game.md).
+The [short code-first game](examples/first_game.rs) demonstrates movement, sprite animation, a
+tilemap, collision, sound, and a HUD. Run it with the features below.
+
+```text
+cargo run --locked --example first_game --features physics-2d,audio-device,presentation-2d,presentation-ui,desktop-winit,render-wgpu
+```
+
+On Linux, a desktop build with audio requires the ALSA development headers.
+
+Create a standalone project from the engine checkout. The destination's parent must exist.
+
+```text
+cargo run --locked -p nara_project --bin nara -- new ../my-game --package my-game --nara-checkout .
+cargo run --locked -p nara_project --bin nara -- check ../my-game
+cargo run --locked -p nara_project --bin nara -- schema ../my-game --trusted
+cargo run --locked -p nara_project --bin nara -- play ../my-game --trusted
+```
+
+Use `--trusted` for projects whose Rust and Cargo build code you trust to run. Follow the generated
+README for the project layout and [examples](examples/) for game code.
 
 For cross-level travel and game-owned checkpoint saves, see the independent
 [`samples/two-level-game`](samples/two-level-game/README.md) consumer.
@@ -58,7 +76,7 @@ For cross-level travel and game-owned checkpoint saves, see the independent
 ## Repository Layout
 
 - `crates/`: engine modules and native adapters
-- `src/`: the game facade, runtime project loading, and headless project commands
+- `src/`: the game facade and the current authored and cooked runtime integrations
 - `reference-game/`: the first complete headless and desktop game tracer
 - [`tests/fixtures/`](tests/fixtures/README.md) contains shared format and image test data.
 - [`docs/architecture/`](docs/architecture/overview.md) contains the v2 architecture and accepted ADRs.

@@ -14,15 +14,13 @@ use std::{
 
 use nara::{
     app::{
-        __RuntimeDriverPort, CoreStage, PluginCategory, PluginDeclaration, PluginDefinition,
-        PluginId, PluginShutdownContext, PluginShutdownObligationId, RuntimeDriverScope,
-        RuntimeGeneration, RuntimeWorldAccessError,
+        CoreStage, PluginCategory, PluginDeclaration, PluginDefinition, PluginId,
+        PluginShutdownContext, PluginShutdownObligationId, RuntimeGeneration,
     },
     ecs::{
         Entity, Mut, Resource, With, bevy_ecs::lifecycle::Add, bevy_ecs::observer::On,
         schedule::IntoScheduleConfigs,
     },
-    gameplay::{GameplayCommandBatch, GameplayCommandSet, add_local_gameplay_command_systems},
     identity::{EntityLookup, WorldIdentityDomain},
     prelude::{App, Commands, FixedTime, Plugin, PluginError, Query, Res, ResMut, World},
     scene::SceneEntitySource,
@@ -30,7 +28,8 @@ use nara::{
     window::WindowId,
 };
 use nara_reference_game::{
-    PlayerRole, REFERENCE_RUNTIME_UI_PLUGIN_ID, WaveRetryRejection, WaveRetryStatus, WaveSnapshot,
+    PlayerRole, REFERENCE_RUNTIME_UI_PLUGIN_ID, ReferenceWaveSet, WaveRetryRejection,
+    WaveRetryStatus, WaveSnapshot, wave_retry_request_count,
 };
 use nara_render::RenderTarget;
 use nara_render::hud::{
@@ -67,7 +66,6 @@ const RETRY_REPLACEMENT_REJECTION_FIXTURE_DECLARATION: PluginDeclaration = Plugi
 .shutdown_obligations(COMPONENT_PRESENTER_SHUTDOWN_OBLIGATIONS);
 static NEXT_BACKEND_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_PRESENTATION_ATTEMPT_ID: AtomicU64 = AtomicU64::new(1);
-const RETRY_COMMAND_TYPE: &str = "reference-game.retry-v1";
 const MAX_RECORDED_RETRY_BATCHES: usize = 8;
 const MAX_RECORDED_UI_ACTIONS: usize = 16;
 
@@ -105,7 +103,7 @@ impl Plugin for RetryReplacementRejectionFixturePlugin {
                 repair_retry_candidate_observer_after_rejection,
             )
                 .chain()
-                .after(GameplayCommandSet::Capture),
+                .after(ReferenceWaveSet::Capture),
         )?;
         Ok(())
     }
@@ -172,26 +170,8 @@ impl ComponentPresentationState {
 #[derive(Debug, Default, Resource)]
 struct ComponentAccessibilityInputs(Vec<UiAccessibilityInput>);
 
-impl __RuntimeDriverPort for ComponentAccessibilityInputs {
-    type Input = UiAccessibilityInput;
-    type Output = ();
-
-    fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output {
-        self.0.push(input);
-    }
-}
-
 #[derive(Debug, Default, Resource)]
 struct ComponentSurfaceUpdates(Vec<UiSurfaceContentTransform>);
-
-impl __RuntimeDriverPort for ComponentSurfaceUpdates {
-    type Input = UiSurfaceContentTransform;
-    type Output = ();
-
-    fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output {
-        self.0.push(input);
-    }
-}
 
 #[derive(Debug, Default, Resource)]
 struct RetryCandidateObserver {
@@ -261,7 +241,7 @@ fn install_component_presenter(app: &mut App) -> Result<(), PluginError> {
         events: Vec::new(),
         overflowed: false,
     })?;
-    add_local_gameplay_command_systems(app, record_component_ui_actions)?;
+    app.add_systems(CoreStage::PreUpdate, record_component_ui_actions)?;
     app.init_resource::<ComponentPresentationState>()?
         .init_resource::<ComponentAccessibilityInputs>()?
         .init_resource::<ComponentSurfaceUpdates>()?
@@ -276,7 +256,7 @@ fn install_component_presenter(app: &mut App) -> Result<(), PluginError> {
         )?
         .add_systems(
             CoreStage::FixedUpdate,
-            record_component_retry_commands.in_set(GameplayCommandSet::Capture),
+            record_component_retry_commands.in_set(ReferenceWaveSet::Capture),
         )?
         .add_systems(CoreStage::Cleanup, present_latest_reference_ui_component)?;
     Ok(())
@@ -336,29 +316,28 @@ fn fixture_error(message: impl Into<String>) -> PluginError {
     }
 }
 
-fn record_component_retry_commands(
-    batch: Res<GameplayCommandBatch>,
-    mut trace: ResMut<ComponentRetryCommandTrace>,
-) {
-    let retry_count = batch
-        .iter()
-        .filter(|command| command.command_type().as_str() == RETRY_COMMAND_TYPE)
-        .count();
-    trace.record(retry_count);
+fn record_component_retry_commands(world: &mut World) {
+    let retry_count = wave_retry_request_count(world);
+    world
+        .resource_mut::<ComponentRetryCommandTrace>()
+        .record(retry_count);
 }
 
-pub(super) fn queue_component_accessibility_input(
-    scope: &mut RuntimeDriverScope<'_>,
-    input: UiAccessibilityInput,
-) -> Result<(), RuntimeWorldAccessError> {
-    scope.__apply_port::<ComponentAccessibilityInputs>(input)
+pub(super) fn queue_component_accessibility_input(world: &mut World, input: UiAccessibilityInput) {
+    world
+        .resource_mut::<ComponentAccessibilityInputs>()
+        .0
+        .push(input);
 }
 
 pub(super) fn queue_component_surface_update(
-    scope: &mut RuntimeDriverScope<'_>,
+    world: &mut World,
     transform: UiSurfaceContentTransform,
-) -> Result<(), RuntimeWorldAccessError> {
-    scope.__apply_port::<ComponentSurfaceUpdates>(transform)
+) {
+    world
+        .resource_mut::<ComponentSurfaceUpdates>()
+        .0
+        .push(transform);
 }
 
 fn apply_component_surface_updates(world: &mut World) {
@@ -406,7 +385,7 @@ fn present_latest_reference_ui_component(world: &mut World) {
     let runtime_generation =
         UiPresentationRuntimeGeneration::new(world.resource::<RuntimeGeneration>().get())
             .expect("managed runtime generations are non-zero");
-    let authority = nara_ui::__private::prepare_ui_presentation(world, packet.frame(), epoch)
+    let authority = nara_ui::presentation::prepare_ui_presentation(world, packet.frame(), epoch)
         .expect("the Host should reserve exact presentation authority");
     let prepared = nara_render::hud::presentation::prepare_backend_submission(
         UiPresentationAttemptId::new(NEXT_PRESENTATION_ATTEMPT_ID.fetch_add(1, Ordering::Relaxed))
@@ -448,14 +427,14 @@ fn present_latest_reference_ui_component(world: &mut World) {
     assert_eq!(accepted.identity(), prepared_identity);
     assert_eq!(accepted.identity().runtime_generation(), runtime_generation);
     if !Arc::ptr_eq(accepted.packet(), &packet) {
-        nara_ui::__private::supersede_prepared_ui_presentation(world, authority);
+        nara_ui::presentation::supersede_prepared_ui_presentation(world, authority);
         panic!("backend acceptance did not retain the exact product packet");
     }
     let acceptance = accepted.identity();
     let identity = accepted.packet().identity();
-    let receipt = match nara_ui::__private::commit_prepared_ui_presentation(world, authority) {
-        nara_ui::__private::UiPresentationCommit::Committed(receipt) => receipt,
-        nara_ui::__private::UiPresentationCommit::Invalidated { .. } => return,
+    let receipt = match nara_ui::presentation::commit_prepared_ui_presentation(world, authority) {
+        nara_ui::presentation::UiPresentationCommit::Committed(receipt) => receipt,
+        nara_ui::presentation::UiPresentationCommit::Invalidated { .. } => return,
     };
     assert_eq!(receipt.surface_id(), identity.surface_id());
     assert_eq!(receipt.frame_revision(), identity.frame_revision());

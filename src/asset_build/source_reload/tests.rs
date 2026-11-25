@@ -12,7 +12,9 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use crate::fs::{CapabilityRights, FileCapability, HostCapabilityOptions, TrustMode};
 use nara_app::RuntimeInstance;
+use nara_app::tasks::{TaskPlugin, TaskPoolConfig};
 use nara_asset::{
     AssetBuildSource, AssetImportError, AssetImportLimits, AssetImportSource, AssetMeta,
     AssetMetaFileLimits, AssetMetaIdentity, AssetPath, AssetPlugin, AssetRecord,
@@ -21,8 +23,6 @@ use nara_asset::{
     SourceAssetImporter, StableAssetId,
 };
 use nara_core::{ByteLimit, FormatVersion};
-use nara_fs::{CapabilityRights, FileCapability, HostCapabilityOptions, TrustMode};
-use nara_tasks::{TaskPlugin, TaskPoolConfig};
 use serde::Deserialize;
 
 use super::*;

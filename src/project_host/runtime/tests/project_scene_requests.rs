@@ -3,7 +3,7 @@ use super::*;
 use nara_app::CoreStage;
 use nara_core::ItemLimit;
 use nara_ecs::bevy_ecs::system::SystemState;
-use nara_identity::SpawnedSceneInstance;
+use nara_ecs::identity::SpawnedSceneInstance;
 use nara_project::ProjectPath;
 use nara_scene::advanced::{SceneProductResource, SceneProductTransactionLimits};
 
@@ -82,7 +82,7 @@ impl Fixture {
             ("undeclared.scene.json", "undeclared"),
         ] {
             let scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-                nara_identity::SceneEntityId::new(entity).unwrap(),
+                nara_ecs::identity::SceneEntityId::new(entity).unwrap(),
             )]);
             fs::write(
                 project.root.join("scenes").join(path),
@@ -104,16 +104,16 @@ impl Fixture {
             move || RequestProbePlugin(Arc::clone(&factory_probe)),
         );
         let request =
-            project_runtime_plugins(&candidate).insert_after::<GameplayCommandPlugin>(definition);
+            project_runtime_plugins(&candidate).insert_after::<nara_asset::AssetPlugin>(definition);
         let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
         let loader = Arc::new(ProjectContentLoader::new(root).unwrap());
         let snapshot = load_runtime_snapshot(&loader, &candidate, &plan);
         let mut host = ProjectHost::new(RuntimeClosePolicy::new(Duration::ZERO));
         let mut attempt = if with_context {
-            host.begin_project_start(snapshot, plan, candidate, Arc::clone(&loader), Vec::new())
+            host.begin_project_start(snapshot, plan, candidate, Arc::clone(&loader))
                 .unwrap()
         } else {
-            host.begin_start(snapshot, plan, Vec::new()).unwrap()
+            host.begin_start(snapshot, plan).unwrap()
         };
         host.complete_start(&mut attempt).unwrap();
         drop(attempt);
@@ -198,7 +198,7 @@ fn limits() -> SceneProductTransactionLimits {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SceneObservation {
     address: usize,
-    roots: Vec<nara_identity::SceneEntityId>,
+    roots: Vec<nara_ecs::identity::SceneEntityId>,
 }
 
 fn observe(document: &CompiledSceneDocument) -> SceneObservation {
@@ -251,7 +251,7 @@ fn original_host_prepares_inspectable_scene_then_commits_and_acknowledges_b_to_a
             assert_eq!(prepared.expected_instance(), &original_receipt);
             assert_eq!(
                 prepared.scene().roots(),
-                [nara_identity::SceneEntityId::new("level-b").unwrap()]
+                [nara_ecs::identity::SceneEntityId::new("level-b").unwrap()]
             );
             observe(prepared.scene())
         };
@@ -326,7 +326,7 @@ fn original_host_prepares_inspectable_scene_then_commits_and_acknowledges_b_to_a
             let (source, _) = current(world);
             assert_eq!(
                 source.roots,
-                [nara_identity::SceneEntityId::new("level-a").unwrap()]
+                [nara_ecs::identity::SceneEntityId::new("level-a").unwrap()]
             );
             assert_eq!(world.resource::<CommittedLevel>().0, 2);
             let mut access = SystemState::<ProjectScenes>::new(world);
@@ -559,7 +559,7 @@ fn close_held_preparation(automatic: bool) {
     let mut fixture = Fixture::new(true);
     let (request, started, release, original) = if automatic {
         let scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-            nara_identity::SceneEntityId::new("updated-startup").unwrap(),
+            nara_ecs::identity::SceneEntityId::new("updated-startup").unwrap(),
         )]);
         fs::write(
             fixture._project.root.join("scenes/startup.scene.json"),

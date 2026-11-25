@@ -5,9 +5,9 @@ mod compiled_scene;
 
 use nara_app::App;
 use nara_asset::AssetServer;
-use nara_diagnostic::DiagnosticReport;
+use nara_core::diagnostic::DiagnosticReport;
 use nara_ecs::World;
-use nara_identity::{EntityLookup, WorldIdentityDomain};
+use nara_ecs::identity::{EntityLookup, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistryAuthorityError, ComponentRegistryBuilder, ComponentRegistryPlugin,

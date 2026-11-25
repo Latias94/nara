@@ -10,10 +10,10 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringPropertyEdit,
-    AuthoringSchemaBasis, PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
-    SceneComponentRecord, SceneEntityId, SceneEntityRecord, ScenePatchReport, SourceDocumentKey,
-    SourceDocumentKind,
+    AuthoringDocumentSource, AuthoringPropertyEdit, AuthoringSchemaBasis, PrefabAuthoringSession,
+    PrefabDocument, PrefabDocumentCandidate, SceneComponentRecord, SceneEntityId,
+    SceneEntityRecord, ScenePatchReport, SourceDocumentKey, SourceDocumentKind,
+    authoring::AuthoringAdapterReceipt,
 };
 
 #[derive(Debug, Clone, PartialEq)]

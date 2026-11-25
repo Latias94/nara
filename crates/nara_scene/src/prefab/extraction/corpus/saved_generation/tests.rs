@@ -1,7 +1,7 @@
 //! Stored defaults retain relocation obligations even when explicit values hide them.
 
 use nara_asset::{AssetSourceKind, AssetSourcePath};
-use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
+use nara_ecs::identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
@@ -11,13 +11,13 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    __private::{
-        AuthoringAdapterReceipt, PrefabExtractionDestination, PrefabExtractionRequest,
-        PrefabExtractionWork, PreparedPrefabExtraction,
-    },
     PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop,
     SceneComponentRecord, SceneEntityPlacement, SceneEntityRecord, ScenePlacement,
     ScenePlacementParent,
+    authoring::{
+        AuthoringAdapterReceipt, PrefabExtractionDestination, PrefabExtractionRequest,
+        PrefabExtractionWork, PreparedPrefabExtraction,
+    },
 };
 
 const P: usize = 0;

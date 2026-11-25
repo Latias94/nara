@@ -19,9 +19,10 @@ use std::{path::PathBuf, sync::Arc};
 use nara::{
     ProductConfiguration, ProductRecipe, SchemaContribution,
     advanced_prelude::{CurrentScene, add_startup_scene_activation_systems},
-    app::{PluginCategory, PluginDeclaration, PluginId, PluginSchemaProviderId},
+    app::{
+        PluginCategory, PluginDeclaration, PluginId, PluginSchemaProviderId, RuntimeFaultReporter,
+    },
     ecs::{Entity, World, schedule::IntoScheduleConfigs},
-    gameplay::{GameplayCommandKey, GameplayCommandSet, add_local_gameplay_command_systems},
     identity::{EntityLookup, SceneEntityId},
     prelude::{App, CoreStage, FixedUpdateSet, Plugin, PluginError, Resource, Transform2d, Vec2},
     reflect::{
@@ -30,14 +31,24 @@ use nara::{
         ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
         PersistentComponentProvider,
     },
-    scene::advanced::SceneProductResource,
-    transform::fixed_spatial_snapshot,
+    scene::{
+        TRANSFORM_COMPONENTS_PLUGIN_ID,
+        advanced::SceneProductResource,
+        fixed_spatial::{
+            FIXED_SPATIAL_PLUGIN_ID, FixedSpatialPlugin, add_fixed_transform_projection_systems,
+            fixed_spatial_snapshot,
+        },
+    },
 };
 #[cfg(feature = "local-player")]
 use nara::{core::ItemLimit, project_host::ProjectContentLimits, sprite::Sprite};
 use serde::Serialize;
 
 use crate::{
+    command::{
+        CommandKey, CommandSchedule, CommandSet, acknowledge_commands, mark_frame_input,
+        needs_frame_input, prepare_commands,
+    },
     levels::{LevelId, LevelKey},
     save::{
         Checkpoint, CheckpointLocation, CollectedPickup, MAX_MARKERS, MAX_SCORE, MarkerId,
@@ -63,8 +74,8 @@ const PROVIDER: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefin
 const DECLARATION: PluginDeclaration = PluginDeclaration::new(PLUGIN_ID, PluginCategory::Runtime)
     .requires_plugins(&[
         nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID,
-        nara::transform::TRANSFORM_PLUGIN_ID,
-        nara::gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
+        TRANSFORM_COMPONENTS_PLUGIN_ID,
+        FIXED_SPATIAL_PLUGIN_ID,
         nara::advanced_prelude::STARTUP_SCENE_ACTIVATION_PLUGIN_ID,
     ])
     .provides_schema(&[PROVIDER_ID])
@@ -135,12 +146,12 @@ pub struct ServerCommandRejections {
 
 #[derive(Debug, Clone, Serialize)]
 struct ServerCommandRejection {
-    key: GameplayCommandKey,
+    key: CommandKey,
     message: String,
 }
 
 impl ServerCommandRejections {
-    fn record(&mut self, key: GameplayCommandKey, message: &str) {
+    fn record(&mut self, key: CommandKey, message: &str) {
         const MAX_MESSAGE_BYTES: usize = 1024;
 
         self.count = self.count.saturating_add(1);
@@ -355,22 +366,62 @@ impl Plugin for ExplorationPlugin {
         resume::install(app)?;
         storage::install(app, save_path)?;
         add_startup_scene_activation_systems(app, initialize)?;
-        add_local_gameplay_command_systems(app, verification::drive)?;
-        app.add_systems(
-            CoreStage::FixedUpdate,
-            (travel::consume, simulate)
-                .chain()
-                .in_set(GameplayCommandSet::Consume)
-                .before(GameplayCommandSet::Capture)
-                .in_set(FixedUpdateSet::Simulate),
-        )?;
-        nara::transform::add_fixed_transform_projection_systems(
+        let faults = app.world().resource::<RuntimeFaultReporter>().clone();
+        let capture_faults = faults.clone();
+        let consume_faults = faults.clone();
+        app.init_resource::<CommandSchedule>()?
+            .configure_sets(
+                CoreStage::PreUpdate,
+                CommandSet::FrameInput.run_if(needs_frame_input),
+            )?
+            .add_systems(
+                CoreStage::PreUpdate,
+                (
+                    verification::drive.in_set(CommandSet::FrameInput),
+                    mark_frame_input.after(CommandSet::FrameInput),
+                ),
+            )?
+            .configure_sets(
+                CoreStage::FixedUpdate,
+                (
+                    CommandSet::FrameInput
+                        .in_set(FixedUpdateSet::Prepare)
+                        .run_if(needs_frame_input),
+                    CommandSet::Consume
+                        .in_set(FixedUpdateSet::Simulate)
+                        .run_if(move || consume_faults.fault().is_none()),
+                    CommandSet::Capture
+                        .in_set(FixedUpdateSet::Finalize)
+                        .run_if(move || capture_faults.fault().is_none()),
+                ),
+            )?
+            .add_systems(
+                CoreStage::FixedUpdate,
+                (
+                    verification::drive.in_set(CommandSet::FrameInput),
+                    (mark_frame_input, prepare_commands)
+                        .chain()
+                        .after(CommandSet::FrameInput)
+                        .in_set(FixedUpdateSet::Prepare),
+                    acknowledge_commands
+                        .after(CommandSet::Capture)
+                        .in_set(FixedUpdateSet::Finalize)
+                        .run_if(move || faults.fault().is_none()),
+                ),
+            )?
+            .add_systems(
+                CoreStage::FixedUpdate,
+                (travel::consume, simulate)
+                    .chain()
+                    .in_set(CommandSet::Consume),
+            )?;
+        add_fixed_transform_projection_systems(
             app,
             (collect_pickups, side_room::find_relics, capture).chain(),
         )?;
         app.add_systems(
             CoreStage::FixedUpdate,
-            verification::observe_progress.after(GameplayCommandSet::Capture),
+            verification::observe_progress.after(CommandSet::Capture),
         )?;
         app.add_systems(
             CoreStage::TaskUpdate,
@@ -382,9 +433,7 @@ impl Plugin for ExplorationPlugin {
                 CoreStage::FixedUpdate,
                 project_animation
                     .after(simulate)
-                    .in_set(GameplayCommandSet::Consume)
-                    .before(GameplayCommandSet::Capture)
-                    .in_set(FixedUpdateSet::Simulate),
+                    .in_set(CommandSet::Consume),
             )?
             .add_systems(
                 CoreStage::TaskUpdate,
@@ -484,7 +533,9 @@ fn exploration_recipe(configuration: ExplorationConfiguration) -> ProductRecipe 
         [PROVIDER],
     )
     .expect("static game schema and composition");
-    let recipe = ProductRecipe::new();
+    let recipe = ProductRecipe::new()
+        .add_plugin::<FixedSpatialPlugin>()
+        .expect("static spatial capture plugin");
     #[cfg(feature = "local-player")]
     let recipe = recipe.with_source_content_limits(
         ProjectContentLimits::default().with_retained_generations(ItemLimit::new(4).unwrap()),

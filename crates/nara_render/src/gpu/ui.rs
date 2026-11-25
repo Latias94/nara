@@ -706,11 +706,13 @@ mod tests {
     use crate::image::{
         ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, PreparedImageSnapshot,
     };
-    use nara_text::{FontFace, TextDiagnostic, TextEngine, TextLayoutRequest, bundled_font_face};
-    use nara_ui_kernel::{
+    use nara_ui::kernel::{
         UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii,
         UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiOverflow, UiPaintPrimitive,
         UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiText, UiTextOverflow, UiTheme, UiVisual,
+    };
+    use nara_ui::text::{
+        FontFace, TextDiagnostic, TextEngine, TextLayoutRequest, bundled_font_face,
     };
     use nara_window::WindowId;
 
@@ -1073,7 +1075,7 @@ mod tests {
     #[test]
     fn custom_face_glyph_packet_renders_nonblank_gpu_pixels() {
         let face = FontFace::from_bytes(
-            include_bytes!("../../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+            include_bytes!("../../../nara_ui/tests/text/fixtures/FiraMono-Medium.ttf").to_vec(),
             0,
         )
         .unwrap();
@@ -1133,7 +1135,7 @@ mod tests {
     fn fallback_font_packet_retains_clipped_gpu_pixels_matching_single_face_rasters() {
         let primary = bundled_font_face().unwrap();
         let fallback = FontFace::from_bytes(
-            include_bytes!("../../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+            include_bytes!("../../../nara_ui/tests/text/fixtures/FiraMono-Medium.ttf").to_vec(),
             0,
         )
         .unwrap();
@@ -1341,8 +1343,8 @@ mod tests {
 
     #[test]
     fn reconfigured_editor_snapshot_retains_clipped_gpu_pixels_and_old_font_packets() {
-        use nara_text::{TextEditor, TextWindowError};
-        use nara_ui_kernel::UiPreparedText;
+        use nara_ui::kernel::UiPreparedText;
+        use nara_ui::text::{TextEditor, TextWindowError};
 
         use crate::gpu::{
             quad::{
@@ -1357,7 +1359,7 @@ mod tests {
         const SCALE: f32 = 1.25;
         let primary = bundled_font_face().unwrap();
         let fallback = FontFace::from_bytes(
-            include_bytes!("../../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+            include_bytes!("../../../nara_ui/tests/text/fixtures/FiraMono-Medium.ttf").to_vec(),
             0,
         )
         .unwrap();
@@ -1851,7 +1853,7 @@ mod tests {
             .unwrap()
     }
 
-    fn compile_frame(namespace: &str, node: UiNode) -> Arc<nara_ui_kernel::UiFrame> {
+    fn compile_frame(namespace: &str, node: UiNode) -> Arc<nara_ui::kernel::UiFrame> {
         let snapshot = UiAuthoringSnapshotBuilder::new(1)
             .with_root(
                 UiRoot::new(

@@ -1,0 +1,32 @@
+[package]
+name = {package}
+version = "0.1.0"
+edition = {edition}
+rust-version = {rust_version}
+default-run = {game_binary}
+autobins = false
+
+[workspace]
+resolver = "3"
+
+[lib]
+name = "game_components"
+
+[features]
+desktop = ["nara/presentation-2d", "nara/desktop-winit", "nara/render-wgpu"]
+
+[dependencies]
+nara = {{ path = {checkout}, default-features = false, features = ["runtime-2d", "serde"] }}
+
+[[bin]]
+name = {game_binary}
+path = "src/main.rs"
+required-features = [{desktop_feature}]
+
+[[bin]]
+name = {schema_binary}
+path = "src/bin/nara_schema.rs"
+
+[patch.crates-io]
+wgpu = {{ git = {wgpu_git}, rev = {wgpu_rev} }}
+winit = {{ path = {winit_path} }}

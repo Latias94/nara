@@ -1,3 +1,9 @@
+//! ECS validation and guards for scene and persistence transactions.
+//!
+//! These APIs preflight the lifecycle effects of selected operations. Prepared guards retain
+//! exclusive access to the [`World`] until commit. Ordinary ECS operations use [`crate::bevy_ecs`]
+//! and its native lifecycle behavior.
+
 use std::{collections::BTreeSet, error::Error, fmt};
 
 use bevy_ecs::{
@@ -7,9 +13,19 @@ use bevy_ecs::{
     world::World,
 };
 
-use crate::__private::{
-    validate_entity_despawn, validate_entity_despawn_with_non_linked_relationship,
-    validate_non_linked_relationship_teardown, validate_persistent_component_apply,
+mod validation;
+
+use validation::validate_persistent_component_apply;
+pub use validation::{
+    PersistentComponentMetadataError, PersistentLifecycleEvent, PersistentObserverScope,
+    SceneComponentRequirements, register_persistent_component, validate_entity_despawn,
+    validate_entity_despawn_with_allowed_component_hooks,
+    validate_entity_despawn_with_claimed_component_hooks,
+    validate_entity_despawn_with_non_linked_relationship,
+    validate_non_linked_relationship_insertion, validate_non_linked_relationship_teardown,
+    validate_persistent_component_registration, validate_registered_component_metadata,
+    validate_registered_component_observers, validate_registered_persistent_component_apply,
+    validate_resource_insertion, validate_resource_scope,
 };
 
 /// Rejection while preparing an exclusive despawn with no lifecycle side effects.
@@ -72,8 +88,7 @@ pub fn prepare_lifecycle_free_despawn<'world, 'entities>(
 /// This function does not detach relationships or weaken the strict lifecycle-free despawn guard.
 /// The relationship owner must keep exclusive World access, apply its private prevalidated detach,
 /// and then use [`prepare_lifecycle_free_despawn`] for the final exact retirement set.
-#[doc(hidden)]
-pub(crate) fn validate_lifecycle_free_relationship_despawn<R>(
+pub fn validate_lifecycle_free_relationship_despawn<R>(
     world: &mut World,
     entities: &[Entity],
     relationship_targets: &[Entity],
@@ -194,7 +209,6 @@ impl LifecycleFreeInsertionPlan {
     }
 
     /// Revalidates an owned plan without consuming its component values.
-    #[doc(hidden)]
     pub fn validate(&self, world: &World) -> Result<(), LifecycleFreeInsertionError> {
         let mut identities = Vec::with_capacity(self.insertions.len());
         let mut unique = BTreeSet::new();
@@ -235,14 +249,12 @@ impl<'world> LifecycleFreeInsertion<'world> {
 
 impl<'world> LifecycleFreeDespawn<'world, '_> {
     /// Returns a read-only view while preserving the exclusive validation guard.
-    #[doc(hidden)]
     #[must_use]
     pub fn world(&self) -> &World {
         self.world
     }
 
     /// Cancels the transaction without despawning and returns the exclusive world borrow.
-    #[doc(hidden)]
     #[must_use]
     pub fn cancel(self) -> &'world mut World {
         self.world

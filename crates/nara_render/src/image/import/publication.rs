@@ -1,10 +1,13 @@
-use std::fmt::{self, Debug, Formatter};
+use std::{
+    fmt::{self, Debug, Formatter},
+    sync::Arc,
+};
 
 use nara_asset::{
     AssetEvents, AssetMutationBaseline, AssetRecord, AssetServer, AssetSourcePath, AssetStateError,
     AssetStates, AssetVersion, Assets, Handle, ImportRecipe, ImportedProductId, StableAssetId,
 };
-use nara_fs::ContentDigest;
+use nara_core::vfs::capabilities::ContentDigest;
 
 use crate::image::budget::{ImageImportCharge, ImageImportPixelLease, ImageImportReservation};
 use crate::image::limits::{ImageImportBudgetError, ImageImportMemoryPlan};
@@ -20,7 +23,7 @@ enum PreviousImageSlot {
     Vacant,
     Occupied {
         rgba_bytes: usize,
-        retained_pixels: Option<ImageImportPixelLease>,
+        retained_pixels: Option<Arc<ImageImportPixelLease>>,
     },
 }
 
@@ -29,7 +32,7 @@ impl PreviousImageSlot {
         match previous {
             Some(image) => Self::Occupied {
                 rgba_bytes: image.pixels().len(),
-                retained_pixels: image.shared_import_pixel_lease(),
+                retained_pixels: image.shared_retention_owner::<ImageImportPixelLease>(),
             },
             None => Self::Vacant,
         }
@@ -422,7 +425,7 @@ impl ImageImportedAsset {
             ImageImportPixelLease::from_publication(publication_reservation, rgba_bytes).map_err(
                 |_| ImageImportError::Publication(ImagePublicationFailureKind::TargetMismatch),
             )?;
-        if !image.try_attach_import_pixel_lease(retention) {
+        if !image.try_attach_retention_owner(retention) {
             return Err(ImageImportError::Publication(
                 ImagePublicationFailureKind::TargetMismatch,
             ));

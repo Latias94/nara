@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use nara_app::{
-    App, CoreStage, FixedTime, FixedUpdateSet, RuntimeAdmissionReservation, RuntimeClosePolicy,
+    App, CoreStage, FixedTime, FixedUpdateSet, RuntimeCandidate, RuntimeClosePolicy,
     RuntimeControl, RuntimeControlRequestResult, RuntimeInstance, RuntimeObligationLedger,
     RuntimeState,
 };
@@ -78,7 +78,7 @@ fn consume_enter_for_ui(mut timeline: ResMut<InputTimeline>) {
         .collect::<Vec<_>>();
     for sequence in consumed {
         timeline
-            .__finalize_ui_entry(sequence, nara_input::InputUiDisposition::Consumed)
+            .finalize_ui_entry(sequence, nara_input::InputUiDisposition::Consumed)
             .unwrap();
     }
 }
@@ -112,17 +112,15 @@ fn gameplay_action_map(binding: ActionBinding) -> ActionMap {
 }
 
 fn start_runtime(app: App) -> RuntimeInstance {
-    RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap()
-        .complete_startup()
-        .unwrap()
-        .promote()
+    RuntimeCandidate::admit(
+        app.seal().unwrap(),
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::default(),
+    )
+    .unwrap()
+    .complete_startup()
+    .unwrap()
+    .promote()
 }
 
 fn stop_runtime(runtime: &mut RuntimeInstance) {

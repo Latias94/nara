@@ -7,8 +7,8 @@ mod support;
 
 use std::fs;
 
-use nara::gameplay::{GameplayCommandKey, GameplayCommandSource, GameplayCommandTick};
 use support::{ProjectCopy, full_program};
+use two_level_game::command::{CommandKey, CommandSource, CommandTick};
 use two_level_game::{
     command::SemanticCommand,
     levels::{LevelId, LevelKey},
@@ -66,7 +66,7 @@ fn public_recording_round_trips_and_replays_the_complete_game_in_a_fresh_project
     assert_eq!(recording.steps.len(), 71);
     assert_eq!(recording.steps.len(), program.steps().len());
 
-    let expected_source = GameplayCommandSource::external("two-level-game.recording").unwrap();
+    let expected_source = CommandSource::external("two-level-game.recording").unwrap();
     let mut sequence = 0;
     let mut previous = initial;
     for (index, step) in recording.steps.iter().enumerate() {
@@ -491,8 +491,8 @@ fn noncontiguous_ticks_and_mismatched_capture_keys_are_refused_before_playback_s
     repeated.steps[1].tick = repeated.steps[0].tick;
     let mut mismatched = recording;
     let original = &mismatched.steps[0].commands[0].original;
-    mismatched.steps[0].commands[0].original = GameplayCommandKey::new(
-        GameplayCommandTick::new(2).unwrap(),
+    mismatched.steps[0].commands[0].original = CommandKey::new(
+        CommandTick::new(2).unwrap(),
         original.source().clone(),
         original.source_sequence(),
     );

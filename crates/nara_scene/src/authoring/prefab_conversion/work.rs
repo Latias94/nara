@@ -40,7 +40,7 @@ impl ConversionWork {
     ) -> Result<(), ScenePatchReport> {
         let next = bytes.and_then(|bytes| self.used.checked_add(bytes));
         let Some(next) = next.filter(|next| *next <= self.maximum) else {
-            let mut diagnostics = nara_diagnostic::DiagnosticReport::default();
+            let mut diagnostics = nara_core::diagnostic::DiagnosticReport::default();
             diagnostics.push(crate::diagnostics::with_public_locator(
                 crate::diagnostics::error(
                     "scene.authoring-prefab-conversion-copy-limit",

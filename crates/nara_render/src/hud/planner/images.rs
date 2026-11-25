@@ -6,9 +6,9 @@ use crate::RenderResourceKey;
 use crate::image::PreparedImageSnapshot;
 #[cfg(any(feature = "hud-runtime", test))]
 use crate::image::{ImageAsset, PreparedImages};
-use nara_ui_kernel::UiImageId;
+use nara_ui::kernel::UiImageId;
 #[cfg(any(feature = "hud-runtime", test))]
-use nara_ui_kernel::{UiFrame, UiPaintPrimitive, UiResolvedBrush};
+use nara_ui::kernel::{UiFrame, UiPaintPrimitive, UiResolvedBrush};
 
 #[derive(Debug, Default)]
 pub struct UiPreparedImages {

@@ -1,6 +1,6 @@
 # Collect Game
 
-A complete small public-API consumer created with `nara new desktop-2d/v1`.
+A complete small public-API consumer based on the authored `desktop-2d/v1` starter.
 The generated project owns its sources; the starter is not a runtime dependency.
 
 Move the blue gem with WASD and collect all three gold gems. The background turns
@@ -13,8 +13,6 @@ print to the console. No physics, audio or runtime UI package is required.
 From this directory, with the `nara` CLI available:
 
 ```text
-nara schema . --write
-nara schema . --check
 nara check .
 cargo run --bin headless
 cargo run --bin headless -- --verify-reset
@@ -60,14 +58,15 @@ with `CARGO_TARGET_DIR` and one build job when working in the repository.
 
 The independent workspace has `nara = { path = "../..", ... }` in its root
 manifest and `path = "../../.."` in the plugin manifest. An external project
-must retain the dependency coordinate selected by its own `nara new` call;
+must retain the dependency coordinate selected when publishing its starter;
 adjust the nested plugin's Nara coordinate to the same checkout. Do not copy
 these repository-relative paths unchanged into a different directory layout.
 
 Edit a gem's fractional `Collectible.radius` in `scenes/startup.scene.json` or the
 player's `PlayerConfig.speed` in `prefabs/player.prefab.json`. Both fields are `f32` in Rust
 and use F64 wire values in their version-2 records. Refresh the schema bundle after
-Rust schema changes and run `nara check .` after saving content.
+Rust schema changes by calling `nara::project_tooling::invoke_project_tool` with
+`ProjectToolRequest::Schema { write: true, .. }`. Run `nara check .` after saving content.
 
 Both custom components define literal creation templates. `PlayerConfig` starts
 with speed 240 and `Collectible` with radius 20.
@@ -83,11 +82,9 @@ restore the default.
 
 ## Export
 
-```text
-nara export . --parent .. --destination collect-candidate
-```
-
-The destination must be absent. Run its `bin/headless` and
+For a source-carrying candidate, call `nara::project_tooling::invoke_project_tool` with
+`ProjectToolRequest::Export`. Choose an existing output parent and a new destination name.
+Run the published `bin/headless` and
 `bin/desktop --verify-first-present` from an unrelated working directory; add
 `.exe` on Windows. Both resolve the sibling `project/` content tree. The image,
 player Prefab and scene are in the startup closure. The inactive variant is not

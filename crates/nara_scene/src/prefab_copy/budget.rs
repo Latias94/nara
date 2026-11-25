@@ -334,7 +334,7 @@ mod tests {
         PrefabInstance, PrefabReferenceArguments, SceneComponentRecord, SceneEntityRecord,
         SourceDocumentKey, SourceDocumentKind,
     };
-    use nara_identity::{AuthoredEntityReference, ReferenceInputId, SceneEntityId};
+    use nara_ecs::identity::{AuthoredEntityReference, ReferenceInputId, SceneEntityId};
     use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId};
 
     fn key() -> SourceDocumentKey {

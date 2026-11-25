@@ -348,7 +348,7 @@ fn geometry_loss_revokes_only_its_route_when_another_prepared_route_pins_identit
         )
         .unwrap();
     drain_unmapped_timeline(&mut timeline);
-    let prepared = prepare_presented_route(&mut timeline, route(3)).unwrap();
+    let prepared = timeline.prepare_presented_route(route(3)).unwrap();
     timeline.next_binding_generation = u64::MAX;
     timeline
         .admit_window_event(
@@ -370,7 +370,7 @@ fn geometry_loss_revokes_only_its_route_when_another_prepared_route_pins_identit
     assert!(!timeline.entries().last().unwrap().route().is_ui_routable());
     assert!(
         matches!(
-            commit_presented_route(&mut timeline, prepared),
+            timeline.commit_presented_route(prepared),
             InputRouteCommit::Published(_)
         ),
         "another endpoint's prepared publication remains valid"

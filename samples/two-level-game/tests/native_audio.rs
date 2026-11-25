@@ -290,16 +290,14 @@ fn run_verifier(project: Option<&Path>, backend: &str) -> VerificationProcess {
             timed_out = now >= deadline;
             termination_started = Some(now);
             if let Err(error) = process.request_terminate(now) {
-                std::mem::forget(process);
-                panic!(
-                    "original native audio child retains unresolved process custody after termination failed: {error}"
-                );
+                drop(process);
+                panic!("termination of the original native audio child failed: {error}");
             }
         }
         if termination_started.is_some_and(|started| now >= started + Duration::from_secs(15)) {
-            std::mem::forget(process);
+            drop(process);
             panic!(
-                "original native audio child still retains incomplete containment or output-reader cleanup"
+                "original native audio child did not complete containment or output-reader cleanup"
             );
         }
         thread::sleep(Duration::from_millis(10));

@@ -45,6 +45,8 @@ pub struct ExtractedSprite {
     pub world_y_axis: Vec2,
     pub color: Color,
     pub layer: i32,
+    /// Scene depth added to the authored layer for painter ordering.
+    pub world_z: f32,
     pub sort_key: i32,
     pub world_sort_y: f32,
 }
@@ -197,6 +199,7 @@ pub struct QueuedSpriteItem {
     pub target: RenderTarget,
     pub kind: SpriteBatchKind,
     pub layer: i32,
+    pub world_z: f32,
     pub sort_key: i32,
     pub world_sort_y: f32,
     pub material: SpriteMaterialKey,

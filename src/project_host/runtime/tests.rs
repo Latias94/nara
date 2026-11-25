@@ -21,36 +21,34 @@ use std::{
 #[cfg(windows)]
 use std::fs::OpenOptions;
 
+use crate::fs::{
+    CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
+};
+use nara_app::tasks::{
+    TASK_PLUGIN_ID, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest,
+};
 use nara_app::{
     App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
     PluginDomainError, PluginError, PluginId, PluginInstantiationError, PluginPrepareError,
-    PluginShutdownContext, PluginShutdownObligationId, RuntimeAdmissionReservation,
-    RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
-    RuntimeCloseParticipantId, RuntimeCloseProgress, RuntimeConstructionError, RuntimeFault,
-    RuntimeFaultDetail, RuntimeFaultKind, RuntimeFaultReporter, StartupStage,
-    drive_runtime_quarantine, runtime_quarantine_status,
+    PluginShutdownContext, PluginShutdownObligationId, RuntimeCloseContext,
+    RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
+    RuntimeCloseProgress, RuntimeConstructionError, RuntimeFault, RuntimeFaultDetail,
+    RuntimeFaultKind, RuntimeFaultReporter, StartupStage,
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use nara_app::{RuntimeControl, RuntimeControlRequestResult};
 use nara_asset::{
     AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, Assets, StableAssetId,
 };
-use nara_diagnostic::DiagnosticValueRef;
+use nara_core::diagnostic::DiagnosticValueRef;
+use nara_ecs::identity::{EntityLookup, WorldIdentityDomain};
 use nara_ecs::{Res, Resource, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs};
-use nara_fs::{
-    CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
-};
-use nara_gameplay::{GameplayCommandPlugin, GameplayCommandQueue};
-use nara_identity::{EntityLookup, WorldIdentityDomain};
 use nara_reflect::{
     AuthoringSchemaBundle, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue,
 };
 use nara_render::image::{ImageAsset, ImageImportSettings};
 use nara_scene::{CompiledSceneDocument, SceneComponentRecord, SceneDocument, SceneEntityRecord};
-use nara_tasks::{
-    TASK_PLUGIN_ID, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest,
-};
 
 use crate::project_content::{
     ProjectContentBudgetKind, ProjectContentLimits, ProjectContentLoader,
@@ -97,12 +95,6 @@ const FINISH_FAILURE_DEFINITION_ID: PluginDefinitionId =
     PluginDefinitionId::new("nara.test.project-finish-failure", 1);
 const FINISH_FAILURE_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(FINISH_FAILURE_PLUGIN_ID, PluginCategory::Runtime)
-        .requires_plugins(&[CLOSE_PROBE_PLUGIN_ID]);
-const COMMAND_FAILURE_PLUGIN_ID: PluginId = PluginId::new("nara.test.project-command-failure");
-const COMMAND_FAILURE_DEFINITION_ID: PluginDefinitionId =
-    PluginDefinitionId::new("nara.test.project-command-failure", 1);
-const COMMAND_FAILURE_DECLARATION: PluginDeclaration =
-    PluginDeclaration::new(COMMAND_FAILURE_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(&[CLOSE_PROBE_PLUGIN_ID]);
 const ADMISSION_SCOPE_FAILURE_PLUGIN_ID: PluginId =
     PluginId::new("nara.test.project-admission-scope-failure");
@@ -286,24 +278,6 @@ impl Plugin for FinishFailurePlugin {
 
     fn finish(&self, _app: &mut App) -> Result<(), PluginError> {
         Err(plugin_probe_error(FINISH_FAILURE_PLUGIN_ID))
-    }
-}
-
-#[derive(Debug, Default)]
-struct CommandFailurePlugin;
-
-impl Plugin for CommandFailurePlugin {
-    fn declaration() -> &'static PluginDeclaration {
-        &COMMAND_FAILURE_DECLARATION
-    }
-
-    fn build(&self, _app: &mut App) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    fn finish(&self, app: &mut App) -> Result<(), PluginError> {
-        app.world_mut()?.remove_resource::<GameplayCommandQueue>();
-        Ok(())
     }
 }
 
@@ -610,7 +584,7 @@ fn project_host_rejects_a_runtime_plan_from_another_project_lineage() {
     let (_second_snapshot, second_plan) = second.snapshot_and_plan(false);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
 
-    let Err(error) = host.begin_start(first_snapshot, second_plan, Vec::new()) else {
+    let Err(error) = host.begin_start(first_snapshot, second_plan) else {
         panic!("cross-lineage start unexpectedly succeeded");
     };
 
@@ -642,7 +616,7 @@ fn project_host_rejects_content_without_runtime_schema_agreement() {
         .unwrap();
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
 
-    let Err(error) = host.begin_start(snapshot, plan, Vec::new()) else {
+    let Err(error) = host.begin_start(snapshot, plan) else {
         panic!("runtime content without schema agreement unexpectedly started");
     };
 
@@ -665,7 +639,7 @@ fn project_host_rejects_a_different_schema_plan_from_the_same_lineage() {
     );
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
 
-    let Err(error) = host.begin_start(snapshot.clone(), reduced_plan, Vec::new()) else {
+    let Err(error) = host.begin_start(snapshot.clone(), reduced_plan) else {
         panic!("cross-schema start unexpectedly succeeded");
     };
 
@@ -687,7 +661,7 @@ fn project_host_rejects_a_different_schema_plan_from_the_same_lineage() {
             .snapshot()
             .ptr_eq(equivalent_plan.schema_validation().snapshot())
     );
-    let Err(error) = host.begin_start(snapshot, equivalent_plan, Vec::new()) else {
+    let Err(error) = host.begin_start(snapshot, equivalent_plan) else {
         panic!("equal but independently constructed schema authority unexpectedly succeeded");
     };
     assert_eq!(
@@ -705,9 +679,7 @@ fn sequential_starts_share_immutable_authority_and_rebuild_runtime_sessions() {
     let stable_plan = plan.plugin_plan().fingerprint();
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
 
-    let mut first_attempt = host
-        .begin_start(snapshot.clone(), plan.clone(), Vec::new())
-        .unwrap();
+    let mut first_attempt = host.begin_start(snapshot.clone(), plan.clone()).unwrap();
     assert!(host.start_claim.is_active(first_attempt.epoch));
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
     let diagnostics = host.complete_start(&mut first_attempt).unwrap();
@@ -715,7 +687,7 @@ fn sequential_starts_share_immutable_authority_and_rebuild_runtime_sessions() {
     let first = running_owner_identity(&host);
     close_host(&mut host);
 
-    let mut second_attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut second_attempt = host.begin_start(snapshot, plan).unwrap();
     assert!(host.start_claim.is_active(second_attempt.epoch));
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
     let diagnostics = host.complete_start(&mut second_attempt).unwrap();
@@ -747,7 +719,7 @@ fn bundled_startup_activation_shares_the_spawned_source_and_resolves_its_receipt
         .collect::<Vec<_>>();
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
 
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     host.complete_start(&mut attempt).unwrap();
 
     let ProjectHostSlot::Running(published) = &host.slot else {
@@ -778,7 +750,7 @@ fn product_dependents_observe_the_promoted_startup_activation() {
         project.snapshot_and_plan_with_plugin(activation_probe_definition(&observations));
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
 
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     host.complete_start(&mut attempt).unwrap();
 
     assert_eq!(observations.load(Ordering::SeqCst), 1);
@@ -791,7 +763,7 @@ fn classified_product_startup_failure_preserves_detail_and_prevents_publication(
     let (snapshot, plan) =
         project.snapshot_and_plan_with_plugin(classified_startup_failure_definition());
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
 
     let error = host.complete_start(&mut attempt).unwrap_err();
 
@@ -817,39 +789,6 @@ fn classified_product_startup_failure_preserves_detail_and_prevents_publication(
 }
 
 #[test]
-fn route_capacity_rejection_keeps_the_same_project_start_attempt_retryable() {
-    let mut reservations = Vec::new();
-    while let Ok(reservation) = RuntimeAdmissionReservation::try_acquire() {
-        reservations.push(reservation);
-    }
-    assert!(reservations.len() >= 131);
-
-    let project = TestProject::new("runtime-route-capacity");
-    let (snapshot, plan) = project.snapshot_and_plan(false);
-    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
-
-    let error = host.complete_start(&mut attempt).unwrap_err();
-    assert_eq!(
-        first_code(&error.diagnostics),
-        "project.run.runtime-capacity-exhausted"
-    );
-    assert!(attempt.inputs.is_some());
-    assert!(host.start_claim.is_active(attempt.epoch));
-    assert!(matches!(host.slot, ProjectHostSlot::Empty));
-
-    drop(
-        reservations
-            .pop()
-            .expect("saturated route capacity has one releasable reservation"),
-    );
-    let diagnostics = host.complete_start(&mut attempt).unwrap();
-    assert!(!diagnostics.has_errors());
-    close_host(&mut host);
-    drop(reservations);
-}
-
-#[test]
 fn project_host_publishes_snapshot_images_without_copying_the_retained_pixels() {
     let project = TestProject::with_image("image-publication");
     let (snapshot, plan) = project.snapshot_and_plan(false);
@@ -858,7 +797,7 @@ fn project_host_publishes_snapshot_images_without_copying_the_retained_pixels() 
     let snapshot_source = snapshot.images()[0].source().clone();
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
 
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     host.complete_start(&mut attempt).unwrap();
 
     {
@@ -889,7 +828,7 @@ fn published_host_keeps_only_live_content_and_residency_owners() {
     let budget = loader.budget_host();
     assert_eq!(budget.snapshot().active_reservations(), 2);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
 
     host.complete_start(&mut attempt).unwrap();
 
@@ -930,9 +869,9 @@ fn concurrent_starts_share_immutable_content_but_isolate_every_runtime_owner() {
     let mut first_host = ProjectHost::new(RuntimeClosePolicy::default());
     let mut second_host = ProjectHost::new(RuntimeClosePolicy::default());
     let mut first_attempt = first_host
-        .begin_start(snapshot.clone(), plan.clone(), Vec::new())
+        .begin_start(snapshot.clone(), plan.clone())
         .unwrap();
-    let mut second_attempt = second_host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut second_attempt = second_host.begin_start(snapshot, plan).unwrap();
     first_host.complete_start(&mut first_attempt).unwrap();
     second_host.complete_start(&mut second_attempt).unwrap();
 
@@ -941,7 +880,6 @@ fn concurrent_starts_share_immutable_content_but_isolate_every_runtime_owner() {
 
     assert_ne!(first.generation, second.generation);
     assert_ne!(first.world, second.world);
-    assert_ne!(first.command_queue, second.command_queue);
     assert_ne!(first.fixed_time, second.fixed_time);
     assert_ne!(first.task_pools, second.task_pools);
     assert_ne!(first.service_session, second.service_session);
@@ -963,9 +901,9 @@ fn start_attempts_are_bound_to_one_host_and_remain_usable_after_foreign_rejectio
     let mut first_host = ProjectHost::new(RuntimeClosePolicy::default());
     let mut second_host = ProjectHost::new(RuntimeClosePolicy::default());
     let mut first_attempt = first_host
-        .begin_start(snapshot.clone(), plan.clone(), Vec::new())
+        .begin_start(snapshot.clone(), plan.clone())
         .unwrap();
-    let mut second_attempt = second_host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut second_attempt = second_host.begin_start(snapshot, plan).unwrap();
 
     let error = second_host.complete_start(&mut first_attempt).unwrap_err();
 
@@ -986,15 +924,13 @@ fn dropping_an_unclaimed_attempt_releases_the_host_start_slot() {
     let project = TestProject::new("cancelled-attempt");
     let (snapshot, plan) = project.snapshot_and_plan(false);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let attempt = host
-        .begin_start(snapshot.clone(), plan.clone(), Vec::new())
-        .unwrap();
+    let attempt = host.begin_start(snapshot.clone(), plan.clone()).unwrap();
     let cancelled_epoch = attempt.epoch;
 
     drop(attempt);
 
     assert!(!host.start_claim.is_active(cancelled_epoch));
-    let mut replacement = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut replacement = host.begin_start(snapshot, plan).unwrap();
     assert_ne!(replacement.epoch, cancelled_epoch);
     host.complete_start(&mut replacement).unwrap();
     close_host(&mut host);
@@ -1005,7 +941,7 @@ fn product_tick_uses_one_exact_step() {
     let project = TestProject::new("exact-step");
     let (snapshot, plan) = project.snapshot_and_plan(false);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     host.complete_start(&mut attempt).unwrap();
     let ProjectHostSlot::Running(published) = &mut host.slot else {
         panic!("runtime was not published");
@@ -1039,8 +975,7 @@ fn prepared_publication_unwind_keeps_the_host_slot_empty() {
     let project = TestProject::new("publication-reservation-unwind");
     let (snapshot, plan) = project.snapshot_and_plan(false);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
-    let retained_before = runtime_quarantine_status().current_thread_retained();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
 
     let unwound = catch_unwind(AssertUnwindSafe(|| {
         let _prepared = host.prepare_start(&mut attempt).unwrap();
@@ -1050,17 +985,6 @@ fn prepared_publication_unwind_keeps_the_host_slot_empty() {
     assert!(unwound.is_err());
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
     assert!(!host.start_claim.any_active());
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while runtime_quarantine_status().current_thread_retained() > retained_before
-        && std::time::Instant::now() < deadline
-    {
-        let _ = drive_runtime_quarantine();
-        std::thread::yield_now();
-    }
-    assert_eq!(
-        runtime_quarantine_status().current_thread_retained(),
-        retained_before
-    );
 }
 
 #[test]
@@ -1075,9 +999,7 @@ fn reported_execution_fault_is_not_reemitted_by_runtime_retirement() {
         let project = TestProject::new("reported-execution-fault-retirement");
         let (snapshot, plan) = project.snapshot_and_plan(false);
         let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-        let mut attempt = host
-            .begin_start(snapshot.clone(), plan.clone(), Vec::new())
-            .unwrap();
+        let mut attempt = host.begin_start(snapshot.clone(), plan.clone()).unwrap();
         host.complete_start(&mut attempt).unwrap();
         let fault = RuntimeFault::engine(
             RuntimeFaultKind::System,
@@ -1109,7 +1031,7 @@ fn reported_execution_fault_is_not_reemitted_by_runtime_retirement() {
         );
 
         // Identical fault metadata in a successor is still a new, undelivered execution fault.
-        let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+        let mut attempt = host.begin_start(snapshot, plan).unwrap();
         host.complete_start(&mut attempt).unwrap();
         assert!(
             host.running_runtime_mut()
@@ -1159,7 +1081,7 @@ fn reported_execution_fault_does_not_suppress_terminal_cleanup_failures() {
         close_failure_definition(&control, false, true),
     );
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     attempt
         .inputs
         .as_mut()
@@ -1227,7 +1149,7 @@ fn runtime_retirement_reports_a_fault_first_raised_during_cleanup() {
         close_failure_definition(&control, true, false),
     );
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     host.complete_start(&mut attempt).unwrap();
     assert!(host.running_runtime_mut().unwrap().fault().is_none());
 
@@ -1248,7 +1170,7 @@ fn outcome_capture_delivers_typed_fault_metadata_before_retirement() {
     let project = TestProject::new("outcome-fault-delivery");
     let (snapshot, plan) = project.snapshot_and_plan(false);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     host.complete_start(&mut attempt).unwrap();
     host.drive_one_frame(Duration::ZERO).unwrap();
     let detail = nara_app::RuntimeFaultDetail::new(
@@ -1296,7 +1218,7 @@ fn close_time_runtime_fault_cannot_complete_the_product_run() {
                 close_failure_definition(&control, true, fail_shutdown),
             );
             let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-            let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+            let mut attempt = host.begin_start(snapshot, plan).unwrap();
             host.complete_start(&mut attempt).unwrap();
 
             let failure = host.stop_running().unwrap_err();
@@ -1357,7 +1279,7 @@ fn delayed_cleanup_preserves_plugin_shutdown_failure_until_terminal_result() {
         close_failure_definition(&control, false, true),
     );
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     host.complete_start(&mut attempt).unwrap();
 
     let failure = host.stop_running().unwrap_err();
@@ -1391,7 +1313,7 @@ fn desktop_host_preserves_real_close_evidence_until_retry_finishes() {
     );
     let close_timeout = Duration::from_millis(50);
     let mut host = ProjectHost::new(RuntimeClosePolicy::new(close_timeout));
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     host.complete_start(&mut attempt).unwrap();
 
     {
@@ -1502,7 +1424,7 @@ fn desktop_recipe_facade_reports_startup_failure_before_opening_a_window() {
 }
 
 #[test]
-fn startup_panic_releases_the_host_claim_and_quarantines_the_runtime_owner() {
+fn startup_panic_releases_the_host_claim() {
     let project = TestProject::new("startup-panic-claim");
     let (snapshot, plan) = project.snapshot_and_fault_plan(
         close_probe_definition(
@@ -1512,8 +1434,7 @@ fn startup_panic_releases_the_host_claim_and_quarantines_the_runtime_owner() {
         panic_startup_definition(),
     );
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
-    let retained_before = runtime_quarantine_status().process_retained();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
 
     let unwound = catch_unwind(AssertUnwindSafe(|| {
         let _ = host.complete_start(&mut attempt);
@@ -1522,17 +1443,6 @@ fn startup_panic_releases_the_host_claim_and_quarantines_the_runtime_owner() {
     assert!(unwound.is_err());
     assert!(!host.start_claim.any_active());
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while runtime_quarantine_status().process_retained() > retained_before
-        && std::time::Instant::now() < deadline
-    {
-        let _ = drive_runtime_quarantine();
-        std::thread::yield_now();
-    }
-    assert_eq!(
-        runtime_quarantine_status().process_retained(),
-        retained_before
-    );
 }
 
 #[test]
@@ -1693,16 +1603,6 @@ fn every_start_phase_failure_keeps_runtime_invisible_and_closes_acquired_owners_
     );
     assert_start_phase_failure(
         &project,
-        PluginDefinition::infallible::<CommandFailurePlugin, _>(
-            COMMAND_FAILURE_DEFINITION_ID,
-            b"project-command-failure-v1",
-            CommandFailurePlugin::default,
-        ),
-        "project.run.command-queue-missing",
-        1,
-    );
-    assert_start_phase_failure(
-        &project,
         PluginDefinition::infallible::<StartupFailurePlugin, _>(
             STARTUP_FAILURE_DEFINITION_ID,
             b"project-startup-failure-v1",
@@ -1850,7 +1750,7 @@ fn a_fault_winning_the_publish_lock_is_retired_without_becoming_visible() {
     let (snapshot, plan) =
         project.snapshot_and_plan_with_plugin(close_probe_definition(&builds, &closes));
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     arm_publication_fault_for_test();
 
     let error = host.complete_start(&mut attempt).unwrap_err();
@@ -1872,7 +1772,7 @@ fn admission_scope_failure_before_materialization_is_reported_without_panicking(
     let (snapshot, plan) =
         project.snapshot_and_plan_with_plugin(admission_scope_failure_definition());
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
 
     let error = host.complete_start(&mut attempt).unwrap_err();
 
@@ -1890,7 +1790,7 @@ fn duplicate_completion_rejects_without_disturbing_the_published_runtime() {
     let project = TestProject::new("duplicate-publication");
     let (snapshot, plan) = project.snapshot_and_plan(false);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     host.complete_start(&mut attempt).unwrap();
     let generation = running_generation(&host);
 
@@ -1917,7 +1817,7 @@ fn real_task_shutdown_retains_the_host_epoch_and_owner_until_later_drives_comple
     let replacement_snapshot = snapshot.clone();
     let replacement_plan = plan.clone();
     let mut host = ProjectHost::new(RuntimeClosePolicy::new(Duration::ZERO));
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     let epoch = attempt.epoch;
     host.complete_start(&mut attempt).unwrap();
     let first_generation = running_generation(&host);
@@ -1951,14 +1851,11 @@ fn real_task_shutdown_retains_the_host_epoch_and_owner_until_later_drives_comple
     );
     assert_eq!(control.instances.load(Ordering::SeqCst), 1);
 
-    let replacement_error = match host.begin_start(
-        replacement_snapshot.clone(),
-        replacement_plan.clone(),
-        Vec::new(),
-    ) {
-        Ok(_) => panic!("a Host with an incomplete retirement must reject replacement"),
-        Err(error) => error,
-    };
+    let replacement_error =
+        match host.begin_start(replacement_snapshot.clone(), replacement_plan.clone()) {
+            Ok(_) => panic!("a Host with an incomplete retirement must reject replacement"),
+            Err(error) => error,
+        };
     assert_eq!(
         first_code(&replacement_error.diagnostics),
         "project.run.busy"
@@ -1972,7 +1869,7 @@ fn real_task_shutdown_retains_the_host_epoch_and_owner_until_later_drives_comple
     assert!(!host.start_claim.any_active());
 
     let mut replacement = host
-        .begin_start(replacement_snapshot, replacement_plan, Vec::new())
+        .begin_start(replacement_snapshot, replacement_plan)
         .unwrap();
     host.complete_start(&mut replacement).unwrap();
     assert_ne!(running_generation(&host), first_generation);
@@ -1988,13 +1885,12 @@ fn assert_start_phase_failure(
     expected_code: &str,
     expected_probe_builds: usize,
 ) -> DiagnosticReport {
-    let retained_before = runtime_quarantine_status().process_retained();
     let builds = Arc::new(AtomicUsize::new(0));
     let closes = Arc::new(AtomicUsize::new(0));
     let (snapshot, plan) =
         project.snapshot_and_fault_plan(close_probe_definition(&builds, &closes), failure);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
 
     let error = host.complete_start(&mut attempt).unwrap_err();
     let actual_code = first_code(&error.diagnostics).to_owned();
@@ -2005,7 +1901,6 @@ fn assert_start_phase_failure(
     let actual_closes = closes.load(Ordering::SeqCst);
     let redundant_cleanup = host.drive_cleanup_once();
     let closes_after_redundant_cleanup = closes.load(Ordering::SeqCst);
-    let retained_after = runtime_quarantine_status().process_retained();
 
     assert_eq!(actual_code, expected_code);
     assert!(!claim_remained_active);
@@ -2017,10 +1912,6 @@ fn assert_start_phase_failure(
         CleanupDriveOutcome::Complete { failed: false, .. }
     ));
     assert_eq!(closes_after_redundant_cleanup, expected_probe_builds);
-    assert_eq!(
-        retained_after, retained_before,
-        "a start-phase failure retained a runtime owner after Host cleanup"
-    );
     error.diagnostics.clone()
 }
 
@@ -2117,7 +2008,6 @@ fn running_generation(host: &ProjectHost) -> u64 {
 struct RunningOwnerIdentity {
     generation: u64,
     world: usize,
-    command_queue: usize,
     fixed_time: usize,
     task_pools: usize,
     service_session: u64,
@@ -2135,8 +2025,6 @@ fn running_owner_identity(host: &ProjectHost) -> RunningOwnerIdentity {
     RunningOwnerIdentity {
         generation: published.runtime().generation().get(),
         world: world as *const World as usize,
-        command_queue: world.resource::<GameplayCommandQueue>() as *const GameplayCommandQueue
-            as usize,
         fixed_time: world.resource::<nara_app::FixedTime>() as *const nara_app::FixedTime as usize,
         task_pools: world.resource::<TaskPools>() as *const TaskPools as usize,
         service_session: world.resource::<RuntimeServiceSessionId>().0,
@@ -2282,15 +2170,16 @@ requested = ["runtime-2d"]
         fs::create_dir_all(project.root.join("assets/textures")).unwrap();
 
         let image = AssetRef::path("textures/player.png").unwrap();
-        let entity = SceneEntityRecord::new(nara_identity::SceneEntityId::new("player").unwrap())
-            .with_component(
-                ComponentTypeId::new("nara.transform.Transform2d"),
-                identity_transform_record(),
-            )
-            .with_component(
-                ComponentTypeId::new("nara.sprite.Sprite"),
-                SceneComponentRecord::new(ComponentSchemaVersion::ONE, sprite_value(&image)),
-            );
+        let entity =
+            SceneEntityRecord::new(nara_ecs::identity::SceneEntityId::new("player").unwrap())
+                .with_component(
+                    ComponentTypeId::new("nara.transform.Transform2d"),
+                    identity_transform_record(),
+                )
+                .with_component(
+                    ComponentTypeId::new("nara.sprite.Sprite"),
+                    SceneComponentRecord::new(ComponentSchemaVersion::ONE, sprite_value(&image)),
+                );
         fs::write(
             project.root.join("scenes/startup.scene.json"),
             SceneDocument::from_ordered_roots([entity])
@@ -2371,7 +2260,7 @@ requested = ["runtime-2d"]
         let candidate = ingest_project_manifest(&manifest, None).unwrap();
         drop(manifest);
         let request =
-            project_runtime_plugins(&candidate).insert_after::<GameplayCommandPlugin>(definition);
+            project_runtime_plugins(&candidate).insert_after::<nara_asset::AssetPlugin>(definition);
         let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
         let loader = ProjectContentLoader::new(root).unwrap();
         let snapshot = load_runtime_snapshot(&loader, &candidate, &plan);
@@ -2394,7 +2283,7 @@ requested = ["runtime-2d"]
         let candidate = ingest_project_manifest(&manifest, None).unwrap();
         drop(manifest);
         let request = project_runtime_plugins(&candidate)
-            .insert_after::<GameplayCommandPlugin>(probe)
+            .insert_after::<nara_asset::AssetPlugin>(probe)
             .insert_after::<CloseProbePlugin>(failure);
         let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
         let loader = ProjectContentLoader::new(root).unwrap();

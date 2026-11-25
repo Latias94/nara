@@ -1,5 +1,5 @@
 use nara_asset::{AssetProductRef, AssetSourcePath, ImportedProductId, StableAssetId};
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, ReferenceInputId,
 };
 use nara_reflect::{
@@ -12,13 +12,12 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    __private::AuthoringAdapterReceipt, PrefabAddition, PrefabComponentIntent,
-    PrefabComponentSetMode, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance,
-    PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPropertyClaim,
-    PrefabPropertyIntent, PrefabReferenceArguments, ResolvedPrefabSource,
+    PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityOrigin,
+    PrefabEntityTarget, PrefabInstance, PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay,
+    PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceArguments, ResolvedPrefabSource,
     SceneCompilationFailureKind, SceneComponentRecord, SceneDocument, SceneEntityId,
     SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
-    ScenePlacementSlot, SourceDocumentOrigin,
+    ScenePlacementSlot, SourceDocumentOrigin, authoring::AuthoringAdapterReceipt,
 };
 
 #[path = "tests/inline.rs"]

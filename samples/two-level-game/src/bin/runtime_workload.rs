@@ -354,16 +354,14 @@ impl Experiment {
 
 impl Drop for Experiment {
     fn drop(&mut self) {
-        if let Some(run) = self.run.take()
+        if let Some(run) = &self.run
             && !matches!(
                 run.progress(),
                 DesktopRunProgress::Completed(_) | DesktopRunProgress::Failed
             )
         {
-            std::mem::forget(run);
-            std::mem::forget(self.project.take());
             eprintln!(
-                "runtime_workload: original unresolved native owner retained until process exit"
+                "runtime_workload: explicit retirement of the original native run is incomplete"
             );
         }
     }
@@ -425,9 +423,8 @@ fn run_one(
                 control
             })) {
                 Ok(control) => control,
-                Err(payload) => {
+                Err(_) => {
                     callback_panicked.set(true);
-                    std::mem::forget(payload);
                     DesktopPresentationControl::Exit(AppExit::Requested)
                 }
             }

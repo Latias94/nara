@@ -1,15 +1,18 @@
 use std::collections::BTreeMap;
 
-use nara_ecs::{
-    __private::LifecycleFreeDespawnError, Entity, World, bevy_ecs::entity::EntityHashSet,
+use crate::hierarchy::{
+    HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
+    retirement_operations, validate_retirement_despawn,
 };
-use nara_hierarchy::{
-    __private::{retirement_operations, validate_retirement_despawn},
-    Children, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
-    Parent,
+use nara_ecs::{
+    Entity, World, bevy_ecs::entity::EntityHashSet, transaction::LifecycleFreeDespawnError,
 };
 
-use crate::{SceneEntityId, validation::PreparedScene};
+use crate::{
+    SceneEntityId,
+    spatial::{ChildOf, Children},
+    validation::PreparedScene,
+};
 
 #[derive(Debug)]
 pub(crate) struct SceneHierarchyRetirementError;
@@ -46,6 +49,13 @@ impl PreparedSceneEntityRetirement {
     }
 
     pub(crate) fn commit(self, world: &mut World) {
+        // The hierarchy batch must release every linked relationship before exact despawn.
+        assert!(
+            self.entities.iter().all(|&entity| {
+                world.get::<ChildOf>(entity).is_none() && world.get::<Children>(entity).is_none()
+            }),
+            "scene retirement must detach native hierarchy relationships before despawn"
+        );
         for entity in self.entities {
             // The enclosing exclusive Scene kernel performs no lifecycle registration or entity
             // mutation between preparation and this exact retirement.
@@ -60,7 +70,7 @@ pub(crate) fn validate_scene_entity_retirement_admission(
     hierarchy: &PreparedSceneHierarchyRetirement,
     claimed_component_ids: &[nara_ecs::bevy_ecs::component::ComponentId],
 ) -> Result<(), LifecycleFreeDespawnError> {
-    nara_hierarchy::__private::validate_retirement_despawn_with_claimed_components(
+    crate::hierarchy::validate_retirement_despawn_with_claimed_components(
         world,
         entities,
         hierarchy.affected_entities(),
@@ -80,7 +90,7 @@ pub(crate) fn prepare_scene_hierarchy_retirement(
         .iter()
         .copied()
         .filter(|entity| {
-            world.get::<Parent>(*entity).is_some()
+            world.get::<ChildOf>(*entity).is_some()
                 || world.get::<Children>(*entity).is_some()
                 || roots.is_some_and(|roots| roots.contains(*entity))
         })
@@ -90,13 +100,11 @@ pub(crate) fn prepare_scene_hierarchy_retirement(
     let mut affected_entities = Vec::new();
     for entity in structural_retirements {
         affected_entities.push(entity);
-        if let Some(parent) = world.get::<Parent>(entity).map(Parent::parent) {
+        if let Some(parent) = world.get::<ChildOf>(entity).map(ChildOf::parent) {
             affected_entities.push(parent);
         }
         if let Some(children) = world.get::<Children>(entity) {
-            for child in children.iter() {
-                affected_entities.push(child);
-            }
+            affected_entities.extend(children.iter().copied());
         }
     }
     affected_entities.sort_unstable_by_key(|entity| entity.to_bits());

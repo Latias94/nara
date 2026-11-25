@@ -1,11 +1,11 @@
 //! Compatibility cases for the existing tagged wire and untagged payload classification.
 mod scalars;
 
-use nara_identity::{
-    AssetSourcePath, AuthoredEntityReference, AuthoredReferenceTarget, EntityReference,
-    PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
-    PrefabEntityOrigin, PrefabInstanceHop, ReferenceInputId, SceneEntityId, SourceDocumentKey,
-    SourceDocumentKind, StableAssetId,
+use nara_core::source::{AssetSourcePath, SourceDocumentKey, SourceDocumentKind, StableAssetId};
+use nara_ecs::identity::{
+    AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, PersistentRuntimeId,
+    PersistentRuntimeNamespaceId, PersistentRuntimeReference, PrefabEntityOrigin,
+    PrefabInstanceHop, ReferenceInputId, SceneEntityId,
 };
 use serde::Deserialize;
 

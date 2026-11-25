@@ -1,8 +1,8 @@
 use std::{collections::BTreeMap, error::Error, fmt, mem::size_of, sync::Arc};
 
 use nara_core::{ByteLimit, ItemLimit};
+use nara_ecs::identity::{SceneInstanceId, SpawnedSceneInstance, WorldIdentityDomainId};
 use nara_ecs::{Resource, World, bevy_ecs::world::WorldId};
-use nara_identity::{SceneInstanceId, SpawnedSceneInstance, WorldIdentityDomainId};
 
 use crate::{SourceDocumentKey, provenance::provenance_string_bytes};
 
@@ -165,19 +165,18 @@ pub(crate) fn occurrence_for_instance<'a>(
 
 /// Checks whether both Scene and Identity retirement already completed for a retained receipt.
 #[cfg(feature = "serde")]
-#[doc(hidden)]
 #[must_use]
 pub fn scene_instance_retired(world: &World, receipt: &SpawnedSceneInstance) -> bool {
     matches!(
         occurrence_for_instance(world, receipt),
         Err(OccurrenceError::Missing)
     ) && world
-        .get_resource::<nara_identity::WorldIdentityDomain>()
+        .get_resource::<nara_ecs::identity::WorldIdentityDomain>()
         .is_some_and(|domain| {
             domain.id() == receipt.domain_id()
                 && matches!(
                     domain.active_scene_instance(world, receipt.instance_id()),
-                    Err(nara_identity::IdentityDomainError::SceneInstanceNotActive { .. })
+                    Err(nara_ecs::identity::IdentityDomainError::SceneInstanceNotActive { .. })
                 )
         })
 }
@@ -350,7 +349,7 @@ impl PreparedSceneOccurrence {
             return Err(OccurrenceError::Budget);
         }
         if state.is_none() {
-            nara_ecs::__private::validate_resource_insertion::<ActiveSceneOccurrences>(world)
+            nara_ecs::transaction::validate_resource_insertion::<ActiveSceneOccurrences>(world)
                 .map_err(|_| OccurrenceError::Lifecycle)?;
         }
         Ok(())

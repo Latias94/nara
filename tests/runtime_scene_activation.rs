@@ -12,8 +12,8 @@ use nara::{
         restart_current_scene_with_product,
     },
     app::{
-        App, CoreStage, RuntimeAdmissionReservation, RuntimeCandidateRetirementState,
-        RuntimeClosePolicy, RuntimeObligationLedger,
+        App, CoreStage, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeClosePolicy,
+        RuntimeObligationLedger,
     },
     asset::{AssetPathScope, ProjectAssetDatabase},
     core::{ByteLimit, ItemLimit},
@@ -224,14 +224,12 @@ fn with_current_runtime_scene(
         }
     })
     .unwrap();
-    let mut candidate = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
+    let mut candidate = RuntimeCandidate::admit(
+        app.seal().unwrap(),
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::default(),
+    )
+    .unwrap();
     let materialization = Arc::new(OnceLock::new());
     let result = Arc::clone(&materialization);
     let outcome = candidate
@@ -499,14 +497,12 @@ fn runtime_replacement_rejects_readmitted_definitions_before_product_configurati
 
 #[test]
 fn runtime_startup_rejects_foreign_definitions_without_consuming_activation() {
-    let mut candidate = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app().seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
+    let mut candidate = RuntimeCandidate::admit(
+        app().seal().unwrap(),
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::default(),
+    )
+    .unwrap();
     let observations = Arc::new(OnceLock::new());
     let output = Arc::clone(&observations);
     let outcome = candidate

@@ -7,8 +7,8 @@ use nara_core::Vec2;
 use nara_ecs::Resource;
 
 use crate::{
-    AxisValue, ButtonDriverInput, ButtonTransitionPhase, InputBinding, KeyCode, MouseButton,
-    PointerDriverInput,
+    AxisValue, ButtonTransitionPhase, InputBinding, KeyCode, MouseButton, MouseWheelUnit,
+    TouchPhase,
 };
 
 /// Maximum number of retained normalized platform events.
@@ -607,6 +607,8 @@ pub enum InputEventKind {
     PointerLeft,
     Wheel {
         delta: Vec2,
+        unit: MouseWheelUnit,
+        phase: TouchPhase,
     },
     Key {
         key: KeyCode,
@@ -1172,101 +1174,4 @@ pub enum InputWindowEvent {
     ScaleFactorChanged { scale_factor: f64 },
     CloseRequested,
     SurfaceRetired,
-}
-
-#[doc(hidden)]
-#[derive(Debug, Clone, PartialEq)]
-pub enum __InputDriverEvent {
-    ConnectEndpoint {
-        window: InputWindowId,
-        seat: InputSeatId,
-    },
-    ConnectPointer {
-        window: InputWindowId,
-        seat: InputSeatId,
-        pointer: InputPointerId,
-    },
-    RetirePointer {
-        window: InputWindowId,
-        seat: InputSeatId,
-        pointer: InputPointerId,
-    },
-    SyntheticKeyboard {
-        input: ButtonDriverInput<KeyCode>,
-    },
-    ClaimedKeyboard {
-        claim: super::InputEndpointClaim,
-        input: ButtonDriverInput<KeyCode>,
-    },
-    SyntheticMouse {
-        input: ButtonDriverInput<MouseButton>,
-    },
-    SyntheticPointer {
-        input: PointerDriverInput,
-    },
-    ConnectGamepad {
-        window: InputWindowId,
-        seat: InputSeatId,
-        gamepad: u16,
-    },
-    ConnectSyntheticGamepad {
-        window: InputWindowId,
-        seat: InputSeatId,
-        gamepad: u16,
-    },
-    DisconnectGamepad {
-        connection: super::GamepadConnection,
-    },
-    Keyboard {
-        window: InputWindowId,
-        seat: InputSeatId,
-        input: ButtonDriverInput<KeyCode>,
-    },
-    Mouse {
-        window: InputWindowId,
-        seat: InputSeatId,
-        pointer: InputPointerId,
-        input: ButtonDriverInput<MouseButton>,
-    },
-    Pointer {
-        window: InputWindowId,
-        seat: InputSeatId,
-        pointer: InputPointerId,
-        input: PointerDriverInput,
-    },
-    GamepadButton {
-        connection: super::GamepadConnection,
-        button: u16,
-        phase: ButtonTransitionPhase,
-    },
-    GamepadAxis {
-        connection: super::GamepadConnection,
-        axis: u16,
-        value: AxisValue,
-    },
-    Window {
-        window: InputWindowId,
-        seat: InputSeatId,
-        event: InputWindowEvent,
-    },
-}
-
-#[doc(hidden)]
-#[derive(Debug, Clone, PartialEq)]
-pub struct __InputDriverOutput {
-    pub admission: InputAdmission,
-    pub released_keys: Vec<KeyCode>,
-    pub released_mouse_buttons: Vec<MouseButton>,
-    pub gamepad_connection: Option<super::GamepadConnection>,
-}
-
-impl __InputDriverOutput {
-    pub(super) fn new(admission: InputAdmission) -> Self {
-        Self {
-            admission,
-            released_keys: Vec::new(),
-            released_mouse_buttons: Vec::new(),
-            gamepad_connection: None,
-        }
-    }
 }

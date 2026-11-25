@@ -8,14 +8,14 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
 use nara_app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
 use nara_asset::{
     AssetPathScope, AssetRecord, AssetSourceKind, AssetSourcePath, ImportedProductId,
     ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::Vec2;
-use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
-use nara_identity::SceneEntityId;
+use nara_ecs::identity::SceneEntityId;
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMapBuilder, ActionMapLimits, KeyCode,
 };

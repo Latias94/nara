@@ -1,10 +1,10 @@
 use nara_asset::AssetRef;
-use nara_diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
-    PublicDiagnosticIdentifier, SafeSummary,
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
+    PublicDiagnosticIdentifier, ReportDiagnostic as Diagnostic, SafeSummary,
 };
-use nara_identity::{
-    __private::IdentitySupportTopologyError, EntityIdentityAxis, IdentityDomainError,
+use nara_ecs::identity::{
+    EntityIdentityAxis, IdentityDomainError, domain::IdentitySupportTopologyError,
 };
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentEntityReferenceRewriteError,
@@ -764,8 +764,8 @@ fn with_field(diagnostic: Diagnostic, field: DiagnosticField) -> Diagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_diagnostic::{DiagnosticFieldClass, DiagnosticValueRef};
-    use nara_identity::{EntityReference, SceneEntityId};
+    use nara_core::diagnostic::{DiagnosticFieldClass, DiagnosticValueRef};
+    use nara_ecs::identity::{EntityReference, SceneEntityId};
     use nara_reflect::{
         ComponentDomainError, ComponentFieldId, ComponentFieldSchema, ComponentNumericDomain,
         ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,

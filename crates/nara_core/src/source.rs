@@ -4,6 +4,14 @@ use std::{error::Error, fmt, str::FromStr};
 
 use uuid::Uuid;
 
+mod identity;
+
+pub use identity::{
+    AssetPathError, AssetSourcePath, SourceDocumentBindingError, SourceDocumentKey,
+    SourceDocumentKeyError, SourceDocumentKind, SourceDocumentOrigin, StableAssetId,
+    StableAssetIdError, StableAssetIdGenerationError,
+};
+
 /// Authored namespace for named and project-location sources.
 ///
 /// This value does not identify a runtime, an opened document incarnation, or a stable asset.

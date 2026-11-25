@@ -15,11 +15,6 @@ use nara::{
     app::{
         AppExit, FixedTime, FrameExecutionStart, RuntimeControl, RuntimeControlStatus, RuntimeState,
     },
-    gameplay::{
-        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandPayload,
-        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTick,
-        GameplayCommandTypeId, GameplayCommandValue,
-    },
     project_host::{
         DesktopControlError, DesktopPresentationControl, DesktopRun, DesktopRunIntent,
         DesktopRunOptions, DesktopRunOutcome, DesktopRunProgress, WinitEventLoop,
@@ -32,6 +27,9 @@ use nara::{
 };
 use two_level_game::{
     GamePhase, GameSnapshot,
+    command::{
+        CommandSequence, CommandSource, CommandTick, GameCommand, ScheduledCommand, SemanticCommand,
+    },
     levels::{LevelId, LevelKey},
 };
 use two_level_game::{
@@ -136,8 +134,7 @@ fn main() -> ExitCode {
         game.run.progress(),
         DesktopRunProgress::Retiring | DesktopRunProgress::CleanupIncomplete
     ) {
-        std::mem::forget(game);
-        eprintln!("desktop_control: original native cleanup remains incomplete at process exit");
+        eprintln!("desktop_control: explicit cleanup of the original native run is incomplete");
         return ExitCode::FAILURE;
     }
     let verified = trajectory.and(cleanup).and_then(|()| {
@@ -185,8 +182,7 @@ fn reject_pending_resume() -> Result<WinitEventLoop, String> {
     let mut run = DesktopRun::from_runtime(runtime, DesktopRunOptions::new().with_initial_pause());
     let report = run.execute();
     if run.progress() == DesktopRunProgress::CleanupIncomplete {
-        std::mem::forget(run);
-        return Err("refused initial Pause retains incomplete original cleanup".into());
+        return Err("refused initial Pause left original cleanup incomplete".into());
     }
     assert_eq!(report.outcome(), DesktopRunOutcome::Failed);
     assert!(
@@ -239,7 +235,7 @@ impl Game {
             .unwrap()
             .source_stamp();
         let generation = self.run.runtime_generation().unwrap();
-        self.step(Some(movement(true)?))?;
+        self.step(Some(movement(true)))?;
         let moved = self.snapshot()?;
         assert_eq!(moved.held, [false, true, false, false]);
         assert!(moved.player.x > initial.player.x);
@@ -249,7 +245,7 @@ impl Game {
                 if reason.contains("keyboard inventory")
         ));
         self.qualify_keyboard_release_gap()?;
-        self.step(Some(movement(true)?))?;
+        self.step(Some(movement(true)))?;
         for _ in 0..120 {
             if self.snapshot()?.score == 10 {
                 break;
@@ -257,21 +253,21 @@ impl Game {
             self.step(None)?;
         }
         assert_eq!(self.snapshot()?.score, 10);
-        self.step(Some(movement(false)?))?;
+        self.step(Some(movement(false)))?;
         let meadow_marker = self.snapshot()?.player.to_array();
-        self.step(Some(simple("two-level-game.marker")?))?;
+        self.step(Some(SemanticCommand::Marker.intent()))?;
         assert_eq!(self.snapshot()?.markers.len(), 1);
-        self.step(Some(simple("two-level-game.travel")?))?;
+        self.step(Some(SemanticCommand::Travel.intent()))?;
         assert_eq!(
             self.snapshot()?.level,
             Some(LevelKey::main(LevelId::Cavern))
         );
-        self.step(Some(simple("two-level-game.marker")?))?;
-        self.step(Some(movement(true)?))?;
+        self.step(Some(SemanticCommand::Marker.intent()))?;
+        self.step(Some(movement(true)))?;
         for _ in 0..9 {
             self.step(None)?;
         }
-        self.step(Some(movement(false)?))?;
+        self.step(Some(movement(false)))?;
         let before = self.snapshot()?;
         self.step(None)?;
         let after = self.snapshot()?;
@@ -465,22 +461,21 @@ impl Game {
         }
     }
 
-    fn step(&mut self, command: Option<GameplayCommandDraft>) -> Result<(), String> {
+    fn step(&mut self, command: Option<GameCommand>) -> Result<(), String> {
         let tick = self
             .run
             .capture(|world| world.resource::<FixedTime>().tick())
             .map_err(|error| error.to_string())?;
         if let Some(command) = command {
             self.sequence += 1;
-            self.run
-                .submit(GameplayCommandSubmission::new(
-                    GameplayCommandTick::new(tick + 1).unwrap(),
-                    GameplayCommandIngressSource::external("two-level-game.desktop-control")
-                        .unwrap(),
-                    GameplayCommandSourceSequence::new(self.sequence).unwrap(),
-                    command,
-                ))
-                .map_err(|error| error.to_string())?;
+            ScheduledCommand::new(
+                CommandTick::new(tick + 1).unwrap(),
+                CommandSource::external("two-level-game.desktop-control").unwrap(),
+                CommandSequence::new(self.sequence).unwrap(),
+                command,
+            )
+            .submit_desktop(&mut self.run)
+            .map_err(|error| error.to_string())?;
             assert!(matches!(
                 self.run.capture(|_| ()),
                 Err(DesktopControlError::NotPaused)
@@ -655,19 +650,10 @@ fn visual_expectation(
     }
 }
 
-fn movement(pressed: bool) -> Result<GameplayCommandDraft, String> {
-    let mut payload = GameplayCommandPayload::new();
-    payload
-        .insert("direction", GameplayCommandValue::I64(1))
-        .map_err(|error| error.to_string())?;
-    payload
-        .insert("pressed", GameplayCommandValue::Bool(pressed))
-        .map_err(|error| error.to_string())?;
-    Ok(simple("two-level-game.move")?.with_payload(payload))
-}
-
-fn simple(id: &str) -> Result<GameplayCommandDraft, String> {
-    Ok(GameplayCommandDraft::new(
-        GameplayCommandTypeId::new(id).map_err(|error| error.to_string())?,
-    ))
+fn movement(pressed: bool) -> GameCommand {
+    SemanticCommand::Move {
+        direction: 1,
+        pressed,
+    }
+    .intent()
 }

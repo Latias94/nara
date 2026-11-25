@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use nara_ui_kernel::{UiSurfaceId, UiSurfaceRetirementToken};
+use crate::kernel::{UiSurfaceId, UiSurfaceRetirementToken};
 
 use super::UiAdapterError;
 
@@ -56,7 +56,7 @@ mod tests {
     use super::*;
 
     fn retirement(surface: UiSurfaceId) -> UiSurfaceRetirementToken {
-        let mut journal = nara_ui_kernel::UiFrameJournal::default();
+        let mut journal = crate::kernel::UiFrameJournal::default();
         journal.install_surface(surface, 1).unwrap();
         journal.retire_surface(surface, 2).unwrap().unwrap()
     }
@@ -72,7 +72,7 @@ mod tests {
                 ledger
                     .retirement(surface)
                     .map(UiSurfaceRetirementToken::retirement_generation)
-                    .map(nara_ui_kernel::UiRevision::get),
+                    .map(crate::kernel::UiRevision::get),
                 Some(2)
             );
         }

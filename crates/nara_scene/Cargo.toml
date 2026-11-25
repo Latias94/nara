@@ -12,14 +12,12 @@ getrandom.workspace = true
 nara_app.workspace = true
 nara_asset = { workspace = true, features = ["runtime"] }
 nara_core.workspace = true
-nara_diagnostic = { workspace = true, features = ["runtime"] }
 nara_ecs.workspace = true
-nara_hierarchy.workspace = true
-nara_identity = { workspace = true, features = ["runtime"] }
 nara_reflect.workspace = true
 ron = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+thiserror.workspace = true
 tracing = { workspace = true, optional = true }
 
 [features]
@@ -29,9 +27,7 @@ serde = [
     "dep:serde",
     "nara_asset/serde",
     "nara_core/serde",
-    "nara_diagnostic/serde",
     "nara_ecs/serde",
-    "nara_identity/serde",
     "nara_reflect/serde",
     "dep:ron",
     "dep:serde_json",

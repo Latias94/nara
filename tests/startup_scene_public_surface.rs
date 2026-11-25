@@ -1,4 +1,4 @@
-#![cfg(feature = "runtime-core")]
+#![cfg(all(feature = "project-runtime", feature = "runtime-core"))]
 
 use nara::advanced_prelude::{
     CurrentScene, STARTUP_SCENE_ACTIVATION_PLUGIN_ID, SceneSource, SceneSourceError,

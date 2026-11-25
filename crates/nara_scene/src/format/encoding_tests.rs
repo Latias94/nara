@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use nara_identity::ReferenceInputId;
+use nara_ecs::identity::ReferenceInputId;
 use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue};
 
 use super::*;

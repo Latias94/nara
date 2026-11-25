@@ -10,14 +10,13 @@ use nara_asset::{
     AssetReferenceResolver, AssetServer, AssetSourcePath, Handle,
 };
 use nara_ecs::{
-    __private::{
+    Component, Entity, Resource, World,
+    bevy_ecs::{component::ComponentId, world::WorldId},
+    transaction::{
         PersistentComponentMetadataError, PersistentLifecycleEvent as EcsPersistentLifecycleEvent,
-        PersistentObserverScope as EcsPersistentObserverScope,
+        PersistentObserverScope as EcsPersistentObserverScope, SceneComponentRequirements,
         validate_registered_persistent_component_apply, validate_resource_insertion,
     },
-    Component, Entity, Resource, World,
-    bevy_ecs::component::ComponentId,
-    bevy_ecs::world::WorldId,
 };
 
 use crate::{
@@ -169,6 +168,7 @@ struct PreparedComponentBinding {
     component_id: ComponentTypeId,
     register_component: fn(&mut World) -> ComponentId,
     validate_component: fn(&World, Option<Entity>) -> Result<(), PersistentComponentMetadataError>,
+    requirements: Option<std::sync::Arc<SceneComponentRequirements>>,
 }
 
 struct PersistentComponentApplyReceipt {
@@ -176,6 +176,7 @@ struct PersistentComponentApplyReceipt {
     component_id: ComponentTypeId,
     runtime_component_id: ComponentId,
     validate_component: fn(&World, Option<Entity>) -> Result<(), PersistentComponentMetadataError>,
+    requirements: Option<std::sync::Arc<SceneComponentRequirements>>,
 }
 
 #[derive(Component, Default)]
@@ -195,11 +196,14 @@ impl PreparedComponentBinding {
     }
 
     fn validate(&self, world: &World, target: Option<Entity>) -> Result<(), ComponentCodecError> {
-        (self.validate_component)(world, target).map_err(|error| {
-            ComponentCodecError::PersistentApplyRejected {
-                component_id: self.component_id.clone(),
-                reason: map_apply_rejection(error),
-            }
+        let result = if let Some(requirements) = &self.requirements {
+            requirements.validate(world, target)
+        } else {
+            (self.validate_component)(world, target)
+        };
+        result.map_err(|error| ComponentCodecError::PersistentApplyRejected {
+            component_id: self.component_id.clone(),
+            reason: map_apply_rejection(error),
         })
     }
 
@@ -213,6 +217,7 @@ impl PreparedComponentBinding {
             component_id: self.component_id.clone(),
             runtime_component_id,
             validate_component: self.validate_component,
+            requirements: self.requirements.clone(),
         }
     }
 }
@@ -228,11 +233,14 @@ impl PersistentComponentApplyReceipt {
         if !entity.contains_id(self.runtime_component_id) {
             return Ok(());
         }
-        (self.validate_component)(world, Some(target)).map_err(|error| {
-            ComponentCodecError::PersistentApplyRejected {
-                component_id: self.component_id.clone(),
-                reason: map_apply_rejection(error),
-            }
+        let result = if let Some(requirements) = &self.requirements {
+            requirements.validate(world, Some(target))
+        } else {
+            (self.validate_component)(world, Some(target))
+        };
+        result.map_err(|error| ComponentCodecError::PersistentApplyRejected {
+            component_id: self.component_id.clone(),
+            reason: map_apply_rejection(error),
         })
     }
 }
@@ -861,8 +869,9 @@ impl<T: Component> PreparedComponentCandidate<T> {
                 (self.prepare)(context)
                     .map(|component| Box::new(component) as Box<dyn PreparedComponentValue>)
             }),
-            register_component: nara_ecs::__private::register_persistent_component::<T>,
+            register_component: nara_ecs::transaction::register_persistent_component::<T>,
             validate_component: validate_registered_persistent_component_apply::<T>,
+            requirements: None,
             may_touch_asset_server: self.may_touch_asset_server,
         }
     }
@@ -872,6 +881,7 @@ pub(crate) struct ErasedPreparedComponentCandidate {
     prepare: Box<PrepareComponentFn>,
     register_component: fn(&mut World) -> ComponentId,
     validate_component: fn(&World, Option<Entity>) -> Result<(), PersistentComponentMetadataError>,
+    pub(crate) requirements: Option<std::sync::Arc<SceneComponentRequirements>>,
     may_touch_asset_server: bool,
 }
 
@@ -883,6 +893,7 @@ impl ErasedPreparedComponentCandidate {
                 component_id,
                 register_component: self.register_component,
                 validate_component: self.validate_component,
+                requirements: self.requirements,
             },
             may_touch_asset_server: self.may_touch_asset_server,
         }

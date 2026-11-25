@@ -1331,7 +1331,7 @@ mod tests {
     #[cfg(any(feature = "sprite-render", feature = "hud-runtime"))]
     use crate::material::AlphaMode2d;
     use nara_app::{
-        App, RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeClosePolicy,
+        App, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeClosePolicy,
         RuntimeGeneration, RuntimeObligationLedger,
     };
     use nara_window::backend::{WindowHandleProvider, WindowTargetPhase};
@@ -1806,14 +1806,12 @@ mod tests {
     }
 
     fn test_runtime_generation() -> RuntimeGeneration {
-        let candidate = RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(
-                App::new().seal().unwrap(),
-                RuntimeObligationLedger::new(),
-                RuntimeClosePolicy::default(),
-            )
-            .unwrap();
+        let candidate = RuntimeCandidate::admit(
+            App::new().seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
         let ready = candidate.complete_startup().unwrap();
         let runtime = ready.promote();
         let generation = runtime.generation();

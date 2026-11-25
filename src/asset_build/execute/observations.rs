@@ -157,8 +157,10 @@ impl SourceBuildObservations {
                     current
                         .verify_digest(digest.content(), digest.length())
                         .map_err(|error| match error {
-                            nara_fs::FsError::ByteLimitExceeded { .. }
-                            | nara_fs::FsError::DigestMismatch { .. } => ArtifactBuildError::Stale,
+                            crate::fs::FsError::ByteLimitExceeded { .. }
+                            | crate::fs::FsError::DigestMismatch { .. } => {
+                                ArtifactBuildError::Stale
+                            }
                             error => error.into(),
                         })?;
                 }
@@ -185,8 +187,8 @@ fn recovered_read(
     let length = match file.reader().and_then(|mut reader| {
         reader
             .seek(SeekFrom::End(0))
-            .map_err(|source| nara_fs::FsError::Io {
-                operation: nara_fs::FsOperation::Read,
+            .map_err(|source| crate::fs::FsError::Io {
+                operation: crate::fs::FsOperation::Read,
                 source,
             })
     }) {

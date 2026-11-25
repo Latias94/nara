@@ -3,7 +3,7 @@ use std::{
     fmt::{self, Debug, Display, Formatter},
 };
 
-use nara_fs::{
+use crate::fs::{
     ContentDigest, DirectoryCapability, DirectoryPublicationBeginError, DirectoryPublicationOrphan,
     DirectoryPublicationOutcome, DirectoryPublicationReceipt, DirectoryPublicationRejection,
     FileIdentity, FsError, RelativeComponent,
@@ -665,10 +665,10 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use nara_asset::{AssetMeta, AssetMetaIdentity, AssetPath, AssetSourceKind, StableAssetId};
-    use nara_fs::{
+    use crate::fs::{
         CapabilityRights, FsError, FsOperation, HostCapabilityOptions, RelativePath, TrustMode,
     };
+    use nara_asset::{AssetMeta, AssetMetaIdentity, AssetPath, AssetSourceKind, StableAssetId};
 
     use super::*;
     use crate::project_workflow::{

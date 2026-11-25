@@ -5,7 +5,6 @@ use nara::{
     app::FixedTime,
     ecs::World,
     fs::ContentDigest,
-    gameplay::{GameplayCommandBatch, GameplayCommandQueue, LocalGameplayCommands},
     prelude::Transform2d,
     tasks::{TaskPools, TaskReturnState},
 };
@@ -19,6 +18,7 @@ use nara::{
 };
 
 use super::{GameResumeError, ResumeControl};
+use crate::command::CommandSchedule;
 #[cfg(feature = "local-player")]
 use crate::{
     gameplay::{ActiveLevel, side_room::Rooms},
@@ -120,17 +120,12 @@ pub(super) fn quiescent(
     if control.rejected {
         return Err(reject("this candidate rejected its reconstruction"));
     }
-    let queue = world.resource::<GameplayCommandQueue>();
-    let stats = queue.stats();
+    let stats = world.resource::<CommandSchedule>().stats();
     let time = world.resource::<FixedTime>();
-    if queue.last_lifecycle_error().is_some()
-        || stats.closed_through_tick != time.tick()
+    if stats.closed_through_tick != time.tick()
         || stats.acknowledged_through_tick != time.tick()
         || stats.active_commands != 0
-        || stats.quarantined_commands != 0
         || (!allow_pending_commands && stats.retained_commands != 0)
-        || !world.resource::<GameplayCommandBatch>().is_empty()
-        || !world.resource::<LocalGameplayCommands>().is_empty()
     {
         return Err(reject(
             "gameplay commands are pending, active or unacknowledged",

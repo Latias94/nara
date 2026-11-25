@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use nara_asset::AssetRef;
 use nara_ecs::Component;
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, ReferenceInputId,
 };
 use nara_reflect::{

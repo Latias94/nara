@@ -1,4 +1,4 @@
-use nara_reflect::{__private::component_values_exactly_match, ComponentValueCost};
+use nara_reflect::{ComponentValueCost, schema::component_values_exactly_match};
 
 use super::{DeclarationBudget, PrefabDeclarationError, PrefabDeclarationLimits, anchor_instance};
 use crate::{

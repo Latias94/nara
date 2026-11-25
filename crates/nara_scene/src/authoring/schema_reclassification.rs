@@ -102,7 +102,6 @@ struct ReclassificationWorkIdentity;
 ///
 /// Whole-workspace preparation retains all incumbents before allocating its first successor.
 /// This linear token prevents a different source or allowance from skipping that charge.
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct RetainedSchemaReclassificationSource {
     work: Arc<ReclassificationWorkIdentity>,
@@ -189,7 +188,7 @@ fn limit_error(kind: &'static str, stage: &'static str) -> ScenePatchReport {
         "preparation-stage",
         stage,
     );
-    let mut diagnostics = nara_diagnostic::DiagnosticReport::default();
+    let mut diagnostics = nara_core::diagnostic::DiagnosticReport::default();
     diagnostics.push(diagnostic);
     ScenePatchReport {
         applied: false,
@@ -200,16 +199,6 @@ fn limit_error(kind: &'static str, stage: &'static str) -> ScenePatchReport {
 
 fn refused(summary: &'static str) -> ScenePatchReport {
     history_error_report("scene.authoring-schema-reclassification-rejected", summary)
-}
-
-/// Uses the source owner's declaration check before allocating a whole-workspace candidate.
-#[doc(hidden)]
-pub fn require_schema_reclassification_successor(
-    previous: &AuthoringSchemaBasis,
-    successor: &AuthoringSchemaBasis,
-    kind: &SchemaReclassificationKind,
-) -> Result<(), ScenePatchReport> {
-    successor.require_reclassification_successor_of(previous, kind)
 }
 
 /// An unpublished classification successor; source and history remain in their original owner.
@@ -231,13 +220,12 @@ pub struct PreparedPrefabSchemaReclassification {
 }
 
 /// A finite immutable source/history input, detached from the live Session.
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct SceneSchemaReclassificationRequest {
     input: ReclassificationInput<SceneDocument>,
 }
 
-#[doc(hidden)]
+/// A captured prefab and its edit history for preparing a replacement classification.
 #[derive(Debug)]
 pub struct PrefabSchemaReclassificationRequest {
     input: ReclassificationInput<PrefabDocument>,
@@ -345,7 +333,6 @@ impl PrefabSchemaReclassificationRequest {
 impl PreparedSceneSchemaReclassification {
     /// Borrows the exact frozen input under this prepared classification. Live publication still
     /// requires the original Session/Workspace revision and basis to be revalidated.
-    #[doc(hidden)]
     pub fn source_view(&self) -> PreparedSceneSchemaSource<'_> {
         PreparedSceneSchemaSource {
             document: &self.document,
@@ -369,13 +356,13 @@ impl PreparedSceneSchemaReclassification {
         self.state.unavailable_manifest()
     }
     #[must_use]
-    pub fn diagnostics(&self) -> &nara_diagnostic::DiagnosticReport {
+    pub fn diagnostics(&self) -> &nara_core::diagnostic::DiagnosticReport {
         self.state.diagnostics()
     }
 }
 
 impl PreparedPrefabSchemaReclassification {
-    #[doc(hidden)]
+    /// Borrows the captured prefab with its prepared classification.
     pub fn source_view(&self) -> PreparedPrefabSchemaSource<'_> {
         PreparedPrefabSchemaSource {
             document: &self.document,
@@ -399,25 +386,22 @@ impl PreparedPrefabSchemaReclassification {
         self.state.unavailable_manifest()
     }
     #[must_use]
-    pub fn diagnostics(&self) -> &nara_diagnostic::DiagnosticReport {
+    pub fn diagnostics(&self) -> &nara_core::diagnostic::DiagnosticReport {
         self.state.diagnostics()
     }
 }
 
-/// Validated current Scene source under an unpublished classification successor.
+/// A captured scene source under its prepared classification.
 ///
-/// Both borrows remain live: the session cannot change source or classification and the
-/// candidate cannot be consumed while this view is used. This proves only their current-source
-/// association; selected composition, dependencies and later publication remain Host admission.
-#[doc(hidden)]
+/// The view borrows the prepared operation. Publication still checks the live session revision
+/// and classification basis.
 #[derive(Debug)]
 pub struct PreparedSceneSchemaSource<'a> {
     document: &'a Arc<SceneDocument>,
     prepared: &'a PreparedSceneSchemaReclassification,
 }
 
-/// Nominal Prefab source counterpart, retaining the original Session document Arc.
-#[doc(hidden)]
+/// A captured prefab source under its prepared classification.
 #[derive(Debug)]
 pub struct PreparedPrefabSchemaSource<'a> {
     document: &'a Arc<PrefabDocument>,
@@ -425,8 +409,8 @@ pub struct PreparedPrefabSchemaSource<'a> {
 }
 
 /// Borrows a prepared Scene's exact current source after the same check used by commit bind.
-#[doc(hidden)]
-pub fn borrow_prepared_scene_schema_source<'a>(
+#[cfg(test)]
+fn borrow_prepared_scene_schema_source<'a>(
     session: &'a SceneAuthoringSession,
     prepared: &'a PreparedSceneSchemaReclassification,
 ) -> Result<PreparedSceneSchemaSource<'a>, ScenePatchReport> {
@@ -443,8 +427,8 @@ pub fn borrow_prepared_scene_schema_source<'a>(
 }
 
 /// Borrows a prepared Prefab's exact current source without a Scene projection or source copy.
-#[doc(hidden)]
-pub fn borrow_prepared_prefab_schema_source<'a>(
+#[cfg(test)]
+fn borrow_prepared_prefab_schema_source<'a>(
     session: &'a PrefabAuthoringSession,
     prepared: &'a PreparedPrefabSchemaReclassification,
 ) -> Result<PreparedPrefabSchemaSource<'a>, ScenePatchReport> {
@@ -498,7 +482,7 @@ impl PreparedSceneSchemaSource<'_> {
     }
 
     #[must_use]
-    pub fn diagnostics(&self) -> &nara_diagnostic::DiagnosticReport {
+    pub fn diagnostics(&self) -> &nara_core::diagnostic::DiagnosticReport {
         self.prepared.diagnostics()
     }
 
@@ -545,7 +529,7 @@ impl PreparedPrefabSchemaSource<'_> {
     }
 
     #[must_use]
-    pub fn diagnostics(&self) -> &nara_diagnostic::DiagnosticReport {
+    pub fn diagnostics(&self) -> &nara_core::diagnostic::DiagnosticReport {
         self.prepared.diagnostics()
     }
 
@@ -570,7 +554,6 @@ fn require_prepared_source(
 }
 
 /// Exclusive validated source access for whole-set publication by the Workspace owner.
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct SceneSchemaReclassificationCommit<'a> {
     session: &'a mut SceneAuthoringSession,
@@ -586,7 +569,6 @@ impl SceneSchemaReclassificationCommit<'_> {
 }
 
 /// Exclusive validated Prefab access; the nominal source and all history remain in place.
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct PrefabSchemaReclassificationCommit<'a> {
     session: &'a mut PrefabAuthoringSession,
@@ -601,7 +583,6 @@ impl PrefabSchemaReclassificationCommit<'_> {
 
 impl SceneAuthoringSession {
     /// Captures an owned request after the whole-set owner has retained every incumbent.
-    #[doc(hidden)]
     pub fn capture_schema_reclassification(
         &self,
         successor: &AuthoringSchemaBasis,
@@ -647,7 +628,6 @@ impl SceneAuthoringSession {
     }
 
     /// Retains this exact incumbent before a whole-set owner prepares any successor.
-    #[doc(hidden)]
     pub fn retain_schema_reclassification_source(
         &self,
         work: &mut SchemaReclassificationWork,
@@ -675,7 +655,6 @@ impl SceneAuthoringSession {
     }
 
     /// Prepares under the allowance that already retains this exact source incumbent.
-    #[doc(hidden)]
     pub fn prepare_schema_reclassification_with_retained_source(
         &self,
         successor: &AuthoringSchemaBasis,
@@ -706,7 +685,6 @@ impl SceneAuthoringSession {
     }
 
     /// Binds exclusive source access so a Workspace can validate its entire set before swapping.
-    #[doc(hidden)]
     pub fn bind_schema_reclassification(
         &mut self,
         prepared: PreparedSceneSchemaReclassification,
@@ -725,7 +703,7 @@ impl SceneAuthoringSession {
 }
 
 impl PrefabAuthoringSession {
-    #[doc(hidden)]
+    /// Captures a prefab and its edit history after all participating sources are retained.
     pub fn capture_schema_reclassification(
         &self,
         successor: &AuthoringSchemaBasis,
@@ -769,7 +747,7 @@ impl PrefabAuthoringSession {
         self.prepare_schema_reclassification_with_retained_source(successor, kind, work, incumbent)
     }
 
-    #[doc(hidden)]
+    /// Retains the current prefab source against the shared preparation allowance.
     pub fn retain_schema_reclassification_source(
         &self,
         work: &mut SchemaReclassificationWork,
@@ -796,7 +774,7 @@ impl PrefabAuthoringSession {
         })
     }
 
-    #[doc(hidden)]
+    /// Prepares a replacement classification using the retained current prefab source.
     pub fn prepare_schema_reclassification_with_retained_source(
         &self,
         successor: &AuthoringSchemaBasis,
@@ -825,7 +803,7 @@ impl PrefabAuthoringSession {
         Ok(())
     }
 
-    #[doc(hidden)]
+    /// Binds exclusive access for committing the prepared prefab classification.
     pub fn bind_schema_reclassification(
         &mut self,
         prepared: PreparedPrefabSchemaReclassification,

@@ -1,7 +1,7 @@
 //! Persistent scene documents, authoring operations, and runtime materialization.
 
 mod asset_reservations;
-mod authoring;
+pub mod authoring;
 #[cfg(feature = "serde")]
 mod authoring_decode;
 #[cfg(feature = "serde")]
@@ -17,8 +17,10 @@ mod document;
 mod draft;
 mod effective_component_payload;
 mod export;
+pub mod fixed_spatial;
 #[cfg(feature = "serde")]
 mod format;
+pub mod hierarchy;
 #[cfg(feature = "serde")]
 mod migration;
 mod occurrence;
@@ -35,6 +37,7 @@ mod runtime_scene;
 mod scene_components;
 mod schema_authority;
 mod source_hierarchy;
+pub mod spatial;
 mod spawn;
 mod validation;
 
@@ -111,10 +114,12 @@ pub use format::{
     SceneFileEncodingAdmissionError, SceneFileLimits, SceneFilePublicationError, SceneFormatError,
     ScenePatchDocumentCandidate,
 };
-pub use nara_identity::{
-    SceneEntityId, SceneEntityIdError, SceneInstanceId, SourceDocumentBindingError,
-    SourceDocumentKey, SourceDocumentKeyError, SourceDocumentKind, SourceDocumentOrigin,
-    SpawnedSceneInstance,
+pub use nara_core::source::{
+    SourceDocumentBindingError, SourceDocumentKey, SourceDocumentKeyError, SourceDocumentKind,
+    SourceDocumentOrigin,
+};
+pub use nara_ecs::identity::{
+    SceneEntityId, SceneEntityIdError, SceneInstanceId, SpawnedSceneInstance,
 };
 pub use occurrence::{SceneOccurrenceKey, SceneOccurrenceKeyError, SceneOccurrenceLimits};
 pub use patch::{
@@ -164,6 +169,8 @@ pub use source_hierarchy::SourceLocalSceneHierarchy;
 /// surface. They may change while ADR 0089 remains Proposed.
 pub mod advanced {
     pub use crate::asset_reservations::SceneAssetReservations;
+    #[cfg(feature = "serde")]
+    pub use crate::occurrence::scene_instance_retired;
     pub use crate::product_transaction::{
         SceneProductOverlayWriter, SceneProductResource, SceneProductRetirement,
         SceneProductTransactionLimits,
@@ -177,77 +184,16 @@ pub mod advanced {
 pub use scene_components::{
     Name, SCENE_COMPONENTS_PLUGIN_DECLARATION, SCENE_COMPONENTS_PLUGIN_ID,
     SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER,
-    SCENE_COMPONENTS_SCHEMA_PROVIDER_ID, SceneComponentsPlugin, Visibility,
-    register_scene_components,
+    SCENE_COMPONENTS_SCHEMA_PROVIDER_ID, SceneComponentsPlugin, register_scene_components,
+};
+pub use spatial::{
+    SPATIAL_PLUGIN_ID, SpatialPlugin, SpatialSet, TRANSFORM_COMPONENTS_PLUGIN_DECLARATION,
+    TRANSFORM_COMPONENTS_PLUGIN_ID, TRANSFORM_SCHEMA_OWNER_ID, TRANSFORM_SCHEMA_PROVIDER,
+    TRANSFORM_SCHEMA_PROVIDER_ID, TransformComponentsPlugin, Visibility,
+    register_transform_components,
 };
 pub use spawn::{
     PreparedScene, SceneEntityRetirementError, SceneEntitySource, SceneProjection,
     SceneSpawnReport, prepare_scene, prepare_scene_replacement, retire_and_despawn_scene_entity,
     retire_and_despawn_scene_instance, spawn_scene,
 };
-
-#[doc(hidden)]
-#[cfg(feature = "serde")]
-pub mod __private {
-    pub use crate::authoring::schema_upgrade::{
-        AuthoredSchemaUpgradeBindFailure, AuthoredSchemaUpgradeLimits, AuthoredSchemaUpgradeUsage,
-        AuthoredSchemaUpgradeWork, PrefabAuthoredSchemaUpgradeCommit,
-        PrefabAuthoredSchemaUpgradeInput, PreparedPrefabAuthoredSchemaUpgrade,
-        PreparedSceneAuthoredSchemaUpgrade, RetainedAuthoredSchemaUpgradeSource,
-        SceneAuthoredSchemaUpgradeCommit, SceneAuthoredSchemaUpgradeInput,
-        admit_authored_upgrade_prefab_source, admit_authored_upgrade_scene_source,
-        validate_authored_upgrade_prefab_transition, validate_authored_upgrade_scene_transition,
-    };
-    pub use crate::authoring::{
-        BoundPrefabComponentApply, CapturedPrefabComponentApplySources,
-        PrefabComponentApplyBindFailure, PrefabComponentApplyPreparationError,
-        PrefabComponentApplyRequest, PrefabComponentApplySource, PrefabComponentApplySourceMut,
-        PrefabSchemaReclassificationCommit, PrefabSchemaReclassificationRequest,
-        PreparedPrefabComponentApply, PreparedPrefabSchemaSource, PreparedSceneSchemaSource,
-        RetainedSchemaReclassificationSource, SceneSchemaReclassificationCommit,
-        SceneSchemaReclassificationRequest, bind_prepared_prefab_component_apply,
-        borrow_prepared_prefab_schema_source, borrow_prepared_scene_schema_source,
-        capture_prefab_component_apply_sources, require_schema_reclassification_successor,
-        try_prepare_prefab_component_apply_with_loader,
-    };
-    pub use crate::authoring::{
-        EncodedPrefabExtractionSource, PrefabExtractionDestination, PrefabExtractionFailure,
-        PrefabExtractionRequest, PrefabExtractionSavedGeneration,
-        PrefabExtractionSavedGenerationError, PrefabExtractionSourceBindFailure,
-        PrefabExtractionSourceCommit, PrefabExtractionSourceOutput,
-        PrefabExtractionStoredAdmissionFailure, PrefabExtractionUsage, PrefabExtractionWork,
-        PrefabSourceExtractionInput, PreparedPrefabExtraction, PreparedPrefabExtractionSource,
-        PreparedSceneExtractionSource, SceneExtractionSourceCommit, SceneSourceExtractionInput,
-    };
-    pub use crate::authoring_decode::schema_upgrade::AuthoredFieldUpgrade;
-    pub use crate::authoring_decode::{
-        AuthoringAdapterReceipt, AuthoringAdapterReceiptError,
-        fork_published_authoring_prefab_document, fork_published_authoring_scene_document,
-    };
-    pub use crate::authoring_preview::{
-        AuthoringPrefabPreviewDocument, AuthoringPreviewOmission, AuthoringPreviewOmissionLocation,
-        AuthoringPreviewOmissionReason, AuthoringPreviewProjectionError,
-        AuthoringScenePreviewDocument, project_authoring_prefab_session_preview,
-        project_authoring_scene_session_preview, project_published_authoring_prefab_preview,
-        project_published_authoring_scene_preview,
-    };
-    pub use crate::format::{canonical_prefab_source_matches, canonical_scene_source_matches};
-    pub use crate::occurrence::scene_instance_retired;
-    pub use crate::prefab::extraction::{
-        CapturedExtractionSource, ComponentApplySourceFootprint, PrefabExtractionAssets,
-        PrefabExtractionBinding, PrefabExtractionEnvironment, classify_component_apply_dependants,
-    };
-    pub use crate::prefab::inspection::{
-        AuthoringPrefabComponentEditError, AuthoringPrefabComponentOverrideKind,
-        AuthoringPrefabInspectionError, AuthoringPrefabPropertyApplyError,
-        AuthoringPrefabPropertyWriteError, ObservedPrefabComponentEdit,
-        ObservedPrefabPropertyApply, ObservedPrefabPropertyWrite, PrefabInspectionInput,
-        try_inspect_authoring_prefab_instance_with_loader,
-    };
-    pub use crate::prefab::{
-        AuthoringNativePreview, AuthoringSavedPrefabValidationReport,
-        AuthoringSceneCompilationOmission, AuthoringSceneCompilationOmissionReason,
-        AuthoringSceneCompilationParts, AuthoringSceneCompilationReport, SourceDocumentInput,
-        try_compile_authoring_scene_with_loader, try_validate_authoring_saved_prefab_with_loader,
-    };
-}

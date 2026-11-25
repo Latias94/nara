@@ -1,6 +1,6 @@
+use crate::fs::{DirectoryCapability, RelativeComponent};
 use nara_asset::StableAssetId;
 use nara_core::SourceUniverseId;
-use nara_fs::{DirectoryCapability, RelativeComponent};
 use thiserror::Error;
 
 use super::{
@@ -79,9 +79,9 @@ pub enum ProjectCreationPlanErrorKind {
 #[derive(Debug, Error)]
 pub enum ProjectCreationPlanError {
     #[error("local dependency checkout could not be resolved through the common ancestor")]
-    LocalCheckoutUnavailable(#[source] nara_fs::FsError),
+    LocalCheckoutUnavailable(#[source] crate::fs::FsError),
     #[error("local dependency destination parent could not be resolved")]
-    LocalParentUnavailable(#[source] nara_fs::FsError),
+    LocalParentUnavailable(#[source] crate::fs::FsError),
     #[error("local dependency destination parent does not match the common-ancestor relation")]
     LocalParentMismatch,
     #[error("local dependency coordinate is not UTF-8 and cannot be represented in Cargo.toml")]
@@ -135,20 +135,12 @@ pub fn prepare_desktop_2d_project(
         })?;
     let PreparedDependency {
         manifest_fragment,
-        creation_command_arguments,
         receipt,
         revalidation: dependency_revalidation,
     } = dependency;
     let identities = prepare_source_identities(starter, getrandom::fill)?;
-    let plan = build_creation_plan(
-        starter,
-        slug,
-        identities,
-        &manifest_fragment,
-        &creation_command_arguments,
-        receipt,
-    )
-    .map_err(ProjectCreationPlanError::StarterContract)?;
+    let plan = build_creation_plan(starter, slug, identities, &manifest_fragment, receipt)
+        .map_err(ProjectCreationPlanError::StarterContract)?;
     Ok(PreparedProjectCreation {
         publication_parent,
         destination,

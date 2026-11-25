@@ -1,9 +1,9 @@
 use std::{collections::BTreeMap, fmt};
 
-use nara_ecs::Resource;
-use nara_ui_kernel::{
+use crate::kernel::{
     UiActionId, UiActivationSource, UiKey, UiKeyAtom, UiKeyError, UiRouteStamp, UiSurfaceId,
 };
+use nara_ecs::Resource;
 use thiserror::Error;
 
 pub const MAX_UI_ACTION_JOURNAL_ENTRIES: usize = 256;
@@ -445,7 +445,7 @@ pub enum UiActionAdmissionError {
 
 #[cfg(test)]
 mod tests {
-    use nara_ui_kernel::{
+    use crate::kernel::{
         UiActionId, UiActivationSource, UiLocalKey, UiRootKey, UiRouteStamp, UiSurfaceGenerations,
         UiSurfaceId,
     };
@@ -459,7 +459,7 @@ mod tests {
         let surface = UiSurfaceId::new(1).unwrap();
         let root = UiRootKey::runtime("journal-test", "root").unwrap();
         let key =
-            nara_ui_kernel::UiKey::scoped(root, UiLocalKey::runtime("journal-test", name).unwrap())
+            crate::kernel::UiKey::scoped(root, UiLocalKey::runtime("journal-test", name).unwrap())
                 .unwrap();
         let generations = UiSurfaceGenerations::new(1, 1, 1, 1).unwrap();
         UiActionDraft::new(

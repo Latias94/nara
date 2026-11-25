@@ -13,30 +13,24 @@ use bevy_ecs::error::{BevyError, ErrorContext, ErrorHandler, FallbackErrorHandle
 
 use nara::{
     app::{
-        __RuntimeDriverPort, App, CoreStage, FixedCatchUpPolicy, FixedTime, FixedUpdateSet, Plugin,
-        PluginCategory, PluginDeclaration, PluginError, PluginId, PluginShutdownContext,
+        App, CoreStage, FixedCatchUpPolicy, FixedTime, FixedUpdateSet, Plugin, PluginCategory,
+        PluginDeclaration, PluginError, PluginId, PluginShutdownContext,
         PluginShutdownObligationId, RealTime, RenderTime, RuntimeAdmissionError,
-        RuntimeAdmissionFailure, RuntimeAdmissionReservation, RuntimeCandidate,
-        RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseContext,
-        RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
-        RuntimeCloseParticipantPhase, RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl,
-        RuntimeControlFailure, RuntimeControlRejection, RuntimeControlRequestResult,
-        RuntimeControlStatus, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
-        RuntimeInstance, RuntimeObligationLedger, RuntimePublicationError,
-        RuntimePublicationFailure, RuntimePublicationSlot, RuntimeState, RuntimeTimeSettings,
-        RuntimeWorldAccessError, SealedApp, StartupStage, VirtualTime, drive_runtime_quarantine,
-        runtime_quarantine_status,
+        RuntimeAdmissionFailure, RuntimeCandidate, RuntimeCandidateRetirementState,
+        RuntimeCloseCause, RuntimeCloseContext, RuntimeCloseParticipant,
+        RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseParticipantPhase,
+        RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl, RuntimeControlFailure,
+        RuntimeControlRejection, RuntimeControlRequestResult, RuntimeControlStatus, RuntimeFault,
+        RuntimeFaultKind, RuntimeFaultReporter, RuntimeInstance, RuntimeObligationLedger,
+        RuntimePublicationError, RuntimePublicationFailure, RuntimePublicationSlot,
+        RuntimeScopeError, RuntimeState, RuntimeTimeSettings, RuntimeWorldAccessError, SealedApp,
+        StartupStage, VirtualTime,
     },
     core::{ItemLimit, TimeLimit},
     ecs::{
         Commands, Res, ResMut, Resource, World, bevy_ecs::change_detection::DetectChangesMut,
-        bevy_ecs::event::Event, bevy_ecs::observer::On, schedule::IntoScheduleConfigs,
-    },
-    gameplay::{
-        GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,
-        GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandRejection, GameplayCommandSet,
-        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTick,
-        GameplayCommandTypeId, submit_gameplay_driver_command,
+        bevy_ecs::event::Event, bevy_ecs::observer::On, bevy_ecs::system::Command,
+        schedule::IntoScheduleConfigs,
     },
     tasks::{
         TaskDomainKey, TaskHandle, TaskKindConfig, TaskPlugin, TaskPoolConfig, TaskPoolKind,
@@ -105,9 +99,7 @@ fn admit_candidate_with(
     obligations: RuntimeObligationLedger,
     close_policy: RuntimeClosePolicy,
 ) -> Result<RuntimeCandidate, RuntimeAdmissionFailure> {
-    RuntimeAdmissionReservation::try_acquire()
-        .expect("the test process has runtime route capacity")
-        .admit(sealed, obligations, close_policy)
+    RuntimeCandidate::admit(sealed, obligations, close_policy)
 }
 
 fn accepted_ticket(result: RuntimeControlRequestResult) -> nara::app::RuntimeControlTicket {
@@ -513,68 +505,82 @@ fn exact_step_preserves_fixed_debt_and_remainder_and_rotates_one_tick() {
     );
 }
 
-#[derive(Debug, Default, Resource)]
-struct GameplayStepTrace {
-    consume_runs: usize,
-    consumed_commands: usize,
+#[derive(Debug, Default, PartialEq, Eq, Resource)]
+struct PlayerMotion {
+    speed: u32,
+    position: u32,
 }
 
-fn record_gameplay_step(batch: Res<GameplayCommandBatch>, mut trace: ResMut<GameplayStepTrace>) {
-    trace.consume_runs += 1;
-    trace.consumed_commands += batch.len();
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error("player speed {0} exceeds the limit")]
+struct InvalidPlayerSpeed(u32);
+
+const MAX_PLAYER_SPEED: u32 = 10;
+
+struct SetPlayerSpeed(u32);
+
+impl Command for SetPlayerSpeed {
+    type Out = Result<u32, InvalidPlayerSpeed>;
+
+    fn apply(self, world: &mut World) -> Self::Out {
+        if self.0 > MAX_PLAYER_SPEED {
+            return Err(InvalidPlayerSpeed(self.0));
+        }
+        let mut motion = world.resource_mut::<PlayerMotion>();
+        Ok(std::mem::replace(&mut motion.speed, self.0))
+    }
 }
 
-#[test]
-fn exact_step_runs_one_complete_gameplay_command_transaction() {
+fn simulate_player_motion(mut motion: ResMut<PlayerMotion>) {
+    let speed = motion.speed;
+    motion.position += speed;
+}
+
+fn app_with_player_motion() -> App {
     let mut app = configured_app(FixedTime::default());
-    app.add_plugin(GameplayCommandPlugin::default())
-        .unwrap()
-        .insert_resource(GameplayStepTrace::default())
+    app.init_resource::<PlayerMotion>()
         .unwrap()
         .add_systems(
             CoreStage::FixedUpdate,
-            record_gameplay_step.in_set(GameplayCommandSet::Consume),
+            simulate_player_motion.in_set(FixedUpdateSet::Simulate),
         )
         .unwrap();
-    let mut runtime = start_runtime(app);
-    runtime
-        .with_driver_scope(|scope| {
-            submit_gameplay_driver_command(
-                scope,
-                GameplayCommandSubmission::new(
-                    GameplayCommandTick::new(1).unwrap(),
-                    GameplayCommandIngressSource::test("runtime-step").unwrap(),
-                    GameplayCommandSourceSequence::new(1).unwrap(),
-                    GameplayCommandDraft::new(GameplayCommandTypeId::new("runtime.step").unwrap()),
-                ),
-            )
-            .unwrap()
-            .unwrap();
-        })
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
-        })
-        .unwrap();
+    app
+}
 
+#[test]
+fn exact_step_simulates_game_owned_state_updated_by_a_typed_command() {
+    let mut runtime = start_runtime(app_with_player_motion());
     accepted_ticket(runtime.request_control(RuntimeControl::Pause));
     runtime.drive(Duration::ZERO).unwrap();
-    accepted_ticket(runtime.request_control(RuntimeControl::StepFixedTick));
+    let outcome = runtime.apply_command(SetPlayerSpeed(3)).unwrap();
+    assert_eq!(outcome.output, Ok(0));
+    assert_eq!(outcome.post_operation_fault, None);
+    assert_eq!(
+        *runtime.world().resource::<PlayerMotion>(),
+        PlayerMotion {
+            speed: 3,
+            position: 0,
+        }
+    );
+
+    let step = accepted_ticket(runtime.request_control(RuntimeControl::StepFixedTick));
     runtime.drive(Duration::ZERO).unwrap();
 
-    let trace = runtime.world().resource::<GameplayStepTrace>();
-    assert_eq!(trace.consume_runs, 1);
-    assert_eq!(trace.consumed_commands, 1);
-    assert!(
-        runtime
-            .world()
-            .resource::<GameplayCommandBatch>()
-            .is_empty()
+    assert_eq!(
+        *runtime.world().resource::<PlayerMotion>(),
+        PlayerMotion {
+            speed: 3,
+            position: 3,
+        }
     );
-    let stats = runtime.world().resource::<GameplayCommandQueue>().stats();
-    assert_eq!(stats.admitted, 1);
-    assert_eq!(stats.acknowledged, 1);
-    assert_eq!(stats.acknowledged_through_tick, 1);
+    assert_eq!(runtime.world().resource::<RuntimeTrace>().fixed_ticks, [1]);
+    assert_eq!(runtime.state(), RuntimeState::Paused);
+    assert_eq!(
+        runtime.control_status(step),
+        Some(RuntimeControlStatus::Applied)
+    );
+    finish_runtime(runtime);
 }
 
 #[derive(Debug)]
@@ -931,7 +937,6 @@ impl RuntimeCloseParticipant for TestCloseParticipant {
 #[test]
 fn close_participant_panics_unwind_out_of_runtime_drive() {
     for phase in [PanicClosePhase::Begin, PanicClosePhase::Poll] {
-        let quarantine_before = runtime_quarantine_status();
         let has_panicked = Arc::new(AtomicBool::new(false));
         let panicking_begins = Arc::new(AtomicUsize::new(0));
         let panicking_polls = Arc::new(AtomicUsize::new(0));
@@ -986,58 +991,6 @@ fn close_participant_panics_unwind_out_of_runtime_drive() {
         assert!(has_panicked.load(Ordering::SeqCst));
         assert_eq!(completing_begins.load(Ordering::SeqCst), 1);
         assert_eq!(panicking_drops.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            runtime_quarantine_status().process_retained(),
-            quarantine_before.process_retained()
-        );
-    }
-}
-
-#[test]
-fn close_participant_panic_during_drop_retains_the_owner_for_retry() {
-    for phase in [PanicClosePhase::Begin, PanicClosePhase::Poll] {
-        let quarantine_before = runtime_quarantine_status();
-        let has_panicked = Arc::new(AtomicBool::new(false));
-        let drops = Arc::new(AtomicUsize::new(0));
-        let mut obligations = RuntimeObligationLedger::new();
-        obligations
-            .register(
-                RuntimeCloseParticipantId::new("nara.test.drop-panic-close"),
-                PanickingCloseParticipant {
-                    phase,
-                    has_panicked: has_panicked.clone(),
-                    begins: Arc::new(AtomicUsize::new(0)),
-                    polls: Arc::new(AtomicUsize::new(0)),
-                    drops: drops.clone(),
-                },
-            )
-            .unwrap();
-        let runtime = admit_candidate_with(
-            configured_app(FixedTime::default()).seal().unwrap(),
-            obligations,
-            RuntimeClosePolicy::new(Duration::ZERO),
-        )
-        .unwrap()
-        .complete_startup()
-        .unwrap()
-        .promote();
-
-        let dropped = catch_unwind(AssertUnwindSafe(|| drop(runtime)));
-
-        assert!(dropped.is_err(), "close participant panic was contained");
-        assert!(has_panicked.load(Ordering::SeqCst));
-        assert_eq!(drops.load(Ordering::SeqCst), 0);
-        assert_eq!(
-            runtime_quarantine_status().current_thread_retained(),
-            quarantine_before.current_thread_retained() + 1
-        );
-
-        let reaped = drive_runtime_quarantine();
-        assert_eq!(
-            reaped.current_thread_retained(),
-            quarantine_before.current_thread_retained()
-        );
-        assert_eq!(drops.load(Ordering::SeqCst), 1);
     }
 }
 
@@ -1124,212 +1077,6 @@ fn consuming_retirement_retries_only_unfinished_owners_and_preserves_evidence() 
     assert_eq!(retained_drops.load(Ordering::SeqCst), 1);
 }
 
-#[test]
-fn dropping_an_incomplete_runtime_does_not_destroy_its_close_owner() {
-    let quarantine_before = runtime_quarantine_status();
-    let released = Arc::new(AtomicBool::new(false));
-    let drops = Arc::new(AtomicUsize::new(0));
-    let mut obligations = RuntimeObligationLedger::new();
-    obligations
-        .register(
-            RuntimeCloseParticipantId::new("nara.test.drop-retained-owner"),
-            RetainedCloseParticipant {
-                released: released.clone(),
-                begins: Arc::new(AtomicUsize::new(0)),
-                polls: Arc::new(AtomicUsize::new(0)),
-                drops: drops.clone(),
-            },
-        )
-        .unwrap();
-    let runtime = admit_candidate_with(
-        configured_app(FixedTime::default()).seal().unwrap(),
-        obligations,
-        RuntimeClosePolicy::new(Duration::ZERO),
-    )
-    .unwrap()
-    .complete_startup()
-    .unwrap()
-    .promote();
-
-    drop(runtime);
-
-    assert_eq!(drops.load(Ordering::SeqCst), 0);
-    let retained = runtime_quarantine_status();
-    assert_eq!(
-        retained.current_thread_retained(),
-        quarantine_before.current_thread_retained() + 1
-    );
-    assert_eq!(
-        retained.process_retained(),
-        quarantine_before.process_retained() + 1
-    );
-
-    released.store(true, Ordering::SeqCst);
-    let reaped = drive_runtime_quarantine();
-    assert_eq!(
-        reaped.current_thread_retained(),
-        quarantine_before.current_thread_retained()
-    );
-    assert_eq!(
-        reaped.process_retained(),
-        quarantine_before.process_retained()
-    );
-    assert_eq!(reaped.total_reaped(), quarantine_before.total_reaped() + 1);
-    assert_eq!(drops.load(Ordering::SeqCst), 1);
-}
-
-#[test]
-fn quarantine_is_process_observable_and_driven_on_the_owner_thread() {
-    let process_before = runtime_quarantine_status();
-    let released = Arc::new(AtomicBool::new(false));
-    let drops = Arc::new(AtomicUsize::new(0));
-    let (status_sender, status_receiver) = mpsc::sync_channel(2);
-    let (release_sender, release_receiver) = mpsc::sync_channel(1);
-    let worker_released = released.clone();
-    let worker_drops = drops.clone();
-
-    let worker = std::thread::spawn(move || {
-        let thread_before = runtime_quarantine_status();
-        let mut obligations = RuntimeObligationLedger::new();
-        obligations
-            .register(
-                RuntimeCloseParticipantId::new("nara.test.thread-affine-quarantine"),
-                RetainedCloseParticipant {
-                    released: worker_released.clone(),
-                    begins: Arc::new(AtomicUsize::new(0)),
-                    polls: Arc::new(AtomicUsize::new(0)),
-                    drops: worker_drops,
-                },
-            )
-            .unwrap();
-        let runtime = admit_candidate_with(
-            configured_app(FixedTime::default()).seal().unwrap(),
-            obligations,
-            RuntimeClosePolicy::new(Duration::ZERO),
-        )
-        .unwrap()
-        .complete_startup()
-        .unwrap()
-        .promote();
-
-        drop(runtime);
-        status_sender
-            .send((thread_before, runtime_quarantine_status()))
-            .unwrap();
-        release_receiver.recv().unwrap();
-        worker_released.store(true, Ordering::SeqCst);
-        status_sender
-            .send((thread_before, drive_runtime_quarantine()))
-            .unwrap();
-    });
-
-    let (thread_before, retained) = status_receiver.recv().unwrap();
-    assert_eq!(
-        retained.current_thread_retained(),
-        thread_before.current_thread_retained() + 1
-    );
-    assert_eq!(
-        runtime_quarantine_status().process_retained(),
-        process_before.process_retained() + 1
-    );
-    assert_eq!(
-        runtime_quarantine_status().current_thread_retained(),
-        process_before.current_thread_retained()
-    );
-
-    release_sender.send(()).unwrap();
-    let (thread_before, reaped) = status_receiver.recv().unwrap();
-    worker.join().unwrap();
-    assert_eq!(
-        reaped.current_thread_retained(),
-        thread_before.current_thread_retained()
-    );
-    assert_eq!(
-        runtime_quarantine_status().process_retained(),
-        process_before.process_retained()
-    );
-    assert_eq!(drops.load(Ordering::SeqCst), 1);
-}
-
-#[test]
-fn dropping_multiple_runtimes_with_blocked_task_owners_is_bounded_and_reapable() {
-    const RUNTIME_COUNT: usize = 3;
-
-    let quarantine_before = runtime_quarantine_status();
-    let mut releases = Vec::with_capacity(RUNTIME_COUNT);
-    let mut exits = Vec::with_capacity(RUNTIME_COUNT);
-
-    for index in 0..RUNTIME_COUNT {
-        let mut app = configured_app(FixedTime::default());
-        app.add_plugin(TaskPlugin::new(single_worker_task_config()))
-            .unwrap();
-        let (started_sender, started_receiver) = mpsc::sync_channel(1);
-        let (release_sender, release_receiver) = mpsc::sync_channel::<()>(1);
-        let (exit_sender, exit_receiver) = mpsc::sync_channel(1);
-        let handle = app
-            .world()
-            .resource::<TaskPools>()
-            .spawn(
-                TaskPoolKind::Io,
-                TaskSpawnRequest::new(1, TaskDomainKey::new(100 + index as u64)),
-                move |_| {
-                    started_sender.send(()).unwrap();
-                    let _ = release_receiver.recv();
-                    exit_sender.send(()).unwrap();
-                },
-            )
-            .into_handle()
-            .unwrap();
-        started_receiver
-            .recv_timeout(Duration::from_secs(10))
-            .expect("blocked task did not start before the deadline");
-        drop(handle);
-
-        let runtime = admit_candidate_with(
-            app.seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::new(Duration::ZERO),
-        )
-        .unwrap()
-        .complete_startup()
-        .unwrap()
-        .promote();
-        drop(runtime);
-
-        releases.push(release_sender);
-        exits.push(exit_receiver);
-    }
-
-    let retained = runtime_quarantine_status();
-    assert_eq!(
-        retained.current_thread_retained(),
-        quarantine_before.current_thread_retained() + RUNTIME_COUNT
-    );
-    assert!(retained.current_thread_retained() <= retained.current_thread_capacity());
-    assert!(retained.process_retained() <= retained.process_capacity());
-
-    drop(releases);
-    for exit in exits {
-        exit.recv_timeout(Duration::from_secs(10))
-            .expect("blocked task did not exit before the deadline");
-    }
-
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let mut reaped = drive_runtime_quarantine();
-    while reaped.current_thread_retained() != quarantine_before.current_thread_retained()
-        && Instant::now() < deadline
-    {
-        std::thread::sleep(Duration::from_millis(1));
-        reaped = drive_runtime_quarantine();
-    }
-
-    assert_eq!(
-        reaped.current_thread_retained(),
-        quarantine_before.current_thread_retained()
-    );
-    assert!(reaped.total_reaped() >= quarantine_before.total_reaped() + RUNTIME_COUNT as u64);
-}
-
 #[derive(Debug, Resource)]
 struct CallerOwnedResource(Arc<AtomicUsize>);
 
@@ -1390,7 +1137,6 @@ impl Plugin for FailingRuntimeShutdownPlugin {
 
 #[test]
 fn plugin_shutdown_failure_is_terminal_and_visible_without_claiming_close_success() {
-    let quarantine_before = runtime_quarantine_status();
     let mut app = configured_app(FixedTime::default());
     app.add_plugin(FailingRuntimeShutdownPlugin).unwrap();
     let mut runtime = start_runtime(app);
@@ -1408,10 +1154,6 @@ fn plugin_shutdown_failure_is_terminal_and_visible_without_claiming_close_succes
         ))
     );
     drop(runtime);
-    assert_eq!(
-        runtime_quarantine_status().process_retained(),
-        quarantine_before.process_retained()
-    );
 }
 
 #[test]
@@ -1580,10 +1322,6 @@ fn close_is_retryable_and_proves_only_explicitly_transferred_owners() {
 
 #[test]
 fn dropping_a_live_runtime_begins_best_effort_close_once() {
-    let quarantine_before = runtime_quarantine_status();
-    let baseline_reservations = reserve_remaining_runtime_routes();
-    let baseline_available = baseline_reservations.len();
-    drop(baseline_reservations);
     let released = Arc::new(AtomicBool::new(false));
     let begins = Arc::new(AtomicUsize::new(0));
     let polls = Arc::new(AtomicUsize::new(0));
@@ -1617,27 +1355,6 @@ fn dropping_a_live_runtime_begins_best_effort_close_once() {
     assert_eq!(plugin_shutdowns.load(Ordering::SeqCst), 1);
     assert_eq!(begins.load(Ordering::SeqCst), 1);
     assert_eq!(polls.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        runtime_quarantine_status().process_retained(),
-        quarantine_before.process_retained() + 1
-    );
-    let reservations = reserve_remaining_runtime_routes();
-    assert_eq!(
-        reservations.len() + 1,
-        baseline_available,
-        "a quarantined managed owner must retain its route"
-    );
-
-    released.store(true, Ordering::SeqCst);
-    let reaped = drive_runtime_quarantine();
-    assert_eq!(
-        reaped.process_retained(),
-        quarantine_before.process_retained()
-    );
-    let released_route = RuntimeAdmissionReservation::try_acquire()
-        .expect("reaping the quarantined owner releases its route");
-    drop(released_route);
-    drop(reservations);
 }
 
 #[test]
@@ -1739,9 +1456,6 @@ fn admission_failure_retires_plugin_then_host_and_retries_only_pending_owner() {
         }
     }
 
-    let baseline_reservations = reserve_remaining_runtime_routes();
-    let route_capacity = baseline_reservations.len();
-    drop(baseline_reservations);
     let log = Arc::new(Mutex::new(Vec::new()));
     let released = Arc::new(AtomicBool::new(false));
     let plugin_begins = Arc::new(AtomicUsize::new(0));
@@ -1778,8 +1492,6 @@ fn admission_failure_retires_plugin_then_host_and_retries_only_pending_owner() {
             id: PLUGIN_PARTICIPANT_ID,
         })
     );
-    let retained_route_reservations = reserve_remaining_runtime_routes();
-    assert_eq!(retained_route_reservations.len() + 1, route_capacity);
     assert_eq!(plugin_begins.load(Ordering::SeqCst), 0);
     assert_eq!(host_begins.load(Ordering::SeqCst), 0);
     let mut retirement = failure.begin_retirement();
@@ -1811,15 +1523,10 @@ fn admission_failure_retires_plugin_then_host_and_retries_only_pending_owner() {
         *log.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
         ["plugin", "host"]
     );
-    let released_route = RuntimeAdmissionReservation::try_acquire()
-        .expect("truthful admission-failure retirement releases its route");
-    drop(released_route);
-    drop(retained_route_reservations);
 }
 
 #[test]
-fn ordinary_start_validator_unwind_retains_host_close_obligations() {
-    let retained_before = runtime_quarantine_status().current_thread_retained();
+fn ordinary_start_validator_unwind_releases_host_close_obligations() {
     let begins = Arc::new(AtomicUsize::new(0));
     let drops = Arc::new(AtomicUsize::new(0));
     let mut obligations = RuntimeObligationLedger::new();
@@ -1835,7 +1542,7 @@ fn ordinary_start_validator_unwind_retains_host_close_obligations() {
         )
         .unwrap();
     let mut app = App::new();
-    app.__install_runtime_authority_validator(
+    app.register_runtime_validator(
         PluginId::new("nara.test.validator-unwind"),
         Arc::new(|_, _| panic!("injected seal validator unwind")),
     )
@@ -1846,147 +1553,12 @@ fn ordinary_start_validator_unwind_retains_host_close_obligations() {
             RuntimeInstance::start_with_options(app, obligations, RuntimeClosePolicy::default());
     }));
     assert!(unwound.is_err());
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while runtime_quarantine_status().current_thread_retained() > retained_before
-        && Instant::now() < deadline
-    {
-        let _ = drive_runtime_quarantine();
-    }
-    assert_eq!(
-        runtime_quarantine_status().current_thread_retained(),
-        retained_before
-    );
     assert_eq!(begins.load(Ordering::SeqCst), 1);
     assert_eq!(drops.load(Ordering::SeqCst), 1);
 }
 
 #[test]
-fn reservation_saturation_precedes_app_and_obligation_transfer() {
-    let mut reservations = reserve_remaining_runtime_routes();
-    let capacity = reservations.len();
-    assert!(capacity >= 131);
-    assert_eq!(reservations.len(), capacity);
-
-    let sealed = configured_app(FixedTime::default()).seal().unwrap();
-    let obligations = RuntimeObligationLedger::new();
-    drop(
-        reservations
-            .pop()
-            .expect("saturated capacity contains one releasable reservation"),
-    );
-    let candidate = RuntimeAdmissionReservation::try_acquire()
-        .expect("releasing one reservation restores capacity")
-        .admit(sealed, obligations, RuntimeClosePolicy::default())
-        .expect("inputs remain owned by the caller until explicit admission");
-    let runtime = candidate.complete_startup().unwrap().promote();
-    finish_runtime(runtime);
-    drop(reservations);
-}
-
-fn reserve_remaining_runtime_routes() -> Vec<RuntimeAdmissionReservation> {
-    let mut reservations = Vec::new();
-    while let Ok(reservation) = RuntimeAdmissionReservation::try_acquire() {
-        reservations.push(reservation);
-    }
-    reservations
-}
-
-#[test]
-fn close_incomplete_retains_its_fault_route_until_truthful_retirement() {
-    let baseline_reservations = reserve_remaining_runtime_routes();
-    let capacity = baseline_reservations.len();
-    drop(baseline_reservations);
-    let released = Arc::new(AtomicBool::new(false));
-    let mut obligations = RuntimeObligationLedger::new();
-    obligations
-        .register(
-            RuntimeCloseParticipantId::new("nara.test.route-retention"),
-            TestCloseParticipant {
-                released: Arc::clone(&released),
-                begins: Arc::new(AtomicUsize::new(0)),
-                polls: Arc::new(AtomicUsize::new(0)),
-            },
-        )
-        .unwrap();
-    let runtime = admit_candidate_with(
-        configured_app(FixedTime::default()).seal().unwrap(),
-        obligations,
-        RuntimeClosePolicy::new(Duration::ZERO),
-    )
-    .unwrap()
-    .complete_startup()
-    .unwrap()
-    .promote();
-    let mut retirement = runtime.begin_retirement();
-    assert_eq!(
-        retirement.drive_retirement(),
-        RuntimeCandidateRetirementState::RetirementIncomplete
-    );
-
-    let reservations = reserve_remaining_runtime_routes();
-    assert_eq!(reservations.len() + 1, capacity);
-
-    released.store(true, Ordering::SeqCst);
-    assert_eq!(
-        retirement.drive_retirement(),
-        RuntimeCandidateRetirementState::Retired
-    );
-    let released_route = RuntimeAdmissionReservation::try_acquire()
-        .expect("truthful retirement releases exactly one route");
-    drop(released_route);
-    drop(reservations);
-}
-
-#[test]
-fn admission_panic_retains_its_owner_and_route_in_process_quarantine() {
-    let quarantine_before = runtime_quarantine_status();
-    let baseline_reservations = reserve_remaining_runtime_routes();
-    let route_capacity = baseline_reservations.len();
-    drop(baseline_reservations);
-
-    let mut app = configured_app(FixedTime::default());
-    app.world_mut().unwrap().add_observer(
-        |_: On<nara::ecs::bevy_ecs::lifecycle::Add<nara::ecs::bevy_ecs::observer::Observer>>| {
-            panic!("injected observer materialization panic");
-        },
-    );
-    app.add_observer(count_raw_observer).unwrap();
-    let sealed = app.seal().unwrap();
-
-    let admission = catch_unwind(AssertUnwindSafe(|| {
-        RuntimeAdmissionReservation::try_acquire()
-            .expect("the panic test has one runtime route")
-            .admit(
-                sealed,
-                RuntimeObligationLedger::new(),
-                RuntimeClosePolicy::default(),
-            )
-    }));
-
-    assert!(admission.is_err());
-    assert_eq!(
-        runtime_quarantine_status().process_retained(),
-        quarantine_before.process_retained() + 1
-    );
-    let retained_route_reservations = reserve_remaining_runtime_routes();
-    assert_eq!(retained_route_reservations.len() + 1, route_capacity);
-
-    let reaped = drive_runtime_quarantine();
-    assert_eq!(
-        reaped.process_retained(),
-        quarantine_before.process_retained()
-    );
-    let released_route = RuntimeAdmissionReservation::try_acquire()
-        .expect("reaping the admission panic owner releases its route");
-    drop(released_route);
-    drop(retained_route_reservations);
-}
-
-#[test]
 fn startup_failure_retains_pending_owners_until_explicit_retry() {
-    let baseline_reservations = reserve_remaining_runtime_routes();
-    let route_capacity = baseline_reservations.len();
-    drop(baseline_reservations);
     let released = Arc::new(AtomicBool::new(false));
     let begins = Arc::new(AtomicUsize::new(0));
     let polls = Arc::new(AtomicUsize::new(0));
@@ -2017,8 +1589,6 @@ fn startup_failure_retains_pending_owners_until_explicit_retry() {
         failure.retirement_state(),
         RuntimeCandidateRetirementState::Retiring
     );
-    let retained_route_reservations = reserve_remaining_runtime_routes();
-    assert_eq!(retained_route_reservations.len() + 1, route_capacity);
     assert_eq!(
         failure.drive_retirement(),
         RuntimeCandidateRetirementState::RetirementIncomplete
@@ -2033,53 +1603,6 @@ fn startup_failure_retains_pending_owners_until_explicit_retry() {
     );
     assert_eq!(begins.load(Ordering::SeqCst), 1);
     assert_eq!(polls.load(Ordering::SeqCst), 2);
-    let released_route = RuntimeAdmissionReservation::try_acquire()
-        .expect("truthful startup-failure retirement releases its route");
-    drop(released_route);
-    drop(retained_route_reservations);
-}
-
-#[test]
-fn dropping_a_startup_failure_transfers_its_owner_to_quarantine() {
-    let quarantine_before = runtime_quarantine_status();
-    let released = Arc::new(AtomicBool::new(false));
-    let drops = Arc::new(AtomicUsize::new(0));
-    let mut obligations = RuntimeObligationLedger::new();
-    obligations
-        .register(
-            RuntimeCloseParticipantId::new("nara.test.dropped-startup-owner"),
-            RetainedCloseParticipant {
-                released: released.clone(),
-                begins: Arc::new(AtomicUsize::new(0)),
-                polls: Arc::new(AtomicUsize::new(0)),
-                drops: drops.clone(),
-            },
-        )
-        .unwrap();
-    let mut app = configured_app(FixedTime::default());
-    app.add_systems(StartupStage::Core, fail_system).unwrap();
-    let candidate = admit_candidate_with(
-        app.seal().unwrap(),
-        obligations,
-        RuntimeClosePolicy::new(Duration::ZERO),
-    )
-    .unwrap();
-    let failure = candidate.complete_startup().unwrap_err();
-
-    drop(failure);
-    assert_eq!(drops.load(Ordering::SeqCst), 0);
-    assert_eq!(
-        runtime_quarantine_status().process_retained(),
-        quarantine_before.process_retained() + 1
-    );
-
-    released.store(true, Ordering::SeqCst);
-    let reaped = drive_runtime_quarantine();
-    assert_eq!(
-        reaped.process_retained(),
-        quarantine_before.process_retained()
-    );
-    assert_eq!(drops.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -2106,8 +1629,7 @@ fn the_first_runtime_fault_is_sticky_and_generations_do_not_repeat() {
 
 #[test]
 fn the_build_time_fault_reporter_remains_bound_to_the_runtime() {
-    let mut app = configured_app(FixedTime::default());
-    app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+    let app = configured_app(FixedTime::default());
     let build_time_reporter = app.world().resource::<RuntimeFaultReporter>().clone();
     let mut runtime = start_runtime(app);
     let fault = RuntimeFault::engine(
@@ -2261,54 +1783,26 @@ fn control_tickets_are_scoped_to_their_runtime_generation() {
 #[derive(Debug, Resource)]
 struct FirstRuntimeOnly;
 
-fn submit_runtime_isolation_command(
-    runtime: &mut RuntimeInstance,
-    tick: u64,
-    source: &str,
-    sequence: u64,
-) {
-    runtime
-        .with_driver_scope(|scope| {
-            submit_gameplay_driver_command(
-                scope,
-                GameplayCommandSubmission::new(
-                    GameplayCommandTick::new(tick).unwrap(),
-                    GameplayCommandIngressSource::test(source).unwrap(),
-                    GameplayCommandSourceSequence::new(sequence).unwrap(),
-                    GameplayCommandDraft::new(
-                        GameplayCommandTypeId::new("runtime.isolation").unwrap(),
-                    ),
-                ),
-            )
-            .unwrap()
-            .unwrap();
-        })
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
-        })
-        .unwrap();
-}
-
 #[test]
-fn alternating_runtime_drives_do_not_share_world_time_or_gameplay_queue_state() {
-    let mut first_app = configured_app(FixedTime::default());
-    first_app
-        .add_plugin(GameplayCommandPlugin::default())
-        .unwrap();
+fn alternating_runtime_drives_keep_world_time_and_game_owned_state_isolated() {
+    let mut first_app = app_with_player_motion();
     first_app.insert_resource(FirstRuntimeOnly).unwrap();
-    let mut second_app = configured_app(FixedTime::default());
-    second_app
-        .add_plugin(GameplayCommandPlugin::default())
-        .unwrap();
     let mut first = start_runtime(first_app);
-    let mut second = start_runtime(second_app);
+    let mut second = start_runtime(app_with_player_motion());
 
-    submit_runtime_isolation_command(&mut first, 1, "first-runtime", 1);
+    let outcome = first.apply_command(SetPlayerSpeed(2)).unwrap();
+    assert_eq!(outcome.output, Ok(0));
+    assert_eq!(outcome.post_operation_fault, None);
     first.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
-    submit_runtime_isolation_command(&mut second, 1, "second-runtime", 1);
+
+    let outcome = second.apply_command(SetPlayerSpeed(5)).unwrap();
+    assert_eq!(outcome.output, Ok(0));
+    assert_eq!(outcome.post_operation_fault, None);
     second.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
-    submit_runtime_isolation_command(&mut first, 2, "first-runtime", 2);
+
+    let outcome = first.apply_command(SetPlayerSpeed(4)).unwrap();
+    assert_eq!(outcome.output, Ok(2));
+    assert_eq!(outcome.post_operation_fault, None);
     first.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
     assert_eq!(first.world().resource::<FixedTime>().tick(), 2);
@@ -2316,21 +1810,21 @@ fn alternating_runtime_drives_do_not_share_world_time_or_gameplay_queue_state() 
     assert!(first.world().contains_resource::<FirstRuntimeOnly>());
     assert!(!second.world().contains_resource::<FirstRuntimeOnly>());
     assert_eq!(
-        first
-            .world()
-            .resource::<GameplayCommandQueue>()
-            .stats()
-            .accepted,
-        2
+        *first.world().resource::<PlayerMotion>(),
+        PlayerMotion {
+            speed: 4,
+            position: 6,
+        }
     );
     assert_eq!(
-        second
-            .world()
-            .resource::<GameplayCommandQueue>()
-            .stats()
-            .accepted,
-        1
+        *second.world().resource::<PlayerMotion>(),
+        PlayerMotion {
+            speed: 5,
+            position: 5,
+        }
     );
+    finish_runtime(first);
+    finish_runtime(second);
 }
 
 #[test]
@@ -2852,28 +2346,19 @@ fn exact_step_rejects_a_temporarily_replaced_error_handler() {
 #[derive(Resource)]
 struct RetirementMarker(usize);
 
-impl __RuntimeDriverPort for RetirementMarker {
-    type Input = ();
-    type Output = ();
-
-    fn accepts_driver_state(state: RuntimeState) -> bool {
-        matches!(
-            state,
-            RuntimeState::Running
-                | RuntimeState::Paused
-                | RuntimeState::Faulted
-                | RuntimeState::Stopping
-                | RuntimeState::CloseIncomplete
-        )
-    }
-
-    fn apply_driver_input(&mut self, (): Self::Input) {
-        self.0 += 1;
-    }
+fn mark_retirement(runtime: &mut RuntimeInstance) {
+    let outcome = runtime
+        .with_driver_scope(|scope| {
+            scope.apply_command(|world: &mut World| {
+                world.resource_mut::<RetirementMarker>().0 += 1;
+            })
+        })
+        .unwrap();
+    assert!(outcome.post_operation_fault.is_none());
 }
 
 #[test]
-fn faulted_runtime_keeps_typed_retirement_ports_available() {
+fn faulted_runtime_keeps_driver_retirement_commands_available() {
     let mut app = configured_app(FixedTime::default());
     app.insert_resource(RetirementMarker(0)).unwrap();
     let mut runtime = start_runtime(app);
@@ -2883,31 +2368,14 @@ fn faulted_runtime_keeps_typed_retirement_ports_available() {
     ));
     assert_eq!(runtime.state(), RuntimeState::Faulted);
 
-    runtime
-        .with_driver_scope(|scope| {
-            scope.__apply_port::<RetirementMarker>(()).unwrap();
-        })
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
-        })
-        .unwrap();
-
+    mark_retirement(&mut runtime);
     assert_eq!(runtime.world().resource::<RetirementMarker>().0, 1);
     accepted_ticket(runtime.request_control(RuntimeControl::Stop));
     assert_eq!(
         runtime.drive(Duration::ZERO).unwrap().state(),
         RuntimeState::Stopping
     );
-    runtime
-        .with_driver_scope(|scope| {
-            scope.__apply_port::<RetirementMarker>(()).unwrap();
-        })
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
-        })
-        .unwrap();
+    mark_retirement(&mut runtime);
     assert_eq!(runtime.world().resource::<RetirementMarker>().0, 2);
     assert_eq!(
         runtime.drive(Duration::ZERO).unwrap().state(),
@@ -2916,7 +2384,7 @@ fn faulted_runtime_keeps_typed_retirement_ports_available() {
 }
 
 #[test]
-fn runtime_authority_fault_does_not_block_typed_retirement_ports() {
+fn runtime_authority_fault_does_not_block_driver_retirement_commands() {
     let mut app = configured_app(FixedTime::default());
     app.insert_resource(RetirementMarker(0)).unwrap();
     let mut runtime = start_runtime(app);
@@ -2929,15 +2397,7 @@ fn runtime_authority_fault_does_not_block_typed_retirement_ports() {
 
     assert_eq!(failure.fault().kind(), RuntimeFaultKind::RuntimeAuthority);
     assert_eq!(runtime.state(), RuntimeState::Faulted);
-    runtime
-        .with_driver_scope(|scope| {
-            scope.__apply_port::<RetirementMarker>(()).unwrap();
-        })
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
-        })
-        .unwrap();
+    mark_retirement(&mut runtime);
     assert_eq!(runtime.world().resource::<RetirementMarker>().0, 1);
     finish_runtime(runtime);
 }
@@ -3041,9 +2501,6 @@ fn atomic_publication_installs_the_owner_before_a_later_reported_fault() {
 
 #[test]
 fn atomic_publication_preserves_an_occupied_slot_and_retires_the_rejected_owner() {
-    let baseline_reservations = reserve_remaining_runtime_routes();
-    let route_capacity = baseline_reservations.len();
-    drop(baseline_reservations);
     let first = admit_candidate(configured_app(FixedTime::default()).seal().unwrap())
         .unwrap()
         .complete_startup()
@@ -3063,17 +2520,8 @@ fn atomic_publication_preserves_an_occupied_slot_and_retires_the_rejected_owner(
         &RuntimePublicationError::DestinationOccupied
     );
     assert_eq!(slot.runtime().unwrap().generation(), first_generation);
-    let retained_route_reservations = reserve_remaining_runtime_routes();
-    assert_eq!(retained_route_reservations.len() + 2, route_capacity);
     finish_publication_failure(failure);
-    let rejected_route = RuntimeAdmissionReservation::try_acquire()
-        .expect("retiring the rejected publication owner releases one route");
     finish_runtime(slot.take().unwrap());
-    let published_route = RuntimeAdmissionReservation::try_acquire()
-        .expect("retiring the published runtime releases its distinct route");
-    drop(published_route);
-    drop(rejected_route);
-    drop(retained_route_reservations);
 }
 
 #[test]
@@ -3178,87 +2626,57 @@ fn nested_runtime_drive_keeps_both_runtime_routes_independent() {
     finish_runtime(outer);
 }
 
-fn replace_queue_before_acknowledge(mut queue: ResMut<GameplayCommandQueue>) {
-    *queue = GameplayCommandQueue::default();
-}
-
 #[test]
-fn acknowledge_invariant_failure_becomes_a_sticky_runtime_fault() {
-    let mut app = configured_app(FixedTime::default());
-    app.add_plugin(GameplayCommandPlugin::default())
-        .unwrap()
-        .add_systems(
-            CoreStage::FixedUpdate,
-            replace_queue_before_acknowledge.in_set(GameplayCommandSet::Capture),
-        )
+fn typed_command_output_is_retained_when_the_operation_reports_a_fault() {
+    let mut runtime = start_runtime(app_with_player_motion());
+    let reporter = runtime.fault_reporter();
+    let fault = RuntimeFault::engine(RuntimeFaultKind::RequiredService, "nara.test.command");
+    let reported_fault = fault.clone();
+
+    let outcome = runtime
+        .apply_command(move |world: &mut World| {
+            let output = SetPlayerSpeed(6).apply(world);
+            assert!(reporter.report(reported_fault));
+            output
+        })
         .unwrap();
-    let mut runtime = start_runtime(app);
-    accepted_ticket(runtime.request_control(RuntimeControl::Pause));
-    runtime.drive(Duration::ZERO).unwrap();
-    accepted_ticket(runtime.request_control(RuntimeControl::StepFixedTick));
 
-    let error = runtime.drive(Duration::ZERO).unwrap_err();
-
-    assert_eq!(error.fault().kind(), RuntimeFaultKind::GameplayLifecycle);
-    assert_eq!(error.fault().source(), "nara.gameplay.fixed-acknowledge");
+    assert_eq!(outcome.output, Ok(0));
+    assert_eq!(outcome.post_operation_fault.as_ref(), Some(&fault));
+    assert_eq!(runtime.fault(), Some(&fault));
     assert_eq!(runtime.state(), RuntimeState::Faulted);
+    assert!(matches!(
+        runtime.apply_command(SetPlayerSpeed(2)),
+        Err(RuntimeScopeError::Unavailable {
+            state: RuntimeState::Faulted
+        })
+    ));
+    assert_eq!(runtime.world().resource::<PlayerMotion>().speed, 6);
+    finish_runtime(runtime);
 }
 
 #[test]
-fn external_submission_rejections_do_not_fault_a_healthy_runtime() {
-    let mut app = configured_app(FixedTime::default());
-    app.add_plugin(GameplayCommandPlugin::default()).unwrap();
-    let mut runtime = start_runtime(app);
-    let submission = GameplayCommandSubmission::new(
-        GameplayCommandTick::new(1).unwrap(),
-        GameplayCommandIngressSource::external("external-rejection").unwrap(),
-        GameplayCommandSourceSequence::new(1).unwrap(),
-        GameplayCommandDraft::new(GameplayCommandTypeId::new("runtime.external").unwrap()),
-    );
-    runtime
-        .with_driver_scope(|scope| {
-            submit_gameplay_driver_command(scope, submission.clone())
-                .unwrap()
-                .unwrap();
-            assert_eq!(
-                submit_gameplay_driver_command(scope, submission)
-                    .unwrap()
-                    .unwrap_err(),
-                GameplayCommandRejection::Duplicate
-            );
-        })
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
-        })
-        .unwrap();
-    runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
-    runtime
-        .with_driver_scope(|scope| {
-            let rejection = submit_gameplay_driver_command(
-                scope,
-                GameplayCommandSubmission::new(
-                    GameplayCommandTick::new(1).unwrap(),
-                    GameplayCommandIngressSource::external("late-rejection").unwrap(),
-                    GameplayCommandSourceSequence::new(2).unwrap(),
-                    GameplayCommandDraft::new(
-                        GameplayCommandTypeId::new("runtime.external").unwrap(),
-                    ),
-                ),
-            )
-            .unwrap()
-            .unwrap_err();
-            assert!(matches!(rejection, GameplayCommandRejection::Late { .. }));
-        })
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
-        })
-        .unwrap();
+fn typed_command_domain_rejection_does_not_fault_a_healthy_runtime() {
+    let mut runtime = start_runtime(app_with_player_motion());
+    let accepted = runtime.apply_command(SetPlayerSpeed(3)).unwrap();
+    assert_eq!(accepted.output, Ok(0));
+    assert_eq!(accepted.post_operation_fault, None);
 
-    let outcome = runtime.drive(Duration::ZERO).unwrap();
+    let rejected = runtime.apply_command(SetPlayerSpeed(11)).unwrap();
+    assert_eq!(rejected.output, Err(InvalidPlayerSpeed(11)));
+    assert_eq!(rejected.post_operation_fault, None);
+
+    let outcome = runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
     assert_eq!(outcome.state(), RuntimeState::Running);
     assert_eq!(runtime.fault(), None);
+    assert_eq!(
+        *runtime.world().resource::<PlayerMotion>(),
+        PlayerMotion {
+            speed: 3,
+            position: 3,
+        }
+    );
+    finish_runtime(runtime);
 }
 
 #[test]

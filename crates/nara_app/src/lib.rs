@@ -1,9 +1,7 @@
 //! Application lifecycle and plugin orchestration for nara.
 //!
-//! Configure an [`App`], consume it with [`RuntimeInstance::start`], and advance the runtime with
-//! [`RuntimeInstance::drive`]. Embedded hosts request controls and keep driving until physical close
-//! completes; finite headless programs can consume the runtime with [`RuntimeInstance::finish`].
-//! Staged admission and publication remain public only for first-party cross-crate Host composition.
+//! Configure an [`App`], then launch its runner with [`App::run`] or drive it explicitly with
+//! [`App::update`] and [`App::step_fixed`].
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -11,9 +9,10 @@ use std::{
     num::NonZeroU32,
     panic::{AssertUnwindSafe, catch_unwind},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
+use bevy_platform::time::Instant;
 use nara_ecs::{
     Resource, World,
     bevy_ecs::component::Mutable,
@@ -25,11 +24,15 @@ use nara_ecs::{
 };
 use thiserror::Error;
 
+#[cfg(feature = "diagnostics")]
+pub mod diagnostics;
 mod execution;
 mod failure_metadata;
 mod plugin;
 mod runtime;
 mod scaled_time;
+#[cfg(feature = "tasks")]
+pub mod tasks;
 mod time_continuation;
 
 pub use execution::{AppConfigurationFingerprint, ExecutionProfile, ExecutionProfileError};
@@ -52,27 +55,20 @@ pub use time_continuation::{
     RuntimeTimeContinuation, RuntimeTimeContinuationError, RuntimeTimeContinuationRejection,
 };
 
-#[doc(hidden)]
-pub mod __private {
-    use nara_ecs::schedule::{ScheduleLabel, SystemSet};
+/// Collects input and frame intent after [`PreUpdate`] or before one exact fixed tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
+pub struct FrameIntent;
 
-    /// Engine-owned intent collection after ordinary PreUpdate or before one exact fixed tick.
-    /// Input and Gameplay place complete producers here without cloning their system state.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
-    pub struct FrameIntent;
-
-    /// Orders intent preparation before command collection and submission in [`FrameIntent`].
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
-    pub enum FrameIntentSet {
-        Prepare,
-        Collect,
-    }
-
-    /// Engine-owned transient retirement after all frame or exact-step observers have completed.
-    /// This is not a public gameplay ordering anchor.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
-    pub struct FrameCleanup;
+/// Orders intent preparation before collection in [`FrameIntent`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+pub enum FrameIntentSet {
+    Prepare,
+    Collect,
 }
+
+/// Retires frame transients after the ordinary frame or exact fixed step completes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
+pub struct FrameCleanup;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ScheduleLabel)]
 pub enum StartupStage {
@@ -162,8 +158,8 @@ fn is_built_in_schedule(schedule: InternedScheduleLabel) -> bool {
         || CoreStage::ALL
             .into_iter()
             .any(|stage| stage.intern() == schedule)
-        || __private::FrameIntent.intern() == schedule
-        || __private::FrameCleanup.intern() == schedule
+        || FrameIntent.intern() == schedule
+        || FrameCleanup.intern() == schedule
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
@@ -493,6 +489,8 @@ pub enum TimeSettingsError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum FixedTimeError {
+    #[error("an explicit fixed step must advance by a non-zero duration")]
+    ZeroStep,
     #[error(
         "fixed catch-up would queue {pending_steps} ticks, exceeding per-frame work {max_steps_per_frame} plus debt limit {max_debt_steps}"
     )]
@@ -965,7 +963,10 @@ impl FixedTime {
         })
     }
 
-    fn begin_exact_step(&self) -> Result<Self, FixedTimeError> {
+    fn begin_exact_step(&self, delta: Duration) -> Result<Self, FixedTimeError> {
+        if delta.is_zero() {
+            return Err(FixedTimeError::ZeroStep);
+        }
         let tick = self
             .tick
             .checked_add(1)
@@ -973,16 +974,16 @@ impl FixedTime {
                 tick: self.tick,
                 attempted_steps: 1,
             })?;
-        let elapsed =
-            self.elapsed
-                .checked_add(self.timestep)
-                .ok_or(FixedTimeError::ElapsedOverflow {
-                    elapsed: self.elapsed,
-                    timestep: self.timestep,
-                    attempted_steps: 1,
-                })?;
+        let elapsed = self
+            .elapsed
+            .checked_add(delta)
+            .ok_or(FixedTimeError::ElapsedOverflow {
+                elapsed: self.elapsed,
+                timestep: delta,
+                attempted_steps: 1,
+            })?;
         let mut exact = *self;
-        exact.delta = self.timestep;
+        exact.delta = delta;
         exact.elapsed = elapsed;
         exact.tick = tick;
         exact.steps_this_frame = 1;
@@ -1206,15 +1207,16 @@ struct InstalledPlugin {
 /// One private domain guard, retained in its owner's deterministic installation order.
 struct InstalledRuntimeAuthorityValidator {
     plugin: PluginId,
-    validator: Arc<runtime::__RuntimeAuthorityValidator>,
+    validator: Arc<RuntimeValidator>,
 }
 
-/// Configures one thread-bound World and its managed execution definition.
-///
-/// Build a fresh App on the thread that will drive and retire it. Replayable plugin definitions
-/// and immutable configuration can be transferred before App construction.
+type Runner = Box<dyn FnOnce(App) -> Result<AppExit, AppRunError>>;
+
+/// Owns a world, its schedules, and the runner that drives them on the current thread.
 pub struct App {
     owner: runtime::RuntimeOwner,
+    runner: Option<Runner>,
+    previous_update: Option<Instant>,
     plugin_entries: Vec<PluginPlanEntry>,
     plugin_definition_witnesses: Vec<plugin::PluginDefinitionWitness>,
     plugin_groups: Vec<ResolvedPluginGroup>,
@@ -1240,6 +1242,8 @@ impl App {
     pub fn new() -> Self {
         Self {
             owner: runtime::RuntimeOwner::new(),
+            runner: None,
+            previous_update: None,
             plugin_entries: Vec::new(),
             plugin_definition_witnesses: Vec::new(),
             plugin_groups: Vec::new(),
@@ -1248,6 +1252,53 @@ impl App {
             automatic_final_deferred: HashMap::new(),
             registered_shutdown_obligations: BTreeSet::new(),
         }
+    }
+
+    /// Selects the runner used by [`Self::run`]. The runner takes ownership of this app.
+    pub fn set_runner(
+        &mut self,
+        runner: impl FnOnce(App) -> Result<AppExit, AppRunError> + 'static,
+    ) -> &mut Self {
+        self.runner = Some(Box::new(runner));
+        self
+    }
+
+    /// Runs the selected platform runner. Without one, drives a single headless frame.
+    pub fn run(&mut self) -> Result<AppExit, AppRunError> {
+        if let Some(runner) = self.runner.take() {
+            return runner(std::mem::take(self));
+        }
+        Ok(self.update()?.exit.unwrap_or_default())
+    }
+
+    /// Runs one frame using elapsed wall-clock time. The first frame uses zero elapsed time.
+    pub fn update(&mut self) -> Result<AppFrameOutcome, AppRunError> {
+        let now = Instant::now();
+        let delta = self
+            .previous_update
+            .replace(now)
+            .map_or(Duration::ZERO, |previous| {
+                now.saturating_duration_since(previous)
+            });
+        self.update_with_delta(delta)
+    }
+
+    /// Runs one frame with a caller-supplied elapsed time, including any due fixed steps.
+    pub fn update_with_delta(&mut self, delta: Duration) -> Result<AppFrameOutcome, AppRunError> {
+        runtime::start_app(self)?;
+        runtime::drive_app(&mut self.owner, |owner| owner.run_managed_frame(delta))
+    }
+
+    /// Runs one fixed tick with the supplied simulation delta, without running frame schedules.
+    /// The regular frame accumulator and configured fixed timestep are preserved.
+    pub fn step_fixed(&mut self, delta: Duration) -> Result<AppFrameOutcome, AppRunError> {
+        if delta.is_zero() {
+            return Err(FixedTimeError::ZeroStep.into());
+        }
+        runtime::start_app(self)?;
+        runtime::drive_app(&mut self.owner, |owner| {
+            owner.run_fixed_tick(delta, Some(delta))
+        })
     }
 
     pub(crate) fn new_with_runtime_obligations(
@@ -1278,17 +1329,15 @@ impl App {
         Ok(&mut self.owner.world)
     }
 
-    /// Installs a hidden runtime authority guard owned by one domain plugin.
+    /// Registers a plugin's read-only runtime validation callback.
     ///
     /// App finish and managed boundaries check domain guards in installation order, stopping at
-    /// the first fault. Each plugin may install only one guard. The callback receives an immutable
-    /// World view and an admitted runtime generation when one exists; domain identity and fault
-    /// ownership remain inside the registering crate.
-    #[doc(hidden)]
-    pub fn __install_runtime_authority_validator(
+    /// the first fault. Each plugin may register one callback. The callback receives the World
+    /// and the runtime generation once an owner has been admitted.
+    pub fn register_runtime_validator(
         &mut self,
         plugin: PluginId,
-        validator: Arc<runtime::__RuntimeAuthorityValidator>,
+        validator: Arc<RuntimeValidator>,
     ) -> Result<&mut Self, PluginError> {
         self.ensure_mutation_allowed()?;
         if self
@@ -1597,13 +1646,19 @@ impl App {
         Ok(self)
     }
 
-    /// Retains this configured App for owner-thread retirement without sealing or running Startup.
+    /// Shuts down this App and waits for one bounded close attempt.
+    ///
+    /// On timeout or a teardown error, returns the original owner with its close evidence.
+    pub fn finish(self) -> Result<RuntimeCloseEvidence, RuntimePreparationRetirement> {
+        self.begin_retirement(RuntimeClosePolicy::default())
+            .finish()
+    }
+
+    /// Transfers this App into owner-thread retirement without running any further schedules.
     ///
     /// This transfer closes admission without polling shutdown hooks or close participants.
     /// Keep the returned owner and drive its retirement until physical completion, including
-    /// after a configuration operation fails. Dropping unfinished custody uses the existing
-    /// quarantine fallback rather than certifying successful cleanup.
-    #[doc(hidden)]
+    /// after a configuration operation fails. Dropping the owner makes one best-effort attempt.
     pub fn begin_retirement(
         self,
         close_policy: RuntimeClosePolicy,
@@ -1683,7 +1738,7 @@ impl App {
 
         if self.owner.plugin_lifecycle == PluginLifecycleState::Finishing {
             if let Err(error) = (|| {
-                let owner = &mut *self.owner;
+                let owner = &mut self.owner;
                 owner
                     .execution_profile
                     .install(&mut owner.schedules, &self.automatic_final_deferred)
@@ -1726,7 +1781,7 @@ impl App {
     }
 
     fn validate_public_schedule_compatibility(&mut self) -> Result<(), PluginError> {
-        let state = &mut *self.owner;
+        let state = &mut self.owner;
         for schedule in [CoreStage::FixedUpdate, CoreStage::Cleanup] {
             let public_schedule = state
                 .schedules
@@ -1746,7 +1801,7 @@ impl App {
     }
 
     fn initialize_installed_schedules(&mut self) -> Result<(), PluginError> {
-        let state = &mut *self.owner;
+        let state = &mut self.owner;
         for (_, schedule) in state.schedules.iter_mut() {
             if let Err(error) = schedule.initialize(&mut state.world) {
                 return Err(ScheduleGraphError::BuildFailed {
@@ -2138,7 +2193,7 @@ impl runtime::RuntimeOwnerState {
             } else if !paused_stages_only || stage_runs_while_paused(stage) {
                 self.run_managed_schedule(stage)?;
                 if stage == CoreStage::PreUpdate {
-                    self.run_managed_schedule(__private::FrameIntent)?;
+                    self.run_managed_schedule(FrameIntent)?;
                 }
             }
         }
@@ -2148,7 +2203,7 @@ impl runtime::RuntimeOwnerState {
             &mut self.world,
             TimeFrameResource::RuntimeFrameStatus,
         )? = status;
-        self.run_managed_schedule(__private::FrameCleanup)?;
+        self.run_managed_schedule(FrameCleanup)?;
         let exit = required_frame_resource_mut::<AppExitRequests>(
             &mut self.world,
             TimeFrameResource::AppExitRequests,
@@ -2162,6 +2217,14 @@ impl runtime::RuntimeOwnerState {
         &mut self,
         real_delta: Duration,
     ) -> Result<AppFrameOutcome, AppRunError> {
+        self.run_fixed_tick(real_delta, None)
+    }
+
+    fn run_fixed_tick(
+        &mut self,
+        real_delta: Duration,
+        explicit_step: Option<Duration>,
+    ) -> Result<AppFrameOutcome, AppRunError> {
         debug_assert!(self.started, "exact stepping requires completed startup");
         self.validate_managed_runtime_authority()
             .map_err(|fault| AppRunError::managed_runtime_fault(&fault))?;
@@ -2174,7 +2237,7 @@ impl runtime::RuntimeOwnerState {
                 .plan_advance(real_delta)?;
         let current_fixed_time =
             *required_frame_resource::<FixedTime>(&self.world, TimeFrameResource::FixedTime)?;
-        let virtual_delta = current_fixed_time.timestep();
+        let virtual_delta = explicit_step.unwrap_or(current_fixed_time.timestep());
         let virtual_time =
             required_frame_resource::<VirtualTime>(&self.world, TimeFrameResource::VirtualTime)?
                 .plan_advance(virtual_delta)?;
@@ -2187,13 +2250,13 @@ impl runtime::RuntimeOwnerState {
             &self.world,
             TimeFrameResource::AppExitRequests,
         )?;
-        let mut fixed_time = current_fixed_time.begin_exact_step()?;
+        let mut fixed_time = current_fixed_time.begin_exact_step(virtual_delta)?;
 
         *self.world.resource_mut::<RealTime>() = real_time;
         *self.world.resource_mut::<VirtualTime>() = virtual_time;
         *self.world.resource_mut::<FixedTime>() = fixed_time;
 
-        self.run_managed_schedule(__private::FrameIntent)?;
+        self.run_managed_schedule(FrameIntent)?;
         self.run_managed_schedule(CoreStage::FixedUpdate)?;
 
         fixed_time.finish_exact_step();
@@ -2217,7 +2280,7 @@ impl runtime::RuntimeOwnerState {
             &mut self.world,
             TimeFrameResource::RuntimeFrameStatus,
         )? = status;
-        self.run_managed_schedule(__private::FrameCleanup)?;
+        self.run_managed_schedule(FrameCleanup)?;
         let exit = required_frame_resource_mut::<AppExitRequests>(
             &mut self.world,
             TimeFrameResource::AppExitRequests,
@@ -2948,14 +3011,12 @@ mod tests {
             .unwrap();
         app.add_systems(CoreStage::FixedUpdate, observe_exact_step_trackers)
             .unwrap();
-        let candidate = RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(
-                app.seal().unwrap(),
-                RuntimeObligationLedger::new(),
-                RuntimeClosePolicy::default(),
-            )
-            .unwrap();
+        let candidate = RuntimeCandidate::admit(
+            app.seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
         let mut runtime = candidate.complete_startup().unwrap().promote();
         assert!(matches!(
             runtime.request_control(RuntimeControl::Pause),
@@ -3052,7 +3113,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(ExactStepAuthorityRevision::default())
             .unwrap();
-        app.__install_runtime_authority_validator(
+        app.register_runtime_validator(
             AUTHORITY_PLUGIN_ID,
             Arc::new(|world, _generation| {
                 if world
@@ -3069,14 +3130,12 @@ mod tests {
             }),
         )
         .unwrap();
-        let candidate = RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(
-                app.seal().unwrap(),
-                RuntimeObligationLedger::new(),
-                RuntimeClosePolicy::default(),
-            )
-            .unwrap();
+        let candidate = RuntimeCandidate::admit(
+            app.seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
         let mut runtime = candidate.complete_startup().unwrap().promote();
         assert!(matches!(
             runtime.request_control(RuntimeControl::Pause),
@@ -3973,7 +4032,6 @@ mod tests {
 
         assert_eq!(begins.load(Ordering::SeqCst), 1);
         assert_eq!(polls.load(Ordering::SeqCst), 2);
-        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
     }
 
     #[test]
@@ -4019,7 +4077,6 @@ mod tests {
 
         assert_eq!(begins.load(Ordering::SeqCst), 1);
         assert_eq!(polls.load(Ordering::SeqCst), 2);
-        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
     }
 
     #[test]
@@ -4125,7 +4182,6 @@ mod tests {
         assert_eq!(close.begins.load(Ordering::SeqCst), 1);
         assert_eq!(close.finishes.load(Ordering::SeqCst), 0);
         assert_eq!(startup_runs.load(Ordering::SeqCst), 0);
-        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
     }
 
     #[test]
@@ -4167,7 +4223,6 @@ mod tests {
         );
         assert_eq!(completed, RuntimeCandidateRetirementState::Retired);
         assert_eq!(close.begins.load(Ordering::SeqCst), 1);
-        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
     }
 
     #[test]
@@ -4234,7 +4289,6 @@ mod tests {
                 plugin_close.finishes.load(Ordering::SeqCst),
                 usize::from(!collide)
             );
-            assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
         }
     }
 
@@ -4282,7 +4336,6 @@ mod tests {
         );
         assert_eq!(completed, RuntimeCandidateRetirementState::Retired);
         assert_eq!(close.begins.load(Ordering::SeqCst), 1);
-        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
     }
 
     #[test]
@@ -4321,7 +4374,6 @@ mod tests {
         );
         assert_eq!(completed, RuntimeCandidateRetirementState::Retired);
         assert_eq!(close.begins.load(Ordering::SeqCst), 1);
-        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
     }
 
     #[test]
@@ -4347,7 +4399,6 @@ mod tests {
         assert_eq!(begins.load(Ordering::SeqCst), 1);
         assert_eq!(polls.load(Ordering::SeqCst), 2);
         drop(failure);
-        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
     }
 
     #[test]
@@ -4463,6 +4514,5 @@ mod tests {
         assert_eq!(first_polls.load(Ordering::SeqCst), 2);
         assert_eq!(second_begins.load(Ordering::SeqCst), 1);
         assert_eq!(second_polls.load(Ordering::SeqCst), 2);
-        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
     }
 }

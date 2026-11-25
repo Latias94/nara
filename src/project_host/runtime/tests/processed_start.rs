@@ -1,13 +1,13 @@
 use std::{fs, path::PathBuf, time::Instant};
 
+use crate::fs::ContentDigest;
 use nara_app::{App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
 use nara_asset::{
     AssetProductRef, AssetRef, AssetServer, Assets, ImportedProductId, RuntimeAssetCodec,
     StableAssetId,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
-use nara_fs::ContentDigest;
-use nara_identity::{EntityLookup, SceneEntityId, WorldIdentityDomain};
+use nara_ecs::identity::{EntityLookup, SceneEntityId, WorldIdentityDomain};
 use nara_project::{ProductCapability, ProjectPath, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{ComponentTypeId, ComponentValue, encode_asset_reference_value};
 use nara_render::image::{
@@ -423,9 +423,7 @@ fn processed_start_installs_native_values_and_original_request_context_without_f
         fs::remove_file(fixture.root.join(path)).unwrap();
     }
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host
-        .begin_processed_start(base.clone(), Vec::new())
-        .unwrap();
+    let mut attempt = host.begin_processed_start(base.clone()).unwrap();
     let prepared = host.prepare_start(&mut attempt).unwrap();
     assert!(prepared.source().is_none());
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
@@ -498,9 +496,7 @@ fn processed_start_stamp_rejects_an_equal_catalog_base_and_reprepared_scene() {
     assert_eq!(base.catalog_digest(), foreign.catalog_digest());
     assert!(!base.same_base(&foreign));
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host
-        .begin_processed_start(base.clone(), Vec::new())
-        .unwrap();
+    let mut attempt = host.begin_processed_start(base.clone()).unwrap();
     let original = attempt.inputs.as_ref().unwrap().content.clone();
     for replacement in [
         RuntimeStartContent::Processed {
@@ -551,7 +547,7 @@ fn processed_source_execution_is_rejected_before_any_runtime_plugin_builds() {
     let base = fixture.open(RuntimeContentLimits::default());
     let before = SOURCE_PLAN_BUILDS.load(Ordering::Relaxed);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let error = host.begin_processed_start(base, Vec::new()).err().unwrap();
+    let error = host.begin_processed_start(base).err().unwrap();
     assert_eq!(
         error.diagnostics.iter().next().unwrap().code().as_str(),
         "project.run.source-execution-not-allowed"
@@ -569,7 +565,7 @@ fn processed_preparation_failure_leaves_no_start_claim_or_runtime() {
             .with_scene(RuntimeSceneLimits::default().with_working_bytes(ByteLimit::ONE)),
     );
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let error = host.begin_processed_start(base, Vec::new()).err().unwrap();
+    let error = host.begin_processed_start(base).err().unwrap();
     assert_eq!(
         error.diagnostics.iter().next().unwrap().code().as_str(),
         "project.run.runtime-content-rejected"
@@ -584,9 +580,7 @@ fn processed_publication_failure_and_aborted_preparation_retain_existing_cleanup
     let base = fixture.open(RuntimeContentLimits::default());
     for publication_fault in [true, false] {
         let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-        let mut attempt = host
-            .begin_processed_start(base.clone(), Vec::new())
-            .unwrap();
+        let mut attempt = host.begin_processed_start(base.clone()).unwrap();
         if publication_fault {
             arm_publication_fault_for_test();
             let error = host.prepare_start(&mut attempt).err().unwrap();

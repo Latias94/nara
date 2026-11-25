@@ -1460,7 +1460,7 @@ mod tests {
     fn independent_glyph_atlases_upload_separately_and_replay_reuses_the_same_page() {
         use crate::RenderTarget;
         use crate::hud::{UiPreparedImages, UiPresentationPlanner};
-        use nara_ui_kernel::{
+        use nara_ui::kernel::{
             UiAuthoringSnapshotBuilder, UiCompiler, UiEnvironment, UiLayer, UiLocalKey, UiNode,
             UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiText, UiTheme,
         };
@@ -1485,11 +1485,13 @@ mod tests {
             let environment =
                 UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 64.0, 64.0, 1.0, 1, 1, 1, 1)
                     .unwrap();
-            let frame =
-                UiCompiler::new(nara_text::bundled_font_face().unwrap(), Default::default())
-                    .unwrap()
-                    .compile(&snapshot, environment, UiTheme::default())
-                    .unwrap();
+            let frame = UiCompiler::new(
+                nara_ui::text::bundled_font_face().unwrap(),
+                Default::default(),
+            )
+            .unwrap()
+            .compile(&snapshot, environment, UiTheme::default())
+            .unwrap();
             UiPresentationPlanner::default()
                 .plan(
                     frame,

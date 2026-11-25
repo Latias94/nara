@@ -27,7 +27,7 @@ fn ordinary_recipe_configures_the_saved_source_headless_ui_profile() {
     )
     .unwrap();
     let face = nara::ui::FontFace::from_bytes(
-        include_bytes!("../../crates/nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+        include_bytes!("../../crates/nara_ui/tests/text/fixtures/FiraMono-Medium.ttf").to_vec(),
         0,
     )
     .unwrap();
@@ -44,7 +44,6 @@ fn ordinary_recipe_configures_the_saved_source_headless_ui_profile() {
         project.root_capability(),
         recipe,
         NonZeroU32::new(1).unwrap(),
-        Vec::new(),
     );
     let report = execute_to_terminal(&mut run);
     assert_eq!(

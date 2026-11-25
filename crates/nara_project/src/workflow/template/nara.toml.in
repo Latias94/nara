@@ -1,0 +1,10 @@
+schema_version = {schema_version}
+
+[project]
+name = {name}
+source_universe = "{source_universe}"
+native_document_identity = "project_location"
+version = "0.1.0"
+
+[authoring]
+state = "ready"

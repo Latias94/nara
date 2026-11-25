@@ -6,11 +6,11 @@ use nara_asset::{
     AssetDomain, AssetProductRef, AssetReferenceDemand, AssetRuntimeError, AssetRuntimeLimits,
     ImportedProductId, RuntimeAssetCodec,
 };
-use nara_core::{ByteLimit, PersistentFileContractError, SerdeShapeError};
-use nara_diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
-    SafeSummary,
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
+    ReportDiagnostic as Diagnostic, SafeSummary,
 };
+use nara_core::{ByteLimit, PersistentFileContractError, SerdeShapeError};
 
 use crate::{
     ActionIdError, ActionMapDefinition, ActionMapError, ActionMapFileError, ActionMapFileLimits,

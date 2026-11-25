@@ -8,6 +8,13 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use nara_app::diagnostics::{emit_diagnostic_to_tracing, emit_report_to_tracing};
+use nara_app::tasks::{
+    TaskCancellation, TaskCancellationReason, TaskCancellationToken, TaskCoalesceKey,
+    TaskCompletionCutoffError, TaskFailure, TaskHandle, TaskKindConfig, TaskOverloadPolicy,
+    TaskPoolConfig, TaskPoolKind, TaskPools, TaskRejectReason, TaskRejection, TaskShutdownPolicy,
+    TaskSpawnOutcome, TaskSpawnRequest,
+};
 use nara_app::{App, CoreStage};
 use nara_asset::{
     AssetEventKind, AssetEvents, AssetId, AssetLoadGenerations, AssetPath, AssetPathScope,
@@ -18,20 +25,15 @@ use nara_asset::{
 };
 #[cfg(feature = "serde")]
 use nara_asset::{AssetMeta, AssetMetaIdentity};
-use nara_core::{ByteLimit, ItemLimit, TimeLimit};
-use nara_diagnostic::{
-    Diagnostic, DiagnosticFieldClass, DiagnosticReport, DiagnosticSeverity, DiagnosticValueRef,
+use nara_core::diagnostic::{
+    DiagnosticFieldClass, DiagnosticReport, DiagnosticSeverity, DiagnosticValueRef,
+    ReportDiagnostic as Diagnostic,
 };
-use nara_ecs::{ResMut, Resource, schedule::IntoScheduleConfigs};
-use nara_fs::{
+use nara_core::vfs::capabilities::{
     CapabilityRights, ContentDigest, DirectoryCapability, HostCapabilityOptions, TrustMode,
 };
-use nara_tasks::{
-    TaskCancellation, TaskCancellationReason, TaskCancellationToken, TaskCoalesceKey,
-    TaskCompletionCutoffError, TaskFailure, TaskHandle, TaskKindConfig, TaskOverloadPolicy,
-    TaskPoolConfig, TaskPoolKind, TaskPools, TaskRejectReason, TaskRejection, TaskShutdownPolicy,
-    TaskSpawnOutcome, TaskSpawnRequest,
-};
+use nara_core::{ByteLimit, ItemLimit, TimeLimit};
+use nara_ecs::{ResMut, Resource, schedule::IntoScheduleConfigs};
 use tracing::{Event, Metadata, Subscriber, field::Visit, span};
 
 use crate::image::reload::{
@@ -84,9 +86,6 @@ enum ImagePipelineEdit {
     Remove(Handle<ImageAsset>),
     PendingReplacement(ImageAsset),
 }
-
-#[derive(Default, Resource)]
-struct ImagePipelinePort;
 
 #[cfg(feature = "serde")]
 #[derive(Clone, Copy, Debug)]
@@ -147,21 +146,9 @@ impl RecoveryInterference {
     }
 }
 
-impl nara_app::__RuntimeDriverPort for ImagePipelinePort {
-    type Input = ImagePipelineEdit;
-    type Output = Option<AssetVersion>;
-
-    fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
-        unreachable!("image pipeline edits coordinate concrete image resources")
-    }
-}
-
-impl ImagePipelinePort {
-    fn apply_driver_input_in_world(
-        world: &mut nara_ecs::World,
-        input: ImagePipelineEdit,
-    ) -> Result<Option<AssetVersion>, (nara_app::RuntimeWorldAccessError, ImagePipelineEdit)> {
-        match input {
+impl ImagePipelineEdit {
+    fn apply(self, world: &mut nara_ecs::World) -> Option<AssetVersion> {
+        match self {
             ImagePipelineEdit::SourceChange { path, kind } => {
                 let mut changes = world.resource_mut::<AssetSourceChanges>();
                 match kind {
@@ -225,7 +212,7 @@ impl ImagePipelinePort {
                             .unwrap();
                         version
                     });
-                return Ok(Some(version));
+                return Some(version);
             }
             ImagePipelineEdit::Reimport {
                 record,
@@ -272,7 +259,7 @@ impl ImagePipelinePort {
                 world.resource_mut::<PendingImageReplacement>().image = Some(image);
             }
         }
-        Ok(None)
+        None
     }
 }
 
@@ -280,13 +267,17 @@ fn edit_image_pipeline(
     runtime: &mut nara_app::RuntimeInstance,
     edit: ImagePipelineEdit,
 ) -> Option<AssetVersion> {
-    runtime
-        .with_driver_scope(|scope| scope.__apply_port::<ImagePipelinePort>(edit).unwrap())
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
+    let outcome = runtime
+        .with_driver_scope(|scope| {
+            assert!(matches!(
+                scope.state(),
+                nara_app::RuntimeState::Running | nara_app::RuntimeState::Paused
+            ));
+            scope.with_world_mut(|world| edit.apply(world))
         })
-        .unwrap()
+        .unwrap();
+    assert!(outcome.post_operation_fault.is_none());
+    outcome.output
 }
 
 fn stable_id() -> StableAssetId {
@@ -707,7 +698,7 @@ fn image_reload_diagnostic_matrix_preserves_codes_and_typed_privacy_fields() {
                 admission_tick: 17,
                 domain_key: IMAGE_RELOAD_TASK_DOMAIN,
                 reason,
-                return_state: nara_tasks::TaskReturnState::Returned,
+                return_state: nara_app::tasks::TaskReturnState::Returned,
             }),
             "image.reload-task-rejected",
             "Image import task was rejected",
@@ -6487,9 +6478,6 @@ fn app_with_loaded_image(importer: ImageImporter) -> (App, Handle<ImageAsset>) {
         .unwrap();
     let mut app = App::new();
     app.add_plugin(ImagePreparePlugin).unwrap();
-    app.init_resource::<ImagePipelinePort>().unwrap();
-    app.__register_driver_port::<ImagePipelinePort>(ImagePipelinePort::apply_driver_input_in_world)
-        .unwrap();
     app.world_mut().unwrap().insert_resource(server);
     app.world_mut().unwrap().insert_resource(images);
     app.world_mut().unwrap().insert_resource(states);
@@ -6552,7 +6540,7 @@ fn native_image_storage_prepares_procedural_pixels_without_source_resources_or_t
 fn image_source_requires_explicit_source_and_task_plugins_before_build() {
     let without_source = nara_app::PluginPlan::resolve((
         nara_app::PluginDefinition::for_default::<nara_asset::AssetPlugin>(),
-        nara_app::PluginDefinition::for_default::<nara_tasks::TaskPlugin>(),
+        nara_app::PluginDefinition::for_default::<nara_app::tasks::TaskPlugin>(),
         nara_app::PluginDefinition::for_default::<ImagePlugin>(),
         source_plugin(ImageImportLimits::default()),
     ));
@@ -6570,7 +6558,7 @@ fn image_source_requires_explicit_source_and_task_plugins_before_build() {
     assert!(matches!(
         without_tasks,
         Err(nara_app::PluginPlanError::MissingPlugin { plugin, required })
-            if plugin == IMAGE_SOURCE_PLUGIN_ID && required == nara_tasks::TASK_PLUGIN_ID
+            if plugin == IMAGE_SOURCE_PLUGIN_ID && required == nara_app::tasks::TASK_PLUGIN_ID
     ));
 }
 
@@ -6581,7 +6569,7 @@ fn source_image_reload_without_directory_authority_fails_instead_of_dropping_int
     app.insert_resource(TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap())
         .unwrap();
     app.add_plugins((
-        nara_tasks::TaskPlugin::default(),
+        nara_app::tasks::TaskPlugin::default(),
         nara_asset::AssetPlugin,
         nara_asset::AssetSourcePlugin,
         ImagePlugin,
@@ -6634,7 +6622,7 @@ fn image_source_plugin_definition_binds_canonical_limits_and_prepares_that_confi
     assert_ne!(first.key(), changed.key());
 
     let plan = nara_app::PluginPlan::resolve((
-        nara_app::PluginDefinition::for_default::<nara_tasks::TaskPlugin>(),
+        nara_app::PluginDefinition::for_default::<nara_app::tasks::TaskPlugin>(),
         nara_app::PluginDefinition::for_default::<nara_asset::AssetPlugin>(),
         nara_app::PluginDefinition::for_default::<nara_asset::AssetSourcePlugin>(),
         nara_app::PluginDefinition::for_default::<ImagePlugin>(),
@@ -6650,7 +6638,7 @@ fn image_source_plugin_definition_binds_canonical_limits_and_prepares_that_confi
 fn invalid_image_source_plugin_limits_fail_during_preparation() {
     let limits = ImageImportLimits::default().with_max_in_flight_bytes(ByteLimit::new(1).unwrap());
     let plan = nara_app::PluginPlan::resolve((
-        nara_app::PluginDefinition::for_default::<nara_tasks::TaskPlugin>(),
+        nara_app::PluginDefinition::for_default::<nara_app::tasks::TaskPlugin>(),
         nara_app::PluginDefinition::for_default::<nara_asset::AssetPlugin>(),
         nara_app::PluginDefinition::for_default::<nara_asset::AssetSourcePlugin>(),
         nara_app::PluginDefinition::for_default::<ImagePlugin>(),
@@ -6716,11 +6704,8 @@ fn app_with_image_source_directory(
 ) -> App {
     let mut app = App::new();
     app.insert_resource(task_pools).unwrap();
-    app.init_resource::<ImagePipelinePort>().unwrap();
-    app.__register_driver_port::<ImagePipelinePort>(ImagePipelinePort::apply_driver_input_in_world)
-        .unwrap();
     app.add_plugins((
-        nara_tasks::TaskPlugin::default(),
+        nara_app::tasks::TaskPlugin::default(),
         (nara_asset::AssetPlugin, nara_asset::AssetSourcePlugin),
         ImagePlugin,
     ))
@@ -7032,7 +7017,7 @@ const fn expected_value_ref(value: ExpectedDiagnosticValue) -> DiagnosticValueRe
 
 fn assert_diagnostic_sinks_hide(diagnostic: &Diagnostic, hidden: &[&str]) {
     let debug = format!("{diagnostic:?}");
-    let tracing = capture_tracing(|| diagnostic.emit_to_tracing());
+    let tracing = capture_tracing(|| emit_diagnostic_to_tracing(diagnostic));
     assert_values_hidden("Diagnostic Debug", &debug, hidden);
     assert_values_hidden("Diagnostic tracing", &tracing, hidden);
 
@@ -7045,7 +7030,7 @@ fn assert_diagnostic_sinks_hide(diagnostic: &Diagnostic, hidden: &[&str]) {
 
 fn assert_diagnostic_report_sinks_hide(report: &DiagnosticReport, hidden: &[&str]) {
     let debug = format!("{report:?}");
-    let tracing = capture_tracing(|| report.emit_to_tracing());
+    let tracing = capture_tracing(|| emit_report_to_tracing(report));
     assert_values_hidden("DiagnosticReport Debug", &debug, hidden);
     assert_values_hidden("DiagnosticReport tracing", &tracing, hidden);
 

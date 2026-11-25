@@ -202,8 +202,8 @@ mod ui {
         },
     };
     use nara_app::{
-        RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeControl,
-        RuntimeControlRequestResult, RuntimeObligationLedger, RuntimeState,
+        RuntimeCandidate, RuntimeClosePolicy, RuntimeControl, RuntimeControlRequestResult,
+        RuntimeObligationLedger, RuntimeState,
     };
     use nara_window::WindowId;
 
@@ -221,7 +221,7 @@ mod ui {
     }
 
     fn queue_ui_frame(world: &mut World, window_id: WindowId) -> Arc<UiPaintPacket> {
-        use nara_ui_kernel::{
+        use nara_ui::kernel::{
             UiAuthoringSnapshotBuilder, UiCompiler, UiEnvironment, UiLayer, UiRoot, UiRootKey,
             UiStyle, UiSurfaceId, UiTheme,
         };
@@ -240,14 +240,17 @@ mod ui {
             ))
             .build()
             .unwrap();
-        let frame = UiCompiler::new(nara_text::bundled_font_face().unwrap(), Default::default())
-            .unwrap()
-            .compile(
-                &snapshot,
-                UiEnvironment::new(surface, 16.0, 16.0, 1.0, 1, 1, 1, 1).unwrap(),
-                UiTheme::default(),
-            )
-            .unwrap();
+        let frame = UiCompiler::new(
+            nara_ui::text::bundled_font_face().unwrap(),
+            Default::default(),
+        )
+        .unwrap()
+        .compile(
+            &snapshot,
+            UiEnvironment::new(surface, 16.0, 16.0, 1.0, 1, 1, 1, 1).unwrap(),
+            UiTheme::default(),
+        )
+        .unwrap();
         crate::hud::compile_ui_paint_packets(world, &[frame]).unwrap();
         let (mut planned, _) = snapshot_ui_paint_packets(world).unwrap().into_parts();
         let packet = planned.pop().unwrap();
@@ -612,17 +615,15 @@ mod ui {
         ));
         assert_eq!(receiver.pending_backend_count(), 1);
 
-        let mut runtime = RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(
-                app.seal().unwrap(),
-                RuntimeObligationLedger::new(),
-                RuntimeClosePolicy::default(),
-            )
-            .unwrap()
-            .complete_startup()
-            .unwrap()
-            .promote();
+        let mut runtime = RuntimeCandidate::admit(
+            app.seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap()
+        .complete_startup()
+        .unwrap()
+        .promote();
         assert!(matches!(
             runtime.request_control(RuntimeControl::Stop),
             RuntimeControlRequestResult::Accepted(_)

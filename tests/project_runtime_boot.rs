@@ -16,7 +16,7 @@ mod profile_font_product;
 
 #[cfg(all(
     feature = "presentation-ui",
-    feature = "project-workflow-cli",
+    feature = "project-tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
@@ -44,11 +44,6 @@ use nara::{
     },
     diagnostic::{DiagnosticReport, DiagnosticValueRef},
     ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs},
-    gameplay::{
-        GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandDraft, GameplayCommandIngressSource,
-        GameplayCommandSet, GameplayCommandSourceSequence, GameplayCommandSubmission,
-        GameplayCommandTick, GameplayCommandTypeId,
-    },
     project_host::{
         HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport,
         advanced::{RuntimeProbe, headless_run_with_probe},
@@ -60,10 +55,8 @@ use project_content_fixture::{
 };
 
 const BOOT_OUTCOME_PLUGIN_ID: PluginId = PluginId::new("nara.test.project-boot-outcome");
-const BOOT_OUTCOME_REQUIREMENTS: &[PluginId] = &[GAMEPLAY_COMMAND_PLUGIN_ID];
 const BOOT_OUTCOME_DECLARATION: PluginDeclaration =
-    PluginDeclaration::new(BOOT_OUTCOME_PLUGIN_ID, PluginCategory::Runtime)
-        .requires_plugins(BOOT_OUTCOME_REQUIREMENTS);
+    PluginDeclaration::new(BOOT_OUTCOME_PLUGIN_ID, PluginCategory::Runtime);
 const TILESET_PUBLICATION_PLUGIN_ID: PluginId =
     PluginId::new("nara.test.tileset-publication-outcome");
 const TILESET_PUBLICATION_DECLARATION: PluginDeclaration =
@@ -220,9 +213,7 @@ impl Plugin for BootOutcomePlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.insert_resource(BootOutcome::default())?.add_systems(
             CoreStage::FixedUpdate,
-            capture_boot_outcome
-                .in_set(FixedUpdateSet::Finalize)
-                .after(GameplayCommandSet::Capture),
+            capture_boot_outcome.in_set(FixedUpdateSet::Finalize),
         )?;
         Ok(())
     }
@@ -240,9 +231,7 @@ impl Plugin for TileSetPublicationPlugin {
         app.insert_resource(TileSetPublicationOutcome::default())?
             .add_systems(
                 CoreStage::FixedUpdate,
-                capture_tileset_publication
-                    .in_set(FixedUpdateSet::Finalize)
-                    .after(GameplayCommandSet::Capture),
+                capture_tileset_publication.in_set(FixedUpdateSet::Finalize),
             )?;
         #[cfg(feature = "presentation-2d")]
         app.add_systems(CoreStage::Last, capture_rendered_tiles)?;
@@ -407,7 +396,6 @@ fn project_run(project: &TestProject) -> HeadlessRun<BootOutcome> {
         project.root_capability(),
         boot_recipe(),
         NonZeroU32::new(1).unwrap(),
-        Vec::new(),
     )
 }
 
@@ -463,7 +451,6 @@ fn recipe_lifecycle_domain_failures_preserve_public_facts_through_terminal_clean
             project.root_capability(),
             recipe,
             NonZeroU32::new(1).unwrap(),
-            Vec::new(),
         );
 
         let report = execute_to_terminal(&mut run);
@@ -539,7 +526,6 @@ fn recipe_legacy_failure_publishes_actual_hook_identity_without_dynamic_error_te
         project.root_capability(),
         recipe,
         NonZeroU32::new(1).unwrap(),
-        Vec::new(),
     );
 
     let report = execute_to_terminal(&mut run);
@@ -571,7 +557,6 @@ fn ordinary_recipe_headless_facade_owns_project_start_and_close() {
         project.root_capability(),
         recipe,
         NonZeroU32::new(1).unwrap(),
-        Vec::new(),
     );
 
     let report = execute_to_terminal(&mut run);
@@ -793,7 +778,6 @@ fn headless_run_publishes_file_backed_tilesets_after_image_dependencies() {
         project.root_capability(),
         tileset_probe_recipe(),
         NonZeroU32::new(1).unwrap(),
-        Vec::new(),
     );
     let report = execute_to_terminal(&mut run);
 
@@ -925,7 +909,6 @@ fn incomplete_cleanup_retries_the_same_owner_without_restarting_the_project() {
         project.root_capability(),
         intent,
         RuntimeProbe::new(stalled_close_plugin(&released, &instances)),
-        Vec::new(),
     );
 
     let incomplete = run.execute_bounded();
@@ -961,7 +944,7 @@ fn product_action_stops_on_the_first_terminal_snapshot() {
     let intent = HeadlessRunIntent::new(NonZeroU32::new(4).unwrap())
         .stop_when(|outcome: &BootOutcome| outcome.tick >= 2)
         .with_recipe(boot_recipe());
-    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+    let mut run = HeadlessRun::new(project.root_capability(), intent);
 
     let report = execute_to_terminal(&mut run);
 
@@ -1031,11 +1014,8 @@ fn product_action_distinguishes_complete_frames_from_exact_fixed_ticks() {
         let recipe = ProductRecipe::new()
             .add_plugin::<FrameStagesPlugin>()
             .unwrap();
-        let mut run = HeadlessRun::<FrameStages>::new(
-            project.root_capability(),
-            intent.with_recipe(recipe),
-            Vec::new(),
-        );
+        let mut run =
+            HeadlessRun::<FrameStages>::new(project.root_capability(), intent.with_recipe(recipe));
         let report = execute_to_terminal(&mut run);
         assert_eq!(
             report.outcome(),
@@ -1088,7 +1068,7 @@ fn initially_paused_exact_tick_product<const REQUIRE_MAINTENANCE: bool>() {
         .add_plugin::<InitiallyPausedPlugin<REQUIRE_MAINTENANCE>>()
         .unwrap();
     let intent = HeadlessRunIntent::new(NonZeroU32::new(2).unwrap()).with_recipe(recipe);
-    let mut run = HeadlessRun::<FrameStages>::new(project.root_capability(), intent, Vec::new());
+    let mut run = HeadlessRun::<FrameStages>::new(project.root_capability(), intent);
     let report = execute_to_terminal(&mut run);
     assert_eq!(
         report.outcome(),
@@ -1119,7 +1099,7 @@ fn initially_paused_frame_product_runs_only_its_requested_maintenance_frames() {
         .unwrap();
     let intent = HeadlessRunIntent::frames(NonZeroU32::new(2).unwrap(), Duration::from_millis(20))
         .with_recipe(recipe);
-    let mut run = HeadlessRun::<FrameStages>::new(project.root_capability(), intent, Vec::new());
+    let mut run = HeadlessRun::<FrameStages>::new(project.root_capability(), intent);
     let report = execute_to_terminal(&mut run);
     assert_eq!(
         report.outcome(),
@@ -1165,8 +1145,7 @@ fn exact_tick_product_honors_exit_from_entry_maintenance_without_stepping() {
             recipe = recipe.add_plugin::<InitiallyPausedPlugin<false>>().unwrap();
         }
         let intent = HeadlessRunIntent::new(NonZeroU32::new(2).unwrap()).with_recipe(recipe);
-        let mut run =
-            HeadlessRun::<FrameStages>::new(project.root_capability(), intent, Vec::new());
+        let mut run = HeadlessRun::<FrameStages>::new(project.root_capability(), intent);
         let report = execute_to_terminal(&mut run);
         assert_eq!(
             report.outcome(),
@@ -1187,7 +1166,7 @@ fn product_frame_action_observes_the_complete_terminal_frame() {
     let intent = HeadlessRunIntent::frames(NonZeroU32::new(4).unwrap(), Duration::ZERO)
         .with_recipe(recipe)
         .stop_when(|stages: &FrameStages| stages.0.len() >= 4);
-    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+    let mut run = HeadlessRun::new(project.root_capability(), intent);
     let report = execute_to_terminal(&mut run);
     assert_eq!(
         report.outcome(),
@@ -1211,7 +1190,7 @@ fn product_frame_action_preserves_zero_time_scale_while_advancing_frame_services
         .unwrap();
     let intent = HeadlessRunIntent::frames(NonZeroU32::new(1).unwrap(), Duration::from_secs(1))
         .with_recipe(recipe);
-    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+    let mut run = HeadlessRun::new(project.root_capability(), intent);
     let report = execute_to_terminal(&mut run);
     assert_eq!(
         report.outcome(),
@@ -1226,7 +1205,7 @@ fn product_frame_action_reports_its_own_bound_without_a_terminal_match() {
     let intent = HeadlessRunIntent::frames(NonZeroU32::new(2).unwrap(), Duration::ZERO)
         .with_recipe(boot_recipe())
         .stop_when(|_: &BootOutcome| false);
-    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+    let mut run = HeadlessRun::new(project.root_capability(), intent);
     let report = execute_to_terminal(&mut run);
     assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed);
     assert!(
@@ -1247,7 +1226,7 @@ fn product_action_propagates_an_app_exit_from_the_completed_fixed_tick() {
     let intent = HeadlessRunIntent::new(NonZeroU32::new(4).unwrap())
         .stop_when(|_: &BootOutcome| false)
         .with_recipe(recipe);
-    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+    let mut run = HeadlessRun::new(project.root_capability(), intent);
 
     let report = execute_to_terminal(&mut run);
 
@@ -1269,7 +1248,7 @@ fn product_action_reports_a_tick_limit_before_publishing_success() {
     let intent = HeadlessRunIntent::new(NonZeroU32::new(2).unwrap())
         .stop_when(|_: &BootOutcome| false)
         .with_recipe(boot_recipe());
-    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+    let mut run = HeadlessRun::new(project.root_capability(), intent);
 
     let report = execute_to_terminal(&mut run);
 
@@ -1279,45 +1258,4 @@ fn product_action_reports_a_tick_limit_before_publishing_success() {
         diagnostic.code().as_str() == "project.run.tick-limit"
             && diagnostic.summary().as_str() == "Headless project run reached its fixed-tick limit"
     }));
-}
-
-#[test]
-fn source_label_cannot_downgrade_a_trusted_product_command_rejection() {
-    let project = TestProject::with_prefab_startup();
-    project.select_local_headless_profile();
-    let commands = (1..=4_097)
-        .map(|sequence| {
-            GameplayCommandSubmission::new(
-                GameplayCommandTick::new(1).unwrap(),
-                GameplayCommandIngressSource::external("nara.test.external").unwrap(),
-                GameplayCommandSourceSequence::new(sequence).unwrap(),
-                GameplayCommandDraft::new(
-                    GameplayCommandTypeId::new("nara.test.external-command").unwrap(),
-                ),
-            )
-        })
-        .collect::<Vec<_>>();
-    let mut run: HeadlessRun<BootOutcome> = HeadlessRun::from_recipe(
-        project.root_capability(),
-        boot_recipe(),
-        NonZeroU32::new(1).unwrap(),
-        commands,
-    );
-
-    let report = execute_to_terminal(&mut run);
-
-    assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed);
-    assert!(report.startup_content_closure().is_some());
-    assert!(
-        report
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| { diagnostic.code().as_str() == "project.run.command-rejected" })
-    );
-    assert!(
-        report
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| { diagnostic.code().as_str() == "project.run.runtime-faulted" })
-    );
 }

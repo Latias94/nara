@@ -5,14 +5,16 @@ use std::mem::size_of;
 
 use nara_asset::AssetRef;
 use nara_core::ItemLimit;
-use nara_reflect::__private::{
-    EffectiveValueAdmissionError, effective_component_value_in_place_with_default_overrides,
-    freeze_component_defaults_with_admission, validate_explicit_component_value,
-    validate_value_materialization_budget,
-};
 use nara_reflect::{
     ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldPathSegment,
     ComponentSchema, ComponentTypeId, ComponentValueCost, ComponentValueMaterializationLimits,
+};
+use nara_reflect::{
+    effective::{
+        EffectiveValueAdmissionError, effective_component_value_in_place_with_default_overrides,
+        freeze_component_defaults_with_admission, validate_value_materialization_budget,
+    },
+    registry::validate_explicit_component_value,
 };
 
 use super::reference_program::{ComponentReferencePrograms, ReferenceProgram, ReferencePrograms};

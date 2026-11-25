@@ -10,8 +10,8 @@ use nara::{
         PluginCategory, PluginDeclaration, PluginError, PluginId, Query, Res, Sprite, StartupStage,
         Transform2d, Vec2, Visibility,
     },
+    scene::TRANSFORM_COMPONENTS_PLUGIN_ID,
     sprite::SPRITE_PLUGIN_ID,
-    transform::TRANSFORM_PLUGIN_ID,
 };
 
 const MOVE_SPEED: f32 = 240.0;
@@ -22,7 +22,7 @@ const DECLARATION: PluginDeclaration = PluginDeclaration::new(
 .requires_plugins(&[
     INPUT_PLUGIN_ID,
     HIERARCHY_PLUGIN_ID,
-    TRANSFORM_PLUGIN_ID,
+    TRANSFORM_COMPONENTS_PLUGIN_ID,
     SPRITE_PLUGIN_ID,
 ]);
 

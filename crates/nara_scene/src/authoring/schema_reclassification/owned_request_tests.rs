@@ -1,9 +1,9 @@
 use super::*;
 use crate::SchemaReclassificationKind::DeclarationExtension;
 use crate::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentReadiness, AuthoringDocumentSource,
-    PrefabDocumentCandidate, SceneComponentRecord, SceneDocumentCandidate, SceneEntityId,
-    SceneEntityPlacement, SceneEntityRecord, ScenePatchOperation,
+    AuthoringDocumentReadiness, AuthoringDocumentSource, PrefabDocumentCandidate,
+    SceneComponentRecord, SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement,
+    SceneEntityRecord, ScenePatchOperation, authoring::AuthoringAdapterReceipt,
 };
 use nara_asset::AssetRef;
 use nara_reflect::{

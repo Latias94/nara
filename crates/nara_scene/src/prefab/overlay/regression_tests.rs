@@ -766,7 +766,7 @@ mod expansion {
     use std::collections::BTreeSet;
 
     use nara_asset::AssetRef;
-    use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
+    use nara_ecs::identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
     use nara_reflect::{
         AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
         ComponentFieldPath, ComponentFieldSchema, ComponentRegistrySnapshot, ComponentSchema,
@@ -2432,7 +2432,7 @@ mod expansion {
                     .unwrap()
                     .value()
             };
-            use nara_diagnostic::DiagnosticValueRef;
+            use nara_core::diagnostic::DiagnosticValueRef;
             assert_eq!(field("budget-kind"), DiagnosticValueRef::Identifier(kind));
             assert_eq!(field("observed"), DiagnosticValueRef::Unsigned(observed));
             assert_eq!(field("maximum"), DiagnosticValueRef::Unsigned(maximum));

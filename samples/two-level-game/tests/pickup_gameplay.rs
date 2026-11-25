@@ -5,18 +5,18 @@
 #[path = "support/resume_gameplay.rs"]
 mod support;
 
+use two_level_game::command::CommandSet;
+
 use nara::{
     ProductConfiguration,
     advanced_prelude::CurrentScene,
     app::{PluginCategory, PluginDeclaration, PluginId},
     ecs::{Entity, World, schedule::IntoScheduleConfigs},
-    gameplay::GameplayCommandSet,
     hierarchy::{HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter},
     identity::{EntityLookup, SceneEntityId, TombstoneCause},
     prelude::{App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginError, Transform2d, Vec2},
-    scene::retire_and_despawn_scene_entity,
+    scene::{fixed_spatial::historical_spatial_snapshot, retire_and_despawn_scene_entity},
     sprite::Sprite,
-    transform::historical_spatial_snapshot,
 };
 use support::{Game, movement};
 use two_level_game::{GameSnapshot, product_recipe};
@@ -59,7 +59,7 @@ impl Plugin for PickupEdit {
             CoreStage::FixedUpdate,
             (move |world: &mut World| edit_pickup(world, edit, &mut detached_sprite))
                 .in_set(FixedUpdateSet::Simulate)
-                .after(GameplayCommandSet::Consume),
+                .after(CommandSet::Consume),
         )?;
         Ok(())
     }

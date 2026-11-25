@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use nara_diagnostic::DiagnosticValueRef;
+use nara_core::diagnostic::DiagnosticValueRef;
 use nara_ecs::Component;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,

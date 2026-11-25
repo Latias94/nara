@@ -1,9 +1,9 @@
 use std::sync::{Arc, Mutex};
 
 use nara_core::ItemLimit;
-use nara_diagnostic::{DiagnosticCode, DiagnosticValueRef, SafeSummary};
+use nara_core::diagnostic::{DiagnosticCode, DiagnosticValueRef, SafeSummary};
+use nara_ecs::identity::{EntityLookup, WorldIdentityDomain};
 use nara_ecs::{Component, World};
-use nara_identity::{EntityLookup, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentDecodeContext, ComponentDomainError,
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistryBuilder,

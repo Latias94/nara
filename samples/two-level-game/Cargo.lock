@@ -147,10 +147,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-executor"
-version = "1.14.0"
+name = "async-channel"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c96bf972d85afc50bf5ab8fe2d54d1586b4e0b46c97c50a0c9e71e2f7bcd812a"
+checksum = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2"
+dependencies = [
+ "concurrent-queue",
+ "event-listener-strategy",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "async-executor"
+version = "1.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f426a31126c735126297bc5ea7a521263c9faff4f63ca415267ee625651c4f37"
 dependencies = [
  "async-task",
  "concurrent-queue",
@@ -273,6 +285,7 @@ dependencies = [
  "spin",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "web-time",
  "windows-sys 0.61.2",
 ]
 
@@ -300,7 +313,6 @@ dependencies = [
  "foldhash",
  "glam 0.33.12",
  "indexmap",
- "inventory",
  "serde",
  "smallvec",
  "smol_str",
@@ -330,10 +342,12 @@ version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fbd8116f12dc50bde3758a72fba85e1f4c00e6c66d0ad58bdc46c0c0690829a8"
 dependencies = [
+ "async-channel",
  "async-executor",
  "async-task",
  "atomic-waker",
  "bevy_platform",
+ "concurrent-queue",
  "crossbeam-queue",
  "derive_more",
  "futures-lite",
@@ -870,6 +884,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1a05365e3b1c6d1650318537c7460c6923f1abdd272ad6842baa2b509957a06"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "event-listener"
+version = "5.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2"
+dependencies = [
+ "parking",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "event-listener-strategy"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
+dependencies = [
+ "event-listener",
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -1454,15 +1488,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "inventory"
-version = "0.3.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6928282826c822ad91bf1c9a1cb90a30ba1c26770749929b4656cd6be829cd7c"
-dependencies = [
- "rustversion",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1853,22 +1878,14 @@ dependencies = [
  "nara_app",
  "nara_asset",
  "nara_core",
- "nara_diagnostic",
  "nara_ecs",
- "nara_fs",
- "nara_gameplay",
- "nara_hierarchy",
- "nara_identity",
  "nara_input",
  "nara_project",
  "nara_reflect",
  "nara_render",
  "nara_scene",
- "nara_tasks",
- "nara_transform",
  "nara_ui",
  "nara_window",
- "nara_winit",
  "rustix 1.1.5",
  "serde",
  "serde_json",
@@ -1883,9 +1900,14 @@ dependencies = [
 name = "nara_app"
 version = "0.1.0"
 dependencies = [
+ "bevy_platform",
+ "bevy_tasks",
  "blake3",
+ "nara_core",
  "nara_ecs",
+ "serde",
  "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]
@@ -1896,11 +1918,10 @@ dependencies = [
  "blake3",
  "nara_app",
  "nara_core",
- "nara_diagnostic",
  "nara_ecs",
- "nara_identity",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
  "uuid",
 ]
 
@@ -1908,23 +1929,16 @@ dependencies = [
 name = "nara_core"
 version = "0.1.0"
 dependencies = [
+ "blake3",
+ "getrandom 0.3.4",
  "glam 0.33.12",
+ "rustix 1.1.5",
  "semver",
  "serde",
- "uuid",
-]
-
-[[package]]
-name = "nara_diagnostic"
-version = "0.1.0"
-dependencies = [
- "bevy_ecs",
- "nara_app",
- "nara_core",
- "nara_ecs",
- "serde",
+ "tempfile",
  "thiserror 2.0.21",
- "tracing",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1932,8 +1946,11 @@ name = "nara_ecs"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
+ "nara_core",
  "nara_ecs_derive",
  "serde",
+ "thiserror 2.0.21",
+ "uuid",
 ]
 
 [[package]]
@@ -1949,70 +1966,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "nara_fs"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "rustix 1.1.5",
- "thiserror 2.0.21",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "nara_gameplay"
-version = "0.1.0"
-dependencies = [
- "bevy_ecs",
- "nara_app",
- "nara_core",
- "nara_ecs",
- "nara_identity",
- "nara_input",
- "serde",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "nara_gilrs"
-version = "0.1.0"
-dependencies = [
- "gilrs",
- "nara_app",
- "nara_ecs",
- "nara_input",
-]
-
-[[package]]
-name = "nara_hierarchy"
-version = "0.1.0"
-dependencies = [
- "nara_app",
- "nara_ecs",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "nara_identity"
-version = "0.1.0"
-dependencies = [
- "bevy_ecs",
- "getrandom 0.3.4",
- "nara_core",
- "nara_ecs",
- "serde",
- "thiserror 2.0.21",
- "uuid",
-]
-
-[[package]]
 name = "nara_input"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
+ "gilrs",
  "nara_app",
  "nara_asset",
  "nara_core",
- "nara_diagnostic",
  "nara_ecs",
  "serde",
  "serde_json",
@@ -2030,27 +1991,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "nara_physics2d"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "nara_app",
+ "nara_core",
+ "nara_scene",
+ "rapier2d",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "nara_project"
 version = "0.1.0"
 dependencies = [
  "nara_app",
  "nara_asset",
  "nara_core",
- "nara_diagnostic",
  "nara_ecs",
- "nara_tasks",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "toml",
-]
-
-[[package]]
-name = "nara_rapier2d"
-version = "0.1.0"
-dependencies = [
- "nara_core",
- "rapier2d",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2058,18 +2021,16 @@ name = "nara_reflect"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
- "bevy_reflect",
  "blake3",
  "nara_app",
  "nara_asset",
  "nara_core",
- "nara_diagnostic",
  "nara_ecs",
- "nara_identity",
  "nara_reflect_derive",
  "ron",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2095,16 +2056,12 @@ dependencies = [
  "nara_app",
  "nara_asset",
  "nara_core",
- "nara_diagnostic",
  "nara_ecs",
- "nara_fs",
- "nara_hierarchy",
+ "nara_input",
  "nara_material_derive",
  "nara_reflect",
- "nara_tasks",
- "nara_text",
- "nara_transform",
- "nara_ui_kernel",
+ "nara_scene",
+ "nara_ui",
  "nara_window",
  "png",
  "pollster",
@@ -2125,88 +2082,33 @@ dependencies = [
  "nara_app",
  "nara_asset",
  "nara_core",
- "nara_diagnostic",
  "nara_ecs",
- "nara_hierarchy",
- "nara_identity",
  "nara_reflect",
  "ron",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
  "tracing",
-]
-
-[[package]]
-name = "nara_tasks"
-version = "0.1.0"
-dependencies = [
- "bevy_ecs",
- "nara_app",
- "nara_core",
- "nara_ecs",
-]
-
-[[package]]
-name = "nara_text"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "icu_segmenter",
- "parley",
- "swash",
- "thiserror 2.0.21",
- "ttf-parser",
-]
-
-[[package]]
-name = "nara_transform"
-version = "0.1.0"
-dependencies = [
- "bevy_ecs",
- "nara_app",
- "nara_core",
- "nara_ecs",
- "nara_hierarchy",
- "nara_reflect",
- "serde",
- "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "nara_ui"
 version = "0.1.0"
 dependencies = [
+ "blake3",
+ "icu_segmenter",
  "nara_app",
  "nara_asset",
  "nara_core",
  "nara_ecs",
- "nara_hierarchy",
  "nara_input",
  "nara_reflect",
- "nara_render",
  "nara_scene",
- "nara_text",
- "nara_ui_kernel",
- "nara_ui_widgets",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "nara_ui_kernel"
-version = "0.1.0"
-dependencies = [
- "nara_text",
+ "parley",
+ "swash",
  "taffy",
  "thiserror 2.0.21",
-]
-
-[[package]]
-name = "nara_ui_widgets"
-version = "0.1.0"
-dependencies = [
- "nara_text",
- "nara_ui_kernel",
- "thiserror 2.0.21",
+ "ttf-parser",
 ]
 
 [[package]]
@@ -2215,21 +2117,12 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "nara_app",
- "nara_ecs",
- "raw-window-handle",
- "serde",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "nara_winit"
-version = "0.1.0"
-dependencies = [
- "nara_app",
  "nara_core",
  "nara_ecs",
  "nara_input",
- "nara_window",
+ "raw-window-handle",
+ "serde",
+ "thiserror 2.0.21",
  "windows-sys 0.61.2",
  "winit",
 ]
@@ -3569,6 +3462,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tempfile"
+version = "3.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+dependencies = [
+ "fastrand",
+ "getrandom 0.4.3",
+ "once_cell",
+ "rustix 1.1.5",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "termcolor"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3777,8 +3683,7 @@ dependencies = [
  "cpal",
  "hound",
  "nara",
- "nara_gilrs",
- "nara_rapier2d",
+ "nara_physics2d",
  "nara_render",
  "notify",
  "rtrb",

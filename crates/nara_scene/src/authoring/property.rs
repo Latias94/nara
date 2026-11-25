@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use nara_reflect::{
-    __private::exact_component_value_witness, ComponentFieldId, ComponentFieldPathError,
-    ComponentPropertyError, ComponentPropertyPath, ComponentSchema, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue,
+    ComponentFieldId, ComponentFieldPathError, ComponentPropertyError, ComponentPropertyPath,
+    ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    schema::exact_component_value_witness,
 };
 
 use super::{
@@ -298,7 +298,7 @@ fn rejected() -> ScenePatchReport {
 }
 
 fn rejected_at(operation_index: usize) -> ScenePatchReport {
-    let mut diagnostics = nara_diagnostic::DiagnosticReport::default();
+    let mut diagnostics = nara_core::diagnostic::DiagnosticReport::default();
     diagnostics.push(rejection_diagnostic(Some(operation_index)));
     ScenePatchReport {
         applied: false,
@@ -307,7 +307,7 @@ fn rejected_at(operation_index: usize) -> ScenePatchReport {
     }
 }
 
-fn rejection_diagnostic(operation_index: Option<usize>) -> nara_diagnostic::Diagnostic {
+fn rejection_diagnostic(operation_index: Option<usize>) -> nara_core::diagnostic::ReportDiagnostic {
     let diagnostic = crate::diagnostics::error(
         "scene.authoring-property-edit-rejected",
         "Property edit was rejected before document publication",
@@ -328,7 +328,7 @@ pub(crate) fn property_rejection(
     schema: &ComponentSchema,
     operation_index: Option<usize>,
 ) -> ScenePatchReport {
-    let mut diagnostics = nara_diagnostic::DiagnosticReport::default();
+    let mut diagnostics = nara_core::diagnostic::DiagnosticReport::default();
     diagnostics.push(crate::patch::with_property_error(
         rejection_diagnostic(operation_index),
         error,

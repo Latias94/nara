@@ -1,7 +1,8 @@
-use nara_identity::{
+use nara_core::source::{SourceDocumentKey, SourceDocumentKind};
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference, PrefabEntityOrigin,
-    PrefabInstanceHop, ReferenceInputId, SceneEntityId, SourceDocumentKey, SourceDocumentKind,
+    PrefabInstanceHop, ReferenceInputId, SceneEntityId,
 };
 
 #[test]

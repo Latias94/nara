@@ -6,7 +6,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use nara_fs::{ContentDigest, FileCapability, FsError};
+use crate::fs::{ContentDigest, FileCapability, FsError};
 
 use super::{CargoBuildFailure, CargoToolchainObservation, bounded_output, parse_host_target};
 use crate::project_tooling::host_fs;

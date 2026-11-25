@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use nara_app::PluginId;
-use nara_diagnostic::PublicDiagnosticIdentifier;
+use nara_core::diagnostic::PublicDiagnosticIdentifier;
 
 use super::{ProjectToolFailure, ProjectToolFailureStage};
 use crate::ProductRecipeError;

@@ -4,7 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use nara_app::{__RuntimeDriverPort, RuntimeState};
 use nara_core::Vec2;
 use nara_ecs::Resource;
 
@@ -16,8 +15,8 @@ use super::{
 };
 use crate::{
     ActionOutcomes, AxisValue, ButtonDriverInput, ButtonTransitionPhase, InputBinding, KeyCode,
-    MouseButton, PointerDriverInput, SemanticActions, StagedActionRevision,
-    semantic::ActionStaging,
+    MouseButton, MouseWheelUnit, PointerDriverInput, SemanticActions, StagedActionRevision,
+    TouchPhase, WindowDeviceInput, semantic::ActionStaging, window_input::WindowDeviceInputs,
 };
 
 #[path = "gamepad.rs"]
@@ -149,7 +148,7 @@ struct RouteReservation {
     invalidation: Option<InputInvalidationReason>,
 }
 
-/// Exact route admission retained until its matching commit, abort or supersede.
+/// Exact route admission retained until its matching commit or abort.
 #[must_use = "settle the exact prepared input route"]
 #[derive(Debug)]
 pub struct PreparedInputRoutePublication {
@@ -253,6 +252,22 @@ struct InputDraft {
     action_delivery: ActionDelivery,
 }
 
+pub(super) struct InputBatch {
+    pub(super) admission: InputAdmission,
+    pub(super) released_keys: Vec<KeyCode>,
+    pub(super) released_mouse_buttons: Vec<MouseButton>,
+}
+
+impl InputBatch {
+    fn new(admission: InputAdmission) -> Self {
+        Self {
+            admission,
+            released_keys: Vec::new(),
+            released_mouse_buttons: Vec::new(),
+        }
+    }
+}
+
 /// One finite owner of accepted physical/synthetic members, terminal promises and consumer progress.
 #[derive(Debug, Resource)]
 pub struct InputTimeline {
@@ -261,6 +276,7 @@ pub struct InputTimeline {
     pub(super) topology: InputTopology,
     pub(super) capacity: InputCapacity,
     action_outputs: ActionOutputBuffers,
+    window_devices: WindowDeviceInputs,
     retained: VecDeque<RetainedInput>,
     scratch: Vec<InputDraft>,
     observation_cursor: u64,
@@ -279,7 +295,8 @@ impl Default for InputTimeline {
 }
 
 impl InputTimeline {
-    fn claim_endpoint(
+    /// Captures the exact identity of a connected window and seat.
+    pub fn claim_endpoint(
         &self,
         window: InputWindowId,
         seat: InputSeatId,
@@ -318,6 +335,7 @@ impl InputTimeline {
             topology: InputTopology::new(limits)?,
             capacity: InputCapacity::new(limits.events()),
             action_outputs: ActionOutputBuffers::default(),
+            window_devices: WindowDeviceInputs::default(),
             retained,
             scratch,
             observation_cursor: 0,
@@ -488,7 +506,8 @@ impl InputTimeline {
         }
     }
 
-    fn prepare_presented_route(
+    /// Reserves the exact route before backend submission.
+    pub fn prepare_presented_route(
         &mut self,
         route: InputPresentedRoute,
     ) -> Result<PreparedInputRoutePublication, InputIngressError> {
@@ -570,6 +589,50 @@ impl InputTimeline {
         })
     }
 
+    /// Reserves a route that belongs to the endpoint captured by `claim`.
+    pub fn prepare_claimed_route(
+        &mut self,
+        claim: &InputEndpointClaim,
+        route: InputPresentedRoute,
+    ) -> Result<PreparedInputRoutePublication, InputIngressError> {
+        if route.window() != claim.window
+            || route.seat() != claim.seat
+            || !self.owns_claim(claim)?
+        {
+            return Err(InputIngressError::EndpointClaimExpired {
+                window: claim.window,
+                seat: claim.seat,
+            });
+        }
+        self.prepare_presented_route(route)
+    }
+
+    /// Checks whether this timeline owns the exact pending route reservation.
+    #[must_use]
+    pub fn owns_prepared_route(&self, token: &PreparedInputRoutePublication) -> bool {
+        Arc::ptr_eq(&self.owner, &token.owner)
+            && self
+                .prepared_routes
+                .get(&(
+                    token.declaration.route.window(),
+                    token.declaration.route.seat(),
+                ))
+                .is_some_and(|reservation| reservation.declaration == token.declaration)
+    }
+
+    /// Reads any invalidation of the reservation before publishing the matching UI frame.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the token belongs to another timeline.
+    #[must_use]
+    pub fn prepared_route_invalidation(
+        &self,
+        token: &PreparedInputRoutePublication,
+    ) -> Option<InputInvalidationReason> {
+        self.route_reservation(token).invalidation
+    }
+
     fn route_reservation(&self, token: &PreparedInputRoutePublication) -> &RouteReservation {
         assert!(
             Arc::ptr_eq(&self.owner, &token.owner),
@@ -599,7 +662,15 @@ impl InputTimeline {
         self.prepared_routes.remove(&key).unwrap()
     }
 
-    fn commit_presented_route(&mut self, token: PreparedInputRoutePublication) -> InputRouteCommit {
+    /// Completes the reservation and publishes its route if it is still valid.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the token belongs to another timeline.
+    pub fn commit_presented_route(
+        &mut self,
+        token: PreparedInputRoutePublication,
+    ) -> InputRouteCommit {
         let reservation = self.consume_route(token);
         let route = reservation.declaration.route;
         if let Some(reason) = reservation.invalidation {
@@ -624,7 +695,12 @@ impl InputTimeline {
         InputRouteCommit::Published(self.pointer_route(route.window(), route.seat(), None))
     }
 
-    fn release_route(&mut self, token: PreparedInputRoutePublication) {
+    /// Releases a cancelled or superseded route reservation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the token belongs to another timeline.
+    pub fn abort_presented_route(&mut self, token: PreparedInputRoutePublication) {
         let reservation = self.consume_route(token);
         let declaration = reservation.declaration;
         self.refund_unused_geometry(declaration.route.window(), declaration.route.seat());
@@ -701,6 +777,18 @@ impl InputTimeline {
         Ok(())
     }
 
+    /// Unbinds a route only if its original claimed endpoint still exists.
+    pub fn unbind_claimed_endpoint(
+        &mut self,
+        claim: &InputEndpointClaim,
+        expected: Option<InputRouteStamp>,
+    ) -> Result<(), InputIngressError> {
+        if !self.owns_claim(claim)? {
+            return Ok(());
+        }
+        self.unbind_presented_endpoint(claim.window, claim.seat, expected)
+    }
+
     pub fn retire_presented_endpoint(
         &mut self,
         window: InputWindowId,
@@ -722,6 +810,22 @@ impl InputTimeline {
             output.released_keys,
             output.released_mouse_buttons,
         ))
+    }
+
+    /// Retires the original claimed endpoint and reports its released inputs.
+    pub fn retire_claimed_endpoint(
+        &mut self,
+        claim: &InputEndpointClaim,
+        expected: Option<InputRouteStamp>,
+    ) -> Result<InputEndpointRetirement, InputIngressError> {
+        if !self.owns_claim(claim)? {
+            return Ok(InputEndpointRetirement::new(
+                InputAdmission::IGNORED,
+                Vec::new(),
+                Vec::new(),
+            ));
+        }
+        self.retire_presented_endpoint(claim.window, claim.seat, expected)
     }
 
     pub fn admit_keyboard(
@@ -1047,13 +1151,13 @@ impl InputTimeline {
 }
 
 impl InputTimeline {
-    fn apply_keyboard(
+    pub(super) fn apply_keyboard(
         &mut self,
         window: InputWindowId,
         seat: InputSeatId,
         input: ButtonDriverInput<KeyCode>,
         origin: InputEventOrigin,
-    ) -> Result<__InputDriverOutput, InputIngressError> {
+    ) -> Result<InputBatch, InputIngressError> {
         let endpoint = self.topology.connected_endpoint(window, seat)?;
         match input {
             ButtonDriverInput::Press(key) => {
@@ -1066,14 +1170,29 @@ impl InputTimeline {
         }
     }
 
-    fn apply_mouse(
+    pub(super) fn admit_claimed_keyboard(
+        &mut self,
+        claim: &InputEndpointClaim,
+        input: ButtonDriverInput<KeyCode>,
+    ) -> Result<InputAdmission, InputIngressError> {
+        if !self.owns_claim(claim)? {
+            return Err(InputIngressError::EndpointClaimExpired {
+                window: claim.window,
+                seat: claim.seat,
+            });
+        }
+        self.apply_keyboard(claim.window, claim.seat, input, InputEventOrigin::Synthetic)
+            .map(|batch| batch.admission)
+    }
+
+    pub(super) fn apply_mouse(
         &mut self,
         window: InputWindowId,
         seat: InputSeatId,
         pointer: InputPointerId,
         input: ButtonDriverInput<MouseButton>,
         origin: InputEventOrigin,
-    ) -> Result<__InputDriverOutput, InputIngressError> {
+    ) -> Result<InputBatch, InputIngressError> {
         let endpoint = self.topology.connected_endpoint(window, seat)?;
         let pointer = self.topology.connected_pointer(endpoint, pointer)?;
         match input {
@@ -1106,7 +1225,7 @@ impl InputTimeline {
         input: InputBinding,
         origin: InputEventOrigin,
         axis_value: Option<AxisValue>,
-    ) -> Result<__InputDriverOutput, InputIngressError> {
+    ) -> Result<InputBatch, InputIngressError> {
         let endpoint = self.topology.endpoints[endpoint_index].unwrap();
         let pointer = pointer_index.map(|index| self.topology.pointers[index].unwrap());
         if self
@@ -1119,7 +1238,7 @@ impl InputTimeline {
             )
             .is_some()
         {
-            return Ok(__InputDriverOutput::new(InputAdmission::IGNORED));
+            return Ok(InputBatch::new(InputAdmission::IGNORED));
         }
         let member_slot = self.topology.free_member()?;
         let after = self.topology.obligations() - endpoint.obligations()
@@ -1181,7 +1300,7 @@ impl InputTimeline {
             origin,
         });
         self.assert_accounting();
-        Ok(__InputDriverOutput::new(admission))
+        Ok(InputBatch::new(admission))
     }
 
     fn release(
@@ -1190,7 +1309,7 @@ impl InputTimeline {
         pointer_index: Option<usize>,
         gamepad: Option<GamepadId>,
         input: InputBinding,
-    ) -> Result<__InputDriverOutput, InputIngressError> {
+    ) -> Result<InputBatch, InputIngressError> {
         self.release_trigger(endpoint_index, pointer_index, gamepad, input, None)
     }
 
@@ -1201,14 +1320,14 @@ impl InputTimeline {
         gamepad: Option<GamepadId>,
         input: InputBinding,
         trigger: Option<InputEventOrigin>,
-    ) -> Result<__InputDriverOutput, InputIngressError> {
+    ) -> Result<InputBatch, InputIngressError> {
         let endpoint = self.topology.endpoints[endpoint_index].unwrap();
         let pointer = pointer_index.map(|index| self.topology.pointers[index].unwrap().id);
         let Some(index) = self
             .topology
             .member_index(endpoint.id, pointer, gamepad, input)
         else {
-            return Ok(__InputDriverOutput::new(InputAdmission::IGNORED));
+            return Ok(InputBatch::new(InputAdmission::IGNORED));
         };
         let mut draft = self.release_draft(self.topology.members[index].unwrap(), None);
         if let Some(trigger) = trigger {
@@ -1222,7 +1341,7 @@ impl InputTimeline {
             *value = AxisValue::ZERO;
         }
         self.assert_accounting();
-        Ok(__InputDriverOutput::new(admission))
+        Ok(InputBatch::new(admission))
     }
 
     fn release_all(
@@ -1231,7 +1350,7 @@ impl InputTimeline {
         pointer_index: Option<usize>,
         mouse: bool,
         origin: InputEventOrigin,
-    ) -> Result<__InputDriverOutput, InputIngressError> {
+    ) -> Result<InputBatch, InputIngressError> {
         let endpoint = self.topology.endpoints[endpoint_index].unwrap().id;
         let pointer = pointer_index.map(|index| self.topology.pointers[index].unwrap().id);
         self.with_drafts(|owner, drafts| {
@@ -1281,8 +1400,8 @@ impl InputTimeline {
         })
     }
 
-    fn release_output(admission: InputAdmission, drafts: &[InputDraft]) -> __InputDriverOutput {
-        __InputDriverOutput {
+    fn release_output(admission: InputAdmission, drafts: &[InputDraft]) -> InputBatch {
+        InputBatch {
             admission,
             released_keys: drafts
                 .iter()
@@ -1304,11 +1423,10 @@ impl InputTimeline {
                     _ => None,
                 })
                 .collect(),
-            gamepad_connection: None,
         }
     }
 
-    fn apply_pointer(
+    pub(super) fn apply_pointer(
         &mut self,
         window: InputWindowId,
         seat: InputSeatId,
@@ -1316,7 +1434,7 @@ impl InputTimeline {
         input: PointerDriverInput,
         origin: InputEventOrigin,
         retire: bool,
-    ) -> Result<__InputDriverOutput, InputIngressError> {
+    ) -> Result<InputBatch, InputIngressError> {
         let endpoint_index = self.topology.connected_endpoint(window, seat)?;
         let endpoint = self.topology.endpoints[endpoint_index].unwrap();
         let pointer_index = self.topology.connected_pointer(endpoint_index, label)?;
@@ -1351,7 +1469,7 @@ impl InputTimeline {
                 pointer.position = Some(position);
                 pointer.leave = true;
                 self.assert_accounting();
-                Ok(__InputDriverOutput::new(admission))
+                Ok(InputBatch::new(admission))
             }
             PointerDriverInput::Left => self.with_drafts(|owner, drafts| {
                 for member in owner
@@ -1439,6 +1557,25 @@ impl InputTimeline {
         pointer: InputPointerId,
         delta: Vec2,
     ) -> Result<InputAdmission, InputIngressError> {
+        self.admit_wheel_sample(
+            window,
+            seat,
+            pointer,
+            delta,
+            MouseWheelUnit::Lines,
+            TouchPhase::Moved,
+        )
+    }
+
+    fn admit_wheel_sample(
+        &mut self,
+        window: InputWindowId,
+        seat: InputSeatId,
+        pointer: InputPointerId,
+        delta: Vec2,
+        unit: MouseWheelUnit,
+        phase: TouchPhase,
+    ) -> Result<InputAdmission, InputIngressError> {
         if !delta.is_finite() {
             return Err(InputIngressError::NonFinitePosition);
         }
@@ -1447,9 +1584,52 @@ impl InputTimeline {
         self.admit_ordinary(
             endpoint,
             Some(pointer),
-            InputEventKind::Wheel { delta },
+            InputEventKind::Wheel { delta, unit, phase },
             InputEventOrigin::Platform,
         )
+    }
+
+    pub(super) fn admit_window_wheel(
+        &mut self,
+        window: InputWindowId,
+        seat: InputSeatId,
+        pointer: InputPointerId,
+        delta: Vec2,
+        unit: MouseWheelUnit,
+        phase: TouchPhase,
+    ) -> Result<InputAdmission, InputIngressError> {
+        if self.window_device_input_allowed(window, seat)? {
+            self.admit_wheel_sample(window, seat, pointer, delta, unit, phase)
+        } else {
+            Ok(InputAdmission::IGNORED)
+        }
+    }
+
+    pub(super) fn admit_window_device_input(
+        &mut self,
+        input: WindowDeviceInput,
+    ) -> Result<(), InputIngressError> {
+        let (window, seat) = input.endpoint();
+        if self.window_device_input_allowed(window, seat)? {
+            self.window_devices.admit(input, self.limits.events())?;
+        }
+        Ok(())
+    }
+
+    fn window_device_input_allowed(
+        &self,
+        window: InputWindowId,
+        seat: InputSeatId,
+    ) -> Result<bool, InputIngressError> {
+        let index = self.topology.connected_endpoint(window, seat)?;
+        Ok(self.topology.endpoints[index]
+            .is_some_and(|endpoint| endpoint.focused || endpoint.invalidated_through == 0))
+    }
+
+    pub(crate) fn drain_window_device_input(
+        &mut self,
+    ) -> impl Iterator<Item = WindowDeviceInput> + '_ {
+        self.window_devices.drain()
     }
 
     fn admit_ordinary(
@@ -1473,19 +1653,19 @@ impl InputTimeline {
         Ok(admission)
     }
 
-    fn apply_window(
+    pub(super) fn apply_window(
         &mut self,
         window: InputWindowId,
         seat: InputSeatId,
         event: InputWindowEvent,
-    ) -> Result<__InputDriverOutput, InputIngressError> {
+    ) -> Result<InputBatch, InputIngressError> {
         let endpoint_index = self
             .topology
             .endpoint_index(window, seat)
             .ok_or(InputIngressError::UnknownEndpoint { window, seat })?;
         let endpoint = self.topology.endpoints[endpoint_index].unwrap();
         if endpoint.retiring {
-            return Ok(__InputDriverOutput::new(InputAdmission::IGNORED));
+            return Ok(InputBatch::new(InputAdmission::IGNORED));
         }
         match event {
             InputWindowEvent::Focused(true) => {
@@ -1504,13 +1684,14 @@ impl InputTimeline {
                 {
                     let focused = record.id == endpoint.id;
                     if record.focused && !focused {
+                        self.window_devices.cancel(record.window, record.seat);
                         record.invalidated_through = admission
                             .last_sequence()
                             .expect("an admitted focus gain has one sequence");
                     }
                     record.focused = focused;
                 }
-                Ok(__InputDriverOutput::new(admission))
+                Ok(InputBatch::new(admission))
             }
             InputWindowEvent::Resized { logical_size } => {
                 if !logical_size.is_finite() || logical_size.x < 0.0 || logical_size.y < 0.0 {
@@ -1567,12 +1748,12 @@ impl InputTimeline {
         endpoint_index: usize,
         kind: InputEventKind,
         reason: InputInvalidationReason,
-    ) -> Result<__InputDriverOutput, InputIngressError> {
+    ) -> Result<InputBatch, InputIngressError> {
         let endpoint = self.topology.endpoints[endpoint_index].unwrap();
         if !endpoint.geometry {
             return self
                 .admit_ordinary(endpoint_index, None, kind, InputEventOrigin::Platform)
-                .map(__InputDriverOutput::new);
+                .map(InputBatch::new);
         }
         let mut draft = self.ordinary_draft(
             endpoint.window,
@@ -1599,7 +1780,7 @@ impl InputTimeline {
             .unwrap()
             .geometry = false;
         self.assert_accounting();
-        Ok(__InputDriverOutput::new(admission))
+        Ok(InputBatch::new(admission))
     }
 
     fn physical_loss(
@@ -1607,7 +1788,7 @@ impl InputTimeline {
         endpoint_index: usize,
         kind: InputEventKind,
         reason: InputInvalidationReason,
-    ) -> Result<__InputDriverOutput, InputIngressError> {
+    ) -> Result<InputBatch, InputIngressError> {
         let endpoint = self.topology.endpoints[endpoint_index].unwrap();
         let retiring = reason == InputInvalidationReason::SurfaceRetired;
         let control = match reason {
@@ -1710,6 +1891,7 @@ impl InputTimeline {
                 + controls_after;
             let plan = owner.terminal_plan(drafts.len(), after);
             let admission = owner.publish_drafts(plan, drafts, releases);
+            owner.window_devices.cancel(endpoint.window, endpoint.seat);
             owner.revoke_route(endpoint.window, endpoint.seat, reason);
             for member in owner
                 .topology
@@ -1790,8 +1972,11 @@ impl InputTimeline {
 }
 
 impl InputTimeline {
-    #[doc(hidden)]
-    pub fn __finalize_ui_entry(
+    /// Completes the UI routing decision for one pending input sequence.
+    ///
+    /// A completed decision also routes subsequent transitions belonging to the same press.
+    /// Returns an error if the sequence is unknown or already finalized.
+    pub fn finalize_ui_entry(
         &mut self,
         sequence: u64,
         disposition: InputUiDisposition,
@@ -2147,269 +2332,4 @@ impl InputTimeline {
         }
         self.assert_accounting();
     }
-
-    fn apply_driver_event(
-        &mut self,
-        event: __InputDriverEvent,
-    ) -> Result<__InputDriverOutput, InputIngressError> {
-        let synthetic_window = InputWindowId::UNSPECIFIED;
-        let synthetic_seat = InputSeatId::PRIMARY;
-        match event {
-            __InputDriverEvent::ConnectEndpoint { window, seat } => {
-                self.connect_endpoint(window, seat)?;
-                Ok(__InputDriverOutput::new(InputAdmission::IGNORED))
-            }
-            __InputDriverEvent::ConnectGamepad {
-                window,
-                seat,
-                gamepad,
-            } => {
-                let (connection, admission) =
-                    self.connect_gamepad_origin(window, seat, gamepad, InputEventOrigin::Platform)?;
-                let mut output = __InputDriverOutput::new(admission);
-                output.gamepad_connection = Some(connection);
-                Ok(output)
-            }
-            __InputDriverEvent::ConnectSyntheticGamepad {
-                window,
-                seat,
-                gamepad,
-            } => {
-                let (connection, admission) = self.connect_gamepad_origin(
-                    window,
-                    seat,
-                    gamepad,
-                    InputEventOrigin::Synthetic,
-                )?;
-                let mut output = __InputDriverOutput::new(admission);
-                output.gamepad_connection = Some(connection);
-                Ok(output)
-            }
-            __InputDriverEvent::DisconnectGamepad { connection } => self
-                .disconnect_gamepad(&connection)
-                .map(__InputDriverOutput::new),
-            __InputDriverEvent::ConnectPointer {
-                window,
-                seat,
-                pointer,
-            } => {
-                self.connect_pointer(window, seat, pointer)?;
-                Ok(__InputDriverOutput::new(InputAdmission::IGNORED))
-            }
-            __InputDriverEvent::RetirePointer {
-                window,
-                seat,
-                pointer,
-            } => self.apply_pointer(
-                window,
-                seat,
-                pointer,
-                PointerDriverInput::Left,
-                InputEventOrigin::Platform,
-                true,
-            ),
-            __InputDriverEvent::Keyboard {
-                window,
-                seat,
-                input,
-            } => self.apply_keyboard(window, seat, input, InputEventOrigin::Platform),
-            __InputDriverEvent::ClaimedKeyboard { claim, input } => {
-                if !self.owns_claim(&claim)? {
-                    return Err(InputIngressError::EndpointClaimExpired {
-                        window: claim.window,
-                        seat: claim.seat,
-                    });
-                }
-                self.apply_keyboard(claim.window, claim.seat, input, InputEventOrigin::Synthetic)
-            }
-            __InputDriverEvent::Mouse {
-                window,
-                seat,
-                pointer,
-                input,
-            } => self.apply_mouse(window, seat, pointer, input, InputEventOrigin::Platform),
-            __InputDriverEvent::Pointer {
-                window,
-                seat,
-                pointer,
-                input,
-            } => self.apply_pointer(
-                window,
-                seat,
-                pointer,
-                input,
-                InputEventOrigin::Platform,
-                false,
-            ),
-            __InputDriverEvent::GamepadButton {
-                connection,
-                button,
-                phase,
-            } => self
-                .admit_gamepad_button(&connection, button, phase)
-                .map(__InputDriverOutput::new),
-            __InputDriverEvent::GamepadAxis {
-                connection,
-                axis,
-                value,
-            } => self
-                .admit_gamepad_axis(&connection, axis, value)
-                .map(__InputDriverOutput::new),
-            __InputDriverEvent::Window {
-                window,
-                seat,
-                event,
-            } => self.apply_window(window, seat, event),
-            __InputDriverEvent::SyntheticKeyboard { input } => self.apply_keyboard(
-                synthetic_window,
-                synthetic_seat,
-                input,
-                InputEventOrigin::Synthetic,
-            ),
-            __InputDriverEvent::SyntheticMouse { input } => self.apply_mouse(
-                synthetic_window,
-                synthetic_seat,
-                InputPointerId::PRIMARY,
-                input,
-                InputEventOrigin::Synthetic,
-            ),
-            __InputDriverEvent::SyntheticPointer { input } => self.apply_pointer(
-                synthetic_window,
-                synthetic_seat,
-                InputPointerId::PRIMARY,
-                input,
-                InputEventOrigin::Synthetic,
-                false,
-            ),
-        }
-    }
-}
-
-impl __RuntimeDriverPort for InputTimeline {
-    type Input = __InputDriverEvent;
-    type Output = Result<__InputDriverOutput, InputIngressError>;
-
-    fn accepts_driver_input(state: RuntimeState, input: &Self::Input) -> bool {
-        matches!(state, RuntimeState::Running | RuntimeState::Paused)
-            || matches!(
-                (state, input),
-                (
-                    RuntimeState::Faulted | RuntimeState::Stopping | RuntimeState::CloseIncomplete,
-                    __InputDriverEvent::Window {
-                        event: InputWindowEvent::SurfaceRetired,
-                        ..
-                    }
-                )
-            )
-    }
-    fn apply_driver_input(&mut self, event: Self::Input) -> Self::Output {
-        self.apply_driver_event(event)
-    }
-}
-
-/// Reserves the exact route before backend submission.
-#[doc(hidden)]
-pub fn prepare_presented_route(
-    timeline: &mut InputTimeline,
-    route: InputPresentedRoute,
-) -> Result<PreparedInputRoutePublication, InputIngressError> {
-    timeline.prepare_presented_route(route)
-}
-#[doc(hidden)]
-pub fn commit_presented_route(
-    timeline: &mut InputTimeline,
-    token: PreparedInputRoutePublication,
-) -> InputRouteCommit {
-    timeline.commit_presented_route(token)
-}
-/// Reads exact Input invalidation before the UI owner decides its total publication outcome.
-#[doc(hidden)]
-pub fn prepared_route_invalidation(
-    timeline: &InputTimeline,
-    token: &PreparedInputRoutePublication,
-) -> Option<InputInvalidationReason> {
-    timeline.route_reservation(token).invalidation
-}
-
-/// Checks original route custody without consuming the token or asserting on a foreign owner.
-#[doc(hidden)]
-#[must_use]
-pub fn owns_prepared_route(
-    timeline: &InputTimeline,
-    token: &PreparedInputRoutePublication,
-) -> bool {
-    Arc::ptr_eq(&timeline.owner, &token.owner)
-        && timeline
-            .prepared_routes
-            .get(&(
-                token.declaration.route.window(),
-                token.declaration.route.seat(),
-            ))
-            .is_some_and(|reservation| reservation.declaration == token.declaration)
-}
-
-#[doc(hidden)]
-pub fn claim_input_endpoint(
-    timeline: &InputTimeline,
-    window: InputWindowId,
-    seat: InputSeatId,
-) -> Result<InputEndpointClaim, InputIngressError> {
-    timeline.claim_endpoint(window, seat)
-}
-
-#[doc(hidden)]
-pub fn prepare_claimed_route(
-    timeline: &mut InputTimeline,
-    claim: &InputEndpointClaim,
-    route: InputPresentedRoute,
-) -> Result<PreparedInputRoutePublication, InputIngressError> {
-    if route.window() != claim.window
-        || route.seat() != claim.seat
-        || !timeline.owns_claim(claim)?
-    {
-        return Err(InputIngressError::EndpointClaimExpired {
-            window: claim.window,
-            seat: claim.seat,
-        });
-    }
-    timeline.prepare_presented_route(route)
-}
-
-#[doc(hidden)]
-pub fn unbind_claimed_endpoint(
-    timeline: &mut InputTimeline,
-    claim: &InputEndpointClaim,
-    expected: Option<InputRouteStamp>,
-) -> Result<(), InputIngressError> {
-    if !timeline.owns_claim(claim)? {
-        return Ok(());
-    }
-    timeline.unbind_presented_endpoint(claim.window, claim.seat, expected)
-}
-
-#[doc(hidden)]
-pub fn retire_claimed_endpoint(
-    timeline: &mut InputTimeline,
-    claim: &InputEndpointClaim,
-    expected: Option<InputRouteStamp>,
-) -> Result<InputEndpointRetirement, InputIngressError> {
-    if !timeline.owns_claim(claim)? {
-        return Ok(InputEndpointRetirement::new(
-            InputAdmission::IGNORED,
-            Vec::new(),
-            Vec::new(),
-        ));
-    }
-    timeline.retire_presented_endpoint(claim.window, claim.seat, expected)
-}
-#[doc(hidden)]
-pub fn abort_presented_route(timeline: &mut InputTimeline, token: PreparedInputRoutePublication) {
-    timeline.release_route(token);
-}
-#[doc(hidden)]
-pub fn supersede_presented_route(
-    timeline: &mut InputTimeline,
-    token: PreparedInputRoutePublication,
-) {
-    timeline.release_route(token);
 }

@@ -11,10 +11,10 @@ use std::{
 };
 
 use nara_asset::AssetRef;
+use nara_core::diagnostic::DiagnosticValueRef;
 use nara_core::{ByteLimit, ItemLimit};
-use nara_diagnostic::DiagnosticValueRef;
 use nara_ecs::Component;
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, ReferenceInputId,
 };
 use nara_reflect::{
@@ -98,7 +98,7 @@ fn basis() -> AuthoringSchemaBasis {
     .unwrap();
     // Match the existing data-Adapter fixture admission; the exercised conversion,
     // source loading, publication and history operations are public session APIs.
-    let adapter = nara_scene::__private::AuthoringAdapterReceipt::from_schema_owner(
+    let adapter = nara_scene::authoring::AuthoringAdapterReceipt::from_schema_owner(
         &bundle.owners()[0],
         &Default::default(),
     )

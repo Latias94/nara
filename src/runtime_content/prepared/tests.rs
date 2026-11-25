@@ -5,16 +5,16 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use crate::fs::{ContentDigest, RelativePath};
 use nara_app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
 use nara_asset::{
     AssetDomain, AssetPathScope, AssetRecord, AssetRef, AssetReferenceDemand, AssetRuntimeError,
     AssetRuntimeLimits, AssetSourceKind, AssetSourcePath, ImportedProductId, ProjectAssetDatabase,
     RuntimeAssetCodec, StableAssetId,
 };
+use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
-use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
-use nara_fs::{ContentDigest, RelativePath};
-use nara_identity::SceneEntityId;
+use nara_ecs::identity::SceneEntityId;
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
@@ -971,8 +971,8 @@ fn retained_pack_partial_sink_failure_releases_selected_raw_work_without_decodin
             let mut sink = RefusingSink { remaining };
             assert!(matches!(
                 base.write_pack(&mut sink),
-                Err(RuntimeContentError::Host(nara_fs::FsError::Io {
-                    operation: nara_fs::FsOperation::Write,
+                Err(RuntimeContentError::Host(crate::fs::FsError::Io {
+                    operation: crate::fs::FsOperation::Write,
                     ..
                 }))
             ));
@@ -1143,7 +1143,7 @@ fn probe_acquisition(
 
 #[test]
 fn headless_session_publishes_the_original_cpu_closure_and_retires_it() {
-    use nara_identity::EntityLookup;
+    use nara_ecs::identity::EntityLookup;
 
     use crate::{
         project_host::{HeadlessSession, ProjectDomainAssets},

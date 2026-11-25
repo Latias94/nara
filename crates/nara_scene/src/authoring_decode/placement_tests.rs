@@ -114,7 +114,7 @@ fn source_classification_and_copy_do_not_demand_projected_targets_or_instance_in
     let mut prefab = PrefabDocument::new(document.placements, document.entities);
     prefab
         .inputs
-        .insert(nara_identity::ReferenceInputId::new("unbound").unwrap());
+        .insert(nara_ecs::identity::ReferenceInputId::new("unbound").unwrap());
     let basis = basis();
     let source = AuthoringDocumentSource::new(AssetRef::path("source.prefab.json").unwrap());
     let admitted =

@@ -27,15 +27,17 @@ use std::{
 
 use nara::{
     app::RuntimeState,
-    gameplay::{
-        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandPayload,
-        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTick,
-        GameplayCommandTypeId, GameplayCommandValue,
-    },
     project_host::{HeadlessSession, HeadlessSessionClose},
     tasks::{TaskPools, TaskReturnState},
 };
-use two_level_game::{GamePhase, GameSnapshot, capture_resume, request_resume};
+use two_level_game::{
+    GamePhase, GameSnapshot, capture_resume,
+    command::{
+        CommandSchedule, CommandSequence, CommandSource, CommandSubmitError, CommandTick,
+        GameCommand, ScheduledCommand,
+    },
+    request_resume,
+};
 
 use control::{Arguments, ControlDirectory};
 use protocol::{
@@ -160,11 +162,9 @@ fn run() -> Result<(), String> {
         .unwrap_or_else(|_| Err("original physical close panicked".into()))
     };
     if !game.is_closed() {
-        eprintln!(
-            "continuity: {result:?}; terminating the game process after incomplete cleanup: game={cleanup:?}; watcher={watch_cleanup:?}"
-        );
-        // The supervising process reaps the child after a failed retirement.
-        std::process::exit(1);
+        return Err(format!(
+            "{result:?}; original cleanup did not complete: game={cleanup:?}; watcher={watch_cleanup:?}"
+        ));
     }
     if let Err(error) = watch_cleanup {
         return Err(format!(
@@ -505,7 +505,7 @@ impl Game {
                         .session
                         .observe(|world| {
                             world
-                                .resource::<nara::gameplay::GameplayCommandQueue>()
+                                .resource::<CommandSchedule>()
                                 .stats()
                                 .retained_commands
                                 != 0
@@ -599,12 +599,12 @@ impl Game {
             .snapshot()?
             .tick
             .checked_add(1)
-            .and_then(GameplayCommandTick::new)
+            .and_then(CommandTick::new)
             .ok_or("engine tick is exhausted")?;
         self.sequence
             .checked_add(commands.len() as u64)
             .ok_or("command source sequence is exhausted")?;
-        let source = GameplayCommandIngressSource::external("two-level-game.continuity")
+        let source = CommandSource::external("two-level-game.continuity")
             .map_err(|error| format!("command source is invalid: {error}"))?;
         let drafts = commands
             .into_iter()
@@ -617,16 +617,13 @@ impl Game {
                 return Err(error);
             }
             self.sequence += 1;
-            let sequence = GameplayCommandSourceSequence::new(self.sequence)
-                .ok_or("command source sequence is zero")?;
-            let submission = self.session.submit(GameplayCommandSubmission::new(
-                tick,
-                source.clone(),
-                sequence,
-                draft,
-            ));
+            let sequence =
+                CommandSequence::new(self.sequence).ok_or("command source sequence is zero")?;
+            let submission = ScheduledCommand::new(tick, source.clone(), sequence, draft)
+                .submit_headless(&mut self.session);
             if let Err(error) = submission {
-                self.execution_failed |= admitted;
+                self.execution_failed |=
+                    admitted || matches!(&error, CommandSubmitError::Runtime { output: Ok(_), .. });
                 return Err(format!("semantic command admission failed: {error:?}"));
             }
             admitted = true;
@@ -697,30 +694,9 @@ fn observation(runtime_generation: u64, app_frame: u64, snapshot: GameSnapshot) 
     }
 }
 
-fn command_draft(command: SemanticCommand) -> Result<GameplayCommandDraft, String> {
-    let (id, movement) = match command {
-        SemanticCommand::Move { direction, pressed } => {
-            ("two-level-game.move", Some((direction, pressed)))
-        }
-        SemanticCommand::Marker => ("two-level-game.marker", None),
-        SemanticCommand::Travel => ("two-level-game.travel", None),
-        SemanticCommand::Instance => ("two-level-game.instance", None),
-        SemanticCommand::Retry => ("two-level-game.retry", None),
-    };
-    let id =
-        GameplayCommandTypeId::new(id).map_err(|error| format!("invalid game command: {error}"))?;
-    let mut draft = GameplayCommandDraft::new(id);
-    if let Some((direction, pressed)) = movement {
-        let mut payload = GameplayCommandPayload::new();
-        payload
-            .insert("direction", GameplayCommandValue::I64(direction as i64))
-            .map_err(|error| format!("invalid movement direction: {error}"))?;
-        payload
-            .insert("pressed", GameplayCommandValue::Bool(pressed))
-            .map_err(|error| format!("invalid movement intent: {error}"))?;
-        draft = draft.with_payload(payload);
-    }
-    Ok(draft)
+fn command_draft(command: SemanticCommand) -> Result<GameCommand, String> {
+    command.validate()?;
+    Ok(command.intent())
 }
 
 fn check_deadline(deadline: Instant) -> Result<(), String> {

@@ -83,7 +83,7 @@ pub(super) struct SpawnedProcess {
 
 /// Handle-bound authority for launching one already-verified immutable generation.
 ///
-/// The guards are restrictive leases produced by `nara_fs`; this adapter never applies
+/// The guards are restrictive leases produced by the VFS capability layer; this adapter never applies
 /// `ReOpenFile` to an arbitrary foreign handle. The executable path is derived from the guarded
 /// file itself, and the created process remains suspended until Windows proves that its mapped
 /// image shares the guarded executable's underlying file stream.

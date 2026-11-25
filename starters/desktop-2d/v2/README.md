@@ -62,14 +62,10 @@ origin. Upgrading either is an explicit migration.
 If you add a persistent component, register its schema contribution in `product_recipe()` and
 refresh the schema bundle before validating source that uses it.
 
-```text
-nara schema . --check
-nara schema . --write
-nara schema . --check
-```
-
-Pass `--profile desktop` to check or write the desktop profile's schema. To include another Scene
-in Check and Export, declare its path relative to `paths.scenes` in `nara.toml`.
+Use `nara::project_tooling::invoke_project_tool` with `ProjectToolRequest::Schema`. Set `write`
+to `false` to check for staleness or to `true` to refresh `authoring.schema_bundle`. Use
+`Some("desktop".into())` for the desktop profile. To include another Scene in Check and Export,
+declare its path relative to `paths.scenes` in `nara.toml`.
 
 ```toml
 [content]
@@ -106,24 +102,15 @@ runs complete headless frames. `starter_player: ok` reports success.
 
 ## Export a source-carrying candidate
 
-Publish a source-carrying declared-content candidate into an absent destination.
-
-```text
-nara export . --parent .. --destination candidate-before-repair
-```
+Pass `ProjectToolRequest::Export` to `nara::project_tooling::invoke_project_tool` to publish a
+source-carrying declared-content candidate. Choose a new destination under an existing output
+parent.
 
 The candidate's `bin/headless` and `bin/desktop --verify-first-present` executables use the sibling
 `project/` directory and can run from another working directory. Add `.exe` on Windows.
 
 To exercise startup Scene repair, move `scenes/startup.scene.json` and its `.meta` sidecar to
 `scenes/repaired.scene.json` and `scenes/repaired.scene.json.meta`. Update the metadata's authored
-path to `repaired.scene.json` and preserve its stable asset ID. Then run these commands.
-
-```text
-nara check .
-nara repair startup-scene . --replacement repaired.scene.json
-nara check .
-cargo run --bin headless
-cargo run --features desktop --bin desktop -- --verify-first-present
-nara export . --parent .. --destination candidate-after-repair
-```
+path to `repaired.scene.json` and preserve its stable asset ID. Pass the issue returned by the typed
+`nara::project_workflow::check_project` API to `repair_startup_scene` with `repaired.scene.json`
+as the replacement. Recheck and launch both products before publishing the next candidate.

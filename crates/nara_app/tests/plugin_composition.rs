@@ -12,9 +12,9 @@ use nara_app::{
     PluginGroupId, PluginHook, PluginHookMutation, PluginId, PluginInstantiationError,
     PluginLifecycleState, PluginPlan, PluginPlanError, PluginProductCapability,
     PluginShutdownContext, PluginShutdownObligationId, PluginSlot, PluginSlotId,
-    RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeCloseContext,
-    RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
-    RuntimeClosePolicy, RuntimeCloseProgress, RuntimeConstructionError, RuntimeObligationLedger,
+    RuntimeCandidateRetirementState, RuntimeCloseContext, RuntimeCloseParticipant,
+    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeClosePolicy,
+    RuntimeCloseProgress, RuntimeConstructionError, RuntimeObligationLedger,
 };
 use nara_ecs::Resource;
 
@@ -1243,7 +1243,6 @@ fn runtime_construction_uses_one_reverse_ordered_obligation_ledger() {
     let success_plan = PluginPlan::resolve(ordered_owner_definition(&success_log)).unwrap();
     let candidate = success_plan
         .instantiate_runtime_candidate(
-            RuntimeAdmissionReservation::try_acquire().unwrap(),
             ordered_host_obligations(&success_log),
             RuntimeClosePolicy::default(),
         )
@@ -1271,7 +1270,6 @@ fn runtime_construction_uses_one_reverse_ordered_obligation_ledger() {
         PluginPlan::resolve((ordered_owner_definition(&failure_log), failure_definition)).unwrap();
     let mut failure = failure_plan
         .instantiate_runtime_candidate(
-            RuntimeAdmissionReservation::try_acquire().unwrap(),
             ordered_host_obligations(&failure_log),
             RuntimeClosePolicy::default(),
         )
@@ -1310,7 +1308,6 @@ fn runtime_prepare_failure_retains_the_host_owner_for_exactly_once_retry() {
 
     let mut failure = plan
         .instantiate_runtime_candidate(
-            RuntimeAdmissionReservation::try_acquire().unwrap(),
             retained_ordered_host_obligations(&log, &released, &begins, &polls),
             RuntimeClosePolicy::new(Duration::ZERO),
         )
@@ -1368,7 +1365,6 @@ fn runtime_finish_failure_retires_plugin_then_host_and_retries_only_pending_owne
 
     let mut failure = plan
         .instantiate_runtime_candidate(
-            RuntimeAdmissionReservation::try_acquire().unwrap(),
             retained_ordered_host_obligations(&log, &released, &begins, &polls),
             RuntimeClosePolicy::new(Duration::ZERO),
         )
@@ -1840,10 +1836,6 @@ fn app_drop_catches_shutdown_panic_during_an_outer_unwind() {
     }));
 
     assert!(result.is_err());
-    assert_eq!(
-        nara_app::drive_runtime_quarantine().current_thread_retained(),
-        0
-    );
     assert_eq!(
         *log.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
         ["c"]

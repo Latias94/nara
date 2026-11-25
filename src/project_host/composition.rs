@@ -5,20 +5,18 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+use crate::fs::{ContentDigest, FileIdentity};
 use nara_app::{
     EditedPluginGroup, Plugin, PluginDefinition, PluginGroup, PluginGroupBuilder, PluginGroupId,
     PluginId, PluginPlan, PluginPlanError, PluginProductCapability, PluginSchemaProviderId,
 };
-use nara_fs::{ContentDigest, FileIdentity};
 #[cfg(feature = "runtime-input")]
 use nara_input::INPUT_PLUGIN_ID;
 use nara_project::{
     EffectiveProjectSettings, EffectiveRuntimeConfiguration, ProductCapability,
     ProductCapabilitySet, ProjectPath, SourceRuntimeProjection,
 };
-use nara_reflect::__private::{
-    ResolvedComponentSchemaProvider, register_resolved_schema_provider, resolve_schema_provider,
-};
+use nara_reflect::provider::ResolvedComponentSchemaProvider;
 #[cfg(feature = "serde")]
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, PersistentComponentSchemaOwnerId,
@@ -633,7 +631,7 @@ pub fn built_in_schema_providers() -> Vec<ComponentSchemaProviderDefinition> {
     #[allow(unused_mut)]
     let mut providers = vec![
         nara_scene::SCENE_COMPONENTS_SCHEMA_PROVIDER,
-        nara_transform::TRANSFORM_SCHEMA_PROVIDER,
+        nara_scene::TRANSFORM_SCHEMA_PROVIDER,
     ];
     #[cfg(feature = "runtime-2d")]
     {
@@ -682,9 +680,9 @@ fn configured_profile_plugins(
     settings: &EffectiveRuntimeConfiguration,
     plugins: crate::product::ProjectProfilePlugins,
 ) -> EditedPluginGroup<crate::product::ProjectProfilePlugins> {
-    plugins.edit().configure(nara_diagnostic::plugin(
+    plugins.edit().configure(nara_app::diagnostics::plugin(
         settings.diagnostics().runtime,
-        nara_diagnostic::RuntimePressureSettings::default(),
+        nara_app::diagnostics::RuntimePressureSettings::default(),
     ))
 }
 
@@ -964,12 +962,13 @@ fn resolve_schema_validation(
         BTreeMap::<PluginSchemaProviderId, ResolvedComponentSchemaProvider>::new();
     for provider in known_providers {
         let provider_id = provider.id();
-        let resolved = resolve_schema_provider(provider).map_err(|source| {
-            CompositionError::SchemaProviderRejected {
-                provider: provider_id,
-                source: Box::new(source),
-            }
-        })?;
+        let resolved =
+            provider
+                .resolve()
+                .map_err(|source| CompositionError::SchemaProviderRejected {
+                    provider: provider_id,
+                    source: Box::new(source),
+                })?;
         match provider_catalog.entry(provider_id) {
             Entry::Vacant(entry) => {
                 entry.insert(resolved);
@@ -1070,7 +1069,7 @@ fn resolve_schema_validation(
                 .map(|predecessor| predecessor.catalog().clone()),
         ));
         catch_unwind(AssertUnwindSafe(|| {
-            register_resolved_schema_provider(&mut registry, provider)
+            registry.register_resolved_schema_provider(provider)
         }))
         .map_err(|_| CompositionError::SchemaProviderPanicked {
             provider: *provider_id,

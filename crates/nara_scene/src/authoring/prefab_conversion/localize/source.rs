@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 
-use nara_identity::AuthoredReferenceTarget;
+use nara_ecs::identity::AuthoredReferenceTarget;
 use nara_reflect::{ComponentTypeId, EntityReferenceTraversalLimits};
 
 use super::*;
@@ -16,7 +16,8 @@ pub(super) use queries::collect_source_reference_queries;
 #[derive(Clone, Copy)]
 pub(super) struct SourceTargets<'a> {
     pub(super) entities: &'a BTreeMap<PrefabEntityTarget, SceneEntityId>,
-    pub(super) references: &'a BTreeMap<nara_identity::AuthoredEntityReference, EntityReference>,
+    pub(super) references:
+        &'a BTreeMap<nara_ecs::identity::AuthoredEntityReference, EntityReference>,
     pub(super) identifiers: &'a BTreeMap<SceneEntityId, SceneEntityId>,
     pub(super) anchor: &'a SceneEntityId,
     pub(super) source: &'a [SceneEntityRecord],
@@ -255,7 +256,7 @@ fn replacement(
         return Ok(None);
     };
     let enters_selected = reference.through.first().is_some_and(|hop| {
-        matches!(&hop.anchor, nara_identity::PrefabEntityOrigin::SourceEntity(entity) if entity == targets.anchor)
+        matches!(&hop.anchor, nara_ecs::identity::PrefabEntityOrigin::SourceEntity(entity) if entity == targets.anchor)
     });
     if !enters_selected {
         return Ok(None);
@@ -285,7 +286,7 @@ fn replacement(
             EntityReference::Persistent { .. } => resolved.clone(),
             EntityReference::Authored { reference } if matches!(reference.target, AuthoredReferenceTarget::Entity(_))
                 && !reference.through.first().is_some_and(|hop| {
-                    matches!(&hop.anchor, nara_identity::PrefabEntityOrigin::SourceEntity(entity) if entity == targets.anchor)
+                    matches!(&hop.anchor, nara_ecs::identity::PrefabEntityOrigin::SourceEntity(entity) if entity == targets.anchor)
                 }) => resolved.clone(),
             _ => return Err(refused("Conversion requires a surviving canonical source reference endpoint")),
         }));

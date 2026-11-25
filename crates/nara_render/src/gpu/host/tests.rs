@@ -1,4 +1,9 @@
 use super::*;
+use std::{
+    panic::{self, AssertUnwindSafe},
+    sync::Weak,
+    time::{Duration, Instant},
+};
 
 fn stock_policy() -> &'static crate::gpu::WgpuPolicyInstallation<crate::gpu::WgpuStockPolicy> {
     static POLICY: std::sync::OnceLock<
@@ -22,9 +27,14 @@ pub(super) fn test_stock_capture(
     stock_policy().capture(packet, Arc::new(capture)).unwrap()
 }
 
-#[test]
-#[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
-fn native_direct_host_drop_drains_the_original_callback_cycle() {
+fn host_with_pending_image_readback(
+    before_completion: impl FnOnce(&wgpu::Buffer),
+) -> (
+    WgpuRenderHost,
+    Weak<WgpuImageStorage>,
+    wgpu::Buffer,
+    WgpuSubmissionPrefix,
+) {
     let mut host = WgpuRenderHost::offscreen();
     host.begin_frame(1).unwrap();
     let producer = host.create_producer().unwrap();
@@ -35,95 +45,107 @@ fn native_direct_host_drop_drains_the_original_callback_cycle() {
         .unwrap();
     host.activate_image_target(&producer, reservation).unwrap();
     let output = host.submit(&producer, &test_stock_input(packet)).unwrap();
-    let weak_output = Arc::downgrade(&output.0);
-    drop(output);
-    drop(producer);
-    drop(host);
-    assert!(
-        weak_output.upgrade().is_none(),
-        "direct Host Drop must settle its native callbacks and output budget"
+    drain_submission_prefix(
+        host.views[&producer.id()]
+            .submitted_prefix
+            .as_ref()
+            .unwrap(),
     );
+    let weak_output = Arc::downgrade(&output.0);
+    let namespace = host.prepare_namespace(None).unwrap();
+    let validation = namespace
+        .device
+        .push_error_scope(wgpu::ErrorFilter::Validation);
+    let readback = namespace.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("host-retirement-readback"),
+        size: 256,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = namespace.device.create_command_encoder(&Default::default());
+    encoder.copy_texture_to_buffer(
+        output.0.texture().as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &readback,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(256),
+                rows_per_image: Some(1),
+            },
+        },
+        wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+    );
+    let retention = WgpuSubmissionReservation::new(&namespace.device, &namespace.queue, output);
+    let index = namespace.queue.submit([encoder.finish()]);
+    assert!(pollster::block_on(validation.pop()).is_none());
+    // Error-scope polling can service callbacks. Register both only after validation is done.
+    before_completion(&readback);
+    let prefix = retention.submitted(index);
+    host.retiring_prefixes.push(prefix.clone());
+    drop(producer);
+    assert!(!prefix.is_complete());
+    assert!(weak_output.upgrade().is_some());
+    (host, weak_output, readback, prefix)
 }
 
 #[test]
-#[ignore = "requires an explicitly selected native GPU and a fail-stop subprocess"]
-fn native_direct_host_drop_callback_panic_cannot_release_incomplete_dependencies() {
-    const CHILD: &str = "NARA_RENDER_HOST_DROP_PANIC_CHILD";
-    if std::env::var_os(CHILD).is_some() {
-        let mut host = WgpuRenderHost::offscreen();
-        host.begin_frame(1).unwrap();
-        let producer = host.create_producer().unwrap();
-        let packet = test_image_frame();
-        let target = image_target(&packet);
-        let reservation = host
-            .reserve_image_target(&producer, packet.source_generation(), target)
-            .unwrap();
-        host.activate_image_target(&producer, reservation).unwrap();
-        let output = host.submit(&producer, &test_stock_input(packet)).unwrap();
-        let (readback, _) = host
-            .submit_image_use(
-                std::slice::from_ref(&output),
-                |device, _, encoder, views| {
-                    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("host-drop-panicking-map"),
-                        size: 256 * 64,
-                        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                        mapped_at_creation: false,
-                    });
-                    encoder.copy_texture_to_buffer(
-                        views[0].texture().as_image_copy(),
-                        wgpu::TexelCopyBufferInfo {
-                            buffer: &buffer,
-                            layout: wgpu::TexelCopyBufferLayout {
-                                offset: 0,
-                                bytes_per_row: Some(256),
-                                rows_per_image: Some(64),
-                            },
-                        },
-                        wgpu::Extent3d {
-                            width: 64,
-                            height: 64,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                    Ok(buffer)
-                },
-            )
-            .unwrap();
+#[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
+fn native_direct_host_drop_releases_pending_image_output() {
+    let (host, weak_output, readback, prefix) = host_with_pending_image_readback(|_| {});
+    let budget = Arc::clone(&host.output_budget);
+    assert!(budget.retained() > 0);
+    drop((readback, prefix));
+    drop(host);
+    assert!(
+        weak_output.upgrade().is_none(),
+        "ordinary Host teardown must release the retained image output"
+    );
+    assert_eq!(budget.retained(), 0);
+}
+
+#[test]
+#[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
+fn native_host_retirement_recovers_after_a_readback_callback_panics() {
+    struct ReadbackCallbackPanic;
+
+    let (mut host, weak_output, readback, prefix) = host_with_pending_image_readback(|readback| {
         readback.map_async(wgpu::MapMode::Read, .., |result| {
-            result.unwrap();
-            eprintln!("CHILD_NATIVE_CALLBACK_PANIC");
-            panic!("injected callback panic during Host Drop");
+            if result.is_ok() {
+                panic::panic_any(ReadbackCallbackPanic);
+            }
         });
-        eprintln!("CHILD_HOST_READY");
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(host)));
-        eprintln!("DROP_RELEASED_INCOMPLETE_OWNER");
-        std::process::exit(91);
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let interrupted = loop {
+        match panic::catch_unwind(AssertUnwindSafe(|| host.poll_retirement())) {
+            Ok(Ok(false)) if Instant::now() < deadline => std::thread::yield_now(),
+            result => break result,
+        }
+    };
+    readback.unmap();
+    match interrupted {
+        Err(payload) if payload.is::<ReadbackCallbackPanic>() => {}
+        Err(payload) => panic::resume_unwind(payload),
+        Ok(result) => panic!("readback callback did not interrupt retirement: {result:?}"),
     }
-    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
-    command.args(["--exact", "host::tests::native_direct_host_drop_callback_panic_cannot_release_incomplete_dependencies", "--ignored", "--nocapture"])
-        .env(CHILD, "1");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
+    assert!(prefix.callback_abandoned());
+    assert!(!prefix.is_complete());
+    assert!(weak_output.upgrade().is_some());
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !host.poll_retirement().unwrap() {
+        assert!(Instant::now() < deadline, "Host retirement did not settle");
+        std::thread::yield_now();
     }
-    let result = command.output().unwrap();
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    assert!(
-        stderr.contains("CHILD_HOST_READY"),
-        "native child prerequisite failed: {stderr}"
-    );
-    assert!(
-        stderr.contains("CHILD_NATIVE_CALLBACK_PANIC"),
-        "the callback never exercised Drop: {stderr}"
-    );
-    assert!(
-        !stderr.contains("DROP_RELEASED_INCOMPLETE_OWNER"),
-        "Drop unwound and released its unresolved native owner: {stderr}"
-    );
-    assert!(!result.status.success());
-    assert_ne!(result.status.code(), Some(91));
+    assert!(prefix.is_complete());
+    assert_eq!(host.abandoned_submission_count(), 1);
+    assert!(weak_output.upgrade().is_none());
+    assert_eq!(host.retained_resource_bytes(), 0);
 }
 
 #[test]
@@ -1257,7 +1279,9 @@ fn native_editor_ui_rejected_after_close_or_loss_retains_the_original_permit() {
         let (outcomes, mut ui) = editor_ui_submission_with_packet(
             if lost { 91 } else { 90 },
             compile_test_ui_packet(
-                nara_ui_kernel::UiVisual::solid(nara_ui_kernel::UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
+                nara_ui::kernel::UiVisual::solid(nara_ui::kernel::UiColor::rgba(
+                    1.0, 1.0, 1.0, 1.0,
+                )),
                 RenderTarget::Image(image_target(&frame).image()),
                 &crate::hud::UiPreparedImages::default(),
             ),
@@ -2526,7 +2550,7 @@ fn test_ui_packet() -> std::sync::Arc<UiPaintPacket> {
 #[cfg(feature = "hud-runtime")]
 fn test_solid_ui_packet(target: RenderTarget) -> Arc<UiPaintPacket> {
     compile_test_ui_packet(
-        nara_ui_kernel::UiVisual::solid(nara_ui_kernel::UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
+        nara_ui::kernel::UiVisual::solid(nara_ui::kernel::UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
         target,
         &crate::hud::UiPreparedImages::default(),
     )
@@ -2615,11 +2639,11 @@ pub(super) fn test_ui_image_packet(
     snapshot: crate::image::PreparedImageSnapshot,
     target: RenderTarget,
 ) -> Arc<UiPaintPacket> {
-    let image = nara_ui_kernel::UiImageId::new("project://editor-execution/captured.png").unwrap();
+    let image = nara_ui::kernel::UiImageId::new("project://editor-execution/captured.png").unwrap();
     let mut prepared = crate::hud::UiPreparedImages::default();
     prepared.insert(image.clone(), snapshot);
     compile_test_ui_packet(
-        nara_ui_kernel::UiVisual::image(image, nara_ui_kernel::UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
+        nara_ui::kernel::UiVisual::image(image, nara_ui::kernel::UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
         target,
         &prepared,
     )
@@ -2627,15 +2651,15 @@ pub(super) fn test_ui_image_packet(
 
 #[cfg(feature = "hud-runtime")]
 fn compile_test_ui_packet(
-    visual: nara_ui_kernel::UiVisual,
+    visual: nara_ui::kernel::UiVisual,
     target: RenderTarget,
     prepared: &crate::hud::UiPreparedImages,
 ) -> Arc<UiPaintPacket> {
-    use nara_text::bundled_font_face;
-    use nara_ui_kernel::{
+    use nara_ui::kernel::{
         UiAuthoringSnapshotBuilder, UiCompiler, UiEnvironment, UiLayer, UiLocalKey, UiNode, UiRoot,
         UiRootKey, UiStyle, UiSurfaceId, UiTheme,
     };
+    use nara_ui::text::bundled_font_face;
 
     let snapshot = UiAuthoringSnapshotBuilder::new(1)
         .with_root(

@@ -2,7 +2,7 @@
 
 use std::io::{Read, Seek, SeekFrom, Write};
 
-use nara_fs::{ContentDigest, FileCapability, FsError, FsOperation};
+use crate::fs::{ContentDigest, FileCapability, FsError, FsOperation};
 
 use super::{DecodeLease, RuntimeContentBase, RuntimeContentCatalog, RuntimeContentError};
 

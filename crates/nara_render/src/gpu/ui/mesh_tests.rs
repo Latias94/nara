@@ -2,12 +2,12 @@ use super::*;
 
 use std::{mem::size_of, sync::atomic::AtomicUsize};
 
-use nara_text::bundled_font_face;
-use nara_ui_kernel::{
+use nara_ui::kernel::{
     UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiLayer, UiMesh, UiMeshVertex,
     UiNode, UiPoint, UiRoot, UiRootKey, UiSafeAreaInsets, UiSize, UiStyle,
     UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId, UiTheme, UiVisual,
 };
+use nara_ui::text::bundled_font_face;
 
 use crate::gpu::{GraphLimits, WgpuProgramTextureDescriptor, WgpuRenderProgramBuilder};
 

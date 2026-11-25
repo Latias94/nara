@@ -3,10 +3,10 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+use nara_core::diagnostic::DiagnosticValueRef;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_diagnostic::DiagnosticValueRef;
+use nara_ecs::identity::{EntityLookup, WorldIdentityDomain};
 use nara_ecs::{Component, World};
-use nara_identity::{EntityLookup, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentNumericDomain, ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchema,

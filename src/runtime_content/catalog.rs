@@ -13,6 +13,7 @@ use std::{
     mem::size_of,
 };
 
+use crate::fs::{ContentDigest, RelativePath};
 use nara_asset::AssetProductRef;
 use nara_core::{
     ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, FormatVersion, ItemLimit,
@@ -20,7 +21,6 @@ use nara_core::{
     PersistentFileEnvelope, PersistentFileHeader, SerdeShapeError, SerdeShapeLimits,
     SerdeShapePreflightError, decode_persistent_file_with_preflight, preflight_serde_shape,
 };
-use nara_fs::{ContentDigest, RelativePath};
 use nara_project::RuntimeConfiguration;
 use nara_scene::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin};
 use serde::{

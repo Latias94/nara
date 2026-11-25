@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::kernel::UiSurfaceId;
 use nara_input::InputWindowId;
-use nara_ui_kernel::UiSurfaceId;
 
 use super::{UiAdapterError, surface::UiSurfaceSlot};
 

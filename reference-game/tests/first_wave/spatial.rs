@@ -1,7 +1,7 @@
 use super::*;
 use nara::{
     hierarchy::{HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter},
-    transform::{
+    scene::fixed_spatial::{
         SpatialSnapshotError, SpatialSnapshotPhase, fixed_spatial_snapshot,
         historical_spatial_snapshot,
     },
@@ -16,13 +16,14 @@ fn pursuit_stops_at_a_nonspatial_direct_parent_and_capture_reads_the_same_tick()
         .unwrap();
     let mut runtime = admit_adapter_candidate_with_edit(plan, content.scene_source(), |world| {
         let enemy = first_owned_enemy(world);
-        let grouping = world.get::<Parent>(enemy).unwrap().parent();
+        let grouping = world.get::<ChildOf>(enemy).unwrap().parent();
         world.entity_mut(grouping).remove::<Transform2d>();
         let ancestor = world
             .spawn(Transform2d {
                 translation: Vec2::new(100.0, -30.0),
                 rotation: std::f32::consts::FRAC_PI_2,
                 scale: Vec2::splat(3.0),
+                z: 0.0,
             })
             .id();
         let from = HierarchyPlacement::current(world, grouping).unwrap();
@@ -110,11 +111,11 @@ impl Plugin for SelectedCutPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(
             CoreStage::FixedUpdate,
-            consume_then_change_membership.in_set(GameplayCommandSet::Consume),
+            consume_then_change_membership.in_set(ReferenceWaveSet::Consume),
         )?
         .add_systems(
             CoreStage::FixedUpdate,
-            capture_changed_membership.in_set(GameplayCommandSet::Capture),
+            capture_changed_membership.in_set(ReferenceWaveSet::Capture),
         )?;
         Ok(())
     }

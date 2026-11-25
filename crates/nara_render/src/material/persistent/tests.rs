@@ -228,7 +228,7 @@ fn carrier_declares_material_and_every_nested_texture_reference_as_immediate() {
     );
     assert_eq!(references[1].field_id().as_str(), "texture_overrides");
     assert_eq!(registry().catalog().components.len(), 1);
-    nara_reflect::__private::resolve_schema_provider(MATERIAL_SCHEMA_PROVIDER).unwrap();
+    MATERIAL_SCHEMA_PROVIDER.resolve().unwrap();
 }
 
 #[test]
@@ -556,7 +556,7 @@ fn frozen_record_decode_preserves_parameters_references_and_exact_admission() {
     let schema = declaration("test.surface", 2)
         .binding_schema(&values())
         .unwrap();
-    let frozen = nara_reflect::__private::freeze_component_defaults(
+    let frozen = nara_reflect::effective::freeze_component_defaults(
         &schema,
         &source,
         &BTreeMap::new(),

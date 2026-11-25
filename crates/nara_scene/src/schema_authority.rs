@@ -183,7 +183,7 @@ impl<'a> SchemaAuthority<'a> {
                         .validate_whole_value_capabilities(component, [ComponentCapability::Scene])
                         .map_err(|_| SceneCompilationFailureKind::Component)?;
                 } else {
-                    nara_reflect::__private::validate_schema_capabilities(
+                    nara_reflect::registry::validate_schema_capabilities(
                         schema,
                         [ComponentCapability::Scene],
                     )
@@ -192,7 +192,7 @@ impl<'a> SchemaAuthority<'a> {
             }
             #[cfg(feature = "serde")]
             Self::Authoring(_) => {
-                nara_reflect::__private::validate_schema_capabilities(
+                nara_reflect::registry::validate_schema_capabilities(
                     schema,
                     [ComponentCapability::Scene],
                 )

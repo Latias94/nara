@@ -1,4 +1,5 @@
 use nara::prelude::{App, ComponentTypeId, HeadlessRuntimePlugins};
+use nara::scene::fixed_spatial::FixedSpatialPlugin;
 use nara_reference_game::{
     ReferenceWavePlugin, WaveOutcome, WaveSnapshot, reference_game_contribution,
 };
@@ -9,6 +10,7 @@ fn rust_code_first_plugins_publish_the_complete_game_schema() {
     app.add_plugins((
         HeadlessRuntimePlugins,
         nara::advanced_prelude::StartupSceneActivationPlugin,
+        FixedSpatialPlugin,
         nara::ProductRecipe::new()
             .add_contribution(reference_game_contribution().unwrap())
             .unwrap(),

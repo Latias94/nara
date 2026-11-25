@@ -1,6 +1,6 @@
 use std::{fmt, mem::size_of, sync::Arc};
 
-use nara_reflect::{__private::FrozenComponentDefaults, ComponentValue, ComponentValueRef};
+use nara_reflect::{ComponentValue, ComponentValueRef, effective::FrozenComponentDefaults};
 
 use crate::component_payload::ComponentPayload;
 

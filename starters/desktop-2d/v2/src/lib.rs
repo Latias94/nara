@@ -32,8 +32,7 @@ pub fn desktop_product_recipe() -> Result<nara::ProductRecipe, nara::ProductReci
     let recipe = product_recipe()?;
     #[cfg(all(windows, feature = "desktop"))]
     let recipe = recipe.add_configured_plugin((), |_| {
-        use nara::input::{InputSeatId, InputWindowId};
-        use nara_gilrs::{GamepadRoute, GilrsInputPlugin};
+        use nara::input::{GamepadRoute, GilrsInputPlugin, InputSeatId, InputWindowId};
 
         GilrsInputPlugin::new(Some(GamepadRoute::new(
             InputWindowId::new(nara::window::WindowId::PRIMARY.get()),

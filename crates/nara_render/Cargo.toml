@@ -15,16 +15,12 @@ naga = { workspace = true, optional = true }
 nara_app = { workspace = true, optional = true }
 nara_asset.workspace = true
 nara_core.workspace = true
-nara_diagnostic = { workspace = true, optional = true }
 nara_ecs = { workspace = true, optional = true }
-nara_fs = { workspace = true, optional = true }
-nara_hierarchy = { workspace = true, optional = true }
+nara_input = { workspace = true, optional = true }
 nara_material_derive = { workspace = true, optional = true }
 nara_reflect = { workspace = true, optional = true }
-nara_tasks = { workspace = true, optional = true }
-nara_text = { workspace = true, optional = true }
-nara_transform = { workspace = true, optional = true }
-nara_ui_kernel = { workspace = true, optional = true }
+nara_scene = { workspace = true, optional = true }
+nara_ui = { workspace = true, optional = true, default-features = false }
 nara_window.workspace = true
 png = { version = "=0.18.1", optional = true }
 pollster = { workspace = true, optional = true }
@@ -37,7 +33,7 @@ wgpu = { workspace = true, optional = true }
 [dev-dependencies]
 image.workspace = true
 nara_input.workspace = true
-nara_tasks.workspace = true
+nara_app = { workspace = true, features = ["diagnostics", "tasks"] }
 raw-window-handle.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
@@ -50,9 +46,8 @@ default = []
 runtime = [
     "dep:nara_app",
     "dep:nara_ecs",
-    "dep:nara_hierarchy",
     "dep:nara_reflect",
-    "dep:nara_transform",
+    "dep:nara_scene",
     "nara_asset/runtime",
     "nara_window/runtime",
 ]
@@ -62,11 +57,10 @@ serde = [
     "dep:serde_json",
     "nara_asset/serde",
     "nara_core/serde",
-    "nara_diagnostic?/serde",
     "nara_window/serde",
 ]
-image = ["dep:nara_diagnostic"]
-image-runtime = ["image", "runtime", "dep:nara_fs", "dep:nara_tasks", "dep:png", "nara_diagnostic/runtime"]
+image = []
+image-runtime = ["image", "runtime", "nara_core/fs-capabilities", "nara_app/tasks", "dep:png"]
 render-prepare = ["image"]
 material = ["image", "dep:encase", "dep:glam", "dep:naga", "dep:nara_ecs", "dep:nara_material_derive"]
 material-asset = ["material", "serde"]
@@ -75,8 +69,9 @@ sprites = ["runtime", "image", "material"]
 tiles = ["runtime", "image", "material"]
 animation = ["sprites", "serde"]
 sprite-render = ["sprites", "tiles", "persistent", "image-runtime", "render-prepare"]
-hud = ["render-prepare", "dep:guillotiere", "dep:nara_text", "dep:nara_ui_kernel"]
+hud = ["render-prepare", "dep:guillotiere", "dep:nara_ui"]
 hud-runtime = ["hud", "runtime", "image-runtime"]
+hud-presentation = ["hud-runtime", "dep:nara_input", "nara_ui/runtime"]
 wgpu = ["runtime", "material", "dep:bytemuck", "dep:pollster", "dep:wgpu"]
 
 [[test]]

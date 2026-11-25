@@ -26,8 +26,8 @@ use nara::{
         COMPONENT_REGISTRY_PLUGIN_ID, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
         ComponentSchemaProviderDefinition,
     },
+    scene::TRANSFORM_COMPONENTS_PLUGIN_ID,
     sprite::{SPRITE_PLUGIN_ID, Sprite},
-    transform::TRANSFORM_PLUGIN_ID,
 };
 
 const PLUGIN_ID: PluginId = PluginId::new("push-box.gameplay");
@@ -46,7 +46,7 @@ const DECLARATION: PluginDeclaration = PluginDeclaration::new(PLUGIN_ID, PluginC
         INPUT_PLUGIN_ID,
         STARTUP_SCENE_ACTIVATION_PLUGIN_ID,
         SPRITE_PLUGIN_ID,
-        TRANSFORM_PLUGIN_ID,
+        TRANSFORM_COMPONENTS_PLUGIN_ID,
     ])
     .provides_schema(&[PROVIDER_ID]);
 

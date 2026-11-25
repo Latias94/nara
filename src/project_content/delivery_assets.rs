@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, btree_map::Entry};
 
+use crate::fs::{ContentDigest, DirectoryCapability};
 use nara_asset::{
     AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetPathScope, AssetProductRef,
     AssetRef, AssetSourceKind, AssetSourcePath, ImportedProductId, ProjectAssetDatabase,
     StableAssetId,
 };
-use nara_fs::{ContentDigest, DirectoryCapability};
 use nara_project::ProjectPath;
 use nara_render::material::{Material2dAsset, Material2dDomain};
 use nara_render::tilemap::TileSetSource;

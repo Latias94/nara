@@ -6,7 +6,7 @@ use nara_reflect::{
     ComponentPropertyPath, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
 };
 
-pub use nara_identity::{PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop};
+pub use nara_ecs::identity::{PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop};
 
 use crate::{
     PrefabInstance, SceneCompilationFailureKind, SceneComponentRecord, SceneEntityId,

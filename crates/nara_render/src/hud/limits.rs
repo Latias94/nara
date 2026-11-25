@@ -25,7 +25,7 @@ const DEFAULT_MAX_UNIFORM_CORNER_RADIUS: f32 = 4_096.0;
 /// clipping or allocation, including repeated references to the same immutable source mesh.
 ///
 /// The retained-packet budget covers planner-owned primitives and immutable image/glyph/mesh payloads.
-/// It deliberately does not count the shared [`nara_ui_kernel::UiFrame`] allocation a second time;
+/// It deliberately does not count the shared [`nara_ui::kernel::UiFrame`] allocation a second time;
 /// candidate nodes, shaped glyphs, and logical paint are admitted by the kernel's own budgets.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UiPresentationLimits {

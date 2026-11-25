@@ -53,7 +53,7 @@ fn all_declared_textures_are_captured_in_binding_order_and_missing_draws_are_ski
     let world = app.world_mut().unwrap();
     world.insert_resource(images);
     world.insert_resource(states);
-    let camera = spawn_camera(world);
+    spawn_camera(world);
     let stock = world
         .spawn((
             Sprite::from_color(Vec2::ONE, Color::WHITE),
@@ -70,15 +70,12 @@ fn all_declared_textures_are_captured_in_binding_order_and_missing_draws_are_ski
     let mut tilemap = Tilemap::new(Vec2::ONE);
     tilemap.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(0)));
     tilemap.set_cell(TileCoord::new(1, 0), TileCell::new(TileIndex::new(1)));
-    let unavailable = world
-        .spawn((
-            Sprite::from_color(Vec2::ONE, Color::WHITE),
-            Transform2d::default(),
-            tilemap,
-            missing_binding,
-        ))
-        .id();
-    place_roots(world, &[camera, stock, custom, unavailable]);
+    world.spawn((
+        Sprite::from_color(Vec2::ONE, Color::WHITE),
+        Transform2d::default(),
+        tilemap,
+        missing_binding,
+    ));
     app.add_systems(
         CoreStage::Queue,
         (|world: &mut World| {
@@ -197,20 +194,16 @@ fn offscreen_multitexture_extraction_preserves_diagnostics_with_two_or_zero_view
     world.insert_resource(states);
     let cameras = [spawn_camera(world), spawn_camera(world)];
     let offscreen = Transform2d::from_translation(Vec2::splat(10_000.0));
-    let later_missing = world
-        .spawn((
-            Sprite::from_color(Vec2::ONE, Color::WHITE),
-            offscreen,
-            missing_binding,
-        ))
-        .id();
-    let both_missing = world
-        .spawn((
-            Sprite::from_color(Vec2::ONE, Color::WHITE),
-            offscreen,
-            both_missing_binding,
-        ))
-        .id();
+    world.spawn((
+        Sprite::from_color(Vec2::ONE, Color::WHITE),
+        offscreen,
+        missing_binding,
+    ));
+    world.spawn((
+        Sprite::from_color(Vec2::ONE, Color::WHITE),
+        offscreen,
+        both_missing_binding,
+    ));
     let base_missing = world
         .spawn((
             Sprite::from_texture(missing, Vec2::ONE),
@@ -233,18 +226,6 @@ fn offscreen_multitexture_extraction_preserves_diagnostics_with_two_or_zero_view
             binding.clone(),
         ))
         .id();
-    place_roots(
-        world,
-        &[
-            cameras[0],
-            cameras[1],
-            later_missing,
-            both_missing,
-            base_missing,
-            invalid_uv,
-            visible,
-        ],
-    );
     app.add_systems(CoreStage::Update, move |world: &mut World| {
         if world.resource::<nara_app::RealTime>().frame == 2 {
             for camera in cameras {

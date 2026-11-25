@@ -5,9 +5,16 @@ fn manifest_and_production_sources_use_only_the_public_root_package() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = fs::read_to_string(root.join("Cargo.toml")).unwrap();
     assert!(!manifest.contains("workspace = true"));
-    assert!(!manifest.contains("[patch"));
     assert!(!manifest.contains("[build-dependencies]"));
     assert!(root.join("Cargo.lock").is_file());
+    let runtime_dependencies: Vec<_> = manifest
+        .lines()
+        .skip_while(|line| *line != "[dependencies]")
+        .skip(1)
+        .take_while(|line| !line.starts_with('['))
+        .filter_map(|line| line.split_once('=').map(|(name, _)| name.trim()))
+        .collect();
+    assert_eq!(runtime_dependencies, ["nara"]);
 
     let mut sources = String::new();
     collect_rs(&root.join("src"), &mut sources);
@@ -26,10 +33,11 @@ fn headless_cli_accepts_only_bundled_input_and_a_bounded_tick_option() {
     let source = fs::read_to_string(root.join("src/bin/headless.rs")).unwrap();
 
     for required in [
-        "bundled_wave_product_run_with_completed_tick_observer",
+        "bundled_wave_recipe",
+        "load_project_app",
+        ".step_fixed(",
         "--max-ticks",
         "MAXIMUM_CLI_TICKS",
-        "HeadlessRunOutcome",
     ] {
         assert!(
             source.contains(required),

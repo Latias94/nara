@@ -21,7 +21,7 @@ fn install_guards(app: &mut App, calls: &Arc<Mutex<Vec<PluginId>>>, invalid: &Ar
     for (index, plugin) in GUARDS.into_iter().enumerate() {
         let calls = Arc::clone(calls);
         let invalid = Arc::clone(invalid);
-        app.__install_runtime_authority_validator(
+        app.register_runtime_validator(
             plugin,
             Arc::new(move |_, _| {
                 calls.lock().unwrap().push(plugin);
@@ -69,7 +69,7 @@ fn duplicate_domain_guard_ids_are_rejected_without_replacing_the_first_guard() {
     install_guards(&mut app, &calls, &invalid);
 
     let error = app
-        .__install_runtime_authority_validator(
+        .register_runtime_validator(
             GUARDS[0],
             Arc::new(|_, _| {
                 Err(RuntimeFault::engine(

@@ -4,7 +4,7 @@ use crate::material::Material2dBinding;
 use crate::tilemap::{TileSetAssets, TileSetDescriptor, TileSetPublicationInput};
 use nara_app::{FixedTime, FixedUpdateSet, RealTime};
 use nara_asset::{AssetProductRef, AssetServer, ImportedProductId};
-use nara_ecs::{Query, With};
+use nara_ecs::{Query, Resource, With};
 
 fn capture_frames(runtime: &mut RuntimeInstance, count: usize) -> Vec<ExtractedSprites> {
     (0..count)
@@ -38,17 +38,11 @@ fn unchanged_frames_preserve_exact_tile_geometry_and_current_source_order() {
     let entity = world
         .spawn((map, Transform2d::from_translation(Vec2::new(10.0, -6.0))))
         .id();
-    place_roots(world, &[entity, prefix]);
+    let parent = world.spawn_empty().add_children(&[entity, prefix]).id();
     app.add_systems(CoreStage::Update, move |world: &mut World| {
         match world.resource::<RealTime>().frame {
             4 => {
-                HierarchyWriter::new(world)
-                    .move_entity(
-                        prefix,
-                        HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-                        HierarchyPlacement::first(HierarchyPlacementOwner::Root),
-                    )
-                    .unwrap();
+                world.entity_mut(parent).replace_children(&[prefix, entity]);
             }
             7 => {
                 let front = world
@@ -57,12 +51,7 @@ fn unchanged_frames_preserve_exact_tile_geometry_and_current_source_order() {
                         Transform2d::default(),
                     ))
                     .id();
-                HierarchyWriter::new(world)
-                    .place(
-                        front,
-                        HierarchyPlacement::first(HierarchyPlacementOwner::Root),
-                    )
-                    .unwrap();
+                world.entity_mut(parent).insert_child(0, front);
             }
             _ => {}
         }
@@ -90,6 +79,7 @@ fn unchanged_frames_preserve_exact_tile_geometry_and_current_source_order() {
             world_y_axis: Vec2::new(0.0, 2.0),
             color: Color::rgb(1.0, 0.0, 0.0),
             layer: 3,
+            world_z: 0.0,
             sort_key: -2,
             world_sort_y: -2.0,
         },
@@ -109,6 +99,7 @@ fn unchanged_frames_preserve_exact_tile_geometry_and_current_source_order() {
             world_y_axis: Vec2::new(0.0, 2.0),
             color: Color::WHITE,
             layer: 3,
+            world_z: 0.0,
             sort_key: -2,
             world_sort_y: -10.0,
         },
@@ -137,7 +128,6 @@ fn cell_edits_survive_cleared_dirty_hints_and_retained_extractions() {
     map.clear_dirty_chunks();
     let world = app.world_mut().unwrap();
     let entity = world.spawn((map, Transform2d::default())).id();
-    place_roots(world, &[entity]);
     app.add_systems(CoreStage::Update, move |world: &mut World| {
         let frame = world.resource::<RealTime>().frame;
         if !matches!(frame, 4 | 7 | 10) {
@@ -243,7 +233,6 @@ fn cloned_maps_with_coincident_dirty_revisions_preserve_distinct_cell_values() {
     let mut app = sprite_app();
     let world = app.world_mut().unwrap();
     let entity = world.spawn((first, Transform2d::default())).id();
-    place_roots(world, &[entity]);
     app.add_systems(CoreStage::Update, move |world: &mut World| {
         if world.resource::<RealTime>().frame == 4 {
             world.entity_mut(entity).insert(replacement.take().unwrap());
@@ -461,7 +450,6 @@ fn tileset_mutations_aba_and_foreign_stores_refresh_current_inputs() {
         TileCell::new(TileIndex::new(5)).with_color(Color::rgba(0.5, 0.25, 1.0, 0.5)),
     );
     let entity = world.spawn((map, Transform2d::default())).id();
-    place_roots(world, &[entity]);
     app.add_systems(CoreStage::Update, move |world: &mut World| {
         match world.resource::<RealTime>().frame {
             4 => {
@@ -627,7 +615,6 @@ fn removing_readding_and_reusing_entity_slots_preserves_current_tiles() {
     replacement.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(9)));
     let world = app.world_mut().unwrap();
     let entity = world.spawn((map, Transform2d::default())).id();
-    place_roots(world, &[entity]);
     app.add_systems(CoreStage::Update, move |world: &mut World| {
         match world.resource::<RealTime>().frame {
             4 => {
@@ -637,12 +624,6 @@ fn removing_readding_and_reusing_entity_slots_preserves_current_tiles() {
                 world.entity_mut(entity).insert(replacement.clone());
             }
             10 => {
-                HierarchyWriter::new(world)
-                    .remove(
-                        entity,
-                        HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-                    )
-                    .unwrap();
                 let next = world.despawn_no_free(entity).unwrap();
                 world.insert_resource(ReplacementEntity(next));
             }
@@ -654,7 +635,6 @@ fn removing_readding_and_reusing_entity_slots_preserves_current_tiles() {
                     .spawn_at(successor, (map, Transform2d::default()))
                     .unwrap()
                     .id();
-                place_roots(world, &[new_entity]);
                 world.insert_resource(ReplacementEntity(new_entity));
             }
             _ => {}
@@ -700,10 +680,8 @@ fn removing_readding_and_reusing_entity_slots_preserves_current_tiles() {
 }
 
 #[test]
-fn presentation_interpolation_updates_tiles_without_new_simulation_writes() {
+fn tile_geometry_uses_the_latest_fixed_transform_and_stays_stable_between_ticks() {
     let mut app = sprite_app();
-    app.insert_resource(nara_transform::FixedTransformInterpolation)
-        .unwrap();
     app.add_systems(
         CoreStage::FixedUpdate,
         (|mut transforms: Query<&mut Transform2d, With<Tilemap>>| {
@@ -718,12 +696,12 @@ fn presentation_interpolation_updates_tiles_without_new_simulation_writes() {
     map.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(1)));
     let world = app.world_mut().unwrap();
     let entity = world.spawn((map, Transform2d::default())).id();
-    place_roots(world, &[entity]);
 
     let mut runtime = RuntimeInstance::start(app).unwrap();
     let unchanged = capture_frames(&mut runtime, 3);
     let step = FixedTime::DEFAULT_TIMESTEP;
     runtime.drive(step).unwrap();
+    let completed = runtime.world().resource::<ExtractedSprites>().clone();
     let mut presented = Vec::new();
     for _ in 0..3 {
         runtime.drive(step / 4).unwrap();
@@ -737,17 +715,15 @@ fn presentation_interpolation_updates_tiles_without_new_simulation_writes() {
     runtime.finish().unwrap();
 
     assert!(unchanged.iter().all(|frame| frame == &unchanged[0]));
-    for ((frame, simulation, tick), x) in presented.iter().zip([3.0, 5.0, 7.0]) {
+    assert_eq!(unchanged[0].as_slice()[0].world_center, Vec2::new(1.0, 2.0));
+    for (frame, simulation, tick) in &presented {
         assert_eq!(*tick, 1);
         assert_eq!(simulation.translation, Vec2::new(8.0, 0.0));
+        assert_eq!(frame, &completed);
         assert_eq!(frame.len(), 1);
         let extracted = &frame.as_slice()[0];
         assert_eq!(extracted.entity, entity);
-        assert!(
-            extracted
-                .world_center
-                .abs_diff_eq(Vec2::new(x, 2.0), 0.000_01)
-        );
+        assert_eq!(extracted.world_center, Vec2::new(9.0, 2.0));
         assert_eq!(extracted.world_x_axis, Vec2::X);
         assert_eq!(extracted.world_y_axis, Vec2::new(0.0, 2.0));
     }
@@ -792,7 +768,6 @@ fn equal_material_bindings_retain_the_current_owner_and_outlive_retirement() {
     map.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(1)));
     let world = app.world_mut().unwrap();
     let entity = world.spawn((map, first, Transform2d::default())).id();
-    place_roots(world, &[entity]);
     app.add_systems(CoreStage::Update, move |world: &mut World| {
         match world.resource::<RealTime>().frame {
             4 => {

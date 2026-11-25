@@ -698,9 +698,11 @@ fn oversized_product_identity_text_is_refused_before_copy_or_parser_allocation()
 
 #[test]
 fn product_validation_and_entity_planning_admit_the_same_closed_leaf_before_parsing() {
-    use crate::__private::{
-        ComponentValueAdmissionError, EntityReferencePlanError,
-        plan_declared_entity_references_with_admission, validate_component_value_with_admission,
+    use crate::{
+        entity_reference::{
+            EntityReferencePlanError, plan_declared_entity_references_with_admission,
+        },
+        registry::{ComponentValueAdmissionError, validate_component_value_with_admission},
     };
 
     let schema = ComponentSchema::new(

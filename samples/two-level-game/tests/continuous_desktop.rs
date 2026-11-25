@@ -271,12 +271,12 @@ fn production_continuous_desktop_adopts_real_body_and_structure_edits() {
         );
     }));
     if let Err(cleanup) = cleanup {
-        let root = fixture.root.clone();
-        std::mem::forget((host, fixture));
         eprintln!(
-            "continuous desktop retains original cleanup owners and source/work copies at {}",
-            root.display(),
+            "continuous desktop: explicit cleanup failed for {}",
+            fixture.root.display(),
         );
+        drop(host);
+        drop(input);
         resume_unwind(cleanup);
     }
     drop(host);

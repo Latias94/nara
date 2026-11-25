@@ -10,15 +10,15 @@ use nara_asset::{
     AssetSourcePath, AssetStates, Assets, ImportDependencyDigest, ImportRecipe, ImportedProductId,
     ImporterId, ImporterVersion, SourceHash, StableAssetId,
 };
-use nara_text::{
-    FontFace, TextEditor, TextEngine, TextLayoutRequest, TextPaintSnapshot, bundled_font_face,
-};
-use nara_ui_kernel::{
+use nara_ui::kernel::{
     UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii, UiEdges,
     UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiOverflow, UiPaintPrimitive, UiPoint,
     UiPreparedText, UiRect, UiRoot, UiRootKey, UiSafeAreaInsets, UiSize, UiStyle,
     UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId, UiText, UiTextOverflow, UiTheme,
     UiThemePalette, UiVisual,
+};
+use nara_ui::text::{
+    FontFace, TextEditor, TextEngine, TextLayoutRequest, TextPaintSnapshot, bundled_font_face,
 };
 use nara_window::WindowId;
 
@@ -29,7 +29,7 @@ use crate::hud::{
 
 mod mesh;
 
-fn frame(surface: u64, revision: u64, nodes: Vec<UiNode>) -> Arc<nara_ui_kernel::UiFrame> {
+fn frame(surface: u64, revision: u64, nodes: Vec<UiNode>) -> Arc<nara_ui::kernel::UiFrame> {
     let environment = UiEnvironment::new(
         UiSurfaceId::new(surface).unwrap(),
         320.0,
@@ -48,7 +48,7 @@ fn frame_with_environment(
     revision: u64,
     nodes: Vec<UiNode>,
     environment: UiEnvironment,
-) -> Arc<nara_ui_kernel::UiFrame> {
+) -> Arc<nara_ui::kernel::UiFrame> {
     frame_with_font(revision, nodes, environment, bundled_font_face().unwrap())
 }
 
@@ -57,7 +57,7 @@ fn frame_with_font(
     nodes: Vec<UiNode>,
     environment: UiEnvironment,
     font: FontFace,
-) -> Arc<nara_ui_kernel::UiFrame> {
+) -> Arc<nara_ui::kernel::UiFrame> {
     let snapshot = UiAuthoringSnapshotBuilder::new(revision)
         .with_root(
             UiRoot::new(
@@ -142,7 +142,7 @@ fn captured_image_snapshot() -> PreparedImageSnapshot {
 #[test]
 fn custom_font_shapes_and_plans_nonblank_glyphs() {
     let font = FontFace::from_bytes(
-        include_bytes!("../../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+        include_bytes!("../../../nara_ui/tests/text/fixtures/FiraMono-Medium.ttf").to_vec(),
         0,
     )
     .unwrap();
@@ -182,7 +182,7 @@ fn custom_font_shapes_and_plans_nonblank_glyphs() {
 fn finite_fallback_fonts_keep_exact_glyph_masks_in_the_owned_atlas() {
     let primary = bundled_font_face().unwrap();
     let fallback = FontFace::from_bytes(
-        include_bytes!("../../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+        include_bytes!("../../../nara_ui/tests/text/fixtures/FiraMono-Medium.ttf").to_vec(),
         0,
     )
     .unwrap();
@@ -288,7 +288,7 @@ fn finite_fallback_fonts_keep_exact_glyph_masks_in_the_owned_atlas() {
 #[test]
 fn foreign_font_is_rejected_before_atlas_mutation_and_last_good_replay_survives() {
     let custom = FontFace::from_bytes(
-        include_bytes!("../../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+        include_bytes!("../../../nara_ui/tests/text/fixtures/FiraMono-Medium.ttf").to_vec(),
         0,
     )
     .unwrap();
@@ -468,7 +468,7 @@ fn padded_text_packet_preserves_nested_clip_at_fractional_scale() {
             .with_child(child);
     let candidate = frame_with_environment(1, vec![parent], environment);
     assert!(candidate.diagnostics().is_empty());
-    let content_clip = nara_ui_kernel::UiRect::from_origin_size(70.0, 15.0, 20.0, 45.0).unwrap();
+    let content_clip = nara_ui::kernel::UiRect::from_origin_size(70.0, 15.0, 20.0, 45.0).unwrap();
     let expected_clip = environment.physical_rect(content_clip).unwrap();
     let packet = UiPresentationPlanner::default()
         .plan(
@@ -591,7 +591,7 @@ fn visible_glyph_ink_survives_a_baseline_outside_the_surface() {
         assert!(baseline.y() >= authored_height);
         assert!(transform.authored_to_physical(baseline).is_none());
         let physical_origin = transform.physical_content_origin();
-        let placement_at = |rect: UiRect, glyph: &nara_text::PositionedGlyph| {
+        let placement_at = |rect: UiRect, glyph: &nara_ui::text::PositionedGlyph| {
             glyph
                 .physical_placement(
                     [rect.origin().x(), rect.origin().y()],
@@ -829,7 +829,7 @@ fn automatic_image_capture_never_interprets_named_ids_or_other_provider_tokens()
     struct OtherImageProvider;
     let snapshot = captured_image_snapshot();
     let token = snapshot.identity().key().asset_id().raw();
-    let external = UiImageId::external::<ImageAsset>(token);
+    let external = UiImageId::external::<nara_asset::image::ImageAsset>(token);
     let names = [
         UiImageId::new("ui/planner.png").unwrap(),
         UiImageId::new("product:d7961f69-0e25-41d5-8893-0ef85ab19615/primary").unwrap(),
@@ -1702,7 +1702,7 @@ fn excluded_window_glyphs_never_consume_resource_keys_and_retained_packet_pixels
         vec![editing_window_node(&snapshot, clip, false)],
         environment,
     );
-    let keys = |frame: &nara_ui_kernel::UiFrame| {
+    let keys = |frame: &nara_ui::kernel::UiFrame| {
         frame
             .paint()
             .iter()

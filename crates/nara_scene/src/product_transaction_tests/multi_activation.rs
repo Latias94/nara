@@ -1,8 +1,8 @@
 use super::*;
+use crate::hierarchy::Children;
 use nara_asset::AssetRef;
 use nara_core::ByteLimit;
-use nara_hierarchy::Children;
-use nara_identity::EntityReference;
+use nara_ecs::identity::EntityReference;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentSchema, ComponentTypeId, ComponentValueKind,
@@ -237,20 +237,15 @@ fn complete_markers_and_runtime_entity_retire_in_one_original_product_replacemen
         let child_entity = fixture.entity(index, &child);
         let link = &fixture.base.world.get::<MarkerLink>(root_entity).unwrap().0;
         assert_eq!(
-            fixture
-                .base
-                .world
-                .get::<Children>(root_entity)
-                .unwrap()
-                .as_slice(),
+            &fixture.base.world.get::<Children>(root_entity).unwrap()[..],
             &[child_entity]
         );
         assert_eq!(
             fixture
                 .base
                 .world
-                .get::<Parent>(child_entity)
-                .map(Parent::parent),
+                .get::<ChildOf>(child_entity)
+                .map(ChildOf::parent),
             Some(root_entity)
         );
         assert_eq!(
@@ -567,7 +562,7 @@ fn staged_replacement_promotes_surviving_children_added_after_staging() {
         .unwrap_or_else(|(_, report)| panic!("{:?}", report.diagnostics));
     assert_eq!(report.retired_entities(), 2);
     assert!(!fixture.base.world.entities().contains(retired));
-    assert!(fixture.base.world.get::<Parent>(survivor).is_none());
+    assert!(fixture.base.world.get::<ChildOf>(survivor).is_none());
     let replacement = spawned_entity(&fixture.base.world, &report, &fixture.base.target);
     let first = fixture.entity(0, &scene_id("marker"));
     let second = fixture.entity(1, &scene_id("marker"));
@@ -657,7 +652,7 @@ fn retained_multi_activation_replacement_rejects_resource_aba_without_retirement
     fixture.base.assert_unchanged(&original_entities, stats);
     for index in 0..2 {
         let child = fixture.entity(index, &fixture.child());
-        assert!(fixture.base.world.get::<Parent>(child).is_some());
+        assert!(fixture.base.world.get::<ChildOf>(child).is_some());
     }
 }
 

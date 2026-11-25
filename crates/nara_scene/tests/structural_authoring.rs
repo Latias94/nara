@@ -4,7 +4,7 @@
 mod prefab_source;
 
 use nara_asset::AssetRef;
-use nara_identity::AuthoredEntityReference;
+use nara_ecs::identity::AuthoredEntityReference;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
@@ -12,13 +12,13 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringSchemaBasis,
-    PrefabAuthoringSession, PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument,
-    PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance, PrefabOverlay,
-    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePatchReport, ScenePlacement, ScenePlacementParent,
-    SchemaReclassificationKind, SchemaReclassificationWork,
+    AuthoringDocumentSource, AuthoringSchemaBasis, PrefabAuthoringSession, PrefabComponentIntent,
+    PrefabComponentSetMode, PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget,
+    PrefabInstance, PrefabOverlay, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement,
+    ScenePlacementParent, SchemaReclassificationKind, SchemaReclassificationWork,
+    authoring::AuthoringAdapterReceipt,
 };
 
 fn id(value: &str) -> SceneEntityId {

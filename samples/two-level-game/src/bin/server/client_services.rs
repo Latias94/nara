@@ -1,7 +1,6 @@
 use nara::{
     asset::Assets,
     ecs::World,
-    gameplay::ActionCommandMap,
     image::ImageAsset,
     input::{
         ActionMaps, ActionOutcomes, ButtonInput, InputTimeline, KeyCode, MouseButton, PointerState,
@@ -24,7 +23,6 @@ pub(super) fn verify_absent(world: &World) -> Result<(), &'static str> {
         || world.contains_resource::<PointerState>()
         || world.contains_resource::<ButtonInput<KeyCode>>()
         || world.contains_resource::<ButtonInput<MouseButton>>()
-        || world.contains_resource::<ActionCommandMap>()
         || world.contains_resource::<WindowEvents>()
         || world.contains_resource::<PrimaryWindowId>()
         || world.contains_resource::<BackendWindowHandles>()

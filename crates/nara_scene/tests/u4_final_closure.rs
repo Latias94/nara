@@ -9,7 +9,7 @@ use nara_asset::{
 };
 use nara_core::ItemLimit;
 use nara_ecs::Component;
-use nara_identity::EntityReference;
+use nara_ecs::identity::EntityReference;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
@@ -534,8 +534,8 @@ fn published_data_authoring_closes_known_local_edges_and_preserves_unknown_recor
         PersistentComponentSchemaOwnerId,
     };
     use nara_scene::{
-        __private::AuthoringAdapterReceipt, AuthoringDocumentSource, PrefabDocumentCandidate,
-        SceneDocumentCandidate,
+        AuthoringDocumentSource, PrefabDocumentCandidate, SceneDocumentCandidate,
+        authoring::AuthoringAdapterReceipt,
     };
     use std::collections::BTreeSet;
     let owner = PersistentComponentSchemaOwnerId::try_new("nara.test.final-references").unwrap();
@@ -671,8 +671,8 @@ fn prefab_anchor_does_not_bypass_direct_source_reference_closure() {
         PersistentComponentSchemaOwnerId,
     };
     use nara_scene::{
-        __private::AuthoringAdapterReceipt, AuthoringDocumentSource, InMemoryPrefabSourceResolver,
-        PrefabInstance, SceneDocumentCandidate,
+        AuthoringDocumentSource, InMemoryPrefabSourceResolver, PrefabInstance,
+        SceneDocumentCandidate, authoring::AuthoringAdapterReceipt,
     };
     use std::collections::BTreeSet;
 

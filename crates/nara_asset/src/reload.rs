@@ -1,5 +1,5 @@
 use nara_app::{App, CoreStage, Plugin, PluginError};
-use nara_diagnostic::{Diagnostic, DiagnosticReport};
+use nara_core::diagnostic::{DiagnosticReport, ReportDiagnostic as Diagnostic};
 use nara_ecs::{Resource, SystemSet, schedule::IntoScheduleConfigs};
 
 use crate::source_changes::{AssetSourceChange, AssetSourceChangeKind, AssetSourceChanges};

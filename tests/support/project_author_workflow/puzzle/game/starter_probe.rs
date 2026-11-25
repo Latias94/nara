@@ -22,7 +22,6 @@ fn main() {
         env!("CARGO_MANIFEST_DIR"),
         recipe,
         NonZeroU32::new(6).unwrap(),
-        Vec::new(),
     )
     .run()
     .unwrap();

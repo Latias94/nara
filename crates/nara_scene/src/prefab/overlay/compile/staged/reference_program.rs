@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::mem::size_of;
 
 use nara_asset::AssetRef;
-use nara_identity::AuthoredEntityReference;
-use nara_reflect::__private::{
+use nara_ecs::identity::AuthoredEntityReference;
+use nara_reflect::entity_reference::{
     DeclaredEntityReferencePlan, EntityReferencePlanError,
     admit_declared_entity_reference_plan_visit, plan_declared_entity_references_with_admission,
     plan_declared_value_entity_references_with_admission,

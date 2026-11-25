@@ -582,14 +582,13 @@ fn decoded_retained_cost_counts_inline_value_fixed_pixels_and_shared_allocation_
             expected
         );
         let shared_pixels = decoded.shared_pixels();
-        let owners_before = Arc::strong_count(&shared_pixels);
         for _ in 0..2 {
             let actual = ImageRuntimeCodec::runtime_retained_bytes(&decoded).unwrap();
             assert_eq!(actual, expected);
             assert!(actual > pixel_bytes);
             assert!(actual >= size_of::<ImageAsset>());
             assert!(actual < ImageRuntimeCodec::runtime_limits().retained_bytes().get());
-            assert_eq!(Arc::strong_count(&shared_pixels), owners_before);
+            assert_eq!(shared_pixels.as_slice().as_ptr(), decoded.pixels().as_ptr());
         }
         assert!(decoded.source().is_none());
         assert!(decoded.share_retained().is_none());
@@ -632,7 +631,7 @@ fn runtime_retained_cost_refuses_import_leases_without_releasing_or_borrowing_th
         ImageImportPixelLease::from_publication(reservation, PIXELS.len()).unwrap();
     drop(overlap);
     let mut decoded = ImageRuntimeCodec::decode_runtime(GOLDEN).unwrap();
-    assert!(decoded.try_attach_import_pixel_lease(lease));
+    assert!(decoded.try_attach_retention_owner(lease));
     let before = host.snapshot();
 
     assert_eq!(

@@ -249,8 +249,8 @@ impl Drop for Player<'_> {
             if let Err(error) = fs::write(&self.request.unresolved_cleanup, &message) {
                 eprintln!("could not preserve unresolved original cleanup marker: {error}");
             }
-            eprintln!("retaining original round Player custody: {message}");
-            std::mem::forget(self.native.take());
+            eprintln!("round Player cleanup remained incomplete: {message}");
+            drop(self.native.take());
         }
     }
 }

@@ -7,18 +7,16 @@ license.workspace = true
 
 [dependencies]
 bevy_ecs.workspace = true
-bevy_reflect.workspace = true
 blake3.workspace = true
 nara_app.workspace = true
 nara_asset = { workspace = true, features = ["runtime"] }
 nara_core.workspace = true
-nara_diagnostic = { workspace = true, features = ["runtime"] }
 nara_ecs.workspace = true
-nara_identity = { workspace = true, features = ["runtime"] }
 nara_reflect_derive.workspace = true
 ron = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+thiserror.workspace = true
 
 [dev-dependencies]
 trybuild.workspace = true
@@ -31,5 +29,5 @@ serde = [
     "dep:serde_json",
     "nara_asset/serde",
     "nara_core/serde",
-    "nara_identity/serde",
+    "nara_ecs/serde",
 ]

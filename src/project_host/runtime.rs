@@ -23,25 +23,26 @@ use super::{
 use super::{DesktopRun, DesktopRunOutcome};
 #[cfg(all(test, feature = "runtime-2d"))]
 use nara_app::RuntimeCloseCause;
+use nara_app::tasks::{TaskScopeCloseReport, TaskShutdownReport};
 use nara_app::{
-    AppExit, PluginFailureReport, PluginPlanError, RuntimeAdmissionReservation,
-    RuntimeCandidateFailure, RuntimeCandidateRetirementState, RuntimeCloseEvidence,
-    RuntimeClosePolicy, RuntimeConstructionFailure, RuntimeControl, RuntimeControlRejection,
+    AppExit, PluginFailureReport, PluginPlanError, RuntimeCandidateFailure,
+    RuntimeCandidateRetirementState, RuntimeCloseEvidence, RuntimeClosePolicy,
+    RuntimeConstructionFailure, RuntimeControl, RuntimeControlRejection,
     RuntimeControlRequestResult, RuntimeControlStatus, RuntimeControlTicket, RuntimeFault,
     RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration, RuntimeInstance,
     RuntimeObligationLedger, RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement,
     RuntimeState,
 };
-use nara_diagnostic::{Diagnostic, DiagnosticField, DiagnosticReport, PublicDiagnosticIdentifier};
+use nara_core::diagnostic::{
+    DiagnosticField, DiagnosticReport, PublicDiagnosticIdentifier, ReportDiagnostic as Diagnostic,
+};
 use nara_ecs::{Resource, World};
-use nara_gameplay::{GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandQueue, GameplayCommandSubmission};
 #[cfg(feature = "runtime-2d")]
 use nara_reflect::SchemaCompositionFingerprint;
 use nara_reflect::{component_registry, validate_component_registry_authority};
 use nara_scene::{
     SceneComponentBindings, scene_component_bindings, validate_scene_component_bindings_authority,
 };
-use nara_tasks::{TaskScopeCloseReport, TaskShutdownReport};
 
 use super::composition::RuntimeConfigurationPlan;
 use crate::runtime_content::{ProcessedSceneContent, RuntimeContentBase, RuntimeContentError};
@@ -102,12 +103,12 @@ pub(super) use action::DesktopRunInputs;
     feature = "render-wgpu"
 ))]
 pub use action::DesktopRunIntent;
-#[cfg(feature = "runtime-2d")]
-pub use action::HeadlessRunIntent;
 pub use action::{
     HeadlessRun, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport, HeadlessSession,
     HeadlessSessionClose, HeadlessSessionError,
 };
+#[cfg(feature = "runtime-2d")]
+pub use action::{HeadlessRunIntent, ProjectAppLoadError, load_project_app};
 
 struct RuntimeStartAttempt {
     owner: Arc<HostStartClaim>,
@@ -144,7 +145,6 @@ impl PreparedRuntimeStart {
 struct RuntimeStartInputs {
     content: RuntimeStartContent,
     startup_scene: SceneSource,
-    commands: Vec<GameplayCommandSubmission>,
     obligations: RuntimeObligationLedger,
     #[cfg(feature = "runtime-2d")]
     scene_preparation: Option<(
@@ -535,12 +535,11 @@ impl ProjectTaskClose {
             .plugin_plan()
             .entries()
             .iter()
-            .find(|entry| entry.plugin_id() == nara_tasks::TASK_PLUGIN_ID)?;
+            .find(|entry| entry.plugin_id() == nara_app::tasks::TASK_PLUGIN_ID)?;
         Some(
-            if tasks
-                .definition_key()
-                .is_some_and(|key| key.definition() == nara_tasks::SHARED_TASK_PLUGIN_DEFINITION_ID)
-            {
+            if tasks.definition_key().is_some_and(|key| {
+                key.definition() == nara_app::tasks::SHARED_TASK_PLUGIN_DEFINITION_ID
+            }) {
                 Self::Scope
             } else {
                 Self::Workers
@@ -553,8 +552,8 @@ impl ProjectTaskClose {
             .pending_participants()
             .iter()
             .find_map(|pending| match pending.participant() {
-                nara_tasks::TASK_POOLS_CLOSE_PARTICIPANT => Some(Self::Workers),
-                nara_tasks::TASK_SCOPE_CLOSE_PARTICIPANT => Some(Self::Scope),
+                nara_app::tasks::TASK_POOLS_CLOSE_PARTICIPANT => Some(Self::Workers),
+                nara_app::tasks::TASK_SCOPE_CLOSE_PARTICIPANT => Some(Self::Scope),
                 _ => None,
             })
     }
@@ -974,10 +973,9 @@ impl ProjectHost {
         &mut self,
         snapshot: ProjectContentSnapshot,
         plan: RuntimePlan,
-        commands: Vec<GameplayCommandSubmission>,
     ) -> Result<RuntimeStartAttempt, HostFault> {
         let startup_scene = snapshot.scene_source();
-        self.begin_start_with_scene(snapshot, plan, startup_scene, commands)
+        self.begin_start_with_scene(snapshot, plan, startup_scene)
     }
 
     #[cfg(feature = "runtime-2d")]
@@ -987,9 +985,8 @@ impl ProjectHost {
         plan: RuntimePlan,
         candidate: super::ProjectSettingsCandidate,
         loader: Arc<crate::project_content::ProjectContentLoader>,
-        commands: Vec<GameplayCommandSubmission>,
     ) -> Result<RuntimeStartAttempt, HostFault> {
-        let mut attempt = self.begin_start(snapshot, plan, commands)?;
+        let mut attempt = self.begin_start(snapshot, plan)?;
         attempt
             .inputs
             .as_mut()
@@ -1001,7 +998,6 @@ impl ProjectHost {
     fn begin_processed_start(
         &mut self,
         base: RuntimeContentBase,
-        commands: Vec<GameplayCommandSubmission>,
     ) -> Result<RuntimeStartAttempt, HostFault> {
         if !matches!(self.slot, ProjectHostSlot::Empty) || self.start_claim.any_active() {
             return Err(HostFault::new(single_error(
@@ -1039,7 +1035,6 @@ impl ProjectHost {
                 input,
             },
             startup_scene,
-            commands,
         )
     }
 
@@ -1049,7 +1044,6 @@ impl ProjectHost {
         snapshot: ProjectContentSnapshot,
         plan: RuntimePlan,
         startup_scene: SceneSource,
-        commands: Vec<GameplayCommandSubmission>,
     ) -> Result<RuntimeStartAttempt, HostFault> {
         if !matches!(self.slot, ProjectHostSlot::Empty) || self.start_claim.any_active() {
             return Err(HostFault::new(single_error(
@@ -1091,7 +1085,6 @@ impl ProjectHost {
         self.begin_start_inputs(
             RuntimeStartContent::Source { snapshot, plan },
             startup_scene,
-            commands,
         )
     }
 
@@ -1099,7 +1092,6 @@ impl ProjectHost {
         &mut self,
         content: RuntimeStartContent,
         startup_scene: SceneSource,
-        commands: Vec<GameplayCommandSubmission>,
     ) -> Result<RuntimeStartAttempt, HostFault> {
         let epoch = self.next_epoch;
         self.next_epoch = self.next_epoch.checked_add(1).ok_or_else(|| {
@@ -1122,7 +1114,6 @@ impl ProjectHost {
             inputs: Some(RuntimeStartInputs {
                 content,
                 startup_scene,
-                commands,
                 obligations: RuntimeObligationLedger::new(),
                 #[cfg(feature = "runtime-2d")]
                 scene_preparation: None,
@@ -1135,18 +1126,11 @@ impl ProjectHost {
         attempt: &mut RuntimeStartAttempt,
     ) -> Result<PreparedRuntimeStart, HostFault> {
         let epoch = attempt.epoch;
-        let reservation = RuntimeAdmissionReservation::try_acquire().map_err(|_| {
-            HostFault::new(single_error(
-                "project.run.runtime-capacity-exhausted",
-                "Managed runtime capacity is exhausted",
-            ))
-        })?;
         let inputs = attempt.take_for(self)?;
         let claim = ActiveStartClaim::new(Arc::clone(&self.start_claim), epoch);
         let RuntimeStartInputs {
             content,
             startup_scene,
-            commands,
             obligations,
             #[cfg(feature = "runtime-2d")]
             scene_preparation,
@@ -1154,11 +1138,10 @@ impl ProjectHost {
         let plan = content.plan().clone();
         let task_close = ProjectTaskClose::planned(&plan);
 
-        let mut candidate = match plan.plugin_plan().instantiate_runtime_candidate(
-            reservation,
-            obligations,
-            self.cleanup_policy,
-        ) {
+        let mut candidate = match plan
+            .plugin_plan()
+            .instantiate_runtime_candidate(obligations, self.cleanup_policy)
+        {
             Ok(candidate) => candidate,
             Err(owner) => {
                 let mut diagnostics =
@@ -1196,12 +1179,8 @@ impl ProjectHost {
                         .iter()
                         .any(|entry| entry.plugin_id() == nara_input::INPUT_PLUGIN_ID)
                     {
-                        nara_input::finalize_input_selection(scope, selection).map_err(|_| {
-                            HostFault::new(single_error(
-                                "project.run.input-selection-rejected",
-                                "Runtime Input owner refused the global selection",
-                            ))
-                        })
+                        nara_input::finalize_input_selection(scope, selection)
+                            .map_err(|_| startup_input_selection_fault())
                     } else if selection.is_some() {
                         Err(HostFault::new(single_error(
                             "project.run.input-owner-missing",
@@ -1217,43 +1196,25 @@ impl ProjectHost {
                 }
             }
             scope.apply_command(move |world: &mut World| {
-                let value = materialize_runtime(
-                    world,
-                    &admission_plan,
-                    &admission_content,
-                    startup_scene,
-                    commands,
-                )
-                .and_then(|diagnostics| {
-                    let context = match &admission_content {
-                        #[cfg(feature = "runtime-2d")]
-                        RuntimeStartContent::Source { plan, snapshot } => match scene_preparation {
-                            Some((candidate, loader)) => {
-                                #[cfg(feature = "asset-watch")]
-                                source_watch::bind_source_watch(world, &candidate, &loader)?;
-                                scene_requests::install_context(
-                                    world,
-                                    candidate,
-                                    plan.clone(),
-                                    loader,
-                                    snapshot.input_action_map().cloned(),
-                                    Some(snapshot.content_closure()),
-                                )
+                let value =
+                    materialize_runtime(world, &admission_plan, &admission_content, startup_scene)
+                        .and_then(|diagnostics| {
+                            match &admission_content {
+                                #[cfg(feature = "runtime-2d")]
+                                RuntimeStartContent::Source { plan, snapshot } => {
+                                    if let Some((candidate, loader)) = scene_preparation {
+                                        install_source_scene_context(
+                                            world, candidate, loader, plan, snapshot,
+                                        )?;
+                                    }
+                                }
+                                RuntimeStartContent::Processed { base, .. } => {
+                                    scene_requests::install_runtime_context(world, base.clone())
+                                        .map_err(|_| scene_context_fault())?;
+                                }
                             }
-                            None => Ok(()),
-                        },
-                        RuntimeStartContent::Processed { base, .. } => {
-                            scene_requests::install_runtime_context(world, base.clone())
-                        }
-                    };
-                    context.map_err(|_| {
-                        HostFault::new(single_error(
-                            "project.scene.context-install-failed",
-                            "Project Scene preparation context could not be installed",
-                        ))
-                    })?;
-                    Ok(diagnostics)
-                });
+                            Ok(diagnostics)
+                        });
                 assert!(
                     command_result.set(value).is_ok(),
                     "one candidate admission command publishes one result"
@@ -1845,7 +1806,7 @@ fn verify_processed_runtime_plan(plan: &RuntimeConfigurationPlan) -> Result<(), 
             source_execution || plugin == nara_render::image::IMAGE_SOURCE_PLUGIN_ID;
         #[cfg(feature = "asset-watch")]
         let source_execution =
-            source_execution || plugin == nara_asset_watch::ASSET_WATCH_PLUGIN_ID;
+            source_execution || plugin == nara_asset::watch::ASSET_WATCH_PLUGIN_ID;
         #[cfg(all(feature = "runtime-2d", feature = "asset-watch"))]
         let source_execution = source_execution || plugin == PROJECT_SCENE_WATCH_PLUGIN_ID;
         if source_execution {
@@ -1867,24 +1828,8 @@ fn materialize_runtime(
     plan: &RuntimeConfigurationPlan,
     content: &RuntimeStartContent,
     startup_scene: SceneSource,
-    commands: Vec<GameplayCommandSubmission>,
 ) -> Result<DiagnosticReport, HostFault> {
     verify_runtime_component_bindings(world, plan.schema_validation().bindings())?;
-    let requires_command_queue = !commands.is_empty()
-        || plan
-            .plugin_plan()
-            .entries()
-            .iter()
-            .any(|entry| entry.plugin_id() == GAMEPLAY_COMMAND_PLUGIN_ID);
-    let missing_command_queue = || {
-        HostFault::new(single_error(
-            "project.run.command-queue-missing",
-            "Project runtime has no semantic command queue",
-        ))
-    };
-    if requires_command_queue && !world.contains_resource::<GameplayCommandQueue>() {
-        return Err(missing_command_queue());
-    }
     // Processed Scene decoding resolves complete Products through installed native resources.
     // Publish those resources while the candidate is still unpublished, before Scene admission.
     match content {
@@ -1900,34 +1845,44 @@ fn materialize_runtime(
     if let RuntimeStartContent::Source { snapshot, .. } = content {
         content_residency::publish_startup(world, snapshot)?;
     }
-    let faults = world
-        .get_resource::<RuntimeFaultReporter>()
-        .cloned()
-        .ok_or_else(|| {
-            HostFault::new(single_error(
-                "project.run.fault-reporter-missing",
-                "Project runtime fault reporter is unavailable",
-            ))
-        })?;
-    if requires_command_queue {
-        let mut queue = world
-            .get_resource_mut::<GameplayCommandQueue>()
-            .ok_or_else(missing_command_queue)?;
-        for command in commands {
-            queue.submit(command).map_err(|_| {
-                faults.report(RuntimeFault::engine(
-                    RuntimeFaultKind::GameplayLifecycle,
-                    "nara.project-host.command-submit",
-                ));
-                HostFault::new(single_error(
-                    "project.run.command-rejected",
-                    "Project semantic control input was rejected",
-                ))
-            })?;
-        }
-    }
     verify_runtime_component_bindings(world, plan.schema_validation().bindings())?;
     Ok(diagnostics)
+}
+
+#[cfg(feature = "runtime-input")]
+fn startup_input_selection_fault() -> HostFault {
+    HostFault::new(single_error(
+        "project.run.input-selection-rejected",
+        "Runtime Input owner refused the global selection",
+    ))
+}
+
+fn scene_context_fault() -> HostFault {
+    HostFault::new(single_error(
+        "project.scene.context-install-failed",
+        "Project Scene preparation context could not be installed",
+    ))
+}
+
+#[cfg(feature = "runtime-2d")]
+fn install_source_scene_context(
+    world: &mut World,
+    candidate: super::ProjectSettingsCandidate,
+    loader: Arc<crate::project_content::ProjectContentLoader>,
+    plan: &RuntimePlan,
+    snapshot: &ProjectContentSnapshot,
+) -> Result<(), HostFault> {
+    #[cfg(feature = "asset-watch")]
+    source_watch::bind_source_watch(world, &candidate, &loader)?;
+    scene_requests::install_context(
+        world,
+        candidate,
+        plan.clone(),
+        loader,
+        snapshot.input_action_map().cloned(),
+        Some(snapshot.content_closure()),
+    )
+    .map_err(|_| scene_context_fault())
 }
 
 fn verify_runtime_component_bindings(

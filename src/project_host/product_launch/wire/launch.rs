@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use nara_fs::ContentDigest;
+use crate::fs::ContentDigest;
 use nara_project::DESKTOP_SUPERVISED_PLAY_V1_CONTRACT;
 
 use super::super::{

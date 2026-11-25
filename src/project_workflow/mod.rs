@@ -63,15 +63,7 @@ pub use starter::{
     ProjectStarter,
 };
 
-/// Adapter-only construction surface for source Export product agreements.
-///
-/// This module is not a product extension seam. Workflow consumers receive the resulting opaque
-/// receipt; explicit Cargo selection and pure messages belong to the separate `cargo` module.
-#[doc(hidden)]
-#[cfg(feature = "project-workflow-cargo-facts")]
-pub mod __private {
-    #[cfg(feature = "project-tooling")]
-    pub use super::export::{
-        ProjectExportBuildPreparation, ProjectExportCargoArtifact, ProjectExportProductAgreement,
-    };
-}
+#[cfg(feature = "project-tooling")]
+pub(crate) use export::{
+    ProjectExportBuildPreparation, ProjectExportCargoArtifact, ProjectExportProductAgreement,
+};

@@ -2,19 +2,23 @@ use std::{
     collections::BTreeSet,
     error::Error,
     fmt,
+    marker::PhantomData,
     sync::{Arc, OnceLock},
 };
 
 use nara_app::{
-    App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
-    PluginDomainError, PluginError, PluginId, PluginPreflightContext, PluginPreflightResource,
-    RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration,
+    AddPluginsError, App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
+    PluginDefinitionId, PluginDomainError, PluginError, PluginId, PluginPreflightContext,
+    PluginPreflightResource, PluginSchemaProviderId, RuntimeFault, RuntimeFaultKind,
+    RuntimeFaultReporter, RuntimeGeneration,
 };
 use nara_ecs::{Resource, World, bevy_ecs::lifecycle::HookContext, bevy_ecs::world::DeferredWorld};
 
 use crate::{
     ComponentRegistryBuilder, ComponentRegistryError, ComponentRegistrySnapshot,
-    ComponentSchemaProviderDefinition,
+    ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
+    ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
+    PersistentComponentProvider,
 };
 
 pub const COMPONENT_REGISTRY_PLUGIN_ID: PluginId = PluginId::new("nara.reflect.registry");
@@ -187,10 +191,7 @@ pub(crate) fn record_component_registry_structure_change(
     let Some(mut revision) = world.get_resource_mut::<ComponentRegistryMutationRevision>() else {
         return;
     };
-    revision.0 = revision
-        .0
-        .checked_add(1)
-        .unwrap_or_else(|| std::process::abort());
+    revision.0 = revision.0.wrapping_add(1);
 }
 
 struct ComponentRegistryAuthorityState {
@@ -326,6 +327,95 @@ pub fn register_schema_provider_for_plugin(
     resource
         .register_schema_provider(provider)
         .map_err(|error| PluginError::component_registration(plugin, component, error))
+}
+
+/// Registers a game component directly with the app's installed component registry.
+pub trait RegisterSchema {
+    fn register_schema<T: PersistentComponentProvider>(
+        &mut self,
+    ) -> Result<&mut Self, AddPluginsError>;
+}
+
+impl RegisterSchema for App {
+    fn register_schema<T: PersistentComponentProvider>(
+        &mut self,
+    ) -> Result<&mut Self, AddPluginsError> {
+        self.add_plugin(AppSchema::<T>(PhantomData))
+    }
+}
+
+struct AppSchema<T>(PhantomData<T>);
+
+impl<T: PersistentComponentProvider> AppSchema<T> {
+    const ID: PluginId = PluginId::new(T::COMPONENT_ID);
+    const PROVIDER_ID: PluginSchemaProviderId = PluginSchemaProviderId::new(T::COMPONENT_ID);
+    const DECLARATION: PluginDeclaration = PluginDeclaration::new(Self::ID, PluginCategory::Core)
+        .requires_plugins(COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+        .provides_schema(&[Self::PROVIDER_ID]);
+    const PROVIDER: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefinition::new(
+        ComponentSchemaOwnerId::new(T::COMPONENT_ID),
+        Self::PROVIDER_ID,
+        ComponentSchemaProviderBindingId::new(T::COMPONENT_ID, 1),
+        Self::catalog,
+        Self::register,
+    );
+
+    fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
+        let schema = T::persistent_component_schema();
+        if schema.id().as_str() != T::COMPONENT_ID {
+            return Err(ComponentSchemaProviderSourceError::new(
+                "component-id-mismatch",
+            ));
+        }
+        Ok(ComponentSchemaCatalog {
+            components: vec![schema],
+            ..ComponentSchemaCatalog::default()
+        })
+    }
+
+    fn register(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegistryError> {
+        registry.register_persistent_component::<T>()?;
+        Ok(())
+    }
+}
+
+impl<T: PersistentComponentProvider> Plugin for AppSchema<T> {
+    fn declaration() -> &'static PluginDeclaration {
+        &Self::DECLARATION
+    }
+
+    fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
+        validate_schema_provider_for_plugin(context, Self::ID, T::COMPONENT_ID, &Self::PROVIDER)
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        register_schema_provider_for_plugin(app, Self::ID, T::COMPONENT_ID, &Self::PROVIDER)
+    }
+}
+
+/// Serializes the registered Schema catalog without running startup or opening any platform.
+#[cfg(feature = "serde")]
+pub fn schema_json(app: &App) -> Result<String, SchemaExportError> {
+    let registry = app
+        .world()
+        .get_resource::<ComponentRegistryResource>()
+        .ok_or(SchemaExportError::MissingRegistry)?;
+    let catalog = match &registry.state {
+        ComponentRegistryState::Building(Some(builder)) => builder.catalog_candidate(),
+        ComponentRegistryState::Admitted(snapshot)
+        | ComponentRegistryState::Preloaded(snapshot) => snapshot.catalog(),
+        ComponentRegistryState::Building(None) => return Err(SchemaExportError::MissingRegistry),
+    };
+    Ok(catalog.to_json_string()?)
+}
+
+#[cfg(feature = "serde")]
+#[derive(Debug, thiserror::Error)]
+pub enum SchemaExportError {
+    #[error("the app has no component registry")]
+    MissingRegistry,
+    #[error(transparent)]
+    Encode(#[from] crate::ComponentCatalogFileError),
 }
 
 impl Plugin for ComponentRegistryPlugin {
@@ -498,7 +588,7 @@ fn finish_component_registry(
         generation: OnceLock::new(),
     });
     app.insert_resource(ComponentRegistryAuthority(Arc::clone(&authority)))?;
-    app.__install_runtime_authority_validator(
+    app.register_runtime_validator(
         COMPONENT_REGISTRY_PLUGIN_ID,
         Arc::new(move |world, generation| authority.validate_runtime(world, generation)),
     )?;
@@ -1232,46 +1322,17 @@ mod tests {
         runtime.finish().unwrap();
     }
 
-    #[derive(Default, Resource)]
-    struct RegistryRewrapPort;
-
-    impl nara_app::__RuntimeDriverPort for RegistryRewrapPort {
-        type Input = ();
-        type Output = ();
-
-        fn apply_driver_input(&mut self, (): ()) {}
-    }
-
-    impl RegistryRewrapPort {
-        fn apply_driver_input_in_world(
-            world: &mut World,
-            (): (),
-        ) -> Result<(), (nara_app::RuntimeWorldAccessError, ())> {
-            rewrap_registry_during_frame(world);
-            Ok(())
-        }
-    }
-
     #[test]
     fn managed_boundary_rejects_registry_replacement_before_committing_clock_state() {
         let mut app = App::new();
         app.add_plugin(ComponentRegistryPlugin).unwrap();
-        app.init_resource::<RegistryRewrapPort>().unwrap();
-        app.__register_driver_port::<RegistryRewrapPort>(
-            RegistryRewrapPort::apply_driver_input_in_world,
-        )
-        .unwrap();
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
         runtime.drive(Duration::ZERO).unwrap();
         let real_time = *runtime.world().resource::<RealTime>();
         let virtual_time = *runtime.world().resource::<VirtualTime>();
         let frame_execution_start = *runtime.world().resource::<FrameExecutionStart>();
 
-        let scope_outcome = runtime
-            .with_driver_scope(|scope| {
-                scope.__apply_port::<RegistryRewrapPort>(()).unwrap();
-            })
-            .unwrap();
+        let scope_outcome = runtime.apply_command(rewrap_registry_during_frame).unwrap();
         assert_eq!(
             scope_outcome.post_operation_fault.unwrap().kind(),
             RuntimeFaultKind::RuntimeAuthority

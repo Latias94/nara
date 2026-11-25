@@ -134,11 +134,13 @@ fn desktop_2d_v2_owns_its_action_map_and_uses_the_same_pinned_dependency() {
     let cargo =
         std::str::from_utf8(plan.member(ProjectMember::CargoManifest).unwrap().bytes()).unwrap();
     let cargo: toml::Value = toml::from_str(cargo).unwrap();
-    let nara = &cargo["dependencies"]["nara"];
-    let gilrs = &cargo["target"]["cfg(windows)"]["dependencies"]["nara_gilrs"];
-    assert_eq!(gilrs["git"], nara["git"]);
-    assert_eq!(gilrs["rev"], nara["rev"]);
-    assert_eq!(gilrs["optional"].as_bool(), Some(true));
+    assert!(
+        cargo["features"]["desktop"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry.as_str() == Some("nara/gamepad"))
+    );
 
     #[cfg(any(
         all(target_os = "windows", target_arch = "x86_64"),
@@ -247,12 +249,9 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
     assert!(guide.starts_with("# sample-game author guide\n"));
     assert!(guide.contains("Starter: `desktop-2d/v1`"));
     assert!(guide.contains(GIT_REVISION));
-    assert!(guide.contains(&format!(
-        "nara new desktop-2d/v1 sample-game --parent . --git https://github.com/nara-engine/nara.git --rev {GIT_REVISION}"
-    )));
     assert!(guide.contains("nara check ."));
-    assert!(guide.contains("nara export ."));
-    assert!(guide.contains("nara repair startup-scene ."));
+    assert!(guide.contains("ProjectToolRequest::Export"));
+    assert!(guide.contains("repair_startup_scene"));
     assert!(guide.contains("source-carrying declared-content candidate"));
     assert!(guide.contains("[content]"));
     assert!(guide.contains("scenes = [\"level-b.scene.json\"]"));
@@ -344,7 +343,7 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
     );
     let providers = [
         nara::scene::SCENE_COMPONENTS_SCHEMA_PROVIDER,
-        nara::transform::TRANSFORM_SCHEMA_PROVIDER,
+        nara::scene::TRANSFORM_SCHEMA_PROVIDER,
         nara::render::RENDER_SCHEMA_PROVIDER,
         nara::sprite::SPRITE_SCHEMA_PROVIDER,
         nara::tilemap::TILEMAP_SCHEMA_PROVIDER,
@@ -364,7 +363,7 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
         expected_owner_ids
     );
     for provider in providers {
-        let resolved = nara::reflect::__private::resolve_schema_provider(provider).unwrap();
+        let resolved = provider.resolve().unwrap();
         let owner_id = nara::reflect::PersistentComponentSchemaOwnerId::try_new(
             resolved.current().owner().as_str(),
         )
@@ -533,7 +532,7 @@ fn local_source_supports_sibling_paths_with_spaces_and_literal_quotes() {
     );
     let guide = prepared.plan().member(ProjectMember::AuthorGuide).unwrap();
     let guide = std::str::from_utf8(guide.bytes()).unwrap();
-    assert!(guide.contains("--local-checkout '../engine''s checkout'"));
+    assert!(guide.contains("Nara dependency: `path = \"../../engine's checkout\"`"));
 }
 
 #[test]

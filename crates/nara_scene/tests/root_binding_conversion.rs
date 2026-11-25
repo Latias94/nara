@@ -6,12 +6,11 @@ use std::{collections::HashMap, convert::Infallible, sync::Arc};
 
 use nara_asset::AssetRef;
 use nara_core::{ByteLimit, ItemLimit};
-use nara_ecs::{Component, Entity, World};
-use nara_hierarchy::{Children, Parent};
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityLookup, EntityReference,
     ReferenceInputId, SpawnedSceneInstance,
 };
+use nara_ecs::{Component, Entity, World};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistrySnapshot,
@@ -19,6 +18,7 @@ use nara_reflect::{
     ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
     PersistentComponentSchemaOwnerId,
 };
+use nara_scene::hierarchy::{ChildOf, Children};
 use nara_scene::{
     AuthoringDocumentSource, AuthoringSchemaBasis, CompiledSceneDocument,
     InMemoryPrefabSourceResolver, LocalizedPrefabEntity, PrefabAuthoringSession,
@@ -156,7 +156,7 @@ fn basis() -> AuthoringSchemaBasis {
     .unwrap();
     // Existing data-Adapter admission only; all conversion and materialization below use
     // public source/session APIs. No compiler fragment or history authority is fabricated.
-    let adapter = nara_scene::__private::AuthoringAdapterReceipt::from_schema_owner(
+    let adapter = nara_scene::authoring::AuthoringAdapterReceipt::from_schema_owner(
         &bundle.owners()[0],
         &Default::default(),
     )
@@ -456,12 +456,9 @@ fn compile_and_spawn(
     let root = resolve(&world, &instance, &id("anchor"));
     let expected_children =
         [d1.clone(), id("b"), d2.clone()].map(|entity| resolve(&world, &instance, &entity));
-    assert_eq!(
-        world.get::<Children>(root).unwrap().as_slice(),
-        expected_children
-    );
+    assert_eq!(&world.get::<Children>(root).unwrap()[..], expected_children);
     for child in expected_children {
-        assert_eq!(world.get::<Parent>(child).unwrap().parent(), root);
+        assert_eq!(world.get::<ChildOf>(child).unwrap().parent(), root);
     }
     assert_eq!(
         world
@@ -789,7 +786,7 @@ fn retained_source_reference_inventory_is_independent_of_selected_materialized_o
         None,
     )])
     .unwrap();
-    let adapter = nara_scene::__private::AuthoringAdapterReceipt::from_schema_owner(
+    let adapter = nara_scene::authoring::AuthoringAdapterReceipt::from_schema_owner(
         &bundle.owners()[0],
         &Default::default(),
     )

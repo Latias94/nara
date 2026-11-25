@@ -2,22 +2,22 @@ use super::*;
 use crate::advanced::*;
 use crate::tests::{child_placement, scene_occurrence, scene_source_key};
 
+use crate::hierarchy::{
+    ChildOf, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyPlugin,
+    HierarchyRoots, HierarchyWriter, completed_topology_generation,
+};
 use nara_app::App;
 use nara_core::ItemLimit;
+use nara_ecs::identity::{
+    EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
+    WorldEntityLocator, WorldEntityToken, WorldIdentityDomain, resolve_in_world,
+    spawn_identity_entity,
+};
 use nara_ecs::{
     Component, Entity, Mut, Resource, World,
     bevy_ecs::lifecycle::{Add, Despawn},
     bevy_ecs::observer::{Observer, On},
     system::ResMut,
-};
-use nara_hierarchy::{
-    __private::completed_topology_generation, HierarchyOperation, HierarchyPlacement,
-    HierarchyPlacementOwner, HierarchyPlugin, HierarchyRoots, HierarchyWriter, Parent,
-};
-use nara_identity::{
-    EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
-    WorldEntityLocator, WorldEntityToken, WorldIdentityDomain, resolve_in_world,
-    spawn_identity_entity,
 };
 use nara_reflect::{ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentValue};
 use std::sync::Arc;
@@ -114,7 +114,7 @@ impl ReplacementFixture {
     fn assert_unchanged(
         &self,
         before_entities: &[Entity],
-        before_stats: nara_identity::IdentityDomainStats,
+        before_stats: nara_ecs::identity::IdentityDomainStats,
     ) {
         assert_eq!(self.entity_ids(), before_entities);
         assert_eq!(
@@ -290,7 +290,7 @@ fn product_replacement_commits_one_coherent_scene_generation() {
     let new_child = spawned_entity(&world, &report, &child_id);
     assert_eq!(world.get::<RuntimeValue>(new_child), Some(&RuntimeValue(7)));
     assert_eq!(
-        world.get::<Parent>(new_child).map(Parent::parent),
+        world.get::<ChildOf>(new_child).map(ChildOf::parent),
         Some(new_root)
     );
     assert!(matches!(
@@ -539,7 +539,7 @@ fn invalid_existing_hierarchy_rejects_product_replacement_without_scratch_mutati
             },
         ])
         .unwrap();
-    fixture.world.entity_mut(child).remove::<Parent>();
+    fixture.world.entity_mut(parent).insert(ChildOf(child));
     let before_entities = fixture.entity_ids();
     let before_stats = fixture.world.resource::<WorldIdentityDomain>().stats();
 
@@ -691,12 +691,6 @@ fn overlay_lifecycle_rejection_preserves_completed_hierarchy_generation() {
     let mut app = App::new();
     app.add_plugin(HierarchyPlugin).unwrap();
     app.insert_resource(RunState::new(1)).unwrap();
-    app.init_resource::<OverlayLifecycleRejectionPort>()
-        .unwrap();
-    app.__register_driver_port::<OverlayLifecycleRejectionPort>(
-        OverlayLifecycleRejectionPort::apply_driver_input_in_world,
-    )
-    .unwrap();
     let initial = crate::spawn_scene(
         app.world_mut().unwrap(),
         &registry,
@@ -716,20 +710,37 @@ fn overlay_lifecycle_rejection_preserves_completed_hierarchy_generation() {
     runtime.drive(std::time::Duration::ZERO).unwrap();
     let completed_before = completed_topology_generation(runtime.world())
         .expect("the initial scene hierarchy must complete before replacement");
-    let report = runtime
+    let outcome = runtime
         .with_driver_scope(|scope| {
-            scope
-                .__apply_port::<OverlayLifecycleRejectionPort>((registry, document, current, child))
-                .unwrap()
-        })
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
+            scope.with_world_mut(move |world: &mut World| {
+                world.init_resource::<LifecycleCanary>();
+                world.register_component::<RuntimeValue>();
+                world.add_observer(
+                    |_: On<Add<RuntimeValue>>, mut canary: ResMut<LifecycleCanary>| canary.0 += 1,
+                );
+                world.flush();
+                replace_expanded_scene_with_product(
+                    world,
+                    &registry,
+                    &compile_scene(
+                        &document,
+                        &registry,
+                        "apply_driver_input_in_world/replacement",
+                    ),
+                    None,
+                    &current,
+                    transaction_limits(1, 1),
+                    &[],
+                    |overlay| {
+                        overlay.insert_component(child, RuntimeValue(1));
+                    },
+                )
+            })
         })
         .unwrap();
-
+    assert!(outcome.post_operation_fault.is_none());
     assert!(has_diagnostic(
-        &report,
+        &outcome.output,
         "scene.product-overlay-lifecycle-ineligible"
     ));
     assert_eq!(runtime.world().resource::<LifecycleCanary>().0, 0);
@@ -739,59 +750,6 @@ fn overlay_lifecycle_rejection_preserves_completed_hierarchy_generation() {
         "rejected candidate preparation must not dirty the published hierarchy"
     );
     runtime.finish().unwrap();
-}
-
-#[derive(Default, Resource)]
-struct OverlayLifecycleRejectionPort;
-
-impl nara_app::__RuntimeDriverPort for OverlayLifecycleRejectionPort {
-    type Input = (
-        ComponentRegistrySnapshot,
-        SceneDocument,
-        SpawnedSceneInstance,
-        SceneEntityId,
-    );
-    type Output = SceneSpawnReport;
-
-    fn apply_driver_input(&mut self, _input: Self::Input) -> SceneSpawnReport {
-        unreachable!("the overlay transaction needs the scene world")
-    }
-}
-
-impl OverlayLifecycleRejectionPort {
-    fn apply_driver_input_in_world(
-        world: &mut World,
-        (registry, document, current, child): <Self as nara_app::__RuntimeDriverPort>::Input,
-    ) -> Result<
-        SceneSpawnReport,
-        (
-            nara_app::RuntimeWorldAccessError,
-            <Self as nara_app::__RuntimeDriverPort>::Input,
-        ),
-    > {
-        world.init_resource::<LifecycleCanary>();
-        world.register_component::<RuntimeValue>();
-        world.add_observer(
-            |_: On<Add<RuntimeValue>>, mut canary: ResMut<LifecycleCanary>| canary.0 += 1,
-        );
-        world.flush();
-        Ok(replace_expanded_scene_with_product(
-            world,
-            &registry,
-            &compile_scene(
-                &document,
-                &registry,
-                "apply_driver_input_in_world/replacement",
-            ),
-            None,
-            &current,
-            transaction_limits(1, 1),
-            &[],
-            |overlay| {
-                overlay.insert_component(child, RuntimeValue(1));
-            },
-        ))
-    }
 }
 
 #[test]
@@ -1043,7 +1001,7 @@ fn additional_retirement_commits_runtime_hierarchy_and_promotes_survivors() {
     assert_eq!(report.retired_entities(), 2);
     assert!(fixture.world.get_entity(runtime_root.entity()).is_err());
     assert!(fixture.world.get_entity(surviving_child).is_ok());
-    assert!(fixture.world.get::<Parent>(surviving_child).is_none());
+    assert!(fixture.world.get::<ChildOf>(surviving_child).is_none());
     let replacement_root = spawned_entity(&fixture.world, &report, &fixture.target);
     assert_eq!(
         fixture.world.resource::<HierarchyRoots>().as_slice(),

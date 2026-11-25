@@ -1,8 +1,8 @@
 #[path = "support/compiled_scene.rs"]
 mod compiled_scene;
 
+use nara_ecs::identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_ecs::{Component, Entity, Resource, World};
-use nara_identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_reflect::ComponentRegistryBuilder;
 use nara_scene::{
     SceneDocument, SceneEntityId, SceneEntityRecord, retire_and_despawn_scene_entity,

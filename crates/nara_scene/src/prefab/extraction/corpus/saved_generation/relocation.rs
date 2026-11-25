@@ -12,7 +12,7 @@ use crate::{
     PrefabComponentIntent, PrefabEntityTarget, PrefabInstance, PrefabOverlay, SceneComponentRecord,
     SceneEntityPlacement, ScenePlacementParent, ScenePlacementSlot,
 };
-use nara_identity::EntityReference;
+use nara_ecs::identity::EntityReference;
 use nara_reflect::{ComponentSchemaVersion, ComponentTypeId};
 
 pub(super) fn requires_relocation(

@@ -1,8 +1,6 @@
 use super::*;
 
-use nara_app::{
-    __RuntimeDriverPort, RuntimeDriveError, RuntimeDriveOutcome, RuntimeWorldAccessError,
-};
+use nara_app::{RuntimeDriveError, RuntimeDriveOutcome};
 use nara_input::{GamepadConnection, InputAdmission, InputIngressError, InputRouteStamp};
 
 use crate::runtime::{
@@ -39,9 +37,6 @@ impl UiTestApp {
                 )
                 .unwrap();
         }
-        app.insert_resource(UiTestDriver).unwrap();
-        app.__register_driver_port::<UiTestDriver>(UiTestDriver::apply_driver_input_in_world)
-            .unwrap();
         Self {
             configuration: Some(app),
             runtime: None,
@@ -81,17 +76,16 @@ impl UiTestApp {
         self.runtime.as_mut().unwrap().drive(Duration::ZERO)
     }
 
-    fn dispatch(&mut self, command: UiTestCommand) -> UiTestResponse {
+    fn with_world_mut<R>(&mut self, operation: impl FnOnce(&mut World) -> R) -> R {
         match &mut self.runtime {
             Some(runtime) => runtime
-                .with_driver_scope(|scope| scope.__apply_port::<UiTestDriver>(command))
+                .with_driver_scope(|scope| scope.with_world_mut(operation))
                 .map(|outcome| {
                     assert!(outcome.post_operation_fault.is_none());
                     outcome.output
                 })
-                .unwrap()
                 .unwrap(),
-            None => command.apply(self.configuration_world()),
+            None => operation(self.configuration_world()),
         }
     }
 
@@ -120,52 +114,12 @@ impl Drop for UiTestApp {
     }
 }
 
-#[derive(Resource)]
-struct UiTestDriver;
-
-impl __RuntimeDriverPort for UiTestDriver {
-    type Input = UiTestCommand;
-    type Output = UiTestResponse;
-
-    fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
-        unreachable!("the concrete adapter test port coordinates UI-owned resources")
-    }
-}
-
-impl UiTestDriver {
-    fn apply_driver_input_in_world(
-        world: &mut World,
-        input: UiTestCommand,
-    ) -> Result<UiTestResponse, (RuntimeWorldAccessError, UiTestCommand)> {
-        Ok(input.apply(world))
-    }
-}
-
-// The closed operation list admits only concrete UI fixture edits. No command carries a closure,
-// World reference, generic resource type, or replacement for managed runtime authority.
 macro_rules! ui_test_commands {
     ($($variant:ident => fn $name:ident($($argument:ident: $argument_type:ty),* $(,)?)
         -> $output:ty |$world:ident| $body:block;)*) => {
-        enum UiTestCommand { $($variant($($argument_type),*)),* }
-        enum UiTestResponse { $($variant($output)),* }
-
-        impl UiTestCommand {
-            fn apply(self, world: &mut World) -> UiTestResponse {
-                match self {
-                    $(Self::$variant($($argument),*) => {
-                        let $world = &mut *world;
-                        UiTestResponse::$variant($body)
-                    }),*
-                }
-            }
-        }
-
         impl UiTestApp {
             $(pub(super) fn $name(&mut self, $($argument: $argument_type),*) -> $output {
-                match self.dispatch(UiTestCommand::$variant($($argument),*)) {
-                    UiTestResponse::$variant(output) => output,
-                    _ => unreachable!("adapter test command must return its matching response"),
-                }
+                self.with_world_mut(|$world| $body)
             })*
         }
     };
@@ -188,20 +142,20 @@ ui_test_commands! {
     RetireSurface => fn retire_surface(surface: UiSurfaceId) -> Result<Option<UiSurfaceRetirement>, UiAdapterError> |world| {
         retire_ui_surface(world, surface)
     };
-    PreparePresentation => fn prepare_presentation(frame: Arc<nara_ui_kernel::UiFrame>, epoch: u64)
-        -> Result<UiPreparedPresentationAuthority, UiAdapterError> |world| { crate::__private::prepare_ui_presentation(world, frame, epoch) };
+    PreparePresentation => fn prepare_presentation(frame: Arc<crate::kernel::UiFrame>, epoch: u64)
+        -> Result<UiPreparedPresentationAuthority, UiAdapterError> |world| { crate::presentation::prepare_ui_presentation(world, frame, epoch) };
     CommitPresentation => fn commit_presentation(prepared: UiPreparedPresentationAuthority) -> UiPresentationCommit |world| {
-        crate::__private::commit_prepared_ui_presentation(world, prepared)
+        crate::presentation::commit_prepared_ui_presentation(world, prepared)
     };
     AbortPresentation => fn abort_presentation(prepared: UiPreparedPresentationAuthority) -> () |world| {
-        crate::__private::abort_prepared_ui_presentation(world, prepared)
+        crate::presentation::abort_prepared_ui_presentation(world, prepared)
     };
     DeferPresentation => fn defer_presentation(prepared: UiPreparedPresentationAuthority) -> UiDeferredPresentationAuthority |world| {
-        crate::__private::defer_prepared_ui_presentation(world, prepared)
+        crate::presentation::defer_prepared_ui_presentation(world, prepared)
     };
     RetryPresentation => fn retry_presentation(deferred: UiDeferredPresentationAuthority)
-        -> Result<UiDeferredPresentationRetry, UiAdapterError> |world| { crate::__private::retry_deferred_ui_presentation(world, deferred) };
-    PresentFrame => fn present_frame(frame: Arc<nara_ui_kernel::UiFrame>, epoch: u64) -> Result<UiPresentationReceipt, UiAdapterError> |world| {
+        -> Result<UiDeferredPresentationRetry, UiAdapterError> |world| { crate::presentation::retry_deferred_ui_presentation(world, deferred) };
+    PresentFrame => fn present_frame(frame: Arc<crate::kernel::UiFrame>, epoch: u64) -> Result<UiPresentationReceipt, UiAdapterError> |world| {
         commit_ui_presentation(world, frame, epoch)
     };
     DispatchInput => fn dispatch_input(route: UiRouteStamp, input: UiInputEvent) -> UiRouteDisposition |world| {
@@ -231,10 +185,10 @@ ui_test_commands! {
     InvalidModal => fn place_invalid_modal(root_local: String, button_local: String) -> () |world| {
         place_invalid_button_modal(world, &root_local, &button_local)
     };
-    PlaceEntity => fn place_entity(entity: Entity, placement: HierarchyPlacement) -> Result<(), nara_hierarchy::HierarchyError> |world| {
+    PlaceEntity => fn place_entity(entity: Entity, placement: HierarchyPlacement) -> Result<(), nara_scene::hierarchy::HierarchyError> |world| {
         HierarchyWriter::new(world).place(entity, placement)
     };
-    RemoveEntity => fn remove_entity(entity: Entity, previous: HierarchyPlacement) -> Result<(), nara_hierarchy::HierarchyError> |world| {
+    RemoveEntity => fn remove_entity(entity: Entity, previous: HierarchyPlacement) -> Result<(), nara_scene::hierarchy::HierarchyError> |world| {
         HierarchyWriter::new(world).remove(entity, previous)
     };
     PublishRoute => fn publish_presented_route(route: InputPresentedRoute) -> Result<InputRouteStamp, InputIngressError> |world| {

@@ -9,8 +9,8 @@ use nara_ecs::World;
 use thiserror::Error;
 
 use crate::{
-    App, RuntimeAdmissionError, RuntimeAdmissionReservation, RuntimeAdmissionRetirement,
-    RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeCloseEvidence, RuntimeClosePolicy,
+    App, RuntimeAdmissionError, RuntimeAdmissionRetirement, RuntimeCandidate,
+    RuntimeCandidateRetirementState, RuntimeCloseEvidence, RuntimeClosePolicy,
     RuntimeObligationLedger, RuntimePreparationRetirement,
 };
 
@@ -313,6 +313,15 @@ impl PluginPlan {
         self.fingerprint
     }
 
+    /// Installs the plan in a new App. The caller may add systems before running it.
+    pub fn build_app(&self) -> Result<App, PluginInstantiationError> {
+        let prepared = self.prepare_definitions()?;
+        let mut app = App::new();
+        app.commit_plugin_batch(self.commit_batch(prepared))
+            .map_err(|failure| failure.error)?;
+        Ok(app)
+    }
+
     /// Freezes a replayable definition for advanced Host composition.
     ///
     /// This convenience projects failure into a raw error and drops its retained owner, losing
@@ -366,7 +375,6 @@ impl PluginPlan {
     #[doc(hidden)]
     pub fn instantiate_runtime_candidate(
         &self,
-        reservation: RuntimeAdmissionReservation,
         obligations: RuntimeObligationLedger,
         close_policy: RuntimeClosePolicy,
     ) -> Result<RuntimeCandidate, RuntimeConstructionFailure> {
@@ -377,7 +385,7 @@ impl PluginPlan {
                 return Err(RuntimeConstructionFailure::plugin(
                     error.into(),
                     None,
-                    RuntimePreparationRetirement::from_reserved_app(app, reservation, close_policy),
+                    RuntimePreparationRetirement::from_app(app, close_policy),
                 ));
             }
         };
@@ -385,7 +393,7 @@ impl PluginPlan {
             return Err(RuntimeConstructionFailure::plugin(
                 failure.error.into(),
                 failure.failure,
-                RuntimePreparationRetirement::from_reserved_app(app, reservation, close_policy),
+                RuntimePreparationRetirement::from_app(app, close_policy),
             ));
         }
         if let Err(error) = app.seal_internal() {
@@ -396,19 +404,18 @@ impl PluginPlan {
             return Err(RuntimeConstructionFailure::plugin(
                 error.into(),
                 failure,
-                RuntimePreparationRetirement::from_reserved_app(app, reservation, close_policy),
+                RuntimePreparationRetirement::from_app(app, close_policy),
             ));
         }
-        reservation
-            .admit(
-                SealedApp { app },
-                RuntimeObligationLedger::new(),
-                close_policy,
-            )
-            .map_err(|failure| {
-                let error = failure.error();
-                RuntimeConstructionFailure::admission(error, failure.begin_retirement())
-            })
+        RuntimeCandidate::admit(
+            SealedApp { app },
+            RuntimeObligationLedger::new(),
+            close_policy,
+        )
+        .map_err(|failure| {
+            let error = failure.error();
+            RuntimeConstructionFailure::admission(error, failure.begin_retirement())
+        })
     }
 
     fn prepare_definitions(&self) -> Result<Vec<Arc<dyn Plugin>>, PluginPrepareError> {

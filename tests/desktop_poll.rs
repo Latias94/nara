@@ -1,4 +1,5 @@
 #![cfg(all(
+    feature = "project-runtime",
     feature = "runtime-2d",
     feature = "serde",
     feature = "desktop-winit",

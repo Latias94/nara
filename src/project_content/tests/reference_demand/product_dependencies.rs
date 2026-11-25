@@ -1,4 +1,4 @@
-use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
+use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
 use serde::{Deserialize, Serialize};
 
 use crate::project_content::ProjectContentMemberReceipt;

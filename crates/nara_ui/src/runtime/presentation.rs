@@ -2,8 +2,8 @@ use std::{collections::VecDeque, sync::Arc};
 
 use super::candidate::{UiBehaviorSnapshot, UiCompiledCandidate};
 use super::surface::UiSurfaceSlot;
-use nara_ui_kernel::__private::UiFrameJournalAuthority;
-use nara_ui_kernel::{
+use crate::kernel::UiFrameJournalAuthority;
+use crate::kernel::{
     UiFrameJournal, UiJournalError, UiKey, UiLimits, UiPresentationReceipt, UiRouteStamp,
     UiRouteTarget, UiSurfaceRetirementToken,
 };
@@ -63,7 +63,7 @@ impl UiPresentedHistory {
         limits: UiLimits,
         slot: UiSurfaceSlot,
     ) -> Result<(Self, UiFrameJournalAuthority), UiJournalError> {
-        let (mut journal, authority) = nara_ui_kernel::__private::new_hosted_frame_journal(limits)?;
+        let (mut journal, authority) = crate::kernel::UiFrameJournal::new_hosted(limits)?;
         journal.install_surface(slot.surface_id(), slot.slot_generation())?;
         Ok((
             Self {
@@ -167,7 +167,7 @@ impl UiPresentedHistory {
 
     pub(super) fn retire(
         &mut self,
-        surface_id: nara_ui_kernel::UiSurfaceId,
+        surface_id: crate::kernel::UiSurfaceId,
         retirement_generation: u64,
     ) -> Result<Option<UiSurfaceRetirementToken>, UiJournalError> {
         self.entries.clear();

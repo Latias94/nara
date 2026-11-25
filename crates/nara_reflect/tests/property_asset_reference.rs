@@ -1,6 +1,6 @@
 use nara_asset::AssetRef;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_identity::SceneEntityId;
+use nara_ecs::identity::SceneEntityId;
 use nara_reflect::{
     AssetReferenceDemand, ComponentCapability, ComponentEntityReferenceRewriteError,
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentMemberPath,
@@ -698,11 +698,12 @@ mod effective_collection_admission {
 
     use super::*;
     use nara_reflect::{
-        __private::{
+        DeclaredAssetReference,
+        asset_reference::{
             AssetReferenceCollectionError,
             collect_declared_effective_asset_references_with_admission,
         },
-        DeclaredAssetReference, collect_declared_asset_references_from_schema_with_limits,
+        collect_declared_asset_references_from_schema_with_limits,
     };
 
     struct CountingAllocator;

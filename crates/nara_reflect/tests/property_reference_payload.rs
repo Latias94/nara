@@ -1,10 +1,10 @@
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_identity::SceneEntityId;
+use nara_ecs::identity::SceneEntityId;
 use nara_reflect::{
-    __private::plan_declared_value_entity_references, AssetReferenceDemand, ComponentCapability,
-    ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentValue, ComponentValueShape, EntityReference,
-    EntityReferenceTraversalLimits,
+    AssetReferenceDemand, ComponentCapability, ComponentEntityReferenceRewriteError,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentValue,
+    ComponentValueShape, EntityReference, EntityReferenceTraversalLimits,
+    entity_reference::plan_declared_value_entity_references,
 };
 
 fn local(name: &str) -> ComponentValue {

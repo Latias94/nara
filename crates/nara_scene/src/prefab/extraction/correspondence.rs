@@ -6,14 +6,14 @@
 use std::{collections::BTreeMap, mem::size_of};
 
 use nara_asset::AssetRef;
-use nara_identity::EntityReference;
+use nara_ecs::identity::EntityReference;
 use nara_reflect::{
-    __private::{
-        ComponentValueAdmissionError, EntityReferencePlanError,
-        admit_declared_entity_reference_plan_rewrite,
-        plan_declared_entity_references_with_admission, validate_component_value_with_admission,
-    },
     ComponentEntityReferenceRewriteError, ComponentSchema,
+    entity_reference::{
+        EntityReferencePlanError, admit_declared_entity_reference_plan_rewrite,
+        plan_declared_entity_references_with_admission,
+    },
+    registry::{ComponentValueAdmissionError, validate_component_value_with_admission},
 };
 
 use super::{

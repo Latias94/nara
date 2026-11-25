@@ -8,7 +8,7 @@ mod product_launch;
 mod runtime_diagnostics;
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-mod desktop_run;
+pub(crate) mod desktop_run;
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 pub use desktop_run::{
     DesktopControlError, DesktopPresentationControl, DesktopPresentationObservation, DesktopRun,
@@ -17,7 +17,9 @@ pub use desktop_run::{
     DesktopTelemetrySealReport,
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-pub use nara_winit::{WinitEventLoop, WinitInputActivation, WinitKeyboardContinuationError};
+pub use nara_window::winit::{
+    WinitEventLoop, WinitInputActivation, WinitKeyboardContinuationError,
+};
 
 #[cfg(windows)]
 #[doc(hidden)]
@@ -123,7 +125,9 @@ pub use runtime::{
     HeadlessSessionClose, HeadlessSessionError,
 };
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-pub use runtime::{HeadlessRunIntent, ProjectSceneSourceUpdateStatus};
+pub use runtime::{
+    HeadlessRunIntent, ProjectAppLoadError, ProjectSceneSourceUpdateStatus, load_project_app,
+};
 #[cfg(feature = "serde")]
 pub(crate) use runtime::{
     PROJECT_SCENE_REQUEST_CLOSE_OBLIGATION, poll_project_scene_requests,

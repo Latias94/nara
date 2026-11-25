@@ -6,7 +6,7 @@ use std::{
 use nara_app::CoreStage;
 use nara_core::ItemLimit;
 use nara_ecs::Resource;
-use nara_identity::{EntityLookup, SceneEntityId, WorldIdentityDomain};
+use nara_ecs::identity::{EntityLookup, SceneEntityId, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
@@ -53,11 +53,12 @@ fn source(name: &str) -> SceneSource {
 
 fn candidate(document: Arc<SceneDocument>) -> CompiledSceneCandidate {
     let mut registry = nara_reflect::ComponentRegistryBuilder::new();
-    let provider = nara_reflect::__private::resolve_schema_provider(
-        nara_scene::SCENE_COMPONENTS_SCHEMA_PROVIDER,
-    )
-    .unwrap();
-    nara_reflect::__private::register_resolved_schema_provider(&mut registry, provider).unwrap();
+    let provider = nara_scene::SCENE_COMPONENTS_SCHEMA_PROVIDER
+        .resolve()
+        .unwrap();
+    registry
+        .register_resolved_schema_provider(provider)
+        .unwrap();
     let bindings = SceneComponentBindings::new(registry.freeze().unwrap(), [data_owner()]).unwrap();
     compile_test_scene(
         &document,
@@ -124,14 +125,12 @@ fn with_selected_current_scene(
         }
     })
     .unwrap();
-    let mut candidate = nara_app::RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            nara_app::RuntimeObligationLedger::new(),
-            nara_app::RuntimeClosePolicy::default(),
-        )
-        .unwrap();
+    let mut candidate = nara_app::RuntimeCandidate::admit(
+        app.seal().unwrap(),
+        nara_app::RuntimeObligationLedger::new(),
+        nara_app::RuntimeClosePolicy::default(),
+    )
+    .unwrap();
     let materialization = Arc::new(OnceLock::new());
     let command_result = Arc::clone(&materialization);
     candidate

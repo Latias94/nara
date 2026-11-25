@@ -6,7 +6,7 @@
 
 use std::{collections::BTreeMap, mem::size_of};
 
-use nara_identity::ReferenceInputId;
+use nara_ecs::identity::ReferenceInputId;
 use nara_reflect::{
     ComponentFieldId, ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep,
     ComponentTypeId,

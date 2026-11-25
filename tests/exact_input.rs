@@ -1,185 +1,87 @@
-#![cfg(feature = "runtime-core")]
+#![cfg(feature = "runtime-input")]
 
-#[cfg(feature = "runtime-input")]
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use nara::{
     app::{
-        App, CoreStage, FixedTime, RealTime, RuntimeControl, RuntimeControlRequestResult,
-        RuntimeControlStatus, RuntimeFrameKind, RuntimeInstance, RuntimeState,
+        App, CoreStage, FixedTime, FixedUpdateSet, RealTime, RuntimeControl,
+        RuntimeControlRequestResult, RuntimeControlStatus, RuntimeDriverScope, RuntimeFrameKind,
+        RuntimeInstance, RuntimeState, RuntimeTimeSettings,
     },
-    ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs},
-    gameplay::{
-        GameplayCommandBatch, GameplayCommandDraft, GameplayCommandEnvelope, GameplayCommandPlugin,
-        GameplayCommandQueue, GameplayCommandSet, GameplayCommandSource, GameplayCommandTypeId,
-        LocalGameplayCommands,
-    },
-};
-
-#[cfg(feature = "runtime-input")]
-use nara::{
-    app::{RuntimeDriverScope, RuntimeTimeSettings},
-    core::ByteLimit,
-    gameplay::{ActionCommandBinding, ActionCommandMap, GameplayActionPlugin},
+    ecs::{Res, ResMut, Resource, World, schedule::IntoScheduleConfigs},
     input::{
-        __private::claim_input_endpoint, ActionBinding, ActionContext, ActionId, ActionMap,
-        ActionMapBuilder, ActionMapLimits, ActionMaps, ActionOutcomes, ActionPhase,
-        ButtonDriverInput, ButtonInput, InputLimits, InputPlugin, InputSeatId, InputSet,
-        InputTimeline, InputWindowEvent, InputWindowId, KeyCode, KeyboardActionBinding,
-        KeyboardContinuationError, KeyboardHold, SemanticActionCause, SemanticActionOutcome,
-        SemanticActions, apply_keyboard_driver_input_at, apply_window_input_driver_event,
-        capture_keyboard_holds, connect_input_endpoint, restore_keyboard_holds,
+        ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
+        ActionMaps, ActionOutcomes, ActionPhase, ActionState, ButtonDriverInput, ButtonInput,
+        InputLimits, InputPlugin, InputSeatId, InputSet, InputTimeline, InputWindowEvent,
+        InputWindowId, KeyCode, KeyboardActionBinding, KeyboardContinuationError, KeyboardHold,
+        SemanticActionCause, SemanticActionOutcome, SemanticActions,
+        apply_keyboard_driver_input_at, apply_window_input_driver_event, capture_keyboard_holds,
+        connect_input_endpoint, restore_keyboard_holds,
     },
 };
 
-#[cfg(feature = "runtime-input")]
 const WINDOW: InputWindowId = InputWindowId::new(1);
-#[cfg(feature = "runtime-input")]
 const SEAT: InputSeatId = InputSeatId::PRIMARY;
-#[cfg(feature = "runtime-input")]
 const KEY: KeyCode = KeyCode::Character('d');
+const MOVE_RIGHT: &str = "move_right";
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
-struct Motion {
-    moving: bool,
-    position: u64,
-}
+#[derive(Debug, Default, Resource)]
+struct Position(u64);
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 struct TickSample {
     tick: u64,
-    commands: Vec<GameplayCommandEnvelope>,
-    #[cfg(feature = "runtime-input")]
+    moving: bool,
+    position: u64,
     semantic: Vec<SemanticActionOutcome>,
-    motion: Motion,
 }
 
 #[derive(Debug, Default, Resource)]
 struct Trace {
-    consumed: Vec<TickSample>,
-    captured: Vec<TickSample>,
+    ticks: Vec<TickSample>,
     pre_updates: usize,
 }
 
-#[cfg(feature = "runtime-input")]
-#[derive(Debug, Default, Clone, Resource)]
-struct ContextChanges(Arc<Mutex<Option<bool>>>);
-
-#[cfg(feature = "runtime-input")]
 fn binding() -> KeyboardActionBinding {
     KeyboardActionBinding {
         key: KEY,
-        action: ActionId::new("move_right").unwrap(),
+        action: ActionId::new(MOVE_RIGHT).unwrap(),
         context: ActionContext::gameplay(),
     }
 }
 
-fn draft(name: &str) -> GameplayCommandDraft {
-    GameplayCommandDraft::new(GameplayCommandTypeId::new(name).unwrap())
-}
-
-fn sample_tick(
-    time: &FixedTime,
-    batch: &GameplayCommandBatch,
-    #[cfg(feature = "runtime-input")] semantic: Option<&SemanticActions>,
-    motion: Motion,
-) -> TickSample {
-    assert_eq!(batch.active_tick().unwrap().get(), time.tick());
-    TickSample {
+fn simulate_movement(
+    time: Res<FixedTime>,
+    actions: Res<ActionState>,
+    mut position: ResMut<Position>,
+    mut trace: ResMut<Trace>,
+) {
+    let moving = actions.button(MOVE_RIGHT);
+    position.0 += u64::from(moving);
+    trace.ticks.push(TickSample {
         tick: time.tick(),
-        commands: batch.commands().to_vec(),
-        #[cfg(feature = "runtime-input")]
-        semantic: semantic.map_or_else(Vec::new, |actions| actions.as_slice().to_vec()),
-        motion,
-    }
-}
-
-fn consume_commands(
-    time: Res<FixedTime>,
-    batch: Res<GameplayCommandBatch>,
-    #[cfg(feature = "runtime-input")] semantic: Option<Res<SemanticActions>>,
-    mut motion: ResMut<Motion>,
-    mut trace: ResMut<Trace>,
-) {
-    for command in batch.commands() {
-        match command.command_type().as_str() {
-            "player.move" => motion.moving = true,
-            "player.stop" => motion.moving = false,
-            "player.marker" => {}
-            other => panic!("unexpected command: {other}"),
-        }
-    }
-    if motion.moving {
-        motion.position += 1;
-    }
-    trace.consumed.push(sample_tick(
-        &time,
-        &batch,
-        #[cfg(feature = "runtime-input")]
-        semantic.as_deref(),
-        *motion,
-    ));
-}
-
-fn capture_commands(
-    time: Res<FixedTime>,
-    batch: Res<GameplayCommandBatch>,
-    queue: Res<GameplayCommandQueue>,
-    #[cfg(feature = "runtime-input")] semantic: Option<Res<SemanticActions>>,
-    motion: Res<Motion>,
-    mut trace: ResMut<Trace>,
-) {
-    assert_eq!(queue.stats().acknowledged_through_tick, time.tick() - 1);
-    trace.captured.push(sample_tick(
-        &time,
-        &batch,
-        #[cfg(feature = "runtime-input")]
-        semantic.as_deref(),
-        *motion,
-    ));
+        moving,
+        position: position.0,
+        semantic: actions.as_slice().to_vec(),
+    });
 }
 
 fn observe_pre_update(mut trace: ResMut<Trace>) {
     trace.pre_updates += 1;
 }
 
-#[cfg(feature = "runtime-input")]
-fn apply_context_change(changes: Res<ContextChanges>, mut maps: ResMut<ActionMaps>) {
-    let Some(enabled) = changes.0.lock().unwrap().take() else {
-        return;
-    };
-    let map = maps.get_mut(SEAT).unwrap();
-    if enabled {
-        assert!(map.enable_context(&ActionContext::gameplay()).unwrap());
-    } else {
-        assert!(map.disable_context(&ActionContext::gameplay()).unwrap());
-    }
-}
-
-fn install_gameplay(app: &mut App, moving: bool) {
-    app.insert_resource(Motion {
-        moving,
-        position: 0,
-    })
-    .unwrap();
+fn install_movement(app: &mut App) {
+    app.init_resource::<Position>().unwrap();
     app.init_resource::<Trace>().unwrap();
-    app.add_plugin(GameplayCommandPlugin::default()).unwrap();
     app.add_systems(CoreStage::PreUpdate, observe_pre_update)
         .unwrap();
     app.add_systems(
         CoreStage::FixedUpdate,
-        consume_commands.in_set(GameplayCommandSet::Consume),
-    )
-    .unwrap();
-    app.add_systems(
-        CoreStage::FixedUpdate,
-        capture_commands.in_set(GameplayCommandSet::Capture),
+        simulate_movement.in_set(FixedUpdateSet::Simulate),
     )
     .unwrap();
 }
 
-#[cfg(feature = "runtime-input")]
 fn driver<T>(
     runtime: &mut RuntimeInstance,
     operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> T,
@@ -189,7 +91,6 @@ fn driver<T>(
     outcome.output
 }
 
-#[cfg(feature = "runtime-input")]
 fn keyboard(runtime: &mut RuntimeInstance, input: ButtonDriverInput<KeyCode>) {
     driver(runtime, |scope| {
         apply_keyboard_driver_input_at(scope, WINDOW, SEAT, input)
@@ -197,7 +98,6 @@ fn keyboard(runtime: &mut RuntimeInstance, input: ButtonDriverInput<KeyCode>) {
     .unwrap();
 }
 
-#[cfg(feature = "runtime-input")]
 fn paused_frame(runtime: &mut RuntimeInstance) {
     let tick = runtime.world().resource::<FixedTime>().tick();
     let outcome = runtime.drive(Duration::ZERO).unwrap();
@@ -225,7 +125,8 @@ fn control(runtime: &mut RuntimeInstance, control: RuntimeControl, state: Runtim
 fn exact_tick(runtime: &mut RuntimeInstance) {
     let tick = runtime.world().resource::<FixedTime>().tick();
     let frame = runtime.world().resource::<RealTime>().frame;
-    let pre_updates = runtime.world().resource::<Trace>().pre_updates;
+    let trace = runtime.world().resource::<Trace>();
+    let (pre_updates, samples) = (trace.pre_updates, trace.ticks.len());
     let RuntimeControlRequestResult::Accepted(ticket) =
         runtime.request_control(RuntimeControl::StepFixedTick)
     else {
@@ -241,24 +142,14 @@ fn exact_tick(runtime: &mut RuntimeInstance) {
     );
     assert_eq!(runtime.world().resource::<FixedTime>().tick(), tick + 1);
     assert_eq!(runtime.world().resource::<RealTime>().frame, frame + 1);
-    assert_eq!(runtime.world().resource::<Trace>().pre_updates, pre_updates);
+    let trace = runtime.world().resource::<Trace>();
+    assert_eq!(trace.pre_updates, pre_updates);
+    assert_eq!(trace.ticks.len(), samples + 1);
     assert!(runtime.fault().is_none());
 }
 
-#[cfg(feature = "runtime-input")]
-fn input_runtime(moving: bool) -> RuntimeInstance {
-    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
-    builder
-        .declare_context(ActionContext::gameplay(), true)
-        .unwrap();
-    builder
-        .bind(ActionBinding::key(binding().action, KEY))
-        .unwrap();
-    let map = ActionMap::new(
-        builder.compile().unwrap().into_bindings(),
-        ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
-    )
-    .unwrap();
+fn input_runtime() -> RuntimeInstance {
+    let map = ActionMap::from_bindings([ActionBinding::key(binding().action, KEY)]).unwrap();
     let mut app = App::new();
     app.insert_resource(RuntimeTimeSettings::default().with_paused(true))
         .unwrap();
@@ -268,36 +159,7 @@ fn input_runtime(moving: bool) -> RuntimeInstance {
     .unwrap();
     app.insert_resource(ActionMaps::new(map)).unwrap();
     app.add_plugin(InputPlugin).unwrap();
-    install_gameplay(&mut app, moving);
-    app.add_plugin(GameplayActionPlugin).unwrap();
-    app.set_schedule_build_settings(
-        nara::app::__private::FrameIntent,
-        nara::ecs::bevy_ecs::schedule::ScheduleBuildSettings {
-            ambiguity_detection: nara::ecs::bevy_ecs::schedule::LogLevel::Error,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    app.init_resource::<ContextChanges>().unwrap();
-    app.add_systems(
-        CoreStage::First,
-        apply_context_change.before(InputSet::StageActions),
-    )
-    .unwrap();
-    for (phase, command) in [
-        (ActionPhase::Started, "player.move"),
-        (ActionPhase::Released, "player.stop"),
-    ] {
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ActionCommandMap>()
-            .bind(ActionCommandBinding::new(
-                binding().action,
-                phase,
-                GameplayCommandTypeId::new(command).unwrap(),
-            ))
-            .unwrap();
-    }
+    install_movement(&mut app);
     let mut runtime = RuntimeInstance::start(app).unwrap();
     paused_frame(&mut runtime);
     driver(&mut runtime, |scope| {
@@ -308,10 +170,12 @@ fn input_runtime(moving: bool) -> RuntimeInstance {
     runtime
 }
 
-#[cfg(feature = "runtime-input")]
 fn restore_movement(runtime: &mut RuntimeInstance) {
-    let claim =
-        claim_input_endpoint(runtime.world().resource::<InputTimeline>(), WINDOW, SEAT).unwrap();
+    let claim = runtime
+        .world()
+        .resource::<InputTimeline>()
+        .claim_endpoint(WINDOW, SEAT)
+        .unwrap();
     let admission = driver(runtime, |scope| {
         restore_keyboard_holds(
             scope,
@@ -331,11 +195,7 @@ fn restore_movement(runtime: &mut RuntimeInstance) {
             .resource::<ButtonInput<KeyCode>>()
             .pressed(KEY)
     );
-    assert!(runtime.world().resource::<SemanticActions>().pressed(
-        SEAT,
-        &binding().action,
-        &binding().context,
-    ));
+    assert!(runtime.world().resource::<ActionState>().button(MOVE_RIGHT));
     assert!(runtime.world().resource::<ActionOutcomes>().is_empty());
     assert!(
         runtime
@@ -344,15 +204,7 @@ fn restore_movement(runtime: &mut RuntimeInstance) {
             .as_slice()
             .is_empty()
     );
-    assert_eq!(
-        runtime
-            .world()
-            .resource::<GameplayCommandQueue>()
-            .stats()
-            .accepted,
-        0
-    );
-    assert!(runtime.world().resource::<Trace>().consumed.is_empty());
+    assert!(runtime.world().resource::<Trace>().ticks.is_empty());
     assert_eq!(
         capture_keyboard_holds(runtime.world(), WINDOW, SEAT, &[binding()]).unwrap(),
         [KeyboardHold {
@@ -362,39 +214,24 @@ fn restore_movement(runtime: &mut RuntimeInstance) {
     );
 }
 
-fn assert_acknowledged(runtime: &RuntimeInstance, commands: u64, ticks: u64) {
-    let queue = runtime.world().resource::<GameplayCommandQueue>();
-    let stats = queue.stats();
-    assert_eq!(stats.accepted, commands);
-    assert_eq!(stats.admitted, commands);
-    assert_eq!(stats.acknowledged, commands);
-    assert_eq!(stats.acknowledged_ticks, ticks);
-    assert_eq!(stats.closed_through_tick, ticks);
-    assert_eq!(stats.acknowledged_through_tick, ticks);
-    assert_eq!(stats.rejected, 0);
-    assert_eq!(stats.lifecycle_faults, 0);
-    assert!(queue.is_idle());
-    let batch = runtime.world().resource::<GameplayCommandBatch>();
-    assert!(batch.is_empty());
-    assert_eq!(batch.active_tick(), None);
-    let trace = runtime.world().resource::<Trace>();
-    assert_eq!(trace.consumed.len() as u64, ticks);
-    assert_eq!(trace.consumed, trace.captured);
-    assert!(runtime.fault().is_none());
+fn assert_action_edge(
+    sample: &TickSample,
+    phase: ActionPhase,
+    cause: SemanticActionCause,
+) -> &SemanticActionOutcome {
+    let [edge] = sample.semantic.as_slice() else {
+        panic!("expected one semantic edge, got {:?}", sample.semantic);
+    };
+    assert_eq!(edge.seat, SEAT);
+    assert_eq!(edge.action.as_str(), MOVE_RIGHT);
+    assert_eq!(edge.context, ActionContext::gameplay());
+    assert_eq!(edge.phase, phase);
+    assert_eq!(edge.cause, cause);
+    edge
 }
 
-fn assert_local_command(sample: &TickSample, command_type: &str, sequence: u64) {
-    assert_eq!(sample.commands.len(), 1);
-    let command = &sample.commands[0];
-    assert_eq!(command.tick().get(), sample.tick);
-    assert_eq!(command.command_type().as_str(), command_type);
-    assert_eq!(command.source(), &GameplayCommandSource::LocalAction);
-    assert_eq!(command.source_sequence().get(), sequence);
-}
-
-#[cfg(feature = "runtime-input")]
 fn release_before_exact_tick(staged: bool, focus_loss: bool) {
-    let mut runtime = input_runtime(true);
+    let mut runtime = input_runtime();
     restore_movement(&mut runtime);
     if focus_loss {
         let (_, released, _) = driver(&mut runtime, |scope| {
@@ -420,23 +257,18 @@ fn release_before_exact_tick(staged: bool, focus_loss: bool) {
         capture_keyboard_holds(runtime.world(), WINDOW, SEAT, &[binding()]),
         Err(KeyboardContinuationError::PendingInput),
     );
-    assert_eq!(
-        runtime
-            .world()
-            .resource::<GameplayCommandQueue>()
-            .stats()
-            .accepted,
-        0
-    );
+    assert!(runtime.world().resource::<ActionState>().button(MOVE_RIGHT));
+    assert!(runtime.world().resource::<Trace>().ticks.is_empty());
     exact_tick(&mut runtime);
-    assert_acknowledged(&runtime, 1, 1);
-    let sample = &runtime.world().resource::<Trace>().consumed[0];
-    assert_local_command(sample, "player.stop", 1);
-    assert_eq!(sample.motion, Motion::default());
-    assert_eq!(sample.semantic.len(), 1);
-    assert_eq!(sample.semantic[0].phase, ActionPhase::Released);
-    assert_eq!(sample.semantic[0].cause, SemanticActionCause::PhysicalInput);
-    assert!(sample.semantic[0].provenance.is_some());
+    let sample = &runtime.world().resource::<Trace>().ticks[0];
+    let edge = assert_action_edge(
+        sample,
+        ActionPhase::Released,
+        SemanticActionCause::PhysicalInput,
+    );
+    assert!(edge.provenance.is_some());
+    assert!(!sample.moving);
+    assert_eq!(sample.position, 0);
     assert!(
         !runtime
             .world()
@@ -459,15 +291,15 @@ fn release_before_exact_tick(staged: bool, focus_loss: bool) {
         }],
     );
     exact_tick(&mut runtime);
-    assert_acknowledged(&runtime, 1, 2);
-    let sample = &runtime.world().resource::<Trace>().consumed[1];
-    assert!(sample.commands.is_empty());
+    let trace = runtime.world().resource::<Trace>();
+    assert_eq!(trace.ticks.len(), 2);
+    let sample = &trace.ticks[1];
     assert!(sample.semantic.is_empty());
-    assert_eq!(sample.motion, Motion::default());
+    assert!(!sample.moving);
+    assert_eq!(sample.position, 0);
     runtime.finish().unwrap();
 }
 
-#[cfg(feature = "runtime-input")]
 #[test]
 fn staged_release_and_focus_loss_stop_restored_motion_before_exact_tick() {
     for focus_loss in [false, true] {
@@ -475,41 +307,33 @@ fn staged_release_and_focus_loss_stop_restored_motion_before_exact_tick() {
     }
 }
 
-#[cfg(feature = "runtime-input")]
 #[test]
 fn unscanned_release_stops_restored_motion_before_exact_tick() {
     release_before_exact_tick(false, false);
 }
 
-#[cfg(feature = "runtime-input")]
 #[test]
-fn ordinary_press_lowers_once_and_keeps_outcomes_across_three_fixed_ticks() {
-    let mut runtime = input_runtime(false);
+fn ordinary_press_keeps_one_semantic_edge_across_three_fixed_ticks() {
+    let mut runtime = input_runtime();
     control(&mut runtime, RuntimeControl::Resume, RuntimeState::Running);
     keyboard(&mut runtime, ButtonDriverInput::Press(KEY));
     let pre_updates = runtime.world().resource::<Trace>().pre_updates;
     let outcome = runtime.drive(FixedTime::DEFAULT_TIMESTEP * 3).unwrap();
     assert_eq!(outcome.frame_kind(), Some(RuntimeFrameKind::FullFrame));
     assert_eq!(outcome.frame().unwrap().status.fixed_steps, 3);
-    assert_acknowledged(&runtime, 1, 3);
     let trace = runtime.world().resource::<Trace>();
     assert_eq!(trace.pre_updates, pre_updates + 1);
-    assert_local_command(&trace.consumed[0], "player.move", 1);
-    assert_eq!(trace.consumed[0].semantic.len(), 1);
-    assert_eq!(trace.consumed[0].semantic[0].phase, ActionPhase::Started);
-    for (index, sample) in trace.consumed.iter().enumerate() {
+    assert_eq!(trace.ticks.len(), 3);
+    assert_action_edge(
+        &trace.ticks[0],
+        ActionPhase::Started,
+        SemanticActionCause::PhysicalInput,
+    );
+    for (index, sample) in trace.ticks.iter().enumerate() {
         assert_eq!(sample.tick, index as u64 + 1);
-        assert_eq!(
-            sample.motion,
-            Motion {
-                moving: true,
-                position: sample.tick
-            }
-        );
-        assert_eq!(sample.semantic, trace.consumed[0].semantic);
-        if index > 0 {
-            assert!(sample.commands.is_empty());
-        }
+        assert!(sample.moving);
+        assert_eq!(sample.position, sample.tick);
+        assert_eq!(sample.semantic, trace.ticks[0].semantic);
     }
     assert!(
         runtime
@@ -518,13 +342,17 @@ fn ordinary_press_lowers_once_and_keeps_outcomes_across_three_fixed_ticks() {
             .as_slice()
             .is_empty()
     );
+    runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+    let sample = &runtime.world().resource::<Trace>().ticks[3];
+    assert!(sample.semantic.is_empty());
+    assert!(sample.moving);
+    assert_eq!(sample.position, 4);
     runtime.finish().unwrap();
 }
 
-#[cfg(feature = "runtime-input")]
 #[test]
 fn late_fixed_press_uses_next_first_mapping_without_premature_staging() {
-    fn admit_after_first_consume(time: Res<FixedTime>, mut timeline: ResMut<InputTimeline>) {
+    fn admit_after_first_tick(time: Res<FixedTime>, mut timeline: ResMut<InputTimeline>) {
         if time.tick() == 1 {
             let admission = timeline
                 .admit_keyboard(WINDOW, SEAT, ButtonDriverInput::Press(KEY))
@@ -552,27 +380,12 @@ fn late_fixed_press_uses_next_first_mapping_without_premature_staging() {
     let mut app = App::new();
     app.insert_resource(ActionMaps::default()).unwrap();
     app.add_plugin(InputPlugin).unwrap();
-    install_gameplay(&mut app, false);
-    app.add_plugin(GameplayActionPlugin).unwrap();
-    for (phase, command) in [
-        (ActionPhase::Started, "player.move"),
-        (ActionPhase::Released, "player.stop"),
-    ] {
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ActionCommandMap>()
-            .bind(ActionCommandBinding::new(
-                binding().action,
-                phase,
-                GameplayCommandTypeId::new(command).unwrap(),
-            ))
-            .unwrap();
-    }
+    install_movement(&mut app);
     app.add_systems(
         CoreStage::FixedUpdate,
-        admit_after_first_consume
-            .in_set(GameplayCommandSet::Consume)
-            .after(consume_commands),
+        admit_after_first_tick
+            .in_set(FixedUpdateSet::Simulate)
+            .after(simulate_movement),
     )
     .unwrap();
     app.add_systems(
@@ -589,13 +402,13 @@ fn late_fixed_press_uses_next_first_mapping_without_premature_staging() {
     let outcome = runtime.drive(FixedTime::DEFAULT_TIMESTEP * 2).unwrap();
     assert_eq!(outcome.frame_kind(), Some(RuntimeFrameKind::FullFrame));
     assert_eq!(outcome.frame().unwrap().status.fixed_steps, 2);
-    assert_acknowledged(&runtime, 0, 2);
     let trace = runtime.world().resource::<Trace>();
     assert_eq!(trace.pre_updates, 1);
-    for sample in &trace.consumed {
-        assert!(sample.commands.is_empty());
+    assert_eq!(trace.ticks.len(), 2);
+    for sample in &trace.ticks {
         assert!(sample.semantic.is_empty());
-        assert_eq!(sample.motion, Motion::default());
+        assert!(!sample.moving);
+        assert_eq!(sample.position, 0);
     }
     assert!(
         runtime
@@ -615,73 +428,58 @@ fn late_fixed_press_uses_next_first_mapping_without_premature_staging() {
     let outcome = runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
     assert_eq!(outcome.frame_kind(), Some(RuntimeFrameKind::FullFrame));
     assert_eq!(outcome.frame().unwrap().status.fixed_steps, 1);
-    assert_acknowledged(&runtime, 1, 3);
     let trace = runtime.world().resource::<Trace>();
     assert_eq!(trace.pre_updates, 2);
-    let sample = &trace.consumed[2];
-    assert_local_command(sample, "player.move", 1);
-    assert_eq!(sample.semantic.len(), 1);
-    let action = &sample.semantic[0];
-    assert_eq!(action.seat, SEAT);
-    assert_eq!(action.action, binding().action);
-    assert_eq!(action.context, binding().context);
-    assert_eq!(action.phase, ActionPhase::Started);
-    assert_eq!(action.cause, SemanticActionCause::PhysicalInput);
-    assert_eq!(action.provenance.unwrap().sequence(), press_sequence);
-    assert_eq!(
-        sample.motion,
-        Motion {
-            moving: true,
-            position: 1
-        }
+    let sample = &trace.ticks[2];
+    let action = assert_action_edge(
+        sample,
+        ActionPhase::Started,
+        SemanticActionCause::PhysicalInput,
     );
+    assert_eq!(action.provenance.unwrap().sequence(), press_sequence);
+    assert!(sample.moving);
+    assert_eq!(sample.position, 1);
 
     let outcome = runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
     assert_eq!(outcome.frame().unwrap().status.fixed_steps, 1);
-    assert_acknowledged(&runtime, 1, 4);
-    let sample = &runtime.world().resource::<Trace>().consumed[3];
-    assert!(sample.commands.is_empty());
+    let sample = &runtime.world().resource::<Trace>().ticks[3];
     assert!(sample.semantic.is_empty());
-    assert_eq!(
-        sample.motion,
-        Motion {
-            moving: true,
-            position: 2
-        }
-    );
+    assert!(sample.moving);
+    assert_eq!(sample.position, 2);
     runtime.finish().unwrap();
 }
 
-#[cfg(feature = "runtime-input")]
 #[test]
-fn context_cancellation_uses_the_original_release_command_before_exact_movement() {
-    let mut runtime = input_runtime(true);
+fn context_cancellation_releases_restored_motion_before_exact_tick() {
+    let mut runtime = input_runtime();
     restore_movement(&mut runtime);
-    let changes = runtime.world().resource::<ContextChanges>().clone();
     for enabled in [false, true] {
-        assert!(changes.0.lock().unwrap().replace(enabled).is_none());
+        let outcome = runtime
+            .apply_command(move |world: &mut World| {
+                let mut maps = world.resource_mut::<ActionMaps>();
+                let map = maps.get_mut(SEAT).unwrap();
+                if enabled {
+                    map.enable_context(&ActionContext::gameplay())
+                } else {
+                    map.disable_context(&ActionContext::gameplay())
+                }
+            })
+            .unwrap();
+        assert!(outcome.output.unwrap());
+        assert!(outcome.post_operation_fault.is_none());
         paused_frame(&mut runtime);
     }
-    assert_eq!(
-        runtime
-            .world()
-            .resource::<GameplayCommandQueue>()
-            .stats()
-            .accepted,
-        0
-    );
+    assert!(runtime.world().resource::<Trace>().ticks.is_empty());
     exact_tick(&mut runtime);
-    assert_acknowledged(&runtime, 1, 1);
-    let sample = &runtime.world().resource::<Trace>().consumed[0];
-    assert_local_command(sample, "player.stop", 1);
-    assert_eq!(sample.motion, Motion::default());
-    assert_eq!(sample.semantic.len(), 1);
-    assert_eq!(sample.semantic[0].phase, ActionPhase::Released);
-    assert_eq!(
-        sample.semantic[0].cause,
-        SemanticActionCause::ContextChanged
+    let sample = &runtime.world().resource::<Trace>().ticks[0];
+    let edge = assert_action_edge(
+        sample,
+        ActionPhase::Released,
+        SemanticActionCause::ContextChanged,
     );
-    assert_eq!(sample.semantic[0].provenance, None);
+    assert_eq!(edge.provenance, None);
+    assert!(!sample.moving);
+    assert_eq!(sample.position, 0);
     assert!(
         runtime
             .world()
@@ -690,71 +488,19 @@ fn context_cancellation_uses_the_original_release_command_before_exact_movement(
     );
     keyboard(&mut runtime, ButtonDriverInput::Release(KEY));
     exact_tick(&mut runtime);
-    assert_acknowledged(&runtime, 1, 2);
-    assert!(
-        runtime.world().resource::<Trace>().consumed[1]
-            .commands
-            .is_empty()
-    );
+    let sample = &runtime.world().resource::<Trace>().ticks[1];
+    assert!(sample.semantic.is_empty());
+    assert!(!sample.moving);
+    assert_eq!(sample.position, 0);
     keyboard(&mut runtime, ButtonDriverInput::Press(KEY));
     exact_tick(&mut runtime);
-    assert_acknowledged(&runtime, 2, 3);
-    let sample = &runtime.world().resource::<Trace>().consumed[2];
-    assert_local_command(sample, "player.move", 2);
-    assert_eq!(
-        sample.motion,
-        Motion {
-            moving: true,
-            position: 1
-        }
+    let sample = &runtime.world().resource::<Trace>().ticks[2];
+    assert_action_edge(
+        sample,
+        ActionPhase::Started,
+        SemanticActionCause::PhysicalInput,
     );
-    runtime.finish().unwrap();
-}
-
-fn enqueue_after_first_consume(time: Res<FixedTime>, mut commands: ResMut<LocalGameplayCommands>) {
-    if time.tick() == 1 {
-        commands.push(draft("player.marker")).unwrap();
-    }
-}
-
-#[test]
-fn local_commands_drain_once_per_real_frame_and_exact_ticks_work_without_input() {
-    let mut app = App::new();
-    install_gameplay(&mut app, false);
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<LocalGameplayCommands>()
-        .push(draft("player.marker"))
-        .unwrap();
-    app.add_systems(
-        CoreStage::FixedUpdate,
-        enqueue_after_first_consume
-            .in_set(GameplayCommandSet::Consume)
-            .after(consume_commands),
-    )
-    .unwrap();
-    let mut runtime = RuntimeInstance::start(app).unwrap();
-    let outcome = runtime.drive(FixedTime::DEFAULT_TIMESTEP * 3).unwrap();
-    assert_eq!(outcome.frame().unwrap().status.fixed_steps, 3);
-    assert_acknowledged(&runtime, 1, 3);
-    let trace = runtime.world().resource::<Trace>();
-    assert_local_command(&trace.consumed[0], "player.marker", 1);
-    assert!(trace.consumed[1].commands.is_empty());
-    assert!(trace.consumed[2].commands.is_empty());
-    assert_eq!(runtime.world().resource::<LocalGameplayCommands>().len(), 1);
-    control(&mut runtime, RuntimeControl::Pause, RuntimeState::Paused);
-    exact_tick(&mut runtime);
-    assert_acknowledged(&runtime, 2, 4);
-    assert_local_command(
-        &runtime.world().resource::<Trace>().consumed[3],
-        "player.marker",
-        2,
-    );
-    assert!(
-        runtime
-            .world()
-            .resource::<LocalGameplayCommands>()
-            .is_empty()
-    );
+    assert!(sample.moving);
+    assert_eq!(sample.position, 1);
     runtime.finish().unwrap();
 }

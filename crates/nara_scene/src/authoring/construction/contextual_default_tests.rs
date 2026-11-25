@@ -14,11 +14,11 @@ use nara_reflect::{
 
 use super::admit_template_payloads;
 use crate::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringPropertyValue,
-    AuthoringSchemaBasis, PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
-    SceneAuthoringHistoryLimits, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchApplyLimits,
-    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
+    AuthoringDocumentSource, AuthoringPropertyValue, AuthoringSchemaBasis, PrefabAuthoringSession,
+    PrefabDocument, PrefabDocumentCandidate, SceneAuthoringHistoryLimits, SceneAuthoringSession,
+    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
+    ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
+    ScenePlacementParent, authoring::AuthoringAdapterReceipt,
 };
 
 fn component() -> ComponentTypeId {

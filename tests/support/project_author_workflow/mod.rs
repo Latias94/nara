@@ -8,7 +8,10 @@ use std::{
 use nara::{
     fs::{ContentDigest, RelativePath},
     project_tooling::{
+        ProjectToolFailure, ProjectToolFailureStage, ProjectToolInvocationError,
+        ProjectToolRequest, ProjectToolSummary,
         cargo_build::{CargoBuildLimits, CargoBuildRequest, CargoBuildTools},
+        invoke_project_tool,
         process::SupervisedProcessCommand,
         project_cook::project_rust_input_inventory,
     },
@@ -21,7 +24,7 @@ mod process;
 pub(super) mod puzzle;
 mod workspace;
 
-use process::{Custody, Output, install, remove_owned_tree};
+use process::{Custody, install, remove_owned_tree};
 use workspace::Project;
 
 pub fn accept() {
@@ -74,9 +77,7 @@ pub fn accept() {
 
     for (number, project) in [first, second].into_iter().enumerate() {
         project.add_first_system();
-        let first_check = nara(&mut custody, &project, &tools, &target, &["check"]);
-        assert_tool(&first_check, true);
-        assert!(!first_check.stdout.contains("first_fixed_step:"));
+        check(&project.root, None).unwrap();
         let first_tools = custody.directory(&format!("first-tools-{number}"));
         let headless = build(
             &mut custody,
@@ -113,47 +114,19 @@ pub fn accept() {
             Duration::from_secs(120),
         );
         updated.assert_success();
-        let stale = nara(
-            &mut custody,
-            &project,
-            &tools,
-            &target,
-            &["schema", "--check"],
-        );
-        assert_tool(&stale, false);
-        assert!(!stale.stdout.contains("collect_game:"));
-        let refreshed = nara(
-            &mut custody,
-            &project,
-            &tools,
-            &target,
-            &["schema", "--write"],
-        );
-        assert_tool(&refreshed, true);
-        let current = nara(
-            &mut custody,
-            &project,
-            &tools,
-            &target,
-            &["schema", "--check"],
-        );
-        assert_tool(&current, true);
-        let checked = nara(&mut custody, &project, &tools, &target, &["check"]);
-        assert_tool(&checked, true);
-        assert!(
-            !checked.stdout.contains("collect_game:")
-                && !checked.stdout.contains("first_fixed_step:")
-        );
+        let stale = project_failure(schema(&project.root, None, false).unwrap_err());
+        assert_eq!(stale.code(), "project.tool.schema-stale");
+        assert!(schema(&project.root, None, true).unwrap());
+        assert!(!schema(&project.root, None, false).unwrap());
+        check(&project.root, None).unwrap();
 
         let prefab_meta = project.root.join("prefabs/player.prefab.json.meta");
         let prefab_bytes = fs::read(&prefab_meta).unwrap();
         fs::remove_file(&prefab_meta).unwrap();
-        let missing = nara(&mut custody, &project, &tools, &target, &["check"]);
-        assert_tool(&missing, false);
-        assert!(!missing.stdout.contains("first_fixed_step:"));
+        let missing = project_failure(check(&project.root, None).unwrap_err());
+        assert_eq!(missing.stage(), ProjectToolFailureStage::ContentAdmission);
         fs::write(&prefab_meta, &prefab_bytes).unwrap();
-        let repaired = nara(&mut custody, &project, &tools, &target, &["check"]);
-        assert_tool(&repaired, true);
+        check(&project.root, None).unwrap();
         let authored = project.authored_bytes();
 
         let captured_tools = custody.directory(&format!("captured-tools-{number}"));
@@ -343,42 +316,14 @@ pub fn missing_metadata_location() {
             Duration::from_secs(120),
         )
         .assert_success();
-    let schema = nara(
-        &mut custody,
-        &project,
-        &tools,
-        &target,
-        &["schema", "--write"],
-    );
-    assert_tool(&schema, true);
-    let checked = nara(&mut custody, &project, &tools, &target, &["check"]);
-    assert_tool(&checked, true);
+    assert!(schema(&project.root, None, true).unwrap());
+    check(&project.root, None).unwrap();
     let relative = "prefabs/player.prefab.json.meta";
     let metadata = project.root.join(relative);
     let bytes = fs::read(&metadata).unwrap();
     fs::remove_file(&metadata).unwrap();
-    let missing = nara(&mut custody, &project, &tools, &target, &["check"]);
-    assert_tool(&missing, false);
-    assert!(
-        missing.stderr.contains(relative),
-        "missing sidecar must be locatable relative to the project: {}",
-        missing.stderr
-    );
-    assert!(!missing.stderr.contains(project.root.to_str().unwrap()));
-    let error = nara::project_tooling::invoke_project_tool(
-        nara::project_tooling::ProjectToolRequest::Check {
-            project: project.root.clone(),
-            profile: None,
-        },
-    )
-    .unwrap_err();
-    let nara::project_tooling::ProjectToolInvocationError::Project(failure) = error else {
-        panic!("missing metadata must retain its typed content failure: {error:?}");
-    };
-    assert_eq!(
-        failure.stage(),
-        nara::project_tooling::ProjectToolFailureStage::ContentAdmission
-    );
+    let failure = project_failure(check(&project.root, None).unwrap_err());
+    assert_eq!(failure.stage(), ProjectToolFailureStage::ContentAdmission);
     let diagnostic = failure
         .diagnostics()
         .iter()
@@ -386,9 +331,14 @@ pub fn missing_metadata_location() {
         .expect("the original I/O diagnostic must reach the public caller");
     assert_eq!(diagnostic.project_path(), Some(relative));
     assert_eq!(diagnostic.summary(), "Project content host I/O failed");
+    let displayed = failure.to_string();
+    assert!(displayed.contains(relative), "{displayed}");
+    assert!(
+        !displayed.contains(project.root.to_str().unwrap()),
+        "{displayed}"
+    );
     fs::write(&metadata, bytes).unwrap();
-    let repaired = nara(&mut custody, &project, &tools, &target, &["check"]);
-    assert_tool(&repaired, true);
+    check(&project.root, None).unwrap();
     project.assert_identity();
     println!(
         "METADATA_LOCATION_OK project_relative=true restored_check=true gameplay_started=false"
@@ -411,39 +361,44 @@ fn command(
         .environment("CARGO_TARGET_DIR", target)
 }
 
-fn nara(
-    custody: &mut Custody,
-    project: &Project,
-    tools: &CargoBuildTools,
-    target: &Path,
-    args: &[&str],
-) -> Output {
-    let mut invocation = command(
-        Path::new(env!("CARGO_BIN_EXE_nara")),
-        &project.root,
-        tools,
-        target,
-    )
-    .argument(args[0])
-    .argument(&project.root);
-    for arg in &args[1..] {
-        invocation = invocation.argument(arg);
-    }
-    custody.tool(invocation, Duration::from_secs(900))
+fn check(project: &Path, profile: Option<&str>) -> Result<(), ProjectToolInvocationError> {
+    // The compiled tool must return one structured response before the gameplay entry runs.
+    let result = invoke_project_tool(ProjectToolRequest::Check {
+        project: project.to_path_buf(),
+        profile: profile.map(str::to_owned),
+    })?;
+    assert!(
+        matches!(
+            result,
+            ProjectToolSummary::Checked {
+                content_members: 1..
+            }
+        ),
+        "{result:?}"
+    );
+    Ok(())
 }
 
-fn assert_tool(output: &Output, success: bool) {
-    assert_eq!(
-        output.receipt.exit().success(),
-        success,
-        "stdout={}\nstderr={}",
-        output.stdout,
-        output.stderr
-    );
-    if success {
-        output.assert_success();
+fn schema(
+    project: &Path,
+    profile: Option<&str>,
+    write: bool,
+) -> Result<bool, ProjectToolInvocationError> {
+    match invoke_project_tool(ProjectToolRequest::Schema {
+        project: project.to_path_buf(),
+        profile: profile.map(str::to_owned),
+        write,
+    })? {
+        ProjectToolSummary::Schema { written } => Ok(written),
+        summary => panic!("expected the schema outcome: {summary:?}"),
     }
-    assert!(!output.stdout.contains("first_fixed_step:"));
+}
+
+fn project_failure(error: ProjectToolInvocationError) -> ProjectToolFailure {
+    match error {
+        ProjectToolInvocationError::Project(failure) => failure,
+        error => panic!("expected a compiled project failure: {error:?}"),
+    }
 }
 
 fn build(

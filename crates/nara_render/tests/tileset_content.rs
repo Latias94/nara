@@ -1,6 +1,7 @@
 #![cfg(feature = "sprite-render")]
 use std::{collections::VecDeque, time::Duration};
 
+use nara_app::tasks::{TaskKindConfig, TaskPlugin, TaskPoolConfig, TaskShutdownPolicy};
 use nara_app::{App, CoreStage, RuntimeInstance};
 use nara_asset::{
     AssetEvents, AssetPlugin, AssetRecord, AssetRef, AssetReloadDiagnostics, AssetServer,
@@ -11,10 +12,6 @@ use nara_asset::{
 use nara_core::{ByteLimit, ItemLimit, Vec2};
 use nara_ecs::{
     Entity, Resource, World, bevy_ecs::system::SystemState, schedule::IntoScheduleConfigs,
-};
-use nara_hierarchy::{
-    HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyPlugin,
-    HierarchyWriter,
 };
 use nara_render::image::{
     ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImagePreparePlugin,
@@ -33,8 +30,7 @@ use nara_render::tilemap::{
 use nara_render::{
     Camera2d, RenderComponentsPlugin, RenderImage2d, RenderPlugin, RenderTarget, ViewportRect,
 };
-use nara_tasks::{TaskKindConfig, TaskPlugin, TaskPoolConfig, TaskShutdownPolicy};
-use nara_transform::{Transform2d, TransformPlugin};
+use nara_scene::spatial::{SpatialPlugin, Transform2d};
 
 #[derive(Resource)]
 struct Edits {
@@ -245,8 +241,7 @@ fn content_app(limits: TileSetAssetLimits) -> App {
         TaskPlugin::new(TaskPoolConfig::new(one, one, one, TaskShutdownPolicy::default()).unwrap()),
         AssetPlugin,
         nara_reflect::ComponentRegistryPlugin,
-        HierarchyPlugin,
-        TransformPlugin,
+        SpatialPlugin,
         RenderComponentsPlugin,
         RenderPlugin::default(),
         ImagePreparePlugin,
@@ -261,18 +256,16 @@ fn content_app(limits: TileSetAssetLimits) -> App {
     app
 }
 
-fn spawn_camera(world: &mut World) -> Entity {
-    world
-        .spawn((
-            Camera2d {
-                target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
-                viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
-                viewport_height: 100.0,
-                ..Camera2d::default()
-            },
-            Transform2d::default(),
-        ))
-        .id()
+fn spawn_camera(world: &mut World) {
+    world.spawn((
+        Camera2d {
+            target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
+            viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
+            viewport_height: 100.0,
+            ..Camera2d::default()
+        },
+        Transform2d::default(),
+    ));
 }
 
 fn spawn_tilemap(world: &mut World, tileset: Handle<TileSet>) -> Entity {
@@ -330,7 +323,7 @@ fn sprite_and_tilesets_publish_exact_generations_and_revoke_without_releasing_he
     });
     let fixed = request(world, fixed_record, 2);
     let adaptive = request(world, adaptable.clone(), 4);
-    let camera = spawn_camera(world);
+    spawn_camera(world);
     let sprite = world
         .spawn((
             Sprite::from_texture(image_handle, Vec2::ONE),
@@ -339,16 +332,6 @@ fn sprite_and_tilesets_publish_exact_generations_and_revoke_without_releasing_he
         .id();
     let fixed_entity = spawn_tilemap(world, fixed);
     let adaptive_entity = spawn_tilemap(world, adaptive);
-    HierarchyWriter::new(world)
-        .apply_batch(
-            &[camera, sprite, fixed_entity, adaptive_entity].map(|entity| {
-                HierarchyOperation::Place {
-                    entity,
-                    placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-                }
-            }),
-        )
-        .unwrap();
     world.insert_resource(Edits {
         image: image_record,
         image_handle,
@@ -482,22 +465,12 @@ fn atlas_reload_app() -> (App, Handle<TileSet>) {
         .reserve_record::<ImageAsset>(&image_record)
         .unwrap();
     let tileset = request(world, tileset_record.clone(), 2);
-    let camera = spawn_camera(world);
-    let sprite = world
-        .spawn((
-            Sprite::from_texture(image_handle, Vec2::ONE),
-            Transform2d::default(),
-        ))
-        .id();
-    let tilemap = spawn_tilemap(world, tileset);
-    HierarchyWriter::new(world)
-        .apply_batch(
-            &[camera, sprite, tilemap].map(|entity| HierarchyOperation::Place {
-                entity,
-                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-            }),
-        )
-        .unwrap();
+    spawn_camera(world);
+    world.spawn((
+        Sprite::from_texture(image_handle, Vec2::ONE),
+        Transform2d::default(),
+    ));
+    spawn_tilemap(world, tileset);
     world.insert_resource(Edits {
         image: image_record,
         image_handle,

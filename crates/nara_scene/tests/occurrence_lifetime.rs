@@ -6,7 +6,7 @@ mod compiled_scene;
 use nara_asset::ProjectAssetDatabase;
 use nara_core::{ByteLimit, ItemLimit};
 use nara_ecs::World;
-use nara_identity::{EntityLookup, WorldIdentityDomain};
+use nara_ecs::identity::{EntityLookup, WorldIdentityDomain};
 use nara_reflect::ComponentRegistrySnapshot;
 use nara_scene::{
     CompiledSceneCandidate, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,

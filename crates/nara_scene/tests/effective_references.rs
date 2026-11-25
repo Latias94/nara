@@ -8,8 +8,8 @@ use std::collections::BTreeSet;
 
 use nara_asset::{AssetRef, AssetRefExportPolicy};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
+use nara_ecs::identity::{EntityLookup, EntityReference, WorldIdentityDomain};
 use nara_ecs::{Component, World};
-use nara_identity::{EntityLookup, EntityReference, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
@@ -122,7 +122,7 @@ fn registry_patch_and_publication_reject_either_dangling_direct_reference() {
     let targets = [
         local_target(),
         EntityReference::Authored {
-            reference: nara_identity::AuthoredEntityReference::source(scene_id("target")),
+            reference: nara_ecs::identity::AuthoredEntityReference::source(scene_id("target")),
         },
     ];
     for target in targets {
@@ -148,7 +148,7 @@ fn registry_patch_and_publication_reject_either_dangling_direct_reference() {
             let mut prefab = PrefabAuthoringSession::new(original_prefab.clone());
             let prefab_revision = prefab.revision();
             let prefab_history = prefab.history_status();
-            let is_local_reference_error = |report: &nara_diagnostic::DiagnosticReport| {
+            let is_local_reference_error = |report: &nara_core::diagnostic::DiagnosticReport| {
                 report
                     .iter()
                     .any(|diagnostic| diagnostic.code().as_str() == "scene.local-reference-invalid")
@@ -164,7 +164,7 @@ fn registry_patch_and_publication_reject_either_dangling_direct_reference() {
                             && diagnostic.fields().iter().any(|field| {
                                 field.key().as_str() == "operation-index"
                                     && field.value()
-                                        == nara_diagnostic::DiagnosticValueRef::Unsigned(1)
+                                        == nara_core::diagnostic::DiagnosticValueRef::Unsigned(1)
                             })
                     }),
                     "{report:?}"

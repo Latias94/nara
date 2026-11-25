@@ -555,14 +555,13 @@ impl Experiment {
 
 impl Drop for Experiment {
     fn drop(&mut self) {
-        if let Some(run) = self.run.take()
+        if let Some(run) = &self.run
             && !matches!(
                 run.progress(),
                 DesktopRunProgress::Completed(_) | DesktopRunProgress::Failed
             )
         {
-            std::mem::forget(run);
-            eprintln!("runtime_cost: original live DesktopRun retained until process exit");
+            eprintln!("runtime_cost: explicit retirement of the original DesktopRun is incomplete");
         }
     }
 }

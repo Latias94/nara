@@ -1,6 +1,6 @@
 use std::mem::{align_of, size_of};
 
-use nara_ui_kernel::{UiMesh, UiMeshVertex};
+use nara_ui::kernel::{UiMesh, UiMeshVertex};
 
 use super::*;
 use crate::hud::{UiPacketMeshVertex, UiPacketRect, UiPresentationLimitsError};

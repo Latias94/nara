@@ -1,4 +1,4 @@
-use nara_fs::{ContentDigest, DirectoryCapability, FsError, RelativePath};
+use crate::fs::{ContentDigest, DirectoryCapability, FsError, RelativePath};
 use nara_project::ProjectPath;
 
 use crate::{

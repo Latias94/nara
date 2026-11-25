@@ -12,7 +12,7 @@ fn main() -> ExitCode {
     while let Some(argument) = args.next() {
         if argument == "--verify-first-present" && !verify {
             verify = true;
-        } else if argument == "--gamepad" && !gamepad && cfg!(feature = "gamepad") {
+        } else if argument == "--gamepad" && !gamepad && cfg!(all(windows, feature = "gamepad")) {
             gamepad = true;
         } else if argument == "--play-flow" && !play_flow && cfg!(feature = "play-flow") {
             play_flow = true;
@@ -37,7 +37,7 @@ fn main() -> ExitCode {
         use two_level_game::flow::{PlayFlowControls, with_play_flow, with_play_flow_hud};
 
         let controls = PlayFlowControls::Keyboard;
-        #[cfg(feature = "gamepad")]
+        #[cfg(all(windows, feature = "gamepad"))]
         let controls = if gamepad {
             PlayFlowControls::KeyboardAndGamepad
         } else {
@@ -53,7 +53,7 @@ fn main() -> ExitCode {
     } else {
         recipe
     };
-    #[cfg(feature = "gamepad")]
+    #[cfg(all(windows, feature = "gamepad"))]
     let recipe = if gamepad {
         match two_level_game::controller::with_gilrs_input(recipe) {
             Ok(recipe) => recipe,
@@ -116,7 +116,7 @@ fn main() -> ExitCode {
 
 fn usage() -> ExitCode {
     eprint!("usage: desktop [--save ABSOLUTE_PATH] [--verify-first-present]");
-    if cfg!(feature = "gamepad") {
+    if cfg!(all(windows, feature = "gamepad")) {
         eprint!(" [--gamepad]");
     }
     if cfg!(feature = "play-flow") {

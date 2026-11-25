@@ -3,7 +3,6 @@
 
 use std::{
     cell::{RefCell, RefMut},
-    panic::{AssertUnwindSafe, catch_unwind},
     rc::Rc,
     thread::{self, ThreadId},
     time::Duration,
@@ -15,7 +14,6 @@ use nara_app::{
     RuntimeCloseErrorDisposition, RuntimeCloseParticipant, RuntimeCloseParticipantError,
     RuntimeCloseParticipantId, RuntimeClosePolicy, RuntimeCloseProgress, RuntimeInstance,
     RuntimeObligationLedger, RuntimeStartError, RuntimeStartFailure, StartupStage,
-    drive_runtime_quarantine, runtime_quarantine_status,
 };
 use nara_ecs::bevy_ecs::error::BevyError;
 
@@ -608,7 +606,6 @@ fn incomplete_finish_retains_local_aggregate_until_explicit_retry() {
         let after = retirement.drive_retirement();
         let retained_evidence = retirement.close_evidence().clone();
         drop(retirement);
-        let drained = drive_runtime_quarantine();
 
         assert_eq!(
             before,
@@ -623,7 +620,6 @@ fn incomplete_finish_retains_local_aggregate_until_explicit_retry() {
                 .iter()
                 .all(|cause| retained_evidence.causes().contains(cause))
         );
-        assert_eq!(drained.current_thread_retained(), 0);
         assert!(control.local().provider_storage.is_none());
         assert_eq!(
             control
@@ -672,56 +668,6 @@ fn completed_error_releases_provider_and_keeps_aggregate_and_exact_error_evidenc
     assert_released(&control);
 }
 
-#[test]
-fn incomplete_retirement_and_unwinding_retain_local_custody_until_quarantine_drain() {
-    for unwind in [false, true] {
-        let baseline = runtime_quarantine_status().current_thread_retained();
-        let control = Control::new(Reply::Pending);
-        let runtime = start(&control, App::new()).unwrap();
-        let caught = if unwind {
-            catch_unwind(AssertUnwindSafe(move || {
-                let _runtime = runtime;
-                panic!("injected owner unwind");
-            }))
-            .is_err()
-        } else {
-            drop(runtime.finish().unwrap_err());
-            false
-        };
-        let retained = runtime_quarantine_status().current_thread_retained();
-        let live = control.local().provider_storage.is_some();
-        let dropped = control.local().events.contains(&"consumer.drop");
-        let before_drain = control.local().events.clone();
-        control.local().reply = Reply::Complete;
-        let drained = drive_runtime_quarantine();
-        let after_drain = control.local().events.clone();
-
-        assert_eq!(caught, unwind);
-        assert_eq!(retained, baseline + 1);
-        assert!(live && !dropped);
-        assert_eq!(drained.current_thread_retained(), baseline);
-        assert!(control.local().provider_storage.is_none());
-        let mut expected = if unwind {
-            assert!(
-                before_drain.is_empty(),
-                "unwind must not invoke close callbacks"
-            );
-            vec!["consumer.quiesce", "provider.quiesce"]
-        } else {
-            assert!(before_drain.starts_with(&["consumer.quiesce", "provider.quiesce"]));
-            before_drain
-        };
-        expected.extend([
-            "consumer.poll",
-            "consumer.release",
-            "provider.release",
-            "consumer.drop",
-            "provider.drop",
-        ]);
-        assert_eq!(after_drain, expected);
-    }
-}
-
 struct FailStartup;
 
 impl Plugin for FailStartup {
@@ -758,7 +704,6 @@ fn fallible_startup_retains_local_aggregate_and_provider_until_retry() {
     control.local().reply = Reply::Complete;
     let after = failure.drive_retirement();
     drop(failure);
-    let drained = drive_runtime_quarantine();
 
     assert!(startup);
     assert_eq!(
@@ -767,7 +712,6 @@ fn fallible_startup_retains_local_aggregate_and_provider_until_retry() {
     );
     assert!(!drops_before);
     assert_eq!(after, RuntimeCandidateRetirementState::Retired);
-    assert_eq!(drained.current_thread_retained(), 0);
     assert!(control.local().provider_storage.is_none());
     assert!(
         control

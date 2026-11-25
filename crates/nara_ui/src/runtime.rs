@@ -1,18 +1,19 @@
 use std::sync::Arc;
 
-use nara_ecs::{Mut, Resource, World};
-use nara_hierarchy::HierarchyOrder;
-use nara_input::{
-    InputGeometryGeneration, InputIngressError, InputInvalidationReason, InputPresentationEpoch,
-    InputPresentedRoute, InputRouteGeneration, InputSlotGeneration, InputSurfaceId, InputTimeline,
-};
-use nara_ui_kernel::{
+use crate::kernel::{
     UiDispatchError, UiEnvironmentError, UiFrame, UiJournalError, UiPresentationReceipt,
     UiRouteStamp, UiSeatId, UiSemanticSnapshot, UiSurfaceId,
 };
+use nara_ecs::{Entity, Mut, Resource, With, World};
+use nara_input::{
+    InputGeometryGeneration, InputIngressError, InputInvalidationReason, InputPresentationEpoch,
+    InputPresentedRoute, InputRouteGeneration, InputSlotGeneration, InputSurfaceId, InputTimeline,
+    timeline::{InputEndpointClaim, InputRouteCommit, PreparedInputRoutePublication},
+};
+use nara_scene::{hierarchy::HierarchyOrder, spatial::ChildOf};
 use thiserror::Error;
 
-use crate::UiTheme;
+use crate::{UiRoot, UiTheme};
 
 pub(crate) mod candidate;
 mod identity;
@@ -37,7 +38,7 @@ pub struct UiPreparedPresentationAuthority {
     surface_id: UiSurfaceId,
     facts: candidate::UiPresentationFacts,
     prepared: state::UiPreparedPresentation,
-    input_route: nara_input::__private::PreparedInputRoutePublication,
+    input_route: PreparedInputRoutePublication,
 }
 
 impl UiPreparedPresentationAuthority {
@@ -218,7 +219,7 @@ pub(crate) struct UiDefaultTheme(pub(crate) UiTheme);
 pub(crate) fn compile_ui_frames(world: &mut World) {
     world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
         let mut diagnostics = Vec::new();
-        if nara_hierarchy::__private::completed_topology_generation(world).is_none() {
+        if nara_scene::hierarchy::completed_topology_generation(world).is_none() {
             state.discard_all_candidates();
             push_diagnostic(
                 &mut diagnostics,
@@ -230,6 +231,7 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
                 .replace(diagnostics);
             return;
         }
+        let mut runtime_roots = world.query_filtered::<Entity, With<UiRoot>>();
         let Some(order) = world.get_resource::<HierarchyOrder>() else {
             state.discard_all_candidates();
             push_diagnostic(
@@ -242,7 +244,15 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
                 .replace(diagnostics);
             return;
         };
-        let ordered_entities = order.as_slice().to_vec();
+        let mut ordered_entities = order.as_slice().to_vec();
+        let mut runtime_roots = runtime_roots
+            .iter(world)
+            .filter(|&entity| {
+                world.get::<ChildOf>(entity).is_none() && order.index(entity).is_none()
+            })
+            .collect::<Vec<_>>();
+        runtime_roots.sort_unstable_by_key(|entity| entity.index());
+        ordered_entities.extend(runtime_roots);
         let theme = projection::select_theme(world, &ordered_entities, &mut diagnostics);
         let source_revision = state.source_revision();
         if state.advance_source_revision().is_err() {
@@ -346,7 +356,7 @@ pub fn update_ui_surface_slot(
     world: &mut World,
     surface_id: UiSurfaceId,
     endpoint: UiSurfaceEndpoint,
-    transform: nara_ui_kernel::UiSurfaceContentTransform,
+    transform: crate::kernel::UiSurfaceContentTransform,
 ) -> Result<UiSurfaceSlot, UiAdapterError> {
     let theme_revision = active_theme_revision(world);
     world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
@@ -374,22 +384,21 @@ pub fn update_ui_surface_slot(
                 .input_endpoint()
                 .clone()
         } else {
-            nara_input::__private::claim_input_endpoint(
-                world.resource::<InputTimeline>(),
-                endpoint.window(),
-                endpoint.seat(),
-            )?
+            world
+                .resource::<InputTimeline>()
+                .claim_endpoint(endpoint.window(), endpoint.seat())?
         };
         let prepared = state.prepare_surface_slot_update(
             updated,
             UiSurfaceAvailability::Active,
             input_endpoint,
         )?;
-        nara_input::__private::unbind_claimed_endpoint(
-            &mut world.resource_mut::<InputTimeline>(),
-            prepared.released_input_endpoint(),
-            prepared.released_input_route(),
-        )?;
+        world
+            .resource_mut::<InputTimeline>()
+            .unbind_claimed_endpoint(
+                prepared.released_input_endpoint(),
+                prepared.released_input_route(),
+            )?;
         state.commit_surface_slot_update(prepared);
         Ok(updated)
     })
@@ -411,11 +420,12 @@ pub fn suspend_ui_surface(
         else {
             return Ok(None);
         };
-        nara_input::__private::unbind_claimed_endpoint(
-            &mut world.resource_mut::<InputTimeline>(),
-            prepared.released_input_endpoint(),
-            prepared.released_input_route(),
-        )?;
+        world
+            .resource_mut::<InputTimeline>()
+            .unbind_claimed_endpoint(
+                prepared.released_input_endpoint(),
+                prepared.released_input_route(),
+            )?;
         state.commit_surface_slot_update(prepared);
         Ok(Some(suspension))
     })
@@ -430,7 +440,7 @@ pub fn restore_ui_surface(
     world: &mut World,
     surface_id: UiSurfaceId,
     endpoint: UiSurfaceEndpoint,
-    transform: nara_ui_kernel::UiSurfaceContentTransform,
+    transform: crate::kernel::UiSurfaceContentTransform,
 ) -> Result<UiSurfaceSlot, UiAdapterError> {
     let theme_revision = active_theme_revision(world);
     world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
@@ -442,11 +452,12 @@ pub fn restore_ui_surface(
         )?;
         let restored = prepared.slot();
         restored.environment(theme_revision)?;
-        nara_input::__private::unbind_claimed_endpoint(
-            &mut world.resource_mut::<InputTimeline>(),
-            prepared.released_input_endpoint(),
-            prepared.released_input_route(),
-        )?;
+        world
+            .resource_mut::<InputTimeline>()
+            .unbind_claimed_endpoint(
+                prepared.released_input_endpoint(),
+                prepared.released_input_route(),
+            )?;
         state.commit_surface_slot_update(prepared);
         Ok(restored)
     })
@@ -472,11 +483,9 @@ pub fn retire_ui_surface(
             return Ok(None);
         };
         let retirement = prepared.retirement();
-        nara_input::__private::retire_claimed_endpoint(
-            &mut world.resource_mut::<InputTimeline>(),
-            prepared.input_endpoint(),
-            retirement.input_route(),
-        )?;
+        world
+            .resource_mut::<InputTimeline>()
+            .retire_claimed_endpoint(prepared.input_endpoint(), retirement.input_route())?;
         Ok(Some(state.commit_surface_retirement(prepared)))
     })
 }
@@ -485,7 +494,7 @@ pub fn retire_ui_surface(
 pub fn retired_ui_surface_token(
     world: &World,
     surface_id: UiSurfaceId,
-) -> Result<Option<nara_ui_kernel::UiSurfaceRetirementToken>, UiAdapterError> {
+) -> Result<Option<crate::kernel::UiSurfaceRetirementToken>, UiAdapterError> {
     let Some(state) = world.get_resource::<UiRuntimeState>() else {
         return Err(UiAdapterError::RuntimeUnavailable);
     };
@@ -610,10 +619,9 @@ pub fn defer_prepared_ui_presentation(
         prepared,
         input_route,
     } = authority;
-    nara_input::__private::abort_presented_route(
-        &mut world.resource_mut::<InputTimeline>(),
-        input_route,
-    );
+    world
+        .resource_mut::<InputTimeline>()
+        .abort_presented_route(input_route);
     UiDeferredPresentationAuthority {
         surface_id,
         facts,
@@ -672,17 +680,14 @@ pub fn commit_prepared_ui_presentation(
         prepared,
         input_route,
     } = authority;
-    if nara_input::__private::prepared_route_invalidation(
-        world.resource::<InputTimeline>(),
-        &input_route,
-    )
-    .is_some()
+    if world
+        .resource::<InputTimeline>()
+        .prepared_route_invalidation(&input_route)
+        .is_some()
     {
-        let nara_input::__private::InputRouteCommit::Invalidated { reason } =
-            nara_input::__private::commit_presented_route(
-                &mut world.resource_mut::<InputTimeline>(),
-                input_route,
-            )
+        let InputRouteCommit::Invalidated { reason } = world
+            .resource_mut::<InputTimeline>()
+            .commit_presented_route(input_route)
         else {
             unreachable!("exclusive completion preserves the observed Input invalidation");
         };
@@ -698,18 +703,16 @@ pub fn commit_prepared_ui_presentation(
             |surface| surface.prepared_presentation_invalidation(&prepared),
         );
     if let Some(reason) = ui_invalidation {
-        nara_input::__private::abort_presented_route(
-            &mut world.resource_mut::<InputTimeline>(),
-            input_route,
-        );
+        world
+            .resource_mut::<InputTimeline>()
+            .abort_presented_route(input_route);
         return UiPresentationCommit::Invalidated { reason };
     }
-    let input_commit = nara_input::__private::commit_presented_route(
-        &mut world.resource_mut::<InputTimeline>(),
-        input_route,
-    );
+    let input_commit = world
+        .resource_mut::<InputTimeline>()
+        .commit_presented_route(input_route);
     match input_commit {
-        nara_input::__private::InputRouteCommit::Published(input_route) => {
+        InputRouteCommit::Published(input_route) => {
             let receipt = prepared.receipt();
             world
                 .resource_mut::<UiRuntimeState>()
@@ -718,39 +721,38 @@ pub fn commit_prepared_ui_presentation(
                 .commit_presentation(prepared, input_route);
             UiPresentationCommit::Committed(receipt)
         }
-        nara_input::__private::InputRouteCommit::Invalidated { reason } => {
-            UiPresentationCommit::Invalidated {
-                reason: UiPresentationInvalidationReason::Input(reason),
-            }
-        }
+        InputRouteCommit::Invalidated { reason } => UiPresentationCommit::Invalidated {
+            reason: UiPresentationInvalidationReason::Input(reason),
+        },
     }
 }
 
 fn prepare_input_route(
     world: &mut World,
-    input_endpoint: &nara_input::__private::InputEndpointClaim,
+    input_endpoint: &InputEndpointClaim,
     slot: UiSurfaceSlot,
     receipt: UiPresentationReceipt,
-) -> Result<nara_input::__private::PreparedInputRoutePublication, UiAdapterError> {
+) -> Result<PreparedInputRoutePublication, UiAdapterError> {
     let epoch = InputPresentationEpoch::new(receipt.presentation_epoch())
         .ok_or(UiJournalError::ZeroPresentationEpoch)?;
-    nara_input::__private::prepare_claimed_route(
-        &mut world.resource_mut::<InputTimeline>(),
-        input_endpoint,
-        InputPresentedRoute::new(
-            slot.endpoint().window(),
-            InputSurfaceId::new(receipt.surface_id().get()),
-            slot.endpoint().seat(),
-            epoch,
-            InputSlotGeneration::new(receipt.slot_generation().get())
-                .expect("validated receipt slot generation is non-zero"),
-            InputRouteGeneration::new(receipt.route_revision().get())
-                .expect("validated receipt route generation is non-zero"),
-            InputGeometryGeneration::new(receipt.geometry_generation().get())
-                .expect("validated receipt geometry generation is non-zero"),
-        ),
-    )
-    .map_err(UiAdapterError::from)
+    world
+        .resource_mut::<InputTimeline>()
+        .prepare_claimed_route(
+            input_endpoint,
+            InputPresentedRoute::new(
+                slot.endpoint().window(),
+                InputSurfaceId::new(receipt.surface_id().get()),
+                slot.endpoint().seat(),
+                epoch,
+                InputSlotGeneration::new(receipt.slot_generation().get())
+                    .expect("validated receipt slot generation is non-zero"),
+                InputRouteGeneration::new(receipt.route_revision().get())
+                    .expect("validated receipt route generation is non-zero"),
+                InputGeometryGeneration::new(receipt.geometry_generation().get())
+                    .expect("validated receipt geometry generation is non-zero"),
+            ),
+        )
+        .map_err(UiAdapterError::from)
 }
 
 /// Checks that the original Input owner still retains this authority's exact route reservation.
@@ -760,9 +762,9 @@ pub fn can_abort_prepared_ui_presentation(
     world: &World,
     authority: &UiPreparedPresentationAuthority,
 ) -> bool {
-    world.get_resource::<InputTimeline>().is_some_and(|input| {
-        nara_input::__private::owns_prepared_route(input, &authority.input_route)
-    })
+    world
+        .get_resource::<InputTimeline>()
+        .is_some_and(|input| input.owns_prepared_route(&authority.input_route))
 }
 
 /// Aborts one prepared presentation before backend acceptance.
@@ -770,10 +772,9 @@ pub fn abort_prepared_ui_presentation(
     world: &mut World,
     authority: UiPreparedPresentationAuthority,
 ) {
-    nara_input::__private::abort_presented_route(
-        &mut world.resource_mut::<InputTimeline>(),
-        authority.input_route,
-    );
+    world
+        .resource_mut::<InputTimeline>()
+        .abort_presented_route(authority.input_route);
 }
 
 /// Supersedes one prepared presentation before a newer attempt is admitted.
@@ -781,10 +782,7 @@ pub fn supersede_prepared_ui_presentation(
     world: &mut World,
     authority: UiPreparedPresentationAuthority,
 ) {
-    nara_input::__private::supersede_presented_route(
-        &mut world.resource_mut::<InputTimeline>(),
-        authority.input_route,
-    );
+    abort_prepared_ui_presentation(world, authority);
 }
 
 /// Projects accessibility semantics from the latest submitted frame and interaction state.

@@ -42,9 +42,7 @@ fn original_region_material_packets_draw_and_survive_actual_room_and_runtime_ret
     let mut host = WgpuRenderHost::offscreen();
     let result = catch_unwind(AssertUnwindSafe(|| qualify(&mut host, &expected)));
     let retired = gpu::retire(&mut host);
-    if retired.is_err() {
-        std::mem::forget(host);
-    }
+    drop(host);
     if let Err(panic) = result {
         if let Err(error) = retired {
             eprintln!("original region Material Host cleanup also failed: {error}");

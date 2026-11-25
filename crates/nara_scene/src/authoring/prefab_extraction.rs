@@ -34,7 +34,6 @@ use crate::{
 ///
 /// Logical storage is conservatively charged cumulatively, including original history. Dropping
 /// input or refused work does not refund this allowance. It is not an allocator/RSS measurement.
-#[doc(hidden)]
 #[must_use]
 pub struct PrefabExtractionWork {
     identity: Arc<ExtractionWorkIdentity>,
@@ -46,14 +45,13 @@ struct ExtractionWorkIdentity;
 
 /// Immutable saved-source combination checked through this extraction's actual environments.
 /// It has no file receipt, saved checkpoint, Ready or Native execution authority.
-#[doc(hidden)]
 #[must_use]
 pub struct PrefabExtractionSavedGeneration {
     inner: VerifiedExtractionSavedGeneration,
     work: Arc<ExtractionWorkIdentity>,
 }
 
-#[doc(hidden)]
+/// A refusal to admit the saved source set for a prefab extraction.
 #[derive(Debug)]
 pub struct PrefabExtractionSavedGenerationError {
     report: ScenePatchReport,
@@ -102,6 +100,7 @@ impl PrefabExtractionSavedGeneration {
     }
 }
 
+/// Work and retained storage charged during prefab extraction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrefabExtractionUsage {
     pub work_nodes: usize,
@@ -186,7 +185,6 @@ macro_rules! extraction_input {
     ($input:ident, $session:ident, $document:ty, $kind:ident, $inputs:expr, $detached:expr) => {
         /// A share of the actual original source/classification, with exact live observations.
         /// The original Session owns its history throughout capture and worker preparation.
-        #[doc(hidden)]
         #[derive(Debug)]
         #[must_use]
         pub struct $input {
@@ -195,7 +193,7 @@ macro_rules! extraction_input {
         }
 
         impl $session {
-            #[doc(hidden)]
+            /// Captures the current source and classification for prefab extraction.
             pub fn capture_prefab_extraction_input(
                 &self,
                 work: &mut PrefabExtractionWork,
@@ -229,7 +227,6 @@ macro_rules! extraction_input {
 
             /// Rechecks the original owner without installing a source or changing history.
             /// Navigation and worker transfer do not invalidate this source-local observation.
-            #[doc(hidden)]
             pub fn validate_prefab_extraction_input(
                 &self,
                 input: &$input,
@@ -325,13 +322,13 @@ macro_rules! extraction_input {
 
 fn scene_inputs(
     _: &SceneDocument,
-) -> Option<&std::collections::BTreeSet<nara_identity::ReferenceInputId>> {
+) -> Option<&std::collections::BTreeSet<nara_ecs::identity::ReferenceInputId>> {
     None
 }
 
 fn prefab_inputs(
     document: &PrefabDocument,
-) -> Option<&std::collections::BTreeSet<nara_identity::ReferenceInputId>> {
+) -> Option<&std::collections::BTreeSet<nara_ecs::identity::ReferenceInputId>> {
     Some(&document.inputs)
 }
 
@@ -353,7 +350,6 @@ extraction_input!(
 );
 
 /// Fixed proposed Q identity. The Project owner separately proves file and sidecar absence.
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct PrefabExtractionDestination {
     pub key: SourceDocumentKey,
@@ -365,7 +361,6 @@ pub struct PrefabExtractionDestination {
 ///
 /// The capture owner supplies its actual open/closed source allocations, associations and basis.
 /// Those incumbents and decoded buffers must already be charged to this operation's Work.
-#[doc(hidden)]
 #[must_use]
 pub struct PrefabExtractionRequest {
     inner: ExtractionRequest,
@@ -537,7 +532,6 @@ impl PrefabExtractionRequest {
 
 /// Owner-created source construction and complete correspondence, retaining original inputs.
 /// This has no Session mutation, saved checkpoint, file receipt or Native execution authority.
-#[doc(hidden)]
 #[must_use]
 pub struct PreparedPrefabExtraction {
     corpus: VerifiedExtractionCorpus,
@@ -725,7 +719,6 @@ impl PreparedPrefabExtraction {
 }
 
 /// Refused exclusive binding returns the exact move-only candidate without installing it.
-#[doc(hidden)]
 #[derive(Debug)]
 #[must_use]
 pub struct PrefabExtractionSourceBindFailure<P> {
@@ -748,7 +741,6 @@ macro_rules! extracted_source {
      $detached:expr, $install:expr) => {
         /// An actual verified working-source successor under its original nominal Schema basis.
         /// It contains no saved token or file receipt; persistence binds those separately.
-        #[doc(hidden)]
         #[derive(Debug)]
         #[must_use]
         pub struct $prepared {
@@ -894,7 +886,7 @@ macro_rules! extracted_source {
         }
 
         impl $session {
-            #[doc(hidden)]
+            /// Checks that the prepared extraction still applies to this source revision.
             pub fn validate_extracted_source(
                 &self,
                 prepared: &$prepared,
@@ -916,7 +908,6 @@ macro_rules! extracted_source {
 
             /// Holds the original source exclusively for the complete-set owner's final swap.
             /// Dropping the guard changes nothing; no file publication is implied.
-            #[doc(hidden)]
             pub fn bind_extracted_source(
                 &mut self,
                 prepared: $prepared,
@@ -931,7 +922,7 @@ macro_rules! extracted_source {
             }
         }
 
-        #[doc(hidden)]
+        /// Exclusive access for installing a prepared extraction in its source session.
         #[derive(Debug)]
         #[must_use]
         pub struct $commit<'a> {
@@ -974,7 +965,7 @@ fn extraction_readmission(
 fn extraction_persistence_work(
     placements: &[SceneEntityPlacement],
     entities: &[SceneEntityRecord],
-    inputs: Option<&std::collections::BTreeSet<nara_identity::ReferenceInputId>>,
+    inputs: Option<&std::collections::BTreeSet<nara_ecs::identity::ReferenceInputId>>,
     state: &crate::authoring_decode::AuthoringDocumentState,
     mut admit: impl FnMut(Option<usize>) -> Result<(), ScenePatchReport>,
 ) -> Result<(), ScenePatchReport> {
@@ -989,7 +980,7 @@ fn extraction_persistence_work(
             admit(
                 inputs
                     .len()
-                    .checked_mul(size_of::<nara_identity::ReferenceInputId>()),
+                    .checked_mul(size_of::<nara_ecs::identity::ReferenceInputId>()),
             )?;
             crate::authoring_decode::retained_prefab_inputs_bytes(inputs)
         }
@@ -1054,7 +1045,7 @@ extracted_source!(
     |_: &mut PrefabAuthoringSession| {}
 );
 
-#[doc(hidden)]
+/// Refused extraction preparation with the original request and accumulated work.
 #[derive(Debug)]
 #[must_use]
 pub struct PrefabExtractionFailure {
@@ -1067,7 +1058,6 @@ pub struct PrefabExtractionFailure {
 }
 
 /// Pure stored-generation refusal preserves the exact request, fixed outputs and spent Work.
-#[doc(hidden)]
 #[must_use]
 pub struct PrefabExtractionStoredAdmissionFailure {
     request: PrefabExtractionRequest,

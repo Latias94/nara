@@ -1,7 +1,7 @@
 use std::io::Cursor;
 
+use nara_app::tasks::TaskCancellationToken;
 use nara_asset::AssetRecord;
-use nara_tasks::TaskCancellationToken;
 
 use crate::image::budget::{ImageImportCharge, ImageImportReservation};
 use crate::image::limits::{

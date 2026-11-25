@@ -11,7 +11,7 @@ use std::{
 use bevy_tasks::{ComputeTaskPool, TaskPoolBuilder};
 use nara_app::{
     RuntimeCloseCause, RuntimeClosePolicy, RuntimeControl, RuntimeControlRequestResult,
-    RuntimeFaultKind, RuntimeState, runtime_quarantine_status,
+    RuntimeFaultKind, RuntimeState,
 };
 use nara_ecs::{
     ScheduleLabel,
@@ -124,11 +124,11 @@ fn assert_parallel_managed_execution() {
     }
     peers.push((
         "frame intent".to_owned(),
-        add_peers(&mut app, nara_app::__private::FrameIntent, deadline),
+        add_peers(&mut app, nara_app::FrameIntent, deadline),
     ));
     peers.push((
         "frame cleanup".to_owned(),
-        add_peers(&mut app, nara_app::__private::FrameCleanup, deadline),
+        add_peers(&mut app, nara_app::FrameCleanup, deadline),
     ));
 
     let mut runtime = RuntimeInstance::start(app).unwrap();
@@ -219,7 +219,6 @@ fn assert_custom_executors_are_preserved() {
 
 fn assert_parallel_fault_retains_finite_close_custody() {
     let driver = thread::current().id();
-    let quarantine_before = runtime_quarantine_status().current_thread_retained();
     let gate = CloseGate::default();
     let failures = Arc::new(AtomicUsize::new(0));
     let later_runs = Arc::new(AtomicUsize::new(0));
@@ -305,10 +304,6 @@ fn assert_parallel_fault_retains_finite_close_custody() {
     assert_eq!(trace.startup, [driver]);
     assert_eq!(trace.update, [driver]);
     assert_eq!(trace.drops, [driver]);
-    assert_eq!(
-        runtime_quarantine_status().current_thread_retained(),
-        quarantine_before
-    );
 }
 
 fn assert_original_process_global_pool(pool: &'static ComputeTaskPool) {

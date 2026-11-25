@@ -1,14 +1,14 @@
 use super::*;
 use crate::ExtractedViews;
 use crate::sprite_render::batching::ExtractedSprites;
+use nara_scene::spatial::ChildOf;
 
 #[test]
 fn per_view_culling_matches_unclipped_runtime_geometry_pixels() {
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
-        nara_hierarchy::HierarchyPlugin,
-        nara_transform::TransformPlugin,
+        nara_scene::spatial::SpatialPlugin,
         crate::RenderComponentsPlugin,
         crate::RenderPlugin::default(),
         crate::image::ImagePreparePlugin,
@@ -16,25 +16,20 @@ fn per_view_culling_matches_unclipped_runtime_geometry_pixels() {
     ))
     .unwrap();
     let world = app.world_mut().unwrap();
-    let mut roots = Vec::new();
     for (position, rotation) in [(Vec2::ZERO, 0.0), (Vec2::new(24.0, 7.0), 0.37)] {
-        roots.push(
-            world
-                .spawn((
-                    Camera2d {
-                        target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
-                        viewport: Some(ViewportRect::new(0, 0, 64, 64).unwrap()),
-                        viewport_height: 64.0,
-                        ..Default::default()
-                    },
-                    Transform2d {
-                        translation: position,
-                        rotation,
-                        ..Default::default()
-                    },
-                ))
-                .id(),
-        );
+        world.spawn((
+            Camera2d {
+                target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
+                viewport: Some(ViewportRect::new(0, 0, 64, 64).unwrap()),
+                viewport_height: 64.0,
+                ..Default::default()
+            },
+            Transform2d {
+                translation: position,
+                rotation,
+                ..Default::default()
+            },
+        ));
     }
     // Nonuniform parent scale plus child rotation produces a sheared global quad.
     let parent = world
@@ -44,54 +39,31 @@ fn per_view_culling_matches_unclipped_runtime_geometry_pixels() {
             ..Default::default()
         })
         .id();
-    roots.push(parent);
-    let sheared = world
-        .spawn((
-            Sprite::from_color(Vec2::new(17.0, 9.0), Color::rgba(0.0, 0.0, 1.0, 0.5)).with_layer(2),
+    world.spawn((
+        Sprite::from_color(Vec2::new(17.0, 9.0), Color::rgba(0.0, 0.0, 1.0, 0.5)).with_layer(2),
+        Transform2d {
+            rotation: 0.71,
+            ..Default::default()
+        },
+        ChildOf(parent),
+    ));
+    for x in [-100.0, -33.0, -31.0, -3.0, 31.0, 33.0, 100.0] {
+        world.spawn((
+            Sprite::from_color(Vec2::new(5.0, 23.0), Color::rgba(1.0, 0.0, 0.0, 0.5)),
             Transform2d {
-                rotation: 0.71,
+                translation: Vec2::new(x, 3.0),
+                rotation: 0.4,
+                scale: Vec2::new(-1.0, 1.0),
                 ..Default::default()
             },
-        ))
-        .id();
-    for x in [-100.0, -33.0, -31.0, -3.0, 31.0, 33.0, 100.0] {
-        roots.push(
-            world
-                .spawn((
-                    Sprite::from_color(Vec2::new(5.0, 23.0), Color::rgba(1.0, 0.0, 0.0, 0.5)),
-                    Transform2d {
-                        translation: Vec2::new(x, 3.0),
-                        rotation: 0.4,
-                        scale: Vec2::new(-1.0, 1.0),
-                    },
-                ))
-                .id(),
-        );
+        ));
         let mut map = Tilemap::new(Vec2::new(4.0, 5.0)).with_layer(1);
         map.set_cell(
             TileCoord::new(0, 0),
             TileCell::new(TileIndex::new(0)).with_color(Color::rgba(0.0, 1.0, 0.0, 0.5)),
         );
-        roots.push(
-            world
-                .spawn((map, Transform2d::from_translation(Vec2::new(x, -8.0))))
-                .id(),
-        );
+        world.spawn((map, Transform2d::from_xy(x, -8.0)));
     }
-    let operations = roots
-        .into_iter()
-        .map(|entity| HierarchyOperation::Place {
-            entity,
-            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-        })
-        .chain([HierarchyOperation::Place {
-            entity: sheared,
-            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent }),
-        }])
-        .collect::<Vec<_>>();
-    HierarchyWriter::new(world)
-        .apply_batch(&operations)
-        .unwrap();
     let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(std::time::Duration::ZERO).unwrap();
     let batches = runtime.world().resource::<SpriteBatches>().clone();

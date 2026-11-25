@@ -451,10 +451,13 @@ pub mod native {
                 while build.retry_cleanup().is_err() {
                     if Instant::now() >= deadline {
                         eprintln!(
-                            "Two-Level delivery retains original build custody: pid={:?}",
+                            "Two-Level delivery build cleanup remained incomplete: pid={:?}",
                             build.process_id(),
                         );
-                        std::mem::forget((self.build_cleanup.take(), self.fixture.take()));
+                        drop(self.build_cleanup.take());
+                        if let Some(fixture) = self.fixture.take() {
+                            fixture.retain_tree();
+                        }
                         if !thread::panicking() {
                             panic!(
                                 "build cleanup is incomplete; the owned source/package tree was retained"
@@ -491,12 +494,13 @@ pub mod native {
                 let _ = owner.retry_cleanup(Instant::now());
             }
             eprintln!(
-                "Two-Level delivery retains original native custody: {}",
+                "Two-Level delivery native cleanup remained incomplete: {}",
                 diagnostics(owner),
             );
-            let owner = self.process.take().unwrap();
-            let fixture = self.fixture.take();
-            std::mem::forget((owner, fixture));
+            drop(self.process.take());
+            if let Some(fixture) = self.fixture.take() {
+                fixture.retain_tree();
+            }
             if !thread::panicking() {
                 panic!("native cleanup is incomplete; the owned source/package tree was retained");
             }

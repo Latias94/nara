@@ -11,11 +11,6 @@ use nara::{
     advanced_prelude::CurrentScene,
     app::{FixedCatchUpPolicy, FixedTime},
     fs::{ContentDigest, RelativePath},
-    gameplay::{
-        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandKey,
-        GameplayCommandQueue, GameplayCommandSourceSequence, GameplayCommandSubmission,
-        GameplayCommandTick,
-    },
     identity::EntityLookup,
     project::{ProductCapability, ProductCapabilitySet, RuntimePreset},
     project_host::{
@@ -30,7 +25,10 @@ use nara::{
 use serde_json::{Value, json};
 use two_level_game::{
     GamePhase, GameSnapshot, RunOptions, Scenario,
-    command::SERVER_COMMAND_SOURCE,
+    command::{
+        CommandKey, CommandSequence, CommandSource, CommandSubmitError, CommandTick, GameCommand,
+        MAX_COMMAND_TICK_OFFSET, SERVER_COMMAND_SOURCE, ScheduledCommand,
+    },
     delivery::{PlayerSelection, RuntimeKind},
     levels::{LevelId, LevelKey},
     markers::marker_product,
@@ -95,14 +93,24 @@ impl From<&str> for Failure {
 impl From<HeadlessSessionError> for Failure {
     fn from(error: HeadlessSessionError) -> Self {
         match &error {
-            HeadlessSessionError::CommandRejected(_) => Self::Rejected(error.to_string()),
-            HeadlessSessionError::CommandFault { outcome, fault } => {
-                Self::Error(format!("{error}: outcome={outcome:?}, fault={fault:?}"))
-            }
             HeadlessSessionError::Runtime(diagnostics) => {
                 Self::Error(format!("{error}: {diagnostics:?}"))
             }
             _ => Self::Error(error.to_string()),
+        }
+    }
+}
+
+impl From<CommandSubmitError> for Failure {
+    fn from(error: CommandSubmitError) -> Self {
+        match error {
+            CommandSubmitError::Rejected(error) => Self::Rejected(error.to_string()),
+            CommandSubmitError::Headless(error) => Self::from(error),
+            CommandSubmitError::Runtime { output, fault } => Self::Error(format!(
+                "command admission fault: outcome={output:?}, fault={fault:?}"
+            )),
+            #[cfg(feature = "desktop")]
+            CommandSubmitError::Desktop(error) => Self::Error(error.to_string()),
         }
     }
 }
@@ -241,10 +249,11 @@ pub(super) fn run(invocation: Invocation) -> ExitCode {
     } else {
         report.emit(status, message.as_deref())
     };
-    if !cleanup_complete {
-        std::process::exit(1);
+    if cleanup_complete {
+        exit
+    } else {
+        ExitCode::FAILURE
     }
-    exit
 }
 
 fn open_pack() -> Result<RuntimeContentBase, String> {
@@ -342,7 +351,7 @@ fn run_player(
         return Ok(());
     };
     prepare_verification(session)?;
-    session.submit(command)?;
+    command.submit_headless(session)?;
     let mut restored = None;
     for _ in 0..MAX_FRAMES {
         progress.step(session, deadline)?;
@@ -409,49 +418,41 @@ fn check_gameplay(snapshot: &GameSnapshot) -> Result<(), Failure> {
 pub(super) fn submit_external(
     session: &mut HeadlessSession,
     last_sequence: &mut u64,
-    draft: GameplayCommandDraft,
-) -> Result<GameplayCommandKey, Failure> {
-    submit_external_after(session, last_sequence, draft, NonZeroU64::MIN)
+    intent: GameCommand,
+) -> Result<CommandKey, Failure> {
+    submit_external_after(session, last_sequence, intent, NonZeroU64::MIN)
 }
 
 pub(super) fn submit_external_after(
     session: &mut HeadlessSession,
     last_sequence: &mut u64,
-    draft: GameplayCommandDraft,
+    intent: GameCommand,
     after_ticks: NonZeroU64,
-) -> Result<GameplayCommandKey, Failure> {
-    let (current_tick, horizon) = session.observe(|world| {
-        (
-            world.resource::<FixedTime>().tick(),
-            world
-                .resource::<GameplayCommandQueue>()
-                .settings()
-                .future_ticks(),
-        )
-    })?;
-    if after_ticks > horizon {
+) -> Result<CommandKey, Failure> {
+    let current_tick = session.observe(|world| world.resource::<FixedTime>().tick())?;
+    if after_ticks.get() > MAX_COMMAND_TICK_OFFSET {
         return Err(Failure::Rejected(format!(
-            "Server command after_ticks exceeds the configured queue horizon of {horizon}"
+            "Server command after_ticks exceeds the configured queue horizon of {MAX_COMMAND_TICK_OFFSET}"
         )));
     }
     let tick = current_tick
         .checked_add(after_ticks.get())
-        .and_then(GameplayCommandTick::new)
+        .and_then(CommandTick::new)
         .ok_or("Server tick cannot accept another command")?;
     let sequence = last_sequence
         .checked_add(1)
-        .and_then(GameplayCommandSourceSequence::new)
+        .and_then(CommandSequence::new)
         .ok_or("Server command sequence exhausted")?;
-    let source = GameplayCommandIngressSource::external(SERVER_COMMAND_SOURCE)
-        .expect("static Server command source");
-    let command = GameplayCommandSubmission::new(tick, source, sequence, draft);
-    let expected = command.key();
-    let admitted = session.submit(command)?;
-    if admitted != expected {
-        return Err("Server command queue changed the submitted external identity".into());
+    let source =
+        CommandSource::external(SERVER_COMMAND_SOURCE).expect("static Server command source");
+    let result = ScheduledCommand::new(tick, source, sequence, intent).submit_headless(session);
+    if matches!(
+        &result,
+        Ok(_) | Err(CommandSubmitError::Runtime { output: Ok(_), .. })
+    ) {
+        *last_sequence = sequence.get();
     }
-    *last_sequence = sequence.get();
-    Ok(admitted)
+    result.map_err(Into::into)
 }
 
 fn checkpoint(

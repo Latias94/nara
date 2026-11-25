@@ -14,7 +14,6 @@ impl InputTimeline {
         raw_label: u16,
     ) -> Result<GamepadConnection, InputIngressError> {
         self.connect_gamepad_origin(window, seat, raw_label, InputEventOrigin::Platform)
-            .map(|(connection, _)| connection)
     }
 
     /// Connects a synthetic stream through the same physical membership and terminal owner.
@@ -27,16 +26,15 @@ impl InputTimeline {
         raw_label: u16,
     ) -> Result<GamepadConnection, InputIngressError> {
         self.connect_gamepad_origin(window, seat, raw_label, InputEventOrigin::Synthetic)
-            .map(|(connection, _)| connection)
     }
 
-    pub(super) fn connect_gamepad_origin(
+    fn connect_gamepad_origin(
         &mut self,
         window: InputWindowId,
         seat: InputSeatId,
         raw_label: u16,
         origin: InputEventOrigin,
-    ) -> Result<(GamepadConnection, InputAdmission), InputIngressError> {
+    ) -> Result<GamepadConnection, InputIngressError> {
         let endpoint_index = self.topology.connected_endpoint(window, seat)?;
         let endpoint = self.topology.endpoints[endpoint_index].unwrap();
         let slot = self.topology.free_gamepad()?;
@@ -55,7 +53,7 @@ impl InputTimeline {
             },
             origin,
         );
-        let admission = self.publish(plan, &[draft]);
+        self.publish(plan, &[draft]);
         let gamepad = self
             .topology
             .install_gamepad(slot, identity, endpoint.id, raw_label, origin);
@@ -64,17 +62,14 @@ impl InputTimeline {
             .unwrap()
             .rearm();
         self.assert_accounting();
-        Ok((
-            GamepadConnection {
-                owner: Arc::clone(&self.owner),
-                endpoint: endpoint.id,
-                gamepad,
-                raw_label,
-                window,
-                seat,
-            },
-            admission,
-        ))
+        Ok(GamepadConnection {
+            owner: Arc::clone(&self.owner),
+            endpoint: endpoint.id,
+            gamepad,
+            raw_label,
+            window,
+            seat,
+        })
     }
 
     fn connected_gamepad(

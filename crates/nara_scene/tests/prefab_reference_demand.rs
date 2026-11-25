@@ -7,11 +7,12 @@ use nara_asset::{
     AssetSourcePath, ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
 use nara_reflect::{
-    __private::collect_declared_effective_asset_references_with_admission, ComponentCapability,
-    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath,
-    ComponentPropertyStep, ComponentRegistryBuilder, ComponentSchema, ComponentSchemaCatalog,
-    ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId,
-    ComponentValue, ComponentValueShape, DeclaredAssetReference, PersistentComponentSchemaOwnerId,
+    ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+    ComponentPropertyPath, ComponentPropertyStep, ComponentRegistryBuilder, ComponentSchema,
+    ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
+    ComponentShapeMember, ComponentTypeId, ComponentValue, ComponentValueShape,
+    DeclaredAssetReference, PersistentComponentSchemaOwnerId,
+    asset_reference::collect_declared_effective_asset_references_with_admission,
     encode_asset_reference_value, replace_component_property, rewrite_declared_asset_references,
 };
 use nara_scene::{

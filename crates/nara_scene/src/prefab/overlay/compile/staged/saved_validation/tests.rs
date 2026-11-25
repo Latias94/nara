@@ -2,7 +2,7 @@ use std::{convert::Infallible, sync::Arc};
 
 use nara_asset::AssetRef;
 use nara_core::ByteLimit;
-use nara_identity::{AuthoredEntityReference, EntityReference, ReferenceInputId};
+use nara_ecs::identity::{AuthoredEntityReference, EntityReference, ReferenceInputId};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
@@ -11,12 +11,12 @@ use nara_reflect::{
 };
 
 use crate::{
-    __private::AuthoringAdapterReceipt,
     AuthoringSchemaBasis, PrefabComponentIntent, PrefabComponentSetMode, PrefabDeclarationSource,
     PrefabDocument, PrefabEntityTarget, PrefabInstance, PrefabInstancePath, PrefabOverlay,
     PrefabOverlaySlot, PrefabReferenceArguments, ResolvedPrefabSource, SceneCompilationFailureKind,
     SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SourceDocumentKey,
     SourceDocumentKind,
+    authoring::AuthoringAdapterReceipt,
     prefab::{
         try_compile_authoring_scene_with_loader, try_validate_authoring_saved_prefab_with_loader,
     },

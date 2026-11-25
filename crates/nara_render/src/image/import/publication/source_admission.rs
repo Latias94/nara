@@ -5,13 +5,13 @@ use std::{
 };
 
 use image::ImageEncoder;
+use nara_app::tasks::TaskCancellationToken;
 use nara_asset::{
     AssetEvents, AssetProductRef, AssetRecord, AssetServer, AssetSlotRevision, AssetSourceKind,
     AssetSourcePath, AssetStateRevision, AssetStates, AssetVersion, Assets, Handle,
     ImportedProductId, StableAssetId,
 };
-use nara_fs::{FileCapability, TrustMode};
-use nara_tasks::TaskCancellationToken;
+use nara_core::vfs::capabilities::{FileCapability, TrustMode};
 
 use crate::image::{
     ImageAsset, ImageBytesImportRequest, ImageColorSpace, ImageExtent, ImageFileImportRequest,

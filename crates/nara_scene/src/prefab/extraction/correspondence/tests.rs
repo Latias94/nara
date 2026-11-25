@@ -3,7 +3,7 @@
 use std::{collections::BTreeSet, convert::Infallible, sync::Arc};
 
 use nara_core::{ByteLimit, ItemLimit};
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference,
 };
@@ -16,11 +16,11 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    __private::AuthoringAdapterReceipt,
     PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop,
     ResolvedPrefabSource, SceneCompilationLimits, SceneComponentRecord, SceneDocument,
     SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
     SourceDocumentKind,
+    authoring::AuthoringAdapterReceipt,
     prefab::{
         SourceDocumentInput,
         extraction::{

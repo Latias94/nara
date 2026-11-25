@@ -1,4 +1,4 @@
-use nara_fs::{ContentDigest, DirectoryCapability, FileCapability, FileIdentity, RelativePath};
+use crate::fs::{ContentDigest, DirectoryCapability, FileCapability, FileIdentity, RelativePath};
 use nara_project::ProjectPath;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleLimits, PersistentComponentSchemaOwnerId,

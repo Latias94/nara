@@ -9,14 +9,14 @@ use std::{
 };
 
 use nara_asset::AssetRef;
-use nara_diagnostic::DiagnosticReport;
-use nara_identity::EntityReference;
+use nara_core::diagnostic::DiagnosticReport;
+use nara_ecs::identity::EntityReference;
 use nara_reflect::{
-    __private::validate_value_materialization_budget, ComponentFieldId, ComponentFieldPathError,
-    ComponentFieldSchema, ComponentPropertyError, ComponentPropertyPath,
-    ComponentPropertyReadBudget, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueMaterializationLimits, ComponentValueRef, ComponentValueShape,
-    ResolvedComponentProperty, resolve_component_property_in_root,
+    ComponentFieldId, ComponentFieldPathError, ComponentFieldSchema, ComponentPropertyError,
+    ComponentPropertyPath, ComponentPropertyReadBudget, ComponentSchema, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueMaterializationLimits, ComponentValueRef,
+    ComponentValueShape, ResolvedComponentProperty,
+    effective::validate_value_materialization_budget, resolve_component_property_in_root,
 };
 
 use super::{
@@ -44,7 +44,6 @@ pub use property_apply::{AuthoringPrefabPropertyApplyError, ObservedPrefabProper
 pub use property_write::{AuthoringPrefabPropertyWriteError, ObservedPrefabPropertyWrite};
 
 /// A working-source inspection can prepare edits against its captured document allocation.
-#[doc(hidden)]
 pub enum PrefabInspectionInput<'a> {
     WorkingScene(&'a Arc<crate::SceneDocument>, SceneAuthoringRevision),
     WorkingPrefab(&'a Arc<crate::PrefabDocument>, SceneAuthoringRevision),

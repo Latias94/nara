@@ -1,19 +1,18 @@
 use std::{fmt, num::NonZeroU32, time::Duration};
 
 #[cfg(feature = "runtime-2d")]
+use crate::fs::DirectoryCapability;
+#[cfg(feature = "runtime-2d")]
 use nara_app::RuntimeCloseEvidence;
 use nara_app::RuntimeClosePolicy;
-use nara_diagnostic::DiagnosticReport;
+use nara_core::diagnostic::DiagnosticReport;
 use nara_ecs::Resource;
-#[cfg(feature = "runtime-2d")]
-use nara_fs::DirectoryCapability;
-use nara_gameplay::GameplayCommandSubmission;
 #[cfg(all(
     feature = "runtime-2d",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
-use nara_winit::WinitControlFlow;
+use nara_window::winit::WinitControlFlow;
 
 #[cfg(all(
     feature = "runtime-2d",
@@ -41,7 +40,10 @@ use super::{
     single_error,
 };
 #[cfg(feature = "runtime-2d")]
-use super::{RuntimePluginOverlay, runtime_plan_failure_report};
+use super::{
+    RuntimePluginOverlay, RuntimeStartContent, install_source_scene_context, materialize_runtime,
+    runtime_plan_failure_report,
+};
 #[cfg(feature = "runtime-2d")]
 use crate::ProductRecipe;
 
@@ -553,12 +555,11 @@ impl DesktopRun {
                     execution.cleanup_policy,
                     recipe,
                     overlay,
-                    Vec::new(),
                 );
                 (prepared, execution, verification)
             }
             DesktopRunInputs::Processed { base, execution } => (
-                prepare_runtime_content_start(base, execution.cleanup_policy, Vec::new()),
+                prepare_runtime_content_start(base, execution.cleanup_policy),
                 execution,
                 None,
             ),
@@ -677,7 +678,7 @@ fn desktop_state_after_failure(host: ProjectHost) -> DesktopRunState {
 /// Stateful root-owned headless product action.
 ///
 /// Calling [`Self::execute_bounded`] after incomplete cleanup only drives the retained owner. It
-/// never reopens the manifest, rebuilds the project snapshot, resubmits commands, or starts a
+/// never reopens the manifest, rebuilds the project snapshot, or starts a
 /// second runtime.
 pub struct HeadlessRun<O>
 where
@@ -718,27 +719,18 @@ where
         project_root: DirectoryCapability,
         recipe: ProductRecipe,
         fixed_ticks: NonZeroU32,
-        commands: Vec<GameplayCommandSubmission>,
     ) -> Self {
         Self::new(
             project_root,
             HeadlessRunIntent::new(fixed_ticks).with_recipe(recipe),
-            commands,
         )
     }
 
-    /// Creates a product run from an already-owned semantic-command buffer.
-    ///
-    /// Ownership does not bypass admission: every submission is still validated by the runtime
-    /// command queue before the product action can complete.
+    /// Creates a bounded headless run from the project and its startup configuration.
     #[cfg(feature = "runtime-2d")]
     #[must_use]
-    pub fn new(
-        project_root: DirectoryCapability,
-        intent: HeadlessRunIntent<O>,
-        commands: Vec<GameplayCommandSubmission>,
-    ) -> Self {
-        Self::new_inner(project_root, intent, None, commands)
+    pub fn new(project_root: DirectoryCapability, intent: HeadlessRunIntent<O>) -> Self {
+        Self::new_inner(project_root, intent, None)
     }
 
     /// Runs the startup and later Scenes of an already admitted immutable Runtime base.
@@ -749,14 +741,9 @@ where
     pub fn from_runtime_content(
         base: crate::runtime_content::RuntimeContentBase,
         execution: HeadlessRunOptions<O>,
-        commands: Vec<GameplayCommandSubmission>,
     ) -> Self {
         Self {
-            state: HeadlessRunState::Fresh(HeadlessRunInputs::Processed {
-                base,
-                execution,
-                commands,
-            }),
+            state: HeadlessRunState::Fresh(HeadlessRunInputs::Processed { base, execution }),
             diagnostics: DiagnosticReport::default(),
             #[cfg(feature = "runtime-2d")]
             startup_content_closure: None,
@@ -768,14 +755,12 @@ where
         project_root: DirectoryCapability,
         intent: HeadlessRunIntent<O>,
         overlay: Option<RuntimePluginOverlay>,
-        commands: Vec<GameplayCommandSubmission>,
     ) -> Self {
         Self {
             state: HeadlessRunState::Fresh(HeadlessRunInputs::Source {
                 project_root,
                 intent,
                 overlay,
-                commands,
             }),
             diagnostics: DiagnosticReport::default(),
             startup_content_closure: None,
@@ -787,9 +772,8 @@ where
         project_root: DirectoryCapability,
         intent: HeadlessRunIntent<O>,
         overlay: RuntimePluginOverlay,
-        commands: Vec<GameplayCommandSubmission>,
     ) -> Self {
-        Self::new_inner(project_root, intent, Some(overlay), commands)
+        Self::new_inner(project_root, intent, Some(overlay))
     }
 
     pub fn execute_bounded(&mut self) -> HeadlessRunReport<O> {
@@ -968,7 +952,7 @@ where
     }
 
     #[cfg(feature = "runtime-2d")]
-    pub(crate) fn incomplete_cleanup_diagnostics(&self) -> DiagnosticReport {
+    pub(in crate::project_host) fn report_after_cleanup_deadline(&self) -> HeadlessRunReport<O> {
         let mut diagnostics = DiagnosticReport::default();
         if let HeadlessRunState::Cleaning { host, .. } = &self.state
             && let super::ProjectHostSlot::Cleaning { owner, .. } = &host.slot
@@ -979,7 +963,9 @@ where
                 owner.plugin_failure_report(),
             ));
         }
-        diagnostics
+        let mut report = self.report();
+        report.diagnostics.extend(diagnostics);
+        report
     }
 }
 
@@ -989,12 +975,10 @@ enum HeadlessRunInputs<O> {
         project_root: DirectoryCapability,
         intent: HeadlessRunIntent<O>,
         overlay: Option<RuntimePluginOverlay>,
-        commands: Vec<GameplayCommandSubmission>,
     },
     Processed {
         base: crate::runtime_content::RuntimeContentBase,
         execution: HeadlessRunOptions<O>,
-        commands: Vec<GameplayCommandSubmission>,
     },
 }
 
@@ -1079,7 +1063,6 @@ fn prepare_start<O>(
             project_root,
             intent,
             overlay,
-            commands,
         } => {
             let HeadlessRunIntent {
                 profile,
@@ -1091,14 +1074,8 @@ fn prepare_start<O>(
                 cleanup_policy,
                 terminal_predicate,
             } = execution;
-            let prepared = prepare_project_start(
-                project_root,
-                profile,
-                cleanup_policy,
-                recipe,
-                overlay,
-                commands,
-            )?;
+            let prepared =
+                prepare_project_start(project_root, profile, cleanup_policy, recipe, overlay)?;
             Ok(PreparedStart {
                 host: prepared.host,
                 attempt: prepared.attempt,
@@ -1108,17 +1085,13 @@ fn prepare_start<O>(
                 startup_content_closure: prepared.startup_content_closure,
             })
         }
-        HeadlessRunInputs::Processed {
-            base,
-            execution,
-            commands,
-        } => {
+        HeadlessRunInputs::Processed { base, execution } => {
             let HeadlessRunOptions {
                 drive,
                 cleanup_policy,
                 terminal_predicate,
             } = execution;
-            let prepared = prepare_runtime_content_start(base, cleanup_policy, commands)?;
+            let prepared = prepare_runtime_content_start(base, cleanup_policy)?;
             Ok(PreparedStart {
                 host: prepared.host,
                 attempt: prepared.attempt,
@@ -1139,7 +1112,6 @@ fn prepare_project_start(
     cleanup_policy: RuntimeClosePolicy,
     recipe: ProductRecipe,
     overlay: Option<RuntimePluginOverlay>,
-    commands: Vec<GameplayCommandSubmission>,
 ) -> Result<PreparedProjectStart, PreparedProjectStartError> {
     let checked =
         check_project_source_with_overlay(project_root, profile.as_deref(), recipe, overlay)
@@ -1155,13 +1127,7 @@ fn prepare_project_start(
 
     let mut host = ProjectHost::new(cleanup_policy);
     let attempt = host
-        .begin_project_start(
-            snapshot,
-            plan,
-            candidate,
-            std::sync::Arc::new(loader),
-            commands,
-        )
+        .begin_project_start(snapshot, plan, candidate, std::sync::Arc::new(loader))
         .map_err(|fault| PreparedProjectStartError {
             fault,
             startup_content_closure: Some(startup_content_closure.clone()),
@@ -1174,15 +1140,127 @@ fn prepare_project_start(
     })
 }
 
+/// Failure to configure a source-backed App before startup.
+#[cfg(feature = "runtime-2d")]
+#[derive(Debug, thiserror::Error)]
+#[error("could not load the project App")]
+pub struct ProjectAppLoadError {
+    diagnostics: DiagnosticReport,
+}
+
+#[cfg(feature = "runtime-2d")]
+impl ProjectAppLoadError {
+    pub const fn diagnostics(&self) -> &DiagnosticReport {
+        &self.diagnostics
+    }
+}
+
+#[cfg(feature = "runtime-2d")]
+impl From<HostFault> for ProjectAppLoadError {
+    fn from(fault: HostFault) -> Self {
+        Self {
+            diagnostics: fault.diagnostics,
+        }
+    }
+}
+
+/// Configures an App from a project's selected profile, Schema and startup content.
+///
+/// Drive the returned App normally. A desktop profile installs the Winit runner when its
+/// selected capabilities include Winit and WGPU. The receipt describes the loaded source data.
+#[cfg(feature = "runtime-2d")]
+pub fn load_project_app(
+    project_root: DirectoryCapability,
+    profile: Option<&str>,
+    recipe: ProductRecipe,
+) -> Result<(nara_app::App, StartupContentClosureReceipt), ProjectAppLoadError> {
+    let checked = check_project_source_with_overlay(project_root, profile, recipe, None)
+        .map_err(project_source_check_fault)?;
+    let (candidate, plan, snapshot, loader) = checked.into_delivery_parts();
+    let startup = snapshot
+        .startup_content_closure()
+        .expect("the source check selects the manifest's default scene");
+    let mut app = plan.plugin_plan().build_app().map_err(|_| {
+        HostFault::new(single_error(
+            "project.run.app-configuration-failed",
+            "Project plugins could not configure the App",
+        ))
+    })?;
+    let input = snapshot
+        .input_action_map()
+        .map(|input| input.prepare_state())
+        .transpose()
+        .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
+    if app.world().contains_resource::<nara_input::ActionMaps>() || input.is_some() {
+        nara_input::configure_startup_action_map(&mut app, input)
+            .map_err(|_| super::startup_input_selection_fault())?;
+    }
+    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+    {
+        use nara_project::ProductCapability::{DesktopWinit, RenderWgpu};
+
+        let caps = plan.normalized_capabilities();
+        if caps.contains(DesktopWinit) && caps.contains(RenderWgpu) {
+            app.set_runner(crate::product::run_desktop_app);
+        }
+    }
+
+    let mut pending = Some((candidate, plan, snapshot, std::sync::Arc::new(loader)));
+    app.add_systems(
+        nara_app::StartupStage::Core,
+        move |world: &mut nara_ecs::World| {
+            let Some((candidate, plan, snapshot, loader)) = pending.take() else {
+                return Ok(());
+            };
+            let startup_scene = snapshot.scene_source();
+            let content = RuntimeStartContent::Source {
+                snapshot: snapshot.clone(),
+                plan: plan.clone(),
+            };
+            materialize_runtime(world, plan.configuration_plan(), &content, startup_scene)
+                .and_then(|_| {
+                    install_source_scene_context(world, candidate, loader, &plan, &snapshot)
+                })
+                .map_err(project_app_startup_error)
+        },
+    )
+    .map_err(|_| {
+        HostFault::new(single_error(
+            "project.run.app-startup-install-failed",
+            "Could not install the project's App startup system",
+        ))
+    })?;
+    Ok((app, startup))
+}
+
+#[cfg(feature = "runtime-2d")]
+fn project_app_startup_error(fault: HostFault) -> nara_ecs::bevy_ecs::error::BevyError {
+    let detail = fault
+        .diagnostics
+        .iter()
+        .find(|entry| entry.severity() == nara_core::diagnostic::DiagnosticSeverity::Error)
+        .and_then(|entry| {
+            nara_app::RuntimeFaultDetail::new(
+                entry.code().as_str(),
+                entry.summary().as_str(),
+                "nara.project-host",
+            )
+            .ok()
+        });
+    match detail {
+        Some(detail) => detail.into_bevy_error(),
+        None => ProjectAppLoadError::from(fault).into(),
+    }
+}
+
 fn prepare_runtime_content_start(
     base: crate::runtime_content::RuntimeContentBase,
     cleanup_policy: RuntimeClosePolicy,
-    commands: Vec<GameplayCommandSubmission>,
 ) -> Result<PreparedProjectStart, PreparedProjectStartError> {
     let plan_diagnostics = runtime_plan_selected_report(base.plan());
     let mut host = ProjectHost::new(cleanup_policy);
     let attempt = host
-        .begin_processed_start(base, commands)
+        .begin_processed_start(base)
         .map_err(|fault| PreparedProjectStartError {
             fault,
             #[cfg(feature = "runtime-2d")]

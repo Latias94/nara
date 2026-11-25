@@ -12,7 +12,7 @@ use crate::prefab::inspection::{
 use crate::{
     AuthoringRecordOwnerClaim, AuthoringRecordReadiness, PrefabPropertyClaim, PrefabPropertyIntent,
 };
-use nara_identity::EntityReference;
+use nara_ecs::identity::EntityReference;
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPathSegment, ComponentFieldSchema, ComponentPropertyStep,
     ComponentValue, ComponentValueRef,

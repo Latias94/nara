@@ -749,10 +749,6 @@ mod atlas_content {
         asset_build::ArtifactBuildObservation,
         ecs::World,
         fs::{ContentDigest, DirectoryCapability, FsError, RelativePath},
-        gameplay::{
-            GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandSourceSequence,
-            GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
-        },
         identity::{EntityLookup, IdentityDomainError, SpawnedSceneInstance, WorldIdentityDomain},
         image::{ImageAsset, ImageExtent, ImageRuntimeCodec},
         input::{
@@ -791,6 +787,10 @@ mod atlas_content {
     use two_level_game::{
         GamePhase, GameSnapshot, Scenario, SideRoomPhase,
         animation::{atlas_product, clips_product},
+        command::{
+            CommandSequence, CommandSource, CommandTick, ScheduledCommand, SemanticCommand,
+            ServerCommand,
+        },
         levels::{LevelId, LevelKey},
         markers::{MarkerLink, SCENE_PATH, marker_image_product, marker_product},
         region_material, region_tileset, side_room,
@@ -1117,14 +1117,13 @@ mod atlas_content {
     fn processed_continuation_refuses_lookout_after_restoring_side_room() {
         use nara::{
             app::FixedTime,
-            gameplay::GameplayCommandQueue,
             identity::{PrefabEntityTarget, SceneEntityId},
             prelude::Transform2d,
             scene::SceneDocumentCandidate,
         };
         use two_level_game::{
             GameResumeError, capture_processed_resume,
-            command::{SERVER_COMMAND_SOURCE, ServerCommand},
+            command::{CommandSchedule, SERVER_COMMAND_SOURCE},
             restore_processed_resume,
             resume::processed::{PendingServerCommand, ProcessedRoomState, ProcessedRooms},
         };
@@ -1215,14 +1214,15 @@ mod atlas_content {
             room
         };
         let submit_side_room = |session: &mut HeadlessSession, tick| {
-            session
-                .submit(GameplayCommandSubmission::new(
-                    GameplayCommandTick::new(tick).unwrap(),
-                    GameplayCommandIngressSource::external(SERVER_COMMAND_SOURCE).unwrap(),
-                    GameplayCommandSourceSequence::new(tick).unwrap(),
-                    ServerCommand::SideRoom.into_draft().unwrap(),
-                ))
-                .unwrap();
+            ScheduledCommand::new(
+                CommandTick::new(tick).unwrap(),
+                CommandSource::external(SERVER_COMMAND_SOURCE).unwrap(),
+                CommandSequence::new(tick).unwrap(),
+                ServerCommand::SideRoom.into_intent().unwrap(),
+            )
+            .submit_headless(session)
+            .unwrap();
+            assert_eq!(session.frame(Duration::ZERO).unwrap(), None);
         };
 
         with_paused_content(base.clone(), |incumbent| {
@@ -1251,7 +1251,7 @@ mod atlas_content {
                 (
                     world.resource::<FixedTime>().tick(),
                     CurrentScene::get(world).unwrap().receipt().clone(),
-                    world.resource::<GameplayCommandQueue>().stats(),
+                    world.resource::<CommandSchedule>().stats(),
                 )
             };
             let generation = incumbent.runtime_generation().unwrap();
@@ -1277,7 +1277,7 @@ mod atlas_content {
                     assert_eq!(snapshot.lookout, SideRoomPhase::Closed);
                     assert!(!snapshot.restoring);
                     assert_eq!(world.resource::<FixedTime>().tick(), 1);
-                    let queue = world.resource::<GameplayCommandQueue>();
+                    let queue = world.resource::<CommandSchedule>();
                     assert!(queue.is_idle());
                     let stats = queue.stats();
                     assert_eq!(stats.accepted, 1);
@@ -2068,7 +2068,7 @@ mod atlas_content {
             .unwrap()
             .iter_mut()
             .find(|binding| {
-                binding["input"]["GamepadButton"] == nara_gilrs::GamepadButton::Start.code()
+                binding["input"]["GamepadButton"] == nara::input::GamepadButton::Start.code()
             })
             .unwrap();
         start["action"] = serde_json::json!("two-level-game.q");
@@ -2687,7 +2687,11 @@ mod atlas_content {
             evidence.observe(&session)?;
             let initial = evidence.result(Scenario::Interactive, None, None);
             session.pause().map_err(|error| error.to_string())?;
-            step_command(&mut session, 1, "two-level-game.marker")?;
+            step_command(
+                &mut session,
+                1,
+                ServerCommand::Gameplay(SemanticCommand::Marker),
+            )?;
             session
                 .observe(assert_cooked_marker_image)
                 .map_err(|error| error.to_string())??;
@@ -2707,23 +2711,27 @@ mod atlas_content {
         observed.unwrap()
     }
 
-    fn step_command(session: &mut HeadlessSession, tick: u64, command: &str) -> Result<(), String> {
-        session
-            .submit(GameplayCommandSubmission::new(
-                GameplayCommandTick::new(tick).unwrap(),
-                GameplayCommandIngressSource::external("test.cooked-content").unwrap(),
-                GameplayCommandSourceSequence::new(tick).unwrap(),
-                GameplayCommandDraft::new(GameplayCommandTypeId::new(command).unwrap()),
-            ))
-            .map_err(|error| error.to_string())?;
+    fn step_command(
+        session: &mut HeadlessSession,
+        tick: u64,
+        command: ServerCommand,
+    ) -> Result<(), String> {
+        ScheduledCommand::new(
+            CommandTick::new(tick).unwrap(),
+            CommandSource::external("test.cooked-content").unwrap(),
+            CommandSequence::new(tick).unwrap(),
+            command.into_intent()?,
+        )
+        .submit_headless(session)
+        .map_err(|error| error.to_string())?;
         session.step().map_err(|error| error.to_string())?;
         Ok(())
     }
 
     fn check_cooked_regions(session: &mut HeadlessSession) -> Result<(), String> {
-        const SIDE_ROOM: &str = "two-level-game.side-room";
-        const LOOKOUT: &str = "two-level-game.lookout";
-        const TRAVEL: &str = "two-level-game.travel";
+        const SIDE_ROOM: ServerCommand = ServerCommand::SideRoom;
+        const LOOKOUT: ServerCommand = ServerCommand::Lookout;
+        const TRAVEL: ServerCommand = ServerCommand::Gameplay(SemanticCommand::Travel);
         let meadow = LevelKey::main(LevelId::Meadow);
         let cavern = LevelKey::main(LevelId::Cavern);
         let primary = session

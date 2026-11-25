@@ -3,7 +3,9 @@
 use nara_app::{PluginDomainError, PluginError, PluginFailure, PluginFailureReport};
 #[cfg(feature = "serde")]
 use nara_app::{PluginInstantiationError, PluginPrepareError, RuntimeConstructionError};
-use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, SafeSummary};
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticReport, ReportDiagnostic as Diagnostic, SafeSummary,
+};
 
 #[cfg(feature = "serde")]
 use super::{admission_failure_report, single_diagnostic};
@@ -165,7 +167,6 @@ fn plugin_hook_failure_diagnostic(
             diagnostic = attach_identifier(diagnostic, "participant", participant_id.as_str());
         }
         PluginError::AppSealed
-        | PluginError::DuplicateDriverPort { .. }
         | PluginError::RawBuiltInScheduleMutationForbidden
         | PluginError::ScheduleCompatibility(_)
         | PluginError::ScheduleGraph(_)
@@ -199,7 +200,6 @@ fn plugin_error_reason(error: &PluginError) -> &'static str {
         PluginError::Domain(_) => "domain",
         PluginError::HookMutationForbidden { .. } => "hook-mutation-forbidden",
         PluginError::AppSealed => "app-sealed",
-        PluginError::DuplicateDriverPort { .. } => "duplicate-driver-port",
         PluginError::RawBuiltInScheduleMutationForbidden => "raw-schedule-mutation-forbidden",
         PluginError::ScheduleCompatibility(_) => "schedule-compatibility",
         PluginError::ScheduleGraph(_) => "schedule-graph",

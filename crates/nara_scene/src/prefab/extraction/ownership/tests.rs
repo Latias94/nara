@@ -13,12 +13,12 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    __private::{AuthoringAdapterReceipt, PrefabExtractionBinding, PrefabExtractionEnvironment},
     AuthoringSchemaBasis, PrefabAddition, PrefabComponentSetMode, PrefabDocument,
     PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceClaim, PrefabInstanceHop,
     PrefabInstancePathSegment, PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent,
     ResolvedPrefabSource, SceneCompilationLimits, SceneDocument, ScenePlacement,
     ScenePlacementParent, SourceDocumentKind,
+    authoring::{AuthoringAdapterReceipt, PrefabExtractionBinding, PrefabExtractionEnvironment},
     prefab::extraction::corpus::{
         ExtractionDestination, ExtractionRequest, PreparedExtractionCorpus,
     },

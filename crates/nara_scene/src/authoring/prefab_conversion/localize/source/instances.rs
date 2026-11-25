@@ -116,17 +116,17 @@ fn rewrite_instance<'a>(
                     let PrefabPropertyIntent::Set(value) = &claim.intent else {
                         continue;
                     };
-                    let selected = nara_reflect::__private::resolve_component_property_schema_claim_with_admission(
+                    let selected = nara_reflect::property::resolve_component_property_schema_claim_with_admission(
                         schema, *version, &claim.path, reads,
                         |_, _, bytes| work.reserve(bytes),
                     );
                     let selected = match selected {
                         Ok(selected) => selected,
+                        Err(nara_reflect::property::ComponentPropertyAdmissionError::Property(
+                            _,
+                        )) => continue,
                         Err(
-                            nara_reflect::__private::ComponentPropertyAdmissionError::Property(_),
-                        ) => continue,
-                        Err(
-                            nara_reflect::__private::ComponentPropertyAdmissionError::Admission(
+                            nara_reflect::property::ComponentPropertyAdmissionError::Admission(
                                 report,
                             ),
                         ) => return Err(report),

@@ -350,13 +350,15 @@ impl PlayerSelection {
         };
         let recipe = match self.controllers {
             ControllerBackend::Disabled => recipe,
-            #[cfg(feature = "gamepad")]
+            #[cfg(all(windows, feature = "gamepad"))]
             ControllerBackend::Gilrs => {
                 crate::controller::with_gilrs_input(recipe).map_err(|error| error.to_string())?
             }
-            #[cfg(not(feature = "gamepad"))]
+            #[cfg(not(all(windows, feature = "gamepad")))]
             ControllerBackend::Gilrs => {
-                return Err("Gilrs Player selection requires the gamepad Cargo feature".into());
+                return Err(
+                    "Gilrs Player selection requires Windows and the gamepad Cargo feature".into(),
+                );
             }
         };
         match self.flow {

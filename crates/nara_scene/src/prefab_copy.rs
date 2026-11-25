@@ -12,7 +12,7 @@ mod tests;
 use std::{collections::HashMap, error::Error, fmt};
 
 use nara_asset::{AssetProductRef, AssetRef, ImportedProductId};
-use nara_diagnostic::DiagnosticReport;
+use nara_core::diagnostic::DiagnosticReport;
 use nara_reflect::{
     AssetReferenceRewriteError, ComponentCodecError, ComponentEntityReferenceRewriteError,
     ComponentPropertyError, DeclaredAssetReferenceError,

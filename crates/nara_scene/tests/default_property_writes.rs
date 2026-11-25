@@ -11,13 +11,13 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringEntityView,
-    AuthoringPropertyEdit, AuthoringPropertyValue, AuthoringSchemaBasis, PrefabAuthoringSession,
-    PrefabDocument, PrefabDocumentCandidate, SceneAuthoringHistoryLimits, SceneAuthoringSession,
-    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
-    SceneFileLimits, SceneFormatError, ScenePatchDocument, ScenePatchDocumentCandidate,
-    ScenePatchOperation, ScenePlacement, ScenePlacementParent, SchemaReclassificationKind,
-    SchemaReclassificationWork,
+    AuthoringDocumentSource, AuthoringEntityView, AuthoringPropertyEdit, AuthoringPropertyValue,
+    AuthoringSchemaBasis, PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
+    SceneAuthoringHistoryLimits, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneFileLimits, SceneFormatError,
+    ScenePatchDocument, ScenePatchDocumentCandidate, ScenePatchOperation, ScenePlacement,
+    ScenePlacementParent, SchemaReclassificationKind, SchemaReclassificationWork,
+    authoring::AuthoringAdapterReceipt,
 };
 
 fn entity() -> SceneEntityId {
@@ -1043,7 +1043,7 @@ fn unadmitted_target_and_selector_ids_reject_without_retaining_private_input() {
             assert!(report.diagnostics.iter().all(|diagnostic| {
                 diagnostic.fields().iter().any(|field| {
                     field.key().as_str() == "operation-index"
-                        && field.value() == nara_diagnostic::DiagnosticValueRef::Unsigned(0)
+                        && field.value() == nara_core::diagnostic::DiagnosticValueRef::Unsigned(0)
                 })
             }));
         }

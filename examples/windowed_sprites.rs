@@ -27,7 +27,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         WgpuBackendPlugins,
         WgpuStockSpritePlugin,
     ))?;
-    app.insert_resource(nara::transform::FixedTransformInterpolation)?;
     app.add_systems(StartupStage::Scene, setup_scene)?;
     app.add_systems(
         CoreStage::FixedUpdate,
@@ -87,6 +86,7 @@ fn setup_scene(
                 translation: Vec2::new(40.0, -20.0),
                 rotation: 0.35,
                 scale: Vec2::splat(1.0),
+                z: 0.0,
             },
             Sprite::from_color(Vec2::new(96.0, 48.0), Color::rgb(0.95, 0.25, 0.35)).with_layer(2),
         ))

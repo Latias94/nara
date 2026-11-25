@@ -23,7 +23,7 @@ enum Payload {
     Text(String),
     List(Vec<ComponentValue>),
     Map(std::collections::BTreeMap<String, ComponentValue>),
-    Reference(nara_identity::EntityReference),
+    Reference(nara_ecs::identity::EntityReference),
     Unit(()),
 }
 

@@ -236,9 +236,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        __private::AuthoringAdapterReceipt,
         PrefabInstance, SceneCompilationOptions, SceneComponentRecord, SceneDocument,
         SceneEntityId, SceneEntityRecord,
+        authoring::AuthoringAdapterReceipt,
         prefab::{
             SelectedInstanceConsumer, SourceDocumentInput,
             try_compile_selected_authoring_instance_with_loader,

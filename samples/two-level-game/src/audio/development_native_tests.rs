@@ -36,12 +36,7 @@ mod oracle {
     reason = "reuse the original public game owner and command/cleanup helpers"
 )]
 mod support {
-    mod two_level_game {
-        pub use crate::{
-            GamePhase, GameSnapshot, capture_resume, levels, open_explicit_project_root,
-            open_project_root, product_recipe, resume,
-        };
-    }
+    use crate as two_level_game;
 
     include!("../../tests/support/resume_gameplay.rs");
 }
@@ -337,8 +332,8 @@ fn a_development_startup_failure_keeps_output_disabled_and_retires_the_original_
     let deadline = Instant::now() + Duration::from_secs(10);
     while failure.drive_retirement() != RuntimeCandidateRetirementState::Retired {
         if Instant::now() >= deadline {
-            std::mem::forget(failure);
-            panic!("failed development startup still owns original native retirement");
+            drop(failure);
+            panic!("failed development startup did not complete original native retirement");
         }
         std::thread::yield_now();
     }

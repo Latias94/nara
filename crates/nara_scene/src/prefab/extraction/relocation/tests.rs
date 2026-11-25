@@ -2,7 +2,7 @@
 
 use std::{borrow::Cow, convert::Infallible, io};
 
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference, ReferenceInputId,
 };

@@ -7,11 +7,11 @@ use std::{
     sync::Arc,
 };
 
-use nara_core::{ByteLimit, ItemLimit};
-use nara_fs::{
+use crate::fs::{
     ContentDigest, DirectoryCapability, FileCapability, FsError, LockMode, LockedFileCapability,
     RelativeComponent, RelativePath,
 };
+use nara_core::{ByteLimit, ItemLimit};
 use serde::Serialize;
 use thiserror::Error;
 

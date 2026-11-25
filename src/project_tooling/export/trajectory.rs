@@ -1,19 +1,22 @@
 use std::{
-    ffi::{OsStr, OsString},
     fs,
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::Command,
     sync::atomic::{AtomicU64, Ordering},
     time::Instant,
 };
 
 use crate::{
-    fs::{ContentDigest, RelativeComponent},
+    fs::{ContentDigest, RelativeComponent, RelativePath},
+    project::ProjectPath,
     project_host::ProjectContentDeliveryReceipt,
     project_workflow::{
-        ProjectContentMemberKind, ProjectExportBinaryTarget, ProjectExportMemberKind,
-        ProjectExportMemberReceipt, ProjectExportPlanReceipt, ProjectExportRequest,
-        prepare_project_export,
+        LocalDependencyRelation, NaraDependencySource, ProjectCheckRequest,
+        ProjectContentMemberKind, ProjectCreationOutcome, ProjectCreationRequest,
+        ProjectExportBinaryTarget, ProjectExportMemberKind, ProjectExportMemberReceipt,
+        ProjectExportOutcome, ProjectExportPlanReceipt, ProjectExportRequest, ProjectSlug,
+        ProjectStarter, ProjectStartupSceneRepairOutcome, ProjectStartupSceneRepairRequest,
+        check_project, prepare_desktop_2d_project, prepare_project_export, repair_startup_scene,
     },
 };
 use serde_json::{Value, json};
@@ -26,28 +29,6 @@ use crate::project_tooling::host_fs;
 
 #[path = "../../project_workflow/export/profile_fixture.rs"]
 mod profile_fixture;
-
-struct CheckArguments {
-    project: PathBuf,
-    profile: Option<String>,
-}
-
-mod check {
-    use super::*;
-
-    pub(super) fn execute(
-        arguments: CheckArguments,
-    ) -> Result<ProjectContentDeliveryReceipt, crate::project_workflow::ProjectCheckError> {
-        let root = host_fs::readable_directory(&arguments.project).unwrap();
-        let request =
-            crate::project_workflow::ProjectCheckRequest::new(root, crate::ProductRecipe::new());
-        let request = match arguments.profile {
-            Some(profile) => request.with_profile(profile),
-            None => request,
-        };
-        crate::project_workflow::check_project(request)
-    }
-}
 
 const PROJECT_SLUG: &str = "fresh-project-trajectory";
 const REPLACEMENT_SCENE: &str = "repaired.scene.json";
@@ -137,19 +118,20 @@ requested = ["runtime-2d"]
             Some("tools") => {
                 assert_eq!(hint.profile(), Some("tools"));
                 assert_eq!(failure.loss().withheld_repair_fields, 0);
-                assert!(display.contains("--profile tools"));
+                assert!(display.contains("for profile `tools`"));
             }
             Some(withheld) => {
                 assert_eq!(hint.profile(), None);
                 assert_eq!(failure.loss().withheld_repair_fields, 1);
-                assert!(display.contains("--profile <name>"));
+                assert!(display.contains("for the selected profile"));
                 assert!(!display.contains(withheld));
                 assert!(!String::from_utf8_lossy(&bytes).contains(withheld));
             }
             None => {
                 assert_eq!(hint.profile(), None);
                 assert_eq!(failure.loss().withheld_repair_fields, 0);
-                assert!(!display.contains("--profile"));
+                assert!(!display.contains("for profile"));
+                assert!(!display.contains("for the selected profile"));
             }
         }
     }
@@ -160,7 +142,9 @@ requested = ["runtime-2d"]
 fn fresh_project_export_repair_is_one_linked_product_trajectory() {
     let started = Instant::now();
     let root = TrajectoryRoot::new();
-    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .canonicalize()
+        .unwrap();
     let project_parent = root.path().join("projects");
     let export_parent = root.path().join("exports");
     let unrelated_cwd = root.path().join("unrelated-cwd");
@@ -168,28 +152,43 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
     fs::create_dir_all(&project_parent).unwrap();
     fs::create_dir_all(&export_parent).unwrap();
     fs::create_dir_all(&unrelated_cwd).unwrap();
-    let mut public_commands = PublicCommandRehearsal::new(&checkout, &cargo_target);
-
     let create_started = Instant::now();
-    public_commands.expect_success(
-        &project_parent,
-        [
-            OsString::from("new"),
-            OsString::from("desktop-2d/v1"),
-            OsString::from(PROJECT_SLUG),
-            OsString::from("--parent"),
-            OsString::from("."),
-            OsString::from("--local-checkout"),
-            checkout.as_os_str().to_owned(),
-        ],
-    );
+    let checkout_root = host_fs::writable_directory(&checkout).unwrap();
+    let parent_path = RelativePath::from_components(
+        project_parent
+            .strip_prefix(&checkout)
+            .unwrap()
+            .iter()
+            .map(|name| RelativeComponent::new(name).unwrap()),
+    )
+    .unwrap();
+    let parent = checkout_root.open_directory(&parent_path).unwrap();
+    let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+        ProjectStarter::Desktop2dV1,
+        parent,
+        ProjectSlug::new(PROJECT_SLUG).unwrap(),
+        NaraDependencySource::local(LocalDependencyRelation::new(
+            checkout_root,
+            None,
+            Some(parent_path),
+        )),
+    ))
+    .unwrap();
+    let outcome = prepared.publish();
+    let ProjectCreationOutcome::Created(creation) = outcome else {
+        panic!("starter publication failed: {outcome:?}");
+    };
     let create_elapsed_ms = elapsed_ms(create_started);
     let project = project_parent.join(PROJECT_SLUG);
-    let created = check::execute(CheckArguments {
-        project: project.clone(),
-        profile: None,
-    })
+    let created = check_project(ProjectCheckRequest::new(
+        host_fs::readable_directory(&project).unwrap(),
+        crate::ProductRecipe::new(),
+    ))
     .unwrap();
+    assert_eq!(
+        creation.content_digest(),
+        created.startup_content().content_digest()
+    );
     let creation_evidence = json!({
         "starter": "desktop-2d/v1",
         "dependency_kind": "LocalCheckout",
@@ -201,11 +200,11 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
     });
     let created_content_digest = created.startup_content().content_digest();
     drop(created);
+    drop(creation);
 
     let edited_scene_digest = edit_startup_scene(&project);
     profile_fixture::install_profiled_level(&project);
     install_desktop_startup(&project);
-    public_commands.expect_success(&project, ["check", "."].map(OsString::from));
     let checked_before = check_products(&project);
     assert_ne!(
         checked_before.headless.startup_content().content_digest(),
@@ -216,7 +215,6 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
 
     let first_run_started = Instant::now();
     let source_before = run_source_products(
-        &mut public_commands,
         "before-source",
         &project,
         &unrelated_cwd,
@@ -227,10 +225,8 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
 
     let first_export_started = Instant::now();
     let before_export = export_project(
-        &mut public_commands,
         &project,
         &export_parent,
-        &unrelated_cwd,
         &cargo_target,
         "candidate-before-repair",
         checked_before,
@@ -244,18 +240,13 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
     );
 
     let repair_started = Instant::now();
-    let missing_output =
-        public_commands.expect_failure(&project, ["check", "."].map(OsString::from));
-    let missing_stderr = String::from_utf8_lossy(&missing_output.stderr);
-    assert!(missing_stderr.contains("startup Scene `startup.scene.json` is missing"));
-    assert!(missing_stderr.contains("nara repair startup-scene"));
-    let missing = check::execute(CheckArguments {
-        project: project.clone(),
-        profile: None,
-    })
+    let missing = check_project(ProjectCheckRequest::new(
+        host_fs::writable_directory(&project).unwrap(),
+        crate::ProductRecipe::new(),
+    ))
     .unwrap_err();
     let issue = missing
-        .startup_scene_issue()
+        .into_startup_scene_issue()
         .expect("moving the selected startup Scene must produce a repairable issue");
     assert_eq!(issue.selected_scene().as_str(), "startup.scene.json");
     assert_eq!(issue.scenes_path().as_str(), "scenes");
@@ -265,26 +256,37 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
         "scenes_root": issue.scenes_path().as_str(),
         "selected_scene": issue.selected_scene().as_str(),
     });
-    drop(missing);
-
-    public_commands.expect_success(
-        &project,
-        [
-            OsString::from("repair"),
-            OsString::from("startup-scene"),
-            OsString::from("."),
-            OsString::from("--replacement"),
-            OsString::from(REPLACEMENT_SCENE),
-        ],
-    );
+    let outcome = repair_startup_scene(ProjectStartupSceneRepairRequest::new(
+        issue,
+        ProjectPath::new(REPLACEMENT_SCENE).unwrap(),
+    ))
+    .unwrap();
+    let ProjectStartupSceneRepairOutcome::Repaired(repair) = outcome else {
+        panic!("startup Scene repair failed its post-check: {outcome:?}");
+    };
     let repair_elapsed_ms = elapsed_ms(repair_started);
 
     before_export.verify_unchanged();
-    public_commands.expect_success(&project, ["check", "."].map(OsString::from));
     let checked_after = check_products(&project);
     let after_manifest_digest = checked_after.headless.manifest_digest();
     let after_content_digest = checked_after.headless.startup_content().content_digest();
     assert_ne!(after_manifest_digest, issue_manifest_digest);
+    assert_eq!(
+        repair.publication().previous_manifest_digest(),
+        issue_manifest_digest
+    );
+    assert_eq!(
+        repair.publication().manifest_digest(),
+        after_manifest_digest
+    );
+    assert_eq!(
+        repair.publication().replacement_scene_digest(),
+        edited_scene_digest
+    );
+    assert_eq!(
+        repair.startup_content().content_digest(),
+        after_content_digest
+    );
     assert_eq!(
         checked_after.desktop.startup_content().content_digest(),
         desktop_startup_before,
@@ -310,7 +312,6 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
         "content": digest_value(after_content_digest),
     });
     let source_after = run_source_products(
-        &mut public_commands,
         "after-source",
         &project,
         &unrelated_cwd,
@@ -318,10 +319,8 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
         &checked_after,
     );
     let after_export = export_project(
-        &mut public_commands,
         &project,
         &export_parent,
-        &unrelated_cwd,
         &cargo_target,
         "candidate-after-repair",
         checked_after,
@@ -350,7 +349,6 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
             "export": after_export.value(),
         },
         "observations": {
-            "public_command_count": public_commands.count(),
             "create_ms": create_elapsed_ms,
             "first_run_ms": first_run_elapsed_ms,
             "first_export_ms": first_export_elapsed_ms,
@@ -386,124 +384,6 @@ fn check_products(project: &Path) -> CheckedProducts {
     CheckedProducts { headless, desktop }
 }
 
-struct PublicCommandRehearsal {
-    executable: PathBuf,
-    cargo_target: PathBuf,
-    count: u64,
-}
-
-impl PublicCommandRehearsal {
-    fn new(checkout: &Path, cargo_target: &Path) -> Self {
-        Self {
-            executable: build_nara_cli(checkout),
-            cargo_target: cargo_target.to_path_buf(),
-            count: 0,
-        }
-    }
-
-    fn expect_success<I, S>(&mut self, working_directory: &Path, arguments: I) -> Output
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        self.run(working_directory, arguments, true)
-    }
-
-    fn expect_failure<I, S>(&mut self, working_directory: &Path, arguments: I) -> Output
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        self.run(working_directory, arguments, false)
-    }
-
-    fn expect_export_success<I, S>(
-        &mut self,
-        working_directory: &Path,
-        observation_directory: &Path,
-        arguments: I,
-    ) -> Value
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        let sequence = self.count.checked_add(1).expect("command count is bounded");
-        let attempt = format!("fper-export-{}-{sequence}", std::process::id());
-        let observation = observation_directory.join(format!("{attempt}.json"));
-        let mut command = Command::new(&self.executable);
-        command
-            .current_dir(working_directory)
-            .args(arguments)
-            .env(super::COMMAND_OBSERVATION_ATTEMPT_ENV, &attempt)
-            .env(super::COMMAND_OBSERVATION_FILE_ENV, &observation);
-        self.finish(command, true);
-        let bytes = fs::read(&observation).unwrap();
-        fs::remove_file(&observation).unwrap();
-        let value = serde_json::from_slice::<Value>(&bytes).unwrap();
-        assert_eq!(
-            value.get("attempt").and_then(Value::as_str),
-            Some(attempt.as_str())
-        );
-        value
-    }
-
-    fn record_product_command(&mut self) {
-        self.count = self.count.checked_add(1).expect("command count is bounded");
-    }
-
-    const fn count(&self) -> u64 {
-        self.count
-    }
-
-    fn run<I, S>(&mut self, working_directory: &Path, arguments: I, expect_success: bool) -> Output
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        let mut command = Command::new(&self.executable);
-        command.current_dir(working_directory).args(arguments);
-        self.finish(command, expect_success)
-    }
-
-    fn finish(&mut self, mut command: Command, expect_success: bool) -> Output {
-        command.env("CARGO_TARGET_DIR", &self.cargo_target);
-        let output = command.output().unwrap();
-        self.count = self.count.checked_add(1).expect("command count is bounded");
-        assert_eq!(
-            output.status.success(),
-            expect_success,
-            "public nara command had an unexpected status\nstdout={}\nstderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        );
-        output
-    }
-}
-
-fn build_nara_cli(checkout: &Path) -> PathBuf {
-    let target = checkout.join("target");
-    let status = Command::new(env!("CARGO"))
-        .current_dir(checkout)
-        .env("CARGO_TARGET_DIR", &target)
-        .args([
-            "build",
-            "--locked",
-            "--no-default-features",
-            "--features",
-            "project-workflow-cli",
-            "--bin",
-            "nara",
-        ])
-        .status()
-        .unwrap();
-    assert!(status.success(), "failed to build the public nara CLI");
-    let executable = target
-        .join("debug")
-        .join(format!("nara{}", std::env::consts::EXE_SUFFIX));
-    assert!(executable.is_file(), "the public nara CLI was not emitted");
-    executable
-}
-
 struct SourceProductEvidence {
     build: Value,
     products: [ProductProcessObservationReceipt; 2],
@@ -527,7 +407,6 @@ impl SourceProductEvidence {
 }
 
 fn run_source_products(
-    public_commands: &mut PublicCommandRehearsal,
     attempt_prefix: &str,
     project: &Path,
     working_directory: &Path,
@@ -540,7 +419,6 @@ fn run_source_products(
         ProjectExportBinaryTarget::Headless,
     );
     let headless_digest = ContentDigest::of_bytes(&fs::read(&headless_path).unwrap());
-    public_commands.record_product_command();
     let headless = acceptance::observe_prepared_product_command(
         attempt_prefix,
         acceptance::ExpectedProductObservation::new(
@@ -565,7 +443,6 @@ fn run_source_products(
         ProjectExportBinaryTarget::Desktop,
     );
     let desktop_digest = ContentDigest::of_bytes(&fs::read(&desktop_path).unwrap());
-    public_commands.record_product_command();
     let desktop = acceptance::observe_prepared_product_command(
         attempt_prefix,
         acceptance::ExpectedProductObservation::new(
@@ -690,10 +567,8 @@ impl AcceptedExport {
 }
 
 fn export_project(
-    public_commands: &mut PublicCommandRehearsal,
     project: &Path,
     parent: &Path,
-    observation_directory: &Path,
     target_directory: &Path,
     destination: &str,
     checked: CheckedProducts,
@@ -729,28 +604,10 @@ fn export_project(
         manifest_digest
     );
 
-    let command_observation = public_commands.expect_export_success(
-        project,
-        observation_directory,
-        [
-            OsString::from("export"),
-            OsString::from("."),
-            OsString::from("--parent"),
-            parent.as_os_str().to_owned(),
-            OsString::from("--destination"),
-            OsString::from(destination),
-        ],
-    );
-    validate_export_command_observation(&command_observation, prepared.plan());
-    let plan = ExportPlanEvidence {
-        startup_content_digest: prepared
-            .plan()
-            .startup_content_digest(ProjectExportBinaryTarget::Headless),
-        build_input_digest: prepared.plan().build_input_digest(),
-        member_plan_digest: prepared.plan().member_plan_digest(),
-        members: prepared.plan().members().to_vec().into_boxed_slice(),
+    let outcome = prepared.publish();
+    let ProjectExportOutcome::Published(receipt) = outcome else {
+        panic!("export publication failed: {outcome:?}");
     };
-    drop(prepared);
     let original = parent.join(destination);
     let root = parent.join(format!("{destination}-relocated"));
     #[cfg(windows)]
@@ -774,84 +631,54 @@ fn export_project(
     }
     assert!(!original.exists());
     profile_fixture::assert_profiled_level_images(&root.join("project"));
+    let plan = receipt.plan();
+    let acceptance = acceptance::accept(&root, plan).unwrap();
+    assert_product_agreement(acceptance.products(), plan);
     let accepted = AcceptedExport {
         root,
         destination: destination.to_owned(),
-        plan,
-        products: command_observation
-            .get("products")
-            .cloned()
-            .expect("the export command observation contains products"),
+        plan: ExportPlanEvidence {
+            startup_content_digest: plan
+                .startup_content_digest(ProjectExportBinaryTarget::Headless),
+            build_input_digest: plan.build_input_digest(),
+            member_plan_digest: plan.member_plan_digest(),
+            members: plan.members().to_vec().into_boxed_slice(),
+        },
+        products: Value::Array(acceptance.products().iter().map(product_value).collect()),
     };
     accepted.verify_unchanged();
     accepted
 }
 
-fn validate_export_command_observation(value: &Value, plan: &ProjectExportPlanReceipt) {
-    assert_eq!(value.get("version").and_then(Value::as_u64), Some(1));
-    assert_eq!(
-        value.get("startup_content"),
-        Some(&digest_value(
-            plan.startup_content_digest(ProjectExportBinaryTarget::Headless)
-        ))
-    );
-    assert_eq!(
-        value.get("build_input"),
-        Some(&digest_value(plan.build_input_digest()))
-    );
-    assert_eq!(
-        value.get("member_plan"),
-        Some(&digest_value(plan.member_plan_digest()))
-    );
-    let products = value
-        .get("products")
-        .and_then(Value::as_array)
-        .expect("the export command observation contains product receipts");
-    assert_eq!(products.len(), 2);
+fn assert_product_agreement(
+    products: &[ProductProcessObservationReceipt; 2],
+    plan: &ProjectExportPlanReceipt,
+) {
     for (product, target) in products.iter().zip(ProjectExportBinaryTarget::ALL) {
         let agreement = plan.product_agreement(target);
+        assert_eq!(product.target(), target);
         assert_eq!(
-            product.get("target").and_then(Value::as_str),
-            Some(target.cargo_target_name())
+            product.executable_digest(),
+            export_executable_digest(plan.members(), target),
         );
+        assert_eq!(product.manifest_digest(), agreement.manifest_digest);
         assert_eq!(
-            product.get("profile").and_then(Value::as_str),
-            Some(crate::project_tooling::product_observation::product_profile(target))
-        );
-        assert_eq!(
-            product.get("executable"),
-            Some(&digest_value(export_executable_digest(
-                plan.members(),
-                target
-            )))
+            product.startup_content_digest(),
+            agreement.startup_content_digest,
         );
         assert_eq!(
-            product.get("manifest"),
-            Some(&digest_value(agreement.manifest_digest))
+            product.startup_closure_plan_digest(),
+            agreement.startup_closure_plan_digest,
         );
         assert_eq!(
-            product.get("content"),
-            Some(&digest_value(agreement.startup_content_digest))
+            product.authoring_schema_bundle_digest(),
+            agreement.authoring_schema_bundle_digest,
         );
         assert_eq!(
-            product.get("closure_plan"),
-            Some(&digest_value(agreement.startup_closure_plan_digest))
+            product.schema_fingerprint(),
+            agreement.schema_fingerprint.as_ref(),
         );
-        assert_eq!(
-            product.get("authoring_schema_bundle"),
-            Some(&digest_value(agreement.authoring_schema_bundle_digest))
-        );
-        assert_eq!(
-            product.get("schema_fingerprint").and_then(Value::as_str),
-            Some(agreement.schema_fingerprint.as_ref())
-        );
-        assert!(
-            product
-                .get("attempt")
-                .and_then(Value::as_str)
-                .is_some_and(|attempt| !attempt.is_empty() && attempt.len() <= 128)
-        );
-        assert!(product.get("observation").is_some_and(is_digest_value));
+        assert!(product.observation_digest().length() > 0);
     }
 }
 
@@ -868,23 +695,6 @@ fn export_executable_digest(
         .find(|member| member.kind() == kind)
         .expect("the export plan contains both product executables")
         .digest()
-}
-
-fn is_digest_value(value: &Value) -> bool {
-    let Some(object) = value.as_object() else {
-        return false;
-    };
-    object.len() == 2
-        && object.get("length").and_then(Value::as_u64).is_some()
-        && object
-            .get("blake3")
-            .and_then(Value::as_str)
-            .is_some_and(|hash| {
-                hash.len() == 64
-                    && hash
-                        .bytes()
-                        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-            })
 }
 
 fn manifest_member_digest(members: &[ProjectExportMemberReceipt]) -> ContentDigest {

@@ -344,7 +344,7 @@ fn explicit_null_or_wrong_container_ancestors_reject_without_overwrite() {
 
 #[test]
 fn in_place_defaults_reject_a_late_sparse_plan_before_any_earlier_field_is_inserted() {
-    use nara_reflect::__private::effective_component_value_in_place_with_default_overrides;
+    use nara_reflect::effective::effective_component_value_in_place_with_default_overrides;
 
     let schema = materialization_schema([
         default_field(

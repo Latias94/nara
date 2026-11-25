@@ -1,6 +1,6 @@
-use nara_diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
-    SafeSummary,
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
+    ReportDiagnostic as Diagnostic, SafeSummary,
 };
 
 use crate::{AssetError, AssetSourceKind, AssetSourcePath};

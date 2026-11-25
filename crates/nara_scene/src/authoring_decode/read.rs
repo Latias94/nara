@@ -1,15 +1,15 @@
 use std::{collections::BTreeMap, error::Error, fmt, ops::Bound};
 
 use nara_reflect::{
-    __private::{
-        ComponentPropertyReadIndex, read_admitted_component_property_in_root,
-        resolve_admitted_component_property_parent,
-    },
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldPathError,
     ComponentFieldSchema, ComponentMemberPath, ComponentMemberPathSegment, ComponentPropertyError,
     ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyReadBudget,
     ComponentPropertySchemaClaim, ComponentPropertyStep, ComponentSchema, ComponentShapeMember,
     ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueRef, ComponentValueShape,
+    property::{
+        ComponentPropertyReadIndex, read_admitted_component_property_in_root,
+        resolve_admitted_component_property_parent,
+    },
     resolve_component_property_schema_in_root,
 };
 

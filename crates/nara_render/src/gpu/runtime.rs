@@ -7,10 +7,9 @@ use std::sync::{
 
 use crate::{FrameStats, RenderBackendStatus, RenderFrame, RenderWindowPacket, WorldCanvas};
 use nara_app::{
-    __RuntimeDriverPort, App, PluginError, RuntimeCloseContext, RuntimeCloseParticipant,
-    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
-    RuntimeGeneration, RuntimeInstance, RuntimeScopeError, RuntimeScopeOutcome, RuntimeState,
-    RuntimeWorldAccessError,
+    App, PluginError, RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
+    RuntimeCloseParticipantId, RuntimeCloseProgress, RuntimeGeneration, RuntimeInstance,
+    RuntimeScopeError, RuntimeScopeOutcome, RuntimeState,
 };
 use nara_ecs::{Resource, World};
 
@@ -165,8 +164,8 @@ pub struct WgpuRuntimeCompletion {
 pub enum WgpuRuntimeExchangeError {
     #[error(transparent)]
     Scope(#[from] RuntimeScopeError),
-    #[error(transparent)]
-    Port(#[from] RuntimeWorldAccessError),
+    #[error("render runtime resource {type_name} is missing")]
+    MissingResource { type_name: &'static str },
     #[error("the original render connection is unavailable or replaced")]
     OwnerChanged,
     #[error("the Runtime capture sequence is exhausted")]
@@ -192,6 +191,16 @@ pub struct WgpuRuntimeResultFailure {
     pub error: WgpuRuntimeExchangeError,
     pub result: WgpuRuntimeResult,
     pub post_operation_fault: Option<nara_app::RuntimeFault>,
+}
+
+impl WgpuRuntimeResultFailure {
+    fn refused(result: WgpuRuntimeResult, error: WgpuRuntimeExchangeError) -> Self {
+        Self {
+            error,
+            result,
+            post_operation_fault: None,
+        }
+    }
 }
 
 #[derive(Debug, Resource)]
@@ -281,28 +290,6 @@ impl WgpuRuntimeConnection {
     }
 }
 
-/// Original requests are constructed only by the Runtime exchange owner.
-///
-/// ```compile_fail
-/// use nara_app::{RuntimeGeneration, __RuntimeDriverPort};
-/// use nara_render::gpu::execution::WgpuRuntimeConnection;
-/// type Input = <WgpuRuntimeConnection as __RuntimeDriverPort>::Input;
-/// fn forge(generation: RuntimeGeneration) -> Input {
-///     Input::Take(generation)
-/// }
-/// ```
-pub struct ConnectionInput(ConnectionOperation);
-
-enum ConnectionOperation {
-    Take(RuntimeGeneration),
-    Return(WgpuRuntimeResult, bool),
-}
-
-pub enum ConnectionOutput {
-    Taken(Result<Option<WgpuRuntimeCapture>, WgpuRuntimeExchangeError>),
-    Returned(Result<WgpuRuntimeCompletion, WgpuRuntimeResultFailure>),
-}
-
 #[derive(Resource)]
 pub(crate) struct ConnectionAuthority(Arc<Mutex<TransferState>>);
 
@@ -312,165 +299,148 @@ impl ConnectionAuthority {
     }
 }
 
-impl __RuntimeDriverPort for WgpuRuntimeConnection {
-    type Input = ConnectionInput;
-    type Output = ConnectionOutput;
-
-    fn accepts_driver_input(state: RuntimeState, input: &Self::Input) -> bool {
-        match &input.0 {
-            ConnectionOperation::Take(_) => {
-                matches!(state, RuntimeState::Running | RuntimeState::Paused)
-            }
-            ConnectionOperation::Return(_, true) => {
-                matches!(state, RuntimeState::Running | RuntimeState::Paused)
-            }
-            ConnectionOperation::Return(_, false) => matches!(
-                state,
-                RuntimeState::Faulted | RuntimeState::Stopping | RuntimeState::CloseIncomplete
-            ),
-        }
+fn take_connection_frame(
+    world: &mut World,
+    runtime: RuntimeGeneration,
+) -> Result<Option<WgpuRuntimeCapture>, WgpuRuntimeExchangeError> {
+    let connection = world.get_resource::<WgpuRuntimeConnection>().ok_or(
+        WgpuRuntimeExchangeError::MissingResource {
+            type_name: std::any::type_name::<WgpuRuntimeConnection>(),
+        },
+    )?;
+    if !world
+        .get_resource::<ConnectionAuthority>()
+        .is_some_and(|original| original.is_current(connection))
+    {
+        return Err(WgpuRuntimeExchangeError::OwnerChanged);
     }
-
-    fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
-        unreachable!("render exchange uses its registered concrete World operation")
-    }
+    world.resource_mut::<WgpuRuntimeConnection>().take(runtime)
 }
 
-fn apply_connection(
+fn apply_connection_result(
     world: &mut World,
-    input: ConnectionInput,
-) -> Result<ConnectionOutput, (RuntimeWorldAccessError, ConnectionInput)> {
-    Ok(match input.0 {
-        ConnectionOperation::Take(runtime) => {
-            if !world
-                .get_resource::<ConnectionAuthority>()
-                .is_some_and(|original| {
-                    original.is_current(world.resource::<WgpuRuntimeConnection>())
-                })
-            {
-                return Ok(ConnectionOutput::Taken(Err(
-                    WgpuRuntimeExchangeError::OwnerChanged,
-                )));
-            }
-            ConnectionOutput::Taken(world.resource_mut::<WgpuRuntimeConnection>().take(runtime))
+    runtime: RuntimeGeneration,
+    result: WgpuRuntimeResult,
+    present: bool,
+) -> Result<WgpuRuntimeCompletion, WgpuRuntimeResultFailure> {
+    let Some(connection) = world.get_resource::<WgpuRuntimeConnection>() else {
+        return Err(WgpuRuntimeResultFailure::refused(
+            result,
+            WgpuRuntimeExchangeError::MissingResource {
+                type_name: std::any::type_name::<WgpuRuntimeConnection>(),
+            },
+        ));
+    };
+    let identity = result.identity();
+    let valid_owner = identity.runtime_generation() == runtime
+        && Arc::ptr_eq(&connection.owner, &result.transfer.owner)
+        && world
+            .get_resource::<ConnectionAuthority>()
+            .is_some_and(|original| original.is_current(connection));
+    let retiring = valid_owner
+        .then(|| {
+            connection
+                .owner
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+        })
+        .filter(|owner| owner.in_flight == Some(identity))
+        .map(|owner| !present || owner.closing);
+    let Some(retiring) = retiring else {
+        return Err(WgpuRuntimeResultFailure::refused(
+            result,
+            WgpuRuntimeExchangeError::OwnerChanged,
+        ));
+    };
+    for (available, type_name) in [
+        (
+            world.contains_resource::<RenderFrame>(),
+            std::any::type_name::<RenderFrame>(),
+        ),
+        (
+            world.contains_resource::<FrameStats>(),
+            std::any::type_name::<FrameStats>(),
+        ),
+        (
+            world.contains_resource::<RenderBackendStatus>(),
+            std::any::type_name::<RenderBackendStatus>(),
+        ),
+        (
+            world.contains_resource::<WgpuRenderObservation>(),
+            std::any::type_name::<WgpuRenderObservation>(),
+        ),
+    ] {
+        if !available {
+            return Err(WgpuRuntimeResultFailure::refused(
+                result,
+                WgpuRuntimeExchangeError::MissingResource { type_name },
+            ));
         }
-        ConnectionOperation::Return(result, present) => {
-            #[cfg(feature = "hud-runtime")]
-            let mut result = result;
-            let connection = world.resource::<WgpuRuntimeConnection>();
-            let valid = Arc::ptr_eq(&connection.owner, &result.transfer.owner)
-                && world
-                    .get_resource::<ConnectionAuthority>()
-                    .is_some_and(|original| Arc::ptr_eq(&original.0, &connection.owner))
-                && connection
-                    .owner
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .in_flight
-                    == Some(result.identity());
-            if !valid {
-                return Ok(ConnectionOutput::Returned(Err(WgpuRuntimeResultFailure {
-                    error: WgpuRuntimeExchangeError::OwnerChanged,
-                    result,
-                    post_operation_fault: None,
-                })));
-            }
-            for (present, name) in [
-                (
-                    world.contains_resource::<RenderFrame>(),
-                    std::any::type_name::<RenderFrame>(),
-                ),
-                (
-                    world.contains_resource::<FrameStats>(),
-                    std::any::type_name::<FrameStats>(),
-                ),
-                (
-                    world.contains_resource::<RenderBackendStatus>(),
-                    std::any::type_name::<RenderBackendStatus>(),
-                ),
-                (
-                    world.contains_resource::<WgpuRenderObservation>(),
-                    std::any::type_name::<WgpuRenderObservation>(),
-                ),
-            ] {
-                if !present {
-                    return Ok(ConnectionOutput::Returned(Err(WgpuRuntimeResultFailure {
-                        error: WgpuRuntimeExchangeError::Port(
-                            RuntimeWorldAccessError::MissingResource { type_name: name },
-                        ),
-                        result,
-                        post_operation_fault: None,
-                    })));
-                }
-            }
-            let retiring = !present
-                || connection
-                    .owner
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .closing;
-            #[cfg(feature = "hud-runtime")]
-            {
-                if retiring
-                    && let Some(receiver) =
-                        crate::hud::presentation::backend_outcome_receiver(world)
-                {
-                    receiver.begin_close();
-                }
-                if !result.completed.is_empty()
-                    && let Err(completed) =
-                        commit_ui_backend_outcomes(world, std::mem::take(&mut result.completed))
-                {
-                    result.completed = completed;
-                    return Ok(ConnectionOutput::Returned(Err(WgpuRuntimeResultFailure {
-                        error: WgpuRuntimeExchangeError::UiResultRefused,
-                        result,
-                        post_operation_fault: None,
-                    })));
-                }
-            }
-            let presented = (!retiring)
-                .then(|| {
-                    result
-                        .observation
-                        .as_ref()
-                        .and_then(WgpuRenderObservation::presented_frame_this_transaction)
-                })
-                .flatten();
-            if world.resource::<RenderFrame>().index == result.frame.index {
-                *world.resource_mut::<RenderFrame>() = result.frame;
-                *world.resource_mut::<FrameStats>() = result.stats;
-            }
-            if let Some(status) = result.status {
-                *world.resource_mut::<RenderBackendStatus>() = status;
-            } else {
-                world
-                    .resource_mut::<RenderBackendStatus>()
-                    .mark_skipped_with_message(
-                        result.frame.index,
-                        crate::RenderFrameSkipReason::NoRenderableTarget,
-                        "the original capture was cancelled before native execution",
-                    );
-            }
-            if let Some(observation) = result.observation {
-                *world.resource_mut::<WgpuRenderObservation>() = observation;
-            }
-            if !retiring && let Some(presented) = result.presented_world {
-                world.insert_resource(presented);
-            }
-            if let Some(fault) = result.fault
-                && let Some(reporter) = world.get_resource::<nara_app::RuntimeFaultReporter>()
-            {
-                reporter.report(fault);
-            }
-            drop(result.transfer);
-            ConnectionOutput::Returned(Ok(WgpuRuntimeCompletion {
-                presented,
-                retired: retiring,
-            }))
+    }
+    #[cfg(feature = "hud-runtime")]
+    let mut result = result;
+    #[cfg(feature = "hud-runtime")]
+    {
+        if retiring
+            && let Some(receiver) = crate::hud::presentation::backend_outcome_receiver(world)
+        {
+            receiver.begin_close();
         }
+        if !result.completed.is_empty()
+            && let Err(completed) =
+                commit_ui_backend_outcomes(world, std::mem::take(&mut result.completed))
+        {
+            result.completed = completed;
+            return Err(WgpuRuntimeResultFailure::refused(
+                result,
+                WgpuRuntimeExchangeError::UiResultRefused,
+            ));
+        }
+    }
+    let presented = if retiring {
+        None
+    } else {
+        result
+            .observation
+            .as_ref()
+            .and_then(WgpuRenderObservation::presented_frame_this_transaction)
+    };
+    if world.resource::<RenderFrame>().index == result.frame.index {
+        *world.resource_mut::<RenderFrame>() = result.frame;
+        *world.resource_mut::<FrameStats>() = result.stats;
+    }
+    if let Some(status) = result.status {
+        *world.resource_mut::<RenderBackendStatus>() = status;
+    } else {
+        world
+            .resource_mut::<RenderBackendStatus>()
+            .mark_skipped_with_message(
+                result.frame.index,
+                crate::RenderFrameSkipReason::NoRenderableTarget,
+                "the original capture was cancelled before native execution",
+            );
+    }
+    if let Some(observation) = result.observation {
+        *world.resource_mut::<WgpuRenderObservation>() = observation;
+    }
+    if !retiring && let Some(presented) = result.presented_world {
+        world.insert_resource(presented);
+    }
+    if let Some(fault) = result.fault
+        && let Some(reporter) = world.get_resource::<nara_app::RuntimeFaultReporter>()
+    {
+        reporter.report(fault);
+    }
+    drop(result.transfer);
+    Ok(WgpuRuntimeCompletion {
+        presented,
+        retired: retiring,
     })
 }
+
+#[cfg(test)]
+#[derive(Resource)]
+struct PostCompletionFault(nara_app::RuntimeFault);
 
 /// Converts an unexecuted capture to its original logical result after a Runtime fault.
 /// Original UI permissions return Aborted through their retained receivers; no GPU fact is issued.
@@ -493,74 +463,84 @@ pub fn cancel_runtime_frame(capture: WgpuRuntimeCapture) -> WgpuRuntimeResult {
 pub fn take_runtime_frame(
     runtime: &mut RuntimeInstance,
 ) -> Result<RuntimeScopeOutcome<Option<WgpuRuntimeCapture>>, WgpuRuntimeCaptureFailure> {
-    let outcome = runtime
-        .__with_owned_driver_port::<WgpuRuntimeConnection>(ConnectionInput(
-            ConnectionOperation::Take(runtime.generation()),
-        ))
-        .map_err(|(error, _)| WgpuRuntimeCaptureFailure {
+    let generation = runtime.generation();
+    let RuntimeScopeOutcome {
+        output,
+        post_operation_fault,
+    } = runtime
+        .with_driver_scope(|scope| {
+            let state = scope.state();
+            if !matches!(state, RuntimeState::Running | RuntimeState::Paused) {
+                return Err(RuntimeScopeError::Unavailable { state }.into());
+            }
+            scope.with_world_mut(|world| take_connection_frame(world, generation))
+        })
+        .map_err(|error| WgpuRuntimeCaptureFailure {
             error: WgpuRuntimeExchangeError::Scope(error),
             post_operation_fault: None,
         })?;
-    let output = outcome
-        .output
-        .map_err(|(error, _)| WgpuRuntimeCaptureFailure {
-            error: WgpuRuntimeExchangeError::Port(error),
-            post_operation_fault: outcome.post_operation_fault.clone(),
-        })?;
-    let ConnectionOutput::Taken(output) = output else {
-        unreachable!("the exact take operation returns a capture")
-    };
-    Ok(RuntimeScopeOutcome {
-        output: output.map_err(|error| WgpuRuntimeCaptureFailure {
+    match output {
+        Ok(output) => Ok(RuntimeScopeOutcome {
+            output,
+            post_operation_fault,
+        }),
+        Err(error) => Err(WgpuRuntimeCaptureFailure {
             error,
-            post_operation_fault: outcome.post_operation_fault.clone(),
-        })?,
-        post_operation_fault: outcome.post_operation_fault,
-    })
+            post_operation_fault,
+        }),
+    }
 }
 
 pub fn complete_runtime_frame(
     runtime: &mut RuntimeInstance,
     result: WgpuRuntimeResult,
 ) -> Result<RuntimeScopeOutcome<WgpuRuntimeCompletion>, WgpuRuntimeResultFailure> {
-    let present = matches!(
-        runtime.state(),
-        RuntimeState::Running | RuntimeState::Paused
-    );
-    let outcome = match runtime.__with_owned_driver_port::<WgpuRuntimeConnection>(ConnectionInput(
-        ConnectionOperation::Return(result, present),
-    )) {
+    let generation = runtime.generation();
+    let mut pending_result = Some(result);
+    let outcome = runtime.with_driver_scope(|scope| {
+        let result = pending_result
+            .take()
+            .expect("the scope takes the result once");
+        let present = match scope.state() {
+            RuntimeState::Running | RuntimeState::Paused => true,
+            RuntimeState::Faulted | RuntimeState::Stopping | RuntimeState::CloseIncomplete => false,
+            state => {
+                return Err(WgpuRuntimeResultFailure::refused(
+                    result,
+                    RuntimeScopeError::Unavailable { state }.into(),
+                ));
+            }
+        };
+        scope.with_world_mut(|world| {
+            let completion = apply_connection_result(world, generation, result, present);
+            #[cfg(test)]
+            if let Some(fault) = world.get_resource::<PostCompletionFault>()
+                && let Some(reporter) = world.get_resource::<nara_app::RuntimeFaultReporter>()
+            {
+                reporter.report(fault.0.clone());
+            }
+            completion
+        })
+    });
+    let RuntimeScopeOutcome {
+        output,
+        post_operation_fault,
+    } = match outcome {
         Ok(outcome) => outcome,
-        Err((error, ConnectionInput(ConnectionOperation::Return(result, _)))) => {
-            return Err(WgpuRuntimeResultFailure {
-                error: WgpuRuntimeExchangeError::Scope(error),
-                result,
-                post_operation_fault: None,
-            });
+        Err(error) => {
+            return Err(WgpuRuntimeResultFailure::refused(
+                pending_result.expect("a scope rejected before entry retains its result"),
+                error.into(),
+            ));
         }
-        Err(_) => unreachable!("refused application retains the exact result"),
-    };
-    let output = match outcome.output {
-        Ok(output) => output,
-        Err((error, ConnectionInput(ConnectionOperation::Return(result, _)))) => {
-            return Err(WgpuRuntimeResultFailure {
-                error: WgpuRuntimeExchangeError::Port(error),
-                result,
-                post_operation_fault: outcome.post_operation_fault,
-            });
-        }
-        Err(_) => unreachable!("refused application retains the exact result"),
-    };
-    let ConnectionOutput::Returned(output) = output else {
-        unreachable!("the exact return operation applies a result")
     };
     match output {
         Ok(output) => Ok(RuntimeScopeOutcome {
             output,
-            post_operation_fault: outcome.post_operation_fault,
+            post_operation_fault,
         }),
         Err(mut failure) => {
-            failure.post_operation_fault = outcome.post_operation_fault;
+            failure.post_operation_fault = post_operation_fault;
             Err(failure)
         }
     }
@@ -614,7 +594,6 @@ pub(crate) fn install(app: &mut App) -> Result<(), PluginError> {
     app.insert_resource(WgpuRuntimeConnection::default())?;
     let original = Arc::clone(&app.world().resource::<WgpuRuntimeConnection>().owner);
     app.insert_resource(ConnectionAuthority(Arc::clone(&original)))?;
-    app.__register_driver_port::<WgpuRuntimeConnection>(apply_connection)?;
     app.register_plugin_runtime_close_participant(
         crate::gpu::WGPU_BACKEND_SHUTDOWN_OBLIGATION,
         RuntimeCloseParticipantId::new("nara.render-wgpu.connection"),

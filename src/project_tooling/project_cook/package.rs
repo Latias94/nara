@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use nara_fs::{
+use crate::fs::{
     ContentDigest, DirectoryCapability, DirectoryEnumerationLimits, FileIdentity, FileKind,
     FsError, FsOperation, RelativeComponent, RelativePath,
 };

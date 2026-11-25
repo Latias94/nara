@@ -5,7 +5,7 @@ use std::sync::{
 
 use nara_asset::AssetServer;
 use nara_core::ItemLimit;
-use nara_identity::EntityLookup;
+use nara_ecs::identity::EntityLookup;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistryBuilder, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId,
@@ -380,17 +380,16 @@ fn receiving_version_requires_source_recompilation_without_activation_migration(
 
 #[cfg(feature = "serde")]
 #[test]
-fn authoring_sealed_visibility_forest_requires_native_projection_before_any_codec() {
+fn authoring_sealed_visibility_forest_materializes_on_native_relationships() {
     use crate::{
-        __private::{AuthoringAdapterReceipt, try_compile_authoring_scene_with_loader},
         AuthoringSchemaBasis, PrefabEntityTarget, SceneEntityPlacement, ScenePlacement,
         ScenePlacementParent,
+        authoring::{AuthoringAdapterReceipt, try_compile_authoring_scene_with_loader},
     };
-    use nara_diagnostic::DiagnosticValueRef;
-    use nara_reflect::{__private::resolve_schema_provider, AuthoringSchemaBundle};
+    use nara_reflect::AuthoringSchemaBundle;
 
     let provider = crate::SCENE_COMPONENTS_SCHEMA_PROVIDER;
-    let resolved = resolve_schema_provider(provider).unwrap();
+    let resolved = provider.resolve().unwrap();
     let bundle = AuthoringSchemaBundle::from_trusted_provider_definitions([provider]).unwrap();
     let adapter = AuthoringAdapterReceipt::from_trusted_provider(
         resolved.contribution_receipt(),
@@ -480,7 +479,6 @@ fn authoring_sealed_visibility_forest_requires_native_projection_before_any_code
             .components()
             .contains_key(&visibility)
     );
-    let candidate_before = format!("{candidate:?}");
     let mut world = World::new();
     world.insert_resource(AssetServer::new());
     let report = spawn_scene(&mut world, &receiving, &initial, &occurrence(), None);
@@ -490,53 +488,32 @@ fn authoring_sealed_visibility_forest_requires_native_projection_before_any_code
         panic!("isolated Visibility must be supported");
     };
     assert_eq!(calls.swap(0, Ordering::SeqCst), 1);
-    let old_source = world.get::<SceneEntitySource>(old).unwrap().clone();
-    let stats = world.resource::<WorldIdentityDomain>().stats();
-    let assets = world.resource::<AssetServer>().clone();
-    let population = world.entities().len();
-
-    let rejected = prepare_scene_replacement(&mut world, &receiving, &candidate, &current, None)
-        .expect_err("Authoring sealing cannot authorize an unavailable Native projection");
-    let diagnostic = rejected
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable")
-        .expect("Native receiving must reject the unsupported projection");
-    assert_eq!(
-        diagnostic
-            .fields()
-            .iter()
-            .find(|field| field.key().as_str() == "entity-id")
-            .unwrap()
-            .value(),
-        DiagnosticValueRef::Identifier("b-child"),
-    );
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
-    assert_eq!(format!("{candidate:?}"), candidate_before);
-    assert_eq!(world.entities().len(), population);
-    assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
-    assert_eq!(world.resource::<AssetServer>(), &assets);
-    assert_eq!(
-        current.resolve(&world, &id("isolated")),
-        EntityLookup::Resolved(old)
-    );
-    assert_eq!(world.get::<SceneEntitySource>(old), Some(&old_source));
-    assert_eq!(
-        world.get::<ReceivedValue>(old).unwrap().0,
-        ComponentValue::String("visible".into())
-    );
-
-    let mut without_visibility = forest;
-    for entity in &mut without_visibility.entities {
-        entity.components.clear();
-    }
-    let supported = seal(&without_visibility);
-    let prepared = prepare_scene_replacement(&mut world, &receiving, &supported, &current, None)
-        .expect("the same forest without Visibility must remain supported");
+    let prepared = prepare_scene_replacement(&mut world, &receiving, &candidate, &current, None)
+        .expect("an admitted Visibility forest must prepare on native hierarchy");
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    assert!(world.get_entity(old).is_ok());
     let report = prepared.commit(&mut world);
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
-    assert_eq!(report.instance.unwrap().len(), 5);
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(world.get_entity(old).is_err());
+    let instance = report.instance.unwrap();
+    assert_eq!(instance.len(), 5);
+    let live = |name| match instance.resolve(&world, &id(name)) {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("{name} did not resolve: {lookup:?}"),
+    };
+    let child = live("b-child");
+    assert_eq!(
+        world
+            .get::<crate::spatial::ChildOf>(child)
+            .unwrap()
+            .parent(),
+        live("z-parent")
+    );
+    assert_eq!(
+        world.get::<ReceivedValue>(child).unwrap().0,
+        ComponentValue::String("visible".into())
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
 }
 
 #[test]

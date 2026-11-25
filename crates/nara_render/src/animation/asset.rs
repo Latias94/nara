@@ -17,8 +17,8 @@ use nara_asset::{
     AssetReferenceDemand, AssetRuntimeError, AssetRuntimeLimits, AssetSourceKind,
     ImportedProductId, RuntimeAssetCodec, SourceAssetBuild, SourceAssetImporter,
 };
+use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit, SerdeShapeLimits, Vec2, preflight_serde_shape};
-use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 use serde::{Deserialize, Deserializer, Serialize, de};
 
 use crate::animation::{

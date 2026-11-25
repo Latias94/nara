@@ -1,7 +1,7 @@
 //! Finite witnessed input endpoints that must outlive removal of the selected declaration.
 
 use super::*;
-use nara_identity::{AuthoredEntityReference, PrefabEntityOrigin};
+use nara_ecs::identity::{AuthoredEntityReference, PrefabEntityOrigin};
 use nara_reflect::{ComponentFieldSchema, ComponentValueShape};
 
 pub(in crate::authoring::prefab_conversion::localize) struct SourceReferenceQueries {
@@ -250,7 +250,7 @@ impl QueryInventory<'_> {
                         let crate::PrefabPropertyIntent::Set(value) = &claim.intent else {
                             continue;
                         };
-                        let selected = nara_reflect::__private::resolve_component_property_schema_claim_with_admission(
+                        let selected = nara_reflect::property::resolve_component_property_schema_claim_with_admission(
                             schema, *version, &claim.path, &mut self.property_reads,
                             |nodes, bytes, allocated| admit_reference_work(
                                 &mut self.reference_work, self.limits, &mut self.work, nodes, bytes, allocated,
@@ -259,12 +259,12 @@ impl QueryInventory<'_> {
                         let selected = match selected {
                             Ok(selected) => selected,
                             Err(
-                                nara_reflect::__private::ComponentPropertyAdmissionError::Property(
+                                nara_reflect::property::ComponentPropertyAdmissionError::Property(
                                     _,
                                 ),
                             ) => continue,
                             Err(
-                                nara_reflect::__private::ComponentPropertyAdmissionError::Admission(
+                                nara_reflect::property::ComponentPropertyAdmissionError::Admission(
                                     report,
                                 ),
                             ) => return Err(report),

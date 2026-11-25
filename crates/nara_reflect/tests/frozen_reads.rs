@@ -7,20 +7,20 @@ use std::{
 };
 
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
+use nara_ecs::identity::{EntityReference, SceneEntityId};
 use nara_ecs::{Component, World};
-use nara_identity::{EntityReference, SceneEntityId};
 use nara_reflect::{
-    __private::{
-        EffectiveValueAdmissionError, effective_component_value_with_default_overrides,
-        freeze_component_defaults, freeze_component_defaults_with_admission,
-        validate_native_component_value_references_with_limits,
-        validate_value_materialization_budget,
-    },
     ComponentCapability, ComponentCodecError, ComponentDecodeContext, ComponentFieldId,
     ComponentFieldPath, ComponentFieldPathSegment as Segment, ComponentFieldSchema,
     ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits,
     ComponentValueRef, ComponentValueShape, PersistentComponent,
+    effective::{
+        EffectiveValueAdmissionError, effective_component_value_with_default_overrides,
+        freeze_component_defaults, freeze_component_defaults_with_admission,
+        validate_native_component_value_references_with_limits,
+        validate_value_materialization_budget,
+    },
     rewrite_declared_entity_references, validate_component_value,
     validate_component_value_with_limits,
 };

@@ -10,27 +10,17 @@ use nara::{
     app::{FixedTime, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter, RuntimeState},
     asset::Assets,
     diagnostic::{DiagnosticReport, DiagnosticValueRef},
-    gameplay::{GameplayCommandPlugin, GameplayCommandQueue},
     image::ImageAsset,
     project_host::{HeadlessSession, HeadlessSessionClose, HeadlessSessionError},
     scene::SceneEntitySource,
     sprite::Sprite,
 };
 
-use crate::{
-    BootOutcome, GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandSourceSequence,
-    GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId, HeadlessRun,
-    HeadlessRunOutcome, NonZeroU32, TestProject, execute_to_terminal,
-};
+use crate::TestProject;
 
 #[test]
-fn checked_minimal_project_starts_and_runs_without_a_gameplay_queue() {
-    for (preset, explicit_commands, expect_queue) in [
-        (None, false, false),
-        (Some("minimal"), false, false),
-        (Some("minimal"), true, true),
-        (Some("local-headless"), false, true),
-    ] {
+fn checked_minimal_and_headless_projects_start_and_publish_their_scene() {
+    for preset in [None, Some("minimal"), Some("local-headless")] {
         let project = TestProject::with_prefab_startup();
         if let Some(preset) = preset {
             let manifest = project.path().join("nara.toml");
@@ -41,13 +31,7 @@ fn checked_minimal_project_starts_and_runs_without_a_gameplay_queue() {
             )
             .unwrap();
         }
-        let recipe = if explicit_commands {
-            ProductRecipe::new()
-                .add_plugin::<GameplayCommandPlugin>()
-                .unwrap()
-        } else {
-            ProductRecipe::new()
-        };
+        let recipe = ProductRecipe::new();
         #[cfg(feature = "project-workflow")]
         let checked = check_project(ProjectCheckRequest::new(
             project.root_capability(),
@@ -55,9 +39,9 @@ fn checked_minimal_project_starts_and_runs_without_a_gameplay_queue() {
         ))
         .unwrap();
         let mut session = HeadlessSession::new(project.root_capability(), recipe);
-        session.start().unwrap_or_else(|error| {
-            panic!("preset {preset:?}, explicit commands={explicit_commands}: {error:?}")
-        });
+        session
+            .start()
+            .unwrap_or_else(|error| panic!("preset {preset:?}: {error:?}"));
         assert_eq!(session.state(), Some(RuntimeState::Running));
         #[cfg(feature = "project-workflow")]
         assert_eq!(
@@ -71,10 +55,6 @@ fn checked_minimal_project_starts_and_runs_without_a_gameplay_queue() {
         session
             .observe(|world| {
                 assert_eq!(world.resource::<FixedTime>().tick(), 1);
-                assert_eq!(
-                    world.contains_resource::<GameplayCommandQueue>(),
-                    expect_queue
-                );
                 let sprite = world
                     .iter_entities()
                     .find_map(|entity| {
@@ -99,32 +79,6 @@ fn checked_minimal_project_starts_and_runs_without_a_gameplay_queue() {
             .unwrap();
         close(&mut session, HeadlessSessionClose::Complete);
     }
-}
-
-#[test]
-fn startup_commands_still_require_a_gameplay_queue() {
-    let project = TestProject::with_prefab_startup();
-    let command = GameplayCommandSubmission::new(
-        GameplayCommandTick::new(1).unwrap(),
-        GameplayCommandIngressSource::external("test.startup").unwrap(),
-        GameplayCommandSourceSequence::new(1).unwrap(),
-        GameplayCommandDraft::new(GameplayCommandTypeId::new("test.startup").unwrap()),
-    );
-    let mut run = HeadlessRun::<BootOutcome>::from_recipe(
-        project.root_capability(),
-        ProductRecipe::new(),
-        NonZeroU32::new(1).unwrap(),
-        vec![command],
-    );
-    let report = execute_to_terminal(&mut run);
-    assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed);
-    assert!(
-        report
-            .diagnostics()
-            .iter()
-            .any(|entry| entry.code().as_str() == "project.run.command-queue-missing"),
-        "{report:?}"
-    );
 }
 
 #[test]

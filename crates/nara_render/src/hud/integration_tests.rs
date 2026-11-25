@@ -1,9 +1,9 @@
 use super::*;
-use nara_text::bundled_font_face;
-use nara_ui_kernel::{
+use nara_ui::kernel::{
     UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiImageId, UiLayer, UiLocalKey,
     UiNode, UiRoot, UiRootKey, UiStyle, UiTheme, UiVisual,
 };
+use nara_ui::text::bundled_font_face;
 
 pub(crate) fn frame(surface: u64, source_revision: u64, visual: UiVisual) -> Arc<UiFrame> {
     let node = UiNode::new(UiStyle::absolute(0.0, 0.0, 32.0, 32.0))
@@ -743,7 +743,7 @@ fn undrained_outcomes_block_the_next_compile_before_planner_mutation() {
     assert_eq!(rejected_stats.plan_attempts, 1);
     assert_eq!(rejected_stats.planned_packets, 0);
     assert_eq!(rejected_stats.lowered_primitives, 0);
-    assert_eq!(rejected_stats.text, nara_text::TextWorkStats::default());
+    assert_eq!(rejected_stats.text, nara_ui::text::TextWorkStats::default());
 
     let error =
         compile_ui_paint_packets(&mut world, &[frame(1, 2, UiVisual::solid(white))]).unwrap_err();

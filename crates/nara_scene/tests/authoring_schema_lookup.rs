@@ -11,12 +11,12 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringFieldEdit,
-    AuthoringRecordLocation, AuthoringRecordReadiness, AuthoringSchemaBasis,
-    PrefabAuthoringSession, PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument,
-    PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance, PrefabOverlay,
+    AuthoringDocumentSource, AuthoringFieldEdit, AuthoringRecordLocation, AuthoringRecordReadiness,
+    AuthoringSchemaBasis, PrefabAuthoringSession, PrefabComponentIntent, PrefabComponentSetMode,
+    PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance, PrefabOverlay,
     SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
     SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    authoring::AuthoringAdapterReceipt,
 };
 
 const OWNER: &str = "test.lookup.bound";
@@ -499,11 +499,11 @@ fn shared_basis_admission_rejects_conflicting_exact_adapter_coverage() {
 fn data_only_prefab_compilation_preserves_pins_and_typed_omissions_without_native_authority() {
     use nara_reflect::ComponentPropertyPath;
     use nara_scene::{
-        __private::{
+        PrefabPropertyClaim, PrefabPropertyIntent, ResolvedPrefabSource,
+        authoring::{
             AuthoringPreviewOmissionLocation, AuthoringPreviewOmissionReason,
             try_compile_authoring_scene_with_loader,
         },
-        PrefabPropertyClaim, PrefabPropertyIntent, ResolvedPrefabSource,
     };
     use std::{convert::Infallible, sync::Arc};
 
@@ -580,7 +580,7 @@ fn data_only_prefab_compilation_preserves_pins_and_typed_omissions_without_nativ
         7
     );
     let expected = candidate.provenance().clone();
-    let nara_scene::__private::AuthoringNativePreview {
+    let nara_scene::authoring::AuthoringNativePreview {
         candidate: native_preview,
         omissions,
         ..
@@ -606,7 +606,7 @@ fn data_only_prefab_compilation_preserves_pins_and_typed_omissions_without_nativ
 
 #[test]
 fn prefab_compilation_rejects_an_independently_admitted_identical_basis() {
-    use nara_scene::{__private::try_compile_authoring_scene_with_loader, ResolvedPrefabSource};
+    use nara_scene::{ResolvedPrefabSource, authoring::try_compile_authoring_scene_with_loader};
     use std::{convert::Infallible, sync::Arc};
 
     let (bundle, adapters) = catalog();
@@ -651,13 +651,13 @@ fn prefab_compilation_rejects_an_independently_admitted_identical_basis() {
 fn authoring_omits_unavailable_complete_overlay_records_but_refuses_property_interpretation() {
     use nara_reflect::ComponentPropertyPath;
     use nara_scene::{
-        __private::{
-            AuthoringPreviewOmissionLocation, AuthoringPreviewOmissionReason,
-            AuthoringSceneCompilationOmissionReason, try_compile_authoring_scene_with_loader,
-        },
         PrefabAddition, PrefabEntityOrigin, PrefabInstanceHop, PrefabPropertyClaim,
         PrefabPropertyIntent, ResolvedPrefabSource, SceneCompilationFailureKind,
         SceneEntityPlacement, ScenePlacement, ScenePlacementParent,
+        authoring::{
+            AuthoringPreviewOmissionLocation, AuthoringPreviewOmissionReason,
+            AuthoringSceneCompilationOmissionReason, try_compile_authoring_scene_with_loader,
+        },
     };
     use std::{convert::Infallible, sync::Arc};
 
@@ -900,11 +900,11 @@ fn authoring_omits_unavailable_complete_overlay_records_but_refuses_property_int
 #[test]
 fn authoring_rejects_current_complete_overlay_records_without_scene_capability_even_when_unbound() {
     use nara_scene::{
-        __private::{
-            AuthoringSceneCompilationOmissionReason, try_compile_authoring_scene_with_loader,
-        },
         PrefabAddition, ResolvedPrefabSource, SceneCompilationFailureKind, SceneEntityPlacement,
         ScenePlacement, ScenePlacementParent,
+        authoring::{
+            AuthoringSceneCompilationOmissionReason, try_compile_authoring_scene_with_loader,
+        },
     };
     use std::{convert::Infallible, sync::Arc};
 

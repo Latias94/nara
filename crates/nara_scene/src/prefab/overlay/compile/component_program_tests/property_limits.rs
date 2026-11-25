@@ -276,10 +276,10 @@ fn authoring_expand(
     document: &SceneDocument,
     sources: &InMemoryPrefabSourceResolver,
     limits: SceneCompilationLimits,
-) -> crate::__private::AuthoringSceneCompilationReport {
+) -> crate::authoring::AuthoringSceneCompilationReport {
     use crate::{
-        __private::{AuthoringAdapterReceipt, try_compile_authoring_scene_with_loader},
         AuthoringSchemaBasis, PrefabSourceResolver, ResolvedPrefabSource,
+        authoring::{AuthoringAdapterReceipt, try_compile_authoring_scene_with_loader},
     };
     use nara_reflect::{AuthoringSchemaBundle, AuthoringSchemaBundleOwner};
     use std::{convert::Infallible, sync::Arc};
@@ -429,7 +429,7 @@ struct CostFixture {
 struct CostCompilation {
     result: Result<crate::draft::SceneDraft, SceneCompilationFailure>,
     usage: crate::prefab::SceneCompilationUsage,
-    diagnostics: nara_diagnostic::DiagnosticReport,
+    diagnostics: nara_core::diagnostic::DiagnosticReport,
     reference_work: (usize, usize),
     source_upgrade_required: bool,
 }

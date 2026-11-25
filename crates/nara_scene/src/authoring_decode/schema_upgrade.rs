@@ -98,7 +98,7 @@ impl UpgradeSourceValidation<'_, '_> {
         schema: &ComponentSchema,
         record: &SceneComponentRecord,
     ) -> Result<(), ScenePatchReport> {
-        let effective = nara_reflect::__private::effective_component_value_with_default_overrides_with_admission(
+        let effective = nara_reflect::effective::effective_component_value_with_default_overrides_with_admission(
             schema,
             record.value(),
             &record.contextual_defaults,
@@ -114,10 +114,10 @@ impl UpgradeSourceValidation<'_, '_> {
             },
         )
         .map_err(|error| match error {
-            nara_reflect::__private::EffectiveValueAdmissionError::Admission(report) => report,
-            nara_reflect::__private::EffectiveValueAdmissionError::Value(_) => refused(),
+            nara_reflect::effective::EffectiveValueAdmissionError::Admission(report) => report,
+            nara_reflect::effective::EffectiveValueAdmissionError::Value(_) => refused(),
         })?;
-        nara_reflect::__private::validate_component_value_with_admission(
+        nara_reflect::registry::validate_component_value_with_admission(
             schema,
             effective.as_ref(),
             self.limits.component_materialization_limits(),
@@ -132,8 +132,8 @@ impl UpgradeSourceValidation<'_, '_> {
             },
         )
         .map_err(|error| match error {
-            nara_reflect::__private::ComponentValueAdmissionError::Admission(report) => report,
-            nara_reflect::__private::ComponentValueAdmissionError::Value(_) => refused(),
+            nara_reflect::registry::ComponentValueAdmissionError::Admission(report) => report,
+            nara_reflect::registry::ComponentValueAdmissionError::Value(_) => refused(),
         })
     }
 
@@ -143,7 +143,7 @@ impl UpgradeSourceValidation<'_, '_> {
         claim: &PrefabPropertyClaim,
     ) -> Result<(), ScenePatchReport> {
         let selected =
-            nara_reflect::__private::resolve_component_property_schema_claim_with_admission(
+            nara_reflect::property::resolve_component_property_schema_claim_with_admission(
                 schema,
                 schema.version,
                 &claim.path,
@@ -181,7 +181,7 @@ impl UpgradeSourceValidation<'_, '_> {
             PrefabPropertyIntent::Absent => return Err(refused()),
         };
         if let Some(payload) = payload {
-            nara_reflect::__private::validate_component_property_value_with_admission(
+            nara_reflect::property::validate_component_property_value_with_admission(
                 selected.shape,
                 &claim.path,
                 payload,
@@ -203,11 +203,11 @@ impl UpgradeSourceValidation<'_, '_> {
 }
 
 fn property_validation_error(
-    error: nara_reflect::__private::ComponentPropertyAdmissionError<ScenePatchReport>,
+    error: nara_reflect::property::ComponentPropertyAdmissionError<ScenePatchReport>,
 ) -> ScenePatchReport {
     match error {
-        nara_reflect::__private::ComponentPropertyAdmissionError::Admission(report) => report,
-        nara_reflect::__private::ComponentPropertyAdmissionError::Property(_) => refused(),
+        nara_reflect::property::ComponentPropertyAdmissionError::Admission(report) => report,
+        nara_reflect::property::ComponentPropertyAdmissionError::Property(_) => refused(),
     }
 }
 
@@ -428,8 +428,8 @@ impl AuthoredFieldUpgrade {
                 },
             )
             .map_err(|error| match error {
-                nara_reflect::__private::EffectiveValueAdmissionError::Admission(report) => report,
-                nara_reflect::__private::EffectiveValueAdmissionError::Value(_) => refused(),
+                nara_reflect::effective::EffectiveValueAdmissionError::Admission(report) => report,
+                nara_reflect::effective::EffectiveValueAdmissionError::Value(_) => refused(),
             })?;
         }
         validation.record(

@@ -4,7 +4,7 @@
 use std::{collections::BTreeMap, convert::Infallible, sync::Arc};
 
 use nara_core::{ByteLimit, ItemLimit};
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, ReferenceInputId,
 };
 use nara_reflect::{
@@ -17,11 +17,11 @@ use nara_reflect::{
 use super::*;
 use crate::SceneComponentRecord;
 use crate::{
-    __private::AuthoringAdapterReceipt,
     AuthoringDocumentSource, ExpandedSceneDocument, PrefabComponentIntent, PrefabDocumentCandidate,
     PrefabEntityOrigin, PrefabInstanceHop, PrefabOverlay, PrefabProjectionStep,
     PrefabPropertyClaim, PrefabPropertyIntent, ResolvedPrefabSource, SceneCompilationLimits,
     SceneEntityId, SceneEntityPlacement, ScenePlacement, ScenePlacementParent, SourceDocumentKind,
+    authoring::AuthoringAdapterReceipt,
     prefab::{
         extraction::try_capture_source_cut_with_loader, try_compile_authoring_scene_with_loader,
     },

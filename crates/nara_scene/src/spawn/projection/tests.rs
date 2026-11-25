@@ -5,12 +5,12 @@ use crate::{
 };
 use nara_asset::ProjectAssetDatabase;
 use nara_core::ItemLimit;
-use nara_ecs::{Resource, bevy_ecs::lifecycle::HookContext, bevy_ecs::world::DeferredWorld};
-use nara_identity::{
+use nara_ecs::identity::{
     EntityLookup, PersistentRetirementDisposition, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference, register_persistent_identity,
     resolve_in_world, retire_identity_entity_with_disposition, spawn_identity_entity,
 };
+use nara_ecs::{Resource, bevy_ecs::lifecycle::HookContext, bevy_ecs::world::DeferredWorld};
 use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
 use std::sync::{
     Arc,
@@ -297,7 +297,7 @@ fn repeated_epochs_bound_claims_without_replacing_the_world_or_unmanaged_state()
 
 #[test]
 fn wide_root_epochs_preserve_order_unmanaged_neighbors_and_exact_identity_retirement() {
-    use nara_hierarchy::{
+    use crate::hierarchy::{
         HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
         HierarchyWriter,
     };
@@ -387,7 +387,7 @@ fn wide_root_epochs_preserve_order_unmanaged_neighbors_and_exact_identity_retire
         assert_eq!(world.id(), world_id);
         assert_eq!(world.get::<Unmanaged>(head).unwrap().0, 11);
         assert_eq!(world.get::<Unmanaged>(tail).unwrap().0, 22);
-        nara_hierarchy::validate_hierarchy(&world).unwrap();
+        crate::hierarchy::validate_hierarchy(&world).unwrap();
         if let Some((old, old_entities)) = previous {
             assert_ne!(old.domain_id(), instance.domain_id());
             for (id, entity) in ids.iter().zip(old_entities) {
@@ -415,7 +415,7 @@ fn wide_root_epochs_preserve_order_unmanaged_neighbors_and_exact_identity_retire
         .collect::<Vec<_>>();
     remaining.sort_unstable_by_key(|entity| entity.to_bits());
     assert_eq!(remaining, non_scene_population.unwrap());
-    nara_hierarchy::validate_hierarchy(&world).unwrap();
+    crate::hierarchy::validate_hierarchy(&world).unwrap();
 }
 
 #[test]
@@ -593,7 +593,7 @@ fn foreign_active_and_retired_scene_claims_reject_projection_replacement() {
         assert_eq!(stats.claimed_scene_instances, 2);
         let population = fixture.world.iter_entities().count();
         assert!(
-            nara_identity::__private::prepare_scene_projection_epoch_retirement(
+            nara_ecs::identity::domain::prepare_scene_projection_epoch_retirement(
                 &mut fixture.world,
                 Some(&current),
             )
@@ -646,7 +646,7 @@ fn fresh_owner_cannot_take_another_owners_empty_projection() {
     let population = world.iter_entities().count();
     let mut other = SceneProjection::new(occurrence("other"));
     assert!(
-        nara_identity::__private::prepare_scene_projection_epoch_retirement(&mut world, None)
+        nara_ecs::identity::domain::prepare_scene_projection_epoch_retirement(&mut world, None)
             .is_err(),
         "an unbound owner must not replace another owner's empty epoch"
     );

@@ -21,7 +21,10 @@ use nara_app::{
     StartupStage,
 };
 use nara_core::ByteLimit;
-use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, SafeSummary};
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticReport, ReportDiagnostic as Diagnostic, SafeSummary,
+};
+use nara_ecs::identity::SpawnedSceneInstance;
 use nara_ecs::{
     Res, ResMut, Resource, SystemSet, World,
     bevy_ecs::change_detection::Tick,
@@ -34,7 +37,6 @@ use nara_ecs::{
     schedule::IntoScheduleConfigs,
     system::SystemParam,
 };
-use nara_identity::SpawnedSceneInstance;
 #[cfg(feature = "serde")]
 use nara_scene::RuntimeSceneCandidate;
 use nara_scene::{
@@ -416,7 +418,7 @@ impl SceneSourceView {
     #[must_use]
     pub fn hosted_runtime_scene_identity(
         &self,
-    ) -> Option<(nara_asset::AssetProductRef, nara_fs::ContentDigest)> {
+    ) -> Option<(nara_asset::AssetProductRef, crate::fs::ContentDigest)> {
         let source = self.source.upgrade()?;
         match &source.retention {
             SceneRetention::RuntimeContent {
@@ -1214,14 +1216,12 @@ mod tests {
         ))
         .unwrap();
         let sealed = app.seal().unwrap();
-        let mut candidate = nara_app::RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(
-                sealed,
-                nara_app::RuntimeObligationLedger::new(),
-                nara_app::RuntimeClosePolicy::default(),
-            )
-            .unwrap();
+        let mut candidate = nara_app::RuntimeCandidate::admit(
+            sealed,
+            nara_app::RuntimeObligationLedger::new(),
+            nara_app::RuntimeClosePolicy::default(),
+        )
+        .unwrap();
         let source = SceneSource::direct(
             scene_candidate(Arc::new(SceneDocument::from_ordered_roots([]))),
             ByteLimit::new(1024).unwrap(),

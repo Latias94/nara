@@ -64,7 +64,6 @@ impl WgpuViewUniform {
                 time.virtual_time(),
                 time.render(),
                 time.settings(),
-                time.spatial_interpolated(),
             ),
             None => uniform,
         }
@@ -76,7 +75,6 @@ impl WgpuViewUniform {
         virtual_time: VirtualTime,
         render: RenderTime,
         settings: RuntimeTimeSettings,
-        spatial_interpolated: bool,
     ) -> Self {
         let fixed = render.fixed();
         (self.real_elapsed, self.real_period) = period_time(real.elapsed);
@@ -90,7 +88,6 @@ impl WgpuViewUniform {
         self.time_scale = settings.time_scale();
         self.clock_available = 1;
         self.paused = u32::from(settings.paused());
-        self.spatial_interpolated = u32::from(spatial_interpolated);
         self.frame = counter_words(real.frame);
         self.virtual_frame = counter_words(virtual_time.frame);
         self.fixed_tick = counter_words(fixed.tick());

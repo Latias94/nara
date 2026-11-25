@@ -1,6 +1,6 @@
 use nara_reflect::{
-    __private::component_values_exactly_match, ComponentCapability, ComponentFieldPathSegment,
-    ComponentPropertyStep,
+    ComponentCapability, ComponentFieldPathSegment, ComponentPropertyStep,
+    schema::component_values_exactly_match,
 };
 
 use super::*;
@@ -12,6 +12,7 @@ use crate::{
     provenance::provenance_string_bytes,
 };
 
+/// A prefab property write bound to the inspected declaration and source revision.
 #[derive(Debug)]
 pub struct ObservedPrefabPropertyWrite {
     pub(crate) anchor: SceneEntityId,
@@ -67,6 +68,7 @@ impl ObservedPrefabPropertyWrite {
     }
 }
 
+/// A failure to select or prepare a property write from a prefab inspection.
 #[derive(Debug)]
 pub enum AuthoringPrefabPropertyWriteError {
     Read(AuthoringReadError),
@@ -84,7 +86,6 @@ impl From<AuthoringReadError> for AuthoringPrefabPropertyWriteError {
 
 impl AuthoringPrefabInstanceSnapshot {
     /// Resolves a property write to its writable instance layer and original declaration group.
-    #[doc(hidden)]
     pub fn plan_property_write(
         &self,
         input: SourceDocumentInput<'_>,
@@ -238,7 +239,6 @@ impl AuthoringPrefabInstanceSnapshot {
     /// Confirms the write at the original address using the same canonical prepared source that
     /// produced this snapshot. References preserve their authored spelling in that source and
     /// use the compiler's resolved endpoint in the effective record.
-    #[doc(hidden)]
     pub fn verifies_property_write(
         &self,
         source: SourceDocumentInput<'_>,

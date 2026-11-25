@@ -294,7 +294,7 @@ fn projection_retains_admitted_relative_and_known_project_absolute_locations() {
             &path
         };
         assert_eq!(location.path(), expected);
-        assert!(nara_fs::RelativePath::preflight(location.path()).is_ok());
+        assert!(crate::fs::RelativePath::preflight(location.path()).is_ok());
         assert_eq!(location.line(), 12);
         assert_eq!(location.column(), 34);
         assert_eq!(projected.truncated_count(), 0);

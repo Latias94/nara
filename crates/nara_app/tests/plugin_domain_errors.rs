@@ -7,8 +7,7 @@ use nara_app::{
     App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
     PluginDomainError, PluginDomainErrorError, PluginError, PluginFailure, PluginHook, PluginId,
     PluginLifecycleState, PluginPlan, PluginPreflightContext, PluginShutdownContext,
-    RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeClosePolicy,
-    RuntimeInstance, RuntimeObligationLedger,
+    RuntimeCandidateRetirementState, RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
 };
 
 const ACTUAL: PluginId = PluginId::new("test.domain.actual");
@@ -152,7 +151,6 @@ fn first_preflight_retains_actual_context_without_installation_or_poison() {
     assert!(failure.plugin_failure_report().is_none());
     let mut failure = plan
         .instantiate_runtime_candidate(
-            RuntimeAdmissionReservation::try_acquire().unwrap(),
             RuntimeObligationLedger::new(),
             RuntimeClosePolicy::default(),
         )
@@ -173,7 +171,6 @@ fn build_and_finish_preserve_primary_and_secondary_facts_until_close_once() {
         let plan = PluginPlan::resolve(definition(hook, &shutdowns)).unwrap();
         let mut failure = plan
             .instantiate_runtime_candidate(
-                RuntimeAdmissionReservation::try_acquire().unwrap(),
                 RuntimeObligationLedger::new(),
                 RuntimeClosePolicy::default(),
             )

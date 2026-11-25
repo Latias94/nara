@@ -71,7 +71,7 @@ pub fn restore_desktop_resume(
     run.restore_time_continuation(state.runtime_time.to_continuation()?)?;
     paused_maintenance(run, deadline)?;
     check_deadline(deadline)?;
-    run.submit(restore_command(bytes)?)?;
+    restore_command(bytes).submit_desktop(run)?;
     let ticket = run.request_control(RuntimeControl::StepFixedTick)?;
     loop {
         poll(run, deadline)?;

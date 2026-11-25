@@ -156,7 +156,7 @@ impl WgpuRenderObservation {
 #[cfg(test)]
 mod tests {
     use nara_app::{
-        App, RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeClosePolicy,
+        App, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeClosePolicy,
         RuntimeGeneration, RuntimeObligationLedger,
     };
     use nara_window::WindowId;
@@ -182,14 +182,12 @@ mod tests {
     }
 
     fn presented_receipt() -> WgpuPresentedFrameReceipt {
-        let candidate = RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(
-                App::new().seal().unwrap(),
-                RuntimeObligationLedger::new(),
-                RuntimeClosePolicy::default(),
-            )
-            .unwrap();
+        let candidate = RuntimeCandidate::admit(
+            App::new().seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
         let runtime = candidate.complete_startup().unwrap().promote();
         let generation: RuntimeGeneration = runtime.generation();
         let mut retirement = runtime.begin_retirement();
@@ -306,19 +304,21 @@ mod tests {
             presentation::{UiBackendSubmission, UiPresentationOutcomes},
         };
         use crate::{RenderTarget, ViewportRect};
-        use nara_ui_kernel::{
+        use nara_ui::kernel::{
             UiAuthoringSnapshotBuilder, UiCompiler, UiEnvironment, UiSurfaceId, UiTheme,
         };
 
-        let frame = UiCompiler::new(nara_text::bundled_font_face().unwrap(), Default::default())
-            .unwrap()
-            .compile(
-                &UiAuthoringSnapshotBuilder::new(1).build().unwrap(),
-                UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 16.0, 16.0, 1.0, 1, 1, 1, 1)
-                    .unwrap(),
-                UiTheme::default(),
-            )
-            .unwrap();
+        let frame = UiCompiler::new(
+            nara_ui::text::bundled_font_face().unwrap(),
+            Default::default(),
+        )
+        .unwrap()
+        .compile(
+            &UiAuthoringSnapshotBuilder::new(1).build().unwrap(),
+            UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 16.0, 16.0, 1.0, 1, 1, 1, 1).unwrap(),
+            UiTheme::default(),
+        )
+        .unwrap();
         let target = RenderTarget::Window(WindowId::PRIMARY);
         let packet = UiPresentationPlanner::default()
             .plan(frame, target, &UiPreparedImages::default())

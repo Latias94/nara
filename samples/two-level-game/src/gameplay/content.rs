@@ -319,6 +319,7 @@ fn transform(entity: &CompiledSceneEntity) -> Result<Option<Transform2d>, String
             .field_f64("rotation")
             .map_err(|error| error.to_string())? as f32,
         scale: vector("scale")?,
+        z: 0.0,
     };
     if !transform.translation.is_finite()
         || !transform.rotation.is_finite()

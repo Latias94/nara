@@ -22,6 +22,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
+use nara_app::tasks::TaskPools;
 use nara_app::{
     App, PluginError, PluginShutdownObligationId, RuntimeCloseContext, RuntimeCloseParticipant,
     RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
@@ -30,15 +31,16 @@ use nara_app::{
 use nara_asset::AssetProductRef;
 #[cfg(feature = "runtime-2d")]
 use nara_asset::AssetSourcePath;
-use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, SafeSummary};
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticReport, ReportDiagnostic as Diagnostic, SafeSummary,
+};
+use nara_ecs::identity::SpawnedSceneInstance;
 use nara_ecs::{Res, ResMut, Resource, World, system::SystemParam};
-use nara_identity::SpawnedSceneInstance;
 use nara_project::ProjectPath;
 use nara_scene::{
     CompiledSceneDocument, SceneSpawnReport,
     advanced::{SceneProductOverlayWriter, SceneProductRetirement, SceneProductTransactionLimits},
 };
-use nara_tasks::TaskPools;
 
 use super::{content::PreparedSceneContent, content_residency::ProjectSceneResidency};
 #[cfg(feature = "runtime-2d")]
@@ -596,7 +598,7 @@ fn managed_scene_simulation_ready(world: &World) -> bool {
 }
 
 fn drive_managed_travel(world: &mut World) {
-    if nara_ecs::__private::validate_resource_scope::<RequestOwner>(world).is_err() {
+    if crate::ecs::transaction::validate_resource_scope::<RequestOwner>(world).is_err() {
         reject_unscoped_managed_travel(world);
         return;
     }

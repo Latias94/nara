@@ -1,6 +1,6 @@
 //! READY attestation values for supervised desktop product activation.
 
-use nara_fs::ContentDigest;
+use crate::fs::ContentDigest;
 use nara_project::DESKTOP_SUPERVISED_PLAY_V1_CONTRACT;
 
 use super::super::source::MAX_SUPERVISED_DESKTOP_SOURCE_RECEIPT_BYTES;

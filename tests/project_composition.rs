@@ -15,7 +15,7 @@ use std::{
 use std::fs::OpenOptions;
 
 use nara::{
-    diagnostic::DiagnosticReport,
+    diagnostic::{DiagnosticReport, emit_report_to_tracing},
     fs::{
         CapabilityRights, DirectoryCapability, FileCapability, FsError, FsOperation,
         HostCapabilityOptions, RelativePath, TrustMode,
@@ -372,7 +372,7 @@ fn assert_error_sinks_hide(error: &ProjectCandidateError, hidden: &[&str]) {
 fn capture_tracing(diagnostics: &DiagnosticReport) -> String {
     let captured = Arc::new(Mutex::new(Vec::new()));
     let subscriber = RecordingSubscriber::new(Arc::clone(&captured));
-    tracing::subscriber::with_default(subscriber, || diagnostics.emit_to_tracing());
+    tracing::subscriber::with_default(subscriber, || emit_report_to_tracing(diagnostics));
     captured.lock().unwrap().join("\n")
 }
 

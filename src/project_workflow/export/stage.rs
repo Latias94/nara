@@ -3,7 +3,7 @@ use std::{
     io::{self, Cursor, Read, Write},
 };
 
-use nara_fs::{
+use crate::fs::{
     CapabilityReader, DirectoryCapability, FsError, FsOperation, RelativeComponent, RelativePath,
 };
 use nara_project::ProjectPath;

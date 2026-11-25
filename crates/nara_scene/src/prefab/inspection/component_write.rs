@@ -1,5 +1,5 @@
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_reflect::__private::component_values_exactly_match;
+use nara_reflect::schema::component_values_exactly_match;
 
 use super::*;
 use crate::{
@@ -13,6 +13,7 @@ use crate::{
     provenance::provenance_string_bytes,
 };
 
+/// A failure to select or prepare a component edit from a prefab inspection.
 #[derive(Debug)]
 pub enum AuthoringPrefabComponentEditError {
     InvalidComponent,
@@ -21,6 +22,7 @@ pub enum AuthoringPrefabComponentEditError {
     StaleObservedIntent,
 }
 
+/// A component edit bound to the inspected source revision and declaration route.
 #[derive(Debug)]
 pub struct ObservedPrefabComponentEdit {
     pub(crate) anchor: SceneEntityId,
@@ -130,7 +132,6 @@ impl AuthoringPrefabInstanceSnapshot {
     }
 
     /// Selects a complete component edit against the captured working source and its revision.
-    #[doc(hidden)]
     pub fn plan_component_edit(
         &self,
         source: SourceDocumentInput<'_>,
@@ -277,7 +278,6 @@ impl AuthoringPrefabInstanceSnapshot {
     }
 
     /// Confirms the stored declaration and the compiled result at the originally selected route.
-    #[doc(hidden)]
     pub fn verifies_component_edit(
         &self,
         source: SourceDocumentInput<'_>,

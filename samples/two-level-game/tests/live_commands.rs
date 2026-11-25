@@ -8,19 +8,14 @@
 #[path = "support/resume_gameplay.rs"]
 mod support;
 
-use nara::gameplay::{GameplayCommandTarget, GameplayCommandValue};
 use support::{Game, MARKER, action, movement};
 use two_level_game::GamePhase;
 
 #[test]
-fn malformed_live_press_and_release_preserve_state_and_allow_healthy_continuation() {
+fn out_of_range_press_and_release_preserve_state_and_allow_healthy_continuation() {
     let mut game = Game::source();
     let initial = game.snapshot();
-    let mut payload = movement(1, true).payload().clone();
-    payload
-        .insert("extra", GameplayCommandValue::Bool(false))
-        .unwrap();
-    game.submit(movement(1, true).with_payload(payload));
+    game.submit(movement(4, true));
     assert_eq!(game.session.step().unwrap(), None);
     let rejected = game.snapshot();
     assert_eq!(rejected.tick, initial.tick + 1);
@@ -32,7 +27,7 @@ fn malformed_live_press_and_release_preserve_state_and_allow_healthy_continuatio
     assert_eq!(rejected.collected, initial.collected);
     assert_eq!(
         rejected.error.as_deref(),
-        Some("movement contains unrepresented payload fields")
+        Some("movement direction must be in 0..4")
     );
     assert_eq!(game.queue().acknowledged_through_tick, rejected.tick);
     assert_eq!(game.queue().pending_commands, 0);
@@ -46,7 +41,7 @@ fn malformed_live_press_and_release_preserve_state_and_allow_healthy_continuatio
     assert!(moving.player.x > initial.player.x);
     assert_eq!(moving.player.y, initial.player.y);
 
-    game.submit(movement(1, false).with_target(GameplayCommandTarget::named("player").unwrap()));
+    game.submit(movement(4, false));
     assert_eq!(game.session.step().unwrap(), None);
     let rejected_release = game.snapshot();
     assert_eq!(rejected_release.current_instance, initial.current_instance);
@@ -54,7 +49,7 @@ fn malformed_live_press_and_release_preserve_state_and_allow_healthy_continuatio
     assert!(rejected_release.player.x > moving.player.x);
     assert_eq!(
         rejected_release.error.as_deref(),
-        Some("semantic game commands cannot have a target")
+        Some("movement direction must be in 0..4")
     );
     assert_eq!(
         game.queue().acknowledged_through_tick,

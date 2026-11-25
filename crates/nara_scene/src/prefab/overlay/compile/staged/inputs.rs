@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::mem::size_of;
 
 use nara_asset::AssetRef;
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, ReferenceInputId,
 };
 

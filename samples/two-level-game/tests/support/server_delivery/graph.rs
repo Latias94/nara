@@ -7,17 +7,12 @@ use nara::{
 
 use crate::cooked_delivery::native::Custody;
 
-const REQUIRED_RUNTIME_PACKAGES: &[&str] = &[
-    "nara_asset",
-    "nara_gameplay",
-    "nara_rapier2d",
-    "nara_scene",
-    "nara_transform",
-    "rapier2d",
-];
+const REQUIRED_RUNTIME_PACKAGES: &[&str] =
+    &["nara_asset", "nara_physics2d", "nara_scene", "rapier2d"];
 
 const FORBIDDEN_PACKAGES: &[&str] = &[
     "nara_asset_watch",
+    "nara_hierarchy",
     "nara_image",
     "nara_input",
     "nara_material",
@@ -25,12 +20,11 @@ const FORBIDDEN_PACKAGES: &[&str] = &[
     "nara_sprite",
     "nara_tilemap",
     "nara_tooling",
+    "nara_transform",
     "nara_sprite_render",
     "nara_sprite_animation",
     "nara_render_wgpu",
     "nara_window",
-    "nara_winit",
-    "nara_gilrs",
     "notify",
     "raw-window-handle",
     "winit",
@@ -39,6 +33,7 @@ const FORBIDDEN_PACKAGES: &[&str] = &[
     "imgui",
     "cpal",
     "rtrb",
+    "ctrlc",
     "gilrs",
     "gilrs-core",
     "hound",

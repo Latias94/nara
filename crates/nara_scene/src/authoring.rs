@@ -1,3 +1,8 @@
+//! Scene and prefab editing, inspection, and previews.
+//!
+//! Authoring sessions own working documents and edit history. Prepared operations carry the
+//! source and schema evidence needed to validate an edit before committing it to a session.
+
 use std::{
     collections::VecDeque,
     error::Error,
@@ -6,9 +11,9 @@ use std::{
 };
 
 use nara_asset::AssetReferenceResolver;
-use nara_diagnostic::DiagnosticReport;
+use nara_core::diagnostic::DiagnosticReport;
 use nara_ecs::World;
-use nara_identity::SpawnedSceneInstance;
+use nara_ecs::identity::SpawnedSceneInstance;
 use nara_reflect::ComponentRegistrySnapshot;
 
 use crate::{
@@ -20,6 +25,33 @@ use crate::{
     spawn::SceneSpawner,
 };
 
+#[cfg(feature = "serde")]
+pub use crate::authoring_decode::{AuthoringAdapterReceipt, AuthoringAdapterReceiptError};
+#[cfg(feature = "serde")]
+pub use crate::authoring_preview::{
+    AuthoringPrefabPreviewDocument, AuthoringPreviewDocument, AuthoringPreviewOmission,
+    AuthoringPreviewOmissionLocation, AuthoringPreviewOmissionReason,
+    AuthoringPreviewProjectionError, AuthoringScenePreviewDocument,
+    project_authoring_prefab_session_preview, project_authoring_scene_session_preview,
+    project_published_authoring_prefab_preview, project_published_authoring_scene_preview,
+};
+#[cfg(feature = "serde")]
+pub use crate::prefab::{
+    AuthoringNativePreview, AuthoringSavedPrefabValidationReport,
+    AuthoringSceneCompilationOmission, AuthoringSceneCompilationOmissionReason,
+    AuthoringSceneCompilationParts, AuthoringSceneCompilationReport, SourceDocumentInput,
+    extraction::{
+        CapturedExtractionSource, PrefabExtractionAssets, PrefabExtractionBinding,
+        PrefabExtractionEnvironment,
+    },
+    inspection::{
+        AuthoringPrefabComponentEditError, AuthoringPrefabInspectionError,
+        AuthoringPrefabPropertyApplyError, AuthoringPrefabPropertyWriteError,
+        ObservedPrefabComponentEdit, ObservedPrefabPropertyApply, ObservedPrefabPropertyWrite,
+        PrefabInspectionInput, try_inspect_authoring_prefab_instance_with_loader,
+    },
+    try_compile_authoring_scene_with_loader, try_validate_authoring_saved_prefab_with_loader,
+};
 mod creation;
 pub use creation::CreatedSourceEntity;
 #[cfg(feature = "serde")]
@@ -41,7 +73,6 @@ pub use prefab_conversion::{
 #[cfg(feature = "serde")]
 mod prefab_declarations;
 #[cfg(feature = "serde")]
-#[doc(hidden)]
 pub use prefab_declarations::{
     BoundPrefabComponentApply, CapturedPrefabComponentApplySources,
     PrefabComponentApplyBindFailure, PrefabComponentApplyPreparationError,
@@ -70,7 +101,7 @@ mod schema_preparation;
 #[cfg(feature = "serde")]
 mod schema_reclassification;
 #[cfg(feature = "serde")]
-pub(crate) mod schema_upgrade;
+pub mod schema_upgrade;
 #[cfg(feature = "serde")]
 mod source_checkpoint;
 #[cfg(feature = "serde")]
@@ -85,15 +116,11 @@ pub use prefab_extraction::{
 #[cfg(feature = "serde")]
 pub use schema_reclassification::{
     PrefabSchemaReclassificationCommit, PrefabSchemaReclassificationRequest,
-    PreparedPrefabSchemaReclassification, PreparedSceneSchemaReclassification,
+    PreparedPrefabSchemaReclassification, PreparedPrefabSchemaSource,
+    PreparedSceneSchemaReclassification, PreparedSceneSchemaSource,
     RetainedSchemaReclassificationSource, SceneSchemaReclassificationCommit,
     SceneSchemaReclassificationRequest, SchemaReclassificationKind, SchemaReclassificationLimits,
     SchemaReclassificationUsage, SchemaReclassificationWork,
-};
-#[cfg(feature = "serde")]
-pub use schema_reclassification::{
-    PreparedPrefabSchemaSource, PreparedSceneSchemaSource, borrow_prepared_prefab_schema_source,
-    borrow_prepared_scene_schema_source, require_schema_reclassification_successor,
 };
 #[cfg(feature = "serde")]
 mod property;
@@ -1094,7 +1121,7 @@ impl PrefabAuthoringSession {
 
     #[cfg(feature = "serde")]
     #[must_use]
-    pub fn authoring_diagnostics(&self) -> Option<&nara_diagnostic::DiagnosticReport> {
+    pub fn authoring_diagnostics(&self) -> Option<&nara_core::diagnostic::DiagnosticReport> {
         self.authority
             .published()
             .map(crate::authoring_decode::AuthoringDocumentState::diagnostics)
@@ -1650,7 +1677,7 @@ impl SceneAuthoringSession {
 
     #[cfg(feature = "serde")]
     #[must_use]
-    pub fn authoring_diagnostics(&self) -> Option<&nara_diagnostic::DiagnosticReport> {
+    pub fn authoring_diagnostics(&self) -> Option<&nara_core::diagnostic::DiagnosticReport> {
         self.authority
             .published()
             .map(crate::authoring_decode::AuthoringDocumentState::diagnostics)

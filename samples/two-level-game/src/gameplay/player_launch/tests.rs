@@ -2,23 +2,27 @@ use std::{
     fs,
     num::NonZeroU32,
     path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 use nara::{
     app::{PluginCategory, PluginDeclaration, PluginId},
     ecs::schedule::IntoScheduleConfigs,
-    gameplay::{
-        GameplayCommandDraft, GameplayCommandSet, GameplayCommandTarget, GameplayCommandTargetId,
-    },
     prelude::{App, CoreStage, Plugin, PluginError, Resource},
     project_host::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome},
 };
 
 use super::*;
 use crate::{
-    gameplay::{GameSnapshot, Progress, commands::SAVE},
+    command::{CommandSequence, CommandSet, CommandTick, with_test_script},
+    gameplay::{
+        GameSnapshot, Progress,
+        commands::{SAVE, action},
+    },
     levels::{LevelId, LevelKey},
     save::decode_checkpoint,
 };
@@ -80,7 +84,7 @@ impl<const SAVE_VIA_ORIGINAL: bool> Plugin for LaunchProbe<SAVE_VIA_ORIGINAL> {
         })?
         .add_systems(
             CoreStage::FixedUpdate,
-            observe::<SAVE_VIA_ORIGINAL>.after(GameplayCommandSet::Capture),
+            observe::<SAVE_VIA_ORIGINAL>.after(CommandSet::Capture),
         )?;
         Ok(())
     }
@@ -107,17 +111,17 @@ fn observe<const SAVE_VIA_ORIGINAL: bool>(world: &mut World) {
 
 fn run<const SAVE_VIA_ORIGINAL: bool>(
     options: RunOptions,
-    commands: Vec<GameplayCommandSubmission>,
+    commands: Vec<ScheduledCommand>,
     ticks: u32,
 ) -> Observed {
     let recipe = crate::gameplay::configured_recipe(options)
         .add_plugin::<LaunchProbe<SAVE_VIA_ORIGINAL>>()
         .unwrap();
+    let recipe = with_test_script(recipe, commands).unwrap();
     let mut run = HeadlessRun::<Observed>::new(
         crate::open_project_root().unwrap(),
         HeadlessRunIntent::frames(NonZeroU32::new(ticks).unwrap(), Duration::from_millis(20))
             .with_recipe(recipe),
-        commands,
     );
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
@@ -132,7 +136,7 @@ fn run<const SAVE_VIA_ORIGINAL: bool>(
     }
 }
 
-fn travel_launch() -> GameplayCommandSubmission {
+fn travel_launch() -> ScheduledCommand {
     player_launch(RunOptions {
         scenario: Scenario::Travel,
         save_path: None,
@@ -141,17 +145,12 @@ fn travel_launch() -> GameplayCommandSubmission {
     .unwrap()
 }
 
-fn submit(
-    draft: GameplayCommandDraft,
-    tick: u64,
-    source: &str,
-    sequence: u64,
-) -> GameplayCommandSubmission {
-    GameplayCommandSubmission::new(
-        GameplayCommandTick::new(tick).unwrap(),
-        GameplayCommandIngressSource::external(source).unwrap(),
-        GameplayCommandSourceSequence::new(sequence).unwrap(),
-        draft,
+fn submit(intent: GameCommand, tick: u64, source: &str, sequence: u64) -> ScheduledCommand {
+    ScheduledCommand::new(
+        CommandTick::new(tick).unwrap(),
+        CommandSource::external(source).unwrap(),
+        CommandSequence::new(sequence).unwrap(),
+        intent,
     )
 }
 
@@ -185,12 +184,11 @@ fn launch_encoding_is_finite_and_does_not_open_the_save_path() {
         .unwrap()
         .unwrap();
         assert_eq!(command.tick().get(), 1);
-        assert_eq!(command.source().id().as_str(), SOURCE);
+        assert_eq!(command.source().id().unwrap().as_str(), SOURCE);
         assert_eq!(command.source_sequence().get(), 1);
-        assert_eq!(command.command().command_type().as_str(), PLAYER_LAUNCH);
-        assert!(command.command().target().is_none());
-        assert_eq!(command.command().payload().len(), 3);
-        let decoded = decode(command.command().payload()).unwrap();
+        let GameCommand::Launch(decoded) = command.intent() else {
+            panic!("launch should carry typed run options");
+        };
         assert_eq!(decoded.scenario, scenario);
         assert_eq!(decoded.save_path.as_ref(), Some(&path));
         assert!(!path.exists());
@@ -280,7 +278,7 @@ fn ordinary_action_error_without_a_launch_does_not_fabricate_a_launch_result() {
 #[test]
 fn a_later_refused_launch_does_not_replace_the_first_applied_result() {
     let launch = travel_launch();
-    let late = submit(launch.command().clone(), 2, SOURCE, 2);
+    let late = submit(launch.intent().clone(), 2, SOURCE, 2);
     let observed = run::<false>(RunOptions::default(), vec![launch, late], 2);
     assert_eq!(observed.frames[0].launch, Some(Ok(())));
     assert_eq!(observed.frames[1].launch, Some(Ok(())));
@@ -313,38 +311,23 @@ fn launch_precedes_earlier_sorted_ordinary_save_and_reuses_the_original_storage(
 }
 
 #[test]
-fn malformed_launch_payloads_are_refused_before_any_slot_or_script_effects() {
-    let base = travel_launch().command().payload().clone();
-    let mut payloads = Vec::new();
-    for (key, value) in [
-        ("unexpected", GameplayCommandValue::Bool(true)),
-        ("version", GameplayCommandValue::I64(2)),
-        ("version", GameplayCommandValue::Bool(true)),
-        ("scenario", GameplayCommandValue::String("unknown".into())),
-        ("scenario", GameplayCommandValue::String("save".into())),
-        (
-            "scenario",
-            GameplayCommandValue::String("interactive".into()),
-        ),
-        ("scenario", GameplayCommandValue::Bool(true)),
-        ("save_path", GameplayCommandValue::I64(1)),
-        (
-            "save_path",
-            GameplayCommandValue::String("relative.json".into()),
-        ),
-        (
-            "save_path",
-            GameplayCommandValue::String("x".repeat(MAX_SAVE_PATH_BYTES + 1)),
-        ),
-        ("save_path", GameplayCommandValue::String("\0".into())),
+fn invalid_launch_options_are_refused_before_any_slot_or_script_effects() {
+    for options in [
+        RunOptions::default(),
+        RunOptions {
+            scenario: Scenario::Save,
+            save_path: None,
+        },
+        RunOptions {
+            scenario: Scenario::Save,
+            save_path: Some("relative.json".into()),
+        },
+        RunOptions {
+            scenario: Scenario::Travel,
+            save_path: Some("\0".into()),
+        },
     ] {
-        let mut payload = base.clone();
-        payload.insert(key, value).unwrap();
-        payloads.push(payload);
-    }
-    payloads.push(GameplayCommandPayload::new());
-    for payload in payloads {
-        let launch = submit(action(PLAYER_LAUNCH).with_payload(payload), 1, SOURCE, 1);
+        let launch = submit(GameCommand::Launch(options), 1, SOURCE, 1);
         let observed = run::<false>(RunOptions::default(), vec![launch], 1);
         assert_refused(&observed.frames[0]);
     }
@@ -353,7 +336,7 @@ fn malformed_launch_payloads_are_refused_before_any_slot_or_script_effects() {
 #[test]
 fn duplicate_launches_in_one_batch_are_refused_before_the_first_is_applied() {
     let first = travel_launch();
-    let second = submit(first.command().clone(), 1, SOURCE, 2);
+    let second = submit(first.intent().clone(), 1, SOURCE, 2);
     let observed = run::<false>(RunOptions::default(), vec![first, second], 1);
     assert_refused(&observed.frames[0]);
     assert!(
@@ -367,16 +350,12 @@ fn duplicate_launches_in_one_batch_are_refused_before_the_first_is_applied() {
 }
 
 #[test]
-fn late_launch_and_wrong_provenance_or_target_are_refused() {
-    let draft = travel_launch().command().clone();
-    let targeted = draft.clone().with_target(GameplayCommandTarget::Named(
-        GameplayCommandTargetId::new("unexpected-target").unwrap(),
-    ));
+fn late_launch_and_wrong_provenance_are_refused() {
+    let intent = travel_launch().intent().clone();
     for command in [
-        submit(draft.clone(), 2, SOURCE, 1),
-        submit(draft.clone(), 1, "two-level-game.other-source", 1),
-        submit(draft, 1, SOURCE, 2),
-        submit(targeted, 1, SOURCE, 1),
+        submit(intent.clone(), 2, SOURCE, 1),
+        submit(intent.clone(), 1, "two-level-game.other-source", 1),
+        submit(intent, 1, SOURCE, 2),
     ] {
         let tick = command.tick().get();
         let observed = run::<false>(RunOptions::default(), vec![command], tick as u32);
@@ -408,7 +387,7 @@ fn rejected_late_launch_preserves_same_batch_release_and_ordinary_save() {
                 2,
             ),
             submit(action(SAVE), 2, "two-level-game.aaa-save", 1),
-            submit(travel_launch().command().clone(), 2, SOURCE, 1),
+            submit(travel_launch().intent().clone(), 2, SOURCE, 1),
         ],
         3,
     );
@@ -481,7 +460,7 @@ fn configured_script_and_exact_state_resume_cannot_be_reinterpreted_as_player_la
     assert!(!observed.frames[0].interactive);
     assert!(observed.frames[0].empty_slot);
     let resume = submit(
-        action(crate::gameplay::resume::RESTORE_STATE),
+        GameCommand::Resume(Arc::from([])),
         1,
         "two-level-game.resume",
         1,

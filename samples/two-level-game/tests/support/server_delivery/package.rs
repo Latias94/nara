@@ -147,16 +147,13 @@ fn assert_client_services_absent(base: RuntimeContentBase) {
         time::{Duration, Instant},
     };
 
-    use nara::{
-        gameplay::{
-            GameplayCommandIngressSource, GameplayCommandQueue, GameplayCommandSourceSequence,
-            GameplayCommandSubmission, GameplayCommandTick,
-        },
-        project_host::{HeadlessSession, HeadlessSessionClose},
-    };
+    use nara::project_host::{HeadlessSession, HeadlessSessionClose};
     use two_level_game::{
         GamePhase, GameSnapshot, SideRoomPhase,
-        command::{SERVER_COMMAND_SOURCE, SemanticCommand, ServerCommand},
+        command::{
+            CommandSchedule, CommandSequence, CommandSource, CommandTick, SERVER_COMMAND_SOURCE,
+            ScheduledCommand, SemanticCommand, ServerCommand,
+        },
         levels::LevelKey,
     };
 
@@ -189,7 +186,7 @@ fn assert_client_services_absent(base: RuntimeContentBase) {
         assert_eq!(startup.side_room, SideRoomPhase::Closed);
         assert_eq!(startup.lookout, SideRoomPhase::Closed);
 
-        let source = GameplayCommandIngressSource::external(SERVER_COMMAND_SOURCE).unwrap();
+        let source = CommandSource::external(SERVER_COMMAND_SOURCE).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut sequence = 0;
         let mut submit_and_wait =
@@ -197,14 +194,14 @@ fn assert_client_services_absent(base: RuntimeContentBase) {
              previous: &GameSnapshot,
              reached: fn(&GameSnapshot) -> bool| {
                 sequence += 1;
-                let submission = GameplayCommandSubmission::new(
-                    GameplayCommandTick::new(previous.tick + 1).unwrap(),
+                let submission = ScheduledCommand::new(
+                    CommandTick::new(previous.tick + 1).unwrap(),
                     source.clone(),
-                    GameplayCommandSourceSequence::new(sequence).unwrap(),
-                    command.into_draft().unwrap(),
+                    CommandSequence::new(sequence).unwrap(),
+                    command.into_intent().unwrap(),
                 );
-                let key = submission.key();
-                assert_eq!(session.submit(submission).unwrap(), key);
+                let key = submission.key().clone();
+                assert_eq!(submission.submit_headless(&mut session).unwrap(), key);
                 loop {
                     let snapshot = frame(&mut session, timestep);
                     if reached(&snapshot) {
@@ -240,7 +237,7 @@ fn assert_client_services_absent(base: RuntimeContentBase) {
         assert_eq!(travelled.side_room, SideRoomPhase::Closed);
         assert_eq!(travelled.lookout, SideRoomPhase::Closed);
         let queue = session
-            .observe(|world| world.resource::<GameplayCommandQueue>().stats())
+            .observe(|world| world.resource::<CommandSchedule>().stats())
             .unwrap();
         assert_eq!(queue.acknowledged, 3);
         assert_eq!(queue.rejected, 0);

@@ -86,7 +86,7 @@ impl AdmittedCatalog {
         limits: RuntimeContentLimits,
         catalog_limits: RuntimeContentCatalogLimits,
     ) -> Result<Self, RuntimeContentError> {
-        if nara_fs::ContentDigest::of_bytes(&bytes) != expected.catalog_digest {
+        if crate::fs::ContentDigest::of_bytes(&bytes) != expected.catalog_digest {
             return Err(RuntimeContentError::CatalogDigestMismatch);
         }
         let catalog = RuntimeContentCatalog::from_json_bytes(&bytes, catalog_limits)
@@ -196,7 +196,7 @@ impl AdmittedCatalog {
     pub(super) fn publish(self, backing: EncodedBacking, retained: usize) -> RuntimeContentBase {
         RuntimeContentBase {
             inner: Arc::new(RuntimeContentBaseInner {
-                catalog_digest: nara_fs::ContentDigest::of_bytes(&self.bytes),
+                catalog_digest: crate::fs::ContentDigest::of_bytes(&self.bytes),
                 catalog: self.catalog,
                 plan: self.plan,
                 catalog_bytes: self.bytes,

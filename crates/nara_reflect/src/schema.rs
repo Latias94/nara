@@ -6,10 +6,8 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use nara_identity::{
-    AuthoredReferenceTarget, EntityReference, PrefabEntityOrigin, SourceDocumentKey,
-    SourceDocumentKind, SourceDocumentOrigin,
-};
+use nara_core::source::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin};
+use nara_ecs::identity::{AuthoredReferenceTarget, EntityReference, PrefabEntityOrigin};
 
 use crate::{
     AssetReferenceDemand, ComponentFieldPath, ComponentFieldPathSegment, ComponentNumericInterval,

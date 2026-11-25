@@ -2,10 +2,9 @@ use nara::{
     prelude::*,
     scene::{
         PrefabEntityTarget, ScenePatchDocumentCandidate, ScenePlacement, ScenePlacementParent,
-        register_scene_components,
+        register_scene_components, register_transform_components,
     },
     sprite::register_sprite_components,
-    transform::register_transform_components,
 };
 
 fn main() {

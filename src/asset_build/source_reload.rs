@@ -2,6 +2,11 @@
 
 use std::{collections::BTreeMap, marker::PhantomData, mem::size_of, sync::Arc};
 
+use crate::fs::DirectoryCapability;
+use nara_app::tasks::{
+    OrderedTaskResults, TaskDomainKey, TaskOrderKey, TaskPoolKind, TaskPools, TaskSpawnOutcome,
+    TaskSpawnRequest, TaskTerminal,
+};
 use nara_app::{
     App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId, RealTime,
 };
@@ -14,13 +19,8 @@ use nara_asset::{
     SourceSubscriptionKind, register_source_reload_consumer,
 };
 use nara_core::ItemLimit;
-use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
+use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
 use nara_ecs::{Res, ResMut, Resource, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs};
-use nara_fs::DirectoryCapability;
-use nara_tasks::{
-    OrderedTaskResults, TaskDomainKey, TaskOrderKey, TaskPoolKind, TaskPools, TaskSpawnOutcome,
-    TaskSpawnRequest, TaskTerminal,
-};
 use serde::Serialize;
 
 use super::{
@@ -68,7 +68,7 @@ where
         PluginDeclaration::new(PluginId::new(D::BUILD_ID), PluginCategory::Asset).requires_plugins(
             &[
                 nara_asset::ASSET_SOURCE_PLUGIN_ID,
-                nara_tasks::TASK_PLUGIN_ID,
+                nara_app::tasks::TASK_PLUGIN_ID,
             ],
         );
 
@@ -266,7 +266,7 @@ struct SourceBuildOutput<P> {
 fn execute_source_build<D: SourceAssetBuild>(
     configuration: &SourceBuildConfiguration,
     context: &BuildContext<D::Product>,
-    cancellation: nara_tasks::TaskCancellationToken,
+    cancellation: nara_app::tasks::TaskCancellationToken,
 ) -> SourceBuildOutput<D::Product>
 where
     D::Settings: Serialize,

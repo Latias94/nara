@@ -1,6 +1,8 @@
 //! Explicit keyboard Button continuation through the original Input owner.
 
-use nara_app::{__RuntimeDriverPort, RuntimeDriverScope, RuntimeState, RuntimeWorldAccessError};
+use std::any::type_name;
+
+use nara_app::{RuntimeDriverScope, RuntimeState, RuntimeWorldAccessError};
 use nara_ecs::{Mut, World};
 
 use crate::{
@@ -62,21 +64,6 @@ impl From<RuntimeWorldAccessError> for KeyboardContinuationError {
     }
 }
 
-#[doc(hidden)]
-pub struct KeyboardRestoreRequest {
-    claim: InputEndpointClaim,
-    holds: Vec<KeyboardHold>,
-}
-
-#[doc(hidden)]
-pub enum KeyboardContinuationOperation {
-    Restore(KeyboardRestoreRequest),
-    Reconcile {
-        claim: InputEndpointClaim,
-        released: Vec<KeyCode>,
-    },
-}
-
 /// Captures only the declared keyboard inventory after all original consumers completed.
 ///
 /// The caller separately proves its healthy completed paused frame and native isolation policy.
@@ -129,7 +116,7 @@ pub fn capture_keyboard_holds(
 
 /// Restores a complete finite keyboard inventory into its exact original endpoint claim.
 ///
-/// The typed port accepts only Paused. The native owner must keep ordinary input isolated until
+/// The runtime must be paused. The native owner must keep ordinary input isolated until
 /// activation reconciliation. This creates fresh local members and semantic holds without
 /// emitting physical Press or Started. Original projection/observation maintenance still runs.
 pub fn restore_keyboard_holds(
@@ -137,9 +124,8 @@ pub fn restore_keyboard_holds(
     claim: InputEndpointClaim,
     holds: Vec<KeyboardHold>,
 ) -> Result<InputAdmission, KeyboardContinuationError> {
-    scope.__apply_port::<ActionStaging>(KeyboardContinuationOperation::Restore(
-        KeyboardRestoreRequest { claim, holds },
-    ))?
+    require_paused(scope.state())?;
+    scope.with_world_mut(|world| restore_keyboard_inventory(world, &claim, &holds))
 }
 
 /// Cancels declared gameplay members absent from the native owner's current physical observation.
@@ -151,10 +137,37 @@ pub fn reconcile_keyboard_holds(
     claim: InputEndpointClaim,
     released: Vec<KeyCode>,
 ) -> Result<InputAdmission, KeyboardContinuationError> {
-    scope.__apply_port::<ActionStaging>(KeyboardContinuationOperation::Reconcile {
-        claim,
-        released,
-    })?
+    require_paused(scope.state())?;
+    scope.with_world_mut(|world| {
+        require_continuation_resources(world)?;
+        world
+            .resource_mut::<InputTimeline>()
+            .reconcile_keyboard_members(&claim, &released)
+    })
+}
+
+fn require_paused(state: RuntimeState) -> Result<(), KeyboardContinuationError> {
+    if state != RuntimeState::Paused {
+        return Err(RuntimeWorldAccessError::Unavailable { state }.into());
+    }
+    Ok(())
+}
+
+fn require_continuation_resources(world: &World) -> Result<(), KeyboardContinuationError> {
+    if !world.contains_resource::<ActionStaging>() {
+        return Err(RuntimeWorldAccessError::MissingResource {
+            type_name: type_name::<ActionStaging>(),
+        }
+        .into());
+    }
+    if !world.contains_resource::<InputTimeline>()
+        || !world.contains_resource::<ActionMaps>()
+        || !world.contains_resource::<SemanticActions>()
+        || !world.contains_resource::<ButtonInput<KeyCode>>()
+    {
+        return Err(KeyboardContinuationError::MissingResources);
+    }
+    Ok(())
 }
 
 fn validate_bindings(
@@ -213,57 +226,38 @@ fn validate_bindings(
     Ok(())
 }
 
-pub(crate) fn apply_registered(
+fn restore_keyboard_inventory(
     world: &mut World,
-    input: KeyboardContinuationOperation,
-) -> Result<
-    Result<InputAdmission, KeyboardContinuationError>,
-    (RuntimeWorldAccessError, KeyboardContinuationOperation),
-> {
-    if !world.contains_resource::<InputTimeline>()
-        || !world.contains_resource::<ActionMaps>()
-        || !world.contains_resource::<SemanticActions>()
-        || !world.contains_resource::<ButtonInput<KeyCode>>()
-    {
-        return Ok(Err(KeyboardContinuationError::MissingResources));
+    claim: &InputEndpointClaim,
+    holds: &[KeyboardHold],
+) -> Result<InputAdmission, KeyboardContinuationError> {
+    require_continuation_resources(world)?;
+    if holds.is_empty() || holds.len() > world.resource::<InputTimeline>().limits().members() {
+        return Err(KeyboardContinuationError::InvalidCount);
     }
-    let input = match input {
-        KeyboardContinuationOperation::Reconcile { claim, released } => {
-            return Ok(world
-                .resource_mut::<InputTimeline>()
-                .reconcile_keyboard_members(&claim, &released));
-        }
-        KeyboardContinuationOperation::Restore(input) => input,
-    };
-    if input.holds.is_empty()
-        || input.holds.len() > world.resource::<InputTimeline>().limits().members()
-    {
-        return Ok(Err(KeyboardContinuationError::InvalidCount));
-    }
-    Ok(world.resource_scope(|world, staging: Mut<ActionStaging>| {
-        let bindings = input
-            .holds
+    world.resource_scope(|world, staging: Mut<ActionStaging>| {
+        let bindings = holds
             .iter()
             .map(|hold| hold.binding.clone())
             .collect::<Vec<_>>();
         let timeline = world.resource::<InputTimeline>();
         let maps = world.resource::<ActionMaps>();
-        validate_bindings(timeline, maps, &staging, input.claim.seat(), &bindings)?;
+        validate_bindings(timeline, maps, &staging, claim.seat(), &bindings)?;
         world
             .resource::<SemanticActions>()
             .validate_keyboard_restore(
-                input.claim.seat(),
-                input.holds.iter().filter(|hold| hold.held).count(),
+                claim.seat(),
+                holds.iter().filter(|hold| hold.held).count(),
             )?;
         let (admission, members) = world
             .resource_mut::<InputTimeline>()
-            .restore_keyboard_members(&input.claim, &input.holds)?;
+            .restore_keyboard_members(claim, holds)?;
         world.resource_scope(|world, mut semantic: Mut<SemanticActions>| {
             semantic.restore_keyboard_members(
                 world.resource::<ActionMaps>(),
                 &staging,
-                input.claim.seat(),
-                &input.holds,
+                claim.seat(),
+                holds,
                 &members,
             );
             world
@@ -271,18 +265,61 @@ pub(crate) fn apply_registered(
                 .observe_semantic_holds(&semantic);
         });
         Ok(admission)
-    }))
+    })
 }
 
-impl __RuntimeDriverPort for ActionStaging {
-    type Input = KeyboardContinuationOperation;
-    type Output = Result<InputAdmission, KeyboardContinuationError>;
+#[cfg(test)]
+mod tests {
+    use nara_app::{App, RuntimeInstance, RuntimeTimeSettings};
 
-    fn accepts_driver_state(state: RuntimeState) -> bool {
-        state == RuntimeState::Paused
-    }
+    use super::*;
+    use crate::InputPlugin;
 
-    fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
-        Err(KeyboardContinuationError::MissingResources)
+    #[test]
+    fn continuation_reports_missing_resources_before_admission() {
+        let mut app = App::new();
+        app.insert_resource(RuntimeTimeSettings::default().with_paused(true))
+            .unwrap();
+        app.add_plugin(InputPlugin).unwrap();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        let claim = runtime
+            .world()
+            .resource::<InputTimeline>()
+            .claim_endpoint(InputWindowId::UNSPECIFIED, InputSeatId::PRIMARY)
+            .unwrap();
+        let outcome = runtime
+            .with_driver_scope(|scope| {
+                scope.apply_command(|world: &mut World| {
+                    world.remove_resource::<ActionMaps>();
+                });
+                for result in [
+                    restore_keyboard_holds(scope, claim.clone(), Vec::new()),
+                    reconcile_keyboard_holds(scope, claim.clone(), Vec::new()),
+                ] {
+                    assert_eq!(result, Err(KeyboardContinuationError::MissingResources));
+                }
+                scope.apply_command(|world: &mut World| {
+                    world.remove_resource::<ActionStaging>();
+                });
+                for result in [
+                    restore_keyboard_holds(scope, claim.clone(), Vec::new()),
+                    reconcile_keyboard_holds(scope, claim, Vec::new()),
+                ] {
+                    assert_eq!(
+                        result,
+                        Err(RuntimeWorldAccessError::MissingResource {
+                            type_name: type_name::<ActionStaging>(),
+                        }
+                        .into())
+                    );
+                }
+            })
+            .unwrap();
+        assert!(outcome.post_operation_fault.is_none());
+        assert_eq!(
+            runtime.world().resource::<InputTimeline>().retained_len(),
+            0
+        );
+        runtime.finish().unwrap();
     }
 }

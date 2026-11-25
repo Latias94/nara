@@ -103,7 +103,7 @@ fn root_facade_plugin_reload_preserves_last_good_after_budget_rejection() {
         nara::asset::AssetPlugin,
         nara::asset::AssetSourcePlugin,
         nara::hierarchy::HierarchyPlugin,
-        nara::transform::TransformPlugin,
+        nara::scene::TransformComponentsPlugin,
         ImagePlugin,
         ImageSourcePlugin::with_limits(limits)
             .unwrap()
@@ -138,9 +138,6 @@ fn root_facade_plugin_reload_preserves_last_good_after_budget_rejection() {
         .insert_resource(events)
         .unwrap();
 
-    app.insert_resource(ReloadTestPort).unwrap();
-    app.__register_driver_port::<ReloadTestPort>(ReloadTestPort::apply_driver_input_in_world)
-        .unwrap();
     let mut app = RuntimeInstance::start(app).unwrap();
     request_reload(&mut app, &record);
     drive_image_jobs(&mut app);
@@ -275,45 +272,19 @@ fn import_request(record: &AssetRecord, bytes: &[u8]) -> ImageBytesImportRequest
     )
 }
 
-#[derive(Resource)]
-struct ReloadTestPort;
-
-impl nara::app::__RuntimeDriverPort for ReloadTestPort {
-    type Input = nara::asset::AssetSourcePath;
-    type Output = ();
-
-    fn apply_driver_input(&mut self, _input: Self::Input) {}
-}
-
-impl ReloadTestPort {
-    fn apply_driver_input_in_world(
-        world: &mut World,
-        path: nara::asset::AssetSourcePath,
-    ) -> Result<
-        (),
-        (
-            nara::app::RuntimeWorldAccessError,
-            nara::asset::AssetSourcePath,
-        ),
-    > {
-        world.resource_mut::<AssetReloadDiagnostics>().clear();
-        world.resource_mut::<AssetEvents>().drain();
-        world
-            .resource_mut::<AssetSourceChanges>()
-            .modified(path)
-            .unwrap();
-        Ok(())
-    }
-}
-
 fn request_reload(app: &mut RuntimeInstance, record: &AssetRecord) {
-    app.with_driver_scope(|scope| scope.__apply_port::<ReloadTestPort>(record.path().clone()))
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
+    let path = record.path().clone();
+    let outcome = app
+        .with_driver_scope(|scope| {
+            scope.apply_command(move |world: &mut World| {
+                world.resource_mut::<AssetReloadDiagnostics>().clear();
+                world.resource_mut::<AssetEvents>().drain();
+                world.resource_mut::<AssetSourceChanges>().modified(path)
+            })
         })
-        .unwrap()
         .unwrap();
+    assert!(outcome.post_operation_fault.is_none());
+    outcome.output.unwrap();
 }
 
 fn drive_image_jobs(app: &mut RuntimeInstance) {

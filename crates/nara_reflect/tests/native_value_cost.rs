@@ -1,21 +1,21 @@
 use std::{collections::BTreeMap, convert::Infallible};
 
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
     PersistentRuntimeReference, ReferenceInputId, SceneEntityId,
 };
 use nara_reflect::{
-    __private::{
+    ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
+    ComponentFieldPathSegment as Segment, ComponentFieldSchema, ComponentSchema,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueCost,
+    ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueRef,
+    effective::{
         EffectiveValueAdmissionError, FrozenComponentDefaults,
         effective_component_value_with_default_overrides, freeze_component_defaults,
         validate_native_component_value_references_with_admission,
         validate_value_materialization_budget,
     },
-    ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldPathSegment as Segment, ComponentFieldSchema, ComponentSchema,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueCost,
-    ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueRef,
 };
 
 fn limits(nodes: usize, bytes: usize, depth: usize) -> ComponentValueMaterializationLimits {

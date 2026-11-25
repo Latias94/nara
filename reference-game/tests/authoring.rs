@@ -1,7 +1,7 @@
 use nara::{
     identity::EntityLookup,
     prelude::{
-        Component, ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentTypeId, Parent,
+        ChildOf, Component, ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentTypeId,
         PersistentComponent, Transform2d, Vec2, World,
     },
     reflect::{
@@ -664,7 +664,7 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
         Some(&Transform2d::from_translation(Vec2::new(1.2, 0.0)))
     );
     assert_eq!(
-        world.get::<Parent>(weapon_entity).map(Parent::parent),
+        world.get::<ChildOf>(weapon_entity).map(ChildOf::parent),
         Some(player_entity)
     );
     assert_eq!(world.get::<EnemyRole>(enemy_entity), Some(&EnemyRole {}));
@@ -716,7 +716,7 @@ fn frozen_reference_game_successor() -> ComponentRegistrySnapshot {
 
 fn frozen_reference_game_authoring_registry() -> ComponentRegistrySnapshot {
     let mut registry = ComponentRegistryBuilder::new();
-    nara::transform::TRANSFORM_SCHEMA_PROVIDER
+    nara::scene::TRANSFORM_SCHEMA_PROVIDER
         .register_into(&mut registry)
         .unwrap();
     REFERENCE_GAME_SCHEMA_PROVIDER

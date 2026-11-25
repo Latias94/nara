@@ -7,8 +7,8 @@ use crate::RenderTarget;
 use crate::image::{IMAGE_PREPARE_PLUGIN_ID, PreparedImages};
 use nara_app::{App, Plugin, PluginDefinition, PluginDefinitionId, PluginError};
 use nara_ecs::{Mut, ResMut, Resource, World, system::SystemParam};
-use nara_text::FontFace;
-use nara_ui_kernel::{UiFrame, UiSurfaceId};
+use nara_ui::kernel::{UiFrame, UiSurfaceId};
+use nara_ui::text::FontFace;
 use nara_window::WindowId;
 use thiserror::Error;
 

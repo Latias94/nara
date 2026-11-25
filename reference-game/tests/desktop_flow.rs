@@ -4,7 +4,6 @@
 mod project_content_fixture;
 
 use std::{
-    num::NonZeroU64,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -16,13 +15,11 @@ use nara::{
     advanced_prelude::materialize_startup_scene,
     app::{
         App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
-        PluginDefinitionId, PluginError, PluginId, RuntimeAdmissionReservation, RuntimeClosePolicy,
+        PluginDefinitionId, PluginError, PluginId, RuntimeCandidate, RuntimeClosePolicy,
         RuntimeFaultKind, RuntimeInstance, RuntimeObligationLedger, RuntimeState,
         RuntimeTimeSettings,
     },
-    core::ItemLimit,
-    ecs::schedule::IntoScheduleConfigs,
-    gameplay::{GameplayCommandQueue, GameplayCommandQueueSettings},
+    ecs::{Command, schedule::IntoScheduleConfigs},
     input::{
         ActionContext, ActionMaps, ButtonDriverInput, InputSeatId, KeyCode,
         apply_keyboard_driver_input,
@@ -95,14 +92,6 @@ fn semantic_movement_aggregates_alternate_keys_and_context_restore_requires_fres
     assert_eq!(captured.status.fixed_tick, 0);
     assert_eq!(captured.status.fixed_remainder, half_step);
     assert_eq!(player_position(&runtime), nara::prelude::Vec2::ZERO);
-    assert_eq!(
-        runtime
-            .world()
-            .resource::<GameplayCommandQueue>()
-            .stats()
-            .accepted,
-        1
-    );
     let catch_up_delta = DESKTOP_FIXED_TIMESTEP * 2 + half_step;
     assert!(
         catch_up_delta
@@ -135,14 +124,6 @@ fn semantic_movement_aggregates_alternate_keys_and_context_restore_requires_fres
         alternate_held.y > first.y,
         "Up must keep moving after W releases"
     );
-    assert_eq!(
-        runtime
-            .world()
-            .resource::<GameplayCommandQueue>()
-            .stats()
-            .accepted,
-        1
-    );
 
     enabled.store(false, Ordering::Relaxed);
     runtime.drive(Duration::ZERO).unwrap();
@@ -162,15 +143,8 @@ fn semantic_movement_aggregates_alternate_keys_and_context_restore_requires_fres
     );
     keyboard(&mut runtime, ButtonDriverInput::Release(KeyCode::ArrowUp));
     runtime.drive(Duration::ZERO).unwrap();
-    assert_eq!(
-        runtime
-            .world()
-            .resource::<GameplayCommandQueue>()
-            .stats()
-            .accepted,
-        2,
-        "the cancelled physical release must not duplicate the context's terminal command"
-    );
+    drive_fixed(&mut runtime);
+    assert_eq!(player_position(&runtime), alternate_held);
 
     keyboard(&mut runtime, ButtonDriverInput::Press(KeyCode::ArrowUp));
     keyboard(
@@ -199,14 +173,6 @@ fn semantic_movement_aggregates_alternate_keys_and_context_restore_requires_fres
     runtime.drive(Duration::ZERO).unwrap();
     drive_fixed(&mut runtime);
     assert_eq!(player_position(&runtime), resumed);
-    assert_eq!(
-        runtime
-            .world()
-            .resource::<GameplayCommandQueue>()
-            .stats()
-            .accepted,
-        6
-    );
     stop_runtime(runtime);
 }
 
@@ -347,7 +313,7 @@ fn overlapping_wasd_keys_compose_and_releasing_one_preserves_the_other() {
 }
 
 #[test]
-fn wasd_edges_lower_to_semantic_commands_and_focus_release_stops() {
+fn wasd_edges_drive_fixed_movement_and_focus_release_stops() {
     let mut runtime = desktop_runtime();
 
     keyboard(
@@ -355,15 +321,14 @@ fn wasd_edges_lower_to_semantic_commands_and_focus_release_stops() {
         ButtonDriverInput::Press(KeyCode::Character('w')),
     );
     runtime.drive(Duration::ZERO).unwrap();
-    let pressed = runtime.world().resource::<GameplayCommandQueue>().stats();
-    assert_eq!(pressed.accepted, 1);
-    assert_eq!(pressed.pending_commands, 1);
+    drive_fixed(&mut runtime);
+    let pressed = player_position(&runtime);
+    assert!(pressed.y > 0.0);
 
     keyboard(&mut runtime, ButtonDriverInput::ReleaseAll);
     runtime.drive(Duration::ZERO).unwrap();
-    let released = runtime.world().resource::<GameplayCommandQueue>().stats();
-    assert_eq!(released.accepted, 2);
-    assert_eq!(released.pending_commands, 2);
+    drive_fixed(&mut runtime);
+    assert_eq!(player_position(&runtime), pressed);
     stop_runtime(runtime);
 }
 
@@ -425,35 +390,24 @@ fn rejected_physical_local_command_faults_the_managed_runtime() {
     let snapshot = loader.load(&project, &plan).unwrap();
     let source = snapshot.scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
-    let mut candidate = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            sealed,
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
+    let mut candidate = RuntimeCandidate::admit(
+        sealed,
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::default(),
+    )
+    .unwrap();
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {
                 let report = materialize_startup_scene(world, source)
                     .expect("the retained desktop scene should materialize");
                 assert!(!report.has_errors(), "{report:#?}");
-                let defaults = GameplayCommandQueueSettings::default();
-                let settings = GameplayCommandQueueSettings::new(
-                    ItemLimit::new(1).unwrap(),
-                    defaults.retained_bytes(),
-                    defaults.command_bytes(),
-                    defaults.payload_items(),
-                    defaults.payload_bytes(),
-                    NonZeroU64::new(1).unwrap(),
-                )
-                .unwrap();
-                let mut queue = GameplayCommandQueue::new(settings);
-                queue
-                    .submit(movement_command(1, 1, MovementDirection::Right).unwrap())
-                    .unwrap();
-                world.insert_resource(queue);
+                for sequence in 1..=4_096 {
+                    movement_command(1, sequence, MovementDirection::Right)
+                        .unwrap()
+                        .apply(world)
+                        .unwrap();
+                }
             });
         })
         .map(|outcome| {
@@ -469,8 +423,7 @@ fn rejected_physical_local_command_faults_the_managed_runtime() {
     );
     let failure = runtime.drive(Duration::ZERO).unwrap_err();
 
-    assert_eq!(failure.fault().kind(), RuntimeFaultKind::LocalIntentLoss);
-    assert_eq!(failure.fault().source(), "nara.gameplay.local-action");
+    assert_eq!(failure.fault().kind(), RuntimeFaultKind::System);
     assert_eq!(runtime.state(), RuntimeState::Faulted);
     assert_eq!(runtime.fault(), Some(failure.fault()));
     stop_runtime(runtime);
@@ -499,14 +452,12 @@ fn desktop_runtime_with_context(context: Option<Arc<AtomicBool>>) -> RuntimeInst
     let snapshot = loader.load(&candidate, &plan).unwrap();
     let source = snapshot.scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
-    let mut candidate = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            sealed,
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
+    let mut candidate = RuntimeCandidate::admit(
+        sealed,
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::default(),
+    )
+    .unwrap();
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {

@@ -8,10 +8,6 @@ use nara_app::{App, CoreStage, RuntimeInstance, VirtualTime};
 use nara_asset::Handle;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Component, Query, Res, Resource, Single, World};
-use nara_hierarchy::{
-    HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyPlugin,
-    HierarchyWriter,
-};
 use nara_reflect::ComponentRegistryPlugin;
 use nara_render::gpu::{
     TextureCacheStats, WgpuCapturePlugin, WgpuFrameCaptureError, WgpuImageOutput, WgpuRenderHost,
@@ -25,7 +21,13 @@ use nara_render::tilemap::{TileCell, TileCoord, TileIndex, Tilemap};
 use nara_render::{
     Camera2d, Extent2d, RenderComponentsPlugin, RenderImage2d, RenderImagePacket, RenderPlugin,
 };
-use nara_transform::{Transform2d, TransformPlugin};
+use nara_scene::{
+    hierarchy::{
+        HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyPlugin,
+        HierarchyWriter,
+    },
+    spatial::{SpatialPlugin, Transform2d},
+};
 use nara_window::{Window, WindowResolution};
 use parking_lot::Mutex;
 
@@ -63,7 +65,7 @@ impl Scene {
         app.add_plugins((
             ComponentRegistryPlugin,
             HierarchyPlugin,
-            TransformPlugin,
+            SpatialPlugin,
             RenderComponentsPlugin,
             RenderPlugin::default(),
             ImagePreparePlugin,

@@ -1,6 +1,6 @@
 use std::{num::NonZeroU32, process::ExitCode};
 
-use collect_gameplay::{GameSnapshot, demonstration_commands};
+use collect_gameplay::{GameSnapshot, demonstration_commands, with_collection_script};
 use nara::project_host::{HeadlessProductRun, HeadlessRunOutcome};
 
 fn main() -> ExitCode {
@@ -19,7 +19,9 @@ fn main() -> ExitCode {
         }
     };
     let ticks = if verify_reset { 66 } else { 62 };
-    let recipe = match nara_game::product_recipe() {
+    let recipe = match nara_game::product_recipe()
+        .and_then(|recipe| with_collection_script(recipe, demonstration_commands(verify_reset)))
+    {
         Ok(recipe) => recipe,
         Err(error) => {
             eprintln!("failed to construct product recipe: {error}");
@@ -30,7 +32,6 @@ fn main() -> ExitCode {
         env!("CARGO_MANIFEST_DIR"),
         recipe,
         NonZeroU32::new(ticks).expect("the demonstration tick bound is non-zero"),
-        demonstration_commands(verify_reset),
     )
     .run()
     {

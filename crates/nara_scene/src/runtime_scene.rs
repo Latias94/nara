@@ -11,8 +11,8 @@ mod tests;
 use std::{error::Error, fmt};
 
 use nara_asset::AssetReferenceResolver;
+use nara_core::diagnostic::DiagnosticReport;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{ComponentTypeId, ComponentValueMaterializationLimits};
 
 use crate::{

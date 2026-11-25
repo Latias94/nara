@@ -3,6 +3,7 @@
 //! Asset values, storage, source data, and Runtime codecs are available without App or ECS
 //! dependencies. The `runtime` feature enables ECS resources, reload services, and App plugins.
 //! The independent `serde` feature enables source formats without runtime integration.
+//! The `hot-reload` feature adds native source watching.
 
 #[cfg(feature = "serde")]
 mod build;
@@ -10,6 +11,7 @@ mod database;
 #[cfg(feature = "serde")]
 mod format;
 mod identity;
+pub mod image;
 #[cfg(feature = "serde")]
 mod import;
 mod import_recipe;
@@ -26,6 +28,8 @@ mod source_root;
 mod source_subscriptions;
 mod state;
 mod storage;
+#[cfg(feature = "hot-reload")]
+pub mod watch;
 
 use std::{
     error::Error,
@@ -50,7 +54,7 @@ pub use import_recipe::{
     ImportLabelError, ImportLabelKind, ImportRecipe, ImportRecipeDigest, ImportSettingsHash,
     ImporterId, ImporterVersion, SourceHash,
 };
-pub use nara_identity::{
+pub use nara_core::source::{
     AssetPathError, AssetSourcePath, SourceDocumentBindingError, SourceDocumentKey,
     SourceDocumentKeyError, SourceDocumentKind, SourceDocumentOrigin, StableAssetId,
     StableAssetIdError, StableAssetIdGenerationError,
@@ -89,6 +93,48 @@ pub use state::{
 pub use storage::{
     Asset, AssetMutationBaseline, AssetSlotRevision, Assets, Handle, allocate_anonymous_handle,
 };
+
+#[cfg(feature = "runtime")]
+#[derive(Debug, thiserror::Error)]
+pub enum AddAssetError {
+    #[error("install AssetPlugin before adding a runtime asset")]
+    MissingAssetPlugin,
+    #[error(transparent)]
+    Reserve(#[from] AssetError),
+    #[error(transparent)]
+    Publish(#[from] AssetStateError),
+}
+
+/// Publishes a procedural asset as ready for immediate use by the game and renderer.
+#[cfg(feature = "runtime")]
+pub fn add_asset<T: Asset>(
+    world: &mut nara_ecs::World,
+    value: T,
+) -> Result<Handle<T>, AddAssetError> {
+    if !world.contains_resource::<AssetServer>()
+        || !world.contains_resource::<AssetStates>()
+        || !world.contains_resource::<AssetEvents>()
+    {
+        return Err(AddAssetError::MissingAssetPlugin);
+    }
+    let handle = world
+        .resource_mut::<AssetServer>()
+        .reserve_anonymous::<T>()?;
+    world.init_resource::<Assets<T>>();
+    world.resource_scope(|world, mut assets: nara_ecs::Mut<Assets<T>>| {
+        world.resource_scope(|world, mut states: nara_ecs::Mut<AssetStates>| {
+            assets.commit_loaded(
+                handle,
+                value,
+                &mut states,
+                &mut world.resource_mut::<AssetEvents>(),
+                None,
+                None,
+            )
+        })
+    })?;
+    Ok(handle)
+}
 
 /// Selects the export form for source-bound primary products.
 ///

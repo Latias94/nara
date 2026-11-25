@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_identity::{EntityReference, EntityReferenceRemap, IdentityRemapError};
+use nara_ecs::identity::{EntityReference, EntityReferenceRemap, IdentityRemapError};
 
 use crate::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldPathError,

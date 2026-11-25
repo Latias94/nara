@@ -301,7 +301,7 @@ fn validate_exact_component_record(
     validate_record_defaults(schema, record, budget)?;
     budget.observe(record.value())?;
     let (effective, _) =
-        nara_reflect::__private::effective_component_value_with_default_overrides_with_budget(
+        nara_reflect::effective::effective_component_value_with_default_overrides_with_budget(
             schema,
             record.value(),
             &record.contextual_defaults,
@@ -688,10 +688,10 @@ impl PublicationValueBudget {
                     )?;
                     require_shape_limit("depth", depth.saturating_add(4), shape.depth().get())?;
                     let endpoint = match &reference.target {
-                        nara_identity::AuthoredReferenceTarget::Entity(entity) => {
+                        nara_ecs::identity::AuthoredReferenceTarget::Entity(entity) => {
                             entity.entity().as_str()
                         }
-                        nara_identity::AuthoredReferenceTarget::Input(input) => input.as_str(),
+                        nara_ecs::identity::AuthoredReferenceTarget::Input(input) => input.as_str(),
                     };
                     observe_string(endpoint, &mut total_string_bytes, self.limits)?;
                     for hop in &reference.through {
@@ -701,13 +701,14 @@ impl PublicationValueBudget {
                             self.limits,
                         )?;
                         let text = match hop.expected_base.origin() {
-                            nara_identity::SourceDocumentOrigin::Named { name, .. } => {
+                            nara_core::source::SourceDocumentOrigin::Named { name, .. } => {
                                 Some(name.as_ref())
                             }
-                            nara_identity::SourceDocumentOrigin::ProjectLocation {
-                                path, ..
+                            nara_core::source::SourceDocumentOrigin::ProjectLocation {
+                                path,
+                                ..
                             } => Some(path.as_str()),
-                            nara_identity::SourceDocumentOrigin::StableAsset { .. } => None,
+                            nara_core::source::SourceDocumentOrigin::StableAsset { .. } => None,
                         };
                         if let Some(text) = text {
                             observe_string(text, &mut total_string_bytes, self.limits)?;
@@ -767,8 +768,10 @@ fn require_shape_limit(
     )))
 }
 
-fn publication_error(diagnostic: nara_diagnostic::Diagnostic) -> SceneFilePublicationError {
-    let mut diagnostics = nara_diagnostic::DiagnosticReport::default();
+fn publication_error(
+    diagnostic: nara_core::diagnostic::ReportDiagnostic,
+) -> SceneFilePublicationError {
+    let mut diagnostics = nara_core::diagnostic::DiagnosticReport::default();
     diagnostics.push(diagnostic);
     SceneFilePublicationError::new(diagnostics)
 }

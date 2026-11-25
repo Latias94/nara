@@ -3,14 +3,14 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
 };
 
+use crate::hierarchy::{Children, Parent};
 use nara_core::ItemLimit;
+use nara_ecs::identity::{SceneEntityId, SpawnedSceneInstance, WorldEntityToken};
 use nara_ecs::{
-    __private::LifecycleFreeInsertionPlan,
     Component, Entity, Resource, World,
     bevy_ecs::component::{ComponentId, Mutable},
+    transaction::LifecycleFreeInsertionPlan,
 };
-use nara_hierarchy::{Children, Parent};
-use nara_identity::{SceneEntityId, SpawnedSceneInstance, WorldEntityToken};
 use nara_reflect::{ComponentRegistrySnapshot, ComponentTypeId};
 
 use crate::{spawn::SceneEntitySource, validation::PreparedScene};

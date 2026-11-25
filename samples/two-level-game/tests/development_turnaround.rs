@@ -241,12 +241,11 @@ fn production_desktop_records_paused_control_turnaround() {
     let cleanup = match cleanup {
         Ok(cleanup) => cleanup,
         Err(panic) => {
-            let root = fixture.root.clone();
-            std::mem::forget((host, fixture));
             eprintln!(
-                "development turnaround retains original cleanup owners at {}",
-                root.display()
+                "development turnaround: explicit cleanup failed for {}",
+                fixture.root.display()
             );
+            drop(host);
             resume_unwind(panic);
         }
     };

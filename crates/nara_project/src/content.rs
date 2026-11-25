@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use nara_diagnostic::DiagnosticReport;
+use nara_core::diagnostic::DiagnosticReport;
 use serde::{Deserialize, Serialize};
 
 use crate::validation::{

@@ -7,7 +7,7 @@ use std::{
 };
 
 use nara_app::{
-    App, RuntimeAdmissionReservation, RuntimeCloseContext, RuntimeCloseParticipant,
+    App, RuntimeCandidate, RuntimeCloseContext, RuntimeCloseParticipant,
     RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
 };
 
@@ -58,9 +58,7 @@ fn startup_cleanup_poll_retains_incomplete_budget_until_explicit_execute() {
             },
         )
         .unwrap();
-    let runtime = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(App::new().seal().unwrap(), obligations, policy)
+    let runtime = RuntimeCandidate::admit(App::new().seal().unwrap(), obligations, policy)
         .unwrap()
         .complete_startup()
         .unwrap()

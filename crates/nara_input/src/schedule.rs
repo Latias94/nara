@@ -16,7 +16,7 @@ use nara_ecs::schedule::SystemSet;
 /// over the engine's projection, fixed command admission or presentation outcomes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
 pub enum InputSet {
-    /// Projects retained normalized input into the current frame's button/pointer observations.
+    /// Projects retained input into button/pointer state and typed device messages.
     ProjectTimeline,
     /// Publishes the immutable frame observations after physical projection.
     PublishObservations,

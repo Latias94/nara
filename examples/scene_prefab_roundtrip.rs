@@ -6,11 +6,10 @@ use nara::{
     render::register_render_components,
     scene::{
         LiveSceneExportOptions, SceneDocumentCandidate, export_live_scene_with_options,
-        register_scene_components,
+        register_scene_components, register_transform_components,
     },
     sprite::register_sprite_components,
     tilemap::register_tilemap_components,
-    transform::register_transform_components,
 };
 
 const PLAYER_TEXTURE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";

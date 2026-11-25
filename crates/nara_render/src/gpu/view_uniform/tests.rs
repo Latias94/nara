@@ -185,7 +185,6 @@ fn clocks_preserve_maximum_deltas_scale_pause_and_original_render_alpha() {
             .with_time_scale(0.25)
             .unwrap()
             .with_paused(true),
-        false,
     );
     assert_eq!(uniform.clock_available, 1);
     assert_eq!(uniform.real_delta, Duration::MAX.as_secs_f32());
@@ -226,13 +225,12 @@ fn fixed_delta_is_the_latest_tick_and_steps_remain_a_separate_count() {
             *world.resource::<VirtualTime>(),
             *world.resource::<RenderTime>(),
             *world.resource::<RuntimeTimeSettings>(),
-            true,
         );
         assert_eq!(uniform.fixed_steps, steps);
         assert_eq!(uniform.fixed_tick, [tick, 0]);
         assert_eq!(uniform.fixed_timestep, 0.01);
         assert_eq!(uniform.fixed_delta, if steps == 0 { 0.0 } else { 0.01 });
-        assert_eq!(uniform.spatial_interpolated, 1);
+        assert_eq!(uniform.spatial_interpolated, 0);
     }
     runtime.finish().unwrap();
 }

@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::__private::{
+use crate::presentation::{
     UiDeferredPresentationRetry, UiPreparedPresentationAuthority, UiPresentationInvalidationReason,
 };
 use nara_input::InputInvalidationReason;
@@ -107,7 +107,7 @@ fn assert_cancelled_presentation(app: &UiTestApp, receipt: UiPresentationReceipt
     assert!(!surface.interaction().has_pointer_facts(surface_id()));
     assert_eq!(
         surface.reducer_states().get(button.key()).copied(),
-        Some(nara_ui_widgets::UiButtonState::default()),
+        Some(crate::widgets::UiButtonState::default()),
     );
 }
 

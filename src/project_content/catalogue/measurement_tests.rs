@@ -11,14 +11,14 @@ use std::{
 #[cfg(not(windows))]
 use std::fs::File;
 
+use crate::fs::{
+    CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
+};
 use nara_asset::{
     AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, AssetSourcePath,
     StableAssetId,
 };
-use nara_fs::{
-    CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
-};
-use nara_identity::SceneEntityId;
+use nara_ecs::identity::SceneEntityId;
 use nara_scene::{
     PrefabDocument, PrefabEntityTarget, PrefabInstance, PrefabInstanceClaim, PrefabOverlay,
     SceneDocument, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
@@ -243,7 +243,7 @@ fn warmed_loader_rechecks_duplicate_identity_and_changed_delivery_source() {
         .verify_catalogued_metadata(
             &context.prefab_scope.resolve(&path),
             &candidate.settings().paths.prefabs,
-            nara_fs::ContentDigest::of_bytes(&metadata),
+            crate::fs::ContentDigest::of_bytes(&metadata),
         )
         .unwrap_err();
     assert_eq!(error.kind(), ProjectContentErrorKind::HostAuthorityRejected);

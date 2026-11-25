@@ -7,11 +7,11 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use crate::fs::{CapabilityRights, DirectorySyncTier, HostCapabilityOptions, TrustMode};
 use nara_asset::{
     AssetProductRef, AssetReferenceDemand, AssetSourcePath, ImportedProductId, StableAssetId,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion, ItemLimit};
-use nara_fs::{CapabilityRights, DirectorySyncTier, HostCapabilityOptions, TrustMode};
 
 use super::super::model::{ArtifactBuildDefinition, ArtifactBuildOutput};
 use super::*;

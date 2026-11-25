@@ -4,17 +4,15 @@ use std::{
     io::{self, Write},
     num::NonZeroU32,
     process::ExitCode,
-    time::{Duration, Instant},
 };
 
 use nara::{
+    app::{App, FixedTime, RuntimeCandidateRetirementState},
     diagnostic::{DiagnosticReport, DiagnosticSeverity},
-    project_host::{HeadlessRunOutcome, HeadlessRunReport},
+    project_host::load_project_app,
+    project_tooling::{ProductObservationTarget, record_product_observation},
 };
-use nara_reference_game::{
-    ReferenceProductObservation, WaveSnapshot,
-    bundled_wave_product_run_with_completed_tick_observer,
-};
+use nara_reference_game::{ReferenceProductObservation, WaveSnapshot, bundled_wave_recipe};
 
 mod startup_marker;
 mod support;
@@ -52,57 +50,47 @@ fn main() -> ExitCode {
         }
     };
     let marker = match StartupMarker::from_environment("headless_first_authoritative_tick") {
-        Ok(marker) => std::sync::Arc::new(marker),
+        Ok(marker) => marker,
         Err(error) => {
             let summary = error.to_string();
             emit_static_error(error.code(), &summary);
             return ExitCode::FAILURE;
         }
     };
-    let observer = std::sync::Arc::clone(&marker);
-    let mut run =
-        bundled_wave_product_run_with_completed_tick_observer(root, maximum_ticks, move |_| {
-            let _ = observer.emit();
-        });
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let mut observation_failure = None;
-    let terminal = drive_to_terminal(
-        || {
-            let report = run.execute_bounded();
-            if matches!(report.outcome(), HeadlessRunOutcome::Completed(_)) {
-                let result = report
-                    .startup_content_closure()
-                    .ok_or_else(|| {
-                        io::Error::other(
-                            "headless run completed without its admitted startup closure",
-                        )
-                    })
-                    .and_then(|closure| {
-                        nara::project_tooling::record_product_observation(
-                            nara::project_tooling::ProductObservationTarget::Headless,
-                            closure,
-                        )
-                    });
-                if let Err(error) = result {
-                    observation_failure = Some(error);
-                }
-            }
-            classify_run_report(report)
-        },
-        deadline,
-        Instant::now,
-        || std::thread::park_timeout(Duration::from_millis(1)),
-    );
-    if let Some(error) = observation_failure {
+    let recipe = match bundled_wave_recipe() {
+        Ok(recipe) => recipe,
+        Err(_) => {
+            emit_static_error(
+                "project.run.composition-invalid",
+                "Reference wave recipe could not be composed",
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+    let (mut app, closure) = match load_project_app(root, None, recipe) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            emit_diagnostics(error.diagnostics());
+            return ExitCode::FAILURE;
+        }
+    };
+    let outcome = drive_wave(&mut app, maximum_ticks, &marker).map_err(|(code, summary)| {
+        emit_static_error(code, summary);
+    });
+    if !close_app(app) {
+        return ExitCode::FAILURE;
+    }
+    let Ok(observation) = outcome else {
+        return ExitCode::FAILURE;
+    };
+    if let Err(error) = record_product_observation(ProductObservationTarget::Headless, &closure) {
         emit_static_error(
             "reference-game.product-observation.failed",
             &error.to_string(),
         );
         return ExitCode::FAILURE;
     }
-    if matches!(&terminal, CliRunTerminal::Completed(_))
-        && let Err(error) = marker.verify_success()
-    {
+    if let Err(error) = marker.verify_success() {
         let summary = error.to_string();
         emit_static_error(error.code(), &summary);
         return ExitCode::FAILURE;
@@ -112,7 +100,7 @@ fn main() -> ExitCode {
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
     let emit_ui_observation = env::var_os(UI_OBSERVATION_ENV).as_deref() == Some(OsStr::new("1"));
-    write_terminal(terminal, &mut stdout, &mut stderr, emit_ui_observation)
+    write_terminal_success(&mut stdout, &mut stderr, &observation, emit_ui_observation)
 }
 
 fn parse_maximum_ticks(arguments: impl IntoIterator<Item = OsString>) -> Option<NonZeroU32> {
@@ -134,68 +122,59 @@ fn parse_maximum_ticks(arguments: impl IntoIterator<Item = OsString>) -> Option<
         .and_then(NonZeroU32::new)
 }
 
-enum CliRunProgress {
-    Completed(Box<ReferenceProductObservation>),
-    Failed(DiagnosticReport),
-    CleanupIncomplete(DiagnosticReport),
-}
-
-enum CliRunTerminal {
-    Completed(Box<ReferenceProductObservation>),
-    Failed(DiagnosticReport),
-    CleanupTimedOut(DiagnosticReport),
-}
-
-fn classify_run_report(report: HeadlessRunReport<ReferenceProductObservation>) -> CliRunProgress {
-    match report.outcome() {
-        HeadlessRunOutcome::Completed(snapshot) => {
-            CliRunProgress::Completed(Box::new(snapshot.clone()))
+fn drive_wave(
+    app: &mut App,
+    maximum_ticks: NonZeroU32,
+    marker: &StartupMarker,
+) -> Result<ReferenceProductObservation, (&'static str, &'static str)> {
+    let delta = app.world().resource::<FixedTime>().timestep();
+    for _ in 0..maximum_ticks.get() {
+        let tick = app.step_fixed(delta).map_err(|error| {
+            error.runtime_fault_detail().map_or(
+                (
+                    "project.run.runtime-faulted",
+                    "Project runtime reported a fault before product completion",
+                ),
+                |detail| (detail.code(), detail.summary()),
+            )
+        })?;
+        let observation = app
+            .world()
+            .get_resource::<ReferenceProductObservation>()
+            .ok_or((
+                "project.run.outcome-missing",
+                "Project runtime did not publish its typed outcome",
+            ))?;
+        if tick.exit.is_none() {
+            let _ = marker.emit();
         }
-        HeadlessRunOutcome::Failed => CliRunProgress::Failed(report.diagnostics().clone()),
-        HeadlessRunOutcome::CleanupIncomplete => {
-            CliRunProgress::CleanupIncomplete(report.diagnostics().clone())
-        }
-    }
-}
-
-fn drive_to_terminal(
-    mut step: impl FnMut() -> CliRunProgress,
-    deadline: Instant,
-    mut now: impl FnMut() -> Instant,
-    mut wait: impl FnMut(),
-) -> CliRunTerminal {
-    loop {
-        match step() {
-            CliRunProgress::Completed(snapshot) => return CliRunTerminal::Completed(snapshot),
-            CliRunProgress::Failed(report) => return CliRunTerminal::Failed(report),
-            CliRunProgress::CleanupIncomplete(_) if now() < deadline => wait(),
-            CliRunProgress::CleanupIncomplete(report) => {
-                return CliRunTerminal::CleanupTimedOut(report);
-            }
+        if tick.exit.is_some() || observation.wave().is_terminal() {
+            return Ok(observation.clone());
         }
     }
+    Err((
+        "project.run.tick-limit",
+        "Headless project run reached its fixed-tick limit",
+    ))
 }
 
-fn write_terminal(
-    terminal: CliRunTerminal,
-    stdout: &mut impl Write,
-    stderr: &mut impl Write,
-    emit_ui_observation: bool,
-) -> ExitCode {
-    match terminal {
-        CliRunTerminal::Completed(observation) => {
-            write_terminal_success(stdout, stderr, &observation, emit_ui_observation)
-        }
-        CliRunTerminal::Failed(report) => {
-            let _ = write_diagnostics(stderr, &report);
-            ExitCode::FAILURE
-        }
-        CliRunTerminal::CleanupTimedOut(report) => {
-            let _ = write_diagnostics(stderr, &report);
-            let _ = write_static_error(stderr, CLEANUP_TIMEOUT_CODE, CLEANUP_TIMEOUT_SUMMARY);
-            ExitCode::FAILURE
-        }
+fn close_app(app: App) -> bool {
+    let Err(retirement) = app.finish() else {
+        return true;
+    };
+    if retirement
+        .close_evidence()
+        .is_some_and(|evidence| evidence.has_terminal_failure())
+    {
+        emit_static_error(
+            "project.run.cleanup-failed",
+            "Project runtime cleanup reported a terminal failure",
+        );
     }
+    if retirement.retirement_state() != RuntimeCandidateRetirementState::Retired {
+        emit_static_error(CLEANUP_TIMEOUT_CODE, CLEANUP_TIMEOUT_SUMMARY);
+    }
+    false
 }
 
 fn write_terminal_success(
@@ -279,7 +258,7 @@ fn write_static_error(
     writeln!(writer, "{code}: {summary}")
 }
 
-fn emit_diagnostics(report: &nara::diagnostic::DiagnosticReport) {
+fn emit_diagnostics(report: &DiagnosticReport) {
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
     let _ = write_diagnostics(&mut stderr, report);
@@ -305,8 +284,6 @@ fn write_diagnostics(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
-
     use nara::{
         fs::{FsError, FsOperation},
         project_host::ProjectCandidateError,
@@ -358,41 +335,6 @@ mod tests {
                 "\"player_hit_points\":0,\"enemies_remaining\":0,",
                 "\"projectiles_remaining\":0}\n"
             )
-        );
-    }
-
-    #[test]
-    fn incomplete_cleanup_retries_only_until_the_deadline() {
-        let start = Instant::now();
-        let deadline = start + Duration::from_secs(5);
-        let steps = Cell::new(0_u32);
-        let clock_reads = Cell::new(0_u32);
-        let waits = Cell::new(0_u32);
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-
-        let terminal = drive_to_terminal(
-            || {
-                steps.set(steps.get() + 1);
-                CliRunProgress::CleanupIncomplete(DiagnosticReport::default())
-            },
-            deadline,
-            || {
-                let read = clock_reads.get();
-                clock_reads.set(read + 1);
-                if read == 0 { start } else { deadline }
-            },
-            || waits.set(waits.get() + 1),
-        );
-        let exit = write_terminal(terminal, &mut stdout, &mut stderr, false);
-
-        assert_eq!(exit, ExitCode::FAILURE);
-        assert_eq!(steps.get(), 2);
-        assert_eq!(waits.get(), 1);
-        assert!(stdout.is_empty());
-        assert_eq!(
-            String::from_utf8(stderr).unwrap(),
-            "reference-game.run.cleanup-timeout: Headless runtime cleanup exceeded its deadline\n"
         );
     }
 }

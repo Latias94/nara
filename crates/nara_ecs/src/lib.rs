@@ -64,10 +64,8 @@ pub mod schedule {
     };
 }
 
-#[doc(hidden)]
-pub mod __private;
-
-mod transaction;
+pub mod identity;
+pub mod transaction;
 
 /// Nara's maintained ordinary ECS authoring surface.
 ///

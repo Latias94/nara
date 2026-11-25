@@ -10,12 +10,12 @@ use nara_scene::{
     SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord, SceneEntitySource,
     ScenePlacement, ScenePlacementParent, SourceDocumentKey,
 };
+use nara_ui::kernel::{
+    UiLayer, UiRootKey, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform, UiSurfaceId,
+};
 use nara_ui::{
     UiAdapterDiagnostics, UiNode, UiPlugin, UiRoot, UiStyle, UiSurfaceEndpoint, UiSurfaceSlot,
     install_ui_surface, ui_candidate_frame,
-};
-use nara_ui_kernel::{
-    UiLayer, UiRootKey, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform, UiSurfaceId,
 };
 
 #[test]
@@ -248,7 +248,7 @@ fn canonical_prefab_alias_rebuild_preserves_keys_but_a_containing_source_switch_
         ));
     }
     runtime.finish().unwrap();
-    let keys = |frame: &Option<std::sync::Arc<nara_ui_kernel::UiFrame>>| {
+    let keys = |frame: &Option<std::sync::Arc<nara_ui::kernel::UiFrame>>| {
         frame
             .as_ref()
             .expect("the source-bound UI must compile")
@@ -656,7 +656,7 @@ fn source_identity_app() -> (App, UiSurfaceId) {
     let mut app = App::new();
     app.add_plugins((
         ComponentRegistryPlugin,
-        nara_hierarchy::HierarchyPlugin,
+        nara_scene::hierarchy::HierarchyPlugin,
         nara_input::InputPlugin,
         UiPlugin::default(),
     ))

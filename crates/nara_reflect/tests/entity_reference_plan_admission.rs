@@ -1,8 +1,8 @@
-use nara_identity::{
+use nara_ecs::identity::{
     EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
     SceneEntityId,
 };
-use nara_reflect::__private::{
+use nara_reflect::entity_reference::{
     EntityReferencePlanError, plan_declared_entity_references,
     plan_declared_entity_references_with_admission,
 };

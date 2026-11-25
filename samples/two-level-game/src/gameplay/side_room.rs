@@ -8,8 +8,7 @@ use nara::{
         ProjectSceneRequestId, ProjectSceneRequestState, ProjectScenes,
         activate_prepared_project_scene, unload_project_scene_addition,
     },
-    scene::SceneOccurrenceKey,
-    transform::fixed_spatial_snapshot,
+    scene::{SceneOccurrenceKey, fixed_spatial::fixed_spatial_snapshot},
 };
 
 use crate::{
@@ -19,11 +18,7 @@ use crate::{
     },
 };
 
-use super::{
-    Session,
-    commands::{LOOKOUT, SIDE_ROOM},
-    player, simulation_enabled,
-};
+use super::{Session, player, simulation_enabled};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -266,8 +261,8 @@ pub(super) fn advance(world: &mut World) {
         return;
     };
     let (owner, relic) = match room {
-        Room::SideRoom => (SIDE_ROOM, RELIC),
-        Room::Lookout => (LOOKOUT, LOOKOUT_RELIC),
+        Room::SideRoom => ("two-level-game.side-room", RELIC),
+        Room::Lookout => ("two-level-game.lookout", LOOKOUT_RELIC),
     };
     let name = room.name();
     let relic = SceneEntityId::new(relic).expect("static relic ID");

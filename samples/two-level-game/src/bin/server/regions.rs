@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 use nara::{
     advanced_prelude::CurrentScene,
     app::FixedTime,
-    gameplay::{GameplayCommandKey, GameplayCommandQueue, GameplayCommandQueueStats},
     identity::{
         EntityLookup, IdentityDomainError, SceneEntityId, SpawnedSceneInstance, WorldIdentityDomain,
     },
@@ -14,7 +13,10 @@ use nara::{
 use serde_json::{Value, json};
 use two_level_game::{
     CollisionBox, GamePhase, GameSnapshot, SideRoomPhase,
-    command::{SERVER_COMMAND_SOURCE, SemanticCommand, ServerCommand},
+    command::{
+        CommandKey, CommandSchedule, CommandStats, SERVER_COMMAND_SOURCE, SemanticCommand,
+        ServerCommand,
+    },
     levels::{LevelId, LevelKey},
     side_room::{LOOKOUT_RELIC, RELIC},
 };
@@ -216,7 +218,7 @@ impl Driver<'_> {
         )))
     }
 
-    fn after_command(&mut self, command: GameplayCommandKey) -> Result<GameSnapshot, Failure> {
+    fn after_command(&mut self, command: CommandKey) -> Result<GameSnapshot, Failure> {
         let tick = command.tick().get();
         let snapshot = self.until(
             MAX_FRAMES,
@@ -229,10 +231,10 @@ impl Driver<'_> {
         Ok(snapshot)
     }
 
-    fn queue(&self) -> Result<GameplayCommandQueueStats, Failure> {
+    fn queue(&self) -> Result<CommandStats, Failure> {
         Ok(self
             .session
-            .observe(|world| world.resource::<GameplayCommandQueue>().stats())?)
+            .observe(|world| world.resource::<CommandSchedule>().stats())?)
     }
 
     fn room_receipt(&self, relic: &str) -> Result<SpawnedSceneInstance, Failure> {
@@ -319,15 +321,15 @@ impl Driver<'_> {
         Ok(phase(&released))
     }
 
-    fn movement(&mut self, direction: usize, pressed: bool) -> Result<GameplayCommandKey, Failure> {
+    fn movement(&mut self, direction: usize, pressed: bool) -> Result<CommandKey, Failure> {
         self.submit(ServerCommand::Gameplay(SemanticCommand::Move {
             direction,
             pressed,
         }))
     }
 
-    fn submit(&mut self, command: ServerCommand) -> Result<GameplayCommandKey, Failure> {
-        let draft = command.into_draft().map_err(Failure::Error)?;
+    fn submit(&mut self, command: ServerCommand) -> Result<CommandKey, Failure> {
+        let draft = command.into_intent().map_err(Failure::Error)?;
         submit_external(self.session, &mut self.sequence, draft)
     }
 }

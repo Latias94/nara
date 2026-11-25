@@ -468,11 +468,7 @@ fn finish(mut host: DevelopmentHost, stdout: &mut impl Write, stop: Stop) -> Exi
         "build_failure": host.last_build_failure().map(output::build_failure),
         "error": stop.error,
     });
-    let emitted = output::emit(stdout, &response);
-    if retirement == RetirementStatus::Pending {
-        std::mem::forget(host);
-    }
-    if let Err(error) = emitted {
+    if let Err(error) = output::emit(stdout, &response) {
         eprintln!("develop: {error}");
         return ExitCode::FAILURE;
     }
@@ -640,9 +636,6 @@ fn startup_build_failure(stdout: &mut impl Write, mut failure: CargoBuildFailure
     });
     if let Err(error) = output::emit(stdout, &response) {
         eprintln!("develop: {error}");
-    }
-    if pending {
-        std::mem::forget(failure);
     }
     ExitCode::FAILURE
 }

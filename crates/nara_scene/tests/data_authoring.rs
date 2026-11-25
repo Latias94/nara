@@ -10,11 +10,11 @@ use nara_reflect::{
     ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::{AuthoringAdapterReceipt, AuthoringPreviewOmissionReason},
     AuthoringDocumentSource, AuthoringRecordReadiness, PrefabAuthoringSession, PrefabDocument,
     PrefabDocumentCandidate, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
     SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
     ScenePatchOperation,
+    authoring::{AuthoringAdapterReceipt, AuthoringPreviewOmissionReason},
 };
 
 #[path = "support/vec2_data_authoring.rs"]
@@ -99,7 +99,7 @@ fn data_adapter_edits_scene_and_prefab_without_native_preview_or_unavailable_mut
         .unwrap();
     assert_eq!(fact.readiness(), AuthoringRecordReadiness::Available);
     assert!(!fact.adapter().unwrap().supports_native_preview());
-    let preview = nara_scene::__private::project_published_authoring_scene_preview(&published);
+    let preview = nara_scene::authoring::project_published_authoring_scene_preview(&published);
     assert!(preview.document().entities[0].components.is_empty());
     assert!(
         preview.omissions().iter().any(|omission| omission.reason()

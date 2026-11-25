@@ -17,7 +17,7 @@ are copied.
 
 The changes are deliberately limited:
 
-- Accept a `syn::Path` to the facade's hidden complete substrate support instead
+- Accept a `syn::Path` to the facade's public Bevy ECS re-export instead
   of discovering Bevy through `BevyManifest`.
 - Move proc-macro entry points to Nara's existing derive crate and return Bundle
   parse errors through `syn::Result`.
@@ -32,10 +32,8 @@ or introduce a second ECS implementation.
 
 The derive entry points resolve the direct `nara_ecs` or `nara` dependency by
 package identity, including renamed dependencies, and append
-`::__private::bevy_ecs`. That hidden re-export supplies every upstream module
-needed by generated code without making those modules part of the ordinary
-authoring surface. Advanced source consumers use the public `nara_ecs::bevy_ecs` path;
-generated code uses the hidden support path.
+`::bevy_ecs` to the resolved ECS facade. Generated code uses the same public
+`nara_ecs::bevy_ecs` or `nara::ecs::bevy_ecs` re-export as direct consumers.
 
 Keep these sources synchronized with `bevy_ecs`, `bevy_ecs_macro_logic` and
 `bevy_macro_utils`. Any dependency upgrade must review the exact new released

@@ -1,10 +1,10 @@
 //! Safe format facts shared by strict content Check and ordinary authoring Open.
 
-use nara_core::{EngineVersion, PersistentFileContractError, SerdeShapeError};
-use nara_diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
-    SafeSummary,
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
+    ReportDiagnostic as Diagnostic, SafeSummary,
 };
+use nara_core::{EngineVersion, PersistentFileContractError, SerdeShapeError};
 use nara_scene::{SceneFileBudgetKind, SceneFileEncoding, SceneFormatError};
 
 fn diagnostic(code: &'static str, summary: &'static str) -> Diagnostic {
@@ -220,8 +220,8 @@ fn usize_to_u64(value: usize) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use nara_core::diagnostic::{DiagnosticFieldClass, DiagnosticValueRef};
     use nara_core::{EngineVersion, FormatKind, PersistentFileContractError};
-    use nara_diagnostic::{DiagnosticFieldClass, DiagnosticValueRef};
     use nara_scene::{SceneDocumentCandidate, SceneFormatError};
 
     use super::scene_format_diagnostic;

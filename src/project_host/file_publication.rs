@@ -9,7 +9,7 @@ use std::{
 #[cfg(test)]
 use std::sync::atomic::AtomicBool;
 
-use nara_fs::{
+use crate::fs::{
     ContentDigest, DirectoryCapability, ExpectedTarget, FileCapability, FileIdentity, FsError,
     LockMode, RelativeComponent, RelativePath, ReplaceReceipt, StageStatus, TemporaryFileCleanup,
     TemporaryFileFailure,
@@ -274,7 +274,7 @@ impl FileSourceObservation {
     ) -> Result<Self, FsError> {
         if file.parent_identity() != Some(parent.identity()) {
             return Err(FsError::Unproven {
-                operation: nara_fs::FsOperation::InspectHandle,
+                operation: crate::fs::FsOperation::InspectHandle,
                 proof: "the source read does not belong to its continuously retained parent",
             });
         }
@@ -561,7 +561,7 @@ impl FilePublicationHost {
         error
     }
 
-    fn discard_candidate(&mut self, candidate: nara_fs::TemporaryFile) {
+    fn discard_candidate(&mut self, candidate: crate::fs::TemporaryFile) {
         if let Err(failure) = candidate.discard() {
             debug_assert!(self.cleanup.is_none());
             self.cleanup = failure.into_parts().1;
@@ -804,14 +804,14 @@ impl FilePublicationHost {
 
 fn publication_is_accepted(binding: FilePublicationBinding, receipt: &ReplaceReceipt) -> bool {
     receipt.previous_identity() == binding.identity()
-        && receipt.publication_atomicity() == nara_fs::PublicationAtomicity::AtomicNameSwitch
+        && receipt.publication_atomicity() == crate::fs::PublicationAtomicity::AtomicNameSwitch
         && (!matches!(binding, FilePublicationBinding::Missing)
-            || receipt.conflict_protection() == nara_fs::ConflictProtection::StrongCompareAndSwap)
+            || receipt.conflict_protection() == crate::fs::ConflictProtection::StrongCompareAndSwap)
         && receipt.published_identity() == Some(receipt.candidate_identity())
         && matches!(
             receipt.publication_identity_evidence(),
-            nara_fs::PublicationIdentityEvidence::HandleBoundCandidate
-                | nara_fs::PublicationIdentityEvidence::PostPublishObserved
+            crate::fs::PublicationIdentityEvidence::HandleBoundCandidate
+                | crate::fs::PublicationIdentityEvidence::PostPublishObserved
         )
         && receipt.durability().data_synced() == StageStatus::Achieved
         && receipt.durability().file_metadata_synced() == StageStatus::Achieved
@@ -821,7 +821,7 @@ fn publication_is_accepted(binding: FilePublicationBinding, receipt: &ReplaceRec
 
 fn create_temporary(
     parent: &DirectoryCapability,
-) -> Result<(RelativeComponent, nara_fs::TemporaryFile), TemporaryFileFailure> {
+) -> Result<(RelativeComponent, crate::fs::TemporaryFile), TemporaryFileFailure> {
     for _ in 0..TEMPORARY_NAME_ATTEMPTS {
         let sequence = NEXT_TEMPORARY_NAME.fetch_add(1, Ordering::Relaxed);
         let name = RelativeComponent::new(format!(
@@ -836,7 +836,7 @@ fn create_temporary(
         }
     }
     Err(FsError::AlreadyExists {
-        operation: nara_fs::FsOperation::CreateTemporary,
+        operation: crate::fs::FsOperation::CreateTemporary,
     }
     .into())
 }
@@ -863,7 +863,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
+    use crate::fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
 
     use super::*;
 

@@ -47,10 +47,7 @@ fn server_bundle_stays_free_of_raw_client_resources() {
     #[cfg(feature = "runtime-input")]
     {
         assert!(!app.world().contains_resource::<nara::input::PointerState>());
-        assert!(
-            !app.world()
-                .contains_resource::<nara::gameplay::ActionCommandMap>()
-        );
+        assert!(!app.world().contains_resource::<nara::input::ActionState>());
     }
     #[cfg(feature = "runtime-window")]
     assert!(
@@ -102,15 +99,19 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
 
     let expected = [
         "asset-watch",
+        "audio",
+        "audio-device",
         "default",
         "desktop-winit",
+        "gamepad",
         "parallel-executor",
+        "physics-2d",
         "presentation-2d",
         "presentation-ui",
+        "project-runtime",
         "project-tooling",
         "project-workflow",
         "project-workflow-cargo-facts",
-        "project-workflow-cli",
         "render-wgpu",
         "runtime-2d",
         "runtime-core",
@@ -130,7 +131,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
     );
     assert_eq!(
         feature_members(features, "runtime-input"),
-        ["runtime-core", "dep:nara_input", "nara_gameplay/input"]
+        ["runtime-core", "dep:nara_input"]
     );
     assert_eq!(
         feature_members(features, "runtime-window"),
@@ -143,6 +144,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
             "runtime-window",
             "dep:nara_render",
             "nara_render/image-runtime",
+            "nara_render/animation",
             "nara_render/persistent",
             "nara_render/sprites",
             "nara_render/tiles",
@@ -154,26 +156,32 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
     );
     assert_eq!(
         feature_members(features, "runtime-ui"),
-        ["runtime-input", "runtime-window", "dep:nara_ui"]
+        [
+            "runtime-input",
+            "runtime-window",
+            "dep:nara_ui",
+            "nara_ui/runtime"
+        ]
     );
     assert_eq!(
         feature_members(features, "presentation-ui"),
-        ["runtime-ui", "dep:nara_render", "nara_render/hud-runtime"]
+        [
+            "runtime-ui",
+            "dep:nara_render",
+            "nara_render/hud-presentation"
+        ]
     );
     assert_eq!(
         feature_members(features, "serde"),
         [
             "dep:serde",
             "dep:serde_json",
+            "nara_app?/serde",
             "nara_asset?/serde",
             "nara_core?/serde",
-            "nara_diagnostic?/serde",
             "nara_ecs?/serde",
-            "nara_identity?/serde",
             "nara_input?/serde",
-            "nara_gameplay?/serde",
             "nara_reflect?/serde",
-            "nara_transform?/serde",
             "nara_render?/serde",
             "nara_scene?/serde",
             "nara_ui?/serde",
@@ -221,11 +229,21 @@ fn examples_and_optional_tests_declare_their_capability_ceiling() {
     assert_eq!(targets["windowed_clear"], ["desktop-winit", "render-wgpu"]);
     assert_eq!(
         targets["windowed_sprites"],
-        ["presentation-2d", "desktop-winit", "render-wgpu"]
+        [
+            "project-runtime",
+            "presentation-2d",
+            "desktop-winit",
+            "render-wgpu"
+        ]
     );
     assert_eq!(
         targets["ui_presentation_gallery"],
-        ["presentation-ui", "desktop-winit", "render-wgpu"]
+        [
+            "project-runtime",
+            "presentation-ui",
+            "desktop-winit",
+            "render-wgpu"
+        ]
     );
     assert_eq!(targets["asset_import_texture"], ["presentation-2d"]);
     assert_eq!(targets["hello_world"], ["runtime-2d"]);
@@ -234,15 +252,21 @@ fn examples_and_optional_tests_declare_their_capability_ceiling() {
         targets["scene_prefab_roundtrip"],
         ["presentation-2d", "serde"]
     );
-    assert_eq!(targets["product_capabilities"], ["runtime-core"]);
-    assert_eq!(targets["project_composition"], ["runtime-core"]);
+    assert_eq!(
+        targets["product_capabilities"],
+        ["project-runtime", "runtime-core"]
+    );
+    assert_eq!(
+        targets["project_composition"],
+        ["project-runtime", "runtime-core"]
+    );
     assert_eq!(
         targets["runtime_configuration_composition"],
-        ["runtime-core"]
+        ["project-runtime", "runtime-core"]
     );
     assert_eq!(
         targets["runtime_scene_activation"],
-        ["runtime-core", "serde"]
+        ["project-runtime", "runtime-core", "serde"]
     );
     assert_eq!(targets["scene_authoring_session"], ["runtime-core"]);
     assert_eq!(targets["scene_patch_transactions"], ["runtime-core"]);
@@ -278,19 +302,11 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
         "nara_app",
         "nara_asset",
         "nara_core",
-        "nara_diagnostic",
         "nara_ecs",
         "nara_ecs_derive",
-        "nara_fs",
-        "nara_gameplay",
-        "nara_hierarchy",
-        "nara_identity",
-        "nara_project",
         "nara_reflect",
         "nara_reflect_derive",
         "nara_scene",
-        "nara_tasks",
-        "nara_transform",
     ]);
     let local_runtime = with_packages(&runtime_core, &["nara_input", "nara_window"]);
     let cases = [
@@ -333,16 +349,7 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
         (
             "runtime-ui",
             vec!["--no-default-features", "--features", "runtime-ui"],
-            with_packages(
-                &local_runtime,
-                &[
-                    "nara_render",
-                    "nara_text",
-                    "nara_ui",
-                    "nara_ui_kernel",
-                    "nara_ui_widgets",
-                ],
-            ),
+            with_packages(&local_runtime, &["nara_ui"]),
         ),
         (
             "presentation-2d",
@@ -352,26 +359,17 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
         (
             "presentation-ui",
             vec!["--no-default-features", "--features", "presentation-ui"],
-            with_packages(
-                &local_runtime,
-                &[
-                    "nara_render",
-                    "nara_text",
-                    "nara_ui",
-                    "nara_ui_kernel",
-                    "nara_ui_widgets",
-                ],
-            ),
+            with_packages(&local_runtime, &["nara_render", "nara_ui"]),
         ),
         (
             "asset-watch",
             vec!["--no-default-features", "--features", "asset-watch"],
-            with_packages(&runtime_core, &["nara_asset_watch"]),
+            runtime_core.clone(),
         ),
         (
             "desktop-winit",
             vec!["--no-default-features", "--features", "desktop-winit"],
-            with_packages(&local_runtime, &["nara_winit"]),
+            local_runtime.clone(),
         ),
         (
             "render-wgpu",
@@ -387,14 +385,12 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             with_packages(
                 &local_runtime,
                 &[
-                    "nara_asset_watch",
+                    "nara_audio",
                     "nara_material_derive",
+                    "nara_physics2d",
+                    "nara_project",
                     "nara_render",
-                    "nara_text",
                     "nara_ui",
-                    "nara_ui_kernel",
-                    "nara_ui_widgets",
-                    "nara_winit",
                 ],
             ),
         ),
@@ -407,8 +403,8 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             expected,
             "unexpected internal package graph for {name}\n{tree}"
         );
-        for editor_package in ["nara_editor", "nara_editor_core", "gpui"] {
-            assert_not_present(&tree, editor_package);
+        for tool_package in ["nara_editor", "nara_editor_core", "gpui", "ctrlc"] {
+            assert_not_present(&tree, tool_package);
         }
         if !matches!(name, "desktop-winit" | "render-wgpu" | "all-features") {
             assert_not_present(&tree, "winit");

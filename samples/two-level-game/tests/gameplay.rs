@@ -187,7 +187,6 @@ fn run_until_error(root: &Path, options: RunOptions, corrupt: bool) -> GameSnaps
     let mut run = HeadlessRun::new(
         two_level_game::open_explicit_project_root(root).unwrap(),
         intent,
-        Vec::new(),
     );
     finish(&mut run)
 }
@@ -234,7 +233,7 @@ impl Plugin for CorruptCommittedB {
         })?
         .add_systems(
             CoreStage::FixedUpdate,
-            change_committed_b.after(nara::gameplay::GameplayCommandSet::Capture),
+            change_committed_b.after(two_level_game::command::CommandSet::Capture),
         )?;
         Ok(())
     }
@@ -273,7 +272,6 @@ fn retry_of_committed_b_uses_retained_source_even_when_the_file_has_become_inval
     let mut run = HeadlessRun::new(
         two_level_game::open_explicit_project_root(&project).unwrap(),
         intent,
-        Vec::new(),
     );
     let snapshot = finish(&mut run);
     assert_eq!(

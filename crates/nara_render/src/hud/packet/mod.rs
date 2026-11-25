@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::RenderTarget;
 use crate::image::PreparedImageSnapshot;
-use nara_ui_kernel::{UiColor, UiFrame, UiFrameRevision, UiImageId, UiRevision, UiSurfaceId};
+use nara_ui::kernel::{UiColor, UiFrame, UiFrameRevision, UiImageId, UiRevision, UiSurfaceId};
 
 mod mesh;
 

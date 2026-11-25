@@ -4,7 +4,7 @@
 use std::{borrow::Cow, collections::BTreeMap, convert::Infallible, io, sync::Arc};
 
 use nara_asset::AssetRef;
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference, ReferenceInputId,
 };
@@ -17,12 +17,12 @@ use nara_reflect::{
 
 use super::{BranchRelocation, MovedReferenceInputs};
 use crate::{
-    __private::AuthoringAdapterReceipt,
     AuthoringSchemaBasis, ExpandedSceneDocument, PrefabDocument, PrefabEntityOrigin,
     PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabProjectionStep,
     PrefabReferenceArguments, ResolvedPrefabSource, SceneComponentRecord, SceneDocument,
     SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
     SourceDocumentKey, SourceDocumentKind,
+    authoring::AuthoringAdapterReceipt,
     prefab::{
         SourceDocumentInput,
         extraction::{SourceCut, try_capture_source_cut_with_loader},

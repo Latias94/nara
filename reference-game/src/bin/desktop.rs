@@ -9,16 +9,19 @@ use std::{
 use nara::{
     app::AppExit,
     diagnostic::{DiagnosticReport, DiagnosticSeverity},
+    fs::DirectoryCapability,
     project_host::{
         DesktopRun, DesktopRunOutcome, ProductSupervisedDesktopLaunchCandidate,
-        ProductSupervisedDesktopSession, SupervisedDesktopProductIdentity,
+        ProductSupervisedDesktopSession, StartupContentClosureReceipt,
+        SupervisedDesktopProductIdentity, load_project_app,
     },
+    project_tooling::{ProductObservationTarget, record_product_observation},
 };
-use nara_reference_game::{bundled_desktop_run, wave_desktop_intent};
+use nara_reference_game::{desktop_wave_recipe, wave_desktop_intent};
 
 mod desktop_candidate_smoke;
 mod support;
-use desktop_candidate_smoke::{CandidateSmokeEvidenceSink, candidate_smoke_run};
+use desktop_candidate_smoke::candidate_smoke_run;
 use support::project_root::{open_explicit_project_root, open_project_root};
 
 const CLEANUP_DEADLINE: Duration = Duration::from_secs(5);
@@ -62,22 +65,34 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let supervised_session = match supervised_candidate {
-        Some(candidate) => match candidate.verify_project_source(&project_root) {
-            Ok(session) => Some(session),
-            Err(_) => {
-                let diagnostic = supervised_source_diagnostic();
-                emit_static_error(&diagnostic.code, &diagnostic.summary);
-                return ExitCode::FAILURE;
+    let (mut run, observation) = if let Some(candidate) = supervised_candidate {
+        let session = match candidate.verify_project_source(&project_root) {
+            Ok(session) => session,
+            Err(_) => return emit_failure(supervised_source_diagnostic()),
+        };
+        match supervised_desktop_run(project_root, session) {
+            Ok(run) => (run, None),
+            Err(diagnostic) => return emit_failure(diagnostic),
+        }
+    } else {
+        match mode {
+            DesktopMode::Interactive => {
+                return match run_interactive_app(project_root) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(diagnostic) => emit_failure(diagnostic),
+                };
             }
-        },
-        None => None,
-    };
-    let (mut run, observation) = match desktop_run(project_root, mode, supervised_session) {
-        Ok(run) => run,
-        Err(diagnostic) => {
-            emit_static_error(&diagnostic.code, &diagnostic.summary);
-            return ExitCode::FAILURE;
+            DesktopMode::CandidateSmoke => {
+                let (run, observation) = candidate_smoke_run(project_root);
+                (run, Some(observation))
+            }
+            DesktopMode::VerifyFirstPresent => (
+                DesktopRun::new(
+                    project_root,
+                    wave_desktop_intent().with_first_present_verification(),
+                ),
+                None,
+            ),
         }
     };
     let exit = drive_desktop_process(
@@ -93,24 +108,10 @@ fn main() -> ExitCode {
                             .to_owned(),
                     });
                 }
-                let result = report
-                    .startup_content_closure()
-                    .ok_or_else(|| {
-                        io::Error::other(
-                            "desktop run completed without its admitted startup closure",
-                        )
-                    })
-                    .and_then(|closure| {
-                        nara::project_tooling::record_product_observation(
-                            nara::project_tooling::ProductObservationTarget::Desktop,
-                            closure,
-                        )
-                    });
-                if let Err(error) = result {
-                    return DesktopProcessStep::Failed(ProcessDiagnostic {
-                        code: "reference-game.product-observation.failed".to_owned(),
-                        summary: error.to_string(),
-                    });
+                if let Err(diagnostic) =
+                    record_desktop_product_observation(report.startup_content_closure())
+                {
+                    return DesktopProcessStep::Failed(diagnostic);
                 }
             }
             lower_run_report(&report)
@@ -198,41 +199,58 @@ impl DesktopMode {
     }
 }
 
-fn desktop_run(
-    project_root: nara::fs::DirectoryCapability,
-    mode: DesktopMode,
-    supervised_session: Option<ProductSupervisedDesktopSession>,
-) -> Result<(DesktopRun, Option<CandidateSmokeEvidenceSink>), ProcessDiagnostic> {
-    match (mode, supervised_session) {
-        (DesktopMode::Interactive, Some(session)) => {
-            let profile = session.context().profile_name().to_owned();
-            let product_identity = SupervisedDesktopProductIdentity::from_cargo_product(
-                env!("CARGO_PKG_NAME"),
-                env!("CARGO_PKG_VERSION"),
-                DESKTOP_BINARY_TARGET,
-            )
-            .map_err(|_| product_identity_diagnostic())?;
-            let intent = wave_desktop_intent()
-                .with_profile(profile)
-                .with_supervised_desktop_activation(session, product_identity);
-            Ok((DesktopRun::new(project_root, intent), None))
-        }
-        (DesktopMode::Interactive, None) => Ok((bundled_desktop_run(project_root), None)),
-        (DesktopMode::CandidateSmoke, None) => {
-            let (run, observation) = candidate_smoke_run(project_root);
-            Ok((run, Some(observation)))
-        }
-        (DesktopMode::VerifyFirstPresent, None) => Ok((
-            DesktopRun::new(
-                project_root,
-                wave_desktop_intent().with_first_present_verification(),
+fn run_interactive_app(project_root: DirectoryCapability) -> Result<(), ProcessDiagnostic> {
+    let recipe = desktop_wave_recipe().map_err(|_| ProcessDiagnostic {
+        code: "project.run.composition-invalid".to_owned(),
+        summary: "Reference desktop wave recipe could not be composed".to_owned(),
+    })?;
+    let (mut app, closure) = load_project_app(project_root, Some("desktop"), recipe)
+        .map_err(|error| first_error_diagnostic(error.diagnostics()))?;
+    app.run().map_err(|error| {
+        let (code, summary) = error.runtime_fault_detail().map_or(
+            (
+                "project.desktop.runner-failed",
+                "Desktop project runner failed",
             ),
-            None,
-        )),
-        (DesktopMode::CandidateSmoke | DesktopMode::VerifyFirstPresent, Some(_)) => {
-            Err(supervised_mode_diagnostic())
+            |detail| (detail.code(), detail.summary()),
+        );
+        ProcessDiagnostic {
+            code: code.to_owned(),
+            summary: summary.to_owned(),
         }
-    }
+    })?;
+    record_desktop_product_observation(Some(&closure))
+}
+
+fn supervised_desktop_run(
+    project_root: DirectoryCapability,
+    session: ProductSupervisedDesktopSession,
+) -> Result<DesktopRun, ProcessDiagnostic> {
+    let profile = session.context().profile_name().to_owned();
+    let product_identity = SupervisedDesktopProductIdentity::from_cargo_product(
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        DESKTOP_BINARY_TARGET,
+    )
+    .map_err(|_| product_identity_diagnostic())?;
+    let intent = wave_desktop_intent()
+        .with_profile(profile)
+        .with_supervised_desktop_activation(session, product_identity);
+    Ok(DesktopRun::new(project_root, intent))
+}
+
+fn record_desktop_product_observation(
+    closure: Option<&StartupContentClosureReceipt>,
+) -> Result<(), ProcessDiagnostic> {
+    closure
+        .ok_or_else(|| {
+            io::Error::other("desktop run completed without its admitted startup closure")
+        })
+        .and_then(|closure| record_product_observation(ProductObservationTarget::Desktop, closure))
+        .map_err(|error| ProcessDiagnostic {
+            code: "reference-game.product-observation.failed".to_owned(),
+            summary: error.to_string(),
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -385,6 +403,11 @@ fn emit_static_error(code: &str, summary: &str) {
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
     let _ = write_static_error(&mut stderr, code, summary);
+}
+
+fn emit_failure(diagnostic: ProcessDiagnostic) -> ExitCode {
+    emit_static_error(&diagnostic.code, &diagnostic.summary);
+    ExitCode::FAILURE
 }
 
 fn write_static_error(mut writer: impl Write, code: &str, summary: &str) -> Result<(), io::Error> {

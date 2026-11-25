@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+use crate::kernel::{UiPoint, UiRect, UiSize, UiSurfaceContentTransform};
 use nara_asset::AssetRef;
 use nara_core::ItemLimit;
 use nara_reflect::{
@@ -16,7 +17,6 @@ use nara_scene::{
     SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
     SourceLocalSceneHierarchy,
 };
-use nara_ui_kernel::{UiPoint, UiRect, UiSize, UiSurfaceContentTransform};
 use thiserror::Error;
 
 use crate::{

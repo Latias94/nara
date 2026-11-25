@@ -108,11 +108,13 @@ impl Drop for Custody {
             && !process.retire_normally(Duration::from_secs(30))
         {
             eprintln!(
-                "retaining original round process and fixture: {}",
+                "round process cleanup remained incomplete; retaining the fixture: {}",
                 process.diagnostics()
             );
-            std::mem::forget(self.process.take());
-            std::mem::forget(self.fixture.take());
+            drop(self.process.take());
+            if let Some(fixture) = self.fixture.take() {
+                fixture.retain_tree();
+            }
         }
         if self.fixture.as_ref().is_some_and(|fixture| {
             fixture
@@ -128,7 +130,10 @@ impl Drop for Custody {
             eprintln!(
                 "retaining owned round fixture after failed worker or unresolved original cleanup"
             );
-            std::mem::forget(self.fixture.take());
+            drop(self.process.take());
+            if let Some(fixture) = self.fixture.take() {
+                fixture.retain_tree();
+            }
         }
     }
 }

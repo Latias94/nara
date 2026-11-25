@@ -411,39 +411,27 @@ impl Drop for ImageImportReservation {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct ImageImportPixelLease {
-    inner: Arc<ImageImportPixelLeaseInner>,
-}
-
-struct ImageImportPixelLeaseInner {
     budget: ImageImportBudget,
     reservation: Mutex<ImageImportReservation>,
     rgba_bytes: usize,
 }
 
 impl ImageImportPixelLease {
-    fn new(reservation: ImageImportReservation, rgba_bytes: usize) -> Self {
-        let budget = reservation.budget.clone();
-        Self {
-            inner: Arc::new(ImageImportPixelLeaseInner {
-                budget,
-                reservation: Mutex::new(reservation),
-                rgba_bytes,
-            }),
-        }
-    }
-
     pub(crate) fn from_publication(
         reservation: ImageImportReservation,
         rgba_bytes: usize,
-    ) -> Result<(Self, ImageImportPublicationOverlapGuard), ImageImportReservation> {
+    ) -> Result<(Arc<Self>, ImageImportPublicationOverlapGuard), ImageImportReservation> {
         if !reservation.is_publication_for(rgba_bytes) {
             return Err(reservation);
         }
-        let lease = Self::new(reservation, rgba_bytes);
+        let lease = Arc::new(Self {
+            budget: reservation.budget.clone(),
+            reservation: Mutex::new(reservation),
+            rgba_bytes,
+        });
         let guard = ImageImportPublicationOverlapGuard {
-            lease: lease.clone(),
+            lease: Arc::clone(&lease),
         };
         Ok((lease, guard))
     }
@@ -453,8 +441,7 @@ impl ImageImportPixelLease {
         budget_host: &ImageImportBudgetHost,
         rgba_bytes: usize,
     ) -> bool {
-        self.inner.rgba_bytes == rgba_bytes
-            && Arc::ptr_eq(&self.inner.budget.inner, &budget_host.budget.inner)
+        self.rgba_bytes == rgba_bytes && Arc::ptr_eq(&self.budget.inner, &budget_host.budget.inner)
     }
 }
 
@@ -462,20 +449,19 @@ impl Debug for ImageImportPixelLease {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ImageImportPixelLease")
-            .field("rgba_bytes", &self.inner.rgba_bytes)
-            .field("shared_owners", &Arc::strong_count(&self.inner))
+            .field("rgba_bytes", &self.rgba_bytes)
             .finish_non_exhaustive()
     }
 }
 
 pub(crate) struct ImageImportPublicationOverlapGuard {
-    lease: ImageImportPixelLease,
+    lease: Arc<ImageImportPixelLease>,
 }
 
 impl Drop for ImageImportPublicationOverlapGuard {
     fn drop(&mut self) {
-        let mut reservation = lock_unpoisoned(&self.lease.inner.reservation);
-        reservation.release_publication_overlap(self.lease.inner.rgba_bytes);
+        let mut reservation = lock_unpoisoned(&self.lease.reservation);
+        reservation.release_publication_overlap(self.lease.rgba_bytes);
     }
 }
 

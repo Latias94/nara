@@ -4,10 +4,10 @@
 //! preflight, including its acceptance and error order. Actual encoders still enforce exact
 //! byte limits. Overlays, explicit asset products and patches deliberately use that fallback.
 
+use nara_core::source::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin};
 use nara_core::{PersistentFileEnvelope, SerdeShapeLimits};
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredReferenceTarget, EntityReference, PrefabEntityOrigin, ReferenceInputId,
-    SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin,
 };
 use nara_reflect::ComponentValue;
 

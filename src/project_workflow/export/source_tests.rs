@@ -144,7 +144,7 @@ fn deferred_dependency_only_scenes_and_importer_reads_export_and_recheck_after_r
     };
     let future_scene = |target| {
         SceneDocument::from_ordered_roots([nara_scene::SceneEntityRecord::new(
-            nara_identity::SceneEntityId::new("door").unwrap(),
+            nara_ecs::identity::SceneEntityId::new("door").unwrap(),
         )
         .with_component(
             ComponentTypeId::new("test.export.FutureTarget"),
@@ -165,7 +165,7 @@ fn deferred_dependency_only_scenes_and_importer_reads_export_and_recheck_after_r
             "c.scene.json",
             3,
             SceneDocument::from_ordered_roots([nara_scene::SceneEntityRecord::new(
-                nara_identity::SceneEntityId::new("text").unwrap(),
+                nara_ecs::identity::SceneEntityId::new("text").unwrap(),
             )
             .with_component(
                 ComponentTypeId::new("test.export.SourceText"),
@@ -356,7 +356,7 @@ fn install_source_text_scene(project: &SourceProject, root: &DirectoryCapability
         source: nara_asset::AssetRef::path("text.txt").unwrap(),
     };
     let scene = SceneDocument::from_ordered_roots([nara_scene::SceneEntityRecord::new(
-        nara_identity::SceneEntityId::new("text").unwrap(),
+        nara_ecs::identity::SceneEntityId::new("text").unwrap(),
     )
     .with_component(
         nara_reflect::ComponentTypeId::new("test.export.SourceText"),
@@ -648,7 +648,7 @@ fn cyclic_scenes_and_input_export_exact_sources_and_check_after_relocation() {
             source: AssetRef::Product(target),
         };
         SceneDocument::from_ordered_roots([nara_scene::SceneEntityRecord::new(
-            nara_identity::SceneEntityId::new("door").unwrap(),
+            nara_ecs::identity::SceneEntityId::new("door").unwrap(),
         )
         .with_component(
             nara_reflect::ComponentTypeId::new("test.export.SourceText"),

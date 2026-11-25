@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use crate::fs::ContentDigest;
 use nara_app::{
     App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
     RuntimeControl, RuntimeControlRequestResult, RuntimeInstance,
@@ -17,9 +18,8 @@ use nara_asset::{
     AssetRuntimeLimits, ImportedProductId, ProjectAssetDatabase, RuntimeAssetCodec, StableAssetId,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
+use nara_ecs::identity::SceneEntityId;
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
-use nara_fs::ContentDigest;
-use nara_identity::SceneEntityId;
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapAsset, ActionMapBuilder,
     ActionMapDomain, ActionMapLimits, ActionMapRuntimeCodec, ActionMaps, InputBinding, InputPlugin,

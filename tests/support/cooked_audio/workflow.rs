@@ -142,8 +142,8 @@ impl Drop for Player<'_> {
             if let Err(error) = fs::write(&self.request.unresolved_cleanup, message.as_bytes()) {
                 eprintln!("unresolved original Player custody marker failed: {error}");
             }
-            eprintln!("retaining original Player custody: {message}");
-            std::mem::forget(self.native.take());
+            eprintln!("Player cleanup remained incomplete: {message}");
+            drop(self.native.take());
         }
     }
 }

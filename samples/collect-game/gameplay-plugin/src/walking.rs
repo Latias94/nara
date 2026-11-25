@@ -4,8 +4,10 @@ use nara::{
     ecs::{Entity, With, bevy_ecs::error::BevyError},
     prelude::{FixedTime, Query, Res, ResMut, Transform2d, Vec2},
     render::Camera2d,
+    scene::fixed_spatial::{
+        CapturedTransform2d, FixedInputSpatialSnapshot2d, FixedSpatialSnapshot2d,
+    },
     sprite::Sprite,
-    transform::{FixedInputSpatialSnapshot2d, FixedSpatialSnapshot2d, GlobalTransform2d},
 };
 
 use super::{Collectible, GameState, PlayerConfig, VICTORY};
@@ -17,7 +19,7 @@ struct Walk {
     player: Entity,
     world_start: Vec2,
     local_end: Vec2,
-    parent: Option<GlobalTransform2d>,
+    parent: Option<CapturedTransform2d>,
 }
 
 #[derive(Clone, Copy)]
@@ -29,7 +31,7 @@ struct MovementParent {
 #[derive(Clone, Copy)]
 enum MovementFrame {
     World,
-    Parent(GlobalTransform2d),
+    Parent(CapturedTransform2d),
     Singular,
 }
 

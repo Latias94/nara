@@ -31,9 +31,11 @@ use nara_reflect::{
     ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueRef,
 };
-use nara_transform::PresentedSpatialSnapshot2d;
+use nara_scene::spatial::{
+    GlobalTransform2d, InheritedVisibility, SPATIAL_PLUGIN_ID, propagate_spatial,
+};
 #[cfg(test)]
-use nara_transform::Transform2d;
+use nara_scene::spatial::{SpatialPlugin, Transform2d};
 use nara_window::{PrimaryWindowId, Window, WindowId};
 
 #[doc(hidden)]
@@ -102,6 +104,8 @@ impl CameraViewLifetimes {
 pub(crate) enum RenderViewExtractionError {
     #[error("camera entity {entity:?} has no available View lifetime identity")]
     IdentityUnavailable { entity: Entity },
+    #[error("camera entity {entity:?} has no GlobalTransform2d")]
+    MissingGlobalTransform { entity: Entity },
     #[error("camera entity {entity:?} has a non-finite completed transform")]
     NonFiniteTransform { entity: Entity },
     #[error("camera entity {entity:?} has a singular completed linear transform")]
@@ -380,10 +384,8 @@ pub fn plugin(world_canvas: Option<WorldCanvas>) -> nara_app::PluginDefinition {
 }
 
 pub const RENDER_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.render");
-const RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
-    RENDER_COMPONENTS_PLUGIN_ID,
-    nara_transform::TRANSFORM_PLUGIN_ID,
-];
+const RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] =
+    &[RENDER_COMPONENTS_PLUGIN_ID, SPATIAL_PLUGIN_ID];
 const RENDER_PLUGIN_PRODUCT_ALTERNATIVES: &[nara_app::PluginProductCapability] = &[
     nara_app::PluginProductCapability::new("presentation-2d"),
     nara_app::PluginProductCapability::new("presentation-ui"),
@@ -400,7 +402,6 @@ impl Plugin for RenderPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        nara_transform::__private::install_render_projection(app)?;
         if let Some(canvas) = self.world_canvas {
             app.insert_resource(canvas)?;
         }
@@ -418,9 +419,11 @@ impl Plugin for RenderPlugin {
         )?;
         app.add_systems(
             CoreStage::Extract,
-            extract_views
-                .after(nara_transform::__private::TransformSet::Present)
-                .in_set(runtime_integration::RenderExtractSet::Views),
+            (
+                propagate_spatial,
+                extract_views.in_set(runtime_integration::RenderExtractSet::Views),
+            )
+                .chain(),
         )?;
         app.add_systems(CoreStage::Render, begin_render_frame)?;
         Ok(())
@@ -670,7 +673,6 @@ struct ViewExtraction<'w, 's> {
     scratch: ResMut<'w, ExtractedViewScratch>,
     lifetimes: Res<'w, CameraViewLifetimes>,
     clear_color: Res<'w, ClearColor>,
-    spatial: PresentedSpatialSnapshot2d<'w>,
     real_time: Res<'w, RealTime>,
     virtual_time: Res<'w, VirtualTime>,
     render_time: Res<'w, RenderTime>,
@@ -678,7 +680,16 @@ struct ViewExtraction<'w, 's> {
     primary_window_id: Option<Res<'w, PrimaryWindowId>>,
     windows: Query<'w, 's, &'static Window>,
     canvas: Option<Res<'w, WorldCanvas>>,
-    cameras: Query<'w, 's, (Entity, &'static Camera2d)>,
+    cameras: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Camera2d,
+            Option<&'static GlobalTransform2d>,
+            Option<&'static InheritedVisibility>,
+        ),
+    >,
 }
 
 fn extract_views(
@@ -696,7 +707,6 @@ fn extract_views(
         mut scratch,
         lifetimes,
         clear_color,
-        spatial,
         real_time,
         virtual_time,
         render_time,
@@ -706,21 +716,21 @@ fn extract_views(
         canvas,
         cameras,
     } = state.get_mut(world).map_err(BevyError::error)?;
-    let spatial_stamp = spatial.stamp().map_err(BevyError::error)?;
-    let spatial_interpolated = spatial.spatial_interpolated().map_err(BevyError::error)?;
-    let captured_time = CapturedRenderTime::new(
-        *real_time,
-        *virtual_time,
-        *render_time,
-        *time_settings,
-        spatial_stamp,
-        spatial_interpolated,
-    );
+    let captured_time =
+        CapturedRenderTime::new(*real_time, *virtual_time, *render_time, *time_settings);
     scratch.0.clear();
 
     let primary_window_id = primary_window_id.map(|resource| resource.0);
 
-    for (camera_entity, camera) in cameras.iter() {
+    for (camera_entity, camera, global, visibility) in &cameras {
+        if visibility.is_some_and(|visibility| !visibility.get()) {
+            continue;
+        }
+        let global = global
+            .ok_or(RenderViewExtractionError::MissingGlobalTransform {
+                entity: camera_entity,
+            })
+            .map_err(BevyError::error)?;
         let id = lifetimes
             .ids
             .get(&camera_entity)
@@ -729,7 +739,6 @@ fn extract_views(
                 entity: camera_entity,
             })
             .map_err(BevyError::error)?;
-        let global = spatial.global(camera_entity).map_err(BevyError::error)?;
         let Some(viewport) = viewport_for_camera(
             camera,
             primary_window_id,
@@ -850,24 +859,19 @@ mod tests {
     use std::time::Duration;
 
     use nara_app::{
-        App, CoreStage, RuntimeAdmissionReservation, RuntimeCandidateRetirementState,
-        RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
+        App, CoreStage, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeClosePolicy,
+        RuntimeInstance, RuntimeObligationLedger,
     };
-    use nara_ecs::{Entity, Resource, World, schedule::IntoScheduleConfigs};
-    use nara_hierarchy::{
-        HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyPlugin,
-        HierarchyWriter,
-    };
+    use nara_ecs::{Entity, World, schedule::IntoScheduleConfigs};
     use nara_reflect::ComponentRegistryPlugin;
-    use nara_transform::TransformPlugin;
+    use nara_scene::spatial::ChildOf;
     use nara_window::WindowPlugin;
 
     fn render_app(with_window: bool) -> App {
         let mut app = App::new();
         app.add_plugins((
             ComponentRegistryPlugin,
-            HierarchyPlugin,
-            TransformPlugin,
+            SpatialPlugin,
             RenderComponentsPlugin,
         ))
         .unwrap();
@@ -879,32 +883,19 @@ mod tests {
     }
 
     fn place_parented(world: &mut World, child: Entity, parent: Entity) {
-        HierarchyWriter::new(world)
-            .apply_batch(&[
-                HierarchyOperation::Place {
-                    entity: parent,
-                    placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-                },
-                HierarchyOperation::Place {
-                    entity: child,
-                    placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent }),
-                },
-            ])
-            .expect("the ordered hierarchy should be valid");
+        world.entity_mut(child).insert(ChildOf(parent));
     }
 
     fn start_runtime(app: App) -> RuntimeInstance {
-        RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(
-                app.seal().unwrap(),
-                RuntimeObligationLedger::new(),
-                RuntimeClosePolicy::default(),
-            )
-            .unwrap()
-            .complete_startup()
-            .unwrap()
-            .promote()
+        RuntimeCandidate::admit(
+            app.seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap()
+        .complete_startup()
+        .unwrap()
+        .promote()
     }
 
     fn retire_runtime(runtime: RuntimeInstance) {
@@ -1343,9 +1334,9 @@ mod tests {
         let mut runtime = start_runtime(app);
         runtime.drive(Duration::ZERO).unwrap();
         let view = runtime.world().resource::<ExtractedViews>().as_slice()[0];
-        let camera_matrix = nara_transform::historical_spatial_snapshot(runtime.world())
-            .unwrap()
-            .global(camera)
+        let camera_matrix = runtime
+            .world()
+            .get::<GlobalTransform2d>(camera)
             .unwrap()
             .matrix();
         let world_point = camera_matrix.transform_point2(Vec2::new(80.0, 45.0));
@@ -1432,14 +1423,12 @@ mod tests {
     }
 
     fn test_runtime_generation() -> RuntimeGeneration {
-        let candidate = RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(
-                App::new().seal().unwrap(),
-                RuntimeObligationLedger::new(),
-                RuntimeClosePolicy::default(),
-            )
-            .unwrap();
+        let candidate = RuntimeCandidate::admit(
+            App::new().seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
         let ready = candidate.complete_startup().unwrap();
         let runtime = ready.promote();
         let generation = runtime.generation();
@@ -1479,10 +1468,6 @@ mod tests {
         assert_eq!(
             captured_time.real(),
             *runtime.world().resource::<RealTime>()
-        );
-        assert_eq!(
-            captured_time.spatial_stamp().runtime_generation,
-            Some(runtime.generation())
         );
         let RenderTarget::Image(image) = views.as_slice()[0].target else {
             panic!("the extracted camera must retain its image target");
@@ -1575,7 +1560,7 @@ mod tests {
         let mut runtime = start_runtime(app);
         runtime
             .drive(Duration::ZERO)
-            .expect_err("world-space cameras require explicit local and completed transforms");
+            .expect_err("world-space cameras require a global transform");
 
         assert_eq!(
             runtime.world().resource::<ExtractedViews>().as_slice(),
@@ -1585,54 +1570,22 @@ mod tests {
     }
 
     #[test]
-    fn camera_spawn_after_spatial_cut_faults_without_replacing_prior_views() {
-        let mut app = render_app(false);
-        let prior = test_extracted_view();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ExtractedViews>()
-            .push(prior);
-        let camera = app
-            .world_mut()
-            .unwrap()
-            .spawn((
-                Camera2d {
-                    target: RenderTarget::Image(nara_asset::allocate_anonymous_handle().unwrap()),
-                    viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
-                    ..Camera2d::default()
-                },
-                Transform2d::default(),
-            ))
-            .id();
-        app.insert_resource(SpawnCameraAfterSpatialCut(camera))
-            .unwrap();
-        app.add_systems(
-            CoreStage::Extract,
-            spawn_camera_after_spatial_cut
-                .after(nara_transform::__private::TransformSet::Present)
-                .before(runtime_integration::RenderExtractSet::Views),
-        )
+    fn deferred_camera_spawn_in_post_update_is_visible_in_the_same_frame() {
+        let mut app = render_app(true);
+        app.add_systems(CoreStage::PostUpdate, |mut commands: nara_ecs::Commands| {
+            commands.spawn((Camera2d::default(), Transform2d::from_xy(32.0, 16.0)));
+        })
         .unwrap();
 
         let mut runtime = start_runtime(app);
-        runtime
-            .drive(Duration::ZERO)
-            .expect_err("a camera without its completed global projection must fault");
-
+        runtime.drive(Duration::ZERO).unwrap();
+        let views = runtime.world().resource::<ExtractedViews>();
+        assert_eq!(views.len(), 1);
         assert_eq!(
-            runtime.world().resource::<ExtractedViews>().as_slice(),
-            &[prior]
+            views.as_slice()[0].mapping.clip_to_world(Vec2::ZERO),
+            Vec2::new(32.0, 16.0)
         );
-        retire_runtime(runtime);
-    }
-
-    #[derive(Resource)]
-    struct SpawnCameraAfterSpatialCut(Entity);
-
-    fn spawn_camera_after_spatial_cut(world: &mut World) {
-        let camera = world.resource::<SpawnCameraAfterSpatialCut>().0;
-        let config = world.get::<Camera2d>(camera).unwrap().clone();
-        world.spawn((config, Transform2d::default()));
+        runtime.finish().unwrap();
     }
 
     #[test]

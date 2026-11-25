@@ -27,7 +27,7 @@ mod nested_aliases {
 
     use nara_asset::AssetRef;
     use nara_ecs::Component;
-    use nara_identity::EntityReference;
+    use nara_ecs::identity::EntityReference;
     use nara_reflect::{ComponentRegistryBuilder, PersistentComponent};
 
     type EntityTargets = Vec<Option<EntityReference>>;

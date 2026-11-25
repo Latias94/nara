@@ -11,11 +11,6 @@ use std::{
 
 use nara::{
     app::{FixedTime, RuntimeControl, RuntimeControlStatus, RuntimeState},
-    gameplay::{
-        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandPayload,
-        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTick,
-        GameplayCommandTypeId, GameplayCommandValue,
-    },
     project_host::{
         DesktopControlError, DesktopPresentationControl, DesktopPresentationObservation,
         DesktopRun, DesktopRunIntent, DesktopRunOptions, DesktopRunProgress, WinitEventLoop,
@@ -29,6 +24,10 @@ use serde::Serialize;
 use two_level_game::{
     GamePhase, GameSnapshot, RunOptions, Scenario,
     audio::{self, AudioCause, AudioObservation, AudioOptions, AudioSnapshot, AudioWitness},
+    command::{
+        CommandSequence, CommandSource, CommandTick, GameCommand, ScheduledCommand,
+        SemanticCommand, ServerCommand,
+    },
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
 };
 
@@ -367,8 +366,7 @@ impl Session {
                         observer.borrow_mut().failure.get_or_insert(error);
                         DesktopPresentationControl::Exit(nara::app::AppExit::Requested)
                     }
-                    Err(payload) => {
-                        std::mem::forget(payload);
+                    Err(_) => {
                         panic_flag.set(true);
                         DesktopPresentationControl::Exit(nara::app::AppExit::Requested)
                     }
@@ -495,7 +493,7 @@ impl Session {
 
     fn step(
         &mut self,
-        command: Option<GameplayCommandDraft>,
+        command: Option<GameCommand>,
         allow_game_error: bool,
     ) -> Result<GameSnapshot, String> {
         let tick = self
@@ -507,17 +505,16 @@ impl Session {
                 .sequence
                 .checked_add(1)
                 .ok_or("command sequence exhausted")?;
-            let submission = GameplayCommandSubmission::new(
-                GameplayCommandTick::new(tick.checked_add(1).ok_or("game tick exhausted")?)
+            let submission = ScheduledCommand::new(
+                CommandTick::new(tick.checked_add(1).ok_or("game tick exhausted")?)
                     .ok_or("gameplay command tick is zero")?,
-                GameplayCommandIngressSource::external("two-level-game.audio-desktop")
+                CommandSource::external("two-level-game.audio-desktop")
                     .map_err(|error| error.to_string())?,
-                GameplayCommandSourceSequence::new(self.sequence)
-                    .ok_or("gameplay source sequence is zero")?,
+                CommandSequence::new(self.sequence).ok_or("gameplay source sequence is zero")?,
                 command,
             );
-            self.run()
-                .submit(submission)
+            submission
+                .submit_desktop(self.run())
                 .map_err(|error| error.to_string())?;
             if self.run().capture(|_| ()).is_ok() {
                 return Err("semantic admission did not invalidate paused capture".into());
@@ -572,7 +569,7 @@ impl Session {
                 "fresh paused Runtime did not start with an empty game/audio history".into(),
             );
         }
-        let mut current = self.step(Some(movement(true)?), false)?;
+        let mut current = self.step(Some(movement(true)), false)?;
         for _ in 0..128 {
             if current.score >= 10 {
                 break;
@@ -608,7 +605,7 @@ impl Session {
         {
             return Err("Pause stopped the one-shot or advanced the gameplay clock".into());
         }
-        current = self.step(Some(movement(false)?), false)?;
+        current = self.step(Some(movement(false)), false)?;
         for _ in 0..3 {
             current = self.step(None, false)?;
         }
@@ -639,7 +636,7 @@ impl Session {
 
         project.remove_cavern()?;
         let before = current.clone();
-        let refused = self.step(Some(action("two-level-game.travel")?), true)?;
+        let refused = self.step(Some(SemanticCommand::Travel.intent()), true)?;
         if refused.error.is_none()
             || refused.level != before.level
             || refused.current_instance != before.current_instance
@@ -661,7 +658,7 @@ impl Session {
         project.repair_cavern()?;
 
         project.change_travel_samples(true)?;
-        let changed_bank = self.step(Some(action("two-level-game.travel")?), true)?;
+        let changed_bank = self.step(Some(SemanticCommand::Travel.intent()), true)?;
         if !changed_bank
             .error
             .as_deref()
@@ -683,7 +680,7 @@ impl Session {
         evidence.changed_bank_audio_accepted = self.audio()?.accepted;
         project.change_travel_samples(false)?;
 
-        let entered = self.step(Some(action("two-level-game.travel")?), false)?;
+        let entered = self.step(Some(SemanticCommand::Travel.intent()), false)?;
         if entered.level != Some(LevelKey::main(LevelId::Cavern))
             || entered.travel_count != 1
             || entered.current_instance == before.current_instance
@@ -693,7 +690,7 @@ impl Session {
         }
         self.wait_audio(|audio| audio.accepted == 2 && audio.started == 2)?;
         evidence.retry_before_instance = entered.current_instance.map(|id| id.get());
-        let retried = self.step(Some(action("two-level-game.retry")?), false)?;
+        let retried = self.step(Some(SemanticCommand::Retry.intent()), false)?;
         let retry_instance = retried
             .current_instance
             .ok_or("Retry did not publish a Scene instance")?;
@@ -715,11 +712,11 @@ impl Session {
             return Err("Retry changed the number of accepted or started cues".into());
         }
         evidence.retry_audio_accepted = retired.accepted;
-        let saved = self.step(Some(action("two-level-game.save")?), false)?;
+        let saved = self.step(Some(GameCommand::Player(ServerCommand::Save)), false)?;
         if saved.saves != 1 {
             return Err("ordinary Save did not publish its checkpoint".into());
         }
-        let restored = self.step(Some(action("two-level-game.restore")?), false)?;
+        let restored = self.step(Some(GameCommand::Player(ServerCommand::Restore)), false)?;
         if restored.restores != 1
             || restored.saves != 1
             || restored.restarts != 1
@@ -750,7 +747,7 @@ impl Session {
         {
             project.edit_scene_position(level, revision)?;
             let before = final_game;
-            final_game = self.step(Some(action("two-level-game.travel")?), false)?;
+            final_game = self.step(Some(SemanticCommand::Travel.intent()), false)?;
             if final_game.level != Some(LevelKey::main(level))
                 || final_game.current_instance == before.current_instance
                 || final_game.score != before.score
@@ -955,44 +952,29 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        if let Some(run) = self.run.take() {
-            if matches!(
+        if let Some(run) = &self.run
+            && !matches!(
                 run.progress(),
                 DesktopRunProgress::Completed(_) | DesktopRunProgress::Failed
-            ) {
-                drop(run);
-            } else {
-                std::mem::forget(run);
-                eprintln!(
-                    "audio_desktop: unresolved original native custody retained until process exit"
-                );
-            }
+            )
+        {
+            eprintln!("audio_desktop: original native retirement did not complete explicitly");
         }
     }
 }
 
 fn protected<T>(operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
-    catch_unwind(AssertUnwindSafe(operation)).unwrap_or_else(|payload| {
-        std::mem::forget(payload);
+    catch_unwind(AssertUnwindSafe(operation)).unwrap_or_else(|_| {
         Err("native game operation panicked; original cleanup remains required".into())
     })
 }
 
-fn action(id: &str) -> Result<GameplayCommandDraft, String> {
-    Ok(GameplayCommandDraft::new(
-        GameplayCommandTypeId::new(id).map_err(|error| error.to_string())?,
-    ))
-}
-
-fn movement(pressed: bool) -> Result<GameplayCommandDraft, String> {
-    let mut payload = GameplayCommandPayload::new();
-    payload
-        .insert("direction", GameplayCommandValue::I64(1))
-        .map_err(|error| error.to_string())?;
-    payload
-        .insert("pressed", GameplayCommandValue::Bool(pressed))
-        .map_err(|error| error.to_string())?;
-    Ok(action("two-level-game.move")?.with_payload(payload))
+fn movement(pressed: bool) -> GameCommand {
+    SemanticCommand::Move {
+        direction: 1,
+        pressed,
+    }
+    .intent()
 }
 
 fn causes(scripted: bool) -> Vec<AudioCause> {

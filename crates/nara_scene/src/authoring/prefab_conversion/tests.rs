@@ -10,11 +10,11 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringSchemaBasis,
-    PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget,
-    PrefabInstance, SceneAuthoringHistoryLimits, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocumentCandidate, SceneEntityPlacement, SceneEntityRecord, ScenePlacement,
-    ScenePlacementParent, authoring::AuthoringHistoryScope,
+    AuthoringDocumentSource, AuthoringSchemaBasis, PrefabAuthoringSession, PrefabDocument,
+    PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance, SceneAuthoringHistoryLimits,
+    SceneAuthoringSession, SceneComponentRecord, SceneDocumentCandidate, SceneEntityPlacement,
+    SceneEntityRecord, ScenePlacement, ScenePlacementParent, authoring::AuthoringAdapterReceipt,
+    authoring::AuthoringHistoryScope,
 };
 
 pub(super) fn id(name: &str) -> SceneEntityId {

@@ -34,8 +34,7 @@ use nara::{
 };
 use nara_reference_game::{
     REFERENCE_FIRST_TICK_COMMAND_SOURCE, REFERENCE_FIRST_TICK_COMMAND_TYPE,
-    REFERENCE_GAME_PLUGIN_ID, ReferenceProjectSnapshot, project_first_tick_command,
-    project_headless_run, project_recipe,
+    REFERENCE_GAME_PLUGIN_ID, ReferenceProjectSnapshot, project_headless_run, project_recipe,
 };
 
 fn project_run_with_plugin<P>() -> HeadlessRun<ReferenceProjectSnapshot>
@@ -49,7 +48,6 @@ where
         project_root_capability(),
         recipe,
         NonZeroU32::new(1).unwrap(),
-        Vec::new(),
     )
 }
 use project_content_fixture::{project_root_capability, try_project_root_capability_at};
@@ -214,19 +212,6 @@ fn blocking_task_setup_failed() -> PluginError {
 
 #[test]
 fn product_action_runs_the_frozen_first_tick_without_rust_seed_content() {
-    let canonical_command = project_first_tick_command();
-    assert_eq!(
-        canonical_command.command().command_type().as_str(),
-        REFERENCE_FIRST_TICK_COMMAND_TYPE
-    );
-    assert_eq!(
-        canonical_command.source().id().as_str(),
-        REFERENCE_FIRST_TICK_COMMAND_SOURCE
-    );
-    assert_eq!(canonical_command.tick().get(), 1);
-    assert_eq!(canonical_command.source_sequence().get(), 1);
-    let expected_command_key = canonical_command.key();
-    let expected_command_type = canonical_command.command().command_type().clone();
     let mut product = project_headless_run(project_root_capability(), NonZeroU32::new(1).unwrap());
 
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -249,8 +234,15 @@ fn product_action_runs_the_frozen_first_tick_without_rust_seed_content() {
     assert_eq!(snapshot.enemy_hit_points, 10);
     assert_eq!(snapshot.weapon_remaining_ticks, 2);
     assert_eq!(snapshot.commands_seen, 1);
-    assert_eq!(snapshot.first_command_key, Some(expected_command_key));
-    assert_eq!(snapshot.first_command_type, Some(expected_command_type));
+    assert_eq!(snapshot.first_command_tick, Some(1));
+    assert_eq!(
+        snapshot.first_command_source,
+        Some(REFERENCE_FIRST_TICK_COMMAND_SOURCE)
+    );
+    assert_eq!(
+        snapshot.first_command_type,
+        Some(REFERENCE_FIRST_TICK_COMMAND_TYPE)
+    );
     assert_eq!(snapshot.runtime_only_entities, 0);
     assert_eq!(snapshot.unbound_gameplay_components, 0);
     assert!(!report.diagnostics().has_errors());
@@ -345,7 +337,6 @@ fn incomplete_retirement_stays_with_the_product_action_until_retry() {
         project_root_capability(),
         intent,
         RuntimeProbe::new(blocking_task),
-        vec![project_first_tick_command()],
     );
 
     let first_drive_started = Instant::now();

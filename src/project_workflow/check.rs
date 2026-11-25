@@ -1,6 +1,6 @@
 use std::{error::Error, fmt};
 
-use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity};
+use crate::fs::{ContentDigest, DirectoryCapability, FileIdentity};
 use nara_project::ProjectPath;
 
 use crate::{

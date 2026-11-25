@@ -22,9 +22,9 @@ pub use ready::{
 #[cfg(test)]
 use super::source::MAX_SUPERVISED_DESKTOP_SOURCE_RECEIPT_BYTES;
 #[cfg(test)]
-use launch::MAX_PRODUCT_IDENTITY_BYTES;
+use crate::fs::ContentDigest;
 #[cfg(test)]
-use nara_fs::ContentDigest;
+use launch::MAX_PRODUCT_IDENTITY_BYTES;
 #[cfg(test)]
 use std::path::PathBuf;
 

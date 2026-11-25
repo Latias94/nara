@@ -6,16 +6,16 @@ use std::{
     sync::LazyLock,
 };
 
+use nara_app::tasks::TaskCancellationToken;
 use nara_asset::{
     AssetPath, AssetPathScope, AssetRecord, AssetServer, AssetSourcePath, AssetStates,
     AssetVersion, Assets, Handle, ImportDependencyDigest, ImportRecipe, ImporterId,
     ImporterVersion, SourceHash,
 };
-use nara_ecs::Resource;
-use nara_fs::{
+use nara_core::vfs::capabilities::{
     ContentDigest, DirectoryCapability, FileCapability, FsError, PathValidationError, RelativePath,
 };
-use nara_tasks::TaskCancellationToken;
+use nara_ecs::Resource;
 
 use crate::image::budget::{
     ImageImportBudgetHost, ImageImportBudgetSnapshot, ImageImportCharge, ImageImportReservation,

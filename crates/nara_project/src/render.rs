@@ -1,4 +1,4 @@
-use nara_diagnostic::DiagnosticReport;
+use nara_core::diagnostic::DiagnosticReport;
 use serde::{Deserialize, Serialize};
 
 use crate::validation::{error, with_field_path, with_public_u64};

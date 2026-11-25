@@ -11,14 +11,13 @@ use std::{
 
 use nara::{
     app::{FixedTime, RealTime, RuntimeState, RuntimeTimeSettings},
-    gameplay::{GameplayCommandQueue, GameplayCommandQueueStats},
-    project_host::HeadlessSession,
+    project_host::{HeadlessSession, HeadlessSessionError},
 };
 use serde_json::{Value, json};
 use two_level_game::{
     GamePhase, GameSnapshot, RunOptions, Scenario, ServerCommandRejections, SideRoomPhase,
     capture_processed_resume, claim_processed_checkpoint,
-    command::ServerCommand,
+    command::{CommandSchedule, CommandStats, ServerCommand},
     levels::{LevelId, LevelKey},
     restore_processed_resume,
     resume::processed::{
@@ -67,7 +66,7 @@ pub(super) fn run(
         if let Some(launch) =
             two_level_game::player_launch(launch_options).map_err(Failure::Rejected)?
         {
-            session.submit(launch)?;
+            launch.submit_headless(session)?;
             if session.pause()?.is_some() || session.step()?.is_some() {
                 return Err("Server exited before its checkpoint launch was applied".into());
             }
@@ -414,7 +413,19 @@ impl Service<'_> {
             Request::Advance { elapsed_nanos } => {
                 return self.advance(Duration::from_nanos(elapsed_nanos));
             }
-            Request::Capture {} => self.capture()?,
+            Request::Capture {} => {
+                // ECS commands invalidate the host's paused capture boundary.
+                if self.paused
+                    && matches!(
+                        self.session.capture(|_| ()),
+                        Err(HeadlessSessionError::NotPaused)
+                    )
+                    && self.session.frame(Duration::ZERO)?.is_some()
+                {
+                    return Ok(Some(Stop::AppExit));
+                }
+                self.capture()?;
+            }
             Request::ClaimCheckpoint {} => self.claim_checkpoint()?,
             Request::Command {
                 command,
@@ -521,11 +532,11 @@ impl Service<'_> {
                 "Server requires --save to configure a checkpoint slot",
             );
         }
-        let draft = match command.into_draft() {
-            Ok(draft) => draft,
+        let intent = match command.into_intent() {
+            Ok(intent) => intent,
             Err(message) => return reject(self.output, &message),
         };
-        match submit_external_after(self.session, &mut self.sequence, draft, after_ticks) {
+        match submit_external_after(self.session, &mut self.sequence, intent, after_ticks) {
             Ok(key) => self.output.send(
                 REPLY,
                 json!({
@@ -551,7 +562,7 @@ fn scene_work_pending(game: &GameSnapshot) -> bool {
 
 fn settled(session: &HeadlessSession) -> Result<bool, Failure> {
     Ok(session.observe(|world| {
-        world.resource::<GameplayCommandQueue>().is_idle()
+        world.resource::<CommandSchedule>().is_idle()
             && !scene_work_pending(world.resource::<GameSnapshot>())
     })?)
 }
@@ -565,7 +576,7 @@ struct DrainStatus {
 impl DrainStatus {
     fn read(session: &HeadlessSession) -> Result<Self, Failure> {
         Ok(session.observe(|world| {
-            let queue = world.resource::<GameplayCommandQueue>();
+            let queue = world.resource::<CommandSchedule>();
             let fixed = world.resource::<FixedTime>();
             let stats = queue.stats();
             Self {
@@ -608,7 +619,7 @@ impl Stop {
 
 struct Observation {
     game: GameSnapshot,
-    queue: GameplayCommandQueueStats,
+    queue: CommandStats,
     rejections: ServerCommandRejections,
     real: RealTime,
     fixed: FixedTime,
@@ -618,7 +629,7 @@ impl Observation {
     fn read(session: &HeadlessSession) -> Result<Self, Failure> {
         Ok(session.observe(|world| Self {
             game: world.resource::<GameSnapshot>().clone(),
-            queue: world.resource::<GameplayCommandQueue>().stats(),
+            queue: world.resource::<CommandSchedule>().stats(),
             rejections: world.resource::<ServerCommandRejections>().clone(),
             real: *world.resource::<RealTime>(),
             fixed: *world.resource::<FixedTime>(),

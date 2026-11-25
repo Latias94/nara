@@ -780,7 +780,7 @@ mod tests {
     use crate::hud::integration::tests::{frame, prepared_submission};
     use crate::hud::{UiPreparedImages, UiPresentationPlanner};
     use nara_ecs::World;
-    use nara_ui_kernel::{UiColor, UiVisual};
+    use nara_ui::kernel::{UiColor, UiVisual};
     use nara_window::WindowId;
 
     #[test]

@@ -6,10 +6,10 @@ use std::{
     },
 };
 
+use nara_core::diagnostic::{DiagnosticValueRef, ReportDiagnostic as Diagnostic};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_diagnostic::{Diagnostic, DiagnosticValueRef};
+use nara_ecs::identity::{EntityLookup, WorldIdentityDomain};
 use nara_ecs::{Component, World};
-use nara_identity::{EntityLookup, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistryBuilder, ComponentSchema, ComponentSchemaCatalog,

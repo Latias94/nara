@@ -4,14 +4,14 @@ use nara_asset::{
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_reflect::{
     __macro_support::{PersistentFieldCodec, encode_persistent_field},
-    __private::{
-        AssetReferenceCollectionError, collect_declared_value_asset_references_with_admission,
-    },
     AssetReferenceDemand, AssetReferenceRewriteError, ComponentCapability, ComponentCodecError,
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath,
     ComponentPropertyReadBudget, ComponentPropertyStep, ComponentSchema, ComponentSchemaVersion,
     ComponentShapeMember, ComponentTypeId, ComponentValue, ComponentValueKind,
     ComponentValueMaterializationLimits, ComponentValueShape, DeclaredAssetReferenceError,
+    asset_reference::{
+        AssetReferenceCollectionError, collect_declared_value_asset_references_with_admission,
+    },
     collect_declared_asset_references_from_schema, collect_declared_field_asset_references,
     collect_declared_value_asset_references_with_limits, effective_component_value,
     resolve_component_property_schema_claim, rewrite_declared_asset_references,

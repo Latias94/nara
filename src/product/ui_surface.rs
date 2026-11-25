@@ -2,12 +2,9 @@ use nara_app::{
     App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
     PluginError, PluginId, PluginProductCapability,
 };
-use nara_ecs::Resource;
 use nara_input::{InputPointerId, InputSeatId, InputWindowId};
-use nara_project::EffectivePrimaryUiSurface;
 use nara_ui::{
-    UiSafeAreaInsets, UiSize, UiSurfaceContentTransform, UiSurfaceEndpoint, UiSurfaceId,
-    UiSurfaceSlot, install_ui_surface,
+    UiPrimarySurfaceMetrics, UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot, install_ui_surface,
 };
 
 pub(crate) const PROJECT_PRIMARY_UI_SURFACE_ID: u64 = 1;
@@ -25,92 +22,9 @@ const PROJECT_PRIMARY_UI_SURFACE_DECLARATION: PluginDeclaration = PluginDeclarat
 .requires_plugins(PROJECT_PRIMARY_UI_SURFACE_REQUIREMENTS)
 .requires_product_capabilities(PROJECT_PRIMARY_UI_SURFACE_PRODUCT_REQUIREMENTS);
 
-/// Immutable project-owned authored geometry for the primary UI surface.
-///
-/// The profile contains no target identity. Runtime and Editor consumers derive their own exact
-/// target transform while preserving these authored facts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
-pub(crate) struct AcceptedPrimaryUiSurfaceProfile(EffectivePrimaryUiSurface);
-
-impl AcceptedPrimaryUiSurfaceProfile {
-    pub(crate) const fn from_effective(profile: EffectivePrimaryUiSurface) -> Self {
-        Self(profile)
-    }
-
-    pub(crate) fn logical_size(self) -> Option<UiSize> {
-        UiSize::new(self.0.logical_width as f32, self.0.logical_height as f32)
-    }
-
-    pub(crate) fn direct_transform(self) -> Option<UiSurfaceContentTransform> {
-        let logical_size = self.logical_size()?;
-        let safe_area = self.authored_safe_area(1.0, UiSafeAreaInsets::default())?;
-        UiSurfaceContentTransform::new(logical_size, logical_size, safe_area, 1.0).ok()
-    }
-
-    #[cfg(feature = "presentation-ui")]
-    pub(crate) fn target_transform(
-        self,
-        physical_size: UiSize,
-        host_safe_area: UiSafeAreaInsets,
-        platform_scale_factor: f32,
-    ) -> Option<UiSurfaceContentTransform> {
-        let logical_size = self.logical_size()?;
-        let authored_scale = (physical_size.width() / logical_size.width())
-            .min(physical_size.height() / logical_size.height());
-        if !authored_scale.is_finite() || authored_scale <= 0.0 {
-            return None;
-        }
-        let safe_area = self.authored_safe_area(authored_scale, host_safe_area)?;
-        UiSurfaceContentTransform::new(
-            logical_size,
-            physical_size,
-            safe_area,
-            platform_scale_factor,
-        )
-        .ok()
-    }
-
-    fn authored_safe_area(
-        self,
-        authored_scale: f32,
-        host_safe_area: UiSafeAreaInsets,
-    ) -> Option<UiSafeAreaInsets> {
-        UiSafeAreaInsets::new(
-            host_safe_area
-                .left()
-                .max(self.0.safe_area.left as f32 * authored_scale),
-            host_safe_area
-                .top()
-                .max(self.0.safe_area.top as f32 * authored_scale),
-            host_safe_area
-                .right()
-                .max(self.0.safe_area.right as f32 * authored_scale),
-            host_safe_area
-                .bottom()
-                .max(self.0.safe_area.bottom as f32 * authored_scale),
-        )
-    }
-
-    fn canonical_configuration(self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(64);
-        bytes.extend_from_slice(b"nara.project-primary-ui-surface.v1\0");
-        for value in [
-            self.0.logical_width,
-            self.0.logical_height,
-            self.0.safe_area.left,
-            self.0.safe_area.top,
-            self.0.safe_area.right,
-            self.0.safe_area.bottom,
-        ] {
-            bytes.extend_from_slice(&value.to_le_bytes());
-        }
-        bytes
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 struct ProjectPrimaryUiSurfacePlugin {
-    profile: AcceptedPrimaryUiSurfaceProfile,
+    profile: UiPrimarySurfaceMetrics,
 }
 
 impl Plugin for ProjectPrimaryUiSurfacePlugin {
@@ -120,8 +34,7 @@ impl Plugin for ProjectPrimaryUiSurfacePlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         let transform = self.profile.direct_transform().ok_or_else(setup_error)?;
-        let surface_id = UiSurfaceId::new(PROJECT_PRIMARY_UI_SURFACE_ID)
-            .expect("the project primary UI surface identity is non-zero");
+        let surface_id = self.profile.surface_id();
         let endpoint = UiSurfaceEndpoint::new(
             InputWindowId::new(nara_window::WindowId::PRIMARY.get()),
             InputSeatId::PRIMARY,
@@ -144,11 +57,22 @@ impl Plugin for ProjectPrimaryUiSurfacePlugin {
 }
 
 pub(crate) fn project_primary_ui_surface_definition(
-    profile: AcceptedPrimaryUiSurfaceProfile,
+    logical_width: u32,
+    logical_height: u32,
+    safe_area: [u32; 4],
 ) -> PluginDefinition {
+    let surface_id = UiSurfaceId::new(PROJECT_PRIMARY_UI_SURFACE_ID)
+        .expect("the project primary UI surface identity is non-zero");
+    let profile =
+        UiPrimarySurfaceMetrics::new(surface_id, logical_width, logical_height, safe_area);
+    let mut bytes = Vec::with_capacity(64);
+    bytes.extend_from_slice(b"nara.project-primary-ui-surface.v1\0");
+    for value in [logical_width, logical_height].into_iter().chain(safe_area) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
     PluginDefinition::infallible::<ProjectPrimaryUiSurfacePlugin, _>(
         PROJECT_PRIMARY_UI_SURFACE_DEFINITION_ID,
-        profile.canonical_configuration(),
+        bytes,
         move || ProjectPrimaryUiSurfacePlugin { profile },
     )
 }

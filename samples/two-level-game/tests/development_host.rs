@@ -359,13 +359,11 @@ fn production_host_adopts_real_body_and_structure_edits_without_probe_state_leak
     let closed = close_to_completion(&mut host);
     let foreign_closed = close_to_completion(&mut foreign);
     if !closed || !foreign_closed {
-        let retained_tree = fixture.root.clone();
-        std::mem::forget(host);
-        std::mem::forget(foreign);
-        std::mem::forget(fixture);
+        drop(host);
+        drop(foreign);
         panic!(
-            "physical Host cleanup remains pending; retained owners and their tree at {}",
-            retained_tree.display(),
+            "explicit physical Host cleanup remained pending for {}",
+            fixture.root.display(),
         );
     }
     for retired in host.retirements() {

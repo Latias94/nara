@@ -18,9 +18,9 @@ use nara::{
     advanced_prelude::{CurrentScene, SceneSource, materialize_startup_scene},
     app::{
         CoreStage, FixedUpdateSet, PluginCategory, PluginDeclaration, PluginDefinition, PluginId,
-        RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeClosePolicy,
-        RuntimeControl, RuntimeControlRequestResult, RuntimeFault, RuntimeFaultKind,
-        RuntimeFaultReporter, RuntimeInstance, RuntimeObligationLedger, RuntimeState,
+        RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeClosePolicy, RuntimeControl,
+        RuntimeControlRequestResult, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
+        RuntimeInstance, RuntimeObligationLedger, RuntimeState,
     },
     core::ByteLimit,
     ecs::{
@@ -31,13 +31,12 @@ use nara::{
         bevy_ecs::system::SystemState,
         schedule::IntoScheduleConfigs,
     },
-    gameplay::{GameplayCommandSet, submit_gameplay_driver_command},
     identity::{
         EntityLookup, RuntimeEntityReference, SpawnedSceneInstance, TombstoneCause,
         WorldIdentityDomain, spawn_identity_entity,
     },
     prelude::{
-        App, Commands, ComponentTypeId, ComponentValue, FixedTime, Parent, Plugin, PluginError,
+        App, ChildOf, Commands, ComponentTypeId, ComponentValue, FixedTime, Plugin, PluginError,
         Query, Res, ResMut, Sprite, Transform2d, Vec2, World,
     },
     project_host::{
@@ -48,10 +47,10 @@ use nara::{
 use nara_reference_game::{
     EnemyRole, Health, InitialHealth, InitialVelocity2d, MovementCommandError, MovementDirection,
     PlayerRole, ProjectileDamage, ProjectileId, ProjectileLifetime, ProjectileRole,
-    REFERENCE_WAVE_PLUGIN_ID, Velocity2d, WaveOutcome, WaveRetryPhase, WaveRetryRejection,
-    WaveRetryStatus, WaveRunGeneration, WaveSnapshot, WaveSpawn, Weapon, WeaponCooldown,
-    bundled_wave_commands, bundled_wave_run, movement_command, retry_command, wave_headless_intent,
-    wave_headless_run, wave_recipe,
+    REFERENCE_WAVE_PLUGIN_ID, ReferenceWaveSet, Velocity2d, WaveCommand, WaveOutcome,
+    WaveRetryPhase, WaveRetryRejection, WaveRetryStatus, WaveRunGeneration, WaveSnapshot,
+    WaveSpawn, Weapon, WeaponCooldown, bundled_wave_commands, bundled_wave_run, movement_command,
+    retry_command, wave_headless_intent, wave_headless_run, wave_recipe, with_wave_script,
 };
 use project_content_fixture::{
     headless_wave_candidate_plan_and_root, headless_wave_candidate_plan_and_root_with,
@@ -128,7 +127,7 @@ impl Plugin for TieSetupPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(
             CoreStage::FixedUpdate,
-            prepare_same_tick_tie.in_set(GameplayCommandSet::Consume),
+            prepare_same_tick_tie.in_set(ReferenceWaveSet::Consume),
         )?;
         Ok(())
     }
@@ -145,7 +144,7 @@ impl Plugin for InvalidTopologyPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(
             CoreStage::FixedUpdate,
-            remove_wave_spawn.in_set(GameplayCommandSet::Consume),
+            remove_wave_spawn.in_set(ReferenceWaveSet::Consume),
         )?
         .add_systems(
             CoreStage::FixedUpdate,
@@ -166,7 +165,7 @@ impl Plugin for ConsumeFaultPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(
             CoreStage::FixedUpdate,
-            report_consume_fault.in_set(GameplayCommandSet::Consume),
+            report_consume_fault.in_set(ReferenceWaveSet::Consume),
         )?
         .add_systems(
             CoreStage::FixedUpdate,
@@ -187,7 +186,7 @@ impl Plugin for CaptureFaultPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(
             CoreStage::FixedUpdate,
-            report_capture_fault.in_set(GameplayCommandSet::Capture),
+            report_capture_fault.in_set(ReferenceWaveSet::Capture),
         )?;
         Ok(())
     }
@@ -204,11 +203,11 @@ impl Plugin for LateSimulationFaultPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(
             CoreStage::FixedUpdate,
-            remove_player_role_after_first_tick.in_set(GameplayCommandSet::Consume),
+            remove_player_role_after_first_tick.in_set(ReferenceWaveSet::Consume),
         )?
         .add_systems(
             CoreStage::FixedUpdate,
-            assert_failed_tick_kept_last_good_snapshot.after(GameplayCommandSet::Capture),
+            assert_failed_tick_kept_last_good_snapshot.after(ReferenceWaveSet::Capture),
         )?;
         Ok(())
     }
@@ -243,7 +242,7 @@ impl Plugin for RetryIdentityCorruptionPlugin {
         app.insert_resource(RetryIdentityCorruption::default())?
             .add_systems(
                 CoreStage::FixedUpdate,
-                corrupt_retry_identity_after_terminal.after(GameplayCommandSet::Capture),
+                corrupt_retry_identity_after_terminal.after(ReferenceWaveSet::Capture),
             )?;
         Ok(())
     }
@@ -271,7 +270,7 @@ impl Plugin for RetryCandidateDespawnPlugin {
                     repair_retry_candidate_observer_after_rejection,
                 )
                     .chain()
-                    .after(GameplayCommandSet::Capture),
+                    .after(ReferenceWaveSet::Capture),
             )?;
         Ok(())
     }
@@ -298,7 +297,7 @@ impl Plugin for RetryRetirementObserverPlugin {
         app.insert_resource(RetryRetirementObserver::default())?
             .add_systems(
                 CoreStage::FixedUpdate,
-                install_retry_retirement_observer_after_terminal.after(GameplayCommandSet::Capture),
+                install_retry_retirement_observer_after_terminal.after(ReferenceWaveSet::Capture),
             )?;
         Ok(())
     }
@@ -322,7 +321,7 @@ impl Plugin for RunInitializationAuditPlugin {
         app.insert_resource(RunInitializationAudit::default())?
             .add_systems(
                 CoreStage::FixedUpdate,
-                capture_run_initialization.in_set(GameplayCommandSet::Consume),
+                capture_run_initialization.in_set(ReferenceWaveSet::Consume),
             )?;
         Ok(())
     }
@@ -346,7 +345,7 @@ impl Plugin for ProjectileSentinelPlugin {
         app.insert_resource(ProjectileSentinel::default())?
             .add_systems(
                 CoreStage::FixedUpdate,
-                spawn_same_shaped_projectile_sentinel.after(GameplayCommandSet::Capture),
+                spawn_same_shaped_projectile_sentinel.after(ReferenceWaveSet::Capture),
             )?;
         Ok(())
     }
@@ -364,7 +363,7 @@ impl Plugin for ForeignGameplaySentinelPlugin {
         app.insert_resource(ForeignGameplaySentinels::default())?
             .add_systems(
                 CoreStage::FixedUpdate,
-                spawn_foreign_gameplay_sentinels.before(GameplayCommandSet::Consume),
+                spawn_foreign_gameplay_sentinels.before(ReferenceWaveSet::Consume),
             )?;
         Ok(())
     }
@@ -497,14 +496,14 @@ fn assert_consume_fault_did_not_mutate(
 
 fn report_consume_fault(faults: Res<RuntimeFaultReporter>) {
     faults.report(RuntimeFault::engine(
-        RuntimeFaultKind::GameplayLifecycle,
+        RuntimeFaultKind::System,
         "reference-game.test.consume",
     ));
 }
 
 fn report_capture_fault(faults: Res<RuntimeFaultReporter>) {
     faults.report(RuntimeFault::engine(
-        RuntimeFaultKind::GameplayLifecycle,
+        RuntimeFaultKind::System,
         "reference-game.test.capture",
     ));
 }
@@ -678,7 +677,7 @@ fn normalized_run_state(world: &World) -> NormalizedRunState {
         .find(|entity| {
             entity.contains::<Weapon>()
                 && registered_scene_entity(world, entity.id())
-                && entity.get::<Parent>().is_some_and(|parent| {
+                && entity.get::<ChildOf>().is_some_and(|parent| {
                     world.get::<PlayerRole>(parent.parent()).is_some()
                         && registered_scene_entity(world, parent.parent())
                 })
@@ -688,7 +687,7 @@ fn normalized_run_state(world: &World) -> NormalizedRunState {
         .get::<SceneEntitySource>()
         .expect("the weapon should retain its scene identity");
     let parent = weapon_entity
-        .get::<Parent>()
+        .get::<ChildOf>()
         .expect("the authored weapon should retain its parent");
     let parent_source = world
         .get::<SceneEntitySource>(parent.parent())
@@ -880,20 +879,20 @@ fn assert_completed_wave_retired_scene_identities(world: &mut World) {
 
 fn wave_run_with_plugin<P>(
     maximum_fixed_ticks: NonZeroU32,
-    commands: Vec<nara::gameplay::GameplayCommandSubmission>,
+    commands: Vec<WaveCommand>,
 ) -> HeadlessRun<WaveSnapshot>
 where
     P: Plugin + Default,
 {
     let recipe = wave_recipe()
         .and_then(|recipe| recipe.add_plugin::<P>())
+        .and_then(|recipe| with_wave_script(recipe, commands))
         .expect("the test wave recipe is statically valid");
     HeadlessRun::new(
         project_root_capability(),
         HeadlessRunIntent::new(maximum_fixed_ticks)
             .with_recipe(recipe)
             .stop_when(WaveSnapshot::is_terminal),
-        commands,
     )
 }
 
@@ -1071,7 +1070,7 @@ fn second_projectile_hits_next_live_enemy_in_the_same_tick() {
 
     let maximum = NonZeroU32::new(2).unwrap();
     let intent = wave_headless_intent(maximum).stop_when(|snapshot| snapshot.tick == 2);
-    let snapshot = complete(HeadlessRun::new(project.capability(), intent, Vec::new()));
+    let snapshot = complete(HeadlessRun::new(project.capability(), intent));
 
     assert_eq!(snapshot.tick, 2);
     assert_eq!(snapshot.score, 200);
@@ -1142,20 +1141,14 @@ fn rejected_trusted_command_faults_the_candidate_before_success() {
         commands,
     );
     let report = execute_to_terminal(&mut run);
-    assert_runtime_fault_without_tick_limit(&report);
+    assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed);
     let codes = report
         .diagnostics()
         .iter()
         .map(|diagnostic| diagnostic.code().as_str())
         .collect::<Vec<_>>();
-    assert!(
-        codes.contains(&"project.run.command-rejected"),
-        "{report:#?}"
-    );
-    assert!(
-        codes.contains(&"project.run.runtime-faulted"),
-        "{report:#?}"
-    );
+    assert!(codes.contains(&"project.run.startup-failed"), "{report:#?}");
+    assert!(!codes.contains(&"project.run.tick-limit"), "{report:#?}");
 }
 
 #[test]
@@ -1394,17 +1387,11 @@ fn retry_retires_only_current_generation_projectiles_and_preserves_same_shaped_s
 fn current_receipt_excludes_foreign_same_shaped_actors_from_simulation_and_snapshots() {
     let mut runtime = adapter_retry_runtime_with_test_plugin(foreign_gameplay_sentinel_plugin());
     runtime
-        .with_driver_scope(|scope| {
-            submit_gameplay_driver_command(
-                scope,
-                movement_command(1, 1, MovementDirection::Left).unwrap(),
-            )
-        })
+        .apply_command(movement_command(1, 1, MovementDirection::Left).unwrap())
         .map(|outcome| {
             assert!(outcome.post_operation_fault.is_none());
             outcome.output
         })
-        .unwrap()
         .unwrap()
         .unwrap();
     drive_adapter_fixed(&mut runtime);
@@ -1522,14 +1509,11 @@ fn semantic_retry_resets_the_wave_without_a_platform_or_runtime_replacement() {
     assert!(runtime.world().resource::<WaveSnapshot>().is_terminal());
     let fixed_tick = runtime.world().resource::<FixedTime>().tick();
     runtime
-        .with_driver_scope(|scope| {
-            submit_gameplay_driver_command(scope, retry_command(fixed_tick + 1, 2).unwrap())
-        })
+        .apply_command(retry_command(fixed_tick + 1, 2).unwrap())
         .map(|outcome| {
             assert!(outcome.post_operation_fault.is_none());
             outcome.output
         })
-        .unwrap()
         .unwrap()
         .unwrap();
 
@@ -1804,14 +1788,12 @@ fn admit_adapter_candidate_with_edit(
     edit: impl FnOnce(&mut World) + Send + Sync + 'static,
 ) -> nara::app::RuntimeCandidate {
     let sealed = plan.plugin_plan().instantiate().unwrap();
-    let mut candidate = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            sealed,
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
+    let mut candidate = RuntimeCandidate::admit(
+        sealed,
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::default(),
+    )
+    .unwrap();
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut World| {
@@ -1842,14 +1824,11 @@ fn drive_adapter_to_terminal(runtime: &mut RuntimeInstance) {
 fn submit_retry_for_next_tick(runtime: &mut RuntimeInstance, sequence: u64) {
     let fixed_tick = runtime.world().resource::<FixedTime>().tick();
     runtime
-        .with_driver_scope(|scope| {
-            submit_gameplay_driver_command(scope, retry_command(fixed_tick + 1, sequence).unwrap())
-        })
+        .apply_command(retry_command(fixed_tick + 1, sequence).unwrap())
         .map(|outcome| {
             assert!(outcome.post_operation_fault.is_none());
             outcome.output
         })
-        .unwrap()
         .unwrap()
         .unwrap();
 }

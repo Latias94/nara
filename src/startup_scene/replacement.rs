@@ -1,6 +1,6 @@
-use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
+use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
+use nara_ecs::identity::SpawnedSceneInstance;
 use nara_ecs::{Mut, World};
-use nara_identity::SpawnedSceneInstance;
 use nara_scene::{
     SceneComponentBindings, SceneSpawnReport,
     advanced::{
@@ -111,7 +111,7 @@ where
             "Hosted Scene replacement requires content residency preparation",
         );
     }
-    if nara_ecs::__private::validate_resource_scope::<CurrentSceneOwner>(world).is_err() {
+    if crate::ecs::transaction::validate_resource_scope::<CurrentSceneOwner>(world).is_err() {
         return rejected(
             "scene.current.owner-lifecycle-unsupported",
             "Current Scene ownership cannot run lifecycle effects during replacement",

@@ -1,12 +1,12 @@
-use nara_asset::Handle;
-use nara_ecs::Component;
-use nara_render::image::ImageAsset;
-use nara_ui_kernel::{
+use crate::kernel::{
     UiActionId, UiAuthoringError, UiBorder, UiBrush, UiColor, UiColorRole, UiCornerRadii,
     UiImageId, UiKeyError, UiLayer, UiSemanticRole, UiStyle, UiStyleError, UiTextAlignment,
     UiTextOverflow, UiThemePalette,
 };
-use nara_ui_widgets::{UiButton as KernelButton, UiButtonState, UiButtonVisualState};
+use crate::widgets::{UiButton as KernelButton, UiButtonState, UiButtonVisualState};
+use nara_asset::Handle;
+use nara_asset::image::ImageAsset;
+use nara_ecs::Component;
 
 /// Marks one ECS entity as the root of an authored UI tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
@@ -59,7 +59,7 @@ impl Default for UiNode {
 /// Optional visual decoration for one authored node.
 #[derive(Debug, Clone, PartialEq, Component)]
 pub struct UiVisual {
-    visual: nara_ui_kernel::UiVisual,
+    visual: crate::kernel::UiVisual,
     image_asset: Option<Handle<ImageAsset>>,
 }
 
@@ -67,7 +67,7 @@ impl UiVisual {
     #[must_use]
     pub fn solid(color: UiColor) -> Self {
         Self {
-            visual: nara_ui_kernel::UiVisual::solid(color),
+            visual: crate::kernel::UiVisual::solid(color),
             image_asset: None,
         }
     }
@@ -75,7 +75,7 @@ impl UiVisual {
     #[must_use]
     pub fn role(role: UiColorRole) -> Self {
         Self {
-            visual: nara_ui_kernel::UiVisual::role(role),
+            visual: crate::kernel::UiVisual::role(role),
             image_asset: None,
         }
     }
@@ -83,7 +83,7 @@ impl UiVisual {
     #[must_use]
     pub fn image(image: UiImageId, tint: UiColor) -> Self {
         Self {
-            visual: nara_ui_kernel::UiVisual::image(image, tint),
+            visual: crate::kernel::UiVisual::image(image, tint),
             image_asset: None,
         }
     }
@@ -93,7 +93,7 @@ impl UiVisual {
     #[must_use]
     pub fn image_asset(handle: Handle<ImageAsset>, tint: UiColor) -> Self {
         Self {
-            visual: nara_ui_kernel::UiVisual::image(
+            visual: crate::kernel::UiVisual::image(
                 UiImageId::external::<ImageAsset>(handle.id().raw()),
                 tint,
             ),
@@ -125,7 +125,7 @@ impl UiVisual {
         self
     }
 
-    pub(crate) fn kernel(&self) -> nara_ui_kernel::UiVisual {
+    pub(crate) fn kernel(&self) -> crate::kernel::UiVisual {
         self.visual.clone()
     }
 }
@@ -135,7 +135,7 @@ pub(crate) fn resolve_controlled_button_visual(
     visuals: UiButtonVisuals,
     interaction: UiButtonState,
     button: &KernelButton,
-) -> Result<(nara_ui_kernel::UiVisual, UiBrush), UiStyleError> {
+) -> Result<(crate::kernel::UiVisual, UiBrush), UiStyleError> {
     let background_state = interaction.visual_state(button);
     let mut visual = visual.kernel();
     let background = match background_state {
@@ -169,11 +169,11 @@ pub(crate) fn resolve_controlled_button_visual(
 
 /// Bounded display text authored on one ECS node.
 #[derive(Debug, Clone, PartialEq, Component)]
-pub struct UiText(nara_ui_kernel::UiText);
+pub struct UiText(crate::kernel::UiText);
 
 impl UiText {
     pub fn new(content: impl Into<String>, logical_size: f32) -> Result<Self, UiStyleError> {
-        nara_ui_kernel::UiText::new(content, logical_size).map(Self)
+        crate::kernel::UiText::new(content, logical_size).map(Self)
     }
 
     /// Replaces dynamic display content without changing authored presentation fields.
@@ -207,7 +207,7 @@ impl UiText {
         self
     }
 
-    pub(crate) fn kernel(&self) -> nara_ui_kernel::UiText {
+    pub(crate) fn kernel(&self) -> crate::kernel::UiText {
         self.0.clone()
     }
 }
@@ -228,8 +228,8 @@ impl UiButton {
         logical_text_size: f32,
     ) -> Result<Self, UiAuthoringError> {
         let label = label.into();
-        nara_ui_kernel::UiSemantics::new(UiSemanticRole::Button, label.clone())?;
-        nara_ui_kernel::UiText::new(label.clone(), logical_text_size)?;
+        crate::kernel::UiSemantics::new(UiSemanticRole::Button, label.clone())?;
+        crate::kernel::UiText::new(label.clone(), logical_text_size)?;
         Ok(Self {
             label,
             action,
@@ -405,11 +405,11 @@ impl Default for UiButtonVisuals {
 
 /// Optional explicit semantics for a non-Button node.
 #[derive(Debug, Clone, PartialEq, Eq, Component)]
-pub struct UiSemantics(nara_ui_kernel::UiSemantics);
+pub struct UiSemantics(crate::kernel::UiSemantics);
 
 impl UiSemantics {
     pub fn new(role: UiSemanticRole, name: impl Into<String>) -> Result<Self, UiAuthoringError> {
-        nara_ui_kernel::UiSemantics::new(role, name).map(Self)
+        crate::kernel::UiSemantics::new(role, name).map(Self)
     }
 
     pub fn with_value(mut self, value: impl Into<String>) -> Result<Self, UiAuthoringError> {
@@ -434,22 +434,22 @@ impl UiSemantics {
         Ok(self)
     }
 
-    pub(crate) fn kernel(&self) -> nara_ui_kernel::UiSemantics {
+    pub(crate) fn kernel(&self) -> crate::kernel::UiSemantics {
         self.0.clone()
     }
 }
 
 /// Immutable theme value shared by every root compiled for one surface.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Component)]
-pub struct UiTheme(nara_ui_kernel::UiTheme);
+pub struct UiTheme(crate::kernel::UiTheme);
 
 impl UiTheme {
     pub fn new(revision: u64, palette: UiThemePalette) -> Result<Self, UiStyleError> {
-        nara_ui_kernel::UiTheme::new(revision, palette).map(Self)
+        crate::kernel::UiTheme::new(revision, palette).map(Self)
     }
 
     #[must_use]
-    pub const fn revision(self) -> nara_ui_kernel::UiRevision {
+    pub const fn revision(self) -> crate::kernel::UiRevision {
         self.0.revision()
     }
 
@@ -458,7 +458,7 @@ impl UiTheme {
         self.0.palette()
     }
 
-    pub(crate) const fn kernel(self) -> nara_ui_kernel::UiTheme {
+    pub(crate) const fn kernel(self) -> crate::kernel::UiTheme {
         self.0
     }
 }
@@ -477,8 +477,8 @@ impl UiRuntimeKey {
     pub fn new(domain: impl Into<String>, local: impl Into<String>) -> Result<Self, UiKeyError> {
         let domain = domain.into();
         let local = local.into();
-        nara_ui_kernel::UiRootKey::runtime(domain.clone(), local.clone())?;
-        nara_ui_kernel::UiLocalKey::runtime(domain.clone(), local.clone())?;
+        crate::kernel::UiRootKey::runtime(domain.clone(), local.clone())?;
+        crate::kernel::UiLocalKey::runtime(domain.clone(), local.clone())?;
         Ok(Self { domain, local })
     }
 

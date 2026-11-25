@@ -47,8 +47,8 @@ fn public_desktop_poll_controls_real_gameplay_and_retires_original_native_owners
             process.request_terminate(Instant::now()).unwrap();
         }
         if timed_out && Instant::now() >= deadline + Duration::from_secs(15) {
-            std::mem::forget(process);
-            panic!("the exact native control process still owns incomplete cleanup");
+            drop(process);
+            panic!("explicit cleanup of the original native control process did not complete");
         }
         thread::sleep(Duration::from_millis(10));
     }

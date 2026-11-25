@@ -1,8 +1,10 @@
 use std::fmt;
 
 use nara_app::TimeSettingsError;
-use nara_diagnostic::{DiagnosticReport, DiagnosticSettingsError, MAX_RUNTIME_DIAGNOSTIC_ENTRIES};
-use nara_tasks::TaskConfigError;
+use nara_app::tasks::TaskConfigError;
+use nara_core::diagnostic::{
+    DiagnosticReport, DiagnosticSettingsError, MAX_RUNTIME_DIAGNOSTIC_ENTRIES,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

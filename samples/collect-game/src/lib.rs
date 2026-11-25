@@ -2,6 +2,7 @@ use std::path::Path;
 
 use nara::fs::{DirectoryCapability, FsError};
 use nara::project_host::{open_explicit_product_project_root, open_product_project_root};
+use nara::scene::fixed_spatial::FixedSpatialPlugin;
 
 #[doc(hidden)]
 pub use nara::project_tooling::{ProductObservationTarget, record_product_observation};
@@ -9,7 +10,9 @@ pub use nara::project_tooling::{ProductObservationTarget, record_product_observa
 /// Returns the one product recipe shared by the generated targets.
 #[must_use]
 pub fn product_recipe() -> Result<nara::ProductRecipe, nara::ProductRecipeError> {
-    let recipe = nara::ProductRecipe::new().add_contribution(collect_gameplay::contribution()?)?;
+    let recipe = nara::ProductRecipe::new()
+        .add_plugin::<FixedSpatialPlugin>()?
+        .add_contribution(collect_gameplay::contribution()?)?;
     #[cfg(feature = "desktop")]
     let recipe = recipe.add_plugin::<collect_gameplay::DesktopInputPlugin>()?;
     Ok(recipe)

@@ -9,8 +9,10 @@ use std::sync::{
 };
 
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
+use nara_ecs::identity::{
+    AuthoredEntityReference, EntityLookup, EntityReference, ReferenceInputId,
+};
 use nara_ecs::{Component, World};
-use nara_identity::{AuthoredEntityReference, EntityLookup, EntityReference, ReferenceInputId};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchema,
@@ -381,7 +383,7 @@ fn data_setter_rejects_authored_values_and_defaults_without_replacing_prior_memb
 #[cfg(feature = "serde")]
 #[test]
 fn source_json_and_ron_preserve_authored_intent_without_codec_but_native_refuses() {
-    use nara_identity::{PrefabEntityOrigin, PrefabInstanceHop};
+    use nara_ecs::identity::{PrefabEntityOrigin, PrefabInstanceHop};
     use nara_scene::SceneDocumentCandidate;
 
     let unresolved_route = ComponentValue::EntityReference(EntityReference::Authored {
@@ -457,10 +459,12 @@ fn source_keeps_context_free_null_persistent_and_scalar_default_fallbacks() {
     use nara_scene::SceneDocumentCandidate;
 
     let persistent = ComponentValue::EntityReference(EntityReference::Persistent {
-        entity: nara_identity::PersistentRuntimeReference::new(
-            nara_identity::PersistentRuntimeNamespaceId::new("game.saved").unwrap(),
-            nara_identity::PersistentRuntimeId::parse_str("00000000-0000-4000-8000-000000000051")
-                .unwrap(),
+        entity: nara_ecs::identity::PersistentRuntimeReference::new(
+            nara_ecs::identity::PersistentRuntimeNamespaceId::new("game.saved").unwrap(),
+            nara_ecs::identity::PersistentRuntimeId::parse_str(
+                "00000000-0000-4000-8000-000000000051",
+            )
+            .unwrap(),
         ),
     });
     let scalar = ComponentSchema::new(last_id(), "Last", ComponentSchemaVersion::ONE)
@@ -559,10 +563,12 @@ fn source_limits_ignore_hidden_scalar_schema_defaults_but_bound_selected_default
 #[test]
 fn source_limits_classify_mixed_schema_defaults_without_charging_hidden_payloads() {
     let persistent = ComponentValue::EntityReference(EntityReference::Persistent {
-        entity: nara_identity::PersistentRuntimeReference::new(
-            nara_identity::PersistentRuntimeNamespaceId::new("game.saved").unwrap(),
-            nara_identity::PersistentRuntimeId::parse_str("00000000-0000-4000-8000-000000000052")
-                .unwrap(),
+        entity: nara_ecs::identity::PersistentRuntimeReference::new(
+            nara_ecs::identity::PersistentRuntimeNamespaceId::new("game.saved").unwrap(),
+            nara_ecs::identity::PersistentRuntimeId::parse_str(
+                "00000000-0000-4000-8000-000000000052",
+            )
+            .unwrap(),
         ),
     });
     for (reference, requires_context) in [
@@ -634,10 +640,12 @@ fn source_limits_classify_mixed_schema_defaults_without_charging_hidden_payloads
 #[test]
 fn source_schema_default_context_scan_does_not_expand_shared_reference_paths() {
     let persistent = ComponentValue::EntityReference(EntityReference::Persistent {
-        entity: nara_identity::PersistentRuntimeReference::new(
-            nara_identity::PersistentRuntimeNamespaceId::new("game.saved").unwrap(),
-            nara_identity::PersistentRuntimeId::parse_str("00000000-0000-4000-8000-000000000053")
-                .unwrap(),
+        entity: nara_ecs::identity::PersistentRuntimeReference::new(
+            nara_ecs::identity::PersistentRuntimeNamespaceId::new("game.saved").unwrap(),
+            nara_ecs::identity::PersistentRuntimeId::parse_str(
+                "00000000-0000-4000-8000-000000000053",
+            )
+            .unwrap(),
         ),
     });
     // The admitted payload is below 16,384 nodes / 4 MiB. Expanding 9,000 reference paths

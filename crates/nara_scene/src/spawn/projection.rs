@@ -69,7 +69,7 @@ impl SceneProjection {
         crate::occurrence::validate_projection_occurrence(world, Some(current)).map_err(
             |error| occurrence_rejection(DiagnosticReport::default(), error).diagnostics,
         )?;
-        nara_identity::__private::prepare_scene_projection_epoch_retirement(world, Some(current))
+        nara_ecs::identity::domain::prepare_scene_projection_epoch_retirement(world, Some(current))
             .map_err(projection_identity_rejection)?;
         let retired = retire_scene_instance_exact(world, current, TombstoneCause::Unloaded)
             .map_err(|error| match error {

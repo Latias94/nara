@@ -11,12 +11,6 @@ use nara::{
         FixedTime, PluginCategory, PluginDeclaration, PluginId, RuntimeGeneration, RuntimeState,
     },
     ecs::schedule::IntoScheduleConfigs,
-    gameplay::{
-        GameplayCommandBatch, GameplayCommandEnvelope, GameplayCommandIngressSource,
-        GameplayCommandQueue, GameplayCommandQueueSettings, GameplayCommandSet,
-        GameplayCommandSourceId, GameplayCommandSourceSequence, GameplayCommandSubmission,
-        GameplayCommandTick,
-    },
     prelude::{App, CoreStage, Plugin, PluginError, Res, Resource},
     project_host::HeadlessSession,
     tasks::{TaskPools, TaskReturnState},
@@ -25,7 +19,10 @@ use nara::{
 use super::{DEADLINE, ReplayError};
 use crate::{
     GamePhase, GameSnapshot,
-    command::SemanticCommand,
+    command::{
+        CommandSchedule, CommandSequence, CommandSet, CommandSource, CommandTick, ScheduledCommand,
+        SemanticCommand,
+    },
     levels::{LevelId, LevelKey},
     resume::ResumeState,
 };
@@ -45,7 +42,7 @@ struct CaptureSlot(Arc<Mutex<Option<CapturedTick>>>);
 struct CapturedTick {
     generation: u64,
     tick: u64,
-    commands: Vec<GameplayCommandEnvelope>,
+    commands: Vec<ScheduledCommand>,
 }
 
 #[derive(Clone)]
@@ -71,41 +68,33 @@ impl Plugin for CapturePlugin {
             PluginId::new("two-level-game.replay"),
             PluginCategory::Runtime,
         )
-        .requires_plugins(&[
-            crate::gameplay::PLUGIN_ID,
-            nara::gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
-        ]);
+        .requires_plugins(&[crate::gameplay::PLUGIN_ID]);
         &DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         if matches!(self.0.mode, Mode::Replay) {
-            app.insert_resource(GameplayCommandQueue::for_replay(
-                GameplayCommandQueueSettings::default(),
-                GameplayCommandSourceId::new(REPLAY_SOURCE).expect("fixed game Replay source"),
+            app.insert_resource(CommandSchedule::replay_only(
+                CommandSource::replay(REPLAY_SOURCE).expect("fixed game Replay source"),
             ))?;
         }
         app.insert_resource(self.0.slot.clone())?;
-        app.add_systems(
-            CoreStage::FixedUpdate,
-            capture.in_set(GameplayCommandSet::Capture),
-        )?;
+        app.add_systems(CoreStage::FixedUpdate, capture.in_set(CommandSet::Capture))?;
         Ok(())
     }
 }
 
 fn capture(
-    batch: Res<GameplayCommandBatch>,
+    schedule: Res<CommandSchedule>,
+    time: Res<FixedTime>,
     generation: Res<RuntimeGeneration>,
     slot: Res<CaptureSlot>,
 ) {
-    if let Some(tick) = batch.active_tick() {
-        *slot.0.lock().unwrap_or_else(|error| error.into_inner()) = Some(CapturedTick {
-            generation: generation.get(),
-            tick: tick.get(),
-            commands: batch.commands().to_vec(),
-        });
-    }
+    *slot.0.lock().unwrap_or_else(|error| error.into_inner()) = Some(CapturedTick {
+        generation: generation.get(),
+        tick: time.tick(),
+        commands: schedule.current().to_vec(),
+    });
 }
 
 pub(super) struct Game {
@@ -180,7 +169,7 @@ impl Game {
                 .session
                 .observe(|world| {
                     (
-                        world.resource::<GameplayCommandQueue>().is_idle(),
+                        world.resource::<CommandSchedule>().is_idle(),
                         world.resource::<TaskPools>().return_state(),
                     )
                 })
@@ -222,7 +211,7 @@ impl Game {
     pub(super) fn step(
         &mut self,
         commands: &[SemanticCommand],
-    ) -> Result<(u64, Vec<GameplayCommandEnvelope>, ResumeState), ReplayError> {
+    ) -> Result<(u64, Vec<ScheduledCommand>, ResumeState), ReplayError> {
         let before = self.snapshot()?;
         let tick = self
             .tick()?
@@ -240,18 +229,19 @@ impl Game {
                 .checked_add(1)
                 .ok_or_else(|| ReplayError::new("recording sequence exhausted"))?;
             let source = match self.mode {
-                Mode::Record => GameplayCommandIngressSource::external(RECORD_SOURCE),
-                Mode::Replay => GameplayCommandIngressSource::replay(REPLAY_SOURCE),
+                Mode::Record => CommandSource::external(RECORD_SOURCE),
+                Mode::Replay => CommandSource::replay(REPLAY_SOURCE),
             }
             .expect("fixed game command source");
-            let submission = GameplayCommandSubmission::new(
-                GameplayCommandTick::new(tick).expect("successor tick is nonzero"),
+            let submission = ScheduledCommand::new(
+                CommandTick::new(tick).expect("successor tick is nonzero"),
                 source,
-                GameplayCommandSourceSequence::new(self.sequence)
-                    .expect("successor sequence is nonzero"),
-                command.draft(),
+                CommandSequence::new(self.sequence).expect("successor sequence is nonzero"),
+                command.intent(),
             );
-            self.session.submit(submission).map_err(runtime_error)?;
+            submission
+                .submit_headless(&mut self.session)
+                .map_err(runtime_error)?;
         }
         if self.session.step().map_err(runtime_error)?.is_some() {
             return Err(ReplayError::new("game exited during the recorded step"));
@@ -269,7 +259,7 @@ impl Game {
             .session
             .observe(|world| {
                 world
-                    .resource::<GameplayCommandQueue>()
+                    .resource::<CommandSchedule>()
                     .stats()
                     .acknowledged_through_tick
             })
@@ -287,7 +277,7 @@ impl Game {
         let actual = captured
             .commands
             .iter()
-            .map(SemanticCommand::from_envelope)
+            .map(SemanticCommand::from_scheduled)
             .collect::<Result<Vec<_>, _>>()
             .map_err(ReplayError::new)?;
         if actual != commands {

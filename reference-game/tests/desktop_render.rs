@@ -11,9 +11,7 @@ use std::{process::Command, time::Duration};
 use child_process::{ChildOutputLimits, run_child_with_timeout};
 use nara::{
     advanced_prelude::materialize_startup_scene,
-    app::{
-        RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
-    },
+    app::{RuntimeCandidate, RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger},
     core::Color,
     ecs::Entity,
     hierarchy::Parent,
@@ -22,9 +20,12 @@ use nara::{
     material::SamplerDescriptor,
     prelude::{Component, FixedTime, Sprite, Vec2, World},
     project_host::ProjectContentLoader,
-    scene::SceneEntitySource,
+    scene::{
+        SceneEntitySource,
+        fixed_spatial::{historical_spatial_snapshot, presented_spatial_snapshot},
+        spatial::Transform2d,
+    },
     sprite_render::batching::{ExtractedSprites, TextureUvRect},
-    transform::{Transform2d, historical_spatial_snapshot, presented_spatial_snapshot},
     ui::{UiLayer, UiSurfaceId, ui_candidate_frame},
 };
 use nara_reference_game::{
@@ -523,14 +524,12 @@ fn render_runtime_with_admission_edit(
     let content = loader.load(&project, &plan).unwrap();
     let source = content.scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
-    let mut candidate = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            sealed,
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
+    let mut candidate = RuntimeCandidate::admit(
+        sealed,
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::default(),
+    )
+    .unwrap();
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {

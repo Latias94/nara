@@ -1,0 +1,15 @@
+[package]
+name = "nara_physics2d"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Fixed-step ECS physics and stateless collision queries for Nara games."
+
+[dependencies]
+bevy_ecs.workspace = true
+nara_app.workspace = true
+nara_core.workspace = true
+nara_scene.workspace = true
+rapier2d.workspace = true
+thiserror.workspace = true

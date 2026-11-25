@@ -1,8 +1,8 @@
 use super::*;
 use crate::{
-    __private::validate_component_property_value_with_admission, AssetReferenceDemand,
-    ComponentNumericBound, ComponentNumericDomain, ComponentNumericInterval, ComponentShapeMember,
-    ComponentTypeId,
+    AssetReferenceDemand, ComponentNumericBound, ComponentNumericDomain, ComponentNumericInterval,
+    ComponentShapeMember, ComponentTypeId,
+    property::validate_component_property_value_with_admission,
 };
 use nara_core::DepthLimit;
 

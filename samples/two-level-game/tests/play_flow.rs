@@ -18,7 +18,7 @@ use std::{
 };
 
 #[cfg(feature = "gamepad")]
-use nara::input::{ButtonTransitionPhase, GamepadConnection};
+use nara::input::{ButtonTransitionPhase, GamepadButton, GamepadConnection};
 use nara::{
     ProductConfiguration, ProductRecipe,
     advanced_prelude::CurrentScene,
@@ -27,10 +27,6 @@ use nara::{
         PluginId, RuntimeState, RuntimeTimeSettings, StartupStage, VirtualTime,
     },
     ecs::{Resource, World, schedule::IntoScheduleConfigs},
-    gameplay::{
-        GameplayCommandBatch, GameplayCommandQueue, GameplayCommandQueueStats,
-        LocalGameplayCommands,
-    },
     identity::{EntityLookup, SceneEntityId, SceneInstanceId},
     input::{
         ActionBinding, ActionContext, ActionId, ActionMapFileCandidate, ActionMaps,
@@ -41,13 +37,16 @@ use nara::{
     sprite::{Sprite, TextureRegion},
     tasks::{TaskPools, TaskReturnState},
 };
-#[cfg(feature = "gamepad")]
-use nara_gilrs::GamepadButton;
 use support::{DEADLINE, ProjectCopy};
 use two_level_game::{
     GamePhase, GameResumeError, GameSnapshot, RunOptions,
     animation::ExplorerFrame,
-    capture_resume, configured_recipe,
+    capture_resume,
+    command::{
+        CommandSchedule, CommandSequence, CommandSource, CommandStats, CommandTick,
+        ScheduledCommand,
+    },
+    configured_recipe,
     flow::{FlowBindings, FlowPhase, FlowSnapshot, PlayFlowControls, with_play_flow},
     levels::{AUTHORED_LEVEL_MEMBERS, LevelId, LevelKey},
     open_explicit_project_root, product_recipe,
@@ -353,20 +352,19 @@ impl Game {
             .unwrap()
     }
 
-    fn queue(&self) -> GameplayCommandQueueStats {
+    fn queue(&self) -> CommandStats {
         self.session
-            .observe(|world| world.resource::<GameplayCommandQueue>().stats())
+            .observe(|world| world.resource::<CommandSchedule>().stats())
             .unwrap()
     }
 
     fn assert_idle(&self) {
         self.session
             .observe(|world| {
-                let queue = world.resource::<GameplayCommandQueue>();
+                let queue = world.resource::<CommandSchedule>();
                 let stats = queue.stats();
                 assert!(queue.is_idle(), "{stats:?}");
-                assert!(world.resource::<GameplayCommandBatch>().is_empty());
-                assert!(world.resource::<LocalGameplayCommands>().is_empty());
+                assert!(queue.current().is_empty());
                 assert_eq!(stats.accepted, stats.admitted);
                 assert_eq!(stats.accepted, stats.acknowledged);
                 assert_eq!(
@@ -375,9 +373,7 @@ impl Game {
                 );
                 assert_eq!(stats.closed_through_tick, stats.acknowledged_through_tick);
                 assert_eq!(stats.retained_commands, 0);
-                assert_eq!(stats.retained_bytes, 0);
                 assert_eq!(stats.rejected, 0);
-                assert_eq!(stats.lifecycle_faults, 0);
             })
             .unwrap();
     }
@@ -770,7 +766,7 @@ fn a_pending_player_save_launch_survives_title_and_is_consumed_once_by_the_first
     })
     .unwrap()
     .unwrap();
-    game.session.submit(launch).unwrap();
+    launch.submit_headless(&mut game.session).unwrap();
     for _ in 0..3 {
         game.frame(Duration::from_millis(100));
         assert_eq!(game.flow().phase, FlowPhase::Title);
@@ -839,16 +835,14 @@ fn a_refused_first_resume_save_launch_keeps_its_result_and_completes_the_origina
     let invalid = missing_parent.join("checkpoint.json");
     assert!(!missing_parent.exists());
     let mut game = Game::from_project(project.root(), keyboard_flow_recipe());
-    game.session
-        .submit(
-            two_level_game::player_launch(RunOptions {
-                save_path: Some(invalid.clone()),
-                ..RunOptions::default()
-            })
-            .unwrap()
-            .unwrap(),
-        )
-        .unwrap();
+    two_level_game::player_launch(RunOptions {
+        save_path: Some(invalid.clone()),
+        ..RunOptions::default()
+    })
+    .unwrap()
+    .unwrap()
+    .submit_headless(&mut game.session)
+    .unwrap();
     game.begin_round();
     game.settle_start(FlowPhase::Resuming);
     game.frame(STEP);
@@ -965,6 +959,7 @@ fn zero_tick_marker_travel_and_movement_backlog_is_drained_by_the_original_resum
     let pending = game.queue();
     assert_eq!(pending.active_commands, 0);
     assert_eq!(pending.admitted, idle.admitted);
+    assert_eq!(pending.acknowledged_through_tick, clock.0);
     game.finish_resume();
     let acknowledged = game.queue();
     assert_eq!(acknowledged.accepted, pending.accepted);
@@ -975,10 +970,6 @@ fn zero_tick_marker_travel_and_movement_backlog_is_drained_by_the_original_resum
     assert_eq!(
         acknowledged.acknowledged - pending.acknowledged,
         pending.pending_commands as u64
-    );
-    assert_eq!(
-        acknowledged.acknowledged_ticks,
-        pending.acknowledged_ticks + 1
     );
     assert_eq!(acknowledged.acknowledged_through_tick, clock.0 + 1);
     for _ in 0..3 {
@@ -1549,11 +1540,6 @@ fn the_first_paused_menu_action_decides_the_pending_round_save() {
 
 #[test]
 fn refused_travel_preserves_the_last_admitted_typed_movement_decision() {
-    use nara::gameplay::{
-        GameplayCommandIngressSource, GameplayCommandSourceSequence, GameplayCommandSubmission,
-        GameplayCommandTick,
-    };
-
     let project = ProjectCopy::new();
     let mut game = Game::from_project(project.root(), keyboard_flow_recipe());
     game.start_round();
@@ -1561,14 +1547,14 @@ fn refused_travel_preserves_the_last_admitted_typed_movement_decision() {
     game.frame(STEP);
     assert!(game.snapshot().held[1]);
     let stopped_at = game.snapshot().player;
-    let submission = GameplayCommandSubmission::new(
-        GameplayCommandTick::new(game.snapshot().tick + 1).unwrap(),
-        GameplayCommandIngressSource::external("two-level-game.test.typed-stop").unwrap(),
-        GameplayCommandSourceSequence::new(1).unwrap(),
+    let submission = ScheduledCommand::new(
+        CommandTick::new(game.snapshot().tick + 1).unwrap(),
+        CommandSource::external("two-level-game.test.typed-stop").unwrap(),
+        CommandSequence::new(1).unwrap(),
         support::movement(1, false),
     );
-    let key = submission.key();
-    assert_eq!(game.session.submit(submission).unwrap(), key);
+    let key = submission.key().clone();
+    assert_eq!(submission.submit_headless(&mut game.session).unwrap(), key);
     game.frame(STEP);
     assert_eq!(game.snapshot().player, stopped_at);
     assert!(!game.snapshot().held[1]);
@@ -1597,10 +1583,6 @@ fn refused_travel_preserves_the_last_admitted_typed_movement_decision() {
 #[cfg(feature = "gamepad")]
 #[test]
 fn host_exact_step_keeps_native_and_typed_save_in_the_original_batch() {
-    use nara::gameplay::{
-        GameplayCommandIngressSource, GameplayCommandSourceSequence, GameplayCommandSubmission,
-        GameplayCommandTick,
-    };
     use two_level_game::save::decode_checkpoint;
 
     let project = ProjectCopy::new();
@@ -1618,14 +1600,14 @@ fn host_exact_step_keeps_native_and_typed_save_in_the_original_batch() {
     assert_eq!(game.snapshot().saves, 1);
     game.assert_idle();
 
-    let submission = GameplayCommandSubmission::new(
-        GameplayCommandTick::new(game.snapshot().tick + 1).unwrap(),
-        GameplayCommandIngressSource::external("two-level-game.test.typed-save").unwrap(),
-        GameplayCommandSourceSequence::new(1).unwrap(),
+    let submission = ScheduledCommand::new(
+        CommandTick::new(game.snapshot().tick + 1).unwrap(),
+        CommandSource::external("two-level-game.test.typed-save").unwrap(),
+        CommandSequence::new(1).unwrap(),
         support::action("two-level-game.save"),
     );
-    let key = submission.key();
-    assert_eq!(game.session.submit(submission).unwrap(), key);
+    let key = submission.key().clone();
+    assert_eq!(submission.submit_headless(&mut game.session).unwrap(), key);
     assert_eq!(game.snapshot().saves, 1);
     assert_eq!(game.session.step().unwrap(), None);
     assert_eq!(game.snapshot().saves, 2);

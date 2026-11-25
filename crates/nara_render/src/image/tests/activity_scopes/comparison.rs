@@ -2,7 +2,7 @@
 //! aggregate IO workers and identical activity custody; total-saturation fairness is not promised.
 
 use super::*;
-use nara_tasks::TaskTerminal;
+use nara_app::tasks::TaskTerminal;
 use serde_json::{Value, json};
 use std::sync::Condvar;
 

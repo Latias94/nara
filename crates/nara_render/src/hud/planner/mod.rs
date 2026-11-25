@@ -1,10 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{RenderResourceKey, RenderTarget};
-use nara_text::{
+use nara_ui::kernel::{UiFrame, UiSurfaceId};
+use nara_ui::text::{
     FontFace, FontFaceId, TextEngine, TextEngineCreateError, TextLimits, bundled_font_face,
 };
-use nara_ui_kernel::{UiFrame, UiSurfaceId};
 use thiserror::Error;
 
 use crate::hud::packet::UiPreparedBackendSubmission;
@@ -48,7 +48,7 @@ pub struct UiPresentationWorkStats {
     /// Work observed by the planner's own text engine, including work before a plan fails.
     ///
     /// Excludes shaping and other text work performed by the caller's compiler or text engine.
-    pub text: nara_text::TextWorkStats,
+    pub text: nara_ui::text::TextWorkStats,
 }
 
 /// Target-private, failure-atomic planner for resource-complete UI packets.

@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 
-use nara_ecs::{Mut, Resource, World};
-use nara_input::{InputTimeline, InputUiCursorError, InputUiDisposition};
-use nara_ui_kernel::{
+use crate::kernel::{
     UiButtonPhase, UiDispatchBatch, UiDispatchError, UiDispatchOutcome, UiInputEvent,
     UiInteractionSession, UiJournalError, UiKey, UiNonActivation, UiPointerButton,
     UiPointerInputKind, UiRouteStamp, UiSurfaceId,
 };
-use nara_ui_widgets::{UiButtonState, UiIntent};
+use crate::widgets::{UiButtonState, UiIntent};
+use nara_ecs::{Mut, Resource, World};
+use nara_input::{InputTimeline, InputUiCursorError, InputUiDisposition};
 use thiserror::Error;
 
 use crate::runtime::{UiAdapterError, UiRuntimeState, state::UiReducerPreparationError};
@@ -46,7 +46,7 @@ pub(crate) fn execute(
             if let Some(sequence) = input_sequence
                 && let Err(error) = world
                     .resource_mut::<InputTimeline>()
-                    .__finalize_ui_entry(sequence, InputUiDisposition::Consumed)
+                    .finalize_ui_entry(sequence, InputUiDisposition::Consumed)
             {
                 return UiRouteDisposition::RejectedClosed(UiRouteRejection::InputFinalization(
                     error,
@@ -70,7 +70,7 @@ pub(crate) fn reject_timeline_entry(
 ) -> UiRouteRejection {
     match world
         .resource_mut::<InputTimeline>()
-        .__finalize_ui_entry(sequence, InputUiDisposition::RejectedClosed)
+        .finalize_ui_entry(sequence, InputUiDisposition::RejectedClosed)
     {
         Ok(()) => rejection,
         Err(error) => UiRouteRejection::InputFinalization(error),

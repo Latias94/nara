@@ -7,9 +7,9 @@ use nara_app::{
     RuntimeCloseErrorDisposition, RuntimeCloseEvidence, RuntimeCloseParticipantPhase, RuntimeFault,
     RuntimeFaultDetail, RuntimeFaultKind,
 };
-use nara_diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
-    PublicDiagnosticIdentifier, SafeSummary,
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
+    PublicDiagnosticIdentifier, ReportDiagnostic as Diagnostic, SafeSummary,
 };
 
 mod plugin;
@@ -71,8 +71,6 @@ pub(super) const fn runtime_fault_kind_id(kind: RuntimeFaultKind) -> &'static st
         RuntimeFaultKind::RunCondition => "run-condition",
         RuntimeFaultKind::Command => "command",
         RuntimeFaultKind::Observer => "observer",
-        RuntimeFaultKind::GameplayLifecycle => "gameplay-lifecycle",
-        RuntimeFaultKind::LocalIntentLoss => "local-intent-loss",
         RuntimeFaultKind::RequiredTask => "required-task",
         RuntimeFaultKind::RequiredService => "required-service",
     }

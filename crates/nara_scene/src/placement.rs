@@ -1,6 +1,6 @@
 //! Source-owned desired locations shared by Scene, Prefab and instance overlays.
 
-use nara_identity::{PrefabEntityTarget, SceneEntityId};
+use nara_ecs::identity::{PrefabEntityTarget, SceneEntityId};
 
 /// Parent in the actual declaring source or overlay's effective hierarchy.
 #[derive(Debug, Clone, PartialEq, Eq)]

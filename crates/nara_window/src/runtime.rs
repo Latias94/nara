@@ -1,5 +1,5 @@
 use nara_app::{
-    __RuntimeDriverPort, App, AppExitRequests, CoreStage, Plugin, PluginError, RuntimeDriverScope,
+    App, AppExitRequests, CoreStage, Plugin, PluginError, RuntimeDriverScope, RuntimeState,
     RuntimeWorldAccessError,
 };
 use nara_ecs::{
@@ -20,44 +20,17 @@ pub enum WindowSet {
     ApplyEvents,
 }
 
-/// First-party input token for the synchronized platform event path.
-///
-/// The private field prevents callers from bypassing [`push_window_driver_event`] and publishing
-/// an observation without also queueing its retained window-state update.
-#[doc(hidden)]
-pub struct __WindowDriverEvent(WindowEvent);
-
-impl __RuntimeDriverPort for WindowEvents {
-    type Input = __WindowDriverEvent;
-    type Output = ();
-
-    fn apply_driver_input(&mut self, input: Self::Input) {
-        self.push(input.0);
-    }
-}
-
 const MAX_PENDING_WINDOW_EVENTS: usize = 4_096;
 
 #[derive(Debug, Default, Resource)]
 struct PendingWindowEvents(Vec<WindowEvent>);
 
-impl __RuntimeDriverPort for PendingWindowEvents {
-    type Input = WindowEvent;
-    type Output = Result<(), WindowDriverEventError>;
-
-    fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output {
-        if self.0.len() >= MAX_PENDING_WINDOW_EVENTS {
-            return Err(WindowDriverEventError::CapacityExceeded);
-        }
-        self.0.push(input);
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum WindowDriverEventError {
     #[error("managed window driver access failed")]
     Access(#[from] RuntimeWorldAccessError),
+    #[error("window events are unavailable while the runtime is {0:?}")]
+    Unavailable(RuntimeState),
     #[error("the bounded window driver event queue is full")]
     CapacityExceeded,
 }
@@ -126,13 +99,37 @@ pub fn push_window_event(world: &mut World, event: WindowEvent) {
     world.resource_mut::<WindowEvents>().push(event);
 }
 
+/// Queues a platform event for state synchronization and publishes its frame observation.
 pub fn push_window_driver_event(
     scope: &mut RuntimeDriverScope<'_>,
     event: WindowEvent,
 ) -> Result<(), WindowDriverEventError> {
-    scope.__apply_port::<PendingWindowEvents>(event.clone())??;
-    scope.__apply_port::<WindowEvents>(__WindowDriverEvent(event))?;
-    Ok(())
+    let state = scope.state();
+    if !matches!(state, RuntimeState::Running | RuntimeState::Paused) {
+        return Err(WindowDriverEventError::Unavailable(state));
+    }
+    scope.apply_command(move |world: &mut World| {
+        let pending = world.get_resource::<PendingWindowEvents>().ok_or(
+            RuntimeWorldAccessError::MissingResource {
+                type_name: std::any::type_name::<PendingWindowEvents>(),
+            },
+        )?;
+        if !world.contains_resource::<WindowEvents>() {
+            return Err(RuntimeWorldAccessError::MissingResource {
+                type_name: std::any::type_name::<WindowEvents>(),
+            }
+            .into());
+        }
+        if pending.0.len() >= MAX_PENDING_WINDOW_EVENTS {
+            return Err(WindowDriverEventError::CapacityExceeded);
+        }
+        world
+            .resource_mut::<PendingWindowEvents>()
+            .0
+            .push(event.clone());
+        world.resource_mut::<WindowEvents>().push(event);
+        Ok(())
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -287,13 +284,8 @@ mod tests {
     #[derive(Debug, Default, Resource)]
     struct ChangedWindowIds(Vec<WindowId>);
 
-    impl __RuntimeDriverPort for ChangedWindowIds {
-        type Input = ();
-        type Output = ();
-
-        fn apply_driver_input(&mut self, (): Self::Input) {
-            self.0.clear();
-        }
+    fn clear_changed_window_ids(world: &mut World) {
+        world.resource_mut::<ChangedWindowIds>().0.clear();
     }
 
     fn record_changed_windows(
@@ -460,19 +452,17 @@ mod tests {
         app.insert_resource(ChangedWindowIds::default()).unwrap();
         app.add_systems(CoreStage::Update, record_changed_windows)
             .unwrap();
-        let candidate = nara_app::RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(
-                app.seal().unwrap(),
-                nara_app::RuntimeObligationLedger::new(),
-                nara_app::RuntimeClosePolicy::default(),
-            )
-            .unwrap();
+        let candidate = nara_app::RuntimeCandidate::admit(
+            app.seal().unwrap(),
+            nara_app::RuntimeObligationLedger::new(),
+            nara_app::RuntimeClosePolicy::default(),
+        )
+        .unwrap();
         let mut runtime = candidate.complete_startup().unwrap().promote();
         runtime.drive(Duration::ZERO).unwrap();
         runtime
             .with_driver_scope(|scope| {
-                scope.__apply_port::<ChangedWindowIds>(()).unwrap();
+                scope.apply_command(clear_changed_window_ids);
             })
             .map(|outcome| {
                 assert!(outcome.post_operation_fault.is_none());
@@ -523,7 +513,7 @@ mod tests {
         );
         runtime
             .with_driver_scope(|scope| {
-                scope.__apply_port::<ChangedWindowIds>(()).unwrap();
+                scope.apply_command(clear_changed_window_ids);
                 push_window_driver_event(
                     scope,
                     WindowEvent::Resized {

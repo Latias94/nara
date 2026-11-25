@@ -4,7 +4,7 @@ use std::{
     fmt::{self, Debug, Display, Formatter},
 };
 
-use nara_fs::{
+use crate::fs::{
     ContentDigest, DirectoryCapability, DirectoryPublicationBeginError, DirectoryPublicationOrphan,
     DirectoryPublicationOutcome, DirectoryPublicationReceipt, DirectoryPublicationRejection,
     FsError, RelativeComponent, RelativePath,

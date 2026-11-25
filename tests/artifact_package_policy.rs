@@ -169,7 +169,7 @@ fn create_repository_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
     for relative in [
         "LICENSE-MIT",
         "LICENSE-APACHE",
-        "crates/nara_text/assets/FiraSans-LICENSE.txt",
+        "crates/nara_ui/assets/FiraSans-LICENSE.txt",
         "reference-game/README.md",
         "reference-game/CONTROLS.md",
         "reference-game/nara.toml",
@@ -228,7 +228,7 @@ fn package_rejects_a_missing_runtime_ui_prefab() {
 
 #[test]
 fn package_rejects_a_missing_embedded_font_license() {
-    assert_required_package_source_is_fail_closed("crates/nara_text/assets/FiraSans-LICENSE.txt");
+    assert_required_package_source_is_fail_closed("crates/nara_ui/assets/FiraSans-LICENSE.txt");
 }
 
 #[test]

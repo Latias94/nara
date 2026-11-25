@@ -22,13 +22,13 @@ use std::{
 };
 
 use nara_asset::AssetReferenceResolver;
+use nara_core::diagnostic::DiagnosticReport;
 use nara_core::{
     ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, ItemLimit,
     PersistentFileContract, PersistentFileContractError, PersistentFileDecodeError,
     PersistentFileEnvelope, PersistentFileHeader, SerdeShapeLimits, SerdeShapePreflightError,
     decode_persistent_file_with_preflight, preflight_serde_shape,
 };
-use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
     ComponentDecodeContext, ComponentRegistrySnapshot, ComponentValueCost,
     ComponentValueMaterializationLimits,
@@ -818,7 +818,7 @@ struct SceneDocumentWire {
 #[serde(deny_unknown_fields)]
 struct PrefabDocumentWire {
     #[serde(default)]
-    inputs: BTreeSet<nara_identity::ReferenceInputId>,
+    inputs: BTreeSet<nara_ecs::identity::ReferenceInputId>,
     placements: Vec<SceneEntityPlacement>,
     entities: Vec<SceneEntityRecord>,
 }
@@ -837,7 +837,7 @@ trait SceneFilePayload: Clone + Serialize {
         None
     }
 
-    fn reference_inputs(&self) -> Option<&BTreeSet<nara_identity::ReferenceInputId>> {
+    fn reference_inputs(&self) -> Option<&BTreeSet<nara_ecs::identity::ReferenceInputId>> {
         None
     }
 }
@@ -912,7 +912,7 @@ impl SceneFilePayload for PrefabDocument {
         Some((&self.placements, &self.entities))
     }
 
-    fn reference_inputs(&self) -> Option<&BTreeSet<nara_identity::ReferenceInputId>> {
+    fn reference_inputs(&self) -> Option<&BTreeSet<nara_ecs::identity::ReferenceInputId>> {
         Some(&self.inputs)
     }
 }
@@ -1156,8 +1156,8 @@ pub(crate) fn validate_prefab_publication_shape_with_admission<E>(
 
 /// Compares a bounded owned source with its owner's canonical wire spelling, without copying
 /// its tree or allocating an encoded output. The caller admits document/ordering/serializer work.
-#[doc(hidden)]
-pub fn canonical_scene_source_matches(
+#[cfg(test)]
+fn canonical_scene_source_matches(
     document: SceneDocument,
     encoding: SceneFileEncoding,
     expected: &[u8],
@@ -1166,8 +1166,8 @@ pub fn canonical_scene_source_matches(
     canonical_source_matches(document, encoding, expected, limits)
 }
 
-#[doc(hidden)]
-pub fn canonical_prefab_source_matches(
+#[cfg(test)]
+fn canonical_prefab_source_matches(
     document: PrefabDocument,
     encoding: SceneFileEncoding,
     expected: &[u8],
@@ -1176,6 +1176,7 @@ pub fn canonical_prefab_source_matches(
     canonical_source_matches(document, encoding, expected, limits)
 }
 
+#[cfg(test)]
 fn canonical_source_matches<T: SceneFilePayload>(
     mut document: T,
     encoding: SceneFileEncoding,
@@ -1214,12 +1215,14 @@ fn canonical_source_matches<T: SceneFilePayload>(
     Ok(writer.written == expected.len())
 }
 
+#[cfg(test)]
 struct SourceComparisonWriter<'a> {
     expected: &'a [u8],
     written: usize,
     differs: bool,
 }
 
+#[cfg(test)]
 impl Write for SourceComparisonWriter<'_> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         let end = self.written.checked_add(bytes.len());
@@ -1977,6 +1980,7 @@ fn validate_patch_version(patch: &ScenePatchDocument) -> Result<(), SceneFormatE
     })
 }
 
+#[cfg(test)]
 fn validate_encoded_bytes(encoded: &[u8], limits: SceneFileLimits) -> Result<(), SceneFormatError> {
     if encoded.len() > limits.encoded_bytes().get() {
         return Err(SceneFormatError::EncodedBytesExceeded {

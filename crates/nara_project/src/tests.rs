@@ -1,11 +1,12 @@
 use super::*;
-use nara_app::{FixedCatchUpPolicy, FixedTime};
-use nara_diagnostic::{
-    Diagnostic, DiagnosticFieldClass, DiagnosticValueRef, MAX_RUNTIME_DIAGNOSTIC_ENTRIES,
-};
-use nara_tasks::{
+use nara_app::tasks::{
     MAX_TASK_POOL_PENDING_PER_KIND, MAX_TASK_POOL_PENDING_TOTAL, MAX_TASK_POOL_THREADS_PER_KIND,
     MAX_TASK_POOL_THREADS_TOTAL, MAX_TASK_SHUTDOWN_PHASE_TIMEOUT, TaskPoolKind,
+};
+use nara_app::{FixedCatchUpPolicy, FixedTime};
+use nara_core::diagnostic::{
+    DiagnosticFieldClass, DiagnosticValueRef, MAX_RUNTIME_DIAGNOSTIC_ENTRIES,
+    ReportDiagnostic as Diagnostic,
 };
 use std::time::Duration;
 

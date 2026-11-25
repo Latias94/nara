@@ -3,14 +3,14 @@ use std::sync::Arc;
 
 use nara_render::RenderTarget;
 use nara_render::hud::{UiPacketPrimitive, UiPaintPacket, UiPreparedImages, UiPresentationPlanner};
-use nara_text::{
-    TextDirection, TextEditor, TextEngine, TextPaintSnapshot, TextTypography, bundled_font_face,
-};
-use nara_ui_kernel::{
+use nara_ui::kernel::{
     UiAuthoringSnapshotBuilder, UiCompiler, UiEnvironment, UiLayer, UiLocalKey, UiNode, UiOverflow,
     UiPaintPrimitive, UiPoint, UiPreparedText, UiRect, UiRoot, UiRootKey, UiSafeAreaInsets, UiSize,
     UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId, UiText, UiTextOverflow,
     UiTheme,
+};
+use nara_ui::text::{
+    TextDirection, TextEditor, TextEngine, TextPaintSnapshot, TextTypography, bundled_font_face,
 };
 use nara_window::WindowId;
 

@@ -6,17 +6,11 @@
 
 use std::io::{self, Write};
 
-use nara::{
-    core::{ByteLimit, DepthLimit, ItemLimit, SerdeShapeLimits, preflight_serde_shape},
-    gameplay::{
-        GameplayCommandEnvelope, GameplayCommandKey, GameplayCommandSource,
-        MAX_GAMEPLAY_COMMAND_ID_BYTES,
-    },
-};
+use nara::core::{ByteLimit, DepthLimit, ItemLimit, SerdeShapeLimits, preflight_serde_shape};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    command::SemanticCommand,
+    command::{CommandKey, CommandSource, ScheduledCommand, SemanticCommand},
     resume::{
         GameClock, LevelContentStamp, PlayerState, ResumeCompatibility, ResumeState,
         RuntimeTimeState, SessionCounters, encode_resume,
@@ -141,16 +135,16 @@ impl RecordedState {
 #[serde(deny_unknown_fields)]
 pub struct RecordedCommand {
     pub command: SemanticCommand,
-    pub original: GameplayCommandKey,
+    pub original: CommandKey,
 }
 
 impl RecordedCommand {
     /// Extracts the exact supported semantics from an actual recording Capture envelope.
-    pub(crate) fn from_envelope(envelope: &GameplayCommandEnvelope) -> Result<Self, String> {
-        validate_source(envelope.key())?;
+    pub(crate) fn from_scheduled(command: &ScheduledCommand) -> Result<Self, String> {
+        validate_source(command.key())?;
         Ok(Self {
-            command: SemanticCommand::from_envelope(envelope)?,
-            original: envelope.key().clone(),
+            command: SemanticCommand::from_scheduled(command)?,
+            original: command.key().clone(),
         })
     }
 }
@@ -306,11 +300,9 @@ fn validate_commands<'a>(
     Ok(())
 }
 
-fn validate_source(key: &GameplayCommandKey) -> Result<(), String> {
+fn validate_source(key: &CommandKey) -> Result<(), String> {
     match key.source() {
-        GameplayCommandSource::External { producer } if producer.as_str() == RECORDING_SOURCE => {
-            Ok(())
-        }
+        CommandSource::External { producer } if producer.as_str() == RECORDING_SOURCE => Ok(()),
         _ => Err(format!(
             "recording commands require the External producer {RECORDING_SOURCE}"
         )),
@@ -327,7 +319,7 @@ fn preflight(bytes: &[u8], maximum: usize) -> Result<(), String> {
         DepthLimit::new(16).expect("the replay depth limit is non-zero"),
         ItemLimit::new(maximum).expect("the replay node limit is non-zero"),
         ItemLimit::new(MAX_STEPS).expect("the replay container limit is non-zero"),
-        ByteLimit::new(MAX_GAMEPLAY_COMMAND_ID_BYTES).expect("the replay string limit is non-zero"),
+        ByteLimit::new(256).expect("the replay string limit is non-zero"),
         ByteLimit::new(maximum).expect("the replay total string limit is non-zero"),
     );
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);

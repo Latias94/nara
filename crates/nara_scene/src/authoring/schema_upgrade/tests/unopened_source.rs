@@ -4,7 +4,7 @@ use crate::{
     PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityTarget,
     PrefabInstance, PrefabInstanceClaim, PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent,
 };
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, EntityReference, PrefabEntityOrigin, PrefabInstanceHop,
 };
 
@@ -136,7 +136,7 @@ fn unopened_prefab_admission_preserves_declared_inputs_through_the_scene_project
     let mut document = PrefabDocument::new(scene.placements, scene.entities);
     document
         .inputs
-        .insert(nara_identity::ReferenceInputId::new("external-target").unwrap());
+        .insert(nara_ecs::identity::ReferenceInputId::new("external-target").unwrap());
     let candidate =
         PrefabDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
             .unwrap();

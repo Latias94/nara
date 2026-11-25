@@ -9,13 +9,6 @@ use nara::{
 
 use crate::snapshot::WaveOutcome;
 
-pub(crate) const MOVE_COMMAND_TYPE: &str = "reference-game.move-v2";
-pub(crate) const MOVE_X_FIELD: &str = "x";
-pub(crate) const MOVE_Y_FIELD: &str = "y";
-pub(crate) const MOVE_PRESSED_FIELD: &str = "pressed";
-pub(crate) const RETRY_COMMAND_TYPE: &str = "reference-game.retry-v1";
-pub(crate) const RETRY_UI_ACTION_SEQUENCE_FIELD: &str = "ui_action_sequence";
-pub(crate) const COMMAND_SOURCE: &str = "reference-game.bundled";
 pub(crate) const PROJECTILE_TTL_TICKS: u64 = 64;
 pub(crate) const ENEMY_CONTACT_DAMAGE: i64 = 10;
 pub(crate) const KILL_SCORE: u64 = 100;
@@ -96,29 +89,6 @@ impl fmt::Display for RetryCommandError {
 }
 
 impl Error for RetryCommandError {}
-
-impl MovementDirection {
-    pub(crate) const fn velocity(self) -> (i64, i64) {
-        match self {
-            Self::Left => (-1, 0),
-            Self::Right => (1, 0),
-            Self::Up => (0, 1),
-            Self::Down => (0, -1),
-            Self::Stop => (0, 0),
-        }
-    }
-
-    pub(crate) const fn from_velocity(x: i64, y: i64) -> Option<Self> {
-        match (x, y) {
-            (-1, 0) => Some(Self::Left),
-            (1, 0) => Some(Self::Right),
-            (0, 1) => Some(Self::Up),
-            (0, -1) => Some(Self::Down),
-            (0, 0) => Some(Self::Stop),
-            _ => None,
-        }
-    }
-}
 
 #[derive(Debug, Default, Clone, Resource)]
 pub(crate) struct MovementIntent {

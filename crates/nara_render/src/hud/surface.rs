@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
 use crate::RenderTarget;
-use nara_text::FontFace;
-use nara_ui_kernel::{
-    __private::{UiFrameJournalAuthority, new_hosted_frame_journal},
-    UiFrame, UiFrameJournal, UiJournalError, UiLimits, UiPresentationReceipt, UiSurfaceId,
-    UiSurfaceRetirementToken,
+use nara_ui::kernel::{
+    UiFrame, UiFrameJournal, UiFrameJournalAuthority, UiJournalError, UiLimits,
+    UiPresentationReceipt, UiSurfaceId, UiSurfaceRetirementToken,
 };
+use nara_ui::text::FontFace;
 use thiserror::Error;
 
 use crate::hud::{
@@ -123,7 +122,7 @@ impl UiSurfacePresenter {
         limits: UiLimits,
         presentation_limits: UiPresentationLimits,
     ) -> Result<Self, UiSurfacePresentationError> {
-        let (mut journal, authority) = new_hosted_frame_journal(limits)?;
+        let (mut journal, authority) = UiFrameJournal::new_hosted(limits)?;
         journal.install_surface(surface, slot_generation)?;
         Ok(Self {
             surface,

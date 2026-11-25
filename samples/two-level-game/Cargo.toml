@@ -12,9 +12,8 @@ project-tool-protocol = 1
 resolver = "3"
 
 [dependencies]
-nara = { path = "../..", default-features = false, features = ["runtime-core", "serde"] }
-nara_gilrs = { path = "../../crates/nara_gilrs", optional = true }
-nara_rapier2d = { path = "../../crates/nara_rapier2d" }
+nara = { path = "../..", default-features = false, features = ["project-runtime", "serde"] }
+nara_physics2d = { path = "../../crates/nara_physics2d" }
 nara_render = { path = "../../crates/nara_render", features = ["animation"], optional = true }
 notify = { version = "=8.2.0", optional = true }
 serde = { version = "1", features = ["derive"] }
@@ -51,7 +50,7 @@ audio-cpal = ["local-player", "dep:cpal", "dep:rtrb"]
 desktop = ["local-player", "nara/presentation-2d", "nara/desktop-winit", "nara/render-wgpu", "dep:wgpu"]
 play-flow = ["desktop", "nara/presentation-ui"]
 play-flow-check = ["development", "play-flow", "dep:windows-sys"]
-gamepad = ["desktop", "dep:nara_gilrs"]
+gamepad = ["desktop", "nara/gamepad"]
 cost-measurement = ["dep:windows-sys"]
 scene-work-observation = ["nara/scene-work-observation", "dep:tracing", "dep:tracing-subscriber"]
 cook = ["local-player", "nara/project-tooling"]

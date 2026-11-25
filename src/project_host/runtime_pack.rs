@@ -2,7 +2,7 @@
 
 use std::io;
 
-use nara_fs::{FsError, FsOperation, RelativePath};
+use crate::fs::{FsError, FsOperation, RelativePath};
 
 use crate::{
     ProductRecipe,

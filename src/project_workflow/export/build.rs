@@ -2,7 +2,7 @@
 use std::array;
 use std::{fmt, sync::Arc};
 
-use nara_fs::{
+use crate::fs::{
     ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, RelativePath,
 };
 

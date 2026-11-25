@@ -14,6 +14,7 @@ use std::{
 use nara_app::{App, CoreStage, RuntimeInstance, StartupStage};
 use nara_asset::{AssetRecord, AssetSourceKind, AssetSourcePath, ProjectAssetDatabase};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
+use nara_ecs::identity::{EntityLookup, EntityReference, SpawnedSceneInstance};
 use nara_ecs::{
     Component, Entity, Resource, World,
     bevy_ecs::{
@@ -21,7 +22,6 @@ use nara_ecs::{
         observer::On,
     },
 };
-use nara_identity::{EntityLookup, EntityReference, SpawnedSceneInstance};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistryBuilder, ComponentRegistryPlugin, ComponentSchema, ComponentSchemaCatalog,

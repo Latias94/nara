@@ -4,9 +4,9 @@ use std::{
 };
 
 use nara_reflect::{
-    __private::{effective_component_value_with_default_overrides, freeze_component_defaults},
     ComponentCapability, ComponentFieldPath, ComponentFieldSchema, ComponentSchema,
     ComponentValueKind, ComponentValueShape,
+    effective::{effective_component_value_with_default_overrides, freeze_component_defaults},
 };
 
 use super::*;

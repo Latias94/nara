@@ -5,10 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use nara::{
-    gameplay::{GameplayCommandSource, GameplayCommandSubmission},
-    project_host::HeadlessSessionError,
-};
+use crate::command::CommandSubmitError;
 
 use super::*;
 
@@ -20,22 +17,21 @@ fn playback_refuses_competing_ingress_before_the_original_game_consumes_it() {
         |game| {
             let before = game.capture()?;
             for source in [
-                GameplayCommandIngressSource::external("unexpected.external").unwrap(),
-                GameplayCommandIngressSource::test("unexpected.test").unwrap(),
-                GameplayCommandIngressSource::ai("unexpected.ai").unwrap(),
-                GameplayCommandIngressSource::replay("unexpected.replay").unwrap(),
+                CommandSource::external("unexpected.external").unwrap(),
+                CommandSource::test("unexpected.test").unwrap(),
+                CommandSource::replay("unexpected.replay").unwrap(),
+                CommandSource::LocalAction,
             ] {
-                let result = game.session.submit(GameplayCommandSubmission::new(
-                    GameplayCommandTick::new(1).unwrap(),
+                let result = ScheduledCommand::new(
+                    CommandTick::new(1).unwrap(),
                     source,
-                    GameplayCommandSourceSequence::new(1).unwrap(),
-                    SemanticCommand::Marker.draft(),
-                ));
-                assert!(matches!(
-                    result,
-                    Err(HeadlessSessionError::CommandRejected(_))
-                ));
+                    CommandSequence::new(1).unwrap(),
+                    SemanticCommand::Marker.intent(),
+                )
+                .submit_headless(&mut game.session);
+                assert!(matches!(result, Err(CommandSubmitError::Rejected(_))));
             }
+            game.session.frame(Duration::ZERO).map_err(runtime_error)?;
             assert_eq!(
                 crate::resume::encode_resume(&game.capture()?).unwrap(),
                 crate::resume::encode_resume(&before).unwrap()
@@ -45,7 +41,7 @@ fn playback_refuses_competing_ingress_before_the_original_game_consumes_it() {
             assert_eq!(consumed.len(), 1);
             assert_eq!(
                 consumed[0].source(),
-                &GameplayCommandSource::replay(REPLAY_SOURCE).unwrap()
+                &CommandSource::replay(REPLAY_SOURCE).unwrap()
             );
             assert_eq!(after.progress.markers.len(), 1);
             Ok(())

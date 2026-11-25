@@ -17,10 +17,10 @@ use nara_reflect::{
     ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, PrefabAuthoringSession,
-    PrefabDocument, PrefabDocumentCandidate, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneFileLimits,
-    ScenePatchDocument, ScenePatchOperation,
+    AuthoringDocumentSource, PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
+    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityRecord, SceneFileLimits, ScenePatchDocument, ScenePatchOperation,
+    authoring::AuthoringAdapterReceipt,
 };
 
 const POPULATION: usize = 4_096;

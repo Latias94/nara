@@ -296,7 +296,7 @@ pub(super) fn action_map_string_bytes(
     definition: &ActionMapDefinition,
     admitted_kind: &str,
 ) -> usize {
-    use crate::{KeyCode, MouseButton};
+    use crate::MouseButton;
 
     let header = [
         "kind",
@@ -330,20 +330,7 @@ pub(super) fn action_map_string_bytes(
             + binding.action.as_str().len()
             + binding.context.as_str().len();
         bytes += match binding.input {
-            InputBinding::Key(key) => {
-                "Key".len()
-                    + match key {
-                        KeyCode::Escape => "Escape".len(),
-                        KeyCode::Space => "Space".len(),
-                        KeyCode::Enter => "Enter".len(),
-                        KeyCode::ArrowUp => "ArrowUp".len(),
-                        KeyCode::ArrowDown => "ArrowDown".len(),
-                        KeyCode::ArrowLeft => "ArrowLeft".len(),
-                        KeyCode::ArrowRight => "ArrowRight".len(),
-                        KeyCode::Character(character) => "Character".len() + character.len_utf8(),
-                        KeyCode::IntlBackslash => "IntlBackslash".len(),
-                    }
-            }
+            InputBinding::Key(key) => "Key".len() + key.serialized_string_bytes(),
             InputBinding::Mouse(button) => {
                 "Mouse".len()
                     + match button {

@@ -1,6 +1,6 @@
 use std::fmt::{self, Debug, Formatter};
 
-use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, FsError, RelativePath};
+use crate::fs::{ContentDigest, DirectoryCapability, FileIdentity, FsError, RelativePath};
 use thiserror::Error;
 
 /// The selected checkout and publication parent, relative to one shared authority.
@@ -191,7 +191,6 @@ impl NaraDependencySourceError {
 
 pub(crate) struct PreparedDependency {
     pub(crate) manifest_fragment: String,
-    pub(crate) creation_command_arguments: String,
     pub(crate) receipt: NaraDependencyReceipt,
     pub(crate) revalidation: PreparedDependencyRevalidation,
 }
@@ -295,13 +294,8 @@ pub(crate) fn prepare_dependency(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let cargo_path = relative_checkout_coordinate(parent_depth + 1, &checkout_components);
-            let author_checkout = relative_checkout_coordinate(parent_depth, &checkout_components);
             Ok(PreparedDependency {
                 manifest_fragment: format!("path = {}", toml::Value::String(cargo_path.clone())),
-                creation_command_arguments: format!(
-                    "--local-checkout '{}'",
-                    author_checkout.replace('\'', "''")
-                ),
                 receipt: NaraDependencyReceipt {
                     inner: NaraDependencyReceiptInner::LocalCheckout {
                         checkout_identity: checkout.identity(),
@@ -321,7 +315,6 @@ pub(crate) fn prepare_dependency(
             revision,
         } => Ok(PreparedDependency {
             manifest_fragment: format!("git = \"{repository}\", rev = \"{revision}\""),
-            creation_command_arguments: format!("--git {repository} --rev {revision}"),
             receipt: NaraDependencyReceipt {
                 inner: NaraDependencyReceiptInner::ImmutableGit {
                     repository_digest: ContentDigest::of_bytes(repository.as_bytes()),

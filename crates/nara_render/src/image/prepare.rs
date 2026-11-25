@@ -1,18 +1,15 @@
 use std::{
     collections::BTreeMap,
     fmt::{self, Debug, Formatter},
-    sync::Arc,
 };
 
 use crate::{
     RenderResourceContentHash, RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
 };
+use nara_asset::image::ImagePixels;
 use nara_asset::{AssetSlotRevision, AssetStates, AssetVersion, Assets, Handle};
 
-use crate::image::{
-    ImageAsset, ImageColorSpace, ImageContentHash, ImageExtent, ImageFormat,
-    asset::ImagePixelRetention,
-};
+use crate::image::{ImageAsset, ImageColorSpace, ImageContentHash, ImageExtent, ImageFormat};
 
 #[cfg(all(feature = "image-runtime", feature = "render-prepare"))]
 pub(crate) mod runtime;
@@ -23,8 +20,7 @@ pub struct PreparedImageResource {
     format: ImageFormat,
     color_space: ImageColorSpace,
     content_hash: ImageContentHash,
-    pixels: Arc<Box<[u8]>>,
-    retention: Option<ImagePixelRetention>,
+    pixels: ImagePixels,
 }
 
 impl PreparedImageResource {
@@ -36,7 +32,6 @@ impl PreparedImageResource {
             color_space: image.color_space(),
             content_hash: image.content_hash(),
             pixels: image.shared_pixels(),
-            retention: image.shared_pixel_retention(),
         }
     }
 
@@ -62,18 +57,18 @@ impl PreparedImageResource {
 
     #[must_use]
     pub fn pixel_len(&self) -> usize {
-        self.pixels.len()
+        self.pixels().len()
     }
 
     #[must_use]
     pub fn pixels(&self) -> &[u8] {
-        self.pixels.as_ref().as_ref()
+        self.pixels.as_slice()
     }
 
     /// Reports whether this snapshot retains the image allocation's lifetime owner or lease.
     #[must_use]
     pub const fn has_retention_owner(&self) -> bool {
-        self.retention.is_some()
+        self.pixels.has_retention_owner()
     }
 }
 
@@ -85,8 +80,8 @@ impl Debug for PreparedImageResource {
             .field("format", &self.format)
             .field("color_space", &self.color_space)
             .field("content_hash", &self.content_hash)
-            .field("pixel_len", &self.pixels.len())
-            .field("has_retention_owner", &self.retention.is_some())
+            .field("pixel_len", &self.pixel_len())
+            .field("has_retention_owner", &self.has_retention_owner())
             .finish()
     }
 }
@@ -98,7 +93,7 @@ impl PartialEq for PreparedImageResource {
             && self.color_space == other.color_space
             && self.content_hash == other.content_hash
             && self.pixels == other.pixels
-            && self.retention.is_some() == other.retention.is_some()
+            && self.has_retention_owner() == other.has_retention_owner()
     }
 }
 

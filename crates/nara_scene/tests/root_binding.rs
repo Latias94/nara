@@ -4,18 +4,18 @@ use std::collections::BTreeMap;
 
 use nara_asset::AssetRef;
 use nara_core::ItemLimit;
-use nara_diagnostic::DiagnosticValueRef;
-use nara_ecs::{Component, Entity, World};
-use nara_hierarchy::{Children, HierarchyRoots, Parent};
-use nara_identity::{
+use nara_core::diagnostic::DiagnosticValueRef;
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityLookup, EntityReference,
     ReferenceInputId, SpawnedSceneInstance, WorldIdentityDomain,
 };
+use nara_ecs::{Component, Entity, World};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentPropertyPath, ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchema,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
+use nara_scene::hierarchy::{ChildOf, Children, HierarchyRoots};
 use nara_scene::{
     CompiledSceneDocument, CompiledSceneEntity, InMemoryPrefabSourceResolver, PrefabAddition,
     PrefabComponentIntent, PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance,
@@ -480,14 +480,14 @@ fn assert_native_spawn(document: CompiledSceneDocument, registry: &ComponentRegi
         assert_eq!(
             world
                 .get::<Children>(runtime)
-                .map_or(&[][..], Children::as_slice),
+                .map_or(&[][..], |children| &children[..]),
             children.as_slice(),
         );
         for child in children {
-            assert_eq!(world.get::<Parent>(child).unwrap().parent(), runtime);
+            assert_eq!(world.get::<ChildOf>(child).unwrap().parent(), runtime);
         }
         if document.roots().contains(compiled.id()) {
-            assert!(world.get::<Parent>(runtime).is_none());
+            assert!(world.get::<ChildOf>(runtime).is_none());
         }
         if let Some(position) = compiled.components().get(&position_type()) {
             assert_eq!(

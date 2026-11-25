@@ -1,10 +1,15 @@
-use nara_app::{__RuntimeDriverPort, RuntimeState};
+use std::any::type_name;
+
+use nara_app::{
+    App, RuntimeFault, RuntimeFaultKind, RuntimeInstance, RuntimeState, RuntimeWorldAccessError,
+};
 use nara_core::Vec2;
 
+use super::driver::accepts_driver_input;
 use super::*;
 use crate::{
-    ActionMaps, ButtonDriverInput, ButtonTransitionPhase, InputBinding, KeyCode, MouseButton,
-    PointerDriverInput, semantic::ActionStaging,
+    ActionMaps, ButtonDriverInput, ButtonInputDriverError, ButtonTransitionPhase, InputBinding,
+    InputPlugin, KeyCode, MouseButton, PointerDriverInput, semantic::ActionStaging,
 };
 
 fn slot_generation(value: u64) -> InputSlotGeneration {
@@ -210,31 +215,87 @@ fn endpoint_observation_never_creates_or_revives_a_retired_endpoint() {
 
 #[test]
 fn fault_retirement_admits_only_surface_retirement_input() {
-    let retired = __InputDriverEvent::Window {
-        window: InputWindowId::new(1),
-        seat: InputSeatId::PRIMARY,
-        event: InputWindowEvent::SurfaceRetired,
-    };
-    let focused = __InputDriverEvent::Window {
-        window: InputWindowId::new(1),
-        seat: InputSeatId::PRIMARY,
-        event: InputWindowEvent::Focused(false),
-    };
-
     for state in [
         RuntimeState::Faulted,
         RuntimeState::Stopping,
         RuntimeState::CloseIncomplete,
     ] {
-        assert!(<InputTimeline as __RuntimeDriverPort>::accepts_driver_input(state, &retired));
-        assert!(!<InputTimeline as __RuntimeDriverPort>::accepts_driver_input(state, &focused));
+        assert!(accepts_driver_input(state, true));
+        assert!(!accepts_driver_input(state, false));
     }
+    assert!(accepts_driver_input(RuntimeState::Running, false));
+    assert!(accepts_driver_input(RuntimeState::Paused, false));
+    assert!(!accepts_driver_input(RuntimeState::Stopped, true));
+
+    let window = InputWindowId::UNSPECIFIED;
+    let seat = InputSeatId::PRIMARY;
+    let mut app = App::new();
+    app.add_plugin(InputPlugin).unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    let press = runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Enter))
+        })
+        .unwrap();
+    assert!(press.post_operation_fault.is_none());
+    press.output.unwrap();
+    let fault = RuntimeFault::engine(RuntimeFaultKind::System, "input-test");
+    assert!(runtime.fault_reporter().report(fault));
+    let retirement = runtime
+        .with_driver_scope(|scope| {
+            let unavailable =
+                ButtonInputDriverError::WorldAccess(RuntimeWorldAccessError::Unavailable {
+                    state: RuntimeState::Faulted,
+                });
+            assert_eq!(
+                apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Space)),
+                Err(unavailable),
+            );
+            assert_eq!(
+                apply_window_input_driver_event(
+                    scope,
+                    window,
+                    seat,
+                    InputWindowEvent::Focused(false)
+                ),
+                Err(unavailable),
+            );
+            apply_window_input_driver_event(scope, window, seat, InputWindowEvent::SurfaceRetired)
+        })
+        .unwrap();
+    assert!(retirement.post_operation_fault.is_none());
+    let (admission, released, mouse) = retirement.output.unwrap();
+    assert_eq!(admission.admitted(), 2);
+    assert_eq!(released, [KeyCode::Enter]);
+    assert!(mouse.is_empty());
     assert!(
-        <InputTimeline as __RuntimeDriverPort>::accepts_driver_input(
-            RuntimeState::Running,
-            &focused,
-        )
+        runtime
+            .world()
+            .resource::<InputTimeline>()
+            .endpoint_observation(window, seat)
+            .is_none()
     );
+    assert!(runtime.finish().is_err());
+}
+
+#[test]
+fn driver_reports_missing_timeline_without_installing_one() {
+    let mut runtime = RuntimeInstance::start(App::new()).unwrap();
+    let outcome = runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Enter))
+        })
+        .unwrap();
+    assert!(outcome.post_operation_fault.is_none());
+    assert_eq!(
+        outcome.output,
+        Err(RuntimeWorldAccessError::MissingResource {
+            type_name: type_name::<InputTimeline>()
+        }
+        .into())
+    );
+    assert!(!runtime.world().contains_resource::<InputTimeline>());
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -432,7 +493,7 @@ fn prepared_route_reserves_the_endpoint_without_changing_active_authority() {
         .publish_presented_route(route(window, surface, seat, 1))
         .unwrap();
     let next_route = route(window, surface, seat, 2);
-    let prepared = prepare_presented_route(&mut timeline, next_route).unwrap();
+    let prepared = timeline.prepare_presented_route(next_route).unwrap();
 
     assert_eq!(
         timeline.publish_presented_route(next_route),
@@ -468,8 +529,7 @@ fn prepared_route_reserves_the_endpoint_without_changing_active_authority() {
     );
     assert_eq!(moved.admitted(), 1);
 
-    let InputRouteCommit::Published(committed) = commit_presented_route(&mut timeline, prepared)
-    else {
+    let InputRouteCommit::Published(committed) = timeline.commit_presented_route(prepared) else {
         panic!("an uninterrupted reservation must publish");
     };
     assert_eq!(
@@ -520,14 +580,12 @@ fn prepared_platform_loss_is_reported_without_rearming_the_route() {
         let mut timeline = published_timeline();
         let window = InputWindowId::new(1);
         let seat = InputSeatId::PRIMARY;
-        let prepared = prepare_presented_route(
-            &mut timeline,
-            route(window, InputSurfaceId::new(7), seat, 12),
-        )
-        .unwrap();
+        let prepared = timeline
+            .prepare_presented_route(route(window, InputSurfaceId::new(7), seat, 12))
+            .unwrap();
         timeline.admit_window_event(window, seat, event).unwrap();
         assert!(matches!(
-            commit_presented_route(&mut timeline, prepared),
+            timeline.commit_presented_route(prepared),
             InputRouteCommit::Invalidated { reason: actual } if actual == reason
         ));
         assert_eq!(
@@ -549,20 +607,18 @@ fn prepared_platform_loss_is_reported_without_rearming_the_route() {
 }
 
 #[test]
-fn aborted_and_superseded_route_reservations_release_the_endpoint() {
+fn aborting_a_route_reservation_releases_the_endpoint() {
     let mut timeline = InputTimeline::default();
     let window = InputWindowId::new(32);
     let seat = InputSeatId::PRIMARY;
     timeline.connect_endpoint(window, seat).unwrap();
     let declaration = route(window, InputSurfaceId::new(42), seat, 1);
-    let aborted = prepare_presented_route(&mut timeline, declaration).unwrap();
+    let aborted = timeline.prepare_presented_route(declaration).unwrap();
     timeline
         .admit_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Enter))
         .unwrap();
     assert!(!timeline.entries().last().unwrap().route().is_ui_routable());
-    abort_presented_route(&mut timeline, aborted);
-    let superseded = prepare_presented_route(&mut timeline, declaration).unwrap();
-    supersede_presented_route(&mut timeline, superseded);
+    timeline.abort_presented_route(aborted);
     let published = timeline.publish_presented_route(declaration).unwrap();
     assert_eq!(published.surface(), Some(declaration.surface()));
 }
@@ -575,11 +631,9 @@ fn prepared_routes_use_connected_capacity_until_their_retirement_is_drained() {
     let replacement = InputWindowId::new(101);
     let seat = InputSeatId::PRIMARY;
     timeline.connect_endpoint(window, seat).unwrap();
-    let prepared = prepare_presented_route(
-        &mut timeline,
-        route(window, InputSurfaceId::new(100), seat, 1),
-    )
-    .unwrap();
+    let prepared = timeline
+        .prepare_presented_route(route(window, InputSurfaceId::new(100), seat, 1))
+        .unwrap();
     assert_eq!(
         timeline.connect_endpoint(replacement, seat),
         Err(InputIngressError::EndpointCapacityExceeded { limit: 2 })
@@ -596,15 +650,13 @@ fn prepared_routes_use_connected_capacity_until_their_retirement_is_drained() {
         timeline.connect_endpoint(replacement, seat),
         Err(InputIngressError::EndpointCapacityExceeded { limit: 2 })
     );
-    abort_presented_route(&mut timeline, prepared);
+    timeline.abort_presented_route(prepared);
     drain_unmapped(&mut timeline);
     timeline.connect_endpoint(replacement, seat).unwrap();
-    let reusable = prepare_presented_route(
-        &mut timeline,
-        route(replacement, InputSurfaceId::new(101), seat, 1),
-    )
-    .unwrap();
-    abort_presented_route(&mut timeline, reusable);
+    let reusable = timeline
+        .prepare_presented_route(route(replacement, InputSurfaceId::new(101), seat, 1))
+        .unwrap();
+    timeline.abort_presented_route(reusable);
 }
 
 #[test]
@@ -618,13 +670,13 @@ fn prepared_route_rejects_regression_and_exhaustion_without_reserving_the_endpoi
         .publish_presented_route(route(window, surface, seat, 5))
         .unwrap();
     assert!(matches!(
-        prepare_presented_route(&mut timeline, route(window, surface, seat, 4)),
+        timeline.prepare_presented_route(route(window, surface, seat, 4)),
         Err(InputIngressError::PresentedRouteRegression { window: actual_window, seat: actual_seat })
             if actual_window == window && actual_seat == seat
     ));
     timeline.next_binding_generation = u64::MAX;
     assert!(matches!(
-        prepare_presented_route(&mut timeline, route(window, surface, seat, 6)),
+        timeline.prepare_presented_route(route(window, surface, seat, 6)),
         Err(InputIngressError::RouteBindingGenerationExhausted)
     ));
     timeline
@@ -1097,7 +1149,7 @@ fn retirement_releases_follow_the_consumer_that_received_each_press() {
         if consumed {
             for admission in [key, mouse] {
                 timeline
-                    .__finalize_ui_entry(
+                    .finalize_ui_entry(
                         admission.first_sequence().unwrap(),
                         InputUiDisposition::Consumed,
                     )
@@ -1377,7 +1429,7 @@ fn independent_cursors_and_ui_consumption_preserve_paused_action_edges() {
     assert_eq!(timeline.cursors().observation(), 3);
     assert_eq!(timeline.cursors().ui(), 1);
     timeline
-        .__finalize_ui_entry(
+        .finalize_ui_entry(
             pressed.first_sequence().unwrap(),
             InputUiDisposition::Consumed,
         )
@@ -1634,7 +1686,7 @@ fn invalidated_prepared_route_cannot_be_overwritten_before_its_exact_token_finis
         )
         .unwrap();
     drain_unmapped(&mut timeline);
-    let first = prepare_presented_route(&mut timeline, exact).unwrap();
+    let first = timeline.prepare_presented_route(exact).unwrap();
     timeline
         .admit_pointer(
             window,
@@ -1644,22 +1696,22 @@ fn invalidated_prepared_route_cannot_be_overwritten_before_its_exact_token_finis
         )
         .unwrap();
     assert_eq!(
-        prepared_route_invalidation(&timeline, &first),
+        timeline.prepared_route_invalidation(&first),
         Some(InputInvalidationReason::PointerLeft)
     );
     assert!(matches!(
-        prepare_presented_route(&mut timeline, exact),
+        timeline.prepare_presented_route(exact),
         Err(InputIngressError::RouteReservationConflict { .. })
     ));
     assert_eq!(
-        commit_presented_route(&mut timeline, first),
+        timeline.commit_presented_route(first),
         InputRouteCommit::Invalidated {
             reason: InputInvalidationReason::PointerLeft
         }
     );
-    let second = prepare_presented_route(&mut timeline, exact).unwrap();
+    let second = timeline.prepare_presented_route(exact).unwrap();
     assert!(matches!(
-        commit_presented_route(&mut timeline, second),
+        timeline.commit_presented_route(second),
         InputRouteCommit::Published(_)
     ));
 }
@@ -1673,11 +1725,9 @@ fn invalidated_first_route_refunds_unused_geometry_before_reusing_exact_capacity
     timeline
         .connect_pointer(window, seat, InputPointerId::PRIMARY)
         .unwrap();
-    let prepared = prepare_presented_route(
-        &mut timeline,
-        route(window, InputSurfaceId::new(7), seat, 1),
-    )
-    .unwrap();
+    let prepared = timeline
+        .prepare_presented_route(route(window, InputSurfaceId::new(7), seat, 1))
+        .unwrap();
     timeline
         .admit_pointer(
             window,
@@ -1695,7 +1745,7 @@ fn invalidated_first_route_refunds_unused_geometry_before_reusing_exact_capacity
         )
         .unwrap();
     assert_eq!(
-        commit_presented_route(&mut timeline, prepared),
+        timeline.commit_presented_route(prepared),
         InputRouteCommit::Invalidated {
             reason: InputInvalidationReason::PointerLeft
         }
@@ -1727,7 +1777,7 @@ fn coordinated_endpoint_claim_cannot_retire_a_reconnected_unrouted_replacement()
     let window = InputWindowId::new(1);
     let seat = InputSeatId::PRIMARY;
     timeline.connect_endpoint(window, seat).unwrap();
-    let original = claim_input_endpoint(&timeline, window, seat).unwrap();
+    let original = timeline.claim_endpoint(window, seat).unwrap();
     timeline
         .admit_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Enter))
         .unwrap();
@@ -1739,7 +1789,7 @@ fn coordinated_endpoint_claim_cannot_retire_a_reconnected_unrouted_replacement()
     timeline
         .connect_endpoint(window, seat)
         .expect("an old identity claim does not pin the mutable endpoint slot");
-    let replacement = claim_input_endpoint(&timeline, window, seat).unwrap();
+    let replacement = timeline.claim_endpoint(window, seat).unwrap();
     let press = timeline
         .admit_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Enter))
         .unwrap();
@@ -1747,24 +1797,23 @@ fn coordinated_endpoint_claim_cannot_retire_a_reconnected_unrouted_replacement()
     let cursors = timeline.cursors();
     let credits = timeline.capacity.obligations();
     assert!(
-        retire_claimed_endpoint(&mut timeline, &original, None)
+        timeline
+            .retire_claimed_endpoint(&original, None)
             .unwrap()
             .admission()
             .is_ignored()
     );
-    unbind_claimed_endpoint(&mut timeline, &original, None).unwrap();
+    timeline.unbind_claimed_endpoint(&original, None).unwrap();
     assert_eq!(timeline.cursors(), cursors);
     assert_eq!(timeline.capacity.obligations(), credits);
     assert_eq!(timeline.retained_len(), 0);
     assert!(matches!(
-        prepare_claimed_route(
-            &mut timeline,
-            &original,
-            route(window, InputSurfaceId::new(7), seat, 1)
-        ),
+        timeline.prepare_claimed_route(&original, route(window, InputSurfaceId::new(7), seat, 1)),
         Err(InputIngressError::EndpointClaimExpired { .. })
     ));
-    let retirement = retire_claimed_endpoint(&mut timeline, &replacement, None).unwrap();
+    let retirement = timeline
+        .retire_claimed_endpoint(&replacement, None)
+        .unwrap();
     assert_eq!(retirement.released_keys(), [KeyCode::Enter]);
     assert_eq!(
         timeline.entries().next().unwrap().press_sequence(),
@@ -1778,21 +1827,21 @@ fn endpoint_claim_refuses_a_foreign_owner_and_a_conflicting_live_route() {
     let mut second = InputTimeline::default();
     let window = InputWindowId::UNSPECIFIED;
     let seat = InputSeatId::PRIMARY;
-    let claim = claim_input_endpoint(&first, window, seat).unwrap();
+    let claim = first.claim_endpoint(window, seat).unwrap();
     assert_eq!(
-        unbind_claimed_endpoint(&mut second, &claim, None),
+        second.unbind_claimed_endpoint(&claim, None),
         Err(InputIngressError::ForeignEndpointClaim)
     );
     assert_eq!(
-        retire_claimed_endpoint(&mut second, &claim, None),
+        second.retire_claimed_endpoint(&claim, None),
         Err(InputIngressError::ForeignEndpointClaim)
     );
     let active = first
         .publish_presented_route(route(window, InputSurfaceId::new(7), seat, 1))
         .unwrap();
     assert_eq!(
-        retire_claimed_endpoint(&mut first, &claim, None),
+        first.retire_claimed_endpoint(&claim, None),
         Err(InputIngressError::PresentedRouteMismatch { window, seat })
     );
-    assert!(retire_claimed_endpoint(&mut first, &claim, Some(active)).is_ok());
+    assert!(first.retire_claimed_endpoint(&claim, Some(active)).is_ok());
 }

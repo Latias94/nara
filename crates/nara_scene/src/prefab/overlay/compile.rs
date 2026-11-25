@@ -46,8 +46,8 @@ pub(crate) struct StagedSceneOutput {
     pub(crate) targets: std::collections::BTreeMap<PrefabEntityTarget, SceneEntityId>,
     #[cfg(feature = "serde")]
     pub(crate) reference_targets: std::collections::BTreeMap<
-        nara_identity::AuthoredEntityReference,
-        nara_identity::EntityReference,
+        nara_ecs::identity::AuthoredEntityReference,
+        nara_ecs::identity::EntityReference,
     >,
     #[cfg(feature = "serde")]
     pub(crate) inspection: Option<crate::prefab::inspection::CapturedPrefabInspection>,
@@ -68,7 +68,7 @@ pub(crate) fn expand_source<F, E>(
     context: &mut SceneCompilationContext<'_, F, E>,
     placements: &[SceneEntityPlacement],
     entities: &[SceneEntityRecord],
-    inputs: Option<&std::collections::BTreeSet<nara_identity::ReferenceInputId>>,
+    inputs: Option<&std::collections::BTreeSet<nara_ecs::identity::ReferenceInputId>>,
 ) -> Result<SceneDraft, SceneCompilationFailure>
 where
     F: FnMut(

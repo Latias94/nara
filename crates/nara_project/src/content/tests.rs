@@ -1,4 +1,4 @@
-use nara_diagnostic::{DiagnosticFieldClass, DiagnosticValueRef};
+use nara_core::diagnostic::{DiagnosticFieldClass, DiagnosticValueRef};
 
 use crate::{MAX_PROJECT_CONTENT_SCENES, ProjectManifest, ProjectProfileError};
 

@@ -2,9 +2,9 @@
 
 use std::convert::Infallible;
 
+use nara_core::diagnostic::{DiagnosticReport, DiagnosticValueRef};
 use nara_core::{ByteLimit, DepthLimit};
-use nara_diagnostic::{DiagnosticReport, DiagnosticValueRef};
-use nara_identity::EntityReference;
+use nara_ecs::identity::EntityReference;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
@@ -15,8 +15,8 @@ use super::*;
 use crate::prefab::{SceneCompilationContext, SceneCompilationLimits, SceneCompilationUsage};
 use crate::schema_authority::SchemaAuthority;
 use crate::{
-    __private::AuthoringAdapterReceipt, AuthoringSchemaBasis, SceneCompilationOptions,
-    SceneDocument, SceneEntityRecord,
+    AuthoringSchemaBasis, SceneCompilationOptions, SceneDocument, SceneEntityRecord,
+    authoring::AuthoringAdapterReceipt,
 };
 
 const PAYLOAD_ITEMS: usize = 8_192;
@@ -278,7 +278,7 @@ fn large_explicit_values_admit_actual_reference_work_without_a_depth_multiplier(
 
 #[test]
 fn persistent_reference_visits_keep_long_path_storage_in_the_original_quota() {
-    use nara_identity::{
+    use nara_ecs::identity::{
         PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
     };
 

@@ -4,7 +4,7 @@ use std::convert::Infallible;
 
 use nara_asset::AssetRef;
 use nara_core::ByteLimit;
-use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget, ReferenceInputId};
+use nara_ecs::identity::{AuthoredEntityReference, AuthoredReferenceTarget, ReferenceInputId};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentSchema,
@@ -14,10 +14,10 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    __private::AuthoringAdapterReceipt,
     PrefabComponentSetMode, PrefabDocument, PrefabEntityOrigin, PrefabInstanceHop,
     PrefabPropertyClaim, PrefabPropertyIntent, ResolvedPrefabSource, SceneCompilationLimits,
     SceneDocument, SceneEntityId, SceneEntityRecord, ScenePlacement, SourceDocumentKind,
+    authoring::AuthoringAdapterReceipt,
     prefab::{
         SourceDocumentInput,
         extraction::{

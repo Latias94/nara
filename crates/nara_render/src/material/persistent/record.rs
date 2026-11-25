@@ -170,7 +170,7 @@ impl Material2dRecord {
             ("parameters", ComponentValue::Map(parameters)),
             ("texture_overrides", ComponentValue::Map(overrides)),
         ]);
-        nara_reflect::__private::validate_value_materialization_budget(&value, limits)?;
+        nara_reflect::effective::validate_value_materialization_budget(&value, limits)?;
         Ok(value)
     }
 
@@ -190,7 +190,7 @@ impl Material2dRecord {
         limits: ComponentValueMaterializationLimits,
     ) -> Result<Self, ComponentCodecError> {
         let value = value.into();
-        nara_reflect::__private::validate_value_materialization_budget(value, limits)?;
+        nara_reflect::effective::validate_value_materialization_budget(value, limits)?;
         let fields = read_map(value, "<material2d>")?;
         let expected = [
             "material",

@@ -1,18 +1,14 @@
 use std::time::Duration;
 
 use nara_app::{
-    Plugin, PluginDeclaration, PluginId, RuntimeAdmissionReservation,
-    RuntimeCandidateRetirementState, RuntimeClosePolicy, RuntimeControl,
-    RuntimeControlRequestResult, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
-    RuntimeObligationLedger,
+    Plugin, PluginDeclaration, PluginId, RuntimeCandidate, RuntimeCandidateRetirementState,
+    RuntimeClosePolicy, RuntimeControl, RuntimeControlRequestResult, RuntimeFault,
+    RuntimeFaultKind, RuntimeFaultReporter, RuntimeObligationLedger,
 };
 use nara_window::backend::BackendWindowHandles;
 
 use super::*;
 use crate::gpu::WgpuRenderHost;
-
-#[derive(Resource)]
-struct HarnessControl;
 
 #[derive(Debug)]
 enum HarnessMutation {
@@ -27,24 +23,8 @@ enum HarnessMutation {
     Fault,
 }
 
-impl __RuntimeDriverPort for HarnessControl {
-    type Input = HarnessMutation;
-    type Output = Option<WgpuRuntimeConnection>;
-
-    fn accepts_driver_state(state: RuntimeState) -> bool {
-        !matches!(state, RuntimeState::Stopped | RuntimeState::Stepping)
-    }
-
-    fn apply_driver_input(&mut self, _: Self::Input) -> Self::Output {
-        unreachable!("the test configures a finite World operation")
-    }
-}
-
-fn mutate(
-    world: &mut World,
-    mutation: HarnessMutation,
-) -> Result<Option<WgpuRuntimeConnection>, (RuntimeWorldAccessError, HarnessMutation)> {
-    Ok(match mutation {
+fn mutate(world: &mut World, mutation: HarnessMutation) -> Option<WgpuRuntimeConnection> {
+    match mutation {
         HarnessMutation::Connection(connection) => {
             let original = world.remove_resource::<WgpuRuntimeConnection>();
             world.insert_resource(connection);
@@ -101,25 +81,11 @@ fn mutate(
                 .report(test_fault());
             None
         }
-    })
+    }
 }
 
 fn test_fault() -> RuntimeFault {
     RuntimeFault::engine(RuntimeFaultKind::System, "nara.test.after-render-result")
-}
-
-fn return_then_fault(
-    world: &mut World,
-    input: ConnectionInput,
-) -> Result<ConnectionOutput, (RuntimeWorldAccessError, ConnectionInput)> {
-    let returning = matches!(input.0, ConnectionOperation::Return(..));
-    let output = apply_connection(world, input);
-    if returning {
-        world
-            .resource::<RuntimeFaultReporter>()
-            .report(test_fault());
-    }
-    output
 }
 
 struct ConnectionHarness {
@@ -145,21 +111,10 @@ impl Plugin for ConnectionHarness {
         app.init_resource::<RenderBackendStatus>()?;
         app.init_resource::<WgpuRenderObservation>()?;
         app.init_resource::<WgpuFramePacketSlot>()?;
-        app.insert_resource(WgpuRuntimeConnection::default())?;
-        let original = Arc::clone(&app.world().resource::<WgpuRuntimeConnection>().owner);
-        app.insert_resource(ConnectionAuthority(Arc::clone(&original)))?;
-        app.__register_driver_port::<WgpuRuntimeConnection>(if self.fault_after_return {
-            return_then_fault
-        } else {
-            apply_connection
-        })?;
-        app.register_plugin_runtime_close_participant(
-            crate::gpu::WGPU_BACKEND_SHUTDOWN_OBLIGATION,
-            RuntimeCloseParticipantId::new("nara.test.original-render-connection"),
-            ConnectionClose(original),
-        )?;
-        app.insert_resource(HarnessControl)?;
-        app.__register_driver_port::<HarnessControl>(mutate)?;
+        install(app)?;
+        if self.fault_after_return {
+            app.insert_resource(PostCompletionFault(test_fault()))?;
+        }
         crate::gpu::install_wgpu_policy(
             app,
             crate::gpu::WgpuPolicyDefinition::new(crate::gpu::WgpuStockPolicy::default())
@@ -187,17 +142,15 @@ fn runtime(fault_after_return: bool) -> RuntimeInstance {
     let mut app = App::new();
     app.add_plugins(ConnectionHarness { fault_after_return })
         .unwrap();
-    RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::new(Duration::ZERO),
-        )
-        .unwrap()
-        .complete_startup()
-        .unwrap()
-        .promote()
+    RuntimeCandidate::admit(
+        app.seal().unwrap(),
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::new(Duration::ZERO),
+    )
+    .unwrap()
+    .complete_startup()
+    .unwrap()
+    .promote()
 }
 
 fn control(
@@ -205,10 +158,9 @@ fn control(
     mutation: HarnessMutation,
 ) -> Option<WgpuRuntimeConnection> {
     runtime
-        .__with_owned_driver_port::<HarnessControl>(mutation)
+        .with_driver_scope(|scope| scope.with_world_mut(|world| mutate(world, mutation)))
         .unwrap()
         .output
-        .unwrap()
 }
 
 fn capture(runtime: &mut RuntimeInstance) -> WgpuRuntimeCapture {
@@ -269,13 +221,22 @@ fn window_capture(runtime: &mut RuntimeInstance, source: RuntimeGeneration) -> W
 fn replacing_world_generation_faults_before_a_foreign_capture_can_be_issued() {
     let mut owner = runtime(false);
     let foreign = runtime(false);
+    let result = result(&mut owner);
     control(
         &mut owner,
         HarnessMutation::RuntimeGeneration(foreign.generation()),
     );
     assert_eq!(owner.state(), RuntimeState::Faulted);
     let failure = take_runtime_frame(&mut owner).unwrap_err();
-    assert!(matches!(failure.error, WgpuRuntimeExchangeError::Port(_)));
+    assert!(matches!(
+        failure.error,
+        WgpuRuntimeExchangeError::Scope(RuntimeScopeError::Unavailable {
+            state: RuntimeState::Faulted
+        })
+    ));
+    let completion = complete_runtime_frame(&mut owner, result).unwrap();
+    assert!(completion.output.retired);
+    assert!(completion.output.presented.is_none());
     let generation = owner.generation();
     control(&mut owner, HarnessMutation::RuntimeGeneration(generation));
     finish(owner);
@@ -639,7 +600,8 @@ fn refused_result_retains_original_custody_and_can_be_retried() {
     let refused = complete_runtime_frame(&mut runtime, result).unwrap_err();
     assert!(matches!(
         refused.error,
-        WgpuRuntimeExchangeError::Port(RuntimeWorldAccessError::MissingResource { .. })
+        WgpuRuntimeExchangeError::MissingResource { type_name }
+            if type_name == std::any::type_name::<FrameStats>()
     ));
     assert_eq!(refused.result.identity(), identity);
     assert!(take_runtime_frame(&mut runtime).unwrap().output.is_none());
@@ -682,6 +644,37 @@ fn replacement_cannot_take_or_apply_an_original_connection_capture() {
     let completed = complete_runtime_frame(&mut runtime, failure.result).unwrap();
     assert!(completed.post_operation_fault.is_none());
     finish(runtime);
+}
+
+#[test]
+fn a_foreign_generation_cannot_return_a_result_even_with_matching_connection_resources() {
+    let mut original = runtime(false);
+    let result = result(&mut original);
+    let identity = result.identity();
+    let owner = Arc::clone(&result.transfer.owner);
+    let mut foreign = runtime(false);
+    let installed = foreign
+        .apply_command(move |world: &mut World| {
+            world.insert_resource(WgpuRuntimeConnection {
+                incarnation: identity.connection(),
+                owner: Arc::clone(&owner),
+                next_sequence: identity.sequence() + 1,
+            });
+            world.insert_resource(ConnectionAuthority(owner));
+        })
+        .unwrap();
+    assert!(installed.post_operation_fault.is_none());
+
+    let failure = complete_runtime_frame(&mut foreign, result).unwrap_err();
+    assert!(matches!(
+        failure.error,
+        WgpuRuntimeExchangeError::OwnerChanged
+    ));
+    assert_eq!(failure.result.identity(), identity);
+    let completion = complete_runtime_frame(&mut original, failure.result).unwrap();
+    assert!(!completion.output.retired);
+    finish(foreign);
+    finish(original);
 }
 
 #[test]
@@ -745,8 +738,33 @@ fn close_revokes_an_unexecuted_capture_without_issuing_gpu_observation() {
 #[test]
 fn consumed_result_keeps_its_output_when_the_scope_reports_a_fault() {
     let mut runtime = runtime(true);
-    let result = result(&mut runtime);
+    let mut result = result(&mut runtime);
+    let receipt = WgpuPresentedFrameReceipt::new(
+        runtime.generation(),
+        nara_window::WindowId::PRIMARY,
+        5,
+        7,
+        11,
+        13,
+        result.frame.index,
+    );
+    let mut backend = crate::gpu::backend::WgpuRenderBackend::default();
+    backend.begin_frame_transaction(
+        receipt.render_transaction_frame_index(),
+        Some(receipt.app_frame_index()),
+    );
+    backend.record_editor_window_presentation();
+    result.observation = Some(WgpuRenderObservation::from_parts(
+        receipt.backend_instance_id(),
+        receipt.device_epoch(),
+        crate::gpu::backend::WgpuBackendState::Ready,
+        backend.frame_transaction_stats(),
+        Some(receipt),
+        #[cfg(feature = "hud-runtime")]
+        Vec::new(),
+    ));
     let completed = complete_runtime_frame(&mut runtime, result).unwrap();
+    assert_eq!(completed.output.presented, Some(receipt));
     assert_eq!(completed.post_operation_fault, Some(test_fault()));
     assert_eq!(
         runtime
@@ -780,7 +798,8 @@ fn rejected_result_preserves_both_input_and_a_post_operation_fault() {
     assert_eq!(failure.post_operation_fault, Some(test_fault()));
     assert!(matches!(
         failure.error,
-        WgpuRuntimeExchangeError::Port(RuntimeWorldAccessError::MissingResource { .. })
+        WgpuRuntimeExchangeError::MissingResource { type_name }
+            if type_name == std::any::type_name::<FrameStats>()
     ));
     assert_eq!(
         runtime

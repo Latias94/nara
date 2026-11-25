@@ -245,7 +245,7 @@ impl LoadContext<'_> {
             .normalized_capabilities()
             .contains(nara_project::ProductCapability::DesktopWinit)
         {
-            nara_winit::validate_action_map_keyboard(&definition)
+            nara_window::winit::validate_action_map_keyboard(&definition)
                 .map_err(|error| unsupported_keyboard_binding(selected.as_str(), error))?;
         }
         let path = AssetSourcePath::new(selected.as_str()).map_err(|_| invalid_input())?;
@@ -438,7 +438,7 @@ fn invalid_input() -> ProjectContentError {
 #[cfg(feature = "desktop-winit")]
 fn unsupported_keyboard_binding(
     source: &str,
-    error: nara_winit::UnsupportedKeyboardBinding,
+    error: nara_window::winit::UnsupportedKeyboardBinding,
 ) -> ProjectContentError {
     let mut diagnostic = attach_field(
         diagnostic(

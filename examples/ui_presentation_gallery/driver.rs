@@ -1,13 +1,10 @@
 use std::{error::Error, sync::Arc};
 
 use nara::advanced_prelude::*;
-use nara::app::{__RuntimeDriverPort, RuntimeInstance, RuntimeWorldAccessError};
+use nara::app::{AppRunError, RuntimeInstance};
 use nara::ui_render::advanced::UiPaintPacket;
 
 use super::presenter::{HeadlessTestOutcome, HeadlessTestPresenter, commit_headless_test_outcome};
-
-#[derive(Resource)]
-pub(super) struct GalleryDriverPort;
 
 pub(super) enum GalleryDriverInput {
     Submit {
@@ -33,27 +30,6 @@ pub(super) enum GalleryDriverOutput {
     Updated(UiSurfaceSlot),
     Retired(Option<UiSurfaceRetirement>),
     Installed(Result<(), UiAdapterError>),
-}
-
-impl __RuntimeDriverPort for GalleryDriverPort {
-    type Input = GalleryDriverInput;
-    type Output = Result<GalleryDriverOutput, Box<dyn Error>>;
-
-    fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
-        Err("gallery operations require the managed runtime world".into())
-    }
-}
-
-impl GalleryDriverPort {
-    pub(super) fn apply_driver_input_in_world(
-        world: &mut World,
-        input: GalleryDriverInput,
-    ) -> Result<
-        Result<GalleryDriverOutput, Box<dyn Error>>,
-        (RuntimeWorldAccessError, GalleryDriverInput),
-    > {
-        Ok(apply_gallery_operation(world, input))
-    }
 }
 
 fn apply_gallery_operation(
@@ -95,7 +71,11 @@ pub(super) fn apply(
     runtime: &mut RuntimeInstance,
     input: GalleryDriverInput,
 ) -> Result<GalleryDriverOutput, Box<dyn Error>> {
-    runtime
-        .with_driver_scope(|scope| scope.__apply_port::<GalleryDriverPort>(input))?
-        .output?
+    let outcome = runtime.with_driver_scope(|scope| {
+        scope.with_world_mut(|world| apply_gallery_operation(world, input))
+    })?;
+    if let Some(fault) = outcome.post_operation_fault {
+        return Err(Box::new(AppRunError::managed_runtime_fault(&fault)));
+    }
+    outcome.output
 }

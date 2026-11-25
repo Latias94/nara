@@ -7,7 +7,9 @@ use nara_asset::{
     StableAssetId,
 };
 use nara_core::PersistentFileContractError;
-use nara_diagnostic::{Diagnostic, DiagnosticFieldClass, DiagnosticValueRef};
+use nara_core::diagnostic::{
+    DiagnosticFieldClass, DiagnosticValueRef, ReportDiagnostic as Diagnostic,
+};
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMapAsset, ActionMapBindings, ActionMapBuilder,
     ActionMapDefinition, ActionMapDomain, ActionMapFileCandidate, ActionMapFileError,

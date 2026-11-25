@@ -7,11 +7,14 @@ use std::{
 };
 
 use nara_app::{
-    App, CoreStage, FixedUpdateSet, Plugin, PluginError, RealTime, RuntimeDriverScope,
-    RuntimeWorldAccessError,
+    App, CoreStage, FixedUpdateSet, FrameCleanup, FrameIntent, FrameIntentSet, Plugin, PluginError,
+    RealTime, RuntimeWorldAccessError,
 };
 use nara_core::Vec2;
-use nara_ecs::{DetectChangesMut, Res, ResMut, Resource, schedule::IntoScheduleConfigs};
+use nara_ecs::{
+    DetectChangesMut, Res, ResMut, Resource, bevy_ecs::message::Messages,
+    schedule::IntoScheduleConfigs,
+};
 
 mod axis;
 mod binding;
@@ -19,13 +22,17 @@ mod definition;
 #[cfg(feature = "serde")]
 mod format;
 mod gamepad;
+#[cfg(all(windows, feature = "gamepad"))]
+mod gilrs_input;
 mod keyboard_continuation;
+mod keys;
 #[cfg(feature = "serde")]
 mod runtime;
 mod schedule;
 mod semantic;
 mod state;
-mod timeline;
+pub mod timeline;
+mod window_input;
 
 pub use axis::{AxisDeadZone, AxisValue, AxisValueError};
 pub use binding::{ActionBinding, ActionTransform, ActionValueKind, AxisDirection};
@@ -36,23 +43,27 @@ pub use definition::{
 };
 #[cfg(feature = "serde")]
 pub use format::{ActionMapFileCandidate, ActionMapFileError, ActionMapFileLimits};
-pub use gamepad::GamepadButton;
+pub use gamepad::{GamepadAxis, GamepadButton, GamepadInput, GamepadInputKind};
+#[cfg(all(windows, feature = "gamepad"))]
+pub use gilrs_input::{
+    GILRS_INPUT_PLUGIN_ID, GamepadAssignmentError, GamepadRoute, GilrsDevice, GilrsDeviceToken,
+    GilrsDevices, GilrsInputPlugin,
+};
 pub use keyboard_continuation::{
     KeyboardActionBinding, KeyboardContinuationError, KeyboardHold, capture_keyboard_holds,
     reconcile_keyboard_holds, restore_keyboard_holds,
 };
+pub use keys::KeyCode;
 #[cfg(feature = "serde")]
 pub use runtime::{ActionMapAsset, ActionMapDomain, ActionMapRuntimeCodec};
 pub use schedule::InputSet;
 use semantic::{ActionStaging, StagedActionRevision};
-pub use semantic::{SemanticActionCause, SemanticActionOutcome, SemanticActions};
+pub use semantic::{ActionState, SemanticActionCause, SemanticActionOutcome, SemanticActions};
 pub use state::{
     ActionMap, ActionMapInstallError, ActionMaps, InputSelectionError, MAX_SEAT_ACTION_MAPS,
-    finalize_input_selection, startup_action_map_bindings,
+    configure_startup_action_map, finalize_input_selection, startup_action_map_bindings,
 };
 
-#[doc(hidden)]
-pub use timeline::{__InputDriverEvent, __InputDriverOutput};
 pub use timeline::{
     ActionInputProvenance, GamepadConnection, InputAdmission, InputConfigurationError,
     InputConsumerCursors, InputEndpointObservation, InputEndpointRetirement, InputEventKind,
@@ -61,23 +72,19 @@ pub use timeline::{
     InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputRouteStamp,
     InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimeline, InputTimelineEntry,
     InputUiCursorError, InputUiDisposition, InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES,
-    MAX_INPUT_TIMELINE_ENTRIES,
+    MAX_INPUT_TIMELINE_ENTRIES, apply_claimed_keyboard_driver_input, apply_gamepad_axis_input,
+    apply_gamepad_button_input, apply_keyboard_driver_input, apply_keyboard_driver_input_at,
+    apply_mouse_driver_input, apply_mouse_driver_input_at, apply_mouse_wheel_driver_input_at,
+    apply_pointer_driver_input, apply_pointer_driver_input_at, apply_window_device_input,
+    apply_window_input_driver_event, connect_gamepad_input, connect_input_endpoint,
+    connect_input_pointer, connect_synthetic_gamepad_input, disconnect_gamepad_input,
+    retire_input_pointer,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum KeyCode {
-    Escape,
-    Space,
-    Enter,
-    ArrowUp,
-    ArrowDown,
-    ArrowLeft,
-    ArrowRight,
-    Character(char),
-    /// The additional physical key on an ISO keyboard.
-    IntlBackslash,
-}
+use window_input::{DeviceMessageWriters, advance_device_messages};
+pub use window_input::{
+    ImeEvent, ImeEventKind, MouseWheel, MouseWheelUnit, TextInput, TouchInput, TouchPhase,
+    WindowDeviceInput,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -86,16 +93,6 @@ pub enum MouseButton {
     Right,
     Middle,
     Other(u16),
-}
-
-#[doc(hidden)]
-pub mod __private {
-    pub use crate::timeline::{
-        InputEndpointClaim, InputRouteCommit, PreparedInputRoutePublication, abort_presented_route,
-        claim_input_endpoint, commit_presented_route, owns_prepared_route, prepare_claimed_route,
-        prepare_presented_route, prepared_route_invalidation, retire_claimed_endpoint,
-        supersede_presented_route, unbind_claimed_endpoint,
-    };
 }
 
 /// Physical edge recorded for a retained button state.
@@ -375,257 +372,6 @@ pub enum PointerDriverInput {
     Left,
 }
 
-/// Connects one explicitly named platform endpoint before its first ingress operation.
-pub fn connect_input_endpoint(
-    scope: &mut RuntimeDriverScope<'_>,
-    window: InputWindowId,
-    seat: InputSeatId,
-) -> Result<(), ButtonInputDriverError> {
-    scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::ConnectEndpoint { window, seat })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok(())
-}
-
-/// Connects a pointer child of an explicitly connected endpoint.
-pub fn connect_input_pointer(
-    scope: &mut RuntimeDriverScope<'_>,
-    window: InputWindowId,
-    seat: InputSeatId,
-    pointer: InputPointerId,
-) -> Result<(), ButtonInputDriverError> {
-    scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::ConnectPointer {
-            window,
-            seat,
-            pointer,
-        })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok(())
-}
-
-/// Retires one connected pointer without retiring its keyboard/window endpoint.
-pub fn retire_input_pointer(
-    scope: &mut RuntimeDriverScope<'_>,
-    window: InputWindowId,
-    seat: InputSeatId,
-    pointer: InputPointerId,
-) -> Result<(InputAdmission, Vec<MouseButton>), ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::RetirePointer {
-            window,
-            seat,
-            pointer,
-        })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok((output.admission, output.released_mouse_buttons))
-}
-
-/// Sends synthetic input through the owner's once-admitted default endpoint.
-pub fn apply_keyboard_driver_input(
-    scope: &mut RuntimeDriverScope<'_>,
-    input: ButtonDriverInput<KeyCode>,
-) -> Result<Vec<KeyCode>, ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::SyntheticKeyboard { input })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok(output.released_keys)
-}
-
-/// Admits synthetic keyboard input at the exact endpoint retained by its original claim.
-///
-/// Foreign, retired, and recycled claims refuse before even an empty ReleaseAll can be ignored.
-/// The original timeline owns membership, ordering, and reserved terminal records. A Release of
-/// a restored or physical member preserves that member's origin independently of this trigger.
-pub fn apply_claimed_keyboard_driver_input(
-    scope: &mut RuntimeDriverScope<'_>,
-    claim: timeline::InputEndpointClaim,
-    input: ButtonDriverInput<KeyCode>,
-) -> Result<InputAdmission, ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::ClaimedKeyboard { claim, input })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok(output.admission)
-}
-
-/// Sends platform input from an explicitly connected endpoint.
-pub fn apply_keyboard_driver_input_at(
-    scope: &mut RuntimeDriverScope<'_>,
-    window: InputWindowId,
-    seat: InputSeatId,
-    input: ButtonDriverInput<KeyCode>,
-) -> Result<Vec<KeyCode>, ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::Keyboard {
-            window,
-            seat,
-            input,
-        })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok(output.released_keys)
-}
-
-pub fn apply_mouse_driver_input(
-    scope: &mut RuntimeDriverScope<'_>,
-    input: ButtonDriverInput<MouseButton>,
-) -> Result<Vec<MouseButton>, ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::SyntheticMouse { input })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok(output.released_mouse_buttons)
-}
-
-pub fn apply_mouse_driver_input_at(
-    scope: &mut RuntimeDriverScope<'_>,
-    window: InputWindowId,
-    seat: InputSeatId,
-    pointer: InputPointerId,
-    input: ButtonDriverInput<MouseButton>,
-) -> Result<Vec<MouseButton>, ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::Mouse {
-            window,
-            seat,
-            pointer,
-            input,
-        })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok(output.released_mouse_buttons)
-}
-
-pub fn apply_pointer_driver_input(
-    scope: &mut RuntimeDriverScope<'_>,
-    input: PointerDriverInput,
-) -> Result<(InputAdmission, Vec<MouseButton>), ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::SyntheticPointer { input })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok((output.admission, output.released_mouse_buttons))
-}
-
-pub fn apply_pointer_driver_input_at(
-    scope: &mut RuntimeDriverScope<'_>,
-    window: InputWindowId,
-    seat: InputSeatId,
-    pointer: InputPointerId,
-    input: PointerDriverInput,
-) -> Result<(InputAdmission, Vec<MouseButton>), ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::Pointer {
-            window,
-            seat,
-            pointer,
-            input,
-        })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok((output.admission, output.released_mouse_buttons))
-}
-
-/// Connects one platform controller stream to an already connected endpoint.
-pub fn connect_gamepad_input(
-    scope: &mut RuntimeDriverScope<'_>,
-    window: InputWindowId,
-    seat: InputSeatId,
-    gamepad: u16,
-) -> Result<GamepadConnection, ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::ConnectGamepad {
-            window,
-            seat,
-            gamepad,
-        })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok(output
-        .gamepad_connection
-        .expect("an accepted connect operation returns its original connection"))
-}
-
-/// Connects a synthetic controller through the same finite membership and terminal owner.
-pub fn connect_synthetic_gamepad_input(
-    scope: &mut RuntimeDriverScope<'_>,
-    window: InputWindowId,
-    seat: InputSeatId,
-    gamepad: u16,
-) -> Result<GamepadConnection, ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::ConnectSyntheticGamepad {
-            window,
-            seat,
-            gamepad,
-        })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok(output
-        .gamepad_connection
-        .expect("an accepted connect operation returns its original connection"))
-}
-
-/// Releases and neutralizes the original connection before retiring its device slot.
-pub fn disconnect_gamepad_input(
-    scope: &mut RuntimeDriverScope<'_>,
-    connection: &GamepadConnection,
-) -> Result<InputAdmission, ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::DisconnectGamepad {
-            connection: connection.clone(),
-        })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok(output.admission)
-}
-
-/// Admits a button through the origin, endpoint and generation captured by its connection.
-pub fn apply_gamepad_button_input(
-    scope: &mut RuntimeDriverScope<'_>,
-    connection: &GamepadConnection,
-    button: u16,
-    phase: ButtonTransitionPhase,
-) -> Result<InputAdmission, ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::GamepadButton {
-            connection: connection.clone(),
-            button,
-            phase,
-        })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok(output.admission)
-}
-
-/// Admits an already validated normalized scalar through the original connection.
-pub fn apply_gamepad_axis_input(
-    scope: &mut RuntimeDriverScope<'_>,
-    connection: &GamepadConnection,
-    axis: u16,
-    value: AxisValue,
-) -> Result<InputAdmission, ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::GamepadAxis {
-            connection: connection.clone(),
-            axis,
-            value,
-        })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok(output.admission)
-}
-
-pub fn apply_window_input_driver_event(
-    scope: &mut RuntimeDriverScope<'_>,
-    window: InputWindowId,
-    seat: InputSeatId,
-    event: InputWindowEvent,
-) -> Result<(InputAdmission, Vec<KeyCode>, Vec<MouseButton>), ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::Window {
-            window,
-            seat,
-            event,
-        })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok((
-        output.admission,
-        output.released_keys,
-        output.released_mouse_buttons,
-    ))
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ActionId(Box<str>);
 
@@ -703,9 +449,11 @@ impl Default for ActionContext {
 }
 
 impl ActionContext {
+    const GAMEPLAY_NAME: &str = "gameplay";
+
     #[must_use]
     pub fn gameplay() -> Self {
-        Self("gameplay".into())
+        Self(Self::GAMEPLAY_NAME.into())
     }
 
     pub fn new(id: impl Into<String>) -> Result<Self, ActionIdError> {
@@ -895,10 +643,14 @@ impl Plugin for InputPlugin {
             outcomes: Vec::new(),
         })?;
         app.insert_resource(semantic)?;
+        app.insert_resource(Messages::<TextInput>::default())?;
+        app.insert_resource(Messages::<ImeEvent>::default())?;
+        app.insert_resource(Messages::<MouseWheel>::default())?;
+        app.insert_resource(Messages::<TouchInput>::default())?;
+        app.insert_resource(Messages::<GamepadInput>::default())?;
         if !app.world().contains_resource::<ActionStaging>() {
             app.insert_resource(ActionStaging::default())?;
         }
-        app.__register_driver_port::<ActionStaging>(keyboard_continuation::apply_registered)?;
         if !app.world().contains_resource::<PointerState>() {
             app.insert_resource(PointerState::default())?;
         }
@@ -917,14 +669,14 @@ impl Plugin for InputPlugin {
             InputSet::ProjectTimeline.in_set(FixedUpdateSet::Prepare),
         )?
         .configure_sets(
-            nara_app::__private::FrameIntent,
+            FrameIntent,
             (
                 InputSet::ProjectTimeline,
                 InputSet::StageActions,
                 InputSet::ResolveActions,
             )
                 .chain()
-                .in_set(nara_app::__private::FrameIntentSet::Prepare),
+                .in_set(FrameIntentSet::Prepare),
         )?
         .add_systems(
             CoreStage::First,
@@ -935,19 +687,19 @@ impl Plugin for InputPlugin {
             project_timeline_input.in_set(InputSet::ProjectTimeline),
         )?
         .add_systems(
-            nara_app::__private::FrameIntent,
+            FrameIntent,
             project_timeline_input
                 .in_set(InputSet::ProjectTimeline)
                 .run_if(actions_need_resolution),
         )?
         .add_systems(
-            nara_app::__private::FrameIntent,
+            FrameIntent,
             stage_unresolved_actions
                 .in_set(InputSet::StageActions)
                 .run_if(actions_need_resolution),
         )?
         .add_systems(
-            nara_app::__private::FrameIntent,
+            FrameIntent,
             resolve_action_outcomes
                 .in_set(InputSet::ResolveActions)
                 .run_if(actions_need_resolution),
@@ -964,7 +716,10 @@ impl Plugin for InputPlugin {
             CoreStage::PreUpdate,
             resolve_action_outcomes.in_set(InputSet::ResolveActions),
         )?
-        .add_systems(nara_app::__private::FrameCleanup, clear_input_transitions)?;
+        .add_systems(
+            FrameCleanup,
+            (clear_input_transitions, advance_device_messages),
+        )?;
         Ok(())
     }
 }
@@ -974,6 +729,7 @@ fn project_timeline_input(
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut pointer: ResMut<PointerState>,
+    mut devices: DeviceMessageWriters,
 ) {
     for entry in timeline.projection_entries() {
         match entry.kind() {
@@ -1002,15 +758,30 @@ fn project_timeline_input(
             | InputEventKind::ScaleFactorChanged { .. }
             | InputEventKind::CloseRequested
             | InputEventKind::SurfaceRetired => pointer.clear_position(entry.route()),
-            InputEventKind::Wheel { .. }
-            | InputEventKind::GamepadConnected { .. }
+            InputEventKind::Wheel { delta, unit, phase } => {
+                devices.wheel.write(MouseWheel {
+                    route: entry.route(),
+                    position: entry.logical_position(),
+                    delta,
+                    unit,
+                    phase,
+                });
+            }
+            InputEventKind::GamepadConnected { .. }
             | InputEventKind::GamepadDisconnected { .. }
             | InputEventKind::GamepadButton { .. }
-            | InputEventKind::GamepadAxis { .. }
-            | InputEventKind::FocusChanged { focused: true } => {}
+            | InputEventKind::GamepadAxis { .. } => {
+                if let Some(input) = GamepadInput::from_timeline(entry) {
+                    devices.gamepad.write(input);
+                }
+            }
+            InputEventKind::FocusChanged { focused: true } => {}
         }
     }
     timeline.finish_projection();
+    for input in timeline.drain_window_device_input() {
+        devices.write_window(input);
+    }
 }
 
 fn publish_timeline_observations(
@@ -1173,7 +944,6 @@ mod projection_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_app::{__RuntimeDriverPort, CoreStage};
     use nara_core::ByteLimit;
     use nara_ecs::{DetectChanges, Res, Resource};
     use std::{sync::Arc, time::Duration};
@@ -1195,7 +965,7 @@ mod tests {
         app.world_mut()
             .unwrap()
             .resource_mut::<InputTimeline>()
-            .apply_driver_input(__InputDriverEvent::SyntheticKeyboard { input })
+            .admit_keyboard(InputWindowId::UNSPECIFIED, InputSeatId::PRIMARY, input)
             .unwrap();
     }
 
@@ -1203,7 +973,12 @@ mod tests {
         app.world_mut()
             .unwrap()
             .resource_mut::<InputTimeline>()
-            .apply_driver_input(__InputDriverEvent::SyntheticMouse { input })
+            .admit_mouse_button(
+                InputWindowId::UNSPECIFIED,
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                input,
+            )
             .unwrap();
     }
 
@@ -1213,9 +988,11 @@ mod tests {
     ) {
         if pending.0 {
             timeline
-                .apply_driver_input(__InputDriverEvent::SyntheticKeyboard {
-                    input: ButtonDriverInput::Release(KeyCode::Space),
-                })
+                .admit_keyboard(
+                    InputWindowId::UNSPECIFIED,
+                    InputSeatId::PRIMARY,
+                    ButtonDriverInput::Release(KeyCode::Space),
+                )
                 .unwrap();
             pending.0 = false;
         }

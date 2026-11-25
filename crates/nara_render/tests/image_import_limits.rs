@@ -9,21 +9,23 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use nara_app::tasks::{
+    TaskCancellationToken, TaskDomainKey, TaskPoolConfig, TaskPoolKind, TaskPools,
+    TaskSpawnOutcome, TaskSpawnRequest, TaskTerminal,
+};
 use nara_asset::{
     AssetPathScope, AssetRecord, AssetServer, AssetSourceKind, AssetSourcePath, AssetStates,
     AssetVersion, Assets, StableAssetId,
 };
 use nara_core::ByteLimit;
-use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
+use nara_core::vfs::capabilities::{
+    CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode,
+};
 use nara_render::image::{
     AdmittedImageImport, ImageBytesImportRequest, ImageFileImportRequest, ImageImportBudgetHost,
     ImageImportBudgetSnapshot, ImageImportError, ImageImportLimitKind, ImageImportLimits,
     ImageImportSettings, ImageImportStage, ImageImportedAsset, ImageImporter, ImagePngFailureKind,
     ImageSourceDirectory, ImageUnsupportedFeature,
-};
-use nara_tasks::{
-    TaskCancellationToken, TaskDomainKey, TaskPoolConfig, TaskPoolKind, TaskPools,
-    TaskSpawnOutcome, TaskSpawnRequest, TaskTerminal,
 };
 
 const TEXTURE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
@@ -485,7 +487,7 @@ fn admit_file(
     )
 }
 
-fn accepted_task<T>(outcome: TaskSpawnOutcome<T>) -> nara_tasks::TaskHandle<T> {
+fn accepted_task<T>(outcome: TaskSpawnOutcome<T>) -> nara_app::tasks::TaskHandle<T> {
     match outcome {
         TaskSpawnOutcome::Accepted(handle) | TaskSpawnOutcome::Coalesced { handle, .. } => handle,
         TaskSpawnOutcome::Rejected(rejection) => panic!("task was rejected: {rejection:?}"),

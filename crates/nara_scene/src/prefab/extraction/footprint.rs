@@ -14,9 +14,8 @@ use super::{
 };
 use crate::{
     PrefabAddition, PrefabComponentIntent, PrefabEntityTarget, PrefabInstance,
-    PrefabInstanceBinding, PrefabInstanceClaim, SceneCompilationFailureKind,
-    SceneCompilationLimits, SceneEntityPlacement, ScenePlacementParent, ScenePlacementSlot,
-    SourceDocumentKey,
+    PrefabInstanceBinding, PrefabInstanceClaim, SceneEntityPlacement, ScenePlacementParent,
+    ScenePlacementSlot, SourceDocumentKey,
 };
 
 #[cfg(test)]
@@ -93,13 +92,13 @@ pub(super) fn classify_contexts(
     }
     let mut queue = Vec::with_capacity(sources.len());
     let mut scan = PhysicalScan {
-        extraction: Some(ExtractionContexts {
+        extraction: ExtractionContexts {
             sources,
             selected_key,
             keys,
             comparison_steps,
             maximum_key_bytes,
-        }),
+        },
         work,
         resolve,
         states: vec![SourceContextFootprint::Preserved; sources.len()],
@@ -125,99 +124,6 @@ pub(super) fn classify_contexts(
     Ok(scan.states)
 }
 
-#[doc(hidden)]
-#[derive(Debug)]
-pub struct ComponentApplySourceFootprint {
-    states: Vec<SourceContextFootprint>,
-    pub work_bytes: usize,
-    pub reference_work: (usize, usize),
-}
-
-impl ComponentApplySourceFootprint {
-    pub fn affects(&self, index: usize) -> bool {
-        self.states.get(index) == Some(&SourceContextFootprint::Affected)
-    }
-
-    pub fn retained_bytes(&self) -> usize {
-        self.states.capacity() * size_of::<SourceContextFootprint>()
-    }
-}
-
-/// Finds the dependants of two existing replacements in a fixed catalogue. A path to
-/// either replacement stops at its first changed member, so the same Guard edges cover
-/// the original and candidate. The resolver must use the complete configuration aliases.
-#[doc(hidden)]
-pub fn classify_component_apply_dependants<'a>(
-    source_count: usize,
-    replacements: [Option<usize>; 2],
-    limits: SceneCompilationLimits,
-    document: impl Fn(usize) -> Option<SourceDocumentInput<'a>>,
-    mut resolve: impl FnMut(&AssetRef) -> Option<usize>,
-) -> Result<ComponentApplySourceFootprint, SceneCompilationFailureKind> {
-    let mut classify = || {
-        if replacements
-            .iter()
-            .flatten()
-            .any(|&index| index >= source_count)
-        {
-            return Err(ExtractionError::InvalidSource);
-        }
-        let mut work = ExtractionWork::new(limits, Some(0))?;
-        let mut reference_bytes = 0;
-        work.visit(
-            source_count,
-            0,
-            source_count
-                .checked_mul(
-                    size_of::<SourceContextFootprint>()
-                        + size_of::<Option<usize>>()
-                        + size_of::<usize>(),
-                )
-                .ok_or(ExtractionError::Capacity)?,
-        )?;
-        let mut scan = PhysicalScan {
-            extraction: None,
-            work: &mut work,
-            resolve: |reference: &AssetRef, work: &mut ExtractionWork| {
-                let bytes = match reference {
-                    AssetRef::Path(path) => path.as_str().len(),
-                    _ => size_of::<AssetRef>(),
-                };
-                work.visit(1, bytes, 0)?;
-                reference_bytes += bytes;
-                Ok(resolve(reference))
-            },
-            states: vec![SourceContextFootprint::Preserved; source_count],
-            heads: vec![None; source_count],
-            edges: Vec::new(),
-        };
-        let mut frames = Vec::new();
-        for member in 0..source_count {
-            if replacements.contains(&Some(member)) {
-                scan.states[member] = SourceContextFootprint::Affected;
-            } else {
-                let source = document(member).ok_or(ExtractionError::InvalidSource)?;
-                scan.document(source, member, &mut frames)?;
-            }
-        }
-        scan.propagate(
-            SourceContextFootprint::Affected,
-            &mut Vec::with_capacity(source_count),
-        )?;
-        let states = scan.states;
-        let (nodes, work_bytes) = work.usage();
-        Ok(ComponentApplySourceFootprint {
-            states,
-            work_bytes,
-            reference_work: (nodes, reference_bytes),
-        })
-    };
-    classify().map_err(|error| match error {
-        ExtractionError::Capacity => SceneCompilationFailureKind::WorkLimit,
-        _ => SceneCompilationFailureKind::OwnerAdmission,
-    })
-}
-
 struct ExtractionContexts<'a> {
     sources: &'a [CapturedExtractionSource],
     selected_key: &'a SourceDocumentKey,
@@ -227,7 +133,7 @@ struct ExtractionContexts<'a> {
 }
 
 struct PhysicalScan<'a, 'w, R> {
-    extraction: Option<ExtractionContexts<'a>>,
+    extraction: ExtractionContexts<'a>,
     work: &'w mut ExtractionWork,
     resolve: R,
     states: Vec<SourceContextFootprint>,
@@ -259,7 +165,7 @@ where
         let (entities, placements) = match source {
             SourceDocumentInput::Scene(document) => (&document.entities, &document.placements),
             SourceDocumentInput::Prefab(document) => {
-                if self.extraction.is_some() && !document.inputs.is_empty() {
+                if !document.inputs.is_empty() {
                     self.mark(parent, None, SourceContextFootprint::Unproven);
                 }
                 (&document.entities, &document.placements)
@@ -271,10 +177,7 @@ where
                 self.instance(instance, parent, frames)?;
             }
         }
-        if self.extraction.is_some() {
-            self.placements(placements, parent)?;
-        }
-        Ok(())
+        self.placements(placements, parent)
     }
 
     fn propagate(
@@ -323,10 +226,7 @@ where
         key: &SourceDocumentKey,
         parent: usize,
     ) -> Result<Option<usize>, ExtractionError> {
-        let extraction = self
-            .extraction
-            .as_ref()
-            .ok_or(ExtractionError::InvalidSource)?;
+        let extraction = &self.extraction;
         let bytes = key
             .checked_retained_bytes()
             .and_then(|bytes| bytes.checked_add(extraction.maximum_key_bytes))
@@ -375,12 +275,8 @@ where
         parent: usize,
         context: Option<usize>,
     ) -> Result<bool, ExtractionError> {
-        let extraction = self
-            .extraction
-            .as_ref()
-            .ok_or(ExtractionError::InvalidSource)?;
         let matches = match actual {
-            Some(index) => same_key(base, extraction.sources[index].key(), self.work)?,
+            Some(index) => same_key(base, self.extraction.sources[index].key(), self.work)?,
             None => false,
         };
         if !matches {
@@ -405,11 +301,7 @@ where
                     .as_ref()
                     .map(|nested| (nested, frame.context))
             } else if let Some(claim) = frame.claims.next() {
-                let context = if self.extraction.is_some() {
-                    self.claim_context(claim, frame)?
-                } else {
-                    None
-                };
+                let context = self.claim_context(claim, frame)?;
                 claim.value.as_ref().map(|nested| (nested, context))
             } else {
                 frames.pop();
@@ -495,21 +387,7 @@ where
     ) -> Result<Option<PhysicalInstanceFrame<'a>>, ExtractionError> {
         self.work.visit(1, 0, 0)?;
         let resolved = (self.resolve)(&instance.source, self.work)?;
-        let Some(extraction) = self.extraction.as_ref() else {
-            if let Some(index) = resolved {
-                if index >= self.heads.len() {
-                    return Err(ExtractionError::InvalidSource);
-                }
-                self.edge(index, parent)?;
-            }
-            let Some(overlay) = &instance.overrides else {
-                return Ok(None);
-            };
-            self.work.visit(overlay.additions.len(), 0, 0)?;
-            self.work.visit(overlay.instances.len(), 0, 0)?;
-            return Ok(Self::frame(overlay, parent, None, true, depth));
-        };
-        let sources = extraction.sources;
+        let sources = self.extraction.sources;
         let actual = match resolved {
             Some(index) => {
                 self.work.visit(1, 0, 0)?;
@@ -605,11 +483,7 @@ where
             // anchors and layout here would create a second overlay interpreter.
             self.mark(parent, context, SourceContextFootprint::Unproven);
         }
-        let selected_key = self
-            .extraction
-            .as_ref()
-            .ok_or(ExtractionError::InvalidSource)?
-            .selected_key;
+        let selected_key = self.extraction.selected_key;
         for hop in &target.through {
             if same_key(&hop.expected_base, selected_key, self.work)? {
                 self.mark(parent, context, SourceContextFootprint::Affected);

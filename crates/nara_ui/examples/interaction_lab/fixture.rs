@@ -2,15 +2,15 @@ use std::error::Error;
 
 use nara_app::{App, CoreStage, StartupStage};
 use nara_ecs::{Entity, Res, ResMut, Resource, World};
-use nara_hierarchy::{
-    HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
-};
 use nara_input::{
     ActionBinding, ActionContext, ActionId as InputActionId, ActionMapBuilder, ActionMapLimits,
     ActionMaps, ActionOutcomes, ActionPhase, InputPointerId, InputSeatId, InputWindowId, KeyCode,
 };
 use nara_reflect::{ComponentRegistryPlugin, component_registry};
-use nara_scene::{SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource};
+use nara_scene::{
+    SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
+    hierarchy::{HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter},
+};
 use nara_ui::{
     advanced::{
         UiSize, UiSurfaceContentTransform, UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot,
@@ -53,7 +53,7 @@ pub(super) fn build_lab() -> Result<App, Box<dyn Error>> {
     let mut app = App::new();
     app.add_plugins((
         ComponentRegistryPlugin,
-        nara_hierarchy::HierarchyPlugin,
+        nara_scene::hierarchy::HierarchyPlugin,
         nara_input::InputPlugin,
         UiPlugin::default(),
     ))?;

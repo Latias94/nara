@@ -581,7 +581,7 @@ fn resolver_rejects_unsupported_source_kinds_with_typed_diagnostics() {
             .find(|field| field.key().as_str() == "source-kind")
             .unwrap()
             .value(),
-        nara_diagnostic::DiagnosticValueRef::Identifier("scene")
+        nara_core::diagnostic::DiagnosticValueRef::Identifier("scene")
     );
     assert!(
         runtime
@@ -639,23 +639,25 @@ fn resolver_errors_are_recorded_as_reload_diagnostics() {
     };
     assert_eq!(
         field("asset-path").value(),
-        nara_diagnostic::DiagnosticValueRef::ProjectRelative("textures/player.png")
+        nara_core::diagnostic::DiagnosticValueRef::ProjectRelative("textures/player.png")
     );
     assert_eq!(
         field("change-kind").value(),
-        nara_diagnostic::DiagnosticValueRef::Identifier("modified")
+        nara_core::diagnostic::DiagnosticValueRef::Identifier("modified")
     );
     assert_eq!(
         field("reason").value(),
-        nara_diagnostic::DiagnosticValueRef::Identifier("asset-id-already-bound-to-stable-id")
+        nara_core::diagnostic::DiagnosticValueRef::Identifier(
+            "asset-id-already-bound-to-stable-id"
+        )
     );
     assert_eq!(
         field("error-detail").class(),
-        nara_diagnostic::DiagnosticFieldClass::Sensitive
+        nara_core::diagnostic::DiagnosticFieldClass::Sensitive
     );
     assert_eq!(
         field("error-detail").value(),
-        nara_diagnostic::DiagnosticValueRef::Redacted
+        nara_core::diagnostic::DiagnosticValueRef::Redacted
     );
     let diagnostic_debug = format!("{diagnostic:?}");
     assert!(!diagnostic_debug.contains(&stable_id().to_string()));

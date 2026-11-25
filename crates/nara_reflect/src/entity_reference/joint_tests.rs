@@ -1,16 +1,18 @@
 use std::collections::BTreeMap;
 
 use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
-use nara_identity::SceneEntityId;
+use nara_ecs::identity::SceneEntityId;
 
 use super::*;
 use crate::{
-    __private::{
-        AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
-        collect_effective_references_with_admission, freeze_component_defaults,
-    },
     AssetReferenceDemand, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValueMaterializationLimits, DeclaredAssetReferenceError, encode_asset_reference_value,
+    ComponentValueMaterializationLimits, DeclaredAssetReferenceError,
+    asset_reference::{
+        AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
+        collect_effective_references_with_admission,
+    },
+    effective::freeze_component_defaults,
+    encode_asset_reference_value,
 };
 
 fn schema(fields: impl IntoIterator<Item = ComponentFieldSchema>) -> ComponentSchema {

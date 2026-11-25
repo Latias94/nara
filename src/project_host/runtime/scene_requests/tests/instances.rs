@@ -5,6 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::fs::ContentDigest;
 use nara_app::{App, PluginError};
 #[cfg(feature = "runtime-2d")]
 use nara_asset::{AssetMeta, AssetMetaIdentity, AssetPath, Assets};
@@ -13,13 +14,11 @@ use nara_asset::{
     AssetSourceKind, AssetStates, ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::ItemLimit;
-use nara_ecs::{Entity, World};
-use nara_fs::ContentDigest;
-use nara_hierarchy::{Children, HierarchyRoots, Parent};
-use nara_identity::{
+use nara_ecs::identity::{
     EntityLookup, EntityReference, PrefabEntityTarget, SceneEntityId, SpawnedSceneInstance,
     WorldIdentityDomain,
 };
+use nara_ecs::{Entity, World};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
@@ -30,8 +29,9 @@ use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentRecord, SceneDocument,
     SceneEntityPlacement, SceneEntityRecord, SceneEntitySource, SceneOccurrenceKey, ScenePlacement,
     ScenePlacementParent, SceneSpawnReport, SourceDocumentKey, SourceDocumentKind,
-    advanced::SceneProductTransactionLimits, retire_and_despawn_scene_instance,
-    scene_component_bindings,
+    advanced::SceneProductTransactionLimits,
+    hierarchy::{Children, HierarchyRoots, Parent},
+    retire_and_despawn_scene_instance, scene_component_bindings,
 };
 
 #[cfg(feature = "runtime-2d")]
@@ -336,7 +336,8 @@ impl super::super::domains::ManagedSceneDomainAttempt for FailFirstRetirement {
             return Ok(());
         }
         Err(super::super::domains::ManagedSceneDomainError::new(
-            nara_diagnostic::DiagnosticCode::new("test.concurrent-room-retire-failed").unwrap(),
+            nara_core::diagnostic::DiagnosticCode::new("test.concurrent-room-retire-failed")
+                .unwrap(),
         ))
     }
 
@@ -473,9 +474,7 @@ fn dependency_inspection_accepts_installed_startup_and_rejects_foreign_and_root_
         unreachable!()
     };
     let mut host = ProjectHost::new(nara_app::RuntimeClosePolicy::default());
-    let mut attempt = host
-        .begin_start(snapshot, plan.clone(), Vec::new())
-        .unwrap();
+    let mut attempt = host.begin_start(snapshot, plan.clone()).unwrap();
     host.complete_start(&mut attempt).unwrap();
     assert!(
         host.with_running_world(|world| world.contains_resource::<StartupInspected>())
@@ -581,7 +580,7 @@ fn exercise_instances(
     assert_eq!(world.entities().count_spawned(), baseline);
     assert_eq!(CurrentScene::get(world).unwrap().receipt(), expected);
     assert_eq!(resource_counts(world), resources);
-    nara_hierarchy::validate_hierarchy(world).unwrap();
+    nara_scene::hierarchy::validate_hierarchy(world).unwrap();
 }
 
 fn assert_refused(
@@ -651,6 +650,7 @@ fn assert_instance(
             .get::<Children>(node)
             .unwrap()
             .iter()
+            .copied()
             .collect::<Vec<_>>(),
         [branch]
     );
@@ -659,6 +659,7 @@ fn assert_instance(
             .get::<Children>(branch)
             .unwrap()
             .iter()
+            .copied()
             .collect::<Vec<_>>(),
         [leaf]
     );

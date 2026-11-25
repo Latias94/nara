@@ -11,7 +11,7 @@ use nara::{
     hierarchy::HierarchyPlugin,
     image::ImageSourcePlugin,
     reflect::ComponentRegistryPlugin,
-    transform::TransformPlugin,
+    scene::TransformComponentsPlugin,
 };
 
 const TEXTURE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
@@ -39,7 +39,7 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
         AssetSourcePlugin,
         ImagePlugin,
         HierarchyPlugin,
-        TransformPlugin,
+        TransformComponentsPlugin,
     ))
     .unwrap();
     app.add_plugin(
@@ -91,9 +91,6 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
             });
         },
     );
-    app.insert_resource(ReloadTestPort).unwrap();
-    app.__register_driver_port::<ReloadTestPort>(ReloadTestPort::apply_driver_input_in_world)
-        .unwrap();
     let mut app = RuntimeInstance::start(app).unwrap();
     request_reload(&mut app, record.path().clone());
 
@@ -146,37 +143,16 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
     app.finish().unwrap();
 }
 
-#[derive(Resource)]
-struct ReloadTestPort;
-
-impl nara::app::__RuntimeDriverPort for ReloadTestPort {
-    type Input = AssetSourcePath;
-    type Output = ();
-    fn apply_driver_input(&mut self, _input: Self::Input) {}
-}
-
-impl ReloadTestPort {
-    fn apply_driver_input_in_world(
-        world: &mut World,
-        path: AssetSourcePath,
-    ) -> Result<(), (nara::app::RuntimeWorldAccessError, AssetSourcePath)> {
-        world
-            .resource_mut::<AssetSourceChanges>()
-            .modified(path)
-            .unwrap();
-        Ok(())
-    }
-}
-
 fn request_reload(runtime: &mut RuntimeInstance, path: AssetSourcePath) {
-    runtime
-        .with_driver_scope(|scope| scope.__apply_port::<ReloadTestPort>(path))
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
+    let outcome = runtime
+        .with_driver_scope(|scope| {
+            scope.apply_command(move |world: &mut World| {
+                world.resource_mut::<AssetSourceChanges>().modified(path)
+            })
         })
-        .unwrap()
         .unwrap();
+    assert!(outcome.post_operation_fault.is_none());
+    outcome.output.unwrap();
 }
 
 fn drive_until(app: &mut RuntimeInstance, mut complete: impl FnMut(&RuntimeInstance) -> bool) {

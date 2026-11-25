@@ -8,7 +8,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use nara_fs::{
+use crate::fs::{
     CapabilityRights, DirectoryCapability, FsError, FsOperation, HostCapabilityOptions, TrustMode,
 };
 

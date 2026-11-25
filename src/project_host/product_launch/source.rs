@@ -2,7 +2,7 @@
 
 use std::{error::Error, fmt};
 
-use nara_fs::{ContentDigest, PathValidationError, RelativePath};
+use crate::fs::{ContentDigest, PathValidationError, RelativePath};
 use nara_project::{DESKTOP_SUPERVISED_PLAY_V1_CONTRACT, ProjectPath, ProjectPathError};
 
 const SOURCE_RECEIPT_MAGIC: &[u8] = b"nara.editor-external-play-source.v1\0";

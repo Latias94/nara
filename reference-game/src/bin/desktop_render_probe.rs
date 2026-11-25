@@ -13,8 +13,7 @@ use nara::{
         PluginDefinitionId, PluginError, PluginId, RuntimeGeneration, StartupStage,
     },
     asset::{AssetEvents, AssetStates, Assets},
-    ecs::{Entity, With, schedule::IntoScheduleConfigs},
-    gameplay::{GameplayCommandQueue, GameplayCommandSet},
+    ecs::{Command, Entity, With, schedule::IntoScheduleConfigs},
     image::{ImageAsset, PreparedImages},
     prelude::{App, CoreStage, FixedTime, Plugin, ResMut, Resource, World},
     project_host::{
@@ -32,8 +31,8 @@ use nara::{
     },
 };
 use nara_reference_game::{
-    MovementDirection, REFERENCE_DESKTOP_PLUGIN_ID, WaveRunGeneration, WaveSnapshot,
-    movement_command, retry_command, wave_desktop_intent,
+    MovementDirection, REFERENCE_DESKTOP_PLUGIN_ID, ReferenceWaveSet, WaveRunGeneration,
+    WaveSnapshot, movement_command, retry_command, wave_desktop_intent,
 };
 
 mod desktop_support;
@@ -176,7 +175,7 @@ impl Plugin for ProductRenderProbePlugin {
         })?
         .add_systems(
             CoreStage::FixedUpdate,
-            observe_product_render.in_set(GameplayCommandSet::Capture),
+            observe_product_render.in_set(ReferenceWaveSet::Capture),
         )?
         .add_systems(StartupStage::Tooling, fail_retry_before_first_image_prepare)?;
         Ok(())
@@ -278,11 +277,7 @@ fn observe_product_render(world: &mut World) {
                 };
                 let submission = movement_command(tick, 9_000, MovementDirection::Left)
                     .expect("the engine-owned product movement command is valid");
-                if world
-                    .resource_mut::<GameplayCommandQueue>()
-                    .submit(submission)
-                    .is_err()
-                {
+                if submission.apply(world).is_err() {
                     fail_product_probe(world);
                     return;
                 }
@@ -298,11 +293,7 @@ fn observe_product_render(world: &mut World) {
             };
             let submission = retry_command(tick, 9_001)
                 .expect("the engine-owned product Retry command is valid");
-            if world
-                .resource_mut::<GameplayCommandQueue>()
-                .submit(submission)
-                .is_err()
-            {
+            if submission.apply(world).is_err() {
                 fail_product_probe(world);
                 return;
             }

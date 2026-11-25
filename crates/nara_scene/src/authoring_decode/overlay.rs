@@ -239,10 +239,10 @@ fn classify_record(
             &mut context.admission,
         ) {
             Ok(value) => Some(value),
-            Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(report)) => {
+            Err(nara_reflect::effective::EffectiveValueAdmissionError::Admission(report)) => {
                 return Err(report);
             }
-            Err(nara_reflect::__private::EffectiveValueAdmissionError::Value(error)) => {
+            Err(nara_reflect::effective::EffectiveValueAdmissionError::Value(error)) => {
                 preserve_contextual_error(
                     schema,
                     complete_value::ContextualRecordError::Value(error),
@@ -263,10 +263,12 @@ fn classify_record(
                 &mut context.admission,
             ) {
                 Ok(()) => {}
-                Err(nara_reflect::__private::EntityReferencePlanError::Admission(report)) => {
+                Err(nara_reflect::entity_reference::EntityReferencePlanError::Admission(
+                    report,
+                )) => {
                     return Err(report);
                 }
-                Err(nara_reflect::__private::EntityReferencePlanError::Reference(error)) => {
+                Err(nara_reflect::entity_reference::EntityReferencePlanError::Reference(error)) => {
                     preserve_traversal_error(&error)?;
                     classified.readiness = AuthoringRecordReadiness::UnresolvedOverlay;
                     classified.adapter = None;
@@ -325,7 +327,7 @@ fn classify_record(
             };
             let limits = context.asset_reference_limits();
             let found =
-                nara_reflect::__private::collect_declared_field_asset_references_with_admission(
+                nara_reflect::asset_reference::collect_declared_field_asset_references_with_admission(
                     component,
                     field,
                     payload,
@@ -348,12 +350,14 @@ fn classify_record(
                 );
             let found = match found {
                 Ok(found) => Ok(found),
-                Err(nara_reflect::__private::AssetReferenceCollectionError::Admission(report)) => {
+                Err(nara_reflect::asset_reference::AssetReferenceCollectionError::Admission(
+                    report,
+                )) => {
                     return Err(report);
                 }
-                Err(nara_reflect::__private::AssetReferenceCollectionError::Reference(error)) => {
-                    Err(error)
-                }
+                Err(nara_reflect::asset_reference::AssetReferenceCollectionError::Reference(
+                    error,
+                )) => Err(error),
             };
             match found {
                 Ok(found) => {
@@ -403,7 +407,7 @@ fn classify_property(
             |scratch| retention::property_dynamic_bytes_impl(claim, context.limits, scratch),
         )?;
         let selected =
-            nara_reflect::__private::resolve_component_property_schema_claim_with_admission(
+            nara_reflect::property::resolve_component_property_schema_claim_with_admission(
                 schema,
                 version,
                 &claim.path,
@@ -420,10 +424,10 @@ fn classify_property(
             );
         let selected = match selected {
             Ok(selected) => Ok(selected),
-            Err(nara_reflect::__private::ComponentPropertyAdmissionError::Admission(report)) => {
+            Err(nara_reflect::property::ComponentPropertyAdmissionError::Admission(report)) => {
                 return Err(report);
             }
-            Err(nara_reflect::__private::ComponentPropertyAdmissionError::Property(error)) => {
+            Err(nara_reflect::property::ComponentPropertyAdmissionError::Property(error)) => {
                 Err(error)
             }
         };
@@ -470,22 +474,22 @@ fn classify_property(
                             )
                         };
                         let found = match &claim.intent {
-                            PrefabPropertyIntent::Set(_) => nara_reflect::__private::collect_declared_value_asset_references_with_admission(
+                            PrefabPropertyIntent::Set(_) => nara_reflect::asset_reference::collect_declared_value_asset_references_with_admission(
                                 component, selected.field, selected.shape, payload, traversal_limits, callback,
                             ),
-                            PrefabPropertyIntent::Absent => nara_reflect::__private::collect_declared_field_asset_references_with_admission(
+                            PrefabPropertyIntent::Absent => nara_reflect::asset_reference::collect_declared_field_asset_references_with_admission(
                                 component, selected.field, payload, traversal_limits, callback,
                             ),
                         };
                         match found {
                             Ok(found) => Ok(found),
                             Err(
-                                nara_reflect::__private::AssetReferenceCollectionError::Admission(
+                                nara_reflect::asset_reference::AssetReferenceCollectionError::Admission(
                                     report,
                                 ),
                             ) => return Err(report),
                             Err(
-                                nara_reflect::__private::AssetReferenceCollectionError::Reference(
+                                nara_reflect::asset_reference::AssetReferenceCollectionError::Reference(
                                     error,
                                 ),
                             ) => Err(error),

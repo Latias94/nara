@@ -23,7 +23,7 @@ use nara::{
     app::{
         AddPluginsError, App, CoreStage, Plugin, PluginCategory, PluginDeclaration,
         PluginDefinition, PluginDefinitionId, PluginError, PluginGroup, PluginGroupBuilder,
-        PluginGroupId, PluginId, PluginPlan, PluginPlanError, RuntimeAdmissionReservation,
+        PluginGroupId, PluginId, PluginPlan, PluginPlanError, RuntimeCandidate,
         RuntimeCandidateRetirementState, RuntimeClosePolicy, RuntimeObligationLedger,
     },
     core::ItemLimit,
@@ -565,7 +565,7 @@ fn public_check_capture_startup_and_replacement_preserve_two_data_owners() {
         HeadlessRunIntent::frames(NonZeroU32::new(20_000).unwrap(), Duration::from_millis(1))
             .with_recipe(recipe)
             .stop_when(|outcome: &DataOutcome| outcome.replacement_complete);
-    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+    let mut run = HeadlessRun::new(project.root_capability(), intent);
     let report = finish_run(&mut run);
     assert_eq!(
         report.outcome(),
@@ -775,14 +775,12 @@ fn captured_project_source_rejects_readmitted_data_with_the_same_native_snapshot
                 .matches(selected),
             matches_source
         );
-        let mut candidate = RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(
-                sealed,
-                RuntimeObligationLedger::new(),
-                RuntimeClosePolicy::default(),
-            )
-            .unwrap();
+        let mut candidate = RuntimeCandidate::admit(
+            sealed,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
         let result = Arc::new(Mutex::new(None));
         let observation = Arc::clone(&result);
         let source = snapshot.scene_source();

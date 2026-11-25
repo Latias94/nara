@@ -105,9 +105,9 @@ pub(super) fn run() -> ExitCode {
         .unwrap_or_else(|panic| Err(presentation::panic_detail(panic.as_ref())));
     if !fixture.retired {
         eprintln!(
-            "readiness retains original native owners and cache: {trajectory:?}; {cleanup:?}; {input_cleanup:?}"
+            "readiness: explicit retirement is incomplete, leaving cache at {}: {trajectory:?}; {cleanup:?}; {input_cleanup:?}",
+            cache.display()
         );
-        std::mem::forget(fixture);
         return ExitCode::FAILURE;
     }
     let mut failures: Vec<_> = [trajectory, cleanup, input_cleanup]
@@ -293,8 +293,8 @@ impl Fixture {
             save_path: Some(cache.join("checkpoint.json")),
         })?
         .ok_or("Save-path launch must use the original first-tick ingress")?;
-        self.run
-            .submit(command)
+        command
+            .submit_desktop(&mut self.run)
             .map_err(|error| error.to_string())?;
         self.shared.borrow_mut().launch_admitted = true;
         self.shared.borrow_mut().launch_required = true;

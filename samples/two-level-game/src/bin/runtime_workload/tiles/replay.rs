@@ -84,9 +84,6 @@ pub fn replay(frames: &[PresentedTileFrame], population: usize) -> Result<Value,
     };
     let result = guarded("tile image replay", || run(&mut owner, frames, population));
     let cleanup = guarded("tile oracle cleanup", || owner.cleanup());
-    if cleanup.is_err() {
-        std::mem::forget(owner);
-    }
     match (result, cleanup) {
         (Ok(mut report), Ok(cleanup)) => {
             report["cleanup"] = cleanup;
@@ -536,7 +533,6 @@ fn guarded<T>(label: &str, operation: impl FnOnce() -> Result<T, String>) -> Res
             } else {
                 "non-string panic payload".into()
             };
-            std::mem::forget(payload);
             Err(format!("{label} panicked: {detail}"))
         }
     }

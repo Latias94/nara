@@ -7,22 +7,21 @@ use std::{
 };
 
 use nara_asset::AssetRef;
+use nara_core::diagnostic::DiagnosticValueRef;
 use nara_core::{ByteLimit, ItemLimit};
-use nara_diagnostic::DiagnosticValueRef;
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference,
 };
 use nara_reflect::{
-    __private::plan_declared_entity_references, AuthoringSchemaBundle, AuthoringSchemaBundleOwner,
-    ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentPropertyPath, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
-    PersistentComponentSchemaOwnerId,
+    AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
+    ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentSchema,
+    ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind, ComponentValueShape, PersistentComponentSchemaOwnerId,
+    entity_reference::plan_declared_entity_references,
 };
 
 use crate::{
-    __private::AuthoringAdapterReceipt,
     AuthoringRecordReadiness, AuthoringSchemaBasis, PrefabAddition, PrefabComponentIntent,
     PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop,
     PrefabOverlay, PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent,
@@ -30,6 +29,7 @@ use crate::{
     SceneCompilationOptions, SceneComponentRecord, SceneDocument, SceneEntityId,
     SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
     SourceDocumentKey, SourceDocumentKind,
+    authoring::AuthoringAdapterReceipt,
     prefab::{
         AuthoringSceneCompilationOmissionReason, SelectedInstanceCompilation,
         SelectedInstanceConsumer, SourceDocumentInput, inspection::PrefabInspectionInput,
@@ -1213,9 +1213,9 @@ fn final_surviving_shells_and_root_bindings_share_the_entity_cap_without_copying
 #[test]
 fn absent_write_requires_an_exact_claim_even_when_the_effective_root_is_already_absent() {
     use crate::{
-        __private::try_inspect_authoring_prefab_instance_with_loader, AuthoringDocumentSource,
-        AuthoringPrefabPropertyClaimKind, AuthoringPrefabPropertyValue, PrefabDeclarationLimits,
-        SceneAuthoringSession, SceneDocumentCandidate,
+        AuthoringDocumentSource, AuthoringPrefabPropertyClaimKind, AuthoringPrefabPropertyValue,
+        PrefabDeclarationLimits, SceneAuthoringSession, SceneDocumentCandidate,
+        authoring::try_inspect_authoring_prefab_instance_with_loader,
     };
     use nara_reflect::ComponentPropertyReadBudget;
 
@@ -1296,9 +1296,7 @@ fn absent_write_requires_an_exact_claim_even_when_the_effective_root_is_already_
             )
             .unwrap()
             .publish();
-    let foreign = SceneAuthoringSession::from_published_authoring_document(
-        crate::__private::fork_published_authoring_scene_document(&published),
-    );
+    let foreign = SceneAuthoringSession::from_published_authoring_document(published.fork());
     let session = SceneAuthoringSession::from_published_authoring_document(published);
     let working = session.shared_document();
     assert!(Arc::ptr_eq(&working, &foreign.shared_document()));
@@ -1382,8 +1380,8 @@ fn absent_write_requires_an_exact_claim_even_when_the_effective_root_is_already_
 #[test]
 fn property_write_verification_checks_the_exact_authored_reference() {
     use crate::{
-        __private::try_inspect_authoring_prefab_instance_with_loader, AuthoringPrefabPropertyValue,
-        PrefabDeclarationLimits, SceneAuthoringSession,
+        AuthoringPrefabPropertyValue, PrefabDeclarationLimits, SceneAuthoringSession,
+        authoring::try_inspect_authoring_prefab_instance_with_loader,
     };
     use nara_reflect::{ComponentPropertyReadBudget, ComponentValueMaterializationLimits};
 
@@ -1509,11 +1507,11 @@ fn property_write_verification_checks_the_exact_authored_reference() {
 #[test]
 fn inspection_preserves_root_aliases_ordered_claims_and_typed_reference_reads() {
     use crate::{
-        __private::try_inspect_authoring_prefab_instance_with_loader,
         AuthoringPrefabPropertyClaimKind, AuthoringPrefabPropertyValue,
         AuthoringPrefabRecordOrigin, AuthoringPrefabValueError, AuthoringPropertyChildrenLimits,
         AuthoringPropertyChildrenPosition, AuthoringReadError, PrefabAuthoringSession,
         PrefabDeclarationLimits, PrefabDeclarationSource, PrefabInstancePath, PrefabOverlaySlot,
+        authoring::try_inspect_authoring_prefab_instance_with_loader,
     };
     use nara_reflect::{
         ComponentPropertyReadBudget, ComponentPropertyStep, ComponentValueMaterializationLimits,
@@ -1932,10 +1930,10 @@ fn inspection_preserves_root_aliases_ordered_claims_and_typed_reference_reads() 
 #[test]
 fn inspection_resolves_a_contextual_default_only_when_it_supplies_the_effective_value() {
     use crate::{
-        __private::{
+        AuthoringPrefabPropertyValue,
+        authoring::{
             AuthoringPrefabInspectionError, try_inspect_authoring_prefab_instance_with_loader,
         },
-        AuthoringPrefabPropertyValue,
     };
     use nara_reflect::ComponentPropertyReadBudget;
 
@@ -2029,8 +2027,8 @@ fn inspection_resolves_a_contextual_default_only_when_it_supplies_the_effective_
 #[test]
 fn inspection_copies_repeated_references_at_the_exact_projected_value_limit() {
     use crate::{
-        __private::try_inspect_authoring_prefab_instance_with_loader, AuthoringPrefabPropertyValue,
-        AuthoringPrefabValueError,
+        AuthoringPrefabPropertyValue, AuthoringPrefabValueError,
+        authoring::try_inspect_authoring_prefab_instance_with_loader,
     };
     use nara_core::DepthLimit;
     use nara_reflect::{ComponentPropertyReadBudget, ComponentValueMaterializationLimits};

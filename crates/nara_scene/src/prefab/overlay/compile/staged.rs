@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
 
 use nara_asset::AssetRef;
-use nara_identity::ReferenceInputId;
+use nara_ecs::identity::ReferenceInputId;
 use nara_reflect::ComponentTypeId;
 
 use self::reference_program::ReferencePrograms;
@@ -79,7 +79,7 @@ struct State {
 
 #[derive(Debug, PartialEq, Eq)]
 struct ReferenceDemand {
-    reference: nara_identity::AuthoredEntityReference,
+    reference: nara_ecs::identity::AuthoredEntityReference,
     remaining_hops: usize,
     lexical_source: PrefabDeclarationSource,
 }
@@ -197,7 +197,7 @@ pub(super) struct SourceTopology<'a> {
     pub(super) placements: &'a [SceneEntityPlacement],
     pub(super) entities: &'a [SceneEntityRecord],
     /// Witnessed containing-source references for conversion or component Apply.
-    pub(super) reference_queries: &'a [nara_identity::AuthoredEntityReference],
+    pub(super) reference_queries: &'a [nara_ecs::identity::AuthoredEntityReference],
     pub(super) preserve_source_defaults: bool,
     #[cfg(feature = "serde")]
     pub(super) inspect: bool,
@@ -893,7 +893,7 @@ where
         node: NodeId,
         site: &Site,
         _key: &SourceDocumentKey,
-        reference: Option<(&nara_identity::AuthoredEntityReference, usize, ScopeId)>,
+        reference: Option<(&nara_ecs::identity::AuthoredEntityReference, usize, ScopeId)>,
     ) -> Result<State, SceneCompilationFailure> {
         // Only work which can still enter this slot distinguishes a finite re-entry.
         // Stable source positions, rather than arena addresses, detect actual recursion.
@@ -1158,7 +1158,7 @@ where
     fn open_reference_slot(
         &mut self,
         node: NodeId,
-        reference: &nara_identity::AuthoredEntityReference,
+        reference: &nara_ecs::identity::AuthoredEntityReference,
         remaining_hops: usize,
         lexical_scope: ScopeId,
     ) -> Result<Option<ScopeId>, SceneCompilationFailure> {
@@ -1168,7 +1168,7 @@ where
     fn open_slot_with_reference(
         &mut self,
         node: NodeId,
-        reference: Option<(&nara_identity::AuthoredEntityReference, usize, ScopeId)>,
+        reference: Option<(&nara_ecs::identity::AuthoredEntityReference, usize, ScopeId)>,
     ) -> Result<Option<ScopeId>, SceneCompilationFailure> {
         if self.nodes[node].opened {
             return Ok(self.nodes[node].entered);
@@ -1209,7 +1209,7 @@ where
         &mut self,
         node: NodeId,
         site: &Site,
-        reference: Option<(&nara_identity::AuthoredEntityReference, usize, ScopeId)>,
+        reference: Option<(&nara_ecs::identity::AuthoredEntityReference, usize, ScopeId)>,
     ) -> Result<Option<ScopeId>, SceneCompilationFailure> {
         self.admit(Some(512))?;
         let instance = self

@@ -1,7 +1,7 @@
 //! Bounded identity lookup for references whose source path is not embedded in the document.
 
+use crate::fs::{DirectoryEnumerationLimits, FileKind};
 use nara_asset::{AssetMetaFileLimits, AssetMetaIdentityCandidate};
-use nara_fs::{DirectoryEnumerationLimits, FileKind};
 #[cfg(feature = "project-tooling")]
 use nara_project::ProjectPath;
 
@@ -298,8 +298,8 @@ impl<V, D> LoadContext<'_, V, D> {
             loop {
                 let batch_memory = BATCH_ENTRIES
                     * (MAX_NAME_BYTES
-                        + size_of::<nara_fs::DirectoryEntryObservation>()
-                        + size_of::<nara_fs::DirectoryEntryRejectedFact>());
+                        + size_of::<crate::fs::DirectoryEntryObservation>()
+                        + size_of::<crate::fs::DirectoryEntryRejectedFact>());
                 let reservation = self.reserve_work(batch_memory)?;
                 let batch = enumeration
                     .next_batch(BATCH_ENTRIES)

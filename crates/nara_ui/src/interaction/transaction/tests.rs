@@ -1,22 +1,24 @@
 use std::sync::Arc;
 
+use crate::kernel::{UiFrame, UiNonActivation, UiPoint};
 use nara_app::App;
 use nara_core::Vec2;
 use nara_ecs::World;
-use nara_hierarchy::{HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter};
 use nara_input::{
     ButtonDriverInput, InputPointerId, InputSeatId, InputTimeline, InputWindowEvent, InputWindowId,
     MouseButton, PointerDriverInput,
 };
-use nara_ui_kernel::{UiFrame, UiNonActivation, UiPoint};
+use nara_scene::hierarchy::{HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter};
 
 use crate::{
-    __private::{UiPresentationCommit, commit_prepared_ui_presentation, prepare_ui_presentation},
     UiActionConsumerId, UiActionId, UiActionJournal, UiActivationSource, UiButton, UiColorRole,
     UiNode, UiOverflow, UiPlugin, UiPresentationReceipt, UiRoot, UiRouteRejection,
     UiRouteRejectionLog, UiRuntimeKey, UiSeatId, UiSize, UiStyle, UiSurfaceContentTransform,
     UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot, UiVisual, install_ui_surface,
     interaction::route_timeline_ui_input,
+    presentation::{
+        UiPresentationCommit, commit_prepared_ui_presentation, prepare_ui_presentation,
+    },
     runtime::compile_ui_frames,
     ui_candidate_frame, ui_semantic_snapshot,
 };
@@ -53,7 +55,7 @@ fn held_resume_releases_once_across_keyed_hud_reorder_and_clipping() {
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
-        nara_hierarchy::HierarchyPlugin,
+        nara_scene::hierarchy::HierarchyPlugin,
         nara_input::InputPlugin,
         UiPlugin::default(),
     ))
@@ -121,7 +123,7 @@ fn held_resume_releases_once_across_keyed_hud_reorder_and_clipping() {
         let placement = HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent });
         writer.place(entity, placement).unwrap();
     }
-    nara_hierarchy::__private::complete_fixed_input_hierarchy(world).unwrap();
+    nara_scene::hierarchy::complete_fixed_input_hierarchy(world).unwrap();
 
     let (initial, receipt) = present(world, 1);
     let position = Vec2::new(20.0, 20.0);

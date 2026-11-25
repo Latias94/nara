@@ -11,12 +11,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+use two_level_game::command::CommandSchedule;
+
 use nara::{
     advanced_prelude::CurrentScene,
     app::RuntimeState,
     asset::Assets,
     ecs::Entity,
-    gameplay::GameplayCommandQueue,
     hierarchy::{Children, HierarchyRoots, Parent},
     identity::{EntityLookup, EntityReference, SpawnedSceneInstance, WorldIdentityDomain},
     image::{ImageAsset, ImageColorSpace, ImageExtent},
@@ -251,7 +252,7 @@ fn marker_graphs(
                 assert!(sprite.material.image.is_none());
                 assert!(root.get::<Parent>().is_none());
                 assert!(hierarchy_roots.contains(root.id()));
-                assert_eq!(root.get::<Children>().unwrap().as_slice(), &[child]);
+                assert_eq!(&**root.get::<Children>().unwrap(), &[child]);
 
                 let child_source = world.get::<SceneEntitySource>(child).unwrap();
                 assert_eq!(child_source.instance_id, source.instance_id);
@@ -264,7 +265,7 @@ fn marker_graphs(
                 assert!(
                     world
                         .get::<Children>(child)
-                        .is_none_or(|children| children.as_slice().is_empty())
+                        .is_none_or(|children| children.is_empty())
                 );
                 assert!(world.get::<MarkerLink>(child).is_none());
                 assert_eq!(
@@ -641,7 +642,7 @@ fn reject_changed_marker_source(relative: &str, diagnostic: &str) {
             .session
             .observe(|world| {
                 (
-                    world.resource::<GameplayCommandQueue>().is_idle(),
+                    world.resource::<CommandSchedule>().is_idle(),
                     world.resource::<TaskPools>().return_state(),
                 )
             })

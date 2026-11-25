@@ -669,9 +669,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_platform"
-version = "0.20.1"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c1280bc12c975ddb041b8341b005415024994477479861ea4490b9b7f9f6185"
+checksum = "000bc467d1b344b6609fcf217a9b08d349d49c8e85dc4179fb7656f2b6e3db47"
 dependencies = [
  "critical-section",
  "foldhash",
@@ -685,7 +685,8 @@ dependencies = [
  "spin 0.12.3",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "windows-sys 0.61.2",
+ "web-time",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -712,7 +713,6 @@ dependencies = [
  "foldhash",
  "glam",
  "indexmap",
- "inventory",
  "serde",
  "smallvec",
  "smol_str 0.2.2",
@@ -738,14 +738,16 @@ dependencies = [
 
 [[package]]
 name = "bevy_tasks"
-version = "0.20.1"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84c634a7f09e9ccd26137a2f541ab670c84854a1af4107fecca1541cfcd1b466"
+checksum = "fbd8116f12dc50bde3758a72fba85e1f4c00e6c66d0ad58bdc46c0c0690829a8"
 dependencies = [
+ "async-channel",
  "async-executor",
  "async-task 4.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "atomic-waker",
  "bevy_platform",
+ "concurrent-queue",
  "crossbeam-queue",
  "derive_more",
  "futures-lite",
@@ -755,9 +757,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_utils"
-version = "0.20.1"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1565ae7a124e68a39321620c5339eb501694357c40f50a74413034ed683cdf9"
+checksum = "5cbd58495039d4e63e6fcfef1242fecab33ffe62b4a5e010467e69e790879812"
 dependencies = [
  "bevy_platform",
  "disqualified",
@@ -1316,7 +1318,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1572,7 +1574,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e35d6e78f4cebb90e51d543db8fe41528851d6deeef6ef21ebd4bfdc1e784776"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2983,10 +2985,9 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
- "nara_hierarchy",
  "nara_reflect",
  "nara_render",
- "nara_transform",
+ "nara_scene",
  "nara_window",
  "open-gpui",
  "open-gpui-platform",
@@ -3000,7 +3001,10 @@ dependencies = [
 name = "nara_app"
 version = "0.1.0"
 dependencies = [
+ "bevy_platform",
+ "bevy_tasks",
  "blake3",
+ "nara_core",
  "nara_ecs",
  "thiserror 2.0.21",
 ]
@@ -3013,11 +3017,10 @@ dependencies = [
  "blake3",
  "nara_app",
  "nara_core",
- "nara_diagnostic",
  "nara_ecs",
- "nara_identity",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
  "uuid",
 ]
 
@@ -3025,23 +3028,16 @@ dependencies = [
 name = "nara_core"
 version = "0.1.0"
 dependencies = [
+ "blake3",
+ "getrandom 0.3.4",
  "glam",
+ "rustix 1.1.6",
  "semver",
  "serde",
- "uuid",
-]
-
-[[package]]
-name = "nara_diagnostic"
-version = "0.1.0"
-dependencies = [
- "bevy_ecs",
- "nara_app",
- "nara_core",
- "nara_ecs",
- "serde",
+ "tempfile",
  "thiserror 2.0.21",
- "tracing",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3049,7 +3045,10 @@ name = "nara_ecs"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
+ "nara_core",
  "nara_ecs_derive",
+ "thiserror 2.0.21",
+ "uuid",
 ]
 
 [[package]]
@@ -3062,38 +3061,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "nara_fs"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "rustix 1.1.6",
- "thiserror 2.0.21",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "nara_hierarchy"
-version = "0.1.0"
-dependencies = [
- "nara_app",
- "nara_ecs",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "nara_identity"
-version = "0.1.0"
-dependencies = [
- "bevy_ecs",
- "getrandom 0.3.4",
- "nara_core",
- "nara_ecs",
- "serde",
- "thiserror 2.0.21",
- "uuid",
 ]
 
 [[package]]
@@ -3112,15 +3079,13 @@ name = "nara_reflect"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
- "bevy_reflect",
  "blake3",
  "nara_app",
  "nara_asset",
  "nara_core",
- "nara_diagnostic",
  "nara_ecs",
- "nara_identity",
  "nara_reflect_derive",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3145,14 +3110,10 @@ dependencies = [
  "nara_app",
  "nara_asset",
  "nara_core",
- "nara_diagnostic",
  "nara_ecs",
- "nara_fs",
- "nara_hierarchy",
  "nara_material_derive",
  "nara_reflect",
- "nara_tasks",
- "nara_transform",
+ "nara_scene",
  "nara_window",
  "png 0.18.1",
  "pollster 0.4.0",
@@ -3164,24 +3125,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "nara_tasks"
+name = "nara_scene"
 version = "0.1.0"
 dependencies = [
+ "base64 0.21.7",
  "bevy_ecs",
+ "getrandom 0.3.4",
  "nara_app",
+ "nara_asset",
  "nara_core",
  "nara_ecs",
-]
-
-[[package]]
-name = "nara_transform"
-version = "0.1.0"
-dependencies = [
- "bevy_ecs",
- "nara_app",
- "nara_core",
- "nara_ecs",
- "nara_hierarchy",
  "nara_reflect",
  "thiserror 2.0.21",
 ]
@@ -4761,7 +4714,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5359,10 +5312,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.6",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6358,7 +6311,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6619,7 +6572,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

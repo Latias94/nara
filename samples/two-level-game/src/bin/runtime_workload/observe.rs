@@ -354,16 +354,11 @@ impl Collector {
             Ok(Ok(control)) => return control,
             Ok(Err(error)) => error,
             Err(payload) => {
-                let detail = match payload.downcast::<String>() {
-                    Ok(message) => *message,
-                    Err(payload) => match payload.downcast::<&'static str>() {
-                        Ok(message) => (*message).to_owned(),
-                        Err(payload) => {
-                            std::mem::forget(payload);
-                            "non-string panic payload".to_owned()
-                        }
-                    },
-                };
+                let detail = payload
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| payload.downcast_ref::<&str>().copied())
+                    .unwrap_or("non-string panic payload");
                 format!("ordinary workload observer panicked: {detail}")
             }
         };

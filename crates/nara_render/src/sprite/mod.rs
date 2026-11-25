@@ -1137,7 +1137,7 @@ mod tests {
             world.get::<Sprite>(entity),
             Some(&Sprite::from_color(Vec2::new(16.0, 16.0), Color::WHITE))
         );
-        nara_reflect::__private::resolve_schema_provider(SPRITE_SCHEMA_PROVIDER).unwrap();
+        SPRITE_SCHEMA_PROVIDER.resolve().unwrap();
     }
 
     #[test]

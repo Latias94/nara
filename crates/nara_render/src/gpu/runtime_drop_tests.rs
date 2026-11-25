@@ -12,9 +12,8 @@ use crate::hud::{
     presentation::{UiBackendOutcomeReceiver, UiPresentationOutcomes, backend_outcome_receiver},
 };
 use nara_app::{
-    Plugin, PluginDeclaration, PluginId, RuntimeAdmissionReservation,
-    RuntimeCandidateRetirementState, RuntimeClosePolicy, RuntimeControl,
-    RuntimeControlRequestResult, RuntimeObligationLedger,
+    Plugin, PluginDeclaration, PluginId, RuntimeCandidate, RuntimeCandidateRetirementState,
+    RuntimeClosePolicy, RuntimeControl, RuntimeControlRequestResult, RuntimeObligationLedger,
 };
 
 use super::*;
@@ -56,8 +55,7 @@ fn capture_with_original_ui_permit() -> (
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
-        nara_hierarchy::HierarchyPlugin,
-        nara_transform::TransformPlugin,
+        nara_scene::spatial::SpatialPlugin,
         crate::RenderComponentsPlugin,
         crate::RenderPlugin::default(),
         crate::image::ImagePreparePlugin,
@@ -87,17 +85,15 @@ fn capture_with_original_ui_permit() -> (
             canvas: None,
             ui: Some(WgpuUiSubmissionState::Prepared(vec![submission])),
         });
-    let mut runtime = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::new(Duration::ZERO),
-        )
-        .unwrap()
-        .complete_startup()
-        .unwrap()
-        .promote();
+    let mut runtime = RuntimeCandidate::admit(
+        app.seal().unwrap(),
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::new(Duration::ZERO),
+    )
+    .unwrap()
+    .complete_startup()
+    .unwrap()
+    .promote();
     let taken = take_runtime_frame(&mut runtime).unwrap();
     assert!(taken.post_operation_fault.is_none());
     let capture = taken.output.unwrap();

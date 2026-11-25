@@ -87,10 +87,8 @@ impl std::error::Error for ReplayError {}
 
 impl Drop for ReplayError {
     fn drop(&mut self) {
-        if let Some(mut session) = self.cleanup.take()
-            && session.close() == HeadlessSessionClose::Pending
-        {
-            std::mem::forget(session);
+        if let Some(session) = &mut self.cleanup {
+            let _ = session.close();
         }
     }
 }
@@ -122,7 +120,7 @@ pub fn record_program(project: &Path, program: &GameProgram) -> Result<GameRecor
                 tick,
                 commands: captured
                     .iter()
-                    .map(RecordedCommand::from_envelope)
+                    .map(RecordedCommand::from_scheduled)
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(ReplayError::new)?,
                 after: RecordedState::from(after),
@@ -232,12 +230,7 @@ fn with_game<T>(
     };
     let result = match result {
         Ok(result) => result,
-        Err(payload) => {
-            if terminal == HeadlessSessionClose::Pending {
-                std::mem::forget(game.session);
-            }
-            resume_unwind(payload);
-        }
+        Err(payload) => resume_unwind(payload),
     };
     match (result, terminal) {
         (Ok(output), HeadlessSessionClose::Complete) => Ok(output),

@@ -5,9 +5,17 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use nara::{
+    project_tooling::{ProjectToolRequest, ProjectToolSummary, invoke_project_tool},
+    project_workflow::ProjectStarter,
+};
+
 use super::profile_font_product::{
     PROFILE_FONT_NATIVE_PROOF, PROFILE_FONT_PROOF, WORLD_CANVAS_NATIVE_PROOF, profile_font_recipe,
 };
+
+#[path = "authored_project.rs"]
+mod authored_project;
 
 static NEXT_TRAJECTORY: AtomicU64 = AtomicU64::new(1);
 
@@ -21,15 +29,12 @@ fn fixed_world_canvas_and_font_recipe_survive_check_export_and_native_restart() 
         std::process::id()
     ));
     fs::create_dir(&parent).unwrap();
-    let project = parent.join("font-profile");
-
-    let mut create = Command::new(env!("CARGO_BIN_EXE_nara"));
-    create
-        .args(["new", "desktop-2d/v1", "font-profile", "--parent"])
-        .arg(&parent)
-        .arg("--local-checkout")
-        .arg(checkout);
-    successful(create.output().unwrap(), "create the ordinary starter");
+    let project = authored_project::create_authored_project(
+        checkout,
+        &parent,
+        "font-profile",
+        ProjectStarter::Desktop2dV1,
+    );
 
     let cargo_path = project.join("Cargo.toml");
     let cargo = fs::read_to_string(&cargo_path).unwrap().replace(
@@ -51,12 +56,12 @@ fn fixed_world_canvas_and_font_recipe_survive_check_export_and_native_restart() 
 
     fs::write(
         project.join("profile-font.ttf"),
-        include_bytes!("../../crates/nara_text/tests/fixtures/FiraMono-Medium.ttf"),
+        include_bytes!("../../crates/nara_ui/tests/text/fixtures/FiraMono-Medium.ttf"),
     )
     .unwrap();
     fs::write(
         project.join("profile-font-LICENSE"),
-        include_bytes!("../../crates/nara_text/tests/fixtures/FiraMono-LICENSE"),
+        include_bytes!("../../crates/nara_ui/tests/text/fixtures/FiraMono-LICENSE"),
     )
     .unwrap();
     fs::write(
@@ -79,7 +84,7 @@ fn fixed_world_canvas_and_font_recipe_survive_check_export_and_native_restart() 
         .unwrap();
     let candidate = nara::project_host::ingest_project_manifest(&manifest, None).unwrap();
     let face = nara::ui::FontFace::from_bytes(
-        include_bytes!("../../crates/nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+        include_bytes!("../../crates/nara_ui/tests/text/fixtures/FiraMono-Medium.ttf").to_vec(),
         0,
     )
     .unwrap();
@@ -97,31 +102,44 @@ fn fixed_world_canvas_and_font_recipe_survive_check_export_and_native_restart() 
     )
     .unwrap();
 
-    let mut check = command(checkout, env!("CARGO_BIN_EXE_nara"));
-    check.arg("check").arg(&project);
-    let checked = successful(check.output().unwrap(), "compiled project Check");
-    assert!(checked.contains("Project check passed"));
+    // Product output would invalidate the compiled tool's structured Check response.
+    let checked = invoke_project_tool(ProjectToolRequest::Check {
+        project: project.clone(),
+        profile: None,
+    })
+    .unwrap();
     assert!(
-        !checked.contains(PROFILE_FONT_PROOF),
-        "Check must not start gameplay"
+        matches!(
+            checked,
+            ProjectToolSummary::Checked {
+                content_members: 1..
+            }
+        ),
+        "{checked:?}"
     );
 
-    let mut export = command(checkout, env!("CARGO_BIN_EXE_nara"));
-    export
-        .arg("export")
-        .arg(&project)
-        .arg("--parent")
-        .arg(&parent)
-        .args(["--destination", "font-candidate"]);
-    let exported = successful(
-        export.output().unwrap(),
-        "saved-source Export and its product acceptance",
+    let exported = invoke_project_tool(ProjectToolRequest::Export {
+        project,
+        parent: parent.clone(),
+        destination: "font-candidate".into(),
+    })
+    .unwrap();
+    assert!(
+        matches!(
+            exported,
+            ProjectToolSummary::Exported {
+                product_observations: 2,
+                ..
+            }
+        ),
+        "{exported:?}"
     );
-    assert!(exported.contains("2 exact product observations"));
 
     // These binaries resolve their sibling exported project, including its saved UI profile.
     // Their shared fixture asserts actual shaping and rasterization before reporting success.
     let packaged = parent.join("font-candidate");
+    let unrelated = parent.join("unrelated-cwd");
+    fs::create_dir(&unrelated).unwrap();
     for (label, target, arguments, success) in [
         (
             "headless",
@@ -146,7 +164,7 @@ fn fixed_world_canvas_and_font_recipe_survive_check_export_and_native_restart() 
             .join("bin")
             .join(format!("{target}{}", std::env::consts::EXE_SUFFIX));
         let mut run = Command::new(executable);
-        run.current_dir(&parent).args(arguments);
+        run.current_dir(&unrelated).args(arguments);
         let output = successful(run.output().unwrap(), label);
         assert!(
             output.contains(PROFILE_FONT_PROOF),
@@ -164,18 +182,11 @@ fn fixed_world_canvas_and_font_recipe_survive_check_export_and_native_restart() 
         }
         assert!(output.contains(success), "{output}");
     }
+    assert!(fs::read_dir(&unrelated).unwrap().next().is_none());
     println!(
         "profile_font_native: compiled_check=true exported_startup=true native_first_present=true artifact={}",
         packaged.display()
     );
-}
-
-fn command(checkout: &Path, program: &str) -> Command {
-    let mut command = Command::new(program);
-    command
-        .env("CARGO_TARGET_DIR", checkout.join("target"))
-        .env("CARGO_BUILD_JOBS", "1");
-    command
 }
 
 fn successful(output: Output, operation: &str) -> String {

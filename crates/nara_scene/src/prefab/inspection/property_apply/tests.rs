@@ -1,6 +1,6 @@
 use std::{convert::Infallible, sync::Arc};
 
-use nara_identity::{AuthoredReferenceTarget, ReferenceInputId};
+use nara_ecs::identity::{AuthoredReferenceTarget, ReferenceInputId};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldPath, ComponentSchemaCatalog,
     ComponentShapeMember, ComponentValueKind, PersistentComponentSchemaOwnerId,
@@ -8,12 +8,12 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, PrefabAddition,
-    PrefabComponentIntent, PrefabDocument, PrefabDocumentCandidate, PrefabInstance,
-    PrefabInstanceClaim, PrefabInstanceHop, PrefabInstancePath, PrefabOverlay, PrefabPropertyClaim,
-    PrefabReferenceArguments, PrefabRevert, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocument, SceneDocumentCandidate, SceneEntityPlacement, SceneEntityRecord, ScenePlacement,
-    ScenePlacementParent, SourceDocumentKind,
+    AuthoringDocumentSource, PrefabAddition, PrefabComponentIntent, PrefabDocument,
+    PrefabDocumentCandidate, PrefabInstance, PrefabInstanceClaim, PrefabInstanceHop,
+    PrefabInstancePath, PrefabOverlay, PrefabPropertyClaim, PrefabReferenceArguments, PrefabRevert,
+    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
+    SourceDocumentKind, authoring::AuthoringAdapterReceipt,
 };
 
 const SLOT: PrefabOverlaySlot = PrefabOverlaySlot::Property {

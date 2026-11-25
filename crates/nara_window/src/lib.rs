@@ -1,6 +1,7 @@
 //! Backend-independent window data and events.
 //!
 //! The `runtime` feature enables App/ECS integration and native handle ownership.
+//! The `winit` feature adds the native desktop event loop on supported targets.
 
 use std::collections::{BTreeMap, btree_map::Values};
 
@@ -11,6 +12,20 @@ use nara_ecs::{Component, Resource};
 pub mod backend;
 #[cfg(feature = "runtime")]
 mod runtime;
+
+#[cfg(all(
+    feature = "winit",
+    any(
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    )
+))]
+pub mod winit;
 
 #[cfg(feature = "runtime")]
 pub use runtime::*;

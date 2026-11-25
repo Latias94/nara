@@ -1,13 +1,9 @@
 use super::*;
 use crate::SchemaReclassificationKind::DeclarationExtension;
 use crate::{
-    __private::{
-        AuthoringAdapterReceipt, PreparedPrefabSchemaSource, PreparedSceneSchemaSource,
-        borrow_prepared_prefab_schema_source, borrow_prepared_scene_schema_source,
-    },
     AuthoringDocumentReadiness, AuthoringDocumentSource, PrefabDocumentCandidate,
     SceneComponentRecord, SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement,
-    SceneEntityRecord, SceneFileLimits, ScenePatchOperation,
+    SceneEntityRecord, SceneFileLimits, ScenePatchOperation, authoring::AuthoringAdapterReceipt,
 };
 use nara_asset::AssetRef;
 use nara_core::ItemLimit;

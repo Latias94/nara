@@ -5,7 +5,6 @@ use crate::{SceneFileEncoding, SceneFileEncodingAdmissionError, prefab::SourceDo
 use super::*;
 
 /// Selects an actual verified physical source, independently of whether it has an open Session.
-#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrefabExtractionSourceOutput {
     Existing(usize),
@@ -14,7 +13,6 @@ pub enum PrefabExtractionSourceOutput {
 
 /// Canonical bytes associated with one verified extraction and its selected source.
 /// This owner grants no filesystem receipt, saved-state acknowledgment or Ready authority.
-#[doc(hidden)]
 #[must_use]
 pub struct EncodedPrefabExtractionSource {
     source: PrefabExtractionSourceOutput,

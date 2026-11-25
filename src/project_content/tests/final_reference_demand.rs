@@ -1,6 +1,6 @@
 //! Real saved dependencies preserve invalid old targets when a final pin repairs the reference.
 
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, PrefabEntityOrigin,
     PrefabInstanceHop,
 };

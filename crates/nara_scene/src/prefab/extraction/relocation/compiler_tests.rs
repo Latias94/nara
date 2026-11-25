@@ -4,7 +4,7 @@
 use std::{borrow::Cow, collections::BTreeMap, convert::Infallible, sync::Arc};
 
 use nara_asset::AssetRef;
-use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
+use nara_ecs::identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentSchema,
@@ -14,12 +14,12 @@ use nara_reflect::{
 
 use super::{AddressRole, BranchRelocation};
 use crate::{
-    __private::AuthoringAdapterReceipt,
     AuthoringSchemaBasis, ExpandedSceneDocument, PrefabComponentIntent, PrefabDocument,
     PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceClaim, PrefabInstanceHop,
     PrefabOverlay, PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent,
     ResolvedPrefabSource, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityPlacement,
     SceneEntityRecord, ScenePlacement, ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
+    authoring::AuthoringAdapterReceipt,
     prefab::{
         SourceDocumentInput, extraction::try_capture_source_cut_with_loader,
         try_compile_authoring_scene_with_loader,

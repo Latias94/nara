@@ -9,7 +9,7 @@ use nara::{
 
 fn custom_face() -> FontFace {
     FontFace::from_bytes(
-        include_bytes!("../../crates/nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+        include_bytes!("../../crates/nara_ui/tests/text/fixtures/FiraMono-Medium.ttf").to_vec(),
         0,
     )
     .unwrap()

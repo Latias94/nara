@@ -1,3 +1,3 @@
-Generate `authoring.bundle.json` with `nara schema . --write` using this package's real product
-recipe. Schema refresh owns the exact native catalog fingerprint and publishes it through the
-existing cooperative local-file contract.
+Generate `authoring.bundle.json` from this package's product recipe using
+`nara::project_tooling::invoke_project_tool` with `ProjectToolRequest::Schema { write: true, .. }`.
+Schema refresh publishes the exact native catalog fingerprint with the bundle.

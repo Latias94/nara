@@ -1,9 +1,9 @@
 use nara_ecs::World;
-use nara_identity::{
+use nara_ecs::identity::{
     EntityLookup, EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
     PersistentRuntimeReference, TombstoneCause, WorldIdentityDomain, spawn_identity_entity,
 };
-use nara_reflect::__private::plan_declared_entity_references;
+use nara_reflect::entity_reference::plan_declared_entity_references;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldPathSegment,
     ComponentFieldSchema, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,

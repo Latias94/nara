@@ -6,14 +6,14 @@ use crate::{
     ProjectAuthoringState, ProjectManifest, ProjectPath, ProjectPresentMode,
     ProjectTaskPoolManifest, ProjectWindowMode,
 };
-use nara_app::{FixedTime, RuntimeTimeSettings};
-use nara_asset::StableAssetId;
-use nara_core::{ByteLimit, TimeLimit};
-use nara_diagnostic::{DiagnosticValueRef, MAX_RUNTIME_DIAGNOSTIC_ENTRIES};
-use nara_tasks::{
+use nara_app::tasks::{
     MAX_TASK_POOL_PENDING_PER_KIND, MAX_TASK_POOL_THREADS_PER_KIND,
     MAX_TASK_SHUTDOWN_PHASE_TIMEOUT, TaskPoolKind, TaskShutdownPolicy,
 };
+use nara_app::{FixedTime, RuntimeTimeSettings};
+use nara_asset::StableAssetId;
+use nara_core::diagnostic::{DiagnosticValueRef, MAX_RUNTIME_DIAGNOSTIC_ENTRIES};
+use nara_core::{ByteLimit, TimeLimit};
 
 const COMPLETE_CONFIGURATION: &str = r#"
 [capabilities]
@@ -209,7 +209,7 @@ fn defaults_resolve_without_a_source_project() {
     );
     assert_eq!(
         effective.tasks().pool_config,
-        nara_tasks::TaskPoolConfig::default()
+        nara_app::tasks::TaskPoolConfig::default()
     );
     assert!(effective.render().world_canvas.is_none());
     assert!(effective.ui().primary_surface.is_none());

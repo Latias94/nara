@@ -1,9 +1,10 @@
 use super::*;
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 #[cfg(feature = "image-runtime")]
 use nara_asset::{AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets};
+use nara_asset::{AssetProductRef, AssetSourcePath, ImportedProductId, SourceHash, StableAssetId};
 use nara_asset::{ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion};
 
 use crate::image::budget::{ImageImportCharge, ImageImportPixelLease};
@@ -441,10 +442,20 @@ fn shared_owner_preserves_an_existing_import_budget_lease() {
     let (lease, overlap) = ImageImportPixelLease::from_publication(reservation, 4).unwrap();
     drop(overlap);
     let mut original = processed(ImportedProductId::PRIMARY, ImageColorSpace::Linear);
-    assert!(original.try_attach_import_pixel_lease(lease));
+    assert!(original.try_attach_retention_owner(lease));
+    assert!(
+        original
+            .shared_retention_owner::<ImageImportPixelLease>()
+            .is_some()
+    );
     let owner = Arc::new(());
     let weak = Arc::downgrade(&owner);
     let shared = original.share_with_retention_owner(owner);
+    assert!(
+        shared
+            .shared_retention_owner::<ImageImportPixelLease>()
+            .is_none()
+    );
     let prepared = PreparedImageResource::from_image(&shared);
     assert_eq!(host.snapshot().active_rgba_bytes(), 4);
     drop(original);

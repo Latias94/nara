@@ -7,12 +7,12 @@ use nara::{
     identity::{EntityLookup, SceneEntityId},
     prelude::{Component, PersistentComponent, Resource, Transform2d, Vec2},
 };
-use nara_rapier2d::{
+use nara_physics2d::stateless::{
     StaticCollisionScene, TopDownCharacter, affine_box_collider,
     rapier::{
         math::Pose,
         parry::query::contact,
-        prelude::{QueryFilter, SharedShape},
+        prelude::{Collider, QueryFilter, SharedShape},
     },
 };
 
@@ -60,10 +60,7 @@ impl CollisionBox {
         Ok(())
     }
 
-    fn collider(
-        self,
-        transform: Transform2d,
-    ) -> Result<nara_rapier2d::rapier::prelude::Collider, String> {
+    fn collider(self, transform: Transform2d) -> Result<Collider, String> {
         self.validate()?;
         affine_box_collider(
             self.center,

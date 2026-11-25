@@ -2,18 +2,14 @@
 
 use std::time::Duration;
 
-use nara_app::{
-    AppExit, RuntimeClosePolicy, RuntimeControl, RuntimeControlStatus, RuntimeFault, RuntimeState,
-    RuntimeTimeContinuation, RuntimeTimeContinuationError,
-};
-use nara_diagnostic::DiagnosticReport;
-use nara_ecs::World;
 #[cfg(feature = "runtime-2d")]
-use nara_fs::DirectoryCapability;
-use nara_gameplay::{
-    GameplayCommandKey, GameplayCommandRejection, GameplayCommandSubmission,
-    submit_gameplay_driver_command,
+use crate::fs::DirectoryCapability;
+use nara_app::{
+    AppExit, RuntimeClosePolicy, RuntimeControl, RuntimeControlStatus, RuntimeScopeError,
+    RuntimeScopeOutcome, RuntimeState, RuntimeTimeContinuation, RuntimeTimeContinuationError,
 };
+use nara_core::diagnostic::DiagnosticReport;
+use nara_ecs::{World, bevy_ecs::system::Command};
 
 use super::{
     CleanupDriveOutcome, HostFault, PreparedProjectStart, ProjectHost,
@@ -36,15 +32,6 @@ pub enum HeadlessSessionError {
     /// The existing managed control refused this request; the incumbent remains usable.
     #[error("the Headless Runtime control was rejected: {0:?}")]
     ControlRejected(nara_app::RuntimeControlRejection),
-    /// The original gameplay queue refused this command without accepting it.
-    #[error("the Headless semantic command was rejected: {0}")]
-    CommandRejected(GameplayCommandRejection),
-    /// Admission ran before the managed scope observed a fault; its output remains authoritative.
-    #[error("the Headless Runtime faulted after semantic-command admission")]
-    CommandFault {
-        outcome: Result<GameplayCommandKey, GameplayCommandRejection>,
-        fault: RuntimeFault,
-    },
     /// Source admission, managed execution or authority validation failed.
     #[error("the Headless product operation failed")]
     Runtime(DiagnosticReport),
@@ -149,16 +136,11 @@ impl HeadlessSession {
             .ok_or(HeadlessSessionError::Unavailable)?;
         let prepared = match inputs {
             #[cfg(feature = "runtime-2d")]
-            Inputs::Source { root, recipe } => prepare_project_start(
-                root,
-                None,
-                RuntimeClosePolicy::default(),
-                recipe,
-                None,
-                Vec::new(),
-            ),
+            Inputs::Source { root, recipe } => {
+                prepare_project_start(root, None, RuntimeClosePolicy::default(), recipe, None)
+            }
             Inputs::Processed(base) => {
-                prepare_runtime_content_start(base, RuntimeClosePolicy::default(), Vec::new())
+                prepare_runtime_content_start(base, RuntimeClosePolicy::default())
             }
         };
         let PreparedProjectStart {
@@ -369,49 +351,36 @@ impl HeadlessSession {
         result.map_err(Into::into)
     }
 
-    /// Admits one command through the existing typed gameplay driver port.
+    /// Applies a game-owned ECS command to the live runtime.
     ///
-    /// Normal queue refusal preserves the live session. A managed fault after admission retains
-    /// the actual output in `CommandFault`; callers must reconcile it before applying fault policy.
-    pub fn submit(
+    /// An applied command invalidates the paused capture boundary. Its typed output is retained
+    /// when the runtime observes a fault after the command returns.
+    pub fn apply_command<C: Command>(
         &mut self,
-        command: GameplayCommandSubmission,
-    ) -> Result<GameplayCommandKey, HeadlessSessionError> {
+        command: C,
+    ) -> Result<RuntimeScopeOutcome<C::Out>, HeadlessSessionError> {
         let host = self.available_host()?;
         let runtime = host
             .running_runtime_mut()
             .ok_or(HeadlessSessionError::Unavailable)?;
-        let outcome = runtime
-            .with_driver_scope(|scope| submit_gameplay_driver_command(scope, command))
-            .map_err(|error| match error {
-                nara_app::RuntimeScopeError::Unavailable { .. } => {
-                    HeadlessSessionError::Unavailable
-                }
-                nara_app::RuntimeScopeError::Faulted { fault } => HeadlessSessionError::Runtime(
-                    super::super::runtime_scope_failure_report(&fault),
-                ),
-            })?;
-        let output = match outcome.output {
-            Ok(output) => output,
-            Err(_) => {
-                if let Some(fault) = outcome.post_operation_fault {
-                    return Err(self.record_fault(HostFault::new(
-                        super::super::runtime_scope_failure_report(&fault),
-                    )));
-                }
+        let outcome = match runtime.apply_command(command) {
+            Ok(outcome) => outcome,
+            Err(RuntimeScopeError::Unavailable { .. }) => {
                 return Err(HeadlessSessionError::Unavailable);
             }
+            Err(RuntimeScopeError::Faulted { fault }) => {
+                return Err(self.record_fault(HostFault::new(
+                    super::super::runtime_scope_failure_report(&fault),
+                )));
+            }
         };
-        if let Some(fault) = outcome.post_operation_fault {
+        self.paused_boundary = false;
+        if let Some(fault) = &outcome.post_operation_fault {
             self.failed = true;
             self.diagnostics
-                .extend(super::super::runtime_scope_failure_report(&fault));
-            return Err(HeadlessSessionError::CommandFault {
-                outcome: output,
-                fault,
-            });
+                .extend(super::super::runtime_scope_failure_report(fault));
         }
-        output.map_err(HeadlessSessionError::CommandRejected)
+        Ok(outcome)
     }
 
     /// Drives the original bounded physical close owner once; no replacement is started.

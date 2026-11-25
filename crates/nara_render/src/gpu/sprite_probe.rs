@@ -7,10 +7,7 @@ use crate::{Camera2d, RenderImage2d, RenderTarget, ViewportRect};
 use nara_app::{App, RuntimeInstance};
 use nara_asset::{AssetEvents, AssetStates, Assets, Handle};
 use nara_core::{Color, Vec2};
-use nara_hierarchy::{
-    HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
-};
-use nara_transform::Transform2d;
+use nara_scene::spatial::Transform2d;
 
 use crate::gpu::{
     quad::{QuadShaderSourceGuard, WgpuMaterial2dPipelineKey, WgpuQuadBatch},
@@ -67,8 +64,7 @@ fn captured_batches() -> Vec<WgpuQuadBatch> {
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
-        nara_hierarchy::HierarchyPlugin,
-        nara_transform::TransformPlugin,
+        nara_scene::spatial::SpatialPlugin,
         crate::RenderComponentsPlugin,
         crate::RenderPlugin::default(),
         crate::image::ImagePreparePlugin,
@@ -103,30 +99,26 @@ fn captured_batches() -> Vec<WgpuQuadBatch> {
         PALETTE_MATERIAL_FRAGMENT,
     );
     let world = app.world_mut().unwrap();
-    let mut entities = vec![
-        world
-            .spawn((
-                Camera2d {
-                    target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
-                    viewport: Some(ViewportRect::new(0, 0, 64, 64).unwrap()),
-                    viewport_height: 64.0,
-                    ..Default::default()
-                },
-                Transform2d::default(),
-            ))
-            .id(),
-    ];
+    world.spawn((
+        Camera2d {
+            target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
+            viewport: Some(ViewportRect::new(0, 0, 64, 64).unwrap()),
+            viewport_height: 64.0,
+            ..Default::default()
+        },
+        Transform2d::default(),
+    ));
     let blue = Color::rgb(0.0, 0.0, 1.0);
     for x in [-21.0, 0.0] {
-        entities.push(
-            world
-                .spawn((
-                    Sprite::from_color(Vec2::splat(16.0), blue)
-                        .with_alpha_mode(AlphaMode2d::Opaque),
-                    Transform2d::from_translation(Vec2::new(x, 16.0)),
-                ))
-                .id(),
-        );
+        world.spawn((
+            Sprite::from_color(Vec2::splat(16.0), blue)
+                .with_alpha_mode(AlphaMode2d::Opaque)
+                .with_layer(2),
+            Transform2d {
+                z: -1.0,
+                ..Transform2d::from_xy(x, 16.0)
+            },
+        ));
         let mut tilemap = Tilemap::new(Vec2::splat(16.0)).with_layer(1);
         tilemap.set_cell(
             TileCoord::new(0, 0),
@@ -137,62 +129,36 @@ fn captured_batches() -> Vec<WgpuQuadBatch> {
                 if x == 0.0 { 0.5 } else { 1.0 },
             )),
         );
-        entities.push(
-            world
-                .spawn((
-                    tilemap,
-                    Transform2d::from_translation(Vec2::new(x - 8.0, 8.0)),
-                ))
-                .id(),
-        );
+        world.spawn((
+            tilemap,
+            Transform2d {
+                z: 0.5,
+                ..Transform2d::from_xy(x - 8.0, 8.0)
+            },
+        ));
     }
-    entities.push(
-        world
-            .spawn((
-                Sprite::from_color(Vec2::splat(16.0), Color::rgba(0.0, 1.0, 0.0, 0.5))
-                    .with_layer(2),
-                Transform2d::from_translation(Vec2::new(0.0, 16.0)),
-            ))
-            .id(),
-    );
+    world.spawn((
+        Sprite::from_color(Vec2::splat(16.0), Color::rgba(0.0, 1.0, 0.0, 0.5)).with_layer(2),
+        Transform2d::from_xy(0.0, 16.0),
+    ));
     for (center, offset, texture) in [
         (Vec2::new(21.0, 16.0), 0.0, palette),
         (Vec2::new(-21.0, -16.0), 1.0, palette),
         (Vec2::new(0.0, -16.0), 1.0, alternate),
         (Vec2::new(21.0, -16.0), 1.0, palette),
     ] {
-        entities.push(
-            world
-                .spawn((
-                    Sprite::from_texture(indices, Vec2::splat(16.0))
-                        .with_sampler(SamplerDescriptor::NEAREST_CLAMP)
-                        .with_layer(1),
-                    material_binding(&generation, [offset, 1.0, 0.0, 0.0], texture),
-                    Transform2d::from_translation(center),
-                ))
-                .id(),
-        );
+        world.spawn((
+            Sprite::from_texture(indices, Vec2::splat(16.0))
+                .with_sampler(SamplerDescriptor::NEAREST_CLAMP)
+                .with_layer(1),
+            material_binding(&generation, [offset, 1.0, 0.0, 0.0], texture),
+            Transform2d::from_translation(center),
+        ));
     }
-    entities.push(
-        world
-            .spawn((
-                Sprite::from_color(Vec2::splat(16.0), Color::rgba(0.0, 0.0, 1.0, 0.5))
-                    .with_layer(2),
-                Transform2d::from_translation(Vec2::new(21.0, -16.0)),
-            ))
-            .id(),
-    );
-    HierarchyWriter::new(world)
-        .apply_batch(
-            &entities
-                .into_iter()
-                .map(|entity| HierarchyOperation::Place {
-                    entity,
-                    placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-                })
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
+    world.spawn((
+        Sprite::from_color(Vec2::splat(16.0), Color::rgba(0.0, 0.0, 1.0, 0.5)).with_layer(2),
+        Transform2d::from_xy(21.0, -16.0),
+    ));
     let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(std::time::Duration::ZERO).unwrap();
     let batches = runtime.world().resource::<SpriteBatches>().clone();

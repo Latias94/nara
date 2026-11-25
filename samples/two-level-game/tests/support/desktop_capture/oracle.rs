@@ -408,6 +408,7 @@ fn objects(expected: &ResumeState) -> Result<Vec<GameObject>> {
                 translation: Vec2::from_array(expected.player.translation),
                 rotation: expected.player.rotation,
                 scale: Vec2::from_array(expected.player.scale),
+                z: 0.0,
             },
             size: Vec2::splat(18.0),
             color: Color::WHITE,

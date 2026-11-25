@@ -1,6 +1,6 @@
+use crate::fs::ContentDigest;
 use nara_asset::{AssetPathScope, ImportedProductId, ProjectAssetDatabase, StableAssetId};
 use nara_core::ByteLimit;
-use nara_fs::ContentDigest;
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneLimits, SourceDocumentKey, SourceDocumentKind,
 };
@@ -48,7 +48,7 @@ fn processed_scene_refuses_source_notifications_and_rescans_without_admitting_io
                 world
                     .resource::<TaskPools>()
                     .stats()
-                    .for_kind(nara_tasks::TaskPoolKind::Io)
+                    .for_kind(nara_app::tasks::TaskPoolKind::Io)
                     .admitted,
                 0
             );
@@ -141,7 +141,7 @@ fn processed_worker_uses_captured_bytes_and_original_definitions_without_source_
     assert_eq!(
         pools
             .stats()
-            .for_kind(nara_tasks::TaskPoolKind::Io)
+            .for_kind(nara_app::tasks::TaskPoolKind::Io)
             .admitted,
         1
     );
@@ -193,7 +193,7 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
                 world
                     .resource::<TaskPools>()
                     .stats()
-                    .for_kind(nara_tasks::TaskPoolKind::Io)
+                    .for_kind(nara_app::tasks::TaskPoolKind::Io)
                     .admitted,
                 0,
             );

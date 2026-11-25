@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use nara_asset::AssetRef;
 use nara_core::Vec2;
 use nara_ecs::Component;
-use nara_identity::EntityReference;
+use nara_ecs::identity::EntityReference;
 
 use crate::{
     AssetReferenceDemand, ComponentCodecError, ComponentNumericDomain, ComponentSchema,
@@ -13,6 +13,9 @@ use crate::{
 };
 
 pub trait PersistentComponentProvider: Component + Sized + 'static {
+    /// The stable schema identifier also used to register this type with an app.
+    const COMPONENT_ID: &'static str;
+
     fn persistent_component_schema() -> ComponentSchema;
 
     #[doc(hidden)]
@@ -398,7 +401,7 @@ mod private {
 
     use nara_asset::AssetRef;
     use nara_core::Vec2;
-    use nara_identity::EntityReference;
+    use nara_ecs::identity::EntityReference;
 
     pub trait Sealed {}
 

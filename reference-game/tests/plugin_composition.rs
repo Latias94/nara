@@ -1,6 +1,5 @@
 use nara::{
     app::PluginGroupId,
-    gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
     image::IMAGE_PLUGIN_ID,
     material::MATERIAL_SCHEMA_PROVIDER_ID,
     project::ProductCapability,
@@ -22,8 +21,8 @@ const CHECKED_IN_AUTHORING_BUNDLE: &[u8] = include_bytes!("../schema/authoring.b
 
 #[cfg(feature = "desktop")]
 use nara::{
-    gameplay::GAMEPLAY_ACTION_PLUGIN_ID,
     image::IMAGE_PREPARE_PLUGIN_ID,
+    input::INPUT_PLUGIN_ID,
     project_host::{ProjectContentLoader, advanced::window_from_settings},
     render::RENDER_PLUGIN_ID,
     render_wgpu::{
@@ -143,15 +142,6 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
             .iter()
             .any(|entry| entry.plugin_id() == TILEMAP_PLUGIN_ID)
     );
-    let command_index = entries
-        .iter()
-        .position(|entry| entry.plugin_id() == GAMEPLAY_COMMAND_PLUGIN_ID)
-        .unwrap();
-    let game_index = entries
-        .iter()
-        .position(|entry| entry.plugin_id() == REFERENCE_GAME_PLUGIN_ID)
-        .unwrap();
-    assert!(command_index < game_index);
 
     let configured_image = entries
         .iter()
@@ -246,7 +236,7 @@ fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
         nara::window::plugin(window_from_settings(&candidate.settings().window)).key()
     );
     for plugin in [
-        GAMEPLAY_ACTION_PLUGIN_ID,
+        INPUT_PLUGIN_ID,
         RENDER_PLUGIN_ID,
         IMAGE_PREPARE_PLUGIN_ID,
         SPRITE_RENDER_PLUGIN_ID,

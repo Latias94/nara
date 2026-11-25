@@ -6,7 +6,7 @@ use std::{collections::BTreeSet, convert::Infallible, fmt::Debug, mem::size_of, 
 
 use nara_asset::{AssetRecord, AssetRef, AssetSourceKind, AssetSourcePath};
 use nara_core::{ByteLimit, ItemLimit};
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, ReferenceInputId,
 };
 use nara_reflect::{
@@ -16,15 +16,6 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::{
-        AuthoringAdapterReceipt, AuthoringSceneCompilationOmissionReason, CapturedExtractionSource,
-        PrefabExtractionBinding, PrefabExtractionDestination, PrefabExtractionEnvironment,
-        PrefabExtractionRequest, PrefabExtractionUsage, PrefabExtractionWork,
-        PrefabSourceExtractionInput, PreparedPrefabExtraction, PreparedPrefabExtractionSource,
-        PreparedSceneExtractionSource, SceneSourceExtractionInput,
-        fork_published_authoring_prefab_document, fork_published_authoring_scene_document,
-        try_compile_authoring_scene_with_loader,
-    },
     AuthoringDocumentSource, AuthoringSchemaBasis, ExpandedSceneDocument, ExpandedSceneEntity,
     PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate, PrefabEntityOrigin,
     PrefabEntityTarget, PrefabInstance, PrefabInstanceBinding, PrefabInstanceHop,
@@ -34,6 +25,14 @@ use nara_scene::{
     SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
     SceneFileLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement,
     ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
+    authoring::{
+        AuthoringAdapterReceipt, AuthoringSceneCompilationOmissionReason, CapturedExtractionSource,
+        PrefabExtractionBinding, PrefabExtractionDestination, PrefabExtractionEnvironment,
+        PrefabExtractionRequest, PrefabExtractionUsage, PrefabExtractionWork,
+        PrefabSourceExtractionInput, PreparedPrefabExtraction, PreparedPrefabExtractionSource,
+        PreparedSceneExtractionSource, SceneSourceExtractionInput,
+        try_compile_authoring_scene_with_loader,
+    },
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -1377,12 +1376,12 @@ fn foreign_owners_sharing_original_allocations_cannot_consume_the_original_owner
     .publish();
     let mut foreign_scene =
         SceneAuthoringSession::from_published_authoring_document_with_history_limits(
-            fork_published_authoring_scene_document(&scene_publication),
+            scene_publication.fork(),
             history_limits(),
         );
     let mut foreign_prefab =
         PrefabAuthoringSession::from_published_authoring_document_with_history_limits(
-            fork_published_authoring_prefab_document(&prefab_publication),
+            prefab_publication.fork(),
             history_limits(),
         );
     fixture.scene = SceneAuthoringSession::from_published_authoring_document_with_history_limits(

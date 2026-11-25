@@ -114,11 +114,13 @@ impl Drop for Custody {
             && !process.retire_normally(Duration::from_secs(30))
         {
             eprintln!(
-                "retaining unresolved cooked-audio process and copied source/cache: {}",
+                "cooked-audio cleanup remained incomplete; retaining the source/cache: {}",
                 process.diagnostics()
             );
-            std::mem::forget(self.process.take());
-            std::mem::forget(self.fixture.take());
+            drop(self.process.take());
+            if let Some(fixture) = self.fixture.take() {
+                fixture.retain_tree();
+            }
         }
         if self.fixture.as_ref().is_some_and(|fixture| {
             fixture
@@ -133,7 +135,10 @@ impl Drop for Custody {
             eprintln!(
                 "retaining copied cooked-audio source/cache after failed acceptance or unresolved Player cleanup"
             );
-            std::mem::forget(self.fixture.take());
+            drop(self.process.take());
+            if let Some(fixture) = self.fixture.take() {
+                fixture.retain_tree();
+            }
         }
     }
 }

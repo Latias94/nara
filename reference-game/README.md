@@ -8,10 +8,11 @@ It is a development and product-regression fixture, not a finished commercial ga
 
 ## Rust Composition
 
-The headless and desktop launch entries share the same Rust `ProductRecipe`. `wave_recipe()`
-binds the gameplay plugin and its schema provider. `desktop_wave_recipe()` adds the desktop
-presentation plugin. Nara's product hosts load the project, admit and drive the runtime, and
-manage bounded shutdown.
+The headless and desktop entries compose the same gameplay and schema through `wave_recipe()`.
+`bundled_wave_recipe()` supplies the deterministic headless input, and `desktop_wave_recipe()`
+adds the desktop presentation plugin. Both ordinary entries use `load_project_app` to load the
+manifest, startup scene, and assets. Headless play advances the configured timestep with
+`App::step_fixed`. Interactive desktop play uses `App::run` with the Winit runner.
 
 ## Run From Source
 
@@ -31,6 +32,16 @@ cargo run --manifest-path reference-game/Cargo.toml --locked --features desktop 
 ```
 
 See `CONTROLS.md` for the input map.
+
+The project CLI builds and supervises the same desktop binary. It also discovers the game's schema
+through its `nara_schema` binary. With `nara` installed from `crates/nara_project`, run these commands
+from the repository root:
+
+```text
+nara check reference-game
+nara schema reference-game --trusted
+nara play reference-game --trusted --bin desktop
+```
 
 ## Project Data
 

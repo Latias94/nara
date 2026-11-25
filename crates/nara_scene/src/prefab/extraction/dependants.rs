@@ -167,7 +167,7 @@ fn rewrite_entity(
 ) -> Result<bool, ExtractionError> {
     work.visit(1, entity.id.as_str().len(), 0)?;
     let mut references_changed = false;
-    let mut rewrite_reference = |reference: &nara_identity::EntityReference,
+    let mut rewrite_reference = |reference: &nara_ecs::identity::EntityReference,
                                  work: &mut ExtractionWork| {
         let rewritten =
             relocation.retained_reference(source_key, reference, |bytes| work.admit(bytes))?;

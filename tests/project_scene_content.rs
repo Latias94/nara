@@ -1,4 +1,4 @@
-#![cfg(all(feature = "serde", feature = "runtime-2d"))]
+#![cfg(all(feature = "project-runtime", feature = "serde", feature = "runtime-2d"))]
 
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;

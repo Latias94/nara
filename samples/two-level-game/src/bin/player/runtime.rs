@@ -115,15 +115,21 @@ pub(super) fn run(options: RunOptions) -> ExitCode {
         original.start().map_err(|error| error.to_string())?;
         evidence.observe(original)?;
         if let Some(command) = two_level_game::player_launch(options.clone())? {
-            original
-                .submit(command)
+            command
+                .submit_headless(original)
                 .map_err(|error| error.to_string())?;
         }
         drive(original, &mut evidence, options.scenario, deadline)?;
         save = verify_save(&options)?;
         Ok(())
     }));
-    let close = session.as_mut().map(close_original);
+    let close = match session.as_mut().map(close_original).transpose() {
+        Ok(close) => close,
+        Err(error) => {
+            let _ = output::diagnostic_to(&mut std::io::stderr().lock(), &error);
+            return ExitCode::FAILURE;
+        }
+    };
     let failed_diagnostics = session
         .as_ref()
         .is_some_and(|original| original.diagnostics().has_errors());
@@ -272,32 +278,21 @@ fn verify_save(options: &RunOptions) -> Result<Option<Value>, String> {
     })))
 }
 
-fn close_original(session: &mut HeadlessSession) -> HeadlessSessionClose {
+fn close_original(session: &mut HeadlessSession) -> Result<HeadlessSessionClose, String> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         match catch_unwind(AssertUnwindSafe(|| session.close())) {
-            Ok(HeadlessSessionClose::Complete) => return HeadlessSessionClose::Complete,
-            Ok(HeadlessSessionClose::Failed) => return HeadlessSessionClose::Failed,
             Ok(HeadlessSessionClose::Pending) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(1));
             }
             Ok(HeadlessSessionClose::Pending) => {
-                let _ = output::diagnostic_to(
-                    &mut std::io::stderr().lock(),
-                    &format!(
-                        "original Headless session cleanup exceeded 10 seconds; retaining the original owner until process exit: {:?}",
-                        session.diagnostics()
-                    ),
-                );
-                std::process::exit(1);
+                return Err(format!(
+                    "original Headless session cleanup exceeded 10 seconds: {:?}",
+                    session.diagnostics()
+                ));
             }
-            Err(_) => {
-                let _ = output::diagnostic_to(
-                    &mut std::io::stderr().lock(),
-                    "original Headless session cleanup panicked; retaining the original owner until process exit",
-                );
-                std::process::exit(1);
-            }
+            Ok(terminal) => return Ok(terminal),
+            Err(_) => return Err("original Headless session cleanup panicked".into()),
         }
     }
 }

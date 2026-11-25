@@ -14,19 +14,19 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::{
-        AuthoringAdapterReceipt, AuthoringSceneCompilationOmissionReason, CapturedExtractionSource,
-        PrefabExtractionBinding, PrefabExtractionDestination, PrefabExtractionEnvironment,
-        PrefabExtractionFailure, PrefabExtractionRequest, PrefabExtractionWork,
-        PrefabSourceExtractionInput, PreparedPrefabExtraction, SceneSourceExtractionInput,
-        try_compile_authoring_scene_with_loader,
-    },
     AuthoringDocumentSource, AuthoringSchemaBasis, ExpandedSceneDocument, ExpandedSceneEntity,
     PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget,
     PrefabInstance, PrefabInstanceBinding, ResolvedPrefabSource, SceneAuthoringSession,
     SceneCompilationLimits, SceneCompilationOptions, SceneComponentRecord, SceneDocument,
     SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
     ScenePatchReport, ScenePlacement, ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
+    authoring::{
+        AuthoringAdapterReceipt, AuthoringSceneCompilationOmissionReason, CapturedExtractionSource,
+        PrefabExtractionBinding, PrefabExtractionDestination, PrefabExtractionEnvironment,
+        PrefabExtractionFailure, PrefabExtractionRequest, PrefabExtractionWork,
+        PrefabSourceExtractionInput, PreparedPrefabExtraction, SceneSourceExtractionInput,
+        try_compile_authoring_scene_with_loader,
+    },
 };
 
 fn id(value: &str) -> SceneEntityId {

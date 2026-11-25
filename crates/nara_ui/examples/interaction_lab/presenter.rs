@@ -14,7 +14,7 @@ use nara_render::hud::{
     UiPresentationPlanner, UiPresentationRuntimeGeneration,
 };
 use nara_ui::UiPresentationReceipt;
-use nara_ui_kernel::UiFrame;
+use nara_ui::kernel::UiFrame;
 use nara_window::WindowId;
 
 static NEXT_BACKEND_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
@@ -49,8 +49,11 @@ impl HeadlessInteractionPresenter {
             .plan(frame, target, &UiPreparedImages::default())?;
         let epoch = UiPresentationEpoch::new(presentation_epoch)
             .ok_or("the interaction lab requires a non-zero presentation epoch")?;
-        let authority =
-            nara_ui::__private::prepare_ui_presentation(world, packet.frame(), presentation_epoch)?;
+        let authority = nara_ui::presentation::prepare_ui_presentation(
+            world,
+            packet.frame(),
+            presentation_epoch,
+        )?;
         let prepared = nara_render::hud::presentation::prepare_backend_submission(
             UiPresentationAttemptId::new(
                 NEXT_PRESENTATION_ATTEMPT_ID.fetch_add(1, Ordering::Relaxed),
@@ -96,14 +99,15 @@ impl HeadlessInteractionPresenter {
         };
         let accepted = nara_render::hud::presentation::discard_ui_backend_acceptance(commit);
         if !Arc::ptr_eq(accepted.packet(), &packet) {
-            nara_ui::__private::supersede_prepared_ui_presentation(world, authority);
+            nara_ui::presentation::supersede_prepared_ui_presentation(world, authority);
             return Err("backend acceptance did not retain the exact planned packet".into());
         }
 
         let identity = accepted.packet().identity();
-        let receipt = match nara_ui::__private::commit_prepared_ui_presentation(world, authority) {
-            nara_ui::__private::UiPresentationCommit::Committed(receipt) => receipt,
-            nara_ui::__private::UiPresentationCommit::Invalidated { reason } => {
+        let receipt = match nara_ui::presentation::commit_prepared_ui_presentation(world, authority)
+        {
+            nara_ui::presentation::UiPresentationCommit::Committed(receipt) => receipt,
+            nara_ui::presentation::UiPresentationCommit::Invalidated { reason } => {
                 return Err(format!(
                     "the interaction lab presentation was invalidated: {reason:?}"
                 )

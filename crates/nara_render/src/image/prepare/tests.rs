@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use nara_asset::AssetEvents;
 
 use super::*;
@@ -100,7 +102,7 @@ fn code_first_capture_retains_the_original_import_lease_and_external_owner() {
         vec![24, 120, 220, 255],
     )
     .unwrap();
-    assert!(image.try_attach_import_pixel_lease(lease));
+    assert!(image.try_attach_retention_owner(lease));
     let owner = Arc::new(());
     let weak = Arc::downgrade(&owner);
     let shared = image.share_with_retention_owner(owner);

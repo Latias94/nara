@@ -3,7 +3,7 @@ use crate::{
     PrefabAddition, PrefabAuthoringSession, PrefabComponentSetMode, PrefabInstanceClaim,
     SceneAuthoringSession, SourceDocumentKey, SourceDocumentKind,
 };
-use nara_identity::{AuthoredEntityReference, PrefabEntityOrigin, PrefabInstanceHop};
+use nara_ecs::identity::{AuthoredEntityReference, PrefabEntityOrigin, PrefabInstanceHop};
 use nara_reflect::{
     AuthoringSchemaBundleOwner, ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath,
     ComponentPropertyStep, ComponentSchemaCatalog, ComponentShapeMember,

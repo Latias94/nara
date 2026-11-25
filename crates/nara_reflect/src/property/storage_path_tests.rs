@@ -3,19 +3,21 @@ use std::mem::size_of;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 
 use crate::{
-    __private::{
-        ComponentPropertyAdmissionError, freeze_component_defaults, index_component_property_reads,
-        index_component_property_reads_with_admission, read_admitted_component_property_in_root,
-        resolve_component_property_storage_path_with_admission,
-        validate_component_property_value_with_admission,
-    },
     ComponentCodecError, ComponentFieldId, ComponentFieldPath, ComponentFieldPathSegment,
     ComponentFieldSchema, ComponentMemberPath, ComponentMemberPathSegment, ComponentPropertyError,
     ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyReadBudget,
     ComponentPropertyStep, ComponentSchema, ComponentSchemaVersion, ComponentShapeMember,
     ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits,
-    ComponentValueShape, replace_component_property, resolve_component_property,
-    resolve_component_property_in_root, resolve_component_property_with_limits,
+    ComponentValueShape,
+    effective::freeze_component_defaults,
+    property::{
+        ComponentPropertyAdmissionError, read_admitted_component_property_in_root,
+        resolve_component_property_storage_path_with_admission,
+        validate_component_property_value_with_admission,
+    },
+    registry::{index_component_property_reads, index_component_property_reads_with_admission},
+    replace_component_property, resolve_component_property, resolve_component_property_in_root,
+    resolve_component_property_with_limits,
 };
 
 fn id(name: &str) -> ComponentFieldId {

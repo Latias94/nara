@@ -8,7 +8,6 @@ use super::*;
 /// capture. The original Session keeps its history; this input shares only the current immutable
 /// source and classification and copies their exact observations. Its original allowance keeps
 /// that complete incumbent charged throughout preparation and retries.
-#[doc(hidden)]
 #[derive(Debug)]
 #[must_use]
 pub struct SceneAuthoredSchemaUpgradeInput {
@@ -16,7 +15,6 @@ pub struct SceneAuthoredSchemaUpgradeInput {
 }
 
 /// Nominal Prefab counterpart, sharing the actual original Prefab without a Scene projection.
-#[doc(hidden)]
 #[derive(Debug)]
 #[must_use]
 pub struct PrefabAuthoredSchemaUpgradeInput {
@@ -72,7 +70,6 @@ macro_rules! owned_upgrade_input {
             ///
             /// All incumbents must already be charged to this same Work before capture begins.
             /// Capture admits its own metadata before sharing Arcs and never copies old history.
-            #[doc(hidden)]
             pub fn capture_authored_schema_upgrade_input(
                 &self,
                 retained: RetainedAuthoredSchemaUpgradeSource,

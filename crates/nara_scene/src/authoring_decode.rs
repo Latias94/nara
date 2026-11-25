@@ -44,19 +44,17 @@ use std::{
 };
 
 use nara_asset::AssetRef;
+use nara_core::diagnostic::DiagnosticReport;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
-    __private::{
-        ComponentPropertyAdmissionError, ComponentPropertyReadIndex,
-        component_values_exactly_match, exact_component_value_witness,
-    },
     AuthoringSchemaBundle, CatalogFingerprint, ComponentCapability, ComponentFieldId,
     ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema,
     ComponentPropertyPath, ComponentSchema, ComponentSchemaContributionReceipt,
     ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     ComponentValueMaterializationLimits, ComponentValueShape, DeclaredAssetReference,
     EntityReference, PersistentComponentSchemaOwnerId,
+    property::{ComponentPropertyAdmissionError, ComponentPropertyReadIndex},
+    schema::{component_values_exactly_match, exact_component_value_witness},
 };
 
 use crate::{
@@ -1126,7 +1124,6 @@ impl UnavailableRecordManifest {
 }
 
 /// Compatibility evidence for a trusted native or finite engine-owned data Adapter.
-#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthoringAdapterReceipt {
     catalog: AuthoringAdapterCatalog,
@@ -1135,6 +1132,7 @@ pub struct AuthoringAdapterReceipt {
     components: BTreeSet<ComponentTypeId>,
 }
 
+/// Invalid identity, generation, or component coverage for an authoring adapter receipt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthoringAdapterReceiptError {
     EmptyIdentity,
@@ -1170,7 +1168,7 @@ impl Display for AuthoringAdapterReceiptError {
 impl Error for AuthoringAdapterReceiptError {}
 
 impl AuthoringAdapterReceipt {
-    #[doc(hidden)]
+    /// Binds an authoring adapter's identity and component coverage to its schema contribution.
     pub fn from_trusted_provider(
         contribution: ComponentSchemaContributionReceipt,
         adapter_id: &'static str,
@@ -1215,7 +1213,6 @@ impl AuthoringAdapterReceipt {
     }
 
     /// Installs the engine's finite data Adapter, without granting executable trust.
-    #[doc(hidden)]
     pub fn from_schema_owner(
         owner: &ComponentSchemaOwnerSnapshot,
         native_coverage: &BTreeSet<ComponentTypeId>,
@@ -1498,22 +1495,19 @@ impl PublishedAuthoringSceneDocument {
         &self.state.diagnostics
     }
 
+    /// Shares the immutable source and classification for a separate authoring session.
+    ///
+    /// Each session created from a fork has its own source identity and edit history.
+    #[must_use]
+    pub fn fork(&self) -> Self {
+        Self {
+            document: Arc::clone(&self.document),
+            state: Arc::clone(&self.state),
+        }
+    }
+
     pub(crate) fn into_parts(self) -> (Arc<SceneDocument>, Arc<AuthoringDocumentState>) {
         (self.document, self.state)
-    }
-}
-
-/// Forks one published Scene source into an independent Editor working owner.
-///
-/// Shares immutable source and classification handles. Session construction creates independent
-/// source identity and history; subsequent edits replace only that Session's handles.
-#[must_use]
-pub fn fork_published_authoring_scene_document(
-    published: &PublishedAuthoringSceneDocument,
-) -> PublishedAuthoringSceneDocument {
-    PublishedAuthoringSceneDocument {
-        document: Arc::clone(&published.document),
-        state: Arc::clone(&published.state),
     }
 }
 
@@ -1576,22 +1570,19 @@ impl PublishedAuthoringPrefabDocument {
         &self.state.diagnostics
     }
 
+    /// Shares the immutable source and classification for a separate authoring session.
+    ///
+    /// Each session created from a fork has its own source identity and edit history.
+    #[must_use]
+    pub fn fork(&self) -> Self {
+        Self {
+            document: Arc::clone(&self.document),
+            state: Arc::clone(&self.state),
+        }
+    }
+
     pub(crate) fn into_parts(self) -> (Arc<PrefabDocument>, Arc<AuthoringDocumentState>) {
         (self.document, self.state)
-    }
-}
-
-/// Forks one published source into an independent Editor working owner.
-///
-/// Shares immutable source and classification handles. Session construction creates independent
-/// source identity and history; subsequent edits replace only that Session's handles.
-#[must_use]
-pub fn fork_published_authoring_prefab_document(
-    published: &PublishedAuthoringPrefabDocument,
-) -> PublishedAuthoringPrefabDocument {
-    PublishedAuthoringPrefabDocument {
-        document: Arc::clone(&published.document),
-        state: Arc::clone(&published.state),
     }
 }
 
@@ -1952,21 +1943,21 @@ impl AuthoringClassificationBasis {
         }
 
         for entry in schemas.values_mut().filter(|entry| entry.adapter.is_some()) {
-            let index = nara_reflect::__private::index_component_property_defaults(&entry.schema)
+            let index = nara_reflect::registry::index_component_property_defaults(&entry.schema)
                 .map_err(|error| {
-                rejection(with_codec_error(
-                    diagnostic_error(
-                        "scene.authoring-component-value-invalid",
-                        "Persistent authoring Schema has an invalid property default",
-                    ),
-                    &nara_reflect::ComponentCodecError::Message(error.to_string()),
-                    Some(&entry.schema),
-                ))
-            })?;
+                    rejection(with_codec_error(
+                        diagnostic_error(
+                            "scene.authoring-component-value-invalid",
+                            "Persistent authoring Schema has an invalid property default",
+                        ),
+                        &nara_reflect::ComponentCodecError::Message(error.to_string()),
+                        Some(&entry.schema),
+                    ))
+                })?;
             entry.default_property_reads = (!index.is_empty()).then(|| Arc::new(index));
             if component_allows_composition(&entry.schema) {
                 for (index, field) in entry.schema.fields().iter().enumerate() {
-                    let contextual = nara_reflect::__private::component_field_default_requires_context(field)
+                    let contextual = nara_reflect::effective::component_field_default_requires_context(field)
                         .map_err(|error| {
                             rejection(with_codec_error(
                                 diagnostic_error(
@@ -2212,7 +2203,7 @@ fn classify_prefab_document(
 pub(crate) struct AuthoringSourceParts<'a> {
     pub(crate) placements: &'a [SceneEntityPlacement],
     pub(crate) entities: &'a [SceneEntityRecord],
-    pub(crate) inputs: Option<&'a BTreeSet<nara_identity::ReferenceInputId>>,
+    pub(crate) inputs: Option<&'a BTreeSet<nara_ecs::identity::ReferenceInputId>>,
 }
 
 impl<'a> From<&'a SceneDocument> for AuthoringSourceParts<'a> {
@@ -2382,7 +2373,7 @@ fn unavailable_record_diagnostics(entries: &[UnavailableRecordManifestEntry]) ->
 
 fn unavailable_readiness_diagnostic(
     readiness: AuthoringRecordReadiness,
-) -> nara_diagnostic::Diagnostic {
+) -> nara_core::diagnostic::ReportDiagnostic {
     match readiness {
         AuthoringRecordReadiness::KnownUnbound => diagnostic_warning(
             "scene.authoring-known-unbound",
@@ -2411,9 +2402,9 @@ fn unavailable_readiness_diagnostic(
 }
 
 fn with_authoring_record_location(
-    diagnostic: nara_diagnostic::Diagnostic,
+    diagnostic: nara_core::diagnostic::ReportDiagnostic,
     location: &AuthoringRecordLocation,
-) -> nara_diagnostic::Diagnostic {
+) -> nara_core::diagnostic::ReportDiagnostic {
     match location {
         AuthoringRecordLocation::EntityComponent { entity } => {
             with_public_locator(diagnostic, "entity-id", entity.as_str())
@@ -2770,7 +2761,9 @@ fn collect_entity_references_at<'a>(
     Ok(())
 }
 
-fn rejection(diagnostic: nara_diagnostic::Diagnostic) -> AuthoringDocumentPublicationError {
+fn rejection(
+    diagnostic: nara_core::diagnostic::ReportDiagnostic,
+) -> AuthoringDocumentPublicationError {
     let mut diagnostics = DiagnosticReport::default();
     diagnostics.push(diagnostic);
     AuthoringDocumentPublicationError::new(diagnostics)

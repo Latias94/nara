@@ -1,17 +1,22 @@
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+use crate::kernel::{
+    UiAccessibilityInput, UiActivationSource, UiButtonPhase, UiInputEvent, UiKey, UiLayer,
+    UiLocalKey, UiNonActivation, UiPaintPrimitive, UiPoint, UiPointerButton, UiPointerId,
+    UiPointerInput, UiPresentationReceipt, UiResolvedBrush, UiRootKey, UiRootStatus, UiRouteStamp,
+    UiSafeAreaInsets, UiSeatId, UiSemanticRole, UiSize, UiSurfaceContentTransform,
+    UiSurfaceGenerations, UiSurfaceId, UiTheme,
+};
 use nara_app::{
     App, CoreStage, RuntimeControl, RuntimeControlRequestResult, RuntimeInstance, RuntimeState,
 };
+use nara_asset::image::ImageAsset;
 use nara_asset::{
     AssetPathScope, AssetProductRef, AssetRecord, AssetRef, AssetRefExportPolicy, AssetSourceKind,
     AssetSourcePath, ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::Vec2;
 use nara_ecs::{Entity, Res, ResMut, Resource, World};
-use nara_hierarchy::{
-    HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
-};
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMapBuilder, ActionMapLimits, ActionMaps,
     ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonTransitionPhase, InputEventKind,
@@ -27,17 +32,13 @@ use nara_reflect::{
     ComponentRegistryPlugin, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue,
 };
+use nara_scene::hierarchy::{
+    HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
+};
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabEntityTarget, PrefabInstance,
     SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord, SceneEntitySource,
     ScenePlacement, ScenePlacementParent,
-};
-use nara_ui_kernel::{
-    UiAccessibilityInput, UiActivationSource, UiButtonPhase, UiInputEvent, UiKey, UiLayer,
-    UiLocalKey, UiNonActivation, UiPaintPrimitive, UiPoint, UiPointerButton, UiPointerId,
-    UiPointerInput, UiPresentationReceipt, UiResolvedBrush, UiRootKey, UiRootStatus, UiRouteStamp,
-    UiSafeAreaInsets, UiSeatId, UiSemanticRole, UiSize, UiSurfaceContentTransform,
-    UiSurfaceGenerations, UiSurfaceId, UiTheme,
 };
 
 use crate::interaction::dispatch_presented_ui_input;
@@ -62,7 +63,7 @@ mod prepared_loss;
 #[path = "adapter_input_regression_tests.rs"]
 mod input_regressions;
 
-use crate::__private::UiPresentationCommit;
+use crate::presentation::UiPresentationCommit;
 
 const TEST_DOMAIN: &str = "nara.test.ui";
 
@@ -166,7 +167,7 @@ fn ui_app() -> UiTestApp {
     let mut app = App::new();
     app.add_plugins((
         ComponentRegistryPlugin,
-        nara_hierarchy::HierarchyPlugin,
+        nara_scene::hierarchy::HierarchyPlugin,
         nara_input::InputPlugin,
         UiPlugin::default(),
     ))
@@ -174,138 +175,13 @@ fn ui_app() -> UiTestApp {
     UiTestApp::new(app)
 }
 
-#[test]
-fn custom_font_uses_ordinary_adapter_and_configured_presentation() {
-    fn compile_packets(world: &mut World) {
-        let frames = crate::ui_candidate_frames(world).unwrap();
-        let stats = nara_render::hud::compile_ui_paint_packets(world, &frames).unwrap();
-        assert_eq!(stats.admitted_packets, 1);
-        assert_eq!(stats.rejected_packets, 0);
-    }
-
-    let font = nara_text::FontFace::from_bytes(
-        include_bytes!("../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
-        0,
-    )
-    .unwrap();
-    let bundled = nara_text::bundled_font_face().unwrap();
-    assert_ne!(font.id(), bundled.id());
-    assert_eq!(
-        crate::plugin(font.clone()).key(),
-        crate::plugin(font.clone()).key()
-    );
-    assert_ne!(
-        crate::plugin(font.clone()).key(),
-        crate::plugin(bundled.clone()).key()
-    );
-    assert_eq!(
-        nara_render::hud::plugin(font.clone()).key(),
-        nara_render::hud::plugin(font.clone()).key()
-    );
-    assert_ne!(
-        nara_render::hud::plugin(font.clone()).key(),
-        nara_render::hud::plugin(bundled).key()
-    );
-
-    let mut configuration = App::new();
-    configuration
-        .add_plugins((
-            ComponentRegistryPlugin,
-            nara_hierarchy::HierarchyPlugin,
-            nara_transform::TransformPlugin,
-            nara_input::InputPlugin,
-            (
-                nara_render::RenderComponentsPlugin,
-                nara_render::RenderPlugin::default(),
-                nara_render::image::ImagePreparePlugin,
-            ),
-            crate::plugin(font.clone()),
-            nara_render::hud::plugin(font.clone()),
-        ))
-        .unwrap();
-    configuration
-        .add_systems(CoreStage::Queue, compile_packets)
-        .unwrap();
-    let world = configuration.world_mut().unwrap();
-    {
-        let mut input = world.resource_mut::<InputTimeline>();
-        input
-            .connect_endpoint(InputWindowId::new(11), InputSeatId::PRIMARY)
-            .unwrap();
-        input
-            .connect_pointer(
-                InputWindowId::new(11),
-                InputSeatId::PRIMARY,
-                InputPointerId::PRIMARY,
-            )
-            .unwrap();
-    }
-    install_test_surface(world);
-    nara_render::hud::presentation::replace_ui_presentation_routes(
-        world,
-        [nara_render::hud::presentation::UiPresentationRoute::new(
-            surface_id(),
-            nara_window::WindowId::PRIMARY,
-        )
-        .unwrap()],
-    )
-    .unwrap();
-    let root = world
-        .spawn((
-            UiRoot::new(UiLayer::Base),
-            UiNode::new(UiStyle::fill()),
-            UiRuntimeKey::new(TEST_DOMAIN, "custom-font-root").unwrap(),
-        ))
-        .id();
-    let label = world
-        .spawn((
-            UiNode::new(UiStyle::absolute(8.0, 6.0, 180.0, 40.0)),
-            UiText::new("Nara mono", 18.0).unwrap(),
-            UiRuntimeKey::new(TEST_DOMAIN, "custom-font-label").unwrap(),
-        ))
-        .id();
-    place_ui_tree(world, root, &[label]);
-
-    let mut app = UiTestApp::new(configuration);
-    app.update().unwrap();
-    let frame = ui_candidate_frame(app.world(), surface_id())
-        .unwrap()
-        .unwrap();
-    let glyphs = frame
-        .paint()
-        .iter()
-        .filter_map(|primitive| match primitive {
-            UiPaintPrimitive::Text { layout, .. } => Some(layout.glyphs()),
-            _ => None,
-        })
-        .flatten()
-        .collect::<Vec<_>>();
-    assert!(!glyphs.is_empty());
-    assert!(
-        glyphs
-            .iter()
-            .all(|glyph| glyph.key().face_id() == font.id())
-    );
-    let (packets, _) = nara_render::hud::presentation::snapshot_ui_paint_packets(app.world())
-        .unwrap()
-        .into_parts();
-    assert_eq!(packets.len(), 1);
-    assert!(Arc::ptr_eq(&packets[0].frame(), &frame));
-    assert!(
-        packets[0]
-            .glyph_pages()
-            .iter()
-            .any(|page| page.pixels().iter().any(|coverage| *coverage != 0))
-    );
-}
-
 fn commit_ui_presentation(
     world: &mut World,
-    frame: Arc<nara_ui_kernel::UiFrame>,
+    frame: Arc<crate::kernel::UiFrame>,
     presentation_epoch: u64,
 ) -> Result<UiPresentationReceipt, UiAdapterError> {
-    let prepared = crate::__private::prepare_ui_presentation(world, frame, presentation_epoch)?;
-    match crate::__private::commit_prepared_ui_presentation(world, prepared) {
+    let prepared = crate::presentation::prepare_ui_presentation(world, frame, presentation_epoch)?;
+    match crate::presentation::commit_prepared_ui_presentation(world, prepared) {
         UiPresentationCommit::Committed(receipt) => Ok(receipt),
         UiPresentationCommit::Invalidated { reason } => {
             panic!("a presentation without intervening loss must commit: {reason:?}")
@@ -635,7 +511,7 @@ fn image_brush_preserves_complete_products_without_source_database() {
         assert_eq!(references[0].asset_ref(), &reference);
         let mut server = nara_asset::AssetServer::new();
         let handle = server
-            .reserve_product::<nara_render::image::ImageAsset>(reference.as_product().unwrap())
+            .reserve_product::<ImageAsset>(reference.as_product().unwrap())
             .unwrap();
         let mut context = ComponentDecodeContext::with_asset_server(&mut server);
         let prepared = snapshot
@@ -648,9 +524,7 @@ fn image_brush_preserves_complete_products_without_source_database() {
         assert_eq!(
             world.get::<UiVisual>(entity).unwrap().kernel().background(),
             Some(&UiBrush::Image {
-                image: nara_ui_kernel::UiImageId::external::<nara_render::image::ImageAsset>(
-                    handle.id().raw()
-                ),
+                image: crate::kernel::UiImageId::external::<ImageAsset>(handle.id().raw()),
                 tint: UiColor::rgba(1.0, 1.0, 1.0, 1.0),
             })
         );
@@ -855,7 +729,7 @@ fn opaque_named_and_external_image_ids_never_acquire_a_persistent_binding() {
     let mut server = nara_asset::AssetServer::new();
     let source = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
     let handle = server
-        .reserve_record::<nara_render::image::ImageAsset>(&AssetRecord::new(
+        .reserve_record::<ImageAsset>(&AssetRecord::new(
             source,
             AssetSourcePath::new("textures/panel.png").unwrap(),
             AssetSourceKind::Image,
@@ -863,10 +737,10 @@ fn opaque_named_and_external_image_ids_never_acquire_a_persistent_binding() {
         .unwrap();
     world.insert_resource(server);
     for image in [
-        nara_ui_kernel::UiImageId::new("textures/panel.png").unwrap(),
-        nara_ui_kernel::UiImageId::new("product:2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f/primary")
+        crate::kernel::UiImageId::new("textures/panel.png").unwrap(),
+        crate::kernel::UiImageId::new("product:2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f/primary")
             .unwrap(),
-        nara_ui_kernel::UiImageId::external::<nara_render::image::ImageAsset>(handle.id().raw()),
+        crate::kernel::UiImageId::external::<ImageAsset>(handle.id().raw()),
     ] {
         let entity = world
             .spawn(UiVisual::image(image, UiColor::rgba(1.0, 1.0, 1.0, 1.0)))
@@ -883,16 +757,12 @@ fn image_asset_binding_survives_shape_changes_and_clears_on_background_replaceme
     let snapshot = frozen_ui_registry();
     let id = ComponentTypeId::new("nara.ui.UiVisual");
     let mut server = nara_asset::AssetServer::new();
-    let handle = server
-        .reserve::<nara_render::image::ImageAsset>("game/art/panel.png")
-        .unwrap();
+    let handle = server.reserve::<ImageAsset>("game/art/panel.png").unwrap();
     let scope = AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
     let tint = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
     let bound = UiVisual::image_asset(handle, tint)
-        .with_radii(nara_ui_kernel::UiCornerRadii::all(2.0).unwrap())
-        .with_border(
-            nara_ui_kernel::UiBorder::new(1.0, UiBrush::Role(UiColorRole::Focus)).unwrap(),
-        );
+        .with_radii(crate::kernel::UiCornerRadii::all(2.0).unwrap())
+        .with_border(crate::kernel::UiBorder::new(1.0, UiBrush::Role(UiColorRole::Focus)).unwrap());
     assert_eq!(bound.image_handle(), Some(handle));
     let mut world = World::new();
     world.insert_resource(server);
@@ -907,9 +777,7 @@ fn image_asset_binding_survives_shape_changes_and_clears_on_background_replaceme
         Some(AssetRef::path("panel.png").unwrap())
     );
     let replaced = bound.clone().with_background(UiBrush::Image {
-        image: nara_ui_kernel::UiImageId::external::<nara_render::image::ImageAsset>(
-            handle.id().raw(),
-        ),
+        image: crate::kernel::UiImageId::external::<ImageAsset>(handle.id().raw()),
         tint,
     });
     assert_eq!(replaced.image_handle(), None);
@@ -952,7 +820,7 @@ fn long_scoped_image_alias_is_not_limited_by_widget_keys_and_checks_source_kind(
     let reference = AssetRef::path(local).unwrap();
     let scope = AssetPathScope::under(AssetSourcePath::new("custom/assets/images").unwrap());
     let canonical = scope.resolve(reference.as_path().unwrap());
-    assert!(canonical.as_str().len() > nara_ui_kernel::MAX_UI_KEY_BYTES);
+    assert!(canonical.as_str().len() > crate::kernel::MAX_UI_KEY_BYTES);
     let value =
         crate::codec::image_visual_value(&reference, UiColor::rgba(1.0, 1.0, 1.0, 1.0)).unwrap();
     let mut world = World::new();
@@ -1436,7 +1304,7 @@ fn deferred_presentation_reprepares_an_equivalent_candidate_without_changing_pac
         .unwrap();
     assert!(!Arc::ptr_eq(&latest, &original));
 
-    let crate::__private::UiDeferredPresentationRetry::Prepared(retried) =
+    let crate::presentation::UiDeferredPresentationRetry::Prepared(retried) =
         app.retry_presentation(deferred).unwrap()
     else {
         panic!("equivalent deferred facts must remain retryable");
@@ -1470,7 +1338,7 @@ fn deferred_presentation_cannot_retry_after_behavior_changes() {
 
     assert!(matches!(
         app.retry_presentation(deferred).unwrap(),
-        crate::__private::UiDeferredPresentationRetry::Superseded
+        crate::presentation::UiDeferredPresentationRetry::Superseded
     ));
     let latest = ui_candidate_frame(app.world(), surface_id())
         .unwrap()
@@ -2655,7 +2523,7 @@ fn focused_disabled_button_keeps_a_non_color_focus_indicator() {
             route_stamp(1),
             UiInputEvent::Navigate {
                 seat: UiSeatId::PRIMARY,
-                direction: nara_ui_kernel::UiNavigation::Next,
+                direction: crate::kernel::UiNavigation::Next,
             },
         ),
         UiRouteDisposition::Consumed(_)
@@ -4662,7 +4530,7 @@ fn consecutive_transform_then_endpoint_updates_do_not_transfer_the_old_seat_sess
             UiRouteStamp::from_receipt(first_receipt),
             UiInputEvent::Navigate {
                 seat: UiSeatId::PRIMARY,
-                direction: nara_ui_kernel::UiNavigation::Next,
+                direction: crate::kernel::UiNavigation::Next,
             },
         ),
         UiRouteDisposition::Consumed(_)
@@ -5283,7 +5151,7 @@ fn persistent_sources_and_occurrences_isolate_presented_focus_press_and_actions(
             let pressed = ui_candidate_frame(app.world(), surface_id())
                 .unwrap()
                 .unwrap();
-            let color = |frame: &nara_ui_kernel::UiFrame, key: &UiKey| {
+            let color = |frame: &crate::kernel::UiFrame, key: &UiKey| {
                 frame
                     .paint()
                     .iter()

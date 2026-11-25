@@ -13,20 +13,16 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
+use crate::hierarchy::{HierarchyRoots, validate_hierarchy};
 use nara_asset::{
     AssetProductRef, AssetRef, AssetRefExportPolicy, AssetReferenceResolver, StableAssetId,
 };
-use nara_diagnostic::{Diagnostic, DiagnosticReport};
-use nara_ecs::{Entity, World};
-use nara_hierarchy::{Children, HierarchyRoots, Parent, validate_hierarchy};
-use nara_identity::{
+use nara_core::diagnostic::{DiagnosticReport, ReportDiagnostic as Diagnostic};
+use nara_ecs::identity::{
     EntityLookup, EntityReference, PersistentRuntimeReference, RuntimeEntityReference,
     SceneInstanceId, WorldEntityLocator, WorldIdentityDomain, WorldIdentityDomainId,
 };
-use nara_reflect::__private::{
-    component_snapshot_matches_runtime_type, effective_component_value_with_budget,
-    validate_persistent_export_coverage, validate_value_materialization_budget,
-};
+use nara_ecs::{Entity, World};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentEncodeContext,
     ComponentEntityReferenceRewriteError, ComponentRegistryAuthorityError,
@@ -34,6 +30,11 @@ use nara_reflect::{
     ComponentValueMaterializationLimits, collect_declared_asset_references_from_schema_with_limits,
     component_registry, component_registry_is_installed, validate_component_registry_authority,
     validate_component_value_with_limits,
+};
+use nara_reflect::{
+    effective::{effective_component_value_with_budget, validate_value_materialization_budget},
+    persistent_apply::validate_persistent_export_coverage,
+    registry::component_snapshot_matches_runtime_type,
 };
 
 use crate::{
@@ -48,6 +49,7 @@ use crate::{
         error as diagnostic_error, with_codec_error, with_entity_reference_rewrite_error,
         with_public_locator, with_public_u64,
     },
+    spatial::{ChildOf, Children},
 };
 
 /// Maps source identity axes to this live export's document-local IDs.
@@ -353,7 +355,7 @@ fn export_live_scene_selected(
         if let Err(error) =
             validate_persistent_export_coverage(world, entity.entity, |component, runtime| {
                 execution.schema(component).is_some_and(|schema| {
-                    nara_reflect::__private::validate_schema_capabilities(
+                    nara_reflect::registry::validate_schema_capabilities(
                         schema,
                         [ComponentCapability::Scene],
                     )
@@ -433,8 +435,8 @@ fn export_live_scene_selected(
     let mut data_components = Vec::with_capacity(export_entities.len());
     for (export_entity, id) in export_entities.iter().zip(&assigned_ids) {
         let parent = world
-            .get::<Parent>(export_entity.entity)
-            .map(Parent::parent);
+            .get::<ChildOf>(export_entity.entity)
+            .map(ChildOf::parent);
         if let Some(parent) = parent
             && !id_by_entity.contains_key(&parent)
         {
@@ -521,7 +523,7 @@ fn export_live_scene_selected(
                     )));
                     continue;
                 }
-                if nara_reflect::__private::validate_schema_capabilities(
+                if nara_reflect::registry::validate_schema_capabilities(
                     schema,
                     [ComponentCapability::Scene],
                 )
@@ -688,8 +690,8 @@ fn export_live_scene_selected(
             world
                 .get::<Children>(export_entity.entity)
                 .into_iter()
-                .flat_map(Children::iter)
-                .filter_map(|child| id_by_entity.get(&child).cloned())
+                .flatten()
+                .filter_map(|child| id_by_entity.get(child).cloned())
                 .map(|child| {
                     SceneEntityPlacement::new(
                         PrefabEntityTarget::source(child),
@@ -759,7 +761,7 @@ impl ExportValueContext<'_> {
                     field.id().as_str(),
                 )
             };
-            if !nara_reflect::__private::component_field_default_requires_context(field)
+            if !nara_reflect::effective::component_field_default_requires_context(field)
                 .map_err(|error| with_codec_error(invalid(), &error, Some(schema)))?
             {
                 continue;
@@ -958,7 +960,7 @@ impl ExportValueContext<'_> {
                     |error| export_reference_resolution_error_name(*error),
                 )
             };
-        let references = nara_reflect::__private::plan_declared_entity_references::<
+        let references = nara_reflect::entity_reference::plan_declared_entity_references::<
             ExportReferenceResolutionError,
         >(
             schema,
@@ -1088,7 +1090,7 @@ fn export_value_budget_diagnostic(
     maximum: usize,
     entity: &str,
     component: &str,
-) -> nara_diagnostic::Diagnostic {
+) -> nara_core::diagnostic::ReportDiagnostic {
     with_public_u64(
         with_public_u64(
             with_public_locator(

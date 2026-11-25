@@ -279,7 +279,7 @@ fn project_relative_location_path(
         path
     } else {
         let spelling = path.to_str()?.replace(std::path::MAIN_SEPARATOR, "/");
-        nara_fs::RelativePath::preflight(&spelling).ok()?;
+        crate::fs::RelativePath::preflight(&spelling).ok()?;
         anchored = workspace.join(spelling);
         &anchored
     };
@@ -293,7 +293,7 @@ fn project_relative_location_path(
     }
     let relative = components.as_path();
     let spelling = relative.to_str()?.replace(std::path::MAIN_SEPARATOR, "/");
-    nara_fs::RelativePath::preflight(&spelling).ok()?;
+    crate::fs::RelativePath::preflight(&spelling).ok()?;
     Some(PathBuf::from(spelling))
 }
 

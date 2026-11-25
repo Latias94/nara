@@ -81,7 +81,7 @@ impl Fixture {
         &self,
         server: &AssetServer,
         entities: &BTreeSet<Entity>,
-        stats: nara_identity::IdentityDomainStats,
+        stats: nara_ecs::identity::IdentityDomainStats,
     ) {
         assert_eq!(self.world.resource::<AssetServer>(), server);
         // Allocated entity indices can grow while scratch entities are spawned and despawned.

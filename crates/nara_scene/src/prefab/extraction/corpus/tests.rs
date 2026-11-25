@@ -4,7 +4,7 @@ use nara_asset::{
     AssetProductRef, AssetSourceKind, AssetSourcePath, ImportedProductId, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, ReferenceInputId,
 };
 use nara_reflect::{
@@ -16,12 +16,12 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    __private::{AuthoringAdapterReceipt, PrefabExtractionBinding, PrefabExtractionEnvironment},
     AuthoringRecordReadiness, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
     PrefabDeclarationSource, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance,
     PrefabInstanceClaim, PrefabInstanceHop, PrefabInstancePath, PrefabInstancePathSegment,
     PrefabOverlay, PrefabOverlaySlot, SceneCompilationLimits, SceneComponentRecord,
     SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
+    authoring::{AuthoringAdapterReceipt, PrefabExtractionBinding, PrefabExtractionEnvironment},
 };
 
 fn id(value: &str) -> SceneEntityId {

@@ -76,13 +76,6 @@ impl PublicationFailure {
     pub(super) fn retry_cleanup(&mut self) -> bool {
         self.source.retry_cleanup()
     }
-
-    /// Preserves pending native cleanup authority through the CLI's terminal result and exit.
-    pub(super) fn retain_cleanup_until_exit(self) {
-        if let Some(cleanup) = self.source.into_parts().1 {
-            std::mem::forget(cleanup);
-        }
-    }
 }
 
 pub(super) fn publish(path: &Path, bytes: &[u8]) -> Result<Publication, PublicationFailure> {

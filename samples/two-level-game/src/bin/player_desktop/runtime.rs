@@ -243,9 +243,14 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
         }
     }
     let had_original = original.is_some();
-    let report = original
+    let report = match original
         .as_mut()
-        .map(|run| close_original(run, &shared, &extension));
+        .map(|run| close_original(run, &shared, &extension))
+        .transpose()
+    {
+        Ok(report) => report,
+        Err(message) => return cleanup_failure(message),
+    };
     let closed = original.as_ref().is_some_and(|run| {
         matches!(
             run.progress(),
@@ -260,9 +265,11 @@ pub(super) fn run_with(options: Options, extension: impl PlayerExtension + 'stat
         returned
     })) {
         Ok(returned) => returned,
-        Err(_panic) => retain_until_exit(
-            "original desktop owner or returned event loop panicked during destruction",
-        ),
+        Err(_) => {
+            return cleanup_failure(
+                "original desktop owner or returned event loop panicked during destruction",
+            );
+        }
     };
     let mut state = shared.borrow_mut();
     let mut message = state.failure.clone();
@@ -403,8 +410,8 @@ fn drive(
         }
     }
     if let Some(command) = two_level_game::player_launch(options.game.clone())? {
-        original
-            .submit(command)
+        command
+            .submit_desktop(original)
             .map_err(|error| error.to_string())?;
         shared.borrow_mut().launch_required = true;
     }
@@ -551,12 +558,9 @@ fn close_original(
     original: &mut DesktopRun,
     shared: &SharedPresentation,
     extension: &Rc<RefCell<impl PlayerExtension>>,
-) -> DesktopRunReport {
-    if catch_unwind(AssertUnwindSafe(|| original.request_close())).is_err() {
-        retain_until_exit(
-            "original desktop close request panicked; retaining its owner until process exit",
-        );
-    }
+) -> Result<DesktopRunReport, &'static str> {
+    catch_unwind(AssertUnwindSafe(|| original.request_close()))
+        .map_err(|_| "original desktop close request panicked")?;
     let deadline = Instant::now() + CLEANUP_TIMEOUT;
     loop {
         let drained = catch_unwind(AssertUnwindSafe(|| extension.borrow_mut().poll()));
@@ -581,34 +585,24 @@ fn close_original(
             progress,
             DesktopRunProgress::Completed(_) | DesktopRunProgress::Failed
         ) {
-            return match catch_unwind(AssertUnwindSafe(|| original.execute())) {
-                Ok(report) => report,
-                Err(_panic) => retain_until_exit(
-                    "original desktop terminal report panicked; retaining its owner until process exit",
-                ),
-            };
+            return catch_unwind(AssertUnwindSafe(|| original.execute()))
+                .map_err(|_| "original desktop terminal report panicked");
         }
         if Instant::now() >= deadline {
-            retain_until_exit(
-                "original desktop cleanup exceeded 10 seconds; retaining its owner until process exit",
-            );
+            return Err("original desktop cleanup exceeded 10 seconds");
         }
-        let advanced = catch_unwind(AssertUnwindSafe(|| {
+        catch_unwind(AssertUnwindSafe(|| {
             if progress == DesktopRunProgress::CleanupIncomplete {
                 original.execute();
             } else {
                 original.poll(POLL_INTERVAL);
             }
-        }));
-        if let Err(_panic) = advanced {
-            retain_until_exit(
-                "original desktop cleanup panicked; retaining its owner until process exit",
-            );
-        }
+        }))
+        .map_err(|_| "original desktop cleanup panicked")?;
     }
 }
 
-fn retain_until_exit(message: &str) -> ! {
+fn cleanup_failure(message: &str) -> ExitCode {
     let _ = output::diagnostic_to(&mut std::io::stderr().lock(), message);
-    std::process::exit(1)
+    ExitCode::FAILURE
 }

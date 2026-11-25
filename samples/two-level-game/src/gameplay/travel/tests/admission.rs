@@ -1,43 +1,35 @@
 use nara::{
     app::RuntimeInstance,
     ecs::schedule::IntoScheduleConfigs,
-    gameplay::{
-        GameplayCommandBatch, GameplayCommandDraft, GameplayCommandEnvelope,
-        GameplayCommandIngressSource, GameplayCommandPayload, GameplayCommandPlugin,
-        GameplayCommandQueue, GameplayCommandSet, GameplayCommandSourceSequence,
-        GameplayCommandSubmission, GameplayCommandTarget, GameplayCommandTick,
-        GameplayCommandValue,
-    },
     prelude::{App, CoreStage, FixedTime, Res, ResMut, Resource},
 };
 
 use crate::{
-    command::SemanticCommand,
+    command::{
+        CommandSchedule, CommandSequence, CommandSource, CommandTick, GameCommand,
+        ScheduledCommand, SemanticCommand, acknowledge_commands, prepare_commands,
+    },
     gameplay::{GamePhase, Session, commands},
 };
 
 #[derive(Clone, Default, Resource)]
 struct Captured {
-    commands: Vec<GameplayCommandEnvelope>,
+    commands: Vec<ScheduledCommand>,
     held: [bool; 4],
     phase: GamePhase,
     error: Option<String>,
 }
 
-fn observe(
-    batch: Res<GameplayCommandBatch>,
-    session: Res<Session>,
-    mut captured: ResMut<Captured>,
-) {
-    captured.commands.extend_from_slice(batch.commands());
+fn observe(schedule: Res<CommandSchedule>, session: Res<Session>, mut captured: ResMut<Captured>) {
+    captured.commands.extend_from_slice(schedule.current());
     captured.held = session.held;
     captured.phase = session.phase;
     captured.error.clone_from(&session.error);
 }
 
-fn consume(drafts: Vec<GameplayCommandDraft>, phase: GamePhase, held: [bool; 4]) -> Captured {
+fn consume(commands: Vec<GameCommand>, phase: GamePhase, held: [bool; 4]) -> Captured {
     let mut app = App::new();
-    app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+    app.init_resource::<CommandSchedule>().unwrap();
     app.insert_resource(Session {
         phase,
         held,
@@ -47,31 +39,32 @@ fn consume(drafts: Vec<GameplayCommandDraft>, phase: GamePhase, held: [bool; 4])
     app.init_resource::<Captured>().unwrap();
     app.add_systems(
         CoreStage::FixedUpdate,
-        super::consume.in_set(GameplayCommandSet::Consume),
+        (
+            prepare_commands,
+            super::consume,
+            observe,
+            acknowledge_commands,
+        )
+            .chain(),
     )
     .unwrap();
-    app.add_systems(
-        CoreStage::FixedUpdate,
-        observe.in_set(GameplayCommandSet::Capture),
-    )
-    .unwrap();
-    for (index, draft) in drafts.into_iter().enumerate() {
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<GameplayCommandQueue>()
-            .submit(GameplayCommandSubmission::new(
-                GameplayCommandTick::new(1).unwrap(),
-                GameplayCommandIngressSource::external("two-level-game.movement-admission-test")
-                    .unwrap(),
-                GameplayCommandSourceSequence::new(index as u64 + 1).unwrap(),
-                draft,
-            ))
-            .unwrap();
+    {
+        let mut schedule = app.world_mut().unwrap().resource_mut::<CommandSchedule>();
+        for (index, command) in commands.into_iter().enumerate() {
+            schedule
+                .schedule(ScheduledCommand::new(
+                    CommandTick::new(1).unwrap(),
+                    CommandSource::external("two-level-game.movement-admission-test").unwrap(),
+                    CommandSequence::new(index as u64 + 1).unwrap(),
+                    command,
+                ))
+                .unwrap();
+        }
     }
     let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
     let captured = runtime.world().resource::<Captured>().clone();
-    let stats = runtime.world().resource::<GameplayCommandQueue>().stats();
+    let stats = runtime.world().resource::<CommandSchedule>().stats();
     runtime.finish().unwrap();
     assert_eq!(stats.acknowledged_through_tick, 1);
     assert_eq!(stats.pending_commands, 0);
@@ -83,36 +76,17 @@ fn consume(drafts: Vec<GameplayCommandDraft>, phase: GamePhase, held: [bool; 4])
 }
 
 #[test]
-fn live_movement_and_recording_reject_the_same_malformed_envelopes_before_held_changes() {
-    let mut extra = commands::movement(1, true).payload().clone();
-    extra
-        .insert("extra", GameplayCommandValue::Bool(false))
-        .unwrap();
-    let mut wrong_pressed = commands::movement(1, true).payload().clone();
-    wrong_pressed
-        .insert("pressed", GameplayCommandValue::I64(1))
-        .unwrap();
-    let mut missing_direction = GameplayCommandPayload::new();
-    missing_direction
-        .insert("pressed", GameplayCommandValue::Bool(true))
-        .unwrap();
-    let mut negative = commands::movement(1, true).payload().clone();
-    negative
-        .insert("direction", GameplayCommandValue::I64(-1))
-        .unwrap();
-    for draft in [
-        commands::movement(1, true).with_payload(extra),
-        commands::movement(1, true).with_target(GameplayCommandTarget::named("player").unwrap()),
-        commands::movement(1, true).with_payload(wrong_pressed),
-        commands::movement(1, true).with_payload(missing_direction),
-        commands::movement(1, true).with_payload(negative),
-        commands::movement(4, true),
-        commands::action(commands::MOVE),
-    ] {
-        let captured = consume(vec![draft], GamePhase::Running, [false; 4]);
+fn live_movement_and_recording_reject_out_of_range_directions_before_held_changes() {
+    for pressed in [true, false] {
+        let held = [false, true, false, false];
+        let captured = consume(
+            vec![commands::movement(4, pressed)],
+            GamePhase::Running,
+            held,
+        );
         assert_eq!(captured.commands.len(), 1);
-        let error = SemanticCommand::from_envelope(&captured.commands[0]).unwrap_err();
-        assert_eq!(captured.held, [false; 4], "{:?}", captured.commands[0]);
+        let error = SemanticCommand::from_scheduled(&captured.commands[0]).unwrap_err();
+        assert_eq!(captured.held, held);
         assert_eq!(captured.phase, GamePhase::Running);
         assert_eq!(captured.error.as_deref(), Some(error.as_str()));
     }
@@ -120,7 +94,7 @@ fn live_movement_and_recording_reject_the_same_malformed_envelopes_before_held_c
 
 #[test]
 fn live_and_recorded_movement_keep_ordered_press_release_and_exact_consumption_keys() {
-    let drafts = (0..4)
+    let commands = (0..4)
         .flat_map(|direction| {
             [
                 commands::movement(direction, true),
@@ -129,11 +103,11 @@ fn live_and_recorded_movement_keep_ordered_press_release_and_exact_consumption_k
         })
         .chain([commands::movement(2, true)])
         .collect();
-    let captured = consume(drafts, GamePhase::Running, [false; 4]);
+    let captured = consume(commands, GamePhase::Running, [false; 4]);
     let actual = captured
         .commands
         .iter()
-        .map(SemanticCommand::from_envelope)
+        .map(SemanticCommand::from_scheduled)
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     let expected = (0..4)
@@ -179,7 +153,7 @@ fn valid_releases_still_clear_held_input_while_new_presses_wait_for_running() {
             captured
                 .commands
                 .iter()
-                .all(|command| SemanticCommand::from_envelope(command).is_ok())
+                .all(|command| SemanticCommand::from_scheduled(command).is_ok())
         );
     }
 }

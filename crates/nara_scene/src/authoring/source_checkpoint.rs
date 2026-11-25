@@ -197,7 +197,7 @@ impl PreparedSourceCheckpoint {
 pub(super) fn admit_incumbent(
     original_placements: &[SceneEntityPlacement],
     original_entities: &[SceneEntityRecord],
-    original_inputs: Option<&BTreeSet<nara_identity::ReferenceInputId>>,
+    original_inputs: Option<&BTreeSet<nara_ecs::identity::ReferenceInputId>>,
     state: &AuthoringDocumentState,
     history: &AuthoringHistory,
     retention_token_bytes: usize,
@@ -215,7 +215,7 @@ pub(super) fn admit_incumbent(
             // a node-limited operation must refuse before walking an arbitrarily large set.
             let scan = inputs
                 .len()
-                .checked_mul(size_of::<nara_identity::ReferenceInputId>());
+                .checked_mul(size_of::<nara_ecs::identity::ReferenceInputId>());
             admit("input-scan", inputs.len(), scan)?;
             scan.ok_or_else(limit_error)?;
             crate::authoring_decode::retained_prefab_inputs_bytes(inputs)

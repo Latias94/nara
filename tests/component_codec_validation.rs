@@ -15,16 +15,13 @@ use nara::{
     ecs::{Component, World},
     identity::{AuthoredEntityReference, EntityReference, ReferenceInputId},
     reflect::{
-        __private::{
-            diagnose_component_with_context, freeze_component_defaults,
-            preflight_admitted_component_with_context, validate_admitted_component_with_context,
-        },
         ComponentCapability, ComponentCodecError, ComponentDecodeContext, ComponentDomainError,
         ComponentEncodeContext, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
         ComponentRegistryBuilder, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId,
         ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
         ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
         ComponentValueMaterializationLimits, ComponentValueRef, PreparedComponentCandidate,
+        effective::freeze_component_defaults,
     },
 };
 
@@ -126,11 +123,12 @@ fn fallback_validation_preserves_immediate_and_scene_batch_candidate_lifetimes()
         (calls.load(Ordering::SeqCst), drops.load(Ordering::SeqCst)),
         (1, 1),
     );
-    let admitted =
-        validate_admitted_component_with_context(&registry, &id, (&valid).into(), &mut context)
-            .unwrap()
-            .expect("fallback must retain the original bound candidate");
-    let diagnosed = diagnose_component_with_context(&registry, &id, (&valid).into(), &mut context)
+    let admitted = registry
+        .validate_admitted_component_with_context(&id, (&valid).into(), &mut context)
+        .unwrap()
+        .expect("fallback must retain the original bound candidate");
+    let diagnosed = registry
+        .diagnose_component_with_context(&id, (&valid).into(), &mut context)
         .unwrap()
         .expect("fresh admission must retain the original bound candidate");
     assert_eq!(
@@ -142,12 +140,15 @@ fn fallback_validation_preserves_immediate_and_scene_batch_candidate_lifetimes()
         Err(domain_error()),
     );
     assert_eq!(
-        validate_admitted_component_with_context(&registry, &id, (&invalid).into(), &mut context)
+        registry
+            .validate_admitted_component_with_context(&id, (&invalid).into(), &mut context)
             .err(),
         Some(domain_error()),
     );
     assert_eq!(
-        diagnose_component_with_context(&registry, &id, (&invalid).into(), &mut context).err(),
+        registry
+            .diagnose_component_with_context(&id, (&invalid).into(), &mut context)
+            .err(),
         Some(domain_error()),
     );
     assert_eq!(
@@ -205,12 +206,14 @@ fn explicit_validation_is_separate_from_preparation_and_preserves_domain_errors(
         .validate_component_with_context(&id, &valid, &mut context)
         .unwrap();
     assert!(
-        validate_admitted_component_with_context(&registry, &id, (&valid).into(), &mut context)
+        registry
+            .validate_admitted_component_with_context(&id, (&valid).into(), &mut context)
             .unwrap()
             .is_none()
     );
     assert!(
-        diagnose_component_with_context(&registry, &id, (&valid).into(), &mut context)
+        registry
+            .diagnose_component_with_context(&id, (&valid).into(), &mut context)
             .unwrap()
             .is_none()
     );
@@ -221,12 +224,15 @@ fn explicit_validation_is_separate_from_preparation_and_preserves_domain_errors(
         Err(domain_error()),
     );
     assert_eq!(
-        validate_admitted_component_with_context(&registry, &id, (&invalid).into(), &mut context)
+        registry
+            .validate_admitted_component_with_context(&id, (&invalid).into(), &mut context)
             .err(),
         Some(domain_error()),
     );
     assert_eq!(
-        diagnose_component_with_context(&registry, &id, (&invalid).into(), &mut context).err(),
+        registry
+            .diagnose_component_with_context(&id, (&invalid).into(), &mut context)
+            .err(),
         Some(domain_error()),
     );
     drop(
@@ -241,11 +247,13 @@ fn explicit_validation_is_separate_from_preparation_and_preserves_domain_errors(
         Some(domain_error()),
     );
     drop(
-        preflight_admitted_component_with_context(&registry, &id, (&valid).into(), &mut context)
+        registry
+            .preflight_admitted_component_with_context(&id, (&valid).into(), &mut context)
             .unwrap(),
     );
     assert_eq!(
-        preflight_admitted_component_with_context(&registry, &id, (&invalid).into(), &mut context)
+        registry
+            .preflight_admitted_component_with_context(&id, (&invalid).into(), &mut context)
             .err(),
         Some(domain_error()),
     );
@@ -306,7 +314,8 @@ fn validation_and_preflight_share_borrowed_defaults_and_admission_refusals() {
             .validate_component_with_context(&id, read, &mut context)
             .unwrap();
         assert!(
-            diagnose_component_with_context(&registry, &id, read, &mut context)
+            registry
+                .diagnose_component_with_context(&id, read, &mut context)
                 .unwrap()
                 .is_none()
         );
@@ -339,7 +348,9 @@ fn validation_and_preflight_share_borrowed_defaults_and_admission_refusals() {
         assert!(validation.is_err());
         let refusal = validation.err();
         assert_eq!(
-            diagnose_component_with_context(&registry, &id, (&invalid).into(), &mut context).err(),
+            registry
+                .diagnose_component_with_context(&id, (&invalid).into(), &mut context)
+                .err(),
             refusal,
         );
         assert_eq!(
@@ -359,7 +370,9 @@ fn validation_and_preflight_share_borrowed_defaults_and_admission_refusals() {
     ));
     let refusal = validation.err();
     assert_eq!(
-        diagnose_component_with_context(&registry, &id, (&explicit).into(), &mut context).err(),
+        registry
+            .diagnose_component_with_context(&id, (&explicit).into(), &mut context)
+            .err(),
         refusal,
     );
     assert_eq!(
@@ -435,7 +448,7 @@ fn validation_observes_current_context_and_preserves_callback_mutations() {
         Err(ComponentCodecError::MaterializationNodeLimit { .. }),
     ));
     assert!(matches!(
-        diagnose_component_with_context(&registry, &id, (&valid).into(), &mut context),
+        registry.diagnose_component_with_context(&id, (&valid).into(), &mut context),
         Err(ComponentCodecError::MaterializationNodeLimit { .. }),
     ));
     assert_eq!(validations.load(Ordering::SeqCst), 2);
@@ -497,13 +510,9 @@ fn invalid_registration_is_atomic_and_schema_capability_admission_precedes_callb
         Err(refusal.clone()),
     );
     assert_eq!(
-        validate_admitted_component_with_context(
-            &registry,
-            &unknown,
-            (&valid).into(),
-            &mut context,
-        )
-        .err(),
+        registry
+            .validate_admitted_component_with_context(&unknown, (&valid).into(), &mut context,)
+            .err(),
         Some(refusal),
     );
 }
@@ -598,7 +607,8 @@ fn provider_composition_retains_validation_in_each_original_binding() {
             Some(provider.receipt()),
         );
         assert!(
-            diagnose_component_with_context(&retained, &id, (&valid).into(), &mut context,)
+            retained
+                .diagnose_component_with_context(&id, (&valid).into(), &mut context,)
                 .unwrap()
                 .is_none(),
         );
@@ -607,13 +617,9 @@ fn provider_composition_retains_validation_in_each_original_binding() {
             Err(refusal.clone()),
         );
         assert_eq!(
-            validate_admitted_component_with_context(
-                &retained,
-                &id,
-                (&invalid).into(),
-                &mut context,
-            )
-            .err(),
+            retained
+                .validate_admitted_component_with_context(&id, (&invalid).into(), &mut context,)
+                .err(),
             Some(refusal.clone()),
         );
         assert_eq!(

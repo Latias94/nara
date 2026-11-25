@@ -6,25 +6,47 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-nara_app.workspace = true
-nara_asset = { workspace = true, features = ["runtime"] }
-nara_core.workspace = true
-nara_ecs.workspace = true
-nara_hierarchy.workspace = true
-nara_render = { workspace = true, features = ["image"] }
-nara_input.workspace = true
-nara_reflect.workspace = true
-nara_scene.workspace = true
-nara_text.workspace = true
-nara_ui_kernel.workspace = true
-nara_ui_widgets.workspace = true
+blake3.workspace = true
+icu_segmenter.workspace = true
+nara_app = { workspace = true, optional = true }
+nara_asset = { workspace = true, optional = true, features = ["runtime"] }
+nara_core = { workspace = true, optional = true }
+nara_ecs = { workspace = true, optional = true }
+nara_input = { workspace = true, optional = true }
+nara_reflect = { workspace = true, optional = true }
+nara_scene = { workspace = true, optional = true }
+parley.workspace = true
+swash.workspace = true
+taffy.workspace = true
 thiserror.workspace = true
+ttf-parser.workspace = true
 
 [dev-dependencies]
 nara_render = { workspace = true, features = ["hud-runtime"] }
-nara_transform.workspace = true
 nara_window = { workspace = true, features = ["runtime"] }
+sha2 = "0.10"
 
 [features]
-default = []
-serde = ["nara_scene/serde"]
+default = ["runtime"]
+runtime = [
+    "dep:nara_app",
+    "dep:nara_asset",
+    "dep:nara_core",
+    "dep:nara_ecs",
+    "dep:nara_input",
+    "dep:nara_reflect",
+    "dep:nara_scene",
+]
+serde = ["runtime", "nara_scene/serde"]
+
+[[example]]
+name = "interaction_lab"
+required-features = ["runtime"]
+
+[[test]]
+name = "source_identity"
+required-features = ["runtime"]
+
+[[test]]
+name = "render_hud"
+required-features = ["runtime"]

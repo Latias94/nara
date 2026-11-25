@@ -6,6 +6,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use crate::fs::ContentDigest;
 use nara_app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
 use nara_asset::{
     AssetImportSource, AssetMeta, AssetMetaIdentity, AssetMetaIdentityCandidate, AssetPath,
@@ -14,7 +15,6 @@ use nara_asset::{
     RuntimeAssetCodec, SourceAssetImporter, StableAssetId,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
-use nara_fs::ContentDigest;
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,

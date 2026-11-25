@@ -1,6 +1,6 @@
 use std::{collections::HashMap, convert::Infallible, sync::Arc};
 
-use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget};
+use nara_ecs::identity::{AuthoredEntityReference, AuthoredReferenceTarget};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentSchema, ComponentSchemaVersion, ComponentValue, ComponentValueKind,
@@ -44,7 +44,7 @@ fn selected_input(name: &str) -> EntityReference {
                 expected_base: key("base"),
             }],
             target: AuthoredReferenceTarget::Input(
-                nara_identity::ReferenceInputId::new(name).unwrap(),
+                nara_ecs::identity::ReferenceInputId::new(name).unwrap(),
             ),
         },
     }
@@ -82,18 +82,18 @@ fn query_inventory_is_finite_deduplicated_and_uses_understood_lexical_payloads()
         base: key("unrelated"),
         values: [
             (
-                nara_identity::ReferenceInputId::new("dormant").unwrap(),
+                nara_ecs::identity::ReferenceInputId::new("dormant").unwrap(),
                 selected_input("dormant"),
             ),
             (
-                nara_identity::ReferenceInputId::new("duplicate").unwrap(),
+                nara_ecs::identity::ReferenceInputId::new("duplicate").unwrap(),
                 selected_input("hidden"),
             ),
             (
-                nara_identity::ReferenceInputId::new("own").unwrap(),
+                nara_ecs::identity::ReferenceInputId::new("own").unwrap(),
                 EntityReference::Authored {
                     reference: AuthoredEntityReference::input(
-                        nara_identity::ReferenceInputId::new("own").unwrap(),
+                        nara_ecs::identity::ReferenceInputId::new("own").unwrap(),
                     ),
                 },
             ),
@@ -795,7 +795,7 @@ fn long_declared_reference_paths_share_the_source_preparation_work_allowance() {
                 && diagnostic.fields().iter().any(|field| {
                     field.key().as_str() == "budget-kind"
                         && field.value()
-                            == nara_diagnostic::DiagnosticValueRef::Identifier(
+                            == nara_core::diagnostic::DiagnosticValueRef::Identifier(
                                 "reference-work-bytes",
                             )
                 })
@@ -861,7 +861,7 @@ fn empty_selected_compilation_still_prepares_and_replays_one_conversion() {
 
 #[test]
 fn materialized_persistent_default_keeps_its_namespace_and_identity() {
-    use nara_identity::{
+    use nara_ecs::identity::{
         PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
     };
     let persistent = EntityReference::Persistent {
@@ -1521,7 +1521,7 @@ fn classification_reuse_removes_only_selected_overlay_inventory_and_preserves_de
 
 #[test]
 fn routed_contextual_default_survives_unselected_sibling_property_intent() {
-    use nara_identity::ReferenceInputId;
+    use nara_ecs::identity::ReferenceInputId;
     use nara_reflect::ComponentPropertyPath;
 
     use crate::{

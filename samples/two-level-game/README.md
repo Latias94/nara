@@ -77,10 +77,9 @@ The native controller targets a 0.01 world-unit separation margin for the explor
 18×18 at default scale. Hold two movement directions to slide along a wall and round its end.
 Walking animation follows held intent while blocked.
 
-The game consumes [nara_rapier2d](../../crates/nara_rapier2d/README.md) directly. That package owns
-immutable native query scenes and a stateless top-down controller. It is optional for Nara
-applications and does not install a second World, clock, transform writer or physics backend
-interface. The game owns `CollisionBox` data, desired movement and the final player Transform.
+The game uses [nara_physics2d::stateless](../../crates/nara_physics2d/src/stateless.rs) for immutable
+native query scenes and a top-down controller. This API runs without installing the ECS physics
+plugin. The game owns `CollisionBox` data, desired movement and the final player Transform.
 Static wall geometry and its query index are prepared once per admitted room. Actor shape data
 is reused until its definition, rotation, scale, placement or room changes. Each move passes an
 already integrated displacement and the original fixed duration to the native query.
@@ -146,9 +145,9 @@ processed descriptor and actual Image dependency without requiring the source RO
 
 ### Optional Native Controller
 
-The source desktop executable can collect native controllers through the independently consumed
-[`nara_gilrs`](../../crates/nara_gilrs/README.md) package. Select both the build feature and runtime
-option explicitly:
+On Windows, the source desktop executable can read native controllers through
+[Nara's optional Gilrs backend](../../crates/nara_input/README.md). Enable the `gamepad` feature
+and pass the `--gamepad` runtime option.
 
 ```text
 cargo run --features desktop,gamepad --bin desktop -- --gamepad
@@ -217,8 +216,6 @@ native window and GPU support. Reuse the engine target directory and one build j
 inside the repository.
 
 ```text
-nara schema . --write
-nara schema . --check
 nara check .
 cargo run --bin headless
 cargo run --bin headless -- --verify-travel
@@ -230,8 +227,8 @@ On Windows, pass a fully qualified path such as `D:\GameSaves\checkpoint.json`. 
 does not choose the process working directory or silently create an arbitrary save parent. Omit
 `--save` for a session without persistence; K/L then report the absent application slot.
 
-The authoring bundle is generated from this product's real native schema provider with the existing
-schema command. It is not a hand-maintained second definition of component layouts.
+To refresh the saved authoring bundle from this product's native schema providers, call
+`nara::project_tooling::invoke_project_tool` with `ProjectToolRequest::Schema { write: true, .. }`.
 
 ### Development And Shipping Features
 
@@ -391,17 +388,34 @@ through Cargo before launch.
 
 ## Source-Free Cooked Player
 
-The optional `cook` binary builds and publishes the same game as a native headless or desktop
-Player. It uses Nara's existing Image importer, Sprite animation domain, the game's Sound Bank
-domain, Scene compiler, cooked-content assembler, captured Cargo executable and whole-directory
-publisher. The pack contains both levels, the marker Scene, two Deferred rooms, five Images, one
-shared Material, one shared TileSet, Sound Bank, Sprite clips and startup Input.
+Run the project CLI from the repository root with Rust 1.95 and an existing output parent outside
+this source package. Replace `NATIVE_TRIPLE` with the intended Player target triple.
+
+```text
+nara cook samples/two-level-game --trusted --release --recipe headless --target NATIVE_TRIPLE --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevelContent
+nara export samples/two-level-game --trusted --release --recipe headless --target NATIVE_TRIPLE --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevel
+```
+
+`cook` publishes `TwoLevelContent/content.pack`. `export` publishes `TwoLevel/` with the Player,
+`content.pack`, and `package.json`. Both commands use the project's declared `cook` binary and
+require a fresh destination. For desktop add `--features desktop --recipe desktop` in place of
+`--recipe headless`. The Windows audio recipe uses `--features desktop,audio-cpal --recipe
+audio-desktop`. Pass project-specific options after `--`, for example `-- --flow round` with the
+`play-flow` build feature. Set `CARGO_TARGET_DIR` to reuse an existing shared build directory.
+The Player build normally discovers Cargo and rustc. `export` also accepts `-- --cargo
+ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC` to select those tools explicitly.
+
+Both operations use Nara's Image importer, Sprite animation domain, the game's Sound Bank domain,
+Scene compiler, cooked-content assembler, and filesystem publication. Export also uses Nara's
+captured Cargo executable and Player package publisher. The pack contains both levels, the marker
+Scene, two Deferred rooms, five Images, one shared Material, one shared TileSet, Sound Bank,
+Sprite clips and startup Input.
 Authoring retains `ProjectLocation` identities; shipping Scene Products are explicit entries in
 `LevelId`, separate from logical level instances.
 
-Run with Rust 1.95, one Cargo job, the shared absolute engine target and cached dependencies.
-Create the output parent outside this source package first. Supply the actual native target
-triple and absolute Cargo/rustc executables from the selected toolchain:
+The direct cooker invocation remains available for workflows that consume the original sample
+receipt. Use one Cargo job, the shared absolute engine target and cached dependencies. Supply the
+actual native target triple and absolute Cargo/rustc executables from the selected toolchain:
 
 ```text
 cargo +1.95.0 run --locked --offline --release --no-default-features --features cook --bin cook -- --project-root ABSOLUTE_GAME_ROOT --output-parent ABSOLUTE_EXISTING_OUTPUT_PARENT --name TwoLevel --target-dir ABSOLUTE_ENGINE_TARGET --target NATIVE_TRIPLE --cargo ABSOLUTE_CARGO --rustc ABSOLUTE_RUSTC --profile release
@@ -863,8 +877,8 @@ The output path must have a Unicode representation for the JSON result; unrepres
 paths refuse before gameplay or publication.
 Serialization finishes before an owned sibling temporary is written and synchronized. Only the
 complete file is published to the final name through the original no-replace filesystem operation.
-Failed temporary cleanup retains its actual owner through CLI exit; a postpublication failure
-never deletes the published target. Stdout may contain game logs; consume the final
+Failed temporary cleanup is reported in the CLI result. A postpublication failure never deletes
+the published target. Stdout may contain game logs. Consume the final
 `TWO_LEVEL_REPLAY_RESULT ` line as compact JSON. `ok` agrees with the process exit status.
 Success includes `report.steps`, `report.commands` and `report.final_state` after original Session
 cleanup. Record results also include `publication.status` (`not_published`, `published` or
@@ -873,9 +887,9 @@ facts. Unsupported parent sync does not turn a complete verified publication int
 it limits crash-durability evidence. If publication already happened but verification or parent
 sync fails, inspect the retained destination rather than treating an error as proof of absence.
 Failure includes `error.stage`, `error.message` and `cleanup_pending`. Runtime cleanup keeps its
-original bounded retry; failed temporary cleanup receives an explicit retry and any unresolved
-owner remains retained until process exit. These facts do not promise an atomic project snapshot
-or hostile-writer isolation.
+original bounded retries, and failed temporary cleanup receives an explicit retry. Remaining owners
+are dropped when the CLI returns. A temporary name can still be present if its removal failed.
+These facts do not promise an atomic project snapshot or hostile-writer isolation.
 
 ## Source/Headless Development Host
 
@@ -1467,11 +1481,11 @@ separately passes both startup product observations and the same three
 travel/save/restore operations from an unrelated directory. This does not qualify other platforms
 or a complete interactive desktop control trajectory.
 
-## Export
+## Source-Carrying Development Export
 
-```text
-nara export . --parent /absolute/existing-parent --destination two-level-candidate
-```
+For a development candidate, call `nara::project_tooling::invoke_project_tool` with
+`ProjectToolRequest::Export`. Choose an existing output parent and a new destination name.
+For a source-free installation, use the [cooked Player workflow](#source-free-cooked-player).
 
 The destination must be absent. Run `bin/headless --verify-travel` and the two checkpoint commands
 from an unrelated directory; use `.exe` on Windows. `bin/desktop --verify-first-present` verifies

@@ -30,11 +30,7 @@ fn escaped_sound_bank_collection_refunds_its_actual_budget_only_on_last_drop() {
 
 #[test]
 fn a_retained_bank_allows_successive_real_scene_revisions_to_travel() {
-    use nara::{
-        asset::AssetRef,
-        gameplay::{GameplayCommandDraft, GameplayCommandTypeId},
-        project_host::ProjectDomainAssets,
-    };
+    use nara::{asset::AssetRef, project_host::ProjectDomainAssets};
     use two_level_game::{
         levels::{LevelId, LevelKey},
         sound_bank::{SoundBankDomain, SoundCue, bank_product},
@@ -75,9 +71,7 @@ fn a_retained_bank_allows_successive_real_scene_revisions_to_travel() {
             ["x"]["value"] = serde_json::json!(81 + index);
         std::fs::write(&path, serde_json::to_vec_pretty(&scene).unwrap()).unwrap();
         let before = game.snapshot();
-        let after = game.command(GameplayCommandDraft::new(
-            GameplayCommandTypeId::new(game::TRAVEL).unwrap(),
-        ));
+        let after = game.command(game::action(game::TRAVEL));
         assert_eq!(after.level, Some(LevelKey::main(level)));
         assert_ne!(after.current_instance, before.current_instance);
         assert_eq!(after.travel_count, index as u32 + 1);

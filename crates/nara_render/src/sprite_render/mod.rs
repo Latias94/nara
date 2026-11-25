@@ -1,4 +1,8 @@
 //! Backend-neutral sprite and tilemap render preparation.
+//!
+//! Within a view, draws paint in ascending order of authored layer plus world Z, then
+//! ascending sort key and descending world Y. Equal keys use hierarchy order within each
+//! root and entity index across roots.
 
 mod extract;
 mod queue;

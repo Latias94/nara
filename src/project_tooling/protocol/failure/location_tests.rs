@@ -1,6 +1,7 @@
 use super::*;
-use nara_diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticReportSettings, SafeDisplayText, SafeSummary,
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticReportSettings, ReportDiagnostic as Diagnostic, SafeDisplayText,
+    SafeSummary,
 };
 
 fn failure() -> ProjectToolFailure {
@@ -201,8 +202,10 @@ fn maximum_locations_and_summaries_still_fit_the_complete_failure_envelope() {
         entry.code = "a".repeat(MAX_CODE_BYTES);
     }
     failure.repair = Some(ProjectToolRepairHint {
-        scene: admitted_path(&"\"".repeat(nara_diagnostic::MAX_DIAGNOSTIC_DRAFT_TEXT_BYTES)),
-        scenes_root: admitted_path(&"\"".repeat(nara_diagnostic::MAX_DIAGNOSTIC_DRAFT_TEXT_BYTES)),
+        scene: admitted_path(&"\"".repeat(nara_core::diagnostic::MAX_DIAGNOSTIC_DRAFT_TEXT_BYTES)),
+        scenes_root: admitted_path(
+            &"\"".repeat(nara_core::diagnostic::MAX_DIAGNOSTIC_DRAFT_TEXT_BYTES),
+        ),
         profile: Some("a".repeat(MAX_CODE_BYTES)),
         profile_selected: true,
     });

@@ -1,0 +1,239 @@
+use thiserror::Error;
+
+use crate::kernel::mesh::{HARD_MAX_MESH_INDICES, HARD_MAX_MESH_VERTICES};
+
+const HARD_MAX_ROOTS: usize = 64;
+const HARD_MAX_NODES: usize = 4_096;
+const HARD_MAX_DEPTH: usize = 64;
+const HARD_MAX_KEY_BYTES: usize = crate::kernel::identity::MAX_UI_KEY_BYTES;
+const HARD_MAX_PAINT_PRIMITIVES: usize = 8_192;
+const HARD_MAX_DIAGNOSTICS: usize = 64;
+const HARD_MAX_CACHE_ROOTS: usize = 64;
+const HARD_MAX_SURFACES: usize = 16;
+const HARD_MAX_SURFACE_LIFETIMES: usize = 4_096;
+const HARD_MAX_LAYOUT_WORK: usize = 1_048_576;
+
+/// Owner-local resource limits. Callers may reduce but never widen the hard ceilings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UiLimits {
+    pub(crate) max_roots: usize,
+    pub(crate) max_nodes: usize,
+    pub(crate) max_depth: usize,
+    pub(crate) max_key_bytes: usize,
+    pub(crate) max_paint_primitives: usize,
+    pub(crate) max_diagnostics: usize,
+    pub(crate) max_cache_roots: usize,
+    pub(crate) max_surfaces: usize,
+    pub(crate) max_surface_lifetimes: usize,
+    pub(crate) max_layout_work: usize,
+    pub(crate) max_mesh_vertices: usize,
+    pub(crate) max_mesh_indices: usize,
+}
+
+/// Exact authoring constraints that must travel with one immutable source snapshot.
+///
+/// Compile-only diagnostics, paint, cache and session limits deliberately remain outside this
+/// profile so changing them does not reinterpret the authored document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct UiSnapshotProfile {
+    max_roots: usize,
+    max_nodes: usize,
+    max_depth: usize,
+    max_key_bytes: usize,
+    max_mesh_vertices: usize,
+    max_mesh_indices: usize,
+}
+
+impl Default for UiLimits {
+    fn default() -> Self {
+        Self {
+            max_roots: HARD_MAX_ROOTS,
+            max_nodes: HARD_MAX_NODES,
+            max_depth: HARD_MAX_DEPTH,
+            max_key_bytes: HARD_MAX_KEY_BYTES,
+            max_paint_primitives: HARD_MAX_PAINT_PRIMITIVES,
+            max_diagnostics: HARD_MAX_DIAGNOSTICS,
+            max_cache_roots: HARD_MAX_CACHE_ROOTS,
+            max_surfaces: HARD_MAX_SURFACES,
+            max_surface_lifetimes: HARD_MAX_SURFACE_LIFETIMES,
+            max_layout_work: HARD_MAX_LAYOUT_WORK,
+            max_mesh_vertices: HARD_MAX_MESH_VERTICES,
+            max_mesh_indices: HARD_MAX_MESH_INDICES,
+        }
+    }
+}
+
+impl UiLimits {
+    /// Bounds complete mesh vertex occurrences independently in authored sources and output.
+    ///
+    /// Shared allocations and hidden sources are charged per occurrence; retained fallback
+    /// output participates in the same candidate-wide output ceiling.
+    pub fn with_max_mesh_vertices(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_mesh_vertices", value, HARD_MAX_MESH_VERTICES)?;
+        self.max_mesh_vertices = value;
+        Ok(self)
+    }
+
+    /// Bounds complete triangle-index occurrences independently in sources and resolved output.
+    pub fn with_max_mesh_indices(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_mesh_indices", value, HARD_MAX_MESH_INDICES)?;
+        self.max_mesh_indices = value;
+        Ok(self)
+    }
+
+    #[must_use]
+    pub const fn max_mesh_vertices(self) -> usize {
+        self.max_mesh_vertices
+    }
+
+    #[must_use]
+    pub const fn max_mesh_indices(self) -> usize {
+        self.max_mesh_indices
+    }
+
+    /// Candidate-wide layout dispatch, custom callback and child-request ceiling.
+    ///
+    /// Cache-hit dispatches and failed requests still consume work. This is a finite operation
+    /// count, not a CPU-time limit or a watchdog for arbitrary component code.
+    pub fn with_max_layout_work(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_layout_work", value, HARD_MAX_LAYOUT_WORK)?;
+        self.max_layout_work = value;
+        Ok(self)
+    }
+
+    /// Root capacity that adapters admit before constructing excess root identities or bodies.
+    #[must_use]
+    pub const fn max_roots(self) -> usize {
+        self.max_roots
+    }
+
+    pub(crate) const fn snapshot_profile(self) -> UiSnapshotProfile {
+        UiSnapshotProfile {
+            max_roots: self.max_roots,
+            max_nodes: self.max_nodes,
+            max_depth: self.max_depth,
+            max_key_bytes: self.max_key_bytes,
+            max_mesh_vertices: self.max_mesh_vertices,
+            max_mesh_indices: self.max_mesh_indices,
+        }
+    }
+
+    pub fn with_max_roots(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_roots", value, HARD_MAX_ROOTS)?;
+        self.max_roots = value;
+        Ok(self)
+    }
+
+    pub fn with_max_nodes(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_nodes", value, HARD_MAX_NODES)?;
+        self.max_nodes = value;
+        Ok(self)
+    }
+
+    pub fn with_max_depth(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_depth", value, HARD_MAX_DEPTH)?;
+        self.max_depth = value;
+        Ok(self)
+    }
+
+    pub fn with_max_key_bytes(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_key_bytes", value, HARD_MAX_KEY_BYTES)?;
+        self.max_key_bytes = value;
+        Ok(self)
+    }
+
+    pub fn with_max_paint_primitives(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_paint_primitives", value, HARD_MAX_PAINT_PRIMITIVES)?;
+        self.max_paint_primitives = value;
+        Ok(self)
+    }
+
+    pub fn with_max_diagnostics(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_diagnostics", value, HARD_MAX_DIAGNOSTICS)?;
+        self.max_diagnostics = value;
+        Ok(self)
+    }
+
+    pub fn with_max_cache_roots(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_cache_roots", value, HARD_MAX_CACHE_ROOTS)?;
+        self.max_cache_roots = value;
+        Ok(self)
+    }
+
+    pub fn with_max_surfaces(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_surfaces", value, HARD_MAX_SURFACES)?;
+        self.max_surfaces = value;
+        Ok(self)
+    }
+
+    pub fn with_max_surface_lifetimes(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_surface_lifetimes", value, HARD_MAX_SURFACE_LIFETIMES)?;
+        self.max_surface_lifetimes = value;
+        Ok(self)
+    }
+
+    pub(crate) fn validate(self) -> Result<(), UiLimitsError> {
+        validate(
+            "max_mesh_vertices",
+            self.max_mesh_vertices,
+            HARD_MAX_MESH_VERTICES,
+        )?;
+        validate(
+            "max_mesh_indices",
+            self.max_mesh_indices,
+            HARD_MAX_MESH_INDICES,
+        )?;
+        validate(
+            "max_layout_work",
+            self.max_layout_work,
+            HARD_MAX_LAYOUT_WORK,
+        )?;
+        validate("max_roots", self.max_roots, HARD_MAX_ROOTS)?;
+        validate("max_nodes", self.max_nodes, HARD_MAX_NODES)?;
+        validate("max_depth", self.max_depth, HARD_MAX_DEPTH)?;
+        validate("max_key_bytes", self.max_key_bytes, HARD_MAX_KEY_BYTES)?;
+        validate(
+            "max_paint_primitives",
+            self.max_paint_primitives,
+            HARD_MAX_PAINT_PRIMITIVES,
+        )?;
+        validate(
+            "max_diagnostics",
+            self.max_diagnostics,
+            HARD_MAX_DIAGNOSTICS,
+        )?;
+        validate(
+            "max_cache_roots",
+            self.max_cache_roots,
+            HARD_MAX_CACHE_ROOTS,
+        )?;
+        validate("max_surfaces", self.max_surfaces, HARD_MAX_SURFACES)?;
+        validate(
+            "max_surface_lifetimes",
+            self.max_surface_lifetimes,
+            HARD_MAX_SURFACE_LIFETIMES,
+        )
+    }
+}
+
+fn validate(field: &'static str, actual: usize, maximum: usize) -> Result<(), UiLimitsError> {
+    if actual == 0 || actual > maximum {
+        Err(UiLimitsError::InvalidField {
+            field,
+            actual,
+            maximum,
+        })
+    } else {
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum UiLimitsError {
+    #[error("UI limit {field} is {actual}; expected 1..={maximum}")]
+    InvalidField {
+        field: &'static str,
+        actual: usize,
+        maximum: usize,
+    },
+}

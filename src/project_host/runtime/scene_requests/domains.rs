@@ -7,9 +7,9 @@
 
 use std::collections::HashSet;
 
-use nara_diagnostic::DiagnosticCode;
+use nara_core::diagnostic::DiagnosticCode;
+use nara_ecs::identity::SpawnedSceneInstance;
 use nara_ecs::{Resource, World};
-use nara_identity::SpawnedSceneInstance;
 use nara_scene::advanced::SceneNativeRetirementClaims;
 
 use super::PreparedProjectSceneView;

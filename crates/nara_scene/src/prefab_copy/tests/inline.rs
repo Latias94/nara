@@ -58,9 +58,10 @@ fn hidden_default(value: ComponentValue) -> SceneComponentRecord {
 
 fn persistent() -> EntityReference {
     EntityReference::Persistent {
-        entity: nara_identity::PersistentRuntimeReference {
-            namespace: nara_identity::PersistentRuntimeNamespaceId::new("test.external").unwrap(),
-            entity: nara_identity::PersistentRuntimeId::parse_str(
+        entity: nara_ecs::identity::PersistentRuntimeReference {
+            namespace: nara_ecs::identity::PersistentRuntimeNamespaceId::new("test.external")
+                .unwrap(),
+            entity: nara_ecs::identity::PersistentRuntimeId::parse_str(
                 "00000000-0000-4000-8000-000000000033",
             )
             .unwrap(),

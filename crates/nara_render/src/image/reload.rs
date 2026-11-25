@@ -14,6 +14,12 @@ use std::{
     sync::Arc,
 };
 
+use nara_app::tasks::{
+    OrderedTaskReadySnapshot, OrderedTaskResults, TaskCancellation, TaskCancellationReason,
+    TaskCoalesceKey, TaskCompletionCutoff, TaskCompletionCutoffError, TaskDomainKey, TaskFailure,
+    TaskHandle, TaskOrderKey, TaskOverloadPolicy, TaskPoolKind, TaskPools, TaskReadySnapshotError,
+    TaskRejection, TaskSpawnOutcome, TaskSpawnRequest, TaskTerminal,
+};
 use nara_app::{App, CoreStage, Plugin, PluginError, RealTime};
 #[cfg(feature = "serde")]
 use nara_asset::AssetMetaIdentityCandidate;
@@ -25,18 +31,12 @@ use nara_asset::{
     AssetTaskUpdateSet, AssetVersion, Assets, Handle, ImageRecoveryContinuity, ImageReloadConsumer,
     ImageReloadDrainError, ImageReloadRegistrationError, register_image_reload_consumer,
 };
-use nara_diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
-    SafeSummary,
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
+    ReportDiagnostic as Diagnostic, SafeSummary,
 };
 use nara_ecs::{
     Res, ResMut, Resource, SystemSet, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs,
-};
-use nara_tasks::{
-    OrderedTaskReadySnapshot, OrderedTaskResults, TaskCancellation, TaskCancellationReason,
-    TaskCoalesceKey, TaskCompletionCutoff, TaskCompletionCutoffError, TaskDomainKey, TaskFailure,
-    TaskHandle, TaskOrderKey, TaskOverloadPolicy, TaskPoolKind, TaskPools, TaskReadySnapshotError,
-    TaskRejection, TaskSpawnOutcome, TaskSpawnRequest, TaskTerminal,
 };
 
 pub(super) const IMAGE_RELOAD_TASK_DOMAIN: TaskDomainKey =
@@ -202,7 +202,7 @@ impl PendingImageImportStream {
 
     fn consume_ready_terminals(
         &mut self,
-        terminals: Vec<nara_tasks::OrderedTaskTerminal<ImageImportTaskResult>>,
+        terminals: Vec<nara_app::tasks::OrderedTaskTerminal<ImageImportTaskResult>>,
     ) -> Vec<ReadyImageImportJob> {
         terminals
             .into_iter()
@@ -574,12 +574,12 @@ pub const IMAGE_SOURCE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
         .requires_plugins(&[
             IMAGE_PLUGIN_ID,
             nara_asset::ASSET_SOURCE_PLUGIN_ID,
-            nara_tasks::TASK_PLUGIN_ID,
+            nara_app::tasks::TASK_PLUGIN_ID,
         ]);
 
 /// Creates a repeatable source Image plugin definition from pure import limits.
 ///
-/// Select [`ImagePlugin`], [`nara_asset::AssetSourcePlugin`], and [`nara_tasks::TaskPlugin`]
+/// Select [`ImagePlugin`], [`nara_asset::AssetSourcePlugin`], and [`nara_app::tasks::TaskPlugin`]
 /// separately. This definition grants no source-directory authority.
 #[must_use]
 pub fn source_plugin(limits: ImageImportLimits) -> nara_app::PluginDefinition {
@@ -1408,13 +1408,13 @@ fn image_diagnostic_field_key(value: &'static str) -> DiagnosticFieldKey {
     DiagnosticFieldKey::new(value).expect("image diagnostic field key literals must be valid")
 }
 
-fn task_rejection_reason(reason: nara_tasks::TaskRejectReason) -> &'static str {
+fn task_rejection_reason(reason: nara_app::tasks::TaskRejectReason) -> &'static str {
     match reason {
-        nara_tasks::TaskRejectReason::QueueFull { .. } => "queue-full",
-        nara_tasks::TaskRejectReason::PoolClosed => "pool-closed",
-        nara_tasks::TaskRejectReason::ScopeClosed => "scope-closed",
-        nara_tasks::TaskRejectReason::WorkerStartupFailed => "worker-startup-failed",
-        nara_tasks::TaskRejectReason::TaskIdExhausted => "task-id-exhausted",
+        nara_app::tasks::TaskRejectReason::QueueFull { .. } => "queue-full",
+        nara_app::tasks::TaskRejectReason::PoolClosed => "pool-closed",
+        nara_app::tasks::TaskRejectReason::ScopeClosed => "scope-closed",
+        nara_app::tasks::TaskRejectReason::WorkerStartupFailed => "worker-startup-failed",
+        nara_app::tasks::TaskRejectReason::TaskIdExhausted => "task-id-exhausted",
     }
 }
 

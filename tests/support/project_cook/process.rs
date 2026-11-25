@@ -322,7 +322,8 @@ impl Drop for Custody {
             );
             let _ = fs::write(self.root.join(UNRESOLVED), &message);
             eprintln!("{message}; retained fixture={}", self.root.display());
-            std::mem::forget((self.process.take(), self.build_cleanup.take()));
+            drop(self.process.take());
+            drop(self.build_cleanup.take());
             if !thread::panicking() {
                 panic!("generated-project cleanup remains incomplete");
             }

@@ -144,8 +144,10 @@ fn run_native(command: &SupervisedProcessCommand) -> String {
             .is_some_and(|start| now.saturating_duration_since(start) >= Duration::from_secs(15))
         {
             let state = process.state();
-            std::mem::forget(process);
-            panic!("exact child cleanup remains retained at process exit ({state:?}): {failure:?}");
+            drop(process);
+            panic!(
+                "explicit cleanup of the original child did not complete ({state:?}): {failure:?}"
+            );
         }
         thread::sleep(Duration::from_millis(10));
     }

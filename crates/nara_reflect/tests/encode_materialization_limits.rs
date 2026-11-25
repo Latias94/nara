@@ -1,9 +1,9 @@
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_ecs::{Component, World};
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
     PersistentRuntimeReference, SceneEntityId,
 };
+use nara_ecs::{Component, World};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentEncodeContext, ComponentFieldId,
     ComponentFieldPath, ComponentFieldPathSegment, ComponentFieldSchema, ComponentRegistryBuilder,

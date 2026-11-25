@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, convert::Infallible, fmt, mem::size_of, sync::Arc};
 
+use crate::fs::{ContentDigest, DirectoryCapability, FileIdentity};
 use nara_asset::{AssetSourcePath, StableAssetId};
-use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity};
 use nara_project::ProjectPath;
 use nara_reflect::SchemaCompositionFingerprint;
 

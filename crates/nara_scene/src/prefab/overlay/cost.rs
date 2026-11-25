@@ -830,7 +830,7 @@ mod tests {
             component: ComponentTypeId::new("test.other"),
             record: SceneComponentRecord::new(
                 ComponentSchemaVersion::ONE,
-                ComponentValue::EntityReference(nara_identity::EntityReference::Authored {
+                ComponentValue::EntityReference(nara_ecs::identity::EntityReference::Authored {
                     reference: target.clone().into(),
                 }),
             ),

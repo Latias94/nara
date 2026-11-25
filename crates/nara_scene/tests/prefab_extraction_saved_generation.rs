@@ -7,7 +7,7 @@ use std::{mem::size_of, sync::Arc};
 
 use nara_asset::{AssetRecord, AssetRef, AssetSourceKind, AssetSourcePath};
 use nara_core::{ByteLimit, ItemLimit};
-use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
+use nara_ecs::identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
@@ -15,13 +15,6 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::{
-        AuthoringAdapterReceipt, AuthoringSceneCompilationOmissionReason,
-        AuthoringSceneCompilationReport, CapturedExtractionSource, PrefabExtractionBinding,
-        PrefabExtractionDestination, PrefabExtractionEnvironment, PrefabExtractionRequest,
-        PrefabExtractionSourceOutput, PrefabExtractionWork, PrefabSourceExtractionInput,
-        SceneSourceExtractionInput, try_compile_authoring_scene_with_loader,
-    },
     AuthoringDocumentSource, AuthoringSchemaBasis, ExpandedSceneDocument, PrefabAddition,
     PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate, PrefabEntityOrigin,
     PrefabEntityTarget, PrefabInstance, PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay,
@@ -31,6 +24,13 @@ use nara_scene::{
     SceneFileEncoding, SceneFileEncodingAdmissionError, SceneFileLimits, ScenePatchDocument,
     ScenePatchOperation, ScenePatchReport, ScenePlacement, ScenePlacementParent, SourceDocumentKey,
     SourceDocumentKind,
+    authoring::{
+        AuthoringAdapterReceipt, AuthoringSceneCompilationOmissionReason,
+        AuthoringSceneCompilationReport, CapturedExtractionSource, PrefabExtractionBinding,
+        PrefabExtractionDestination, PrefabExtractionEnvironment, PrefabExtractionRequest,
+        PrefabExtractionSourceOutput, PrefabExtractionWork, PrefabSourceExtractionInput,
+        SceneSourceExtractionInput, try_compile_authoring_scene_with_loader,
+    },
 };
 
 const R: usize = 0;

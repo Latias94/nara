@@ -8,7 +8,7 @@ use std::{
 
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_ecs::Component;
-use nara_identity::{AuthoredEntityReference, EntityReference, ReferenceInputId};
+use nara_ecs::identity::{AuthoredEntityReference, EntityReference, ReferenceInputId};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchemaCatalog,
@@ -905,7 +905,7 @@ fn wide_optional_schema_requests_storage_before_reference_traversal() {
             .unwrap();
     }
     let mut raw_bytes = 0usize;
-    nara_reflect::__private::validate_native_component_value_references_with_admission(
+    nara_reflect::effective::validate_native_component_value_references_with_admission(
         claims.entities[0].components[&component()].value.read(),
         limits,
         |_, _, allocated| {

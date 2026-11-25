@@ -1,5 +1,6 @@
 use std::{any::Any, collections::BTreeMap, fmt, sync::Arc};
 
+use nara_core::Vec2;
 use nara_ecs::Resource;
 
 use crate::{
@@ -33,7 +34,7 @@ pub struct SemanticActionOutcome {
     pub provenance: Option<ActionInputProvenance>,
 }
 
-/// Seat-local gameplay values and their frame-transient aggregate outcomes.
+/// Held action values for ordinary gameplay systems, including fixed steps.
 ///
 /// Buttons combine with OR; axis contributions sum in admitted-member order and clamp once.
 /// `Started` marks an inactive-to-active aggregate, `Changed` a changed active value, and
@@ -46,20 +47,23 @@ pub struct SemanticActionOutcome {
 /// Held state survives frames with zero or many fixed ticks. Outcomes last until frame cleanup;
 /// durable commands and replay consumers must capture them before that boundary.
 #[derive(Debug, Resource)]
-pub struct SemanticActions {
+pub struct ActionState {
     held: BTreeMap<ActionKey, HeldAction>,
     pub(crate) outcomes: Vec<SemanticActionOutcome>,
     contribution_count: usize,
     contribution_limit: usize,
 }
 
-impl Default for SemanticActions {
+/// The seat and context aware action outcome API used by existing consumers.
+pub type SemanticActions = ActionState;
+
+impl Default for ActionState {
     fn default() -> Self {
         Self::with_limits(InputLimits::default()).expect("default semantic projection bounds fit")
     }
 }
 
-impl SemanticActions {
+impl ActionState {
     pub(crate) fn with_limits(limits: InputLimits) -> Result<Self, InputConfigurationError> {
         let contribution_limit = limits
             .members()
@@ -71,6 +75,54 @@ impl SemanticActions {
             contribution_count: 0,
             contribution_limit,
         })
+    }
+
+    /// Reads a button in the primary seat's `gameplay` context.
+    #[must_use]
+    pub fn button(&self, action: &str) -> bool {
+        self.primary_value(action) == Some(ActionValue::Button(true))
+    }
+
+    /// Reads a signed scalar in the primary seat's `gameplay` context.
+    #[must_use]
+    pub fn axis(&self, action: &str) -> f32 {
+        match self.primary_value(action) {
+            Some(ActionValue::Axis(value)) => value.get(),
+            _ => 0.0,
+        }
+    }
+
+    /// Reads the `<action>.x` and `<action>.y` scalars independently. Missing components are zero.
+    #[must_use]
+    pub fn axis_2d(&self, action: &str) -> Vec2 {
+        let mut result = Vec2::ZERO;
+        for (name, value) in self.primary_values() {
+            let ActionValue::Axis(value) = value else {
+                continue;
+            };
+            match name
+                .strip_prefix(action)
+                .and_then(|suffix| suffix.strip_prefix('.'))
+            {
+                Some("x") => result.x = value.get(),
+                Some("y") => result.y = value.get(),
+                _ => {}
+            }
+        }
+        result
+    }
+
+    fn primary_value(&self, action: &str) -> Option<ActionValue> {
+        self.primary_values()
+            .find_map(|(name, value)| (name == action).then_some(value))
+    }
+
+    fn primary_values(&self) -> impl Iterator<Item = (&str, ActionValue)> {
+        self.held
+            .iter()
+            .take_while(|(key, _)| key.seat == InputSeatId::PRIMARY)
+            .filter(|(key, _)| key.context.as_str() == ActionContext::GAMEPLAY_NAME)
+            .map(|(key, held)| (key.action.as_str(), held.value))
     }
 
     #[must_use]
@@ -526,7 +578,7 @@ impl ActionStaging {
     }
 }
 
-impl SemanticActions {
+impl ActionState {
     pub(crate) fn validate_keyboard_restore(
         &self,
         seat: InputSeatId,

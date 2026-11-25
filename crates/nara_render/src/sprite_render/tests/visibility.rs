@@ -198,9 +198,6 @@ fn each_view_keeps_its_order_while_offscreen_material_diagnostics_run_once() {
             .id()
     });
     world.entity_mut(sprites[7]).insert(binding);
-    let mut roots = cameras.to_vec();
-    roots.extend(sprites);
-    place_roots(world, &roots);
     app.add_systems(CoreStage::Update, move |world: &mut World| {
         if world.resource::<nara_app::RealTime>().frame == 2 {
             for camera in cameras {
@@ -265,21 +262,18 @@ fn each_view_keeps_its_order_while_offscreen_material_diagnostics_run_once() {
 fn direct_tile_changes_are_reobserved_even_after_dirty_chunks_are_cleared() {
     let mut app = sprite_app();
     let world = app.world_mut().unwrap();
-    let camera = world
-        .spawn((
-            Camera2d {
-                viewport: Some(clip_view().viewport),
-                viewport_height: 2.0,
-                ..Default::default()
-            },
-            Transform2d::default(),
-        ))
-        .id();
+    world.spawn((
+        Camera2d {
+            viewport: Some(clip_view().viewport),
+            viewport_height: 2.0,
+            ..Default::default()
+        },
+        Transform2d::default(),
+    ));
     let mut tiles = Tilemap::new(Vec2::ONE);
     tiles.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(0)));
     tiles.set_cell(TileCoord::new(4, 0), TileCell::new(TileIndex::new(0)));
     let tilemap = world.spawn((tiles, Transform2d::default())).id();
-    place_roots(world, &[camera, tilemap]);
     app.add_systems(
         CoreStage::Update,
         move |time: nara_ecs::Res<nara_app::RealTime>,

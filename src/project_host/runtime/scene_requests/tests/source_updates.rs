@@ -1327,7 +1327,7 @@ fn io_admitted(world: &World) -> u64 {
     world
         .resource::<TaskPools>()
         .stats()
-        .for_kind(nara_tasks::TaskPoolKind::Io)
+        .for_kind(nara_app::tasks::TaskPoolKind::Io)
         .admitted
 }
 

@@ -1,5 +1,5 @@
 use nara_asset::AssetRef;
-use nara_diagnostic::DiagnosticValueRef;
+use nara_core::diagnostic::DiagnosticValueRef;
 use nara_reflect::{
     AuthoringSchemaBundle, ComponentFieldId, ComponentPropertyPath, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue,

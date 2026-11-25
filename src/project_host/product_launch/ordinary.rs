@@ -7,13 +7,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara_fs::FsError;
+use crate::fs::FsError;
 
 use super::{
     PRODUCT_CLEANUP_TIMEOUT, ProductSupervisedDesktopBootstrapError,
     ProductSupervisedDesktopLaunchCandidate, SupervisedDesktopProductIdentity,
-    SupervisedDesktopWireError, exit_for_incomplete_product_cleanup,
-    open_explicit_product_project_root, open_product_project_root,
+    SupervisedDesktopWireError, open_explicit_product_project_root, open_product_project_root,
 };
 use crate::{
     ProductRecipe,
@@ -79,14 +78,11 @@ impl DesktopProductLaunch {
         self
     }
 
-    /// Runs the product and returns only after all runtime responsibilities physically retire.
+    /// Runs the product to completion or returns an incomplete cleanup report at the deadline.
     ///
-    /// The process entrypoint explicitly terminates with failure if a live cleanup obligation
-    /// exceeds the fixed product budget. It prints retained participant, phase and failure-code
-    /// diagnostics first and never drops that obligation as if it had retired. Embedded Hosts
-    /// needing to retain an incomplete owner must use [`DesktopRun`] instead.
-    /// The deadline is checked between cleanup drives; callbacks must return promptly.
-    /// `Ok(report)` can still report startup, execution, or teardown failure; inspect its outcome.
+    /// The report includes pending participants and any cleanup failure. An embedded host that
+    /// needs to retain ownership for later retries can continue driving a [`DesktopRun`]. The
+    /// deadline is checked between cleanup drives, so callbacks must return promptly.
     pub fn run(self) -> Result<DesktopRunReport, DesktopProductLaunchError> {
         let candidate = ProductSupervisedDesktopLaunchCandidate::read_from_inherited_bootstrap()
             .map_err(DesktopProductLaunchError::SupervisedBootstrap)?;
@@ -144,10 +140,7 @@ fn finish_product_run(mut run: DesktopRun, cleanup_timeout: Duration) -> Desktop
             continue;
         };
         if now >= deadline {
-            exit_for_incomplete_product_cleanup(
-                report.diagnostics(),
-                &run.incomplete_cleanup_diagnostics(),
-            );
+            return run.report_after_cleanup_deadline();
         }
         std::thread::sleep(Duration::from_millis(1).min(deadline.saturating_duration_since(now)));
     }
@@ -192,6 +185,8 @@ impl Error for DesktopProductLaunchError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use nara_app::{
         App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginShutdownObligationId,
         RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
@@ -211,9 +206,9 @@ mod tests {
     .shutdown_obligations(&[CLOSE_OBLIGATION]);
 
     #[derive(Debug, Default)]
-    struct StartupFailurePlugin;
+    struct StartupFailurePlugin<const PENDING: bool>;
 
-    impl Plugin for StartupFailurePlugin {
+    impl<const PENDING: bool> Plugin for StartupFailurePlugin<PENDING> {
         fn declaration() -> &'static PluginDeclaration {
             &STARTUP_FAILURE
         }
@@ -222,7 +217,7 @@ mod tests {
             app.register_plugin_runtime_close_participant(
                 CLOSE_OBLIGATION,
                 CLOSE_PARTICIPANT,
-                UnfinishedCloseParticipant,
+                UnfinishedCloseParticipant::<PENDING>,
             )?;
             app.add_systems(StartupStage::Runtime, || {
                 Err::<(), _>(nara_ecs::bevy_ecs::error::BevyError::error(
@@ -233,14 +228,22 @@ mod tests {
         }
     }
 
-    struct UnfinishedCloseParticipant;
+    struct UnfinishedCloseParticipant<const PENDING: bool>;
 
-    impl RuntimeCloseParticipant for UnfinishedCloseParticipant {
+    static CLOSE_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+    impl<const PENDING: bool> Drop for UnfinishedCloseParticipant<PENDING> {
+        fn drop(&mut self) {
+            CLOSE_DROPS.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    impl<const PENDING: bool> RuntimeCloseParticipant for UnfinishedCloseParticipant<PENDING> {
         fn begin_close(
             &mut self,
             _context: &mut RuntimeCloseContext<'_>,
         ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-            if std::env::var("NARA_TEST_PRODUCT_LIVE_CLEANUP_CHILD").as_deref() == Ok("pending") {
+            if PENDING {
                 return Ok(RuntimeCloseProgress::Pending);
             }
             Err(RuntimeCloseParticipantError::terminal(
@@ -252,10 +255,7 @@ mod tests {
             &mut self,
             _context: &mut RuntimeCloseContext<'_>,
         ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-            assert_eq!(
-                std::env::var("NARA_TEST_PRODUCT_LIVE_CLEANUP_CHILD").as_deref(),
-                Ok("pending")
-            );
+            assert!(PENDING);
             Ok(RuntimeCloseProgress::Pending)
         }
     }
@@ -297,20 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn expired_live_cleanup_exits_with_participant_evidence_before_owner_drop() {
-        const CHILD_MARKER: &str = "NARA_TEST_PRODUCT_LIVE_CLEANUP_CHILD";
-        if std::env::var_os(CHILD_MARKER).is_some() {
-            let root = std::env::var_os("NARA_TEST_PRODUCT_LIVE_CLEANUP_ROOT").unwrap();
-            let recipe = ProductRecipe::new()
-                .add_plugin::<StartupFailurePlugin>()
-                .unwrap();
-            let launch =
-                DesktopProductLaunch::from_cargo_product(root, "game", "0.1.0", "desktop", recipe)
-                    .unwrap();
-            finish_product_run(launch.prepare(None).unwrap(), Duration::ZERO);
-            panic!("live cleanup must explicitly terminate the ordinary product process");
-        }
-
+    fn expired_live_cleanup_reports_participant_evidence_and_releases_the_owner() {
         let root = std::env::temp_dir().join(format!(
             "nara-product-expired-cleanup-{}",
             std::process::id()
@@ -361,43 +348,40 @@ requested = ["runtime-2d"]
 "#,
         )
         .unwrap();
-        for mode in ["terminal", "pending"] {
-            let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "project_host::product_launch::ordinary::tests::expired_live_cleanup_exits_with_participant_evidence_before_owner_drop",
-                "--nocapture",
-            ])
-            .env(CHILD_MARKER, mode)
-            .env("NARA_TEST_PRODUCT_LIVE_CLEANUP_ROOT", &root)
-            .output()
-            .unwrap();
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert_eq!(output.status.code(), Some(1), "{stderr}");
-            assert!(
-                stderr.contains("product runtime cleanup exceeded its bounded deadline"),
-                "{stderr}"
-            );
-            assert!(
-                stderr.contains("nara.test.product-expired-cleanup"),
-                "{stderr}"
-            );
-            assert!(
-                stderr.contains("project.run.cleanup-participant-pending"),
-                "{stderr}"
-            );
-            if mode == "terminal" {
-                assert!(
-                    stderr.contains("nara.test.product-live-close-failure"),
-                    "{stderr}"
-                );
-                assert!(stderr.contains("begin"), "{stderr}");
+        let drops_before = CLOSE_DROPS.load(Ordering::Relaxed);
+        for pending in [false, true] {
+            let recipe = if pending {
+                ProductRecipe::new().add_plugin::<StartupFailurePlugin<true>>()
             } else {
-                assert!(!stderr.contains("failure-code"), "{stderr}");
-                assert!(stderr.contains("poll"), "{stderr}");
+                ProductRecipe::new().add_plugin::<StartupFailurePlugin<false>>()
             }
-            assert!(!stderr.contains("quarantine"), "{stderr}");
+            .unwrap();
+            let launch =
+                DesktopProductLaunch::from_cargo_product(&root, "game", "0.1.0", "desktop", recipe)
+                    .unwrap();
+            let report = finish_product_run(launch.prepare(None).unwrap(), Duration::ZERO);
+            assert_eq!(report.outcome(), DesktopRunOutcome::CleanupIncomplete);
+            let diagnostics = format!("{:#?}", report.diagnostics());
+            assert!(
+                diagnostics.contains("nara.test.product-expired-cleanup"),
+                "{diagnostics}"
+            );
+            assert!(
+                diagnostics.contains("project.run.cleanup-participant-pending"),
+                "{diagnostics}"
+            );
+            if pending {
+                assert!(!diagnostics.contains("failure-code"), "{diagnostics}");
+                assert!(diagnostics.contains("poll"), "{diagnostics}");
+            } else {
+                assert!(
+                    diagnostics.contains("nara.test.product-live-close-failure"),
+                    "{diagnostics}"
+                );
+                assert!(diagnostics.contains("begin"), "{diagnostics}");
+            }
         }
+        assert_eq!(CLOSE_DROPS.load(Ordering::Relaxed), drops_before + 2);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

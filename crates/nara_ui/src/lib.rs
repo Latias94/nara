@@ -1,38 +1,62 @@
-//! ECS and Scene authoring adapter for Nara's renderer-neutral UI kernel.
+//! Game UI layout, text, widgets, and ECS authoring.
+//!
+//! The default `runtime` feature installs the ECS adapter. Layout, widgets, and text are
+//! also available independently of that adapter.
 
-// Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
+#[cfg(feature = "runtime")]
 mod authoring;
+#[cfg(feature = "runtime")]
 mod authoring_composition;
+#[cfg(feature = "runtime")]
 mod authoring_model;
+#[cfg(feature = "runtime")]
 mod canvas;
+#[cfg(feature = "runtime")]
 mod codec;
+#[cfg(feature = "runtime")]
 mod interaction;
+pub mod kernel;
+#[cfg(feature = "runtime")]
 mod persistent_key;
+#[cfg(feature = "runtime")]
+mod plugin;
+#[cfg(feature = "runtime")]
+mod primary_surface_metrics;
+#[cfg(feature = "runtime")]
 mod runtime;
+#[cfg(feature = "runtime")]
 mod style;
+pub mod text;
+pub mod widgets;
 
-use nara_app::{
-    App, CoreStage, Plugin, PluginDefinition, PluginDefinitionId, PluginError,
-    PluginPreflightContext,
-};
-use nara_ecs::schedule::IntoScheduleConfigs;
-pub use nara_text::{FontFace, FontFaceError};
+pub use text::{FontFace, FontFaceError};
 
+#[cfg(feature = "runtime")]
 pub use authoring::{
     UiButton, UiButtonVisuals, UiNode, UiRoot, UiRuntimeKey, UiSemantics, UiText, UiTheme, UiVisual,
 };
+#[cfg(feature = "runtime")]
 pub use codec::register_ui_components;
+#[cfg(feature = "runtime")]
 pub use interaction::{
     MAX_UI_ACTION_CONSUMERS, MAX_UI_ACTION_JOURNAL_ENTRIES, UiActionAdmissionError,
     UiActionConsumerError, UiActionConsumerId, UiActionCursor, UiActionEvent, UiActionJournal,
     UiActionSequence, UiInputProjectionIssue, UiRouteDisposition, UiRouteRejection,
     UiRouteRejectionLog, UiRouteRejectionRecord, dispatch_ui_accessibility_input,
 };
-pub use nara_ui_kernel::{
+pub use kernel::{
     UiAccessibilityInput, UiAccessibilityRequest, UiActionId, UiActivationSource,
     UiPresentationReceipt, UiRouteStamp, UiSafeAreaInsets, UiSeatId, UiSize,
     UiSurfaceContentTransform, UiSurfaceContentTransformError, UiSurfaceId,
 };
+#[cfg(feature = "runtime")]
+pub use plugin::{
+    UI_PLUGIN_DECLARATION, UI_PLUGIN_ID, UI_SCHEMA_OWNER_ID, UI_SCHEMA_PROVIDER,
+    UI_SCHEMA_PROVIDER_ID, UiPlugin, plugin,
+};
+#[cfg(feature = "runtime")]
+pub use primary_surface_metrics::UiPrimarySurfaceMetrics;
+#[cfg(feature = "runtime")]
 pub use runtime::{
     UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiSurfaceAvailability,
     UiSurfaceEndpoint, UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError,
@@ -41,117 +65,12 @@ pub use runtime::{
     ui_candidate_frame, ui_candidate_frames, ui_semantic_snapshot, ui_surface_slot_snapshots,
     update_ui_surface_slot,
 };
+#[cfg(feature = "runtime")]
 pub use style::*;
 
-#[derive(Debug, Default, Clone)]
-pub struct UiPlugin {
-    font: Option<FontFace>,
-}
-
-impl UiPlugin {
-    /// Selects one admitted font for every surface compiled by this plugin instance.
-    #[must_use]
-    pub fn with_font(font: FontFace) -> Self {
-        Self { font: Some(font) }
-    }
-}
-
-const UI_PLUGIN_DEFINITION_ID: PluginDefinitionId =
-    PluginDefinitionId::new("nara.ui.configured", 1);
-
-/// Creates a repeatable UI plugin definition whose identity includes the selected font content.
-#[must_use]
-pub fn plugin(font: FontFace) -> PluginDefinition {
-    let mut configuration = b"nara.ui.font.v1\0".to_vec();
-    configuration.extend_from_slice(font.id().as_bytes());
-    PluginDefinition::infallible::<UiPlugin, _>(UI_PLUGIN_DEFINITION_ID, configuration, move || {
-        UiPlugin::with_font(font.clone())
-    })
-}
-
-pub const UI_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.ui");
-pub const UI_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
-    nara_app::PluginSchemaProviderId::new("nara.ui.components");
-pub const UI_SCHEMA_OWNER_ID: nara_reflect::ComponentSchemaOwnerId =
-    nara_reflect::ComponentSchemaOwnerId::new("nara.ui.components");
-pub const UI_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
-    nara_reflect::ComponentSchemaProviderDefinition::with_validation(
-        UI_SCHEMA_OWNER_ID,
-        UI_SCHEMA_PROVIDER_ID,
-        nara_reflect::ComponentSchemaProviderBindingId::new("nara.ui.components.native", 1),
-        ui_schema_catalog,
-        crate::codec::validate_ui_components,
-        register_ui_components,
-    );
-const UI_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
-    nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID,
-    nara_input::INPUT_PLUGIN_ID,
-    nara_hierarchy::HIERARCHY_PLUGIN_ID,
-];
-const UI_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
-    &[nara_app::PluginProductCapability::new("runtime-ui")];
-pub const UI_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
-    nara_app::PluginDeclaration::new(UI_PLUGIN_ID, nara_app::PluginCategory::Runtime)
-        .requires_plugins(UI_PLUGIN_REQUIREMENTS)
-        .requires_product_capabilities(UI_PRODUCT_REQUIREMENTS)
-        .provides_schema(&[UI_SCHEMA_PROVIDER_ID]);
-
-fn ui_schema_catalog()
--> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
-    Ok(crate::codec::ui_schema_catalog())
-}
-
-impl Plugin for UiPlugin {
-    fn declaration() -> &'static nara_app::PluginDeclaration {
-        &UI_PLUGIN_DECLARATION
-    }
-
-    fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
-        nara_reflect::validate_schema_provider_for_plugin(
-            context,
-            UI_PLUGIN_ID,
-            UI_SCHEMA_PROVIDER_ID.as_str(),
-            &UI_SCHEMA_PROVIDER,
-        )
-    }
-
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        let font = match self.font.clone() {
-            Some(font) => font,
-            None => nara_text::bundled_font_face().map_err(|error| PluginError::SetupFailed {
-                plugin: UI_PLUGIN_ID,
-                message: error.to_string(),
-            })?,
-        };
-        nara_reflect::register_schema_provider_for_plugin(
-            app,
-            UI_PLUGIN_ID,
-            UI_SCHEMA_PROVIDER_ID.as_str(),
-            &UI_SCHEMA_PROVIDER,
-        )?;
-        if !app.world().contains_resource::<runtime::UiDefaultTheme>() {
-            app.insert_resource(runtime::UiDefaultTheme(UiTheme::default()))?;
-        }
-        app.insert_resource(runtime::UiRuntimeState::new(font))?;
-        app.init_resource::<UiAdapterDiagnostics>()?;
-        app.init_resource::<UiActionJournal>()?;
-        app.init_resource::<UiRouteRejectionLog>()?;
-        app.add_systems(
-            CoreStage::First,
-            interaction::route_timeline_ui_input.in_set(nara_input::InputSet::RouteUi),
-        )?;
-        app.add_systems(
-            CoreStage::Extract,
-            runtime::compile_ui_frames
-                .after(nara_hierarchy::__private::HierarchySet::ValidateAndComplete),
-        )?;
-        Ok(())
-    }
-}
-
-/// First-party Host presentation seams that are not ordinary runtime UI API.
-#[doc(hidden)]
-pub mod __private {
+/// Prefab authoring, structural edits, and canvas projection.
+#[cfg(feature = "runtime")]
+pub mod prefab_authoring {
     pub use crate::authoring_composition::{
         UiAuthoringHierarchyKind, UiAuthoringStructuralCapability,
         UiAuthoringStructuralReadOnlyReason, UiCatalogNodeKind, UiCreateParameters, UiEntityRecipe,
@@ -178,6 +97,11 @@ pub mod __private {
         UI_VISUAL_ID, UI_VISUAL_IMAGE_FIELD_ID, persisted_ui_visual_image_value,
         prefab_contains_ui_root,
     };
+}
+
+/// Exact presentation transactions and surface retirement for host integrations.
+#[cfg(feature = "runtime")]
+pub mod presentation {
     pub use crate::runtime::{
         UiDeferredPresentationAuthority, UiDeferredPresentationRetry,
         UiPreparedPresentationAuthority, UiPresentationCommit, UiPresentationInvalidationReason,
@@ -189,6 +113,7 @@ pub mod __private {
 }
 
 /// Ordinary runtime authoring surface. Compiler, journal, and session types stay out of this prelude.
+#[cfg(feature = "runtime")]
 pub mod prelude {
     pub use crate::{
         UiActionConsumerError, UiActionConsumerId, UiActionCursor, UiActionEvent, UiActionId,
@@ -202,6 +127,10 @@ pub mod prelude {
 
 /// Exact presentation and presented-input boundary for first-party product integrations.
 pub mod advanced {
+    pub use crate::kernel::{
+        UiFrame, UiKey, UiNonActivation, UiPaintPrimitive, UiSemanticSnapshot,
+    };
+    #[cfg(feature = "runtime")]
     pub use crate::{
         UiAccessibilityInput, UiAccessibilityRequest, UiActivationSource, UiAdapterDiagnostic,
         UiAdapterDiagnostics, UiAdapterError, UiInputProjectionIssue, UiPresentationReceipt,
@@ -214,13 +143,10 @@ pub mod advanced {
         suspend_ui_surface, ui_candidate_frame, ui_candidate_frames, ui_semantic_snapshot,
         ui_surface_slot_snapshots, update_ui_surface_slot,
     };
-    pub use nara_ui_kernel::{
-        UiFrame, UiKey, UiNonActivation, UiPaintPrimitive, UiSemanticSnapshot,
-    };
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime"))]
 mod adapter_tests;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime"))]
 mod component_schema_tests;

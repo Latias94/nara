@@ -6,7 +6,7 @@ use std::sync::{
 
 use nara_core::DepthLimit;
 use nara_ecs::World;
-use nara_identity::{
+use nara_ecs::identity::{
     EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
 };
 use nara_reflect::{

@@ -4,11 +4,7 @@ use std::{
 };
 
 use nara_core::DepthLimit;
-use nara_diagnostic::{Diagnostic, DiagnosticReport};
-use nara_reflect::__private::{
-    NativeValueMetrics, plan_declared_entity_references,
-    validate_native_component_value_references_with_limits,
-};
+use nara_core::diagnostic::{DiagnosticReport, ReportDiagnostic as Diagnostic};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentDecodeContext,
     ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentMigrationError,
@@ -17,6 +13,10 @@ use nara_reflect::{
     DeclaredAssetReference, EntityReference, EntityReferenceTraversalLimits, PreparedComponent,
     collect_declared_asset_references_from_schema_with_limits,
     validate_component_value_with_limits,
+};
+use nara_reflect::{
+    effective::{NativeValueMetrics, validate_native_component_value_references_with_limits},
+    entity_reference::plan_declared_entity_references,
 };
 
 use crate::{
@@ -60,17 +60,6 @@ pub(crate) struct PreparedSceneDataComponent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ValidatedScenePlacement {
-    parents: BTreeMap<SceneEntityId, Option<SceneEntityId>>,
-}
-
-impl ValidatedScenePlacement {
-    pub(crate) fn parent_of(&self, entity: &SceneEntityId) -> Option<&SceneEntityId> {
-        self.parents.get(entity).and_then(Option::as_ref)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 enum PlacementOwner {
     Root,
     Parent(SceneEntityId),
@@ -84,7 +73,7 @@ struct NormalizedSceneComponent<'a> {
 enum NormalizedComponentValue<'a> {
     Borrowed {
         value: &'a ComponentValue,
-        defaults: Option<nara_reflect::__private::FrozenComponentDefaults>,
+        defaults: Option<nara_reflect::effective::FrozenComponentDefaults>,
     },
     Owned(ComponentValue),
 }
@@ -159,7 +148,7 @@ fn validate_effective_values<E>(
     admit_validation_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<EffectiveSceneValidation, E> {
     let mut diagnostics = DiagnosticReport::default();
-    let placement = validate_scene_placement(
+    validate_scene_placement(
         &document.roots,
         document
             .entities
@@ -168,20 +157,6 @@ fn validate_effective_values<E>(
         &mut diagnostics,
         None,
     );
-    if let Some(registry) = authority.native_snapshot() {
-        if let Some(entity) = placement.as_ref().and_then(|placement| {
-            first_unavailable_hierarchy_projection_entity(document, placement, registry)
-        }) {
-            diagnostics.push(with_public_locator(
-                diagnostic_error(
-                    "scene.hierarchy-projection-unavailable",
-                    "Scene hierarchy requires a runtime projection that is not implemented",
-                ),
-                "entity-id",
-                entity.as_str(),
-            ));
-        }
-    }
     let namespace = document
         .entities
         .iter()
@@ -286,7 +261,7 @@ fn validate_effective_component_values<'a, E>(
                 Some(schema),
             ))
         };
-        if let Err(error) = nara_reflect::__private::validate_schema_capabilities(
+        if let Err(error) = nara_reflect::registry::validate_schema_capabilities(
             schema,
             [ComponentCapability::Scene],
         ) {
@@ -298,7 +273,7 @@ fn validate_effective_component_values<'a, E>(
             continue;
         }
         {
-            let explicit = nara_reflect::__private::component_defaults_are_explicit_with_admission(
+            let explicit = nara_reflect::effective::component_defaults_are_explicit_with_admission(
                 schema,
                 record.value,
                 &mut admit_validation_work,
@@ -320,10 +295,10 @@ fn validate_effective_component_values<'a, E>(
                     diagnostics.push(locate(diagnostic_error(code, summary)));
                     continue;
                 }
-                Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) => {
+                Err(nara_reflect::effective::EffectiveValueAdmissionError::Admission(error)) => {
                     return Err(error);
                 }
-                Err(nara_reflect::__private::EffectiveValueAdmissionError::Value(error)) => {
+                Err(nara_reflect::effective::EffectiveValueAdmissionError::Value(error)) => {
                     diagnostics.push(invalid(&error));
                     continue;
                 }
@@ -342,25 +317,25 @@ fn validate_effective_component_values<'a, E>(
         };
         let native_metrics = match native_admission {
             Ok(metrics) => metrics,
-            Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) => {
+            Err(nara_reflect::effective::EffectiveValueAdmissionError::Admission(error)) => {
                 return Err(error);
             }
-            Err(nara_reflect::__private::EffectiveValueAdmissionError::Value(error)) => {
+            Err(nara_reflect::effective::EffectiveValueAdmissionError::Value(error)) => {
                 diagnostics.push(invalid(&error));
                 continue;
             }
         };
         let effective = record.value;
-        match nara_reflect::__private::validate_explicit_component_value_with_admission(
+        match nara_reflect::registry::validate_explicit_component_value_with_admission(
             schema,
             effective,
             &mut admit_validation_work,
         ) {
             Ok(()) => {}
-            Err(nara_reflect::__private::ComponentValueAdmissionError::Admission(error)) => {
+            Err(nara_reflect::registry::ComponentValueAdmissionError::Admission(error)) => {
                 return Err(error);
             }
-            Err(nara_reflect::__private::ComponentValueAdmissionError::Value(error)) => {
+            Err(nara_reflect::registry::ComponentValueAdmissionError::Value(error)) => {
                 diagnostics.push(invalid(&error));
                 continue;
             }
@@ -368,7 +343,7 @@ fn validate_effective_component_values<'a, E>(
         let references_result = {
             #[cfg(feature = "work-observation")]
             let _work_span = tracing::info_span!(target: "nara::scene::work", "scene_effective_asset_references").entered();
-            nara_reflect::__private::collect_effective_references_with_admission(
+            nara_reflect::asset_reference::collect_effective_references_with_admission(
                 schema,
                 record.version,
                 effective,
@@ -378,10 +353,10 @@ fn validate_effective_component_values<'a, E>(
         };
         let (references, pending_entities) = match references_result {
             Ok(references) => references,
-            Err(nara_reflect::__private::AssetReferenceCollectionError::Admission(error)) => {
+            Err(nara_reflect::asset_reference::AssetReferenceCollectionError::Admission(error)) => {
                 return Err(error);
             }
-            Err(nara_reflect::__private::AssetReferenceCollectionError::Reference(_)) => {
+            Err(nara_reflect::asset_reference::AssetReferenceCollectionError::Reference(_)) => {
                 diagnostics.push(invalid(&ComponentCodecError::Message(
                     "Schema-declared asset reference traversal failed".into(),
                 )));
@@ -443,10 +418,12 @@ fn validate_effective_component_values<'a, E>(
                     .ok_or(SceneLocalTargetMissing),
                 EntityReference::Persistent { .. } | EntityReference::Authored { .. } => Ok(()),
             }),
-            Err(nara_reflect::__private::EntityReferencePlanError::Admission(error)) => {
+            Err(nara_reflect::entity_reference::EntityReferencePlanError::Admission(error)) => {
                 return Err(error);
             }
-            Err(nara_reflect::__private::EntityReferencePlanError::Reference(error)) => Err(error),
+            Err(nara_reflect::entity_reference::EntityReferencePlanError::Reference(error)) => {
+                Err(error)
+            }
         };
         if let Err(error) = local_references {
             diagnostics.push(with_entity_reference_rewrite_error(
@@ -504,7 +481,7 @@ pub(crate) fn validate_flat_claims_with_admission<E>(
     admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<(EffectiveSceneValidation, Vec<NativeValueMetrics>), E> {
     let mut diagnostics = DiagnosticReport::default();
-    let placement = validate_scene_placement(
+    validate_scene_placement(
         &claims.roots,
         claims
             .entities
@@ -513,33 +490,6 @@ pub(crate) fn validate_flat_claims_with_admission<E>(
         &mut diagnostics,
         None,
     );
-    if let Some(registry) = authority.native_snapshot()
-        && let Some(entity) = placement.as_ref().and_then(|placement| {
-            first_unavailable_flat_projection(
-                placement,
-                claims.entities.iter().map(|entity| &entity.id),
-                claims.entities.iter().filter_map(|entity| {
-                    entity
-                        .components
-                        .keys()
-                        .any(|component| {
-                            component.as_str() == "nara.scene.Visibility"
-                                && registry.schema(component).is_some()
-                        })
-                        .then_some(&entity.id)
-                }),
-            )
-        })
-    {
-        diagnostics.push(with_public_locator(
-            diagnostic_error(
-                "scene.hierarchy-projection-unavailable",
-                "Scene hierarchy requires a runtime projection that is not implemented",
-            ),
-            "entity-id",
-            entity.as_str(),
-        ));
-    }
     let namespace = claims
         .entities
         .iter()
@@ -583,19 +533,6 @@ fn validate_compiled_values_with_admission<E>(
     context: &mut ComponentDecodeContext<'_>,
     admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<EffectiveSceneValidation, E> {
-    let mut diagnostics = DiagnosticReport::default();
-    if let Some(registry) = authority.native_snapshot()
-        && let Some(entity) = first_unavailable_compiled_projection(document, registry)
-    {
-        diagnostics.push(with_public_locator(
-            diagnostic_error(
-                "scene.hierarchy-projection-unavailable",
-                "Scene hierarchy requires a runtime projection that is not implemented",
-            ),
-            "entity-id",
-            entity.as_str(),
-        ));
-    }
     let records = document.entities().iter().flat_map(|entity| {
         entity
             .components()
@@ -621,7 +558,7 @@ fn validate_compiled_values_with_admission<E>(
         authority,
         context,
         EffectiveValueRole::Compiled,
-        diagnostics,
+        DiagnosticReport::default(),
         None,
         admit,
     )
@@ -744,25 +681,18 @@ fn process_compiled_scene_with_context(
             let prepared = match purpose {
                 ScenePreflightPurpose::Diagnostic => {
                     if admitted {
-                        nara_reflect::__private::validate_admitted_component_with_context(
-                            registry,
+                        registry.validate_admitted_component_with_context(
                             component,
                             record.value(),
                             context,
                         )
                     } else {
-                        nara_reflect::__private::diagnose_component_with_context(
-                            registry,
-                            component,
-                            record.value(),
-                            context,
-                        )
+                        registry.diagnose_component_with_context(component, record.value(), context)
                     }
                 }
                 ScenePreflightPurpose::Prepare => {
                     let prepared = if admitted {
-                        nara_reflect::__private::preflight_admitted_component_with_context(
-                            registry,
+                        registry.preflight_admitted_component_with_context(
                             component,
                             record.value(),
                             context,
@@ -1383,7 +1313,7 @@ fn preflight_source_values_with_context(
                     continue;
                 }
             };
-            let validation = nara_reflect::__private::validate_schema_capabilities(
+            let validation = nara_reflect::registry::validate_schema_capabilities(
                 schema,
                 [ComponentCapability::Scene],
             )
@@ -1566,7 +1496,7 @@ impl SceneValueBudget {
         value: ComponentValueRef<'_>,
         measured: Option<NativeValueMetrics>,
         admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
-    ) -> Result<NativeValueMetrics, nara_reflect::__private::EffectiveValueAdmissionError<E>> {
+    ) -> Result<NativeValueMetrics, nara_reflect::effective::EffectiveValueAdmissionError<E>> {
         if let Some(measured) = measured {
             let cost = measured.cost();
             if cost.nodes() <= self.nodes
@@ -1574,7 +1504,7 @@ impl SceneValueBudget {
                 && measured.depth() <= self.depth.get()
             {
                 admit(1, 0, 0)
-                    .map_err(nara_reflect::__private::EffectiveValueAdmissionError::Admission)?;
+                    .map_err(nara_reflect::effective::EffectiveValueAdmissionError::Admission)?;
                 self.nodes -= cost.nodes();
                 self.bytes -= cost.logical_bytes();
                 return Ok(measured);
@@ -1588,10 +1518,10 @@ impl SceneValueBudget {
         &mut self,
         value: ComponentValueRef<'_>,
         admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
-    ) -> Result<NativeValueMetrics, nara_reflect::__private::EffectiveValueAdmissionError<E>> {
-        use nara_reflect::__private::EffectiveValueAdmissionError;
+    ) -> Result<NativeValueMetrics, nara_reflect::effective::EffectiveValueAdmissionError<E>> {
+        use nara_reflect::effective::EffectiveValueAdmissionError;
         let cost =
-            match nara_reflect::__private::validate_native_component_value_references_with_admission(
+            match nara_reflect::effective::validate_native_component_value_references_with_admission(
                 value,
                 self.remaining_limits(),
                 &mut *admit,
@@ -1614,8 +1544,8 @@ impl SceneValueBudget {
         &mut self,
         value: ComponentValueRef<'_>,
         admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
-    ) -> Result<(), nara_reflect::__private::EffectiveValueAdmissionError<E>> {
-        use nara_reflect::__private::EffectiveValueAdmissionError;
+    ) -> Result<(), nara_reflect::effective::EffectiveValueAdmissionError<E>> {
+        use nara_reflect::effective::EffectiveValueAdmissionError;
         let cost = value
             .cost_up_to_with_admission(self.nodes, self.bytes, |bytes| {
                 admit(0, 0, bytes.unwrap_or(usize::MAX))
@@ -1678,8 +1608,8 @@ impl SceneValueBudget {
         schema: &ComponentSchema,
         value: &ComponentValue,
         defaults: &BTreeMap<ComponentFieldId, ComponentValue>,
-    ) -> Result<Option<nara_reflect::__private::FrozenComponentDefaults>, ComponentCodecError> {
-        let frozen = nara_reflect::__private::freeze_component_defaults(
+    ) -> Result<Option<nara_reflect::effective::FrozenComponentDefaults>, ComponentCodecError> {
+        let frozen = nara_reflect::effective::freeze_component_defaults(
             schema,
             value,
             defaults,
@@ -1701,7 +1631,7 @@ impl SceneValueBudget {
         defaults: &BTreeMap<ComponentFieldId, ComponentValue>,
     ) -> Result<(), ComponentCodecError> {
         let cost =
-            nara_reflect::__private::effective_component_value_in_place_with_default_overrides(
+            nara_reflect::effective::effective_component_value_in_place_with_default_overrides(
                 schema,
                 value,
                 defaults,
@@ -1757,11 +1687,11 @@ impl SceneValueBudget {
         // Reflect owns the default plan and checks the complete resulting cost before cloning.
         // Raw usize ceilings intentionally preserve a zero residual byte allowance.
         let (effective, cost) = if let Some(defaults) = default_overrides {
-            nara_reflect::__private::effective_component_value_with_default_overrides_with_budget(
+            nara_reflect::effective::effective_component_value_with_default_overrides_with_budget(
                 schema, value, defaults, self.nodes, self.bytes, self.depth,
             )?
         } else {
-            nara_reflect::__private::effective_component_value_with_budget(
+            nara_reflect::effective::effective_component_value_with_budget(
                 schema, value, self.nodes, self.bytes, self.depth,
             )?
         };
@@ -1854,74 +1784,6 @@ fn component_payload_diagnostic(
     }
 }
 
-pub(crate) fn first_unavailable_hierarchy_projection_entity<'document>(
-    document: &'document SceneDraft,
-    placement: &ValidatedScenePlacement,
-    registry: &ComponentRegistrySnapshot,
-) -> Option<&'document SceneEntityId> {
-    let requires_unavailable_projection = |component_id: &ComponentTypeId| {
-        component_id.as_str() == "nara.scene.Visibility" && registry.schema(component_id).is_some()
-    };
-    first_unavailable_flat_projection(
-        placement,
-        document.entities.iter().map(|entity| &entity.id),
-        document.entities.iter().filter_map(|entity| {
-            entity
-                .components
-                .keys()
-                .any(requires_unavailable_projection)
-                .then_some(&entity.id)
-        }),
-    )
-}
-
-fn first_unavailable_flat_projection<'a>(
-    placement: &ValidatedScenePlacement,
-    entities: impl IntoIterator<Item = &'a SceneEntityId>,
-    visibility_entities: impl IntoIterator<Item = &'a SceneEntityId>,
-) -> Option<&'a SceneEntityId> {
-    let visibility = visibility_entities.into_iter().collect::<BTreeSet<_>>();
-    entities.into_iter().find(|entity| {
-        placement
-            .parent_of(entity)
-            .is_some_and(|parent| visibility.contains(entity) || visibility.contains(parent))
-    })
-}
-
-fn first_unavailable_compiled_projection<'a>(
-    document: &'a crate::CompiledSceneDocument,
-    registry: &ComponentRegistrySnapshot,
-) -> Option<&'a SceneEntityId> {
-    let visibility = document
-        .entities()
-        .iter()
-        .filter_map(|entity| {
-            entity
-                .components()
-                .keys()
-                .any(|component| {
-                    component.as_str() == "nara.scene.Visibility"
-                        && registry.schema(component).is_some()
-                })
-                .then_some(entity.id())
-        })
-        .collect::<BTreeSet<_>>();
-    if visibility.is_empty() {
-        return None;
-    }
-    let visibility = &visibility;
-    document
-        .entities()
-        .iter()
-        .flat_map(|parent| {
-            parent
-                .children()
-                .iter()
-                .filter(move |child| visibility.contains(parent.id()) || visibility.contains(child))
-        })
-        .min()
-}
-
 pub(crate) fn component_migration_diagnostic(
     entity_id: &str,
     component_id: &str,
@@ -1974,8 +1836,7 @@ fn validate_scene_placement<'a>(
     entities: impl Iterator<Item = (&'a SceneEntityId, &'a [SceneEntityId])> + Clone,
     diagnostics: &mut DiagnosticReport,
     operation_index: Option<usize>,
-) -> Option<ValidatedScenePlacement> {
-    let errors_before = diagnostics.stats().observed_errors();
+) {
     let mut ids = BTreeSet::<SceneEntityId>::new();
     for (entity, _) in entities.clone() {
         if !ids.insert(entity.clone()) {
@@ -2098,16 +1959,10 @@ fn validate_scene_placement<'a>(
         }
     }
 
-    let parents = owners
-        .iter()
-        .map(|(entity, owner)| {
-            let parent = match owner {
-                PlacementOwner::Root => None,
-                PlacementOwner::Parent(parent) => Some(parent.clone()),
-            };
-            (entity.clone(), parent)
-        })
-        .collect::<BTreeMap<_, _>>();
+    let parent_of = |entity: &SceneEntityId| match owners.get(entity) {
+        Some(PlacementOwner::Parent(parent)) => Some(parent),
+        _ => None,
+    };
 
     let mut completed = BTreeSet::<SceneEntityId>::new();
     for (entity, _) in entities {
@@ -2134,19 +1989,16 @@ fn validate_scene_placement<'a>(
                     "scene.placement-cycle",
                     "Scene placement contains a cycle",
                     &witness,
-                    parents.get(&witness).and_then(Option::as_ref),
+                    parent_of(&witness),
                 );
                 break;
             }
             positions.insert(id.clone(), path.len());
             path.push(id.clone());
-            current = parents.get(&id).and_then(Clone::clone);
+            current = parent_of(&id).cloned();
         }
         completed.extend(path);
     }
-
-    (diagnostics.stats().observed_errors() == errors_before)
-        .then_some(ValidatedScenePlacement { parents })
 }
 
 fn push_placement_diagnostic(
@@ -2752,8 +2604,8 @@ mod tests {
             atomic::{AtomicUsize, Ordering},
         };
 
-        let reference = nara_identity::AuthoredEntityReference::input(
-            nara_identity::ReferenceInputId::new("required-target").unwrap(),
+        let reference = nara_ecs::identity::AuthoredEntityReference::input(
+            nara_ecs::identity::ReferenceInputId::new("required-target").unwrap(),
         );
         let default = ComponentValue::EntityReference(EntityReference::Authored { reference });
         let effective = ComponentValue::map([("target", default.clone())]);

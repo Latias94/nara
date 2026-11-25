@@ -308,9 +308,11 @@ fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
         #asset_demand_checks
 
         impl #support::PersistentComponentProvider for #name {
+            const COMPONENT_ID: &'static str = #component_id;
+
             fn persistent_component_schema() -> #support::ComponentSchema {
                 #support::ComponentSchema::new(
-                    #support::ComponentTypeId::new(#component_id),
+                    #support::ComponentTypeId::new(Self::COMPONENT_ID),
                     #primary_alias,
                     #support::ComponentSchemaVersion::new(#version_value)
                         .expect("PersistentComponent validates non-zero schema versions"),

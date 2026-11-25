@@ -577,7 +577,7 @@ fn post_application_authority_fault_retains_the_actual_applied_phase() {
     let guard = Arc::clone(&armed);
     let mut configured = app(true, FixedCatchUpPolicy::DiscardExcess);
     configured
-        .__install_runtime_authority_validator(
+        .register_runtime_validator(
             PluginId::new("nara.test.time-application-guard"),
             Arc::new(move |world, _| {
                 if guard.load(Ordering::Acquire)
@@ -653,7 +653,7 @@ fn a_validator_reporting_a_fault_with_ok_cannot_return_capture_or_initialize_tim
         let reported = original.clone();
         let mut configured = app(true, FixedCatchUpPolicy::DiscardExcess);
         configured
-            .__install_runtime_authority_validator(
+            .register_runtime_validator(
                 PluginId::new("nara.test.time-fault-with-ok"),
                 Arc::new(move |world, _| {
                     if observed.load(Ordering::Acquire) != usize::MAX

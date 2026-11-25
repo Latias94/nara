@@ -17,14 +17,13 @@ use nara::{
     project_host::{DesktopPresentationControl, DesktopPresentationObservation},
     render::{ExtractedViews, RenderFrame},
     render_wgpu::{WgpuBackendState, WgpuRenderObservation},
-    scene::SceneEntitySource,
+    scene::{SceneEntitySource, fixed_spatial::presented_spatial_snapshot},
     sprite::Sprite,
     sprite_render::batching::{
         ExtractedSpriteKind, ExtractedSprites, QueuedSpriteItems, SpriteBatchKind, SpriteBatches,
         SpriteInstance,
     },
     tilemap::{TileSet, TileSetAssets, Tilemap},
-    transform::presented_spatial_snapshot,
     window::{
         WindowId,
         backend::{BackendWindowHandles, WindowTargetPhase},
@@ -534,14 +533,14 @@ fn join_presented(
 }
 
 fn observe_controllers(world: &World) -> ControllerObservation {
-    #[cfg(feature = "gamepad")]
-    if let Some(devices) = world.get_resource::<nara_gilrs::GilrsDevices>() {
+    #[cfg(all(windows, feature = "gamepad"))]
+    if let Some(devices) = world.get_resource::<nara::input::GilrsDevices>() {
         return ControllerObservation {
             backend: "gilrs-wgi",
             connected: devices.connected().len(),
         };
     }
-    #[cfg(not(feature = "gamepad"))]
+    #[cfg(not(all(windows, feature = "gamepad")))]
     let _ = world;
     ControllerObservation {
         backend: "none",

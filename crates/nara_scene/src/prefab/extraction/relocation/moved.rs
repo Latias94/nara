@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use nara_identity::ReferenceInputId;
+use nara_ecs::identity::ReferenceInputId;
 
 use super::*;
 use crate::prefab::extraction::work::reference_clone_bytes;

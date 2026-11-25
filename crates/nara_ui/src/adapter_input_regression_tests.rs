@@ -1,6 +1,5 @@
 use super::*;
 use nara_input::SemanticActions;
-use nara_render::hud::{UiPacketPrimitive, UiPreparedImages, UiPresentationPlanner};
 
 fn test_root(world: &mut World, layer: UiLayer, key: &str) -> Entity {
     world
@@ -82,8 +81,7 @@ fn modal_underlay_motion_clears_the_hover_before_position_free_clicks() {
         };
         let exited = expected_runtime_node("modal", "retry");
         assert!(batch.events().iter().any(|event| event.target() == &exited
-            && event.kind()
-                == &nara_ui_kernel::UiRoutedEventKind::HoverChanged { hovered: false }));
+            && event.kind() == &crate::kernel::UiRoutedEventKind::HoverChanged { hovered: false }));
     }
     app.dispatch_input(route, move_pointer(retry_position));
     primary_click(&mut app, route, None);
@@ -118,18 +116,11 @@ fn mouse_hit_and_paint_agree_for_zero_and_one_pixel_foreground_buttons() {
         let frame = ui_candidate_frame(app.world(), surface_id())
             .unwrap()
             .unwrap();
-        let packet = UiPresentationPlanner::default()
-            .plan(
-                Arc::clone(&frame),
-                nara_render::RenderTarget::Window(nara_window::WindowId::PRIMARY),
-                &UiPreparedImages::default(),
-            )
-            .unwrap();
-        let widths: Vec<_> = packet
-            .primitives()
+        let widths: Vec<_> = frame
+            .paint()
             .iter()
             .filter_map(|primitive| match primitive {
-                UiPacketPrimitive::Rect { rect, .. } => Some(rect.width()),
+                UiPaintPrimitive::Rect { physical_rect, .. } => Some(physical_rect.width()),
                 _ => None,
             })
             .collect();

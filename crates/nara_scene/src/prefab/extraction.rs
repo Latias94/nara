@@ -28,7 +28,6 @@ pub use corpus::{
 };
 pub(crate) use corpus::{ExtractionDestination, ExtractionRequest, VerifiedExtractionCorpus};
 pub(crate) use corpus::{SavedGenerationRefusal, VerifiedExtractionSavedGeneration};
-pub use footprint::{ComponentApplySourceFootprint, classify_component_apply_dependants};
 pub(crate) use work::{ExtractionError, ExtractionWork};
 
 /// Operation-local physical nesting limit, separate from compiler occurrence depth and raw

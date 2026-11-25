@@ -4,16 +4,16 @@ use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
 use nara_core::{ByteLimit, ItemLimit, Vec2};
 use nara_reflect::{
     __macro_support::PersistentFieldCodec,
-    __private::{
-        collect_declared_effective_asset_references_with_admission,
-        collect_declared_field_asset_references_with_admission,
-        collect_declared_value_asset_references_with_admission,
-    },
     AssetReferenceDemand, ComponentCapability, ComponentFieldId, ComponentFieldPath,
     ComponentFieldPathSegment, ComponentFieldSchema, ComponentPropertyPath,
     ComponentPropertyReadBudget, ComponentPropertyStep, ComponentSchema, ComponentSchemaCatalog,
     ComponentSchemaVersion, ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId,
     ComponentValue, ComponentValueKind, ComponentValueShape, EntityReference,
+    asset_reference::{
+        collect_declared_effective_asset_references_with_admission,
+        collect_declared_field_asset_references_with_admission,
+        collect_declared_value_asset_references_with_admission,
+    },
     collect_declared_asset_references_from_schema, collect_declared_field_asset_references,
     collect_declared_value_asset_references_with_limits, effective_component_value,
     encode_asset_reference_value, resolve_component_property_schema_claim,

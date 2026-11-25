@@ -4,7 +4,7 @@ use std::{convert::Infallible, sync::Arc};
 
 use nara_asset::AssetRef;
 use nara_core::{ByteLimit, ItemLimit};
-use nara_identity::{
+use nara_ecs::identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, ReferenceInputId,
 };
 use nara_reflect::{
@@ -16,12 +16,12 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    __private::AuthoringAdapterReceipt,
     ExpandedSceneDocument, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
     PrefabDocument, PrefabEntityOrigin, PrefabInstance, PrefabInstanceClaim, PrefabInstanceHop,
     PrefabOverlay, PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent,
     PrefabReferenceArguments, ResolvedPrefabSource, SceneCompilationLimits, SceneComponentRecord,
     SceneDocument, SceneEntityId, SceneEntityRecord, ScenePlacement,
+    authoring::AuthoringAdapterReceipt,
     prefab::{
         extraction::{
             SourceCut, construction::construct_source_split, try_capture_source_cut_with_loader,

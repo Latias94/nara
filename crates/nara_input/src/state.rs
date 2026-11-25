@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use nara_app::RuntimeCandidateScope;
+use nara_app::{App, RuntimeCandidateScope, RuntimeGeneration};
 use nara_core::ByteLimit;
 use nara_ecs::{Resource, World};
 
@@ -143,6 +143,21 @@ impl Default for ActionMap {
 }
 
 impl ActionMap {
+    /// Compiles code-defined bindings for the default `gameplay` context.
+    pub fn from_bindings(
+        bindings: impl IntoIterator<Item = ActionBinding>,
+    ) -> Result<Self, ActionMapError> {
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder.declare_context(ActionContext::gameplay(), true)?;
+        for binding in bindings {
+            builder.bind(binding)?;
+        }
+        Self::new(
+            builder.compile()?.into_bindings(),
+            ByteLimit::new(Self::required_state_bytes()).expect("the state allowance is nonzero"),
+        )
+    }
+
     /// Fixed logical allowance for context state and all retained revision/staging snapshots.
     ///
     /// The single finite ingress log can retain distinct snapshots. A fixed maximum-context allowance
@@ -313,6 +328,7 @@ impl InputInstallation {
 pub enum InputSelectionError {
     MissingInputOwner,
     MissingActionMap,
+    RuntimeStarted,
     AlreadyFinalized,
     CompetingConfiguration,
 }
@@ -332,6 +348,22 @@ impl std::error::Error for InputSelectionError {}
 #[must_use]
 pub fn startup_action_map_bindings(world: &World) -> Option<&ActionMapBindings> {
     world.get_resource::<InputInstallation>()?.selected.as_ref()
+}
+
+/// Installs a startup action map on a configured App before its first update.
+///
+/// `None` preserves the primary map already configured by the game's plugins.
+pub fn configure_startup_action_map(
+    app: &mut App,
+    selection: Option<ActionMap>,
+) -> Result<(), InputSelectionError> {
+    if app.world().contains_resource::<RuntimeGeneration>() {
+        return Err(InputSelectionError::RuntimeStarted);
+    }
+    let world = app
+        .world_mut()
+        .map_err(|_| InputSelectionError::MissingInputOwner)?;
+    receive_selection(world, selection)
 }
 
 /// Finalizes the Host's PRIMARY selection once in the unpublished candidate admission phase.

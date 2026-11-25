@@ -7,10 +7,10 @@ use std::{
 use nara::{
     advanced_prelude::materialize_startup_scene,
     app::{
-        PluginDefinition, RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeControl,
+        PluginDefinition, RuntimeCandidate, RuntimeClosePolicy, RuntimeControl,
         RuntimeControlRequestResult, RuntimeInstance, RuntimeObligationLedger, RuntimeState,
     },
-    gameplay::GameplayCommandSubmission,
+    ecs::Command,
     input::{ButtonDriverInput, KeyCode, MouseButton},
     prelude::World,
     project_host::ProjectContentLoader,
@@ -26,15 +26,15 @@ use nara::{
     window::WindowId,
 };
 use nara_reference_game::{
-    REFERENCE_UI_SURFACE_ID, WaveOutcome, WaveRetryPhase, WaveRetryRejection, WaveRetryStatus,
-    WaveRunGeneration, WaveSnapshot, bundled_wave_commands,
+    REFERENCE_UI_SURFACE_ID, WaveCommand, WaveOutcome, WaveRetryPhase, WaveRetryRejection,
+    WaveRetryStatus, WaveRunGeneration, WaveSnapshot, bundled_wave_commands,
 };
 use nara_render::RenderTarget;
 use nara_render::hud::{
     UiGlyphAtlasPageKey, UiPacketPrimitive, UiPacketRect, UiPaintPacketIdentity, UiPreparedImages,
     UiPresentationPlanner,
 };
-use nara_ui_kernel::UiPaintPrimitive;
+use nara_ui::kernel::UiPaintPrimitive;
 
 use super::project_content_fixture::{
     headless_wave_candidate_plan_and_root_with, headless_wave_candidate_plan_and_root_with_at,
@@ -784,7 +784,7 @@ pub fn capture_retry_interaction_variants() -> RetryInteractionCaptures {
 fn product_runtime(
     target: UiPhysicalTarget,
     plugin: PluginDefinition,
-    initial_commands: Vec<GameplayCommandSubmission>,
+    initial_commands: Vec<WaveCommand>,
 ) -> RuntimeInstance {
     product_runtime_from_project(
         target,
@@ -798,7 +798,7 @@ fn product_runtime_at(
     project_root: &Path,
     target: UiPhysicalTarget,
     plugin: PluginDefinition,
-    initial_commands: Vec<GameplayCommandSubmission>,
+    initial_commands: Vec<WaveCommand>,
 ) -> RuntimeInstance {
     product_runtime_from_project(
         target,
@@ -814,20 +814,18 @@ fn product_runtime_from_project(
         nara::project_host::RuntimePlan,
         nara::fs::DirectoryCapability,
     ),
-    initial_commands: Vec<GameplayCommandSubmission>,
+    initial_commands: Vec<WaveCommand>,
 ) -> RuntimeInstance {
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&project, &plan).unwrap();
     let source = snapshot.scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
-    let mut candidate = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            sealed,
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
+    let mut candidate = RuntimeCandidate::admit(
+        sealed,
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::default(),
+    )
+    .unwrap();
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut World| {
@@ -853,9 +851,8 @@ fn product_runtime_from_project(
                 let report = materialize_startup_scene(world, source)
                     .expect("the retained product scene should materialize");
                 assert!(!report.has_errors(), "{report:#?}");
-                let mut queue = world.resource_mut::<nara::gameplay::GameplayCommandQueue>();
                 for command in initial_commands {
-                    queue.submit(command).unwrap();
+                    command.apply(world).unwrap();
                 }
             });
         })
@@ -1000,10 +997,10 @@ fn capture(runtime: &RuntimeInstance, target: UiPhysicalTarget) -> ProductUiCapt
     let retry_packet_rect = retry.and_then(|fact| {
         let minimum = slot
             .transform()
-            .authored_to_physical(nara_ui_kernel::UiPoint::new(fact.x, fact.y))?;
+            .authored_to_physical(nara_ui::kernel::UiPoint::new(fact.x, fact.y))?;
         let maximum = slot
             .transform()
-            .authored_to_physical(nara_ui_kernel::UiPoint::new(
+            .authored_to_physical(nara_ui::kernel::UiPoint::new(
                 fact.x + fact.width,
                 fact.y + fact.height,
             ))?;

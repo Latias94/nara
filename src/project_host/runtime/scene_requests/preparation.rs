@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex, TryLockError};
 
-use nara_tasks::{
+use nara_app::tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskReturnState, TaskSpawnRequest,
     TaskTerminal,
 };

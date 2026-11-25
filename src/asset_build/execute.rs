@@ -7,13 +7,13 @@ use std::{
     sync::Arc,
 };
 
+use crate::fs::{DirectoryCapability, FileCapability, FsError, RelativePath};
 use nara_asset::{
     AssetBuildSource, AssetImportError, AssetImportLimits, AssetMeta, AssetMetaFileLimits,
     AssetMetaIdentityCandidate, AssetPath, AssetPathScope, AssetProductRef, AssetReferenceDemand,
     AssetSourceKind, AssetSourcePath, ImportedProductId, RuntimeAssetCodec, SourceAssetBuild,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
-use nara_fs::{DirectoryCapability, FileCapability, FsError, RelativePath};
 use serde::{
     Serialize,
     de::{DeserializeOwned, IgnoredAny},
@@ -376,7 +376,7 @@ impl SourceInputs<'_> {
         let length = match &file {
             Some(file) => file.reader()?.seek(SeekFrom::End(0)).map_err(|source| {
                 ArtifactBuildError::Host(FsError::Io {
-                    operation: nara_fs::FsOperation::Read,
+                    operation: crate::fs::FsOperation::Read,
                     source,
                 })
             })?,
@@ -789,7 +789,7 @@ where
 pub(super) fn admit_metadata<T: DeserializeOwned + Serialize>(
     inputs: &mut SourceInputs<'_>,
     kind: &AssetSourceKind,
-    normalize: impl FnOnce(T) -> Result<T, nara_diagnostic::Diagnostic>,
+    normalize: impl FnOnce(T) -> Result<T, nara_core::diagnostic::ReportDiagnostic>,
 ) -> Result<(AssetMetaIdentityCandidate, Vec<u8>), ArtifactBuildError> {
     let path_work = inputs
         .request

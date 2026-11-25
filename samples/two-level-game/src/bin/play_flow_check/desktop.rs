@@ -127,8 +127,7 @@ pub(super) fn run() -> ExitCode {
         game.run.progress(),
         DesktopRunProgress::Completed(_) | DesktopRunProgress::Failed
     ) {
-        std::mem::forget(game);
-        eprintln!("play_flow_check: original native owners remain retained at process exit");
+        eprintln!("play_flow_check: explicit retirement of the original native run is incomplete");
         return ExitCode::FAILURE;
     }
     if success {

@@ -4,7 +4,7 @@ use super::inputs::ResolvedReference;
 use super::reference_program::{ReferenceProgram, ReferencePrograms};
 use super::*;
 use crate::prefab::{PrefabReferenceRemapError, accumulate_generated_identifier_bytes};
-use nara_identity::EntityReference;
+use nara_ecs::identity::EntityReference;
 
 impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
 where

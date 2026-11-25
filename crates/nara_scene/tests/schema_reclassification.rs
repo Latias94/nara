@@ -12,12 +12,12 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentReadiness, AuthoringDocumentSource,
-    AuthoringRecordReadiness, AuthoringSchemaBasis, PrefabAuthoringSession, PrefabDocument,
-    PrefabDocumentCandidate, PreparedPrefabSchemaReclassification,
-    PreparedSceneSchemaReclassification, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, SchemaReclassificationWork,
+    AuthoringDocumentReadiness, AuthoringDocumentSource, AuthoringRecordReadiness,
+    AuthoringSchemaBasis, PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
+    PreparedPrefabSchemaReclassification, PreparedSceneSchemaReclassification,
+    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, SchemaReclassificationWork, authoring::AuthoringAdapterReceipt,
 };
 
 fn id(name: &str) -> SceneEntityId {

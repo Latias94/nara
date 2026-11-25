@@ -5,15 +5,15 @@ use std::{
     sync::Arc,
 };
 
+use crate::kernel::{
+    UiActionId, UiAlign, UiBrush, UiColor, UiColorRole, UiDimension, UiEdges, UiFlexDirection,
+    UiJustify, UiOverflow, UiPositionMode, UiStyle, UiTextAlignment, UiTextOverflow,
+};
 use nara_asset::AssetRef;
 use nara_reflect::{ComponentTypeId, ComponentValue};
 use nara_scene::{
     PrefabEntityOrigin, PrefabEntityTarget, SceneComponentRecord, SceneEntityId, SceneEntityRecord,
     ScenePlacement, ScenePlacementParent, ScenePlacementSlot,
-};
-use nara_ui_kernel::{
-    UiActionId, UiAlign, UiBrush, UiColor, UiColorRole, UiDimension, UiEdges, UiFlexDirection,
-    UiJustify, UiOverflow, UiPositionMode, UiStyle, UiTextAlignment, UiTextOverflow,
 };
 use thiserror::Error;
 
@@ -1106,9 +1106,9 @@ fn ascii_suffix(value: &str, maximum: usize) -> &str {
 
 #[cfg(test)]
 mod tests {
+    use crate::kernel::UiLayer;
     use nara_reflect::ComponentSchemaVersion;
     use nara_scene::{PrefabDocument, SceneEntityPlacement, SceneEntityRecord};
-    use nara_ui_kernel::UiLayer;
 
     use super::*;
     use crate::UiRoot;

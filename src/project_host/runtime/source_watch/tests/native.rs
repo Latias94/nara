@@ -3,17 +3,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::fs::RelativePath;
 use nara_app::{
-    PluginDefinition, PluginDefinitionId, PluginPlanError, RuntimeAdmissionReservation,
-    RuntimeCandidateRetirementState, RuntimeClosePolicy, RuntimeGeneration,
-    RuntimeObligationLedger,
+    PluginDefinition, PluginDefinitionId, PluginPlanError, RuntimeCandidateRetirementState,
+    RuntimeClosePolicy, RuntimeGeneration, RuntimeObligationLedger,
 };
-use nara_asset_watch::{AssetWatchEvent, AssetWatchPlugin, AssetWatchQueueSendError};
+use nara_asset::watch::{AssetWatchEvent, AssetWatchPlugin, AssetWatchQueueSendError};
 use nara_ecs::bevy_ecs::{
     error::BevyError,
     prelude::{On, Remove},
 };
-use nara_fs::RelativePath;
 use nara_reflect::AuthoringSchemaBundle;
 use nara_scene::SceneDocument;
 
@@ -40,7 +39,6 @@ fn plugin_build_acquires_no_watcher_and_unbound_startup_refuses() {
     let candidate = plan
         .plugin_plan()
         .instantiate_runtime_candidate(
-            RuntimeAdmissionReservation::try_acquire().unwrap(),
             RuntimeObligationLedger::new(),
             RuntimeClosePolicy::default(),
         )
@@ -97,7 +95,7 @@ fn processed_runtime_plan_rejects_source_watch_before_its_factory_runs() {
         field.key().as_str() == "plugin"
             && matches!(
                 field.value(),
-                nara_diagnostic::DiagnosticValueRef::Identifier(value)
+                nara_core::diagnostic::DiagnosticValueRef::Identifier(value)
                     if value == PROJECT_SCENE_WATCH_PLUGIN_ID.as_str()
             )
     }));
@@ -133,7 +131,7 @@ fn stock_generic_route_conflicts_during_recipe_resolution_before_native_acquisit
         resolve_product_recipe(&project.candidate(), recipe),
         Err(RuntimePlanError::PluginPlan(PluginPlanError::Conflict { plugin, conflict }))
             if plugin == PROJECT_SCENE_WATCH_PLUGIN_ID
-                && conflict == nara_asset_watch::ASSET_WATCH_PLUGIN_ID
+                && conflict == nara_asset::watch::ASSET_WATCH_PLUGIN_ID
     ));
     assert_eq!(factories.load(Ordering::Relaxed), 0);
 }
@@ -148,7 +146,6 @@ fn mismatched_root_refuses_binding_without_starting_native_coverage() {
     let mut candidate = plan
         .plugin_plan()
         .instantiate_runtime_candidate(
-            RuntimeAdmissionReservation::try_acquire().unwrap(),
             RuntimeObligationLedger::new(),
             RuntimeClosePolicy::default(),
         )
@@ -760,7 +757,7 @@ pending_capacity = 4
         let candidate = self.candidate();
         let request = project_runtime_plugins(&candidate)
             .with_recipe(watch_recipe(self.configuration()))
-            .insert_after::<nara_gameplay::GameplayCommandPlugin>(definition);
+            .insert_after::<nara_asset::AssetPlugin>(definition);
         let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
         let loader = Arc::new(ProjectContentLoader::new(self.capability()).unwrap());
         let agreement =
@@ -770,7 +767,7 @@ pending_capacity = 4
             .unwrap();
         let mut host = ProjectHost::new(RuntimeClosePolicy::default());
         let mut attempt = host
-            .begin_project_start(snapshot, plan, candidate, Arc::clone(&loader), Vec::new())
+            .begin_project_start(snapshot, plan, candidate, Arc::clone(&loader))
             .unwrap();
         host.complete_start(&mut attempt).unwrap();
         drop(attempt);

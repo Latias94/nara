@@ -22,7 +22,7 @@ const SLOT_RUNTIME_TIME: PluginSlotId = PluginSlotId::new("nara.plugins.slot.run
 pub(crate) struct ProjectProfilePlugins {
     preset: RuntimePreset,
     capabilities: ProductCapabilitySet,
-    task_config: nara_tasks::TaskPoolConfig,
+    task_config: nara_app::tasks::TaskPoolConfig,
     time_definition: PluginDefinition,
     #[cfg(feature = "desktop-winit")]
     primary_window: Option<nara_window::Window>,
@@ -33,7 +33,7 @@ pub(crate) struct ProjectProfilePlugins {
     ))]
     render_definition: PluginDefinition,
     #[cfg(feature = "runtime-ui")]
-    primary_ui_surface: Option<super::ui_surface::AcceptedPrimaryUiSurfaceProfile>,
+    primary_ui_surface: Option<nara_project::EffectivePrimaryUiSurface>,
 }
 
 impl ProjectProfilePlugins {
@@ -58,10 +58,7 @@ impl ProjectProfilePlugins {
                     .expect("resolved project world canvas extents are positive")
             })),
             #[cfg(feature = "runtime-ui")]
-            primary_ui_surface: settings
-                .ui()
-                .primary_surface
-                .map(super::ui_surface::AcceptedPrimaryUiSurfaceProfile::from_effective),
+            primary_ui_surface: settings.ui().primary_surface,
         }
     }
 }
@@ -70,7 +67,7 @@ impl PluginGroup for ProjectProfilePlugins {
     const ID: PluginGroupId = PluginGroupId::new("nara.plugins.project-runtime");
 
     fn build(self) -> PluginGroupBuilder {
-        let task_plugin = nara_tasks::plugin(self.task_config);
+        let task_plugin = nara_app::tasks::plugin(self.task_config);
         let product_group_includes_minimal = self
             .capabilities
             .contains(nara_project::ProductCapability::Runtime2d)
@@ -123,7 +120,16 @@ impl PluginGroup for ProjectProfilePlugins {
                         SLOT_PROJECT_PRIMARY_UI_SURFACE,
                         super::ui_surface::PROJECT_PRIMARY_UI_SURFACE_PLUGIN_ID,
                     ),
-                    super::ui_surface::project_primary_ui_surface_definition(profile),
+                    super::ui_surface::project_primary_ui_surface_definition(
+                        profile.logical_width,
+                        profile.logical_height,
+                        [
+                            profile.safe_area.left,
+                            profile.safe_area.top,
+                            profile.safe_area.right,
+                            profile.safe_area.bottom,
+                        ],
+                    ),
                 ),
                 None => builder,
             }

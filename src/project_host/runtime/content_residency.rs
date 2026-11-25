@@ -23,11 +23,11 @@ pub(super) use replacement::StagedProjectSceneReplacement;
 use nara_asset::AssetServer;
 #[cfg(feature = "runtime-2d")]
 use nara_asset::{AssetRecord, ProjectAssetDatabase};
-use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
+use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
 #[cfg(feature = "runtime-2d")]
 use nara_ecs::Mut;
+use nara_ecs::identity::SpawnedSceneInstance;
 use nara_ecs::{Resource, World};
-use nara_identity::SpawnedSceneInstance;
 #[cfg(feature = "runtime-2d")]
 use nara_render::tilemap::{PreparedTileSetPublications, TileSetAssets};
 use nara_scene::{
@@ -43,6 +43,7 @@ use super::{HostFault, single_error};
 #[cfg(feature = "runtime-2d")]
 use crate::project_content::ProjectContentSnapshot;
 use crate::{
+    ecs::transaction,
     project_assets::ProjectDomainAssets,
     runtime_content::ProcessedSceneContent,
     startup_scene::{CurrentSceneOwner, current_scene_bindings},
@@ -191,18 +192,15 @@ fn prepare_startup_resources(
         world.register_component::<ProjectAssetDatabase>();
     }
     world.flush();
-    let unsupported = nara_ecs::__private::validate_resource_insertion::<AssetServer>(world)
-        .is_err()
-        || nara_ecs::__private::validate_resource_insertion::<ProjectSceneResidency>(world)
-            .is_err()
-        || nara_ecs::__private::validate_resource_insertion::<ProjectDomainAssets>(world).is_err();
+    let unsupported = transaction::validate_resource_insertion::<AssetServer>(world).is_err()
+        || transaction::validate_resource_insertion::<ProjectSceneResidency>(world).is_err()
+        || transaction::validate_resource_insertion::<ProjectDomainAssets>(world).is_err();
     #[cfg(feature = "runtime-2d")]
     let unsupported = unsupported
         || matches!(content, ResidencyInput::Source(_))
-            && nara_ecs::__private::validate_resource_insertion::<ProjectAssetDatabase>(world)
-                .is_err()
+            && transaction::validate_resource_insertion::<ProjectAssetDatabase>(world).is_err()
         || content.tileset_count() != 0
-            && nara_ecs::__private::validate_resource_scope::<TileSetAssets>(world).is_err();
+            && transaction::validate_resource_scope::<TileSetAssets>(world).is_err();
     if unsupported {
         return Err(lifecycle_unsupported());
     }

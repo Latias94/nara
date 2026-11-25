@@ -1,16 +1,16 @@
-use nara_identity::ReferenceInputId;
-use nara_reflect::__private::component_values_exactly_match;
+use nara_ecs::identity::ReferenceInputId;
+use nara_reflect::schema::component_values_exactly_match;
 
 use super::*;
 use crate::{
-    __private::{
+    PrefabAuthoringSession, PrefabDocumentCandidate, PrefabReferenceArguments, SceneFileEncoding,
+    ScenePatchDocument, ScenePatchOperation,
+    authoring::{
         CapturedPrefabComponentApplySources, PrefabComponentApplyPreparationError,
         PrefabComponentApplyRequest, PrefabComponentApplySource, PrefabComponentApplySourceMut,
         PreparedPrefabComponentApply, bind_prepared_prefab_component_apply,
         capture_prefab_component_apply_sources, try_prepare_prefab_component_apply_with_loader,
     },
-    PrefabAuthoringSession, PrefabDocumentCandidate, PrefabReferenceArguments, SceneFileEncoding,
-    ScenePatchDocument, ScenePatchOperation,
 };
 
 fn prefab_session(

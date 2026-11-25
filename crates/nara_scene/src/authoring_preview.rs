@@ -19,7 +19,6 @@ use crate::{
 };
 
 /// Exact source location omitted from an authoring preview projection.
-#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthoringPreviewOmissionLocation {
     DirectEntityComponent {
@@ -37,7 +36,6 @@ pub enum AuthoringPreviewOmissionLocation {
 }
 
 /// Closed reason one source value was excluded from an authoring preview projection.
-#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthoringPreviewOmissionReason {
     RecordUnavailable(AuthoringRecordReadiness),
@@ -49,7 +47,6 @@ pub enum AuthoringPreviewOmissionReason {
 }
 
 /// Typed fact describing one fail-closed authoring preview omission.
-#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthoringPreviewOmission {
     location: AuthoringPreviewOmissionLocation,
@@ -96,7 +93,7 @@ impl AuthoringPreviewOmission {
     }
 }
 
-#[doc(hidden)]
+/// A projected document and the source records omitted during projection.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuthoringPreviewDocument<Document> {
     document: Document,
@@ -126,18 +123,15 @@ impl<Document> AuthoringPreviewDocument<Document> {
 /// owner/version as Available. Nested Prefab instances and their patches are removed and reported
 /// rather than interpreted. Projection clones source data and consults no runtime registry or
 /// migration path. Authored placements remain declarations; this is not a flat Native input.
-#[doc(hidden)]
 pub type AuthoringScenePreviewDocument = AuthoringPreviewDocument<SceneDocument>;
 
 /// Non-persistent Prefab projection admitted only for installed authoring presentation.
 ///
 /// It applies the same direct-record and nested-override policy as the Scene projection while
 /// retaining Prefab document identity for downstream authoring consumers.
-#[doc(hidden)]
 pub type AuthoringPrefabPreviewDocument = AuthoringPreviewDocument<PrefabDocument>;
 
 /// Failure to derive a preview from a session without published authoring authority.
-#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthoringPreviewProjectionError {
     ClassificationBasisUnavailable,
@@ -156,7 +150,6 @@ impl Display for AuthoringPreviewProjectionError {
 impl Error for AuthoringPreviewProjectionError {}
 
 /// Derives a presentation-only Scene projection without changing published source authority.
-#[doc(hidden)]
 #[must_use]
 pub fn project_published_authoring_scene_preview(
     published: &PublishedAuthoringSceneDocument,
@@ -176,7 +169,6 @@ pub fn project_published_authoring_scene_preview(
 }
 
 /// Derives a presentation-only Scene projection from the current authoring session state.
-#[doc(hidden)]
 pub fn project_authoring_scene_session_preview(
     session: &SceneAuthoringSession,
 ) -> Result<AuthoringScenePreviewDocument, AuthoringPreviewProjectionError> {
@@ -198,7 +190,6 @@ pub fn project_authoring_scene_session_preview(
 }
 
 /// Derives a presentation-only Prefab projection without changing published source authority.
-#[doc(hidden)]
 #[must_use]
 pub fn project_published_authoring_prefab_preview(
     published: &PublishedAuthoringPrefabDocument,
@@ -219,7 +210,6 @@ pub fn project_published_authoring_prefab_preview(
 }
 
 /// Derives a presentation-only Prefab projection from the current authoring session state.
-#[doc(hidden)]
 pub fn project_authoring_prefab_session_preview(
     session: &PrefabAuthoringSession,
 ) -> Result<AuthoringPrefabPreviewDocument, AuthoringPreviewProjectionError> {

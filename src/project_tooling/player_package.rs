@@ -13,12 +13,12 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind},
 };
 
-use nara_core::{ByteLimit, EngineVersion, FormatGenerator, FormatKind, PersistentFileEnvelope};
-use nara_fs::{
+use crate::fs::{
     ContentDigest, DirectoryCapability, DirectoryEnumerationLimits, DirectoryPublicationBeginError,
     DirectoryPublicationOrphan, DirectoryPublicationOutcome, DirectoryPublicationReceipt,
     DirectoryPublicationRejection, FileKind, FsError, FsOperation, RelativeComponent, RelativePath,
 };
+use nara_core::{ByteLimit, EngineVersion, FormatGenerator, FormatKind, PersistentFileEnvelope};
 use serde::Serialize;
 use thiserror::Error;
 

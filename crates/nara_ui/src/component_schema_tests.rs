@@ -415,7 +415,7 @@ fn registered_ui_codecs_decode_frozen_nested_fields_without_changing_source_valu
             .unwrap();
         field.default_value = Some(source.remove_path(&path).unwrap());
         let before = source.clone();
-        let frozen = nara_reflect::__private::freeze_component_defaults(
+        let frozen = nara_reflect::effective::freeze_component_defaults(
             &schema,
             &source,
             &BTreeMap::new(),
@@ -467,7 +467,7 @@ fn semantics_codec_decodes_a_frozen_action_list_suffix() {
     field.default_value = Some(source.remove_path(&path).unwrap());
     let mut schema = registry.schema(&id).unwrap().clone();
     schema.fields.push(field);
-    let frozen = nara_reflect::__private::freeze_component_defaults(
+    let frozen = nara_reflect::effective::freeze_component_defaults(
         &schema,
         &source,
         &BTreeMap::new(),

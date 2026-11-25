@@ -11,11 +11,12 @@ use crate::{
         validate_value_materialization_budget_with_admission,
     },
 };
+use nara_core::source::{AssetSourcePath, SourceDocumentKey, SourceDocumentKind};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_identity::{
-    AssetSourcePath, AuthoredEntityReference, AuthoredReferenceTarget, PersistentRuntimeId,
+use nara_ecs::identity::{
+    AuthoredEntityReference, AuthoredReferenceTarget, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference, PrefabEntityOrigin,
-    PrefabInstanceHop, ReferenceInputId, SceneEntityId, SourceDocumentKey, SourceDocumentKind,
+    PrefabInstanceHop, ReferenceInputId, SceneEntityId,
 };
 
 fn limits(nodes: usize, bytes: usize, depth: usize) -> ComponentValueMaterializationLimits {
@@ -496,7 +497,7 @@ fn selected_contextual_references_and_opaque_native_rejections_use_the_same_view
     });
     let authored = ComponentValue::EntityReference(EntityReference::Authored {
         reference: AuthoredEntityReference::input(
-            nara_identity::ReferenceInputId::new("socket").unwrap(),
+            nara_ecs::identity::ReferenceInputId::new("socket").unwrap(),
         ),
     });
     let schema = schema([field(

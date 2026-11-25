@@ -10,11 +10,11 @@ use nara_asset::{
     AssetPathScope, AssetProductRef, AssetRecord, AssetRef, AssetSourceKind, AssetSourcePath,
     ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
+use nara_core::diagnostic::{DiagnosticReport, DiagnosticValueRef, ReportDiagnostic as Diagnostic};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_diagnostic::{Diagnostic, DiagnosticReport, DiagnosticValueRef};
 use nara_ecs::bevy_ecs::resource::IsResource;
+use nara_ecs::identity::{EntityLookup, EntityReference, WorldIdentityDomain};
 use nara_ecs::{Component, Entity, World};
-use nara_identity::{EntityLookup, EntityReference, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistryBuilder, ComponentSchema, ComponentSchemaCatalog,

@@ -1,7 +1,7 @@
 use std::{cmp::Ordering, collections::BTreeMap, mem::size_of};
 
 use nara_asset::AssetRef;
-use nara_identity::SceneEntityId;
+use nara_ecs::identity::SceneEntityId;
 
 use crate::SourceDocumentKey;
 

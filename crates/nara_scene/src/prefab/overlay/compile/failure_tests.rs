@@ -267,7 +267,7 @@ fn a_different_authoring_admission_is_not_a_repairable_base_change() {
         foreign_basis,
         key("p"),
     );
-    let report = crate::__private::try_compile_authoring_scene_with_loader(
+    let report = crate::authoring::try_compile_authoring_scene_with_loader(
         &document,
         &basis,
         Default::default(),

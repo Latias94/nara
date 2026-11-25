@@ -3,11 +3,12 @@ use nara_ecs::Component;
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind, Reflect,
-    bevy_reflect,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Component, Reflect)]
+use crate::spatial::Visibility;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Component)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Name(pub String);
 
@@ -21,14 +22,6 @@ impl Name {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Component, Reflect)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Visibility {
-    #[default]
-    Visible,
-    Hidden,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -118,18 +111,20 @@ fn register_name_component(
 fn register_visibility_component(
     registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
-    registry.register_persistent_component_with_codec::<Visibility, _, _>(
+    registry.register_persistent_component_with_required_components::<Visibility, _, _>(
         visibility_schema(),
         |value| match value.as_str() {
+            Some("inherited") => Ok(Visibility::Inherited),
             Some("visible") => Ok(Visibility::Visible),
             Some("hidden") => Ok(Visibility::Hidden),
             _ => Err(ComponentCodecError::invalid_field(
                 "Visibility",
-                "'visible' or 'hidden'",
+                "'inherited', 'visible', or 'hidden'",
             )),
         },
         |visibility| {
             Ok(ComponentValue::String(match visibility {
+                Visibility::Inherited => "inherited".to_string(),
                 Visibility::Visible => "visible".to_string(),
                 Visibility::Hidden => "hidden".to_string(),
             }))
@@ -231,6 +226,10 @@ mod tests {
         }
         assert_eq!(world.get::<Name>(entity), Some(&Name::new("Entity")));
         assert_eq!(world.get::<Visibility>(entity), Some(&Visibility::Visible));
-        nara_reflect::__private::resolve_schema_provider(SCENE_COMPONENTS_SCHEMA_PROVIDER).unwrap();
+        assert_eq!(
+            world.get::<crate::spatial::InheritedVisibility>(entity),
+            Some(&crate::spatial::InheritedVisibility::VISIBLE)
+        );
+        SCENE_COMPONENTS_SCHEMA_PROVIDER.resolve().unwrap();
     }
 }

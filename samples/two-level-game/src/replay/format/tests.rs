@@ -1,19 +1,16 @@
 use nara::{
     app::{App, CoreStage, FixedTime, RuntimeInstance},
     ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs},
-    gameplay::{
-        GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,
-        GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandSet,
-        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
-        GameplayCommandTick, GameplayCommandValue,
-    },
     identity::SceneEntityId,
 };
 use serde_json::json;
 
 use super::*;
 use crate::{
-    gameplay::commands,
+    command::{
+        CommandSchedule, CommandSequence, CommandTick, GameCommand, ServerCommand,
+        acknowledge_commands, prepare_commands,
+    },
     levels::{LevelId, LevelKey},
     resume::{RuntimeCatchUpPolicy, decode_resume},
     save::CheckpointLocation,
@@ -63,11 +60,11 @@ fn stamp(level: LevelId) -> LevelContentStamp {
     }
 }
 
-fn key(tick: u64, sequence: u64) -> GameplayCommandKey {
-    GameplayCommandKey::new(
-        GameplayCommandTick::new(tick).unwrap(),
-        GameplayCommandSource::external(RECORDING_SOURCE).unwrap(),
-        GameplayCommandSourceSequence::new(sequence).unwrap(),
+fn key(tick: u64, sequence: u64) -> CommandKey {
+    CommandKey::new(
+        CommandTick::new(tick).unwrap(),
+        CommandSource::external(RECORDING_SOURCE).unwrap(),
+        CommandSequence::new(sequence).unwrap(),
     )
 }
 
@@ -103,32 +100,34 @@ fn recording() -> GameRecording {
 }
 
 #[derive(Default, Resource)]
-struct Captured(Vec<GameplayCommandEnvelope>);
+struct Captured(Vec<ScheduledCommand>);
 
-fn capture_commands(batch: Res<GameplayCommandBatch>, mut captured: ResMut<Captured>) {
-    captured.0.extend_from_slice(batch.commands());
+fn capture_commands(schedule: Res<CommandSchedule>, mut captured: ResMut<Captured>) {
+    captured.0.extend_from_slice(schedule.current());
 }
 
-fn capture(drafts: Vec<GameplayCommandDraft>) -> Vec<GameplayCommandEnvelope> {
+fn capture(commands: impl IntoIterator<Item = GameCommand>) -> Vec<ScheduledCommand> {
     let mut app = App::new();
-    app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+    app.init_resource::<CommandSchedule>().unwrap();
     app.init_resource::<Captured>().unwrap();
     app.add_systems(
         CoreStage::FixedUpdate,
-        capture_commands.in_set(GameplayCommandSet::Capture),
+        (prepare_commands, capture_commands, acknowledge_commands).chain(),
     )
     .unwrap();
-    for (index, draft) in drafts.into_iter().enumerate() {
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<GameplayCommandQueue>()
-            .submit(GameplayCommandSubmission::new(
-                GameplayCommandTick::new(1).unwrap(),
-                GameplayCommandIngressSource::external(RECORDING_SOURCE).unwrap(),
-                GameplayCommandSourceSequence::new(index as u64 + 1).unwrap(),
-                draft,
-            ))
-            .unwrap();
+    {
+        let mut schedule = app.world_mut().unwrap().resource_mut::<CommandSchedule>();
+        for (index, command) in commands.into_iter().enumerate() {
+            let key = key(1, index as u64 + 1);
+            schedule
+                .schedule(ScheduledCommand::new(
+                    key.tick(),
+                    key.source().clone(),
+                    key.source_sequence(),
+                    command,
+                ))
+                .unwrap();
+        }
     }
     let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
@@ -152,61 +151,67 @@ fn shared_semantics_preserve_protocol_wire_and_actual_capture_keys() {
         (SemanticCommand::Instance, json!({"operation": "instance"})),
         (SemanticCommand::Retry, json!({"operation": "retry"})),
     ];
-    let captured = capture(
-        commands
-            .iter()
-            .map(|(command, _)| command.draft())
-            .collect(),
-    );
+    let captured = capture(commands.iter().map(|(command, _)| command.intent()));
     assert_eq!(captured.len(), commands.len());
-    for ((command, wire), envelope) in commands.iter().zip(&captured) {
+    for (index, ((command, wire), scheduled)) in commands.iter().zip(&captured).enumerate() {
         assert_eq!(serde_json::to_value(command).unwrap(), *wire);
         assert_eq!(
             serde_json::from_value::<SemanticCommand>(wire.clone()).unwrap(),
             *command,
         );
-        let recorded = RecordedCommand::from_envelope(envelope).unwrap();
+        let recorded = RecordedCommand::from_scheduled(scheduled).unwrap();
         assert_eq!(recorded.command, *command);
-        assert_eq!(&recorded.original, envelope.key());
-        assert_eq!(recorded.command.draft(), *envelope.command());
+        assert_eq!(recorded.original, key(1, index as u64 + 1));
+        assert_eq!(&recorded.original, scheduled.key());
     }
 }
 
 #[test]
-fn capture_refuses_targets_unknown_actions_and_unrepresented_or_mistyped_payloads() {
-    let mut extra = commands::movement(0, true).payload().clone();
-    extra
-        .insert("extra", GameplayCommandValue::Bool(false))
-        .unwrap();
-    let mut negative = commands::movement(0, true).payload().clone();
-    negative
-        .insert("direction", GameplayCommandValue::I64(-1))
-        .unwrap();
-    let mut mistyped = commands::movement(0, true).payload().clone();
-    mistyped
-        .insert("pressed", GameplayCommandValue::I64(1))
-        .unwrap();
-    let invalid = vec![
-        commands::action(commands::SAVE),
-        commands::action(commands::RESTORE),
-        commands::action(commands::PLAYER_LAUNCH),
-        commands::action("two-level-game.unknown"),
-        commands::action(commands::MOVE),
-        commands::movement(4, true),
-        commands::movement(0, true).with_payload(extra.clone()),
-        commands::movement(0, true).with_payload(negative),
-        commands::movement(0, true).with_payload(mistyped),
-        commands::action(commands::MARKER).with_payload(extra),
-        commands::action(commands::RETRY)
-            .with_target(GameplayCommandTarget::named("player").unwrap()),
+fn capture_refuses_unsupported_operations_and_non_recording_sources() {
+    let invalid = [
+        GameCommand::Player(ServerCommand::Save),
+        GameCommand::Player(ServerCommand::Restore),
+        GameCommand::Launch(crate::RunOptions::default()),
+        SemanticCommand::Move {
+            direction: 4,
+            pressed: true,
+        }
+        .intent(),
     ];
     let count = invalid.len();
     let captured = capture(invalid);
     assert_eq!(captured.len(), count);
-    for envelope in captured {
+    for scheduled in captured {
         assert!(
-            RecordedCommand::from_envelope(&envelope).is_err(),
-            "accepted unsupported Capture envelope: {envelope:?}",
+            RecordedCommand::from_scheduled(&scheduled).is_err(),
+            "accepted unsupported command: {scheduled:?}",
+        );
+    }
+    let foreign = ScheduledCommand::new(
+        CommandTick::MIN,
+        CommandSource::external("two-level-game.foreign").unwrap(),
+        CommandSequence::MIN,
+        SemanticCommand::Marker.intent(),
+    );
+    assert!(RecordedCommand::from_scheduled(&foreign).is_err());
+}
+
+#[test]
+fn program_decoder_refuses_malformed_semantic_operations() {
+    for invalid in [
+        json!({"operation": "unknown"}),
+        json!({"operation": "move", "pressed": true}),
+        json!({"operation": "move", "direction": -1, "pressed": true}),
+        json!({"operation": "move", "direction": 4, "pressed": true}),
+        json!({"operation": "move", "direction": 0, "pressed": 1}),
+        json!({"operation": "move", "direction": 0, "pressed": true, "extra": false}),
+        json!({"operation": "marker", "extra": false}),
+        json!({"operation": "retry", "target": "player"}),
+    ] {
+        let program = json!({"format": 1, "steps": [[invalid]]});
+        assert!(
+            decode_program(&serde_json::to_vec(&program).unwrap()).is_err(),
+            "{program}"
         );
     }
 }

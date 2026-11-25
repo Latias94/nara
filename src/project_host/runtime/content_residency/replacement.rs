@@ -31,7 +31,7 @@ impl StagedProjectSceneReplacement {
     where
         F: FnOnce(&mut SceneProductOverlayWriter<'_>),
     {
-        nara_hierarchy::__private::prepare_mutation_baseline(world);
+        nara_scene::hierarchy::prepare_mutation_baseline(world);
         let component_bindings = current_scene_bindings(world, expected)?;
         validate_resources(
             world,
@@ -263,9 +263,10 @@ fn scene_retirements<'a>(
     if !current.has_addition() {
         return Ok(Cow::Borrowed(product));
     }
-    let additions = current.additions.active.iter().filter(|addition| {
-        !nara_scene::__private::scene_instance_retired(world, &addition.receipt)
-    });
+    let additions =
+        current.additions.active.iter().filter(|addition| {
+            !nara_scene::advanced::scene_instance_retired(world, &addition.receipt)
+        });
     let entries = product.len().saturating_add(additions.clone().count());
     if entries
         > limits
@@ -297,10 +298,9 @@ fn validate_resources(
     {
         return Err(resources_missing());
     }
-    let unsupported = nara_ecs::__private::validate_resource_scope::<ProjectSceneResidency>(world)
-        .is_err()
-        || nara_ecs::__private::validate_resource_scope::<ProjectDomainAssets>(world).is_err()
-        || nara_ecs::__private::validate_resource_scope::<CurrentSceneOwner>(world).is_err();
+    let unsupported = transaction::validate_resource_scope::<ProjectSceneResidency>(world).is_err()
+        || transaction::validate_resource_scope::<ProjectDomainAssets>(world).is_err()
+        || transaction::validate_resource_scope::<CurrentSceneOwner>(world).is_err();
     #[cfg(feature = "runtime-2d")]
     let unsupported = {
         let source = matches!(content, ResidencyInput::Source(_));
@@ -315,10 +315,9 @@ fn validate_resources(
         let uses_tilesets = content.tileset_count() != 0 || current.tileset_count() != 0;
         unsupported
             || source
-                && nara_ecs::__private::validate_resource_scope::<ProjectAssetDatabase>(world)
-                    .is_err()
+                && transaction::validate_resource_scope::<ProjectAssetDatabase>(world).is_err()
             || uses_tilesets
-                && nara_ecs::__private::validate_resource_scope::<TileSetAssets>(world).is_err()
+                && transaction::validate_resource_scope::<TileSetAssets>(world).is_err()
     };
     if unsupported {
         return Err(lifecycle_unsupported());

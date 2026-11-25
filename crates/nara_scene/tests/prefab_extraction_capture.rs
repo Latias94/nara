@@ -6,7 +6,7 @@ use std::{collections::BTreeSet, convert::Infallible, mem::size_of, sync::Arc};
 
 use nara_asset::{AssetRecord, AssetRef, AssetSourceKind, AssetSourcePath};
 use nara_core::{ByteLimit, ItemLimit};
-use nara_identity::{AuthoredReferenceTarget, EntityReference, ReferenceInputId};
+use nara_ecs::identity::{AuthoredReferenceTarget, EntityReference, ReferenceInputId};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
@@ -14,13 +14,6 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::{
-        AuthoringAdapterReceipt, AuthoringSceneCompilationOmissionReason, CapturedExtractionSource,
-        PrefabExtractionBinding, PrefabExtractionDestination, PrefabExtractionEnvironment,
-        PrefabExtractionFailure, PrefabExtractionRequest, PrefabExtractionWork,
-        PrefabSourceExtractionInput, PreparedPrefabExtraction, SceneSourceExtractionInput,
-        try_compile_authoring_scene_with_loader,
-    },
     AuthoringDocumentSource, AuthoringSchemaBasis, ExpandedSceneDocument, ExpandedSceneEntity,
     PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget,
     PrefabInstance, PrefabInstanceBinding, ResolvedPrefabSource, SceneAuthoringSession,
@@ -28,6 +21,13 @@ use nara_scene::{
     SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId,
     SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
     ScenePatchReport, ScenePlacement, ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
+    authoring::{
+        AuthoringAdapterReceipt, AuthoringSceneCompilationOmissionReason, CapturedExtractionSource,
+        PrefabExtractionBinding, PrefabExtractionDestination, PrefabExtractionEnvironment,
+        PrefabExtractionFailure, PrefabExtractionRequest, PrefabExtractionWork,
+        PrefabSourceExtractionInput, PreparedPrefabExtraction, SceneSourceExtractionInput,
+        try_compile_authoring_scene_with_loader,
+    },
 };
 
 fn id(value: &str) -> SceneEntityId {

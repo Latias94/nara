@@ -8,15 +8,16 @@ use nara_app::{
     AppExit, AppRunError, RuntimeCloseCause, RuntimeCloseEvidence, RuntimeFault, RuntimeFaultKind,
     RuntimeState,
 };
-use nara_diagnostic::DiagnosticReport;
-use nara_winit::{WinitControlFlow, WinitEventLoop, WinitRunProgress, WinitRunner, WinitSession};
+use nara_core::diagnostic::DiagnosticReport;
+use nara_window::winit::{
+    WinitControlFlow, WinitEventLoop, WinitRunProgress, WinitRunner, WinitSession,
+};
 
 mod control;
 mod poll;
-mod presentation;
 mod startup;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-pub(super) mod verification;
+pub(crate) mod verification;
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use super::runtime_diagnostics::cleanup_incomplete_report;
@@ -30,16 +31,16 @@ use super::{
     StartupContentClosureReceipt,
     runtime::{DesktopRunInputs, DesktopRuntimeContext, ProjectHost},
 };
-pub use control::DesktopControlError;
-pub(super) use poll::DesktopDriveMode;
-pub use poll::DesktopRunProgress;
-pub use presentation::{
+pub use crate::desktop_presentation::{
     DesktopPresentationControl, DesktopPresentationObservation, DesktopTelemetrySealOutcome,
     DesktopTelemetrySealReport,
 };
-use presentation::{
+use crate::desktop_presentation::{
     DesktopPresentationDriver, DesktopPresentationOptions, DesktopPresentationReports,
 };
+pub use control::DesktopControlError;
+pub(super) use poll::DesktopDriveMode;
+pub use poll::DesktopRunProgress;
 pub(in crate::project_host) use startup::{DesktopStartupObservation, StartupTimer};
 pub use startup::{DesktopStartupPhase, DesktopStartupTimings};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
@@ -391,7 +392,7 @@ impl DesktopRun {
             reports.clone(),
         );
         // This consumes the one published Runtime. Its publication slot is never refilled.
-        let mut session = execution.runner.__start_with_presentation_on(
+        let mut session = execution.runner.start_with_presentation_on(
             runtime,
             Box::new(driver),
             execution.native_retirement_budget,
@@ -576,7 +577,7 @@ impl DesktopRun {
     }
 
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-    pub(crate) fn incomplete_cleanup_diagnostics(&self) -> DiagnosticReport {
+    pub(super) fn report_after_cleanup_deadline(&self) -> DesktopRunReport {
         let mut diagnostics = DiagnosticReport::default();
         self.append_startup_cleanup_diagnostics(&mut diagnostics);
         if let DesktopRunState::Native(native) = &self.state {
@@ -590,7 +591,9 @@ impl DesktopRun {
                 "Desktop native retirement remains incomplete and retains its original session",
             ));
         }
-        diagnostics
+        let mut report = self.report();
+        report.diagnostics.extend(diagnostics);
+        report
     }
 
     fn report(&self) -> DesktopRunReport {

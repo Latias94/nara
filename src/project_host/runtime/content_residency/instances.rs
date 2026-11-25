@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use nara_asset::{AssetProductRef, ImportedProductId};
 use nara_ecs::World;
-use nara_identity::{SpawnedSceneInstance, WorldIdentityDomain};
+use nara_ecs::identity::{SpawnedSceneInstance, WorldIdentityDomain};
 #[cfg(feature = "runtime-2d")]
 use nara_scene::CompiledSceneCandidate;
 use nara_scene::{
@@ -57,7 +57,7 @@ pub fn instantiate_current_scene_dependency(
     product: AssetProductRef,
     occurrence: &SceneOccurrenceKey,
 ) -> SceneSpawnReport {
-    nara_hierarchy::__private::prepare_mutation_baseline(world);
+    nara_scene::hierarchy::prepare_mutation_baseline(world);
     let bindings = match current_scene_bindings(world, expected) {
         Ok(bindings) => bindings,
         Err(report) => return report,

@@ -7,7 +7,7 @@ use std::{
 };
 
 use guillotiere::{AtlasAllocator, size2};
-use nara_text::{GlyphRaster, GlyphRasterKey, TextEngine};
+use nara_ui::text::{GlyphRaster, GlyphRasterKey, TextEngine};
 use thiserror::Error;
 
 use crate::hud::{UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot, UiPresentationLimits};

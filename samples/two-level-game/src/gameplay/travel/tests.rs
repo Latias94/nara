@@ -8,15 +8,16 @@ use std::{
 use nara::{
     app::{FixedTime, PluginCategory, PluginDeclaration, PluginId},
     ecs::schedule::IntoScheduleConfigs,
-    gameplay::{
-        GameplayCommandIngressSource, GameplayCommandSet, GameplayCommandSourceSequence,
-        GameplayCommandSubmission, GameplayCommandTick,
-    },
     prelude::{App, CoreStage, Plugin, PluginError, Res, ResMut, Resource},
     project_host::{HeadlessRun, HeadlessRunOutcome},
 };
 
-use crate::gameplay::{GameSnapshot, Session};
+use crate::{
+    command::{
+        CommandSequence, CommandSet, CommandSource, CommandTick, ScheduledCommand, with_test_script,
+    },
+    gameplay::{GameSnapshot, Session, commands::movement},
+};
 
 #[derive(Resource, Clone, Default)]
 struct ObservedInput(Vec<(u64, bool, f32)>);
@@ -36,12 +37,9 @@ impl Plugin for PreparationInputProbe {
         app.insert_resource(ObservedInput::default())?
             .add_systems(
                 CoreStage::FixedUpdate,
-                preparation_phase.before(GameplayCommandSet::Consume),
+                preparation_phase.before(CommandSet::Consume),
             )?
-            .add_systems(
-                CoreStage::FixedUpdate,
-                observe.after(GameplayCommandSet::Capture),
-            )?;
+            .add_systems(CoreStage::FixedUpdate, observe.after(CommandSet::Capture))?;
         Ok(())
     }
 }
@@ -82,22 +80,22 @@ fn ignored_press_during_preparation_does_not_move_until_release_and_a_fresh_pres
         .into_iter()
         .enumerate()
         .map(|(index, (tick, direction, pressed))| {
-            GameplayCommandSubmission::new(
-                GameplayCommandTick::new(tick).unwrap(),
-                GameplayCommandIngressSource::external("two-level-game.preparation-input").unwrap(),
-                GameplayCommandSourceSequence::new(index as u64 + 1).unwrap(),
-                super::movement(direction, pressed),
+            ScheduledCommand::new(
+                CommandTick::new(tick).unwrap(),
+                CommandSource::external("two-level-game.preparation-input").unwrap(),
+                CommandSequence::new(index as u64 + 1).unwrap(),
+                movement(direction, pressed),
             )
         })
         .collect();
     let recipe = crate::product_recipe()
         .add_plugin::<PreparationInputProbe>()
         .unwrap();
+    let recipe = with_test_script(recipe, commands).unwrap();
     let mut run = HeadlessRun::<ObservedInput>::from_recipe(
         crate::open_project_root().unwrap(),
         recipe,
         NonZeroU32::new(6).unwrap(),
-        commands,
     );
     let deadline = Instant::now() + Duration::from_secs(10);
     let observed = loop {

@@ -200,7 +200,7 @@ fn core_host_reads_v1_startup_input_metadata_but_refuses_to_open_the_pack() {
         drop(pack);
         let file = open_explicit_product_project_root(&root)
             .unwrap()
-            .open_file(&nara_fs::RelativePath::new("content.pack").unwrap())
+            .open_file(&crate::fs::RelativePath::new("content.pack").unwrap())
             .unwrap();
         let expected = RuntimeContentExpectation::new(
             ContentDigest::of_bytes(&encoded),

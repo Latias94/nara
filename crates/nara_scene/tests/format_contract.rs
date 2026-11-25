@@ -4,8 +4,8 @@
 mod prefab_source;
 
 use nara_asset::AssetRef;
+use nara_core::diagnostic::{DiagnosticReport, DiagnosticValueRef, ReportDiagnostic as Diagnostic};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit, SerdeShapeLimits};
-use nara_diagnostic::{Diagnostic, DiagnosticReport, DiagnosticValueRef};
 use nara_ecs::Component;
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
@@ -2130,7 +2130,7 @@ fn assert_patch_migration_shape_rejected(
 fn assert_shape_budget_error(
     case: &str,
     expected_code: &str,
-    diagnostics: &nara_diagnostic::DiagnosticReport,
+    diagnostics: &nara_core::diagnostic::DiagnosticReport,
 ) {
     assert!(
         diagnostics

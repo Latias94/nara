@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use nara_fs::{DirectoryCapability, FsError, FsOperation, RelativeComponent, RelativePath};
+use crate::fs::{DirectoryCapability, FsError, FsOperation, RelativeComponent, RelativePath};
 
 use super::super::starter::{
     ProjectCreationPlan, ProjectDirectory, ProjectMember, ProjectMemberPlan,

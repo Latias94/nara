@@ -289,8 +289,8 @@ fn required_field_upgrade_preserves_and_revalidates_unrelated_hidden_contextual_
     let document = |next| {
         let mut record = record(next).with_contextual_default(
             ComponentFieldId::new("peer"),
-            ComponentValue::EntityReference(nara_identity::EntityReference::Authored {
-                reference: nara_identity::AuthoredEntityReference::source(id("hidden_target")),
+            ComponentValue::EntityReference(nara_ecs::identity::EntityReference::Authored {
+                reference: nara_ecs::identity::AuthoredEntityReference::source(id("hidden_target")),
             }),
         );
         record

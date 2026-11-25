@@ -28,7 +28,11 @@ fn executable_owners_are_bound_to_their_construction_thread() {
         static_assertions::assert_not_impl_any!(nara::winit::WinitSession: Send, Sync);
         static_assertions::assert_not_impl_any!(nara::winit::WinitRetiredSession: Send, Sync);
     }
-    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+    #[cfg(all(
+        feature = "project-runtime",
+        feature = "desktop-winit",
+        feature = "render-wgpu"
+    ))]
     static_assertions::assert_not_impl_any!(nara::project_host::DesktopRun: Send, Sync);
 }
 
@@ -79,7 +83,7 @@ fn runtime_core_keeps_its_dependency_direction() {
 fn managed_runtime_returns_the_driver_scope_output() {
     let mut runtime = RuntimeInstance::start(App::new()).unwrap();
     let marker = runtime
-        .with_driver_scope(|_| 17_u32)
+        .with_driver_scope(|scope| scope.with_world_mut(|_| 17_u32))
         .map(|outcome| {
             assert!(outcome.post_operation_fault.is_none());
             outcome.output
@@ -108,7 +112,11 @@ fn platform_runner_consumes_the_managed_runtime_contract() {
         nara::winit::WinitSession::into_retired;
 }
 
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[cfg(all(
+    feature = "project-runtime",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
 #[test]
 fn desktop_action_consumes_an_existing_runtime_with_its_native_owner() {
     let _: fn(

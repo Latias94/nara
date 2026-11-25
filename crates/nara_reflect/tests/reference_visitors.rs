@@ -1,7 +1,7 @@
 use nara_asset::AssetRef;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_identity::{EntityReference, SceneEntityId};
-use nara_reflect::__private::plan_declared_entity_references;
+use nara_ecs::identity::{EntityReference, SceneEntityId};
+use nara_reflect::entity_reference::plan_declared_entity_references;
 use nara_reflect::{
     AssetReferenceDemand, ComponentCapability, ComponentEntityReferenceRewriteError,
     ComponentFieldId, ComponentFieldPath, ComponentFieldPathSegment, ComponentFieldSchema,

@@ -850,8 +850,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             nara_reflect::ComponentRegistryPlugin,
-            nara_hierarchy::HierarchyPlugin,
-            nara_transform::TransformPlugin,
+            nara_scene::spatial::SpatialPlugin,
             crate::RenderComponentsPlugin,
             crate::RenderPlugin::default(),
             WgpuCapturePlugin,

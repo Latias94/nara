@@ -373,11 +373,11 @@ pub(crate) fn prefab_retained_bytes(
 }
 
 pub(crate) fn reference_inputs_retained_bytes(
-    inputs: &std::collections::BTreeSet<nara_identity::ReferenceInputId>,
+    inputs: &std::collections::BTreeSet<nara_ecs::identity::ReferenceInputId>,
 ) -> Result<usize, SceneRetentionOverflow> {
     let mut total = checked_product(
         inputs.len(),
-        size_of::<nara_identity::ReferenceInputId>() + BTREE_ENTRY_OVERHEAD,
+        size_of::<nara_ecs::identity::ReferenceInputId>() + BTREE_ENTRY_OVERHEAD,
     )?;
     for input in inputs {
         checked_add_to(&mut total, string_retained_bytes(input.as_str())?)?;
@@ -878,7 +878,7 @@ mod tests {
 
     #[test]
     fn retention_charges_hidden_contextual_defaults_in_every_record_carrier() {
-        use nara_identity::{AuthoredEntityReference, EntityReference, ReferenceInputId};
+        use nara_ecs::identity::{AuthoredEntityReference, EntityReference, ReferenceInputId};
         use nara_reflect::{
             ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
         };
@@ -942,7 +942,7 @@ mod tests {
 
     #[test]
     fn retention_charges_argument_base_and_complete_routes_in_nested_declarations() {
-        use nara_identity::{
+        use nara_ecs::identity::{
             AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, PrefabEntityOrigin,
             PrefabInstanceHop, ReferenceInputId,
         };
@@ -1018,7 +1018,7 @@ mod tests {
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     #[test]
     fn prefab_retention_charges_unused_input_declarations() {
-        use nara_identity::ReferenceInputId;
+        use nara_ecs::identity::ReferenceInputId;
 
         let mut document = PrefabDocument::default();
         let empty = prefab_retained_bytes(&document).unwrap();

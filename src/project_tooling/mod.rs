@@ -1,6 +1,6 @@
 //! Native adapters for tools hosted by a compiled project's existing headless executable.
 //!
-//! The generic CLI discovers and builds that executable. Strict content admission, export build
+//! The native adapter discovers and builds that executable. Strict content admission, export build
 //! agreement, and publication stay in the project process with its own typed product recipe.
 
 use std::{
@@ -301,26 +301,17 @@ fn execute(
                 export::ExportCommandOutcome::Accepted {
                     receipt,
                     acceptance,
-                } => {
-                    export::record_acceptance_observation(&receipt, &acceptance).map_err(|_| {
-                        ToolError::operation(
-                            ProjectToolFailureStage::Acceptance,
-                            "project.tool.export-observation-failed",
-                            "The candidate was published but its acceptance observation failed",
-                        )
-                    })?;
-                    Ok(ProjectToolSummary::Exported {
-                        content_members: receipt
-                            .plan()
-                            .members()
-                            .iter()
-                            .filter(|member| {
-                                matches!(member.kind(), ProjectExportMemberKind::Content(_))
-                            })
-                            .count(),
-                        product_observations: acceptance.products().len(),
-                    })
-                }
+                } => Ok(ProjectToolSummary::Exported {
+                    content_members: receipt
+                        .plan()
+                        .members()
+                        .iter()
+                        .filter(|member| {
+                            matches!(member.kind(), ProjectExportMemberKind::Content(_))
+                        })
+                        .count(),
+                    product_observations: acceptance.products().len(),
+                }),
                 export::ExportCommandOutcome::Rejected(rejection) => {
                     Err(ToolError::ExportRejected(Box::new(rejection)))
                 }

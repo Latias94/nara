@@ -4,6 +4,7 @@ use std::{path::Path, process::Command};
 
 use thiserror::Error;
 
+use crate::fs::RelativePath;
 use crate::project_tooling::{
     cargo_build::{
         CargoBuildFailure, CargoBuildLimits, CargoBuildRequest, CargoBuildTools, bounded_output,
@@ -13,12 +14,10 @@ use crate::project_tooling::{
     project_cook::{ProjectCookError, project_rust_input_inventory},
 };
 use crate::project_workflow::{
-    __private::{ProjectExportBuildPreparation, ProjectExportCargoArtifact},
-    ProjectExportBinaryTarget, ProjectExportBuildError, ProjectExportBuildReceipt,
-    StartupContentClosureReceipt,
+    ProjectExportBinaryTarget, ProjectExportBuildError, ProjectExportBuildPreparation,
+    ProjectExportBuildReceipt, ProjectExportCargoArtifact, StartupContentClosureReceipt,
     cargo::{CargoBuildSelection, CargoMetadataFacts},
 };
-use nara_fs::RelativePath;
 
 use super::acceptance::{self, ExportAcceptanceError};
 

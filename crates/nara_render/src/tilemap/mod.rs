@@ -1187,8 +1187,8 @@ mod tests {
         ProjectAssetDatabase, StableAssetId,
     };
     use nara_reflect::{
-        __private::freeze_component_defaults, ComponentDecodeContext, ComponentRegistrySnapshot,
-        ComponentValueMaterializationLimits,
+        ComponentDecodeContext, ComponentRegistrySnapshot, ComponentValueMaterializationLimits,
+        effective::freeze_component_defaults,
     };
 
     fn frozen_tilemap_registry() -> ComponentRegistrySnapshot {

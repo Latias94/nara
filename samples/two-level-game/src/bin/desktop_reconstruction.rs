@@ -28,12 +28,6 @@ use nara::{
     app::{
         AppExit, FixedTime, FrameExecutionStart, RuntimeControl, RuntimeControlStatus, RuntimeState,
     },
-    gameplay::{
-        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandPayload,
-        GameplayCommandQueue, GameplayCommandQueueStats, GameplayCommandSourceSequence,
-        GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
-        GameplayCommandValue,
-    },
     input::{
         ActionOutcomes, ActionPhase, ButtonDriverInput, InputSeatId, KeyCode, KeyboardHold,
         SemanticActions,
@@ -52,6 +46,10 @@ use two_level_game::{
     GamePhase, GameResumeError, GameSnapshot,
     animation::ExplorerFrame,
     capture_desktop_resume,
+    command::{
+        CommandSchedule, CommandSequence, CommandSource, CommandStats, CommandTick, GameCommand,
+        ScheduledCommand, SemanticCommand,
+    },
     levels::{LevelId, LevelKey},
     movement_keyboard_bindings, restore_desktop_resume,
     resume::{ResumeState, RuntimeTimeState, encode_resume},
@@ -295,28 +293,28 @@ impl Game {
 
         let animation = self.animation_samples()?;
         self.walk_to_score(10)?;
-        self.step(Some(movement(false)?))?;
+        self.step(Some(movement(false)))?;
         let meadow_marker = self.snapshot()?.player.to_array();
-        self.step(Some(simple("two-level-game.marker")?))?;
-        self.step(Some(simple("two-level-game.travel")?))?;
+        self.step(Some(SemanticCommand::Marker.intent()))?;
+        self.step(Some(SemanticCommand::Travel.intent()))?;
         assert_eq!(
             self.snapshot()?.level,
             Some(LevelKey::main(LevelId::Cavern))
         );
         self.walk_to_score(20)?;
-        self.step(Some(movement(false)?))?;
+        self.step(Some(movement(false)))?;
         let cavern_marker = self.snapshot()?.player.to_array();
-        self.step(Some(simple("two-level-game.marker")?))?;
-        self.step(Some(simple("two-level-game.instance")?))?;
+        self.step(Some(SemanticCommand::Marker.intent()))?;
+        self.step(Some(SemanticCommand::Instance.intent()))?;
         assert_eq!(
             self.snapshot()?.level,
             Some(LevelKey::new(LevelId::Cavern, 1).unwrap())
         );
         self.walk_to_score(30)?;
-        self.step(Some(movement(false)?))?;
+        self.step(Some(movement(false)))?;
         let instance_marker = self.snapshot()?.player.to_array();
-        self.step(Some(simple("two-level-game.marker")?))?;
-        self.step(Some(movement(true)?))?;
+        self.step(Some(SemanticCommand::Marker.intent()))?;
+        self.step(Some(movement(true)))?;
         for _ in 0..12 {
             self.step(None)?;
         }
@@ -732,7 +730,7 @@ impl Game {
     }
 
     fn walk_to_score(&mut self, score: u32) -> Result<(), String> {
-        self.step(Some(movement(true)?))?;
+        self.step(Some(movement(true)))?;
         for _ in 0..100 {
             let snapshot = self.snapshot()?;
             if snapshot.score == score {
@@ -756,9 +754,9 @@ impl Game {
             .map_err(|error| error.to_string())
     }
 
-    fn command_stats(&self) -> Result<GameplayCommandQueueStats, String> {
+    fn command_stats(&self) -> Result<CommandStats, String> {
         self.run
-            .capture(|world| world.resource::<GameplayCommandQueue>().stats())
+            .capture(|world| world.resource::<CommandSchedule>().stats())
             .map_err(|error| error.to_string())
     }
 
@@ -810,19 +808,18 @@ impl Game {
         }
     }
 
-    fn step(&mut self, command: Option<GameplayCommandDraft>) -> Result<(), String> {
+    fn step(&mut self, command: Option<GameCommand>) -> Result<(), String> {
         let tick = self.engine_tick()?;
         if let Some(command) = command {
             self.sequence += 1;
-            self.run
-                .submit(GameplayCommandSubmission::new(
-                    GameplayCommandTick::new(tick + 1).unwrap(),
-                    GameplayCommandIngressSource::external("two-level-game.desktop-reconstruction")
-                        .unwrap(),
-                    GameplayCommandSourceSequence::new(self.sequence).unwrap(),
-                    command,
-                ))
-                .map_err(|error| error.to_string())?;
+            ScheduledCommand::new(
+                CommandTick::new(tick + 1).unwrap(),
+                CommandSource::external("two-level-game.desktop-reconstruction").unwrap(),
+                CommandSequence::new(self.sequence).unwrap(),
+                command,
+            )
+            .submit_desktop(&mut self.run)
+            .map_err(|error| error.to_string())?;
         }
         let ticket = self
             .run
@@ -855,12 +852,7 @@ impl Game {
                 );
                 Ok(event_loop)
             }
-            Err(error) => {
-                std::mem::forget(self);
-                Err(format!(
-                    "{role} cleanup remains retained until process exit: {error}"
-                ))
-            }
+            Err(error) => Err(format!("{role} explicit cleanup failed: {error}")),
         }
     }
 
@@ -1015,19 +1007,10 @@ fn advance(state: &mut ResumeState, move_right: bool) {
     state.clock.elapsed_nanos += state.clock.timestep_nanos;
 }
 
-fn simple(id: &str) -> Result<GameplayCommandDraft, String> {
-    Ok(GameplayCommandDraft::new(
-        GameplayCommandTypeId::new(id).map_err(|error| error.to_string())?,
-    ))
-}
-
-fn movement(pressed: bool) -> Result<GameplayCommandDraft, String> {
-    let mut payload = GameplayCommandPayload::new();
-    payload
-        .insert("direction", GameplayCommandValue::I64(1))
-        .map_err(|error| error.to_string())?;
-    payload
-        .insert("pressed", GameplayCommandValue::Bool(pressed))
-        .map_err(|error| error.to_string())?;
-    Ok(simple("two-level-game.move")?.with_payload(payload))
+fn movement(pressed: bool) -> GameCommand {
+    SemanticCommand::Move {
+        direction: 1,
+        pressed,
+    }
+    .intent()
 }

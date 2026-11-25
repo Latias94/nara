@@ -1,20 +1,20 @@
 use nara::{
     app::{PluginCategory, PluginDeclaration, PluginId},
     asset::{AssetProductRef, ImportedProductId, StableAssetId},
-    ecs::World,
-    gameplay::{ActionCommandBinding, ActionCommandMap},
+    ecs::{Res, ResMut, World, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs},
     input::{
         ActionContext, ActionId, ActionMaps, ActionPhase, ActionTransform, InputBinding,
-        InputSeatId, KeyboardActionBinding, SemanticActions,
+        InputSeatId, InputSet, KeyboardActionBinding, SemanticActionOutcome, SemanticActions,
     },
-    prelude::{App, Plugin, PluginError},
+    prelude::{App, CoreStage, Plugin, PluginError},
 };
 
 use super::commands::*;
+use crate::command::{CommandSchedule, CommandSet, GameCommand};
 
 const ID: PluginId = PluginId::new("two-level-game.input");
 const DECLARATION: PluginDeclaration = PluginDeclaration::new(ID, PluginCategory::Runtime)
-    .requires_plugins(&[super::PLUGIN_ID, nara::gameplay::GAMEPLAY_ACTION_PLUGIN_ID]);
+    .requires_plugins(&[super::PLUGIN_ID, nara::input::INPUT_PLUGIN_ID]);
 
 /// Project-relative path to the authored global action map.
 pub const INPUT_PATH: &str = "input/explorer.actions.json";
@@ -28,30 +28,6 @@ const MOVEMENT_ACTIONS: [&str; 4] = [
     "two-level-game.move-s",
 ];
 pub(super) const SAVE_ACTION: &str = "two-level-game.k";
-
-pub(super) fn install_round_save_binding(world: &mut World) {
-    let id = ActionId::new(SAVE_ACTION).expect("static save action");
-    let standard =
-        ActionCommandBinding::from_command(id.clone(), ActionPhase::Started, action(SAVE));
-    let mut round = Some(ActionCommandBinding::from_command(
-        id,
-        ActionPhase::Started,
-        action(ROUND_SAVE),
-    ));
-    let mut map = world.resource_mut::<ActionCommandMap>();
-    let original = std::mem::take(&mut *map);
-    for binding in original.bindings() {
-        let binding = if binding == &standard {
-            round.take()
-        } else {
-            Some(binding.clone())
-        };
-        if let Some(binding) = binding {
-            map.bind(binding)
-                .expect("replacing the game's Save binding preserves command map admission");
-        }
-    }
-}
 
 pub(super) fn held_movement(world: &World) -> [bool; 4] {
     let Some(actions) = world.get_resource::<SemanticActions>() else {
@@ -167,42 +143,64 @@ impl Plugin for GameInputPlugin {
         &DECLARATION
     }
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        for (direction, name) in MOVEMENT_ACTIONS.into_iter().enumerate() {
-            let id = ActionId::new(name).expect("static movement action");
-            for (phase, pressed) in [(ActionPhase::Started, true), (ActionPhase::Released, false)] {
-                bind(app, id.clone(), phase, movement(direction, pressed))?;
-            }
-        }
-        for (name, command) in [
-            ("two-level-game.e", TRAVEL),
-            ("two-level-game.q", INSTANCE),
-            ("two-level-game.m", MARKER),
-            (SAVE_ACTION, SAVE),
-            ("two-level-game.l", RESTORE),
-            ("two-level-game.r", RETRY),
-            ("two-level-game.b", SIDE_ROOM),
-            ("two-level-game.g", LOOKOUT),
-        ] {
-            let id = ActionId::new(name).expect("static game action");
-            bind(app, id, ActionPhase::Started, action(command))?;
-        }
+        app.add_systems(
+            CoreStage::PreUpdate,
+            collect_gameplay_input
+                .in_set(CommandSet::FrameInput)
+                .after(InputSet::ResolveActions)
+                .before(super::verification::drive),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            collect_gameplay_input
+                .in_set(CommandSet::FrameInput)
+                .before(super::verification::drive),
+        )?;
         Ok(())
     }
 }
 
-fn bind(
-    app: &mut App,
-    id: ActionId,
-    phase: ActionPhase,
-    command: nara::gameplay::GameplayCommandDraft,
-) -> Result<(), PluginError> {
-    app.world_mut()?
-        .resource_mut::<ActionCommandMap>()
-        .bind(ActionCommandBinding::from_command(id, phase, command))
-        .map_err(|error| PluginError::SetupFailed {
-            plugin: ID,
-            message: error.to_string(),
-        })
+fn collect_gameplay_input(
+    actions: Res<SemanticActions>,
+    round: Option<Res<super::flow::FlowSnapshot>>,
+    mut commands: ResMut<CommandSchedule>,
+) -> Result<(), BevyError> {
+    for outcome in actions.as_slice() {
+        if let Some(command) = gameplay_intent(outcome, round.is_some()) {
+            commands.push_local(command).map_err(BevyError::error)?;
+        }
+    }
+    Ok(())
+}
+
+fn gameplay_intent(outcome: &SemanticActionOutcome, round: bool) -> Option<GameCommand> {
+    if outcome.seat != InputSeatId::PRIMARY || outcome.context != ActionContext::gameplay() {
+        return None;
+    }
+    let pressed = match outcome.phase {
+        ActionPhase::Started => true,
+        ActionPhase::Released => false,
+        _ => return None,
+    };
+    let name = outcome.action.as_str();
+    if let Some(direction) = MOVEMENT_ACTIONS.iter().position(|action| *action == name) {
+        return Some(movement(direction, pressed));
+    }
+    if !pressed {
+        return None;
+    }
+    Some(action(match name {
+        "two-level-game.e" => TRAVEL,
+        "two-level-game.q" => INSTANCE,
+        "two-level-game.m" => MARKER,
+        SAVE_ACTION if round => return Some(GameCommand::RoundSave),
+        SAVE_ACTION => SAVE,
+        "two-level-game.l" => RESTORE,
+        "two-level-game.r" => RETRY,
+        "two-level-game.b" => SIDE_ROOM,
+        "two-level-game.g" => LOOKOUT,
+        _ => return None,
+    }))
 }
 
 #[cfg(test)]

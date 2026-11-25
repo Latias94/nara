@@ -394,8 +394,7 @@ fn default_render_plugin_preserves_a_directly_configured_world_canvas() {
     let mut app = App::new();
     app.add_plugins((
         ComponentRegistryPlugin,
-        HierarchyPlugin,
-        TransformPlugin,
+        SpatialPlugin,
         RenderComponentsPlugin,
     ))
     .unwrap();

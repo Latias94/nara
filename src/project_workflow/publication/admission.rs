@@ -1,4 +1,4 @@
-use nara_fs::{
+use crate::fs::{
     ContentDigest, DirectoryCapability, DirectoryPublicationReceipt, FileCapability, FsError,
 };
 

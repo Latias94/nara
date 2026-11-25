@@ -6,15 +6,41 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-nara_app.workspace = true
+nara_app = { workspace = true, features = ["tasks"] }
 nara_asset = { workspace = true, features = ["serde"] }
 nara_core = { workspace = true, features = ["serde"] }
-nara_diagnostic.workspace = true
 nara_ecs.workspace = true
-nara_tasks.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
+tempfile = "3.27"
+
+[target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
+ctrlc = { version = "3.5", optional = true }
+nara_reflect = { workspace = true, optional = true, features = ["serde"] }
+nara_scene = { workspace = true, optional = true, features = ["serde"] }
+uuid = { workspace = true, optional = true, features = ["v4"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libc = { version = "0.2", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
+[features]
+default = ["workflow"]
+workflow = ["dep:ctrlc", "dep:libc", "dep:nara_reflect", "dep:nara_scene", "dep:uuid", "dep:windows-sys"]
+
+[[bin]]
+name = "nara"
+path = "src/bin/nara.rs"
+required-features = ["workflow"]

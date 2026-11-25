@@ -9,11 +9,11 @@ use nara_reflect::{
     ComponentValueKind, ComponentValueShape, EntityReference, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, ConstructionPlacement,
-    PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget,
-    SceneAuthoringHistoryLimits, SceneAuthoringSession, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementParent,
+    AuthoringDocumentSource, ConstructionPlacement, PrefabAuthoringSession, PrefabDocument,
+    PrefabDocumentCandidate, PrefabEntityTarget, SceneAuthoringHistoryLimits,
+    SceneAuthoringSession, SceneDocument, SceneDocumentCandidate, SceneEntityId,
+    SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    ScenePlacement, ScenePlacementParent, authoring::AuthoringAdapterReceipt,
 };
 
 fn id(name: &str) -> SceneEntityId {

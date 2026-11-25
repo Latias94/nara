@@ -1,7 +1,7 @@
 use std::{num::NonZeroU64, sync::Arc};
 
 use crate::RenderTarget;
-use nara_ui_kernel::UiPresentationReceipt;
+use nara_ui::kernel::UiPresentationReceipt;
 
 use super::{UiPaintPacket, UiPaintPacketIdentity};
 

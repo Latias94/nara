@@ -7,10 +7,10 @@ use std::sync::{
 
 use nara_app::PluginSchemaProviderId;
 use nara_asset::{AssetRecord, AssetSourceKind, AssetSourcePath, ProjectAssetDatabase};
+use nara_core::diagnostic::DiagnosticReport;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_diagnostic::DiagnosticReport;
 use nara_ecs::Component;
-use nara_identity::EntityReference;
+use nara_ecs::identity::EntityReference;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistryError, ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaCatalog,
@@ -145,7 +145,7 @@ fn assert_materialized_node_limit(
     maximum: u64,
     entity: &str,
 ) {
-    use nara_diagnostic::DiagnosticValueRef;
+    use nara_core::diagnostic::DiagnosticValueRef;
     let diagnostic = report
         .iter()
         .find(|diagnostic| diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded")

@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use crate::RenderTarget;
-use nara_text::bundled_font_face;
-use nara_ui_kernel::{
+use nara_ui::kernel::{
     UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiFrame, UiFrameJournal,
     UiImageId, UiLayer, UiLimits, UiLocalKey, UiNode, UiPresentationReceipt, UiRoot, UiRootKey,
     UiRouteStamp, UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId,
     UiTheme, UiVisual,
 };
+use nara_ui::text::bundled_font_face;
 use nara_window::WindowId;
 
 use crate::hud::{

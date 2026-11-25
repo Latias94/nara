@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use crate::image::ImageAsset;
 use nara_asset::{AssetProductRef, AssetRef, Handle};
-use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
+use nara_core::diagnostic::{DiagnosticCode, ReportDiagnostic as Diagnostic, SafeSummary};
 
 use crate::material::{
     Material2dBinding, Material2dDeclaration, Material2dGeneration, MaterialDeclarationError,

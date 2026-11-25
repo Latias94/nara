@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use nara_app::{RuntimeControl, RuntimeControlRequestResult, RuntimeInstance};
+use nara_app::{RuntimeControl, RuntimeControlRequestResult, RuntimeDriverScope, RuntimeInstance};
 use nara_core::ByteLimit;
 
 use super::*;

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use nara_ui_kernel::UiColor;
+use nara_ui::kernel::UiColor;
 
 /// One immutable mesh vertex in physical surface coordinates.
 ///

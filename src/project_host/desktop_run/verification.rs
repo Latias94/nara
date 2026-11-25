@@ -4,8 +4,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::fs::DirectoryCapability;
 use nara_app::{AppExit, RuntimeGeneration};
-use nara_fs::DirectoryCapability;
 
 use super::super::{
     ProductSupervisedDesktopReadyAdvance, ProductSupervisedDesktopReadyPublication,
@@ -87,7 +87,7 @@ impl DesktopFirstPresentRequest {
 }
 
 #[derive(Clone)]
-pub(in crate::project_host) struct DesktopFirstPresentVerification {
+pub(crate) struct DesktopFirstPresentVerification {
     shared: Arc<Mutex<DesktopFirstPresentState>>,
 }
 
@@ -99,7 +99,7 @@ impl DesktopFirstPresentVerification {
     }
 
     /// Advances only presentation verification and READY I/O, including idle maintenance.
-    pub(in crate::project_host) fn observe(
+    pub(crate) fn observe(
         &self,
         runtime_generation: RuntimeGeneration,
         presented: Option<nara_render::gpu::execution::WgpuPresentedFrameReceipt>,
@@ -184,9 +184,9 @@ impl DesktopFirstPresentVerification {
     }
 }
 
-pub(in crate::project_host) struct DesktopFirstPresentProgress {
-    pub(in crate::project_host) exit: Option<AppExit>,
-    pub(in crate::project_host) next_wake: Option<Instant>,
+pub(crate) struct DesktopFirstPresentProgress {
+    pub(crate) exit: Option<AppExit>,
+    pub(crate) next_wake: Option<Instant>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -371,21 +371,19 @@ fn lock(shared: &Arc<Mutex<DesktopFirstPresentState>>) -> MutexGuard<'_, Desktop
 #[cfg(test)]
 mod tests {
     use nara_app::{
-        App, RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeClosePolicy,
+        App, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeClosePolicy,
         RuntimeObligationLedger,
     };
 
     use super::*;
 
     fn runtime_generation() -> RuntimeGeneration {
-        let candidate = RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(
-                App::new().seal().unwrap(),
-                RuntimeObligationLedger::new(),
-                RuntimeClosePolicy::default(),
-            )
-            .unwrap();
+        let candidate = RuntimeCandidate::admit(
+            App::new().seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
         let runtime = candidate.complete_startup().unwrap().promote();
         let generation = runtime.generation();
         let mut retirement = runtime.begin_retirement();

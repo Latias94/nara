@@ -1,6 +1,6 @@
 //! Attempt-local source paths for the original Scene owner, without decoded content retention.
 
-use nara_fs::FileIdentity;
+use crate::fs::FileIdentity;
 use nara_project::ProjectPath;
 
 use super::*;

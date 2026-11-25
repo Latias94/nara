@@ -5,13 +5,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::fs::FsError;
 use nara_ecs::Resource;
-use nara_fs::FsError;
-use nara_gameplay::GameplayCommandSubmission;
 
-use super::{
-    PRODUCT_CLEANUP_TIMEOUT, exit_for_incomplete_product_cleanup, open_product_project_root,
-};
+use super::{PRODUCT_CLEANUP_TIMEOUT, open_product_project_root};
 use crate::{
     ProductRecipe,
     project_host::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport},
@@ -28,24 +25,18 @@ where
 {
     development_root: PathBuf,
     intent: HeadlessRunIntent<O>,
-    commands: Vec<GameplayCommandSubmission>,
 }
 
 impl<O> HeadlessProductRun<O>
 where
     O: Resource + Clone,
 {
-    /// Creates the ordinary headless process run from one intent and semantic command batch.
+    /// Creates the ordinary headless process run from one intent.
     #[must_use]
-    pub fn new(
-        development_root: impl AsRef<Path>,
-        intent: HeadlessRunIntent<O>,
-        commands: Vec<GameplayCommandSubmission>,
-    ) -> Self {
+    pub fn new(development_root: impl AsRef<Path>, intent: HeadlessRunIntent<O>) -> Self {
         Self {
             development_root: development_root.as_ref().to_path_buf(),
             intent,
-            commands,
         }
     }
 
@@ -55,22 +46,20 @@ where
         development_root: impl AsRef<Path>,
         recipe: ProductRecipe,
         fixed_ticks: std::num::NonZeroU32,
-        commands: Vec<GameplayCommandSubmission>,
     ) -> Self {
         Self::new(
             development_root,
             HeadlessRunIntent::new(fixed_ticks).with_recipe(recipe),
-            commands,
         )
     }
 
-    /// Runs to a terminal result, explicitly exiting if live cleanup exceeds its fixed budget.
+    /// Runs to a terminal result or returns an incomplete cleanup report at the deadline.
     ///
     /// The deadline is checked between cleanup drives; callbacks must return promptly.
     /// `Ok(report)` can still report startup, execution, or teardown failure; inspect its outcome.
     pub fn run(self) -> Result<HeadlessRunReport<O>, FsError> {
         let project_root = open_product_project_root(&self.development_root)?;
-        let run = HeadlessRun::new(project_root, self.intent, self.commands);
+        let run = HeadlessRun::new(project_root, self.intent);
         Ok(finish_product_run(run, PRODUCT_CLEANUP_TIMEOUT))
     }
 }
@@ -92,10 +81,7 @@ where
             continue;
         };
         if now >= deadline {
-            exit_for_incomplete_product_cleanup(
-                report.diagnostics(),
-                &run.incomplete_cleanup_diagnostics(),
-            );
+            return run.report_after_cleanup_deadline();
         }
         std::thread::sleep(Duration::from_millis(1).min(deadline.saturating_duration_since(now)));
     }

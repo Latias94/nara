@@ -1,5 +1,8 @@
 # Your first independent 2D game
 
+For a new code-first project, use the [current `nara` CLI](../../README.md#build-and-test). This
+walkthrough applies to the checked-in authored scene and prefab format used by Collect Game.
+
 Create a project outside the engine checkout, add a small Cargo gameplay plugin,
 edit its content, and run an exported development candidate. The maintained result
 is [Collect Game](../../samples/collect-game/README.md): WASD movement, three gems,
@@ -9,13 +12,12 @@ The commands below use PowerShell on Windows. The Rust sources and Cargo workspa
 are portable; Unix shells use their own environment assignment and executable
 spelling. Native platform acceptance is recorded separately from compilation.
 
-Use the `nara` CLI and edit the scene and prefab source files in your text editor.
-
 ## Build the tools and create a project
 
-Use `desktop-2d/v2` for a new project with editable keyboard and gamepad actions and a running
-movement example. Its generated `README.md` explains how to change the bindings and gameplay.
-The Collect Game walkthrough below uses `desktop-2d/v1` and adds all gameplay as a local plugin.
+The Collect Game walkthrough uses the authored `desktop-2d/v1` starter and adds gameplay as a local
+plugin. Create the base tree with `nara::project_workflow::prepare_desktop_2d_project`, selecting
+`ProjectStarter::Desktop2dV1`, and call `publish()` on the prepared project. The checked-in
+[Collect Game workspace](../../samples/collect-game/README.md) is also ready to build and edit.
 
 From the engine checkout:
 
@@ -23,28 +25,21 @@ From the engine checkout:
 $engine = (Get-Location).Path
 $env:CARGO_BUILD_JOBS = '1'
 $env:CARGO_TARGET_DIR = Join-Path $engine 'target'
-cargo build --bin nara --no-default-features --features project-workflow-cli --locked
+cargo build --locked -p nara_project --bin nara
 $nara = Join-Path $env:CARGO_TARGET_DIR 'debug/nara.exe'
-$games = Join-Path (Split-Path $engine -Parent) 'my-games'
-New-Item -ItemType Directory -Path $games -Force | Out-Null
-& $nara new desktop-2d/v1 collect-game --parent $games --local-checkout $engine
-$game = Join-Path $games 'collect-game'
+$game = 'C:\games\collect-game'  # Use your published starter directory.
 ```
 
-The destination must be absent. Local creation derives a relative Cargo dependency
-from a shared directory capability. Both locations must have a usable common
-filesystem ancestor; cross-volume and inaccessible-ancestor cases fail explicitly.
-An immutable HTTPS Git coordinate is the portable dependency alternative.
+Starter publication requires a new destination. Local creation derives a relative Cargo dependency
+from a shared directory capability. The starter publication API also supports an immutable HTTPS
+Git coordinate.
 
 The project uses the requested name in its directory, `nara.toml` and window title. Its private
 Cargo package is `nara-project-<source-universe-uuid>`. To select the package explicitly, use
 `[package].name` from the generated `Cargo.toml`. The `--manifest-path` and `--bin` commands
 below select it through the project workspace.
 
-Use `nara new --help`, `nara check --help`, `nara schema --help`, `nara export --help` or
-`nara repair startup-scene --help` for scoped syntax and examples. These requests do not open
-or build a project. Help is terminal: supplied options still need values and valid preceding
-arguments; extra arguments after `--help` reject.
+Use `nara --help` for the current command syntax.
 
 Before changing anything, run the generated project:
 
@@ -54,7 +49,7 @@ cargo run --manifest-path "$game/Cargo.toml" --bin headless
 cargo run --manifest-path "$game/Cargo.toml" --features desktop --bin desktop -- --verify-first-present
 ```
 
-The first bootstrap may create Cargo.lock. Keep that lockfile and use `--locked`
+The first build may create Cargo.lock. Keep that lockfile and use `--locked`
 afterward. Reusing target avoids a second dependency cache; the first build of this
 project is consequently not a cold-cache measurement.
 
@@ -106,8 +101,8 @@ $prefabMetadata | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM "$ga
 
 Keep this sidecar when moving or updating that Prefab, including the fast-player data variant;
 do not regenerate it on every Check. The copied token Image already includes its authored
-metadata, which stays with that asset. Missing required native metadata rejects source Check
-before gameplay rather than selecting a path-derived fallback.
+metadata, which stays with that asset. The compiled `ProjectToolRequest::Check` reports missing
+native metadata before gameplay starts.
 
 In the **generated Cargo.toml**, add
 `members = ["gameplay-plugin"]` to its existing `[workspace]`, add this dependency,
@@ -179,13 +174,12 @@ dependency and build decisions authoritative. Extend this explicit list when add
 local compiler input. The engine's own source/dependency graph stays selected by Cargo, not
 copied or resolved by this helper. Keep `build.rs` and the Player's request-owned bootstrap.
 
-Refresh the data-only schema from compiled code:
+Refresh the saved data-only schema through `nara::project_tooling::invoke_project_tool` with
+`ProjectToolRequest::Schema { write: true, .. }`. `write: false` checks for staleness.
+After adding the plugin, update `Cargo.lock` and run the project checks and demonstrations.
 
 ```powershell
-cargo check --manifest-path "$game/Cargo.toml" --workspace # Update Cargo.lock after adding the plugin.
-& $nara schema $game --check # Reports the starter bundle as stale.
-& $nara schema $game --write
-& $nara schema $game --check
+cargo check --manifest-path "$game/Cargo.toml" --workspace
 & $nara check $game
 cargo nextest run --manifest-path "$game/Cargo.toml" --workspace --locked
 cargo run --manifest-path "$game/Cargo.toml" --bin headless --locked
@@ -195,8 +189,8 @@ cargo run --manifest-path "$game/Cargo.toml" --bin headless --locked -- --verify
 Schema refresh updates the compiled recipe's owners and preserves complete current/predecessor
 catalogs for other admitted project owners. A semantically unchanged bundle keeps its existing
 file and spelling. Conflicting owner claims or invalid existing bundle data reject before writing;
-restore or explicitly repair invalid input rather than treating `--write` as permission to erase
-it. Retaining authoring metadata does not add a Runtime binding or approve installed tool code.
+restore or explicitly repair invalid input before refreshing. Retaining authoring metadata does not
+add a Runtime binding or approve installed tool code.
 
 The first demonstration collects three targets and wins. The reset demonstration
 restores the initial player position, three visible targets and original background.
@@ -268,7 +262,8 @@ cargo run --manifest-path "$game/Cargo.toml" --locked --features desktop --bin d
 
 Walk right with D. The final gem is now collected from farther away. Restore the original
 radius before rerunning the headless demonstration, which checks the sample's exact win tick.
-After changing Rust schema, run `nara schema $game --write` and validate the updated source again.
+After changing Rust schema, refresh the saved bundle with `ProjectToolRequest::Schema` and
+validate the updated source again.
 
 ## Try a content variant
 
@@ -289,9 +284,9 @@ Declare additional levels in the project manifest, with paths relative to the ef
 scenes = ["second.scene.json"]
 ```
 
-Check validates each declared Scene and its transitive dependencies. Export includes their exact
-source union and excludes undeclared, unreferenced files. A declaration grants delivery, not
-automatic loading or runtime residency. Code-first content consumers can use
+The compiled Check validates each declared Scene and its transitive dependencies. A source-carrying
+export includes the exact union of those sources. Declared scenes still require explicit runtime
+activation. Code-first content consumers can use
 `ProjectContentLoader::load_scene` to prepare one selected Scene without changing startup.
 An authored Door can retain the destination's primary `AssetProductRef` and pass it directly to
 `ProjectScenes`. The preparation worker resolves its actual Scene metadata and checks that its
@@ -301,9 +296,16 @@ Observe preparation and explicitly commit the prepared result to instantiate the
 
 ## Export and run independently
 
+For a source-free installation, run the project-owned `cook` target in the generated starter and
+move its complete installation to a new directory. The generated README records the cooker flags.
+The checked-in Collect Game demonstrates source gameplay and its authored content.
+
+For a source-carrying development candidate, invoke `ProjectToolRequest::Export` through
+`nara::project_tooling::invoke_project_tool` with the project root, an existing output parent,
+and a new destination name. Then run the candidate from an unrelated working directory.
+
 ```powershell
-& $nara export $game --parent $games --destination collect-candidate
-$candidate = Join-Path $games 'collect-candidate'
+$candidate = 'C:\path\to\collect-candidate'
 Push-Location $env:TEMP
 try {
     & "$candidate/bin/headless.exe"

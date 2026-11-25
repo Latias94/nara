@@ -8,10 +8,10 @@ use nara_asset::{
     LoadState, ProjectAssetDatabase, SourceHash,
 };
 use nara_core::{ByteLimit, ItemLimit, Vec2};
+use nara_ecs::identity::SpawnedSceneInstance;
 use nara_ecs::{
     Mut, ResMut, bevy_ecs::lifecycle::Remove, bevy_ecs::observer::On, bevy_ecs::system::SystemState,
 };
-use nara_identity::SpawnedSceneInstance;
 use nara_project::ProjectPath;
 use nara_render::image::{ImageExtent, ImageFormat, ImageSourceMetadata};
 use nara_render::tilemap::{
@@ -146,12 +146,10 @@ impl ResidencyFixture {
                 plan.clone(),
                 candidate.clone(),
                 Arc::clone(&loader),
-                Vec::new(),
             )
             .unwrap()
         } else {
-            host.begin_start(snapshot, plan.clone(), Vec::new())
-                .unwrap()
+            host.begin_start(snapshot, plan.clone()).unwrap()
         };
         host.complete_start(&mut attempt).unwrap();
         drop(attempt);
@@ -284,7 +282,7 @@ fn write_scene(project: &TestProject, path: &str, name: &str, shared: bool, tile
     let mut entities = Vec::new();
     if shared {
         entities.push(
-            SceneEntityRecord::new(nara_identity::SceneEntityId::new(name).unwrap())
+            SceneEntityRecord::new(nara_ecs::identity::SceneEntityId::new(name).unwrap())
                 .with_component(
                     ComponentTypeId::new("nara.transform.Transform2d"),
                     identity_transform_record(),
@@ -300,7 +298,7 @@ fn write_scene(project: &TestProject, path: &str, name: &str, shared: bool, tile
     }
     if tiles {
         entities.push(
-            SceneEntityRecord::new(nara_identity::SceneEntityId::new("terrain").unwrap())
+            SceneEntityRecord::new(nara_ecs::identity::SceneEntityId::new("terrain").unwrap())
                 .with_component(
                     ComponentTypeId::new("nara.transform.Transform2d"),
                     identity_transform_record(),
@@ -667,7 +665,7 @@ fn hosted_residency_hands_off_shared_pixels_retires_old_only_and_preserves_forei
 fn hosted_scene_replacement_recovers_revoked_tileset_in_the_same_world() {
     let mut fixture = ResidencyFixture::with_scene_requests();
     let tileset_id = StableAssetId::parse_str(TILESET_ID).unwrap();
-    let terrain = nara_identity::SceneEntityId::new("terrain").unwrap();
+    let terrain = nara_ecs::identity::SceneEntityId::new("terrain").unwrap();
     let image_revisions = |world: &World, handle: Handle<ImageAsset>| {
         (
             world.resource::<Assets<ImageAsset>>().slot_revision(handle),
@@ -785,7 +783,7 @@ fn hosted_scene_replacement_recovers_revoked_tileset_in_the_same_world() {
                 prepared.selected_scene_path().unwrap().as_str(),
                 "restored.scene.json"
             );
-            let restored = nara_identity::SceneEntityId::new("restored").unwrap();
+            let restored = nara_ecs::identity::SceneEntityId::new("restored").unwrap();
             assert!(prepared.scene().roots().contains(&restored));
         });
         assert!(
@@ -1112,7 +1110,7 @@ fn hosted_residency_rejects_atlas_retention_stale_and_foreign_image_authority_be
         [9, 8, 7, 255],
     );
     let b = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-        nara_identity::SceneEntityId::new("new-image").unwrap(),
+        nara_ecs::identity::SceneEntityId::new("new-image").unwrap(),
     )
     .with_component(
         ComponentTypeId::new("nara.transform.Transform2d"),
@@ -1226,7 +1224,7 @@ fn hosted_startup_tileset_refusal_releases_complete_prepared_residency() {
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = load_runtime_snapshot(&loader, &candidate, &plan);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
-    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let mut attempt = host.begin_start(snapshot, plan).unwrap();
     let error = host.complete_start(&mut attempt).unwrap_err();
     assert!(report_has_code(
         &error.diagnostics,

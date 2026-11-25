@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use nara_asset::AssetReferenceResolver;
-use nara_diagnostic::DiagnosticReport;
-use nara_identity::SceneEntityId;
+use nara_core::diagnostic::DiagnosticReport;
+use nara_ecs::identity::SceneEntityId;
 use nara_reflect::{
     ComponentDecodeContext, ComponentFieldId, ComponentRegistrySnapshot, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueMaterializationLimits,
@@ -311,8 +311,8 @@ pub(crate) fn validate_contextual_defaults(
         Ok::<_, std::convert::Infallible>(())
     }) {
         Ok(()) => Ok(()),
-        Err(nara_reflect::__private::EffectiveValueAdmissionError::Value(error)) => Err(error),
-        Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) => {
+        Err(nara_reflect::effective::EffectiveValueAdmissionError::Value(error)) => Err(error),
+        Err(nara_reflect::effective::EffectiveValueAdmissionError::Admission(error)) => {
             match error {}
         }
     }
@@ -324,7 +324,7 @@ pub(crate) fn validate_contextual_defaults_with_admission<E>(
     record: &SceneComponentRecord,
     limits: ComponentValueMaterializationLimits,
     admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
-) -> Result<(), nara_reflect::__private::EffectiveValueAdmissionError<E>> {
+) -> Result<(), nara_reflect::effective::EffectiveValueAdmissionError<E>> {
     validate_contextual_default_values_with_admission(
         schema,
         record.version,
@@ -340,13 +340,16 @@ pub(crate) fn validate_contextual_default_values_with_admission<E>(
     defaults: &BTreeMap<ComponentFieldId, ComponentValue>,
     limits: ComponentValueMaterializationLimits,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
-) -> Result<(), nara_reflect::__private::EffectiveValueAdmissionError<E>> {
-    use nara_reflect::__private::{
-        ComponentPropertyAdmissionError, EffectiveValueAdmissionError,
-        component_field_default_requires_context_with_admission,
-        validate_component_property_value_with_admission,
-    };
+) -> Result<(), nara_reflect::effective::EffectiveValueAdmissionError<E>> {
     use nara_reflect::{ComponentCapability, ComponentCodecError, ComponentValueKind};
+    use nara_reflect::{
+        effective::{
+            EffectiveValueAdmissionError, component_field_default_requires_context_with_admission,
+        },
+        property::{
+            ComponentPropertyAdmissionError, validate_component_property_value_with_admission,
+        },
+    };
 
     if !defaults.is_empty() && version != schema.version() {
         return Err(ComponentCodecError::invalid_field(
@@ -500,7 +503,7 @@ mod default_admission_tests {
             None,
         )])
         .unwrap();
-        let adapter = crate::__private::AuthoringAdapterReceipt::from_schema_owner(
+        let adapter = crate::authoring::AuthoringAdapterReceipt::from_schema_owner(
             &bundle.owners()[0],
             &Default::default(),
         )
@@ -526,7 +529,7 @@ mod default_admission_tests {
                 Err(marker.take().unwrap())
             },
         );
-        let Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) = result
+        let Err(nara_reflect::effective::EffectiveValueAdmissionError::Admission(error)) = result
         else {
             panic!("the first field visit must consume the owner's allowance");
         };

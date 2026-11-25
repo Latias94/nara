@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use nara_identity::SceneEntityId;
+use nara_ecs::identity::SceneEntityId;
 
 use super::*;
 use crate::{ComponentSchemaVersion, ComponentTypeId, validate_component_value};

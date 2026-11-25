@@ -17,10 +17,6 @@ use nara::{
         RuntimeState,
     },
     fs::DirectoryCapability,
-    gameplay::{
-        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandSourceSequence,
-        GameplayCommandSubmission, GameplayCommandTick,
-    },
     input::{ButtonDriverInput, KeyCode, KeyboardHold},
     project_host::{
         DesktopControlError, DesktopPresentationControl, DesktopRun, DesktopRunIntent,
@@ -31,6 +27,10 @@ use nara::{
 };
 use two_level_game::{
     GamePhase, GameSnapshot, capture_desktop_resume,
+    command::{
+        CommandSequence, CommandSource, CommandSubmitError, CommandTick, GameCommand,
+        ScheduledCommand,
+    },
     development::presentation::{DevelopmentPresentationPlugin, join_presented, state_digest},
     movement_keyboard_bindings, restore_desktop_resume,
     resume::{ResumeState, encode_resume},
@@ -559,7 +559,7 @@ impl DesktopGame {
             .snapshot()?
             .tick
             .checked_add(1)
-            .and_then(GameplayCommandTick::new)
+            .and_then(CommandTick::new)
             .ok_or("desktop engine tick is exhausted")?;
         let bindings = movement_keyboard_bindings(&self.run)
             .map_err(|error| format!("resolve controlled desktop movement bindings: {error}"))?;
@@ -592,7 +592,7 @@ impl DesktopGame {
         self.sequence
             .checked_add(gameplay_count as u64)
             .ok_or("desktop command source sequence is exhausted")?;
-        let source = GameplayCommandIngressSource::external("two-level-game.continuity")
+        let source = CommandSource::external("two-level-game.continuity")
             .map_err(|error| format!("command source is invalid: {error}"))?;
         let mut admitted = false;
         for operation in operations {
@@ -610,19 +610,17 @@ impl DesktopGame {
                     }),
                 StepOperation::Gameplay(draft) => {
                     self.sequence += 1;
-                    let sequence = GameplayCommandSourceSequence::new(self.sequence)
+                    let sequence = CommandSequence::new(self.sequence)
                         .ok_or("desktop command source sequence is zero")?;
-                    self.run
-                        .submit(GameplayCommandSubmission::new(
-                            tick,
-                            source.clone(),
-                            sequence,
-                            draft,
-                        ))
-                        .map(|_| ())
-                        .map_err(|error| {
-                            format!("desktop semantic command admission failed: {error}")
-                        })
+                    let result = ScheduledCommand::new(tick, source.clone(), sequence, draft)
+                        .submit_desktop(&mut self.run);
+                    self.execution_failed |= matches!(
+                        &result,
+                        Err(CommandSubmitError::Runtime { output: Ok(_), .. })
+                    );
+                    result.map(|_| ()).map_err(|error| {
+                        format!("desktop semantic command admission failed: {error}")
+                    })
                 }
             };
             if let Err(error) = result {
@@ -786,7 +784,7 @@ impl DesktopGame {
 
 enum StepOperation {
     Keyboard(ButtonDriverInput<KeyCode>),
-    Gameplay(GameplayCommandDraft),
+    Gameplay(GameCommand),
 }
 
 fn activation(state: Option<WinitInputActivation>) -> InputActivation {

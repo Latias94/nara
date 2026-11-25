@@ -3,14 +3,23 @@ use std::collections::BTreeMap;
 mod asset_reservations;
 
 use super::*;
+use crate::hierarchy::{
+    ChildOf, Children, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner,
+    HierarchyRoots, HierarchyWriter,
+};
 use nara_asset::{
     AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind, AssetSourcePath, Handle,
     ProjectAssetDatabase, StableAssetId,
 };
-use nara_core::{ByteLimit, ItemLimit};
-use nara_diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticFieldClass, DiagnosticReport, DiagnosticValueRef,
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticFieldClass, DiagnosticValueRef, ReportDiagnostic as Diagnostic,
     SafeSummary,
+};
+use nara_core::{ByteLimit, ItemLimit};
+use nara_ecs::identity::{
+    EntityLookup, EntityReference, IdentityDomainError, PersistentRuntimeId,
+    PersistentRuntimeNamespaceId, PersistentRuntimeReference, SpawnedSceneInstance, TombstoneCause,
+    WorldEntityLocator, WorldIdentityDomain, WorldIdentityDomainSettings, spawn_identity_entity,
 };
 use nara_ecs::{
     Commands, Component, Entity, Mut, Resource, World,
@@ -19,22 +28,12 @@ use nara_ecs::{
     bevy_ecs::world::DeferredWorld,
     system::ResMut,
 };
-use nara_hierarchy::{
-    Children, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
-    HierarchyWriter, Parent,
-};
-use nara_identity::{
-    EntityLookup, EntityReference, IdentityDomainError, PersistentRuntimeId,
-    PersistentRuntimeNamespaceId, PersistentRuntimeReference, SpawnedSceneInstance, TombstoneCause,
-    WorldEntityLocator, WorldIdentityDomain, WorldIdentityDomainSettings, spawn_identity_entity,
-};
-use nara_reflect::bevy_reflect;
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentDecodeContext, ComponentDomainError,
     ComponentFieldId, ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
     ComponentFieldSchema, ComponentRegistryError, ComponentRegistrySnapshot, ComponentSchema,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    PreparedComponentCandidate, Reflect,
+    PreparedComponentCandidate,
 };
 
 pub(crate) fn prefab_source_key(source: &AssetRef) -> SourceDocumentKey {
@@ -55,7 +54,7 @@ pub(crate) fn prefab_source_key(source: &AssetRef) -> SourceDocumentKey {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Component, Reflect)]
+#[derive(Clone, Debug, PartialEq, Component)]
 struct TestPosition {
     x: i32,
 }
@@ -548,7 +547,7 @@ fn hierarchy_writer_publishes_ordered_parent_child_links_immediately() {
 
     let parent_ref = world.get_entity(parent).unwrap();
     let children = parent_ref.get::<Children>().unwrap();
-    assert_eq!(children.as_slice(), &[child]);
+    assert_eq!(&children[..], &[child]);
 }
 
 #[test]
@@ -2285,7 +2284,7 @@ fn hierarchy_observer_rejects_publication_before_candidate_mutation() {
     );
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
-    world.add_observer(|_: On<Add<Parent>>, mut commands: Commands| {
+    world.add_observer(|_: On<Add<ChildOf>>, mut commands: Commands| {
         commands.add_observer(
             |_: On<Add<TestPosition>>, mut canary: ResMut<PersistentApplyCanary>| {
                 canary.0 += 1;
@@ -3110,7 +3109,11 @@ fn individual_scene_retirement_rejects_parents_and_unlinks_retired_children() {
     retire_and_despawn_scene_entity(&mut world, child).unwrap();
 
     assert!(world.get_entity(child).is_err());
-    assert!(world.get::<Children>(parent).is_none_or(Children::is_empty));
+    assert!(
+        world
+            .get::<Children>(parent)
+            .is_none_or(|children| children.is_empty())
+    );
     assert!(matches!(
         instance.resolve(&world, &child_id),
         EntityLookup::Tombstoned(Some(_))
@@ -3354,8 +3357,8 @@ fn hierarchy_aware_replacement_retires_exact_scene_membership_only() {
     let current = spawned_instance(&first).clone();
     let old_root = spawned_entity(&world, &first, &root_id);
     let old_child = spawned_entity(&world, &first, &child_id);
-    let external_descendant = world.spawn_empty().id();
-    place_runtime_child(&mut world, external_descendant, old_child);
+    let external_descendant = world.spawn(ChildOf(old_child)).id();
+    let external_leaf = world.spawn(ChildOf(external_descendant)).id();
 
     let replacement = crate::advanced::replace_expanded_scene_with_product(
         &mut world,
@@ -3382,10 +3385,18 @@ fn hierarchy_aware_replacement_retires_exact_scene_membership_only() {
     assert!(world.get_entity(old_root).is_err());
     assert!(world.get_entity(old_child).is_err());
     assert!(world.get_entity(external_descendant).is_ok());
-    assert!(world.get::<Parent>(external_descendant).is_none());
+    assert!(world.get::<ChildOf>(external_descendant).is_none());
+    assert_eq!(
+        world.get::<ChildOf>(external_leaf).map(ChildOf::parent),
+        Some(external_descendant)
+    );
+    assert_eq!(
+        &world.get::<Children>(external_descendant).unwrap()[..],
+        &[external_leaf]
+    );
     let new_root = spawned_entity(&world, &replacement, &root_id);
     let new_child = spawned_entity(&world, &replacement, &child_id);
-    assert_eq!(world.get::<Parent>(new_child).unwrap().parent(), new_root);
+    assert_eq!(world.get::<ChildOf>(new_child).unwrap().parent(), new_root);
     assert_eq!(
         world.resource::<HierarchyRoots>().as_slice(),
         [new_root, external_descendant]
@@ -3431,7 +3442,7 @@ fn hierarchy_aware_unload_detaches_external_descendants() {
     assert!(clear.cleared);
     assert_eq!(clear.removed_entities, 2);
     assert!(world.get_entity(external_descendant).is_ok());
-    assert!(world.get::<Parent>(external_descendant).is_none());
+    assert!(world.get::<ChildOf>(external_descendant).is_none());
 }
 
 #[test]
@@ -3642,7 +3653,7 @@ fn hierarchy_remove_observer_rejects_scene_replacement_before_detach() {
     let current = spawned_instance(&first).clone();
     let old_child = spawned_entity(&world, &first, &child_id);
     world.entity_mut(old_child).observe(
-        |_: On<Remove<Parent>>, mut canary: ResMut<PersistentApplyCanary>| {
+        |_: On<Remove<ChildOf>>, mut canary: ResMut<PersistentApplyCanary>| {
             canary.0 += 1;
         },
     );
@@ -3690,7 +3701,7 @@ fn hierarchy_remove_observer_rejects_scene_replacement_before_detach() {
         world.resource::<WorldIdentityDomain>().stats(),
         baseline_stats
     );
-    assert!(world.get::<Parent>(old_child).is_some());
+    assert!(world.get::<ChildOf>(old_child).is_some());
 }
 
 #[test]
@@ -3780,12 +3791,6 @@ fn children_add_observer_does_not_reject_a_flat_scene() {
 #[test]
 fn parented_transform_materializes_through_every_entry_point() {
     let registry = deferred_transform_registry();
-    let flat_id = scene_id("flat");
-    let flat_document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(flat_id)
-        .with_component(deferred_transform_type_id(), deferred_transform_record(1))]);
-    assert!(!flat_document.validate(&registry).iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable"
-    }));
 
     let root_id = scene_id("root");
     let child_id = scene_id("root/child");
@@ -3800,14 +3805,7 @@ fn parented_transform_materializes_through_every_entry_point() {
                 .with_component(deferred_transform_type_id(), deferred_transform_record(3)),
         ],
     );
-    let has_unavailable_projection = |diagnostics: &DiagnosticReport| {
-        diagnostics.iter().any(|diagnostic| {
-            diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable"
-                && diagnostic_has_text_field(diagnostic, "entity-id", child_id.as_str())
-        })
-    };
-
-    assert!(!has_unavailable_projection(&document.validate(&registry)));
+    assert!(!document.validate(&registry).has_errors());
 
     let mut direct_world = World::new();
     let direct = crate::spawn_scene(
@@ -3825,7 +3823,9 @@ fn parented_transform_materializes_through_every_entry_point() {
     let direct_root = spawned_entity(&direct_world, &direct, &root_id);
     let direct_child = spawned_entity(&direct_world, &direct, &child_id);
     assert_eq!(
-        direct_world.get::<Parent>(direct_child).map(Parent::parent),
+        direct_world
+            .get::<ChildOf>(direct_child)
+            .map(ChildOf::parent),
         Some(direct_root)
     );
     assert_eq!(
@@ -3854,7 +3854,9 @@ fn parented_transform_materializes_through_every_entry_point() {
     let prefab_root = spawned_entity(&prefab_world, &prefab_report, &root_id);
     let prefab_child = spawned_entity(&prefab_world, &prefab_report, &child_id);
     assert_eq!(
-        prefab_world.get::<Parent>(prefab_child).map(Parent::parent),
+        prefab_world
+            .get::<ChildOf>(prefab_child)
+            .map(ChildOf::parent),
         Some(prefab_root)
     );
     assert_eq!(
@@ -3909,8 +3911,8 @@ fn parented_transform_materializes_through_every_entry_point() {
     let replacement_child = spawned_entity(&replacement_world, &replacement, &child_id);
     assert_eq!(
         replacement_world
-            .get::<Parent>(replacement_child)
-            .map(Parent::parent),
+            .get::<ChildOf>(replacement_child)
+            .map(ChildOf::parent),
         Some(replacement_root)
     );
 
@@ -3939,55 +3941,114 @@ fn parented_transform_materializes_through_every_entry_point() {
     };
     assert_eq!(
         authoring_world
-            .get::<Parent>(authoring_child)
-            .map(Parent::parent),
+            .get::<ChildOf>(authoring_child)
+            .map(ChildOf::parent),
         Some(authoring_root)
     );
 }
 
 #[test]
-fn inherited_visibility_is_rejected_by_the_shared_scene_preflight() {
+fn v0_spatial_components_propagate_and_export_with_exact_authored_membership() {
+    use crate::spatial::{GlobalTransform2d, InheritedVisibility, Transform2d, Visibility};
+
     let mut registry = nara_reflect::ComponentRegistryBuilder::new();
-    register_scene_components(&mut registry).unwrap();
+    crate::SCENE_COMPONENTS_SCHEMA_PROVIDER
+        .register_into(&mut registry)
+        .unwrap();
+    crate::TRANSFORM_SCHEMA_PROVIDER
+        .register_into(&mut registry)
+        .unwrap();
     let registry = registry.freeze().unwrap();
-    let flat_document =
-        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("flat"))
-            .with_component(
-                ComponentTypeId::new("nara.scene.Visibility"),
-                SceneComponentRecord::new(
-                    ComponentSchemaVersion::ONE,
-                    ComponentValue::String("hidden".to_owned()),
-                ),
-            )]);
-    assert!(!flat_document.validate(&registry).iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable"
-    }));
+    let transform = ComponentTypeId::new("nara.transform.Transform2d");
+    let visibility = ComponentTypeId::new("nara.scene.Visibility");
+    let number = |value| ComponentValue::f64(value).unwrap();
+    let vector = |x, y| ComponentValue::map([("x", number(x)), ("y", number(y))]);
+    let pose = |x| {
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([
+                ("translation", vector(x, 0.0)),
+                ("rotation", number(0.0)),
+                ("scale", vector(1.0, 1.0)),
+            ]),
+        )
+    };
+    let local_visibility = |value: &str| {
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::String(value.to_owned()),
+        )
+    };
 
     let root_id = scene_id("root");
-    let child_id = scene_id("root/child");
+    let implicit_id = scene_id("root/implicit");
+    let visible_id = scene_id("root/explicit");
     let document = SceneDocument::new(
         [
             SceneEntityPlacement::root(root_id.clone()),
-            child_placement(child_id.clone(), root_id.clone()),
+            child_placement(implicit_id.clone(), root_id.clone()),
+            child_placement(visible_id.clone(), root_id.clone()),
         ],
         [
-            SceneEntityRecord::new(root_id).with_component(
-                ComponentTypeId::new("nara.scene.Visibility"),
-                SceneComponentRecord::new(
-                    ComponentSchemaVersion::ONE,
-                    ComponentValue::String("hidden".to_owned()),
-                ),
-            ),
-            SceneEntityRecord::new(child_id.clone()),
+            SceneEntityRecord::new(root_id.clone())
+                .with_component(transform.clone(), pose(10.0))
+                .with_component(visibility.clone(), local_visibility("hidden")),
+            SceneEntityRecord::new(implicit_id.clone()).with_component(transform, pose(2.0)),
+            SceneEntityRecord::new(visible_id.clone())
+                .with_component(visibility, local_visibility("visible")),
         ],
     );
 
-    let diagnostics = document.validate(&registry);
+    let mut world = World::new();
+    let report = spawn_scene(
+        &mut world,
+        &registry,
+        &compiled_scene(
+            &registry,
+            scene_source_key("v0_spatial_components/document"),
+            std::sync::Arc::new(document.clone()),
+        ),
+        &scene_occurrence("v0_spatial_components/live"),
+        None,
+    );
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    let root = spawned_entity(&world, &report, &root_id);
+    let implicit = spawned_entity(&world, &report, &implicit_id);
+    let visible = spawned_entity(&world, &report, &visible_id);
+    assert_eq!(
+        &world.get::<Children>(root).unwrap()[..],
+        &[implicit, visible]
+    );
+    assert_eq!(
+        world.get::<ChildOf>(implicit).map(ChildOf::parent),
+        Some(root)
+    );
+    assert_eq!(world.get::<Transform2d>(implicit).unwrap().z, 0.0);
+    assert!(world.get::<Visibility>(implicit).is_none());
 
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable"
-            && diagnostic_has_text_field(diagnostic, "entity-id", child_id.as_str())
-    }));
+    crate::spatial::register_spatial(&mut world);
+    let mut schedule = nara_ecs::bevy_ecs::schedule::Schedule::default();
+    schedule.add_systems(crate::spatial::propagate_spatial);
+    schedule.run(&mut world);
+    assert_eq!(
+        world
+            .get::<GlobalTransform2d>(implicit)
+            .unwrap()
+            .translation()
+            .x,
+        12.0
+    );
+    assert!(!world.get::<InheritedVisibility>(implicit).unwrap().get());
+    assert!(world.get::<InheritedVisibility>(visible).unwrap().get());
+
+    let exported = export_live_scene(&world, &registry);
+    assert_eq!(
+        exported
+            .output()
+            .expect("exact native spatial export")
+            .document,
+        document
+    );
 }
 
 #[test]
@@ -4075,11 +4136,13 @@ fn children_remove_observer_rejects_scene_replacement_before_detach() {
         baseline_stats
     );
     assert_eq!(
-        world.get::<Parent>(old_child).map(Parent::parent),
+        world.get::<ChildOf>(old_child).map(ChildOf::parent),
         Some(old_root)
     );
     assert_eq!(
-        world.get::<Children>(old_root).map(Children::as_slice),
+        world
+            .get::<Children>(old_root)
+            .map(|children| &children[..]),
         Some([old_child].as_slice())
     );
 }
@@ -4158,9 +4221,9 @@ fn children_remove_observer_rejects_authoring_unload_before_detach() {
         world.resource::<WorldIdentityDomain>().stats(),
         baseline_stats
     );
-    assert_eq!(world.get::<Parent>(child).map(Parent::parent), Some(root));
+    assert_eq!(world.get::<ChildOf>(child).map(ChildOf::parent), Some(root));
     assert_eq!(
-        world.get::<Children>(root).map(Children::as_slice),
+        world.get::<Children>(root).map(|children| &children[..]),
         Some([child].as_slice())
     );
 }
@@ -4216,7 +4279,7 @@ fn replacement_relationship_rejection_precedes_asset_and_binding_publication() {
     let old_root = spawned_entity(&world, &first, &root_id);
     let old_child = spawned_entity(&world, &first, &child_id);
     world.entity_mut(old_child).observe(
-        |_: On<Remove<Parent>>, mut canary: ResMut<PersistentApplyCanary>| {
+        |_: On<Remove<ChildOf>>, mut canary: ResMut<PersistentApplyCanary>| {
             canary.0 += 1;
         },
     );
@@ -4266,7 +4329,7 @@ fn replacement_relationship_rejection_precedes_asset_and_binding_publication() {
         baseline_stats
     );
     assert_eq!(
-        world.get::<Parent>(old_child).map(Parent::parent),
+        world.get::<ChildOf>(old_child).map(ChildOf::parent),
         Some(old_root)
     );
 
@@ -4859,14 +4922,7 @@ fn scene_spawn_and_export_preserve_ordered_runtime_topology() {
     assert_eq!(spawned_instance(&report).len(), 2);
     let parent = spawned_entity(&world, &report, &parent_id);
     let child = spawned_entity(&world, &report, &child_id);
-    assert_eq!(
-        world
-            .get::<Children>(parent)
-            .unwrap()
-            .iter()
-            .collect::<Vec<_>>(),
-        vec![child]
-    );
+    assert_eq!(&world.get::<Children>(parent).unwrap()[..], &[child]);
     assert_eq!(
         world.get::<SceneEntitySource>(child).unwrap().entity_id,
         child_id
@@ -4931,7 +4987,7 @@ fn multi_root_and_sibling_order_ignore_record_sorting_and_entity_allocation() {
         [first_root, second_root]
     );
     assert_eq!(
-        world.get::<Children>(first_root).unwrap().as_slice(),
+        &world.get::<Children>(first_root).unwrap()[..],
         [first_child, second_child]
     );
 
@@ -5421,7 +5477,7 @@ fn deleted_persistent_reference_prevents_export_publication() {
                 world,
                 token,
                 TombstoneCause::Despawned,
-                nara_identity::PersistentRetirementDisposition::Delete,
+                nara_ecs::identity::PersistentRetirementDisposition::Delete,
             )
             .unwrap();
     });
@@ -6098,7 +6154,7 @@ fn export_rejects_a_scene_entity_owned_by_a_non_scene_parent() {
 
     let export = export_live_scene(&world, &registry);
     assert!(export.output().is_none());
-    assert_eq!(world.get::<Parent>(child).unwrap().parent(), parent);
+    assert_eq!(world.get::<ChildOf>(child).unwrap().parent(), parent);
     assert!(
         export
             .diagnostics

@@ -1,8 +1,8 @@
+#[cfg(test)]
+use crate::kernel::UiRouteStamp;
+use crate::kernel::{UiAccessibilityInput, UiAccessibilityRequest, UiInputEvent};
 use nara_ecs::World;
 use nara_input::InputTimeline;
-#[cfg(test)]
-use nara_ui_kernel::UiRouteStamp;
-use nara_ui_kernel::{UiAccessibilityInput, UiAccessibilityRequest, UiInputEvent};
 
 use crate::runtime::UiRuntimeState;
 

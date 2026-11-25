@@ -94,9 +94,9 @@ fn execute(fail_observer: bool, population: Option<usize>) {
             break;
         }
         if timed_out && Instant::now() >= deadline + Duration::from_secs(15) {
-            std::mem::forget(process);
+            drop(process);
             panic!(
-                "original workload child still retains containment at {}",
+                "original workload child did not complete containment cleanup at {}",
                 directory.display()
             );
         }

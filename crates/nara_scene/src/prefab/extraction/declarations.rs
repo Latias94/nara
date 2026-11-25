@@ -5,7 +5,7 @@
 
 use std::{borrow::Cow, mem::size_of, slice::IterMut};
 
-use nara_identity::EntityReference;
+use nara_ecs::identity::EntityReference;
 use nara_reflect::ComponentTypeId;
 
 use crate::{

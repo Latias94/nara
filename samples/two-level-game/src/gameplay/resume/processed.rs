@@ -6,10 +6,6 @@ use std::{
 
 use nara::{
     app::{FixedCatchUpPolicy, FixedTime},
-    gameplay::{
-        GameplayCommandIngressSource, GameplayCommandQueue, GameplayCommandSource,
-        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTick,
-    },
     project_host::HeadlessSession,
     tasks::{TaskPools, TaskReturnState},
 };
@@ -20,7 +16,10 @@ use super::{
 };
 use crate::{
     GameSnapshot,
-    command::{SERVER_COMMAND_SOURCE, ServerCommand},
+    command::{
+        CommandSchedule, CommandSequence, CommandSource, CommandTick, GameCommand,
+        MAX_COMMAND_TICK_OFFSET, MAX_SCHEDULED_COMMANDS, SERVER_COMMAND_SOURCE, ScheduledCommand,
+    },
     gameplay::{side_room::Rooms, storage::Storage},
     resume::{
         RuntimeCatchUpPolicy, RuntimeTimeState,
@@ -58,28 +57,43 @@ fn capture_state(
             None => world.resource::<Storage>().handoff_stamp()?,
         };
         if time.catch_up_policy != RuntimeCatchUpPolicy::PreserveDebt {
-            return Err(refuse("processed continuation requires the Server debt policy"));
+            return Err(refuse(
+                "processed continuation requires the Server debt policy",
+            ));
         }
-        let queue = world.resource::<GameplayCommandQueue>();
+        let queue = world.resource::<CommandSchedule>();
         let stats = queue.stats();
         if stats.pending_commands > MAX_PENDING_SERVER_COMMANDS {
-            return Err(ProcessedResumeError::TooManyPendingCommands(stats.pending_commands).into());
+            return Err(
+                ProcessedResumeError::TooManyPendingCommands(stats.pending_commands).into(),
+            );
         }
         let mut pending = Vec::with_capacity(stats.pending_commands);
-        for (tick, source, _, draft) in queue.pending_commands() {
-            if !matches!(source, GameplayCommandSource::External { producer } if producer.as_str() == SERVER_COMMAND_SOURCE) {
+        for (key, intent) in queue.pending_commands() {
+            if !key.source().is_external(SERVER_COMMAND_SOURCE) {
                 return Err(refuse("pending command belongs to an unsupported producer"));
             }
-            let tick_offset = tick.get()
+            let tick_offset = key
+                .tick()
+                .get()
                 .checked_sub(stats.acknowledged_through_tick)
                 .ok_or_else(|| refuse("pending command precedes the acknowledged tick"))?;
+            let GameCommand::Player(command) = intent else {
+                return Err(refuse("pending command is not a Server operation"));
+            };
             pending.push(PendingServerCommand {
                 tick_offset,
-                command: ServerCommand::from_draft(draft).map_err(refuse)?,
+                command: command.clone(),
             });
         }
         let game = capture::game(world, time, capture::compatibility(world)?)?;
-        let state = ProcessedResumeState { game, catalog, rooms, checkpoint, pending };
+        let state = ProcessedResumeState {
+            game,
+            catalog,
+            rooms,
+            checkpoint,
+            pending,
+        };
         state.validate()?;
         Ok(state)
     })?
@@ -120,13 +134,11 @@ pub fn restore_processed_resume(
                 "processed continuation requires the Server debt policy",
             ));
         }
-        let queue = world.resource::<GameplayCommandQueue>();
-        let settings = queue.settings();
-        if state.pending.len() > settings.retained_commands().get()
+        if state.pending.len() > MAX_SCHEDULED_COMMANDS
             || state
                 .pending
                 .last()
-                .is_some_and(|command| command.tick_offset > settings.future_ticks().get())
+                .is_some_and(|command| command.tick_offset > MAX_COMMAND_TICK_OFFSET)
         {
             return Err(refuse(
                 "pending continuation exceeds the candidate queue's limits",
@@ -147,7 +159,7 @@ pub fn restore_processed_resume(
     let mut initializer = state.clone();
     initializer.pending.clear();
     initializer.checkpoint = None;
-    let entry = restore_command(encode_processed_resume(&initializer)?)?;
+    let entry = restore_command(encode_processed_resume(&initializer)?);
     check_deadline(deadline)?;
     enter_headless_resume(session, state.game.runtime_time, entry)?;
     let fixed_tick = loop {
@@ -185,16 +197,19 @@ pub fn restore_processed_resume(
         check_deadline(deadline)?;
         let tick = fixed_tick
             .checked_add(pending.tick_offset)
-            .and_then(GameplayCommandTick::new)
+            .and_then(CommandTick::new)
             .ok_or_else(|| refuse("pending command tick cannot be represented in the candidate"))?;
-        let sequence = GameplayCommandSourceSequence::new(index as u64 + 1)
-            .expect("bounded pending command ordinal");
-        let source = GameplayCommandIngressSource::external(SERVER_COMMAND_SOURCE)
-            .expect("static Server command source");
-        let draft = pending.command.clone().into_draft().map_err(refuse)?;
-        session.submit(GameplayCommandSubmission::new(
-            tick, source, sequence, draft,
-        ))?;
+        let sequence =
+            CommandSequence::new(index as u64 + 1).expect("bounded pending command ordinal");
+        let source =
+            CommandSource::external(SERVER_COMMAND_SOURCE).expect("static Server command source");
+        let intent = pending.command.clone().into_intent().map_err(refuse)?;
+        ScheduledCommand::new(tick, source, sequence, intent).submit_headless(session)?;
+    }
+    if !state.pending.is_empty() && session.frame(Duration::ZERO)?.is_some() {
+        return Err(refuse(
+            "Server candidate exited after restoring pending operations",
+        ));
     }
     let actual = capture_state(session, staged.as_ref())?;
     if encode_processed_resume(&actual)? != expected {

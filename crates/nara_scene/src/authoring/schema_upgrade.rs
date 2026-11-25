@@ -1,10 +1,8 @@
 //! Prepared source checkpoints for the reviewed authored-data upgrade.
 //!
-//! This is internal source preparation, not file publication or a saved checkpoint. The complete
-//! Workspace/persistence owner must bind every participant and its actual new persistence leaf
-//! before installing any source. Dropping either preparation or a bound guard changes no session.
-//! Old history is retained by its session until commit; no old inverse is replayed under a new
-//! Schema. All future source, classification and history storage is ready before binding.
+//! The workspace or persistence owner binds every participant and its new persistence leaf before
+//! installing any source. A session retains its previous history until commit. Preparation admits
+//! the new source, classification, and history storage before binding.
 
 use std::{mem::size_of, sync::Arc};
 
@@ -25,14 +23,14 @@ use crate::{
     SceneDocumentCandidate, SceneEntityRecord, SceneFileEncoding, SceneFileLimits,
     ScenePatchReport, SourceDocumentKey, SourceDocumentKind, UnavailableRecordManifest,
     authoring_decode::{
-        AuthoringDocumentState, AuthoringSourceParts,
-        schema_upgrade::{AuthoredFieldUpgrade, AuthoredUpgradeOutput},
+        AuthoringDocumentState, AuthoringSourceParts, schema_upgrade::AuthoredUpgradeOutput,
     },
 };
 
 mod input;
 mod recovery;
 
+pub use crate::authoring_decode::schema_upgrade::AuthoredFieldUpgrade;
 pub use input::{PrefabAuthoredSchemaUpgradeInput, SceneAuthoredSchemaUpgradeInput};
 pub use recovery::{
     validate_authored_upgrade_prefab_transition, validate_authored_upgrade_scene_transition,
@@ -74,6 +72,7 @@ impl Default for AuthoredSchemaUpgradeLimits {
     }
 }
 
+/// Work and peak retained storage charged during authored schema upgrade preparation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AuthoredSchemaUpgradeUsage {
     pub work_bytes: usize,
@@ -369,7 +368,7 @@ fn upgrade_budget_error(
         "preparation-stage",
         error.stage,
     );
-    let mut diagnostics = nara_diagnostic::DiagnosticReport::default();
+    let mut diagnostics = nara_core::diagnostic::DiagnosticReport::default();
     diagnostics.push(diagnostic);
     ScenePatchReport {
         applied: false,
@@ -479,7 +478,7 @@ macro_rules! checkpoint_observations {
                 self.checkpoint.state.unavailable_manifest()
             }
 
-            pub fn diagnostics(&self) -> &nara_diagnostic::DiagnosticReport {
+            pub fn diagnostics(&self) -> &nara_core::diagnostic::DiagnosticReport {
                 self.checkpoint.state.diagnostics()
             }
         }
@@ -491,7 +490,6 @@ checkpoint_observations!(PreparedPrefabAuthoredSchemaUpgrade, PrefabDocument);
 
 impl SceneAuthoringSession {
     /// Charges the incumbent before any document in the complete set prepares its successor.
-    #[doc(hidden)]
     pub fn retain_authored_schema_upgrade_source(
         &self,
         work: &mut AuthoredSchemaUpgradeWork,
@@ -508,7 +506,6 @@ impl SceneAuthoringSession {
     }
 
     /// Prepares one source under a bounded allowance, without installing or saving it.
-    #[doc(hidden)]
     pub fn prepare_authored_upgrade(
         &self,
         source_key: &SourceDocumentKey,
@@ -528,7 +525,7 @@ impl SceneAuthoringSession {
         )
     }
 
-    #[doc(hidden)]
+    /// Prepares the next scene source using the retained incumbent and shared allowance.
     pub fn prepare_authored_upgrade_with_retained_source(
         &self,
         source_key: &SourceDocumentKey,
@@ -589,7 +586,6 @@ impl SceneAuthoringSession {
 
     /// Revalidates the original source under exclusive access, without installing anything.
     /// Refusal returns the same prepared successor, including its original future identities.
-    #[doc(hidden)]
     pub fn bind_authored_schema_upgrade(
         &mut self,
         source_key: &SourceDocumentKey,
@@ -607,7 +603,7 @@ impl SceneAuthoringSession {
         })
     }
 
-    #[doc(hidden)]
+    /// Checks that the prepared upgrade still applies to the current scene revision.
     pub fn validate_authored_schema_upgrade(
         &self,
         source_key: &SourceDocumentKey,
@@ -631,7 +627,7 @@ impl SceneAuthoringSession {
 }
 
 impl PrefabAuthoringSession {
-    #[doc(hidden)]
+    /// Charges the current prefab source against the shared upgrade allowance.
     pub fn retain_authored_schema_upgrade_source(
         &self,
         work: &mut AuthoredSchemaUpgradeWork,
@@ -647,7 +643,7 @@ impl PrefabAuthoringSession {
         )
     }
 
-    #[doc(hidden)]
+    /// Prepares an authored upgrade of the current prefab under the supplied allowance.
     pub fn prepare_authored_upgrade(
         &self,
         source_key: &SourceDocumentKey,
@@ -667,7 +663,7 @@ impl PrefabAuthoringSession {
         )
     }
 
-    #[doc(hidden)]
+    /// Prepares the next prefab source using the retained incumbent and shared allowance.
     pub fn prepare_authored_upgrade_with_retained_source(
         &self,
         source_key: &SourceDocumentKey,
@@ -723,7 +719,7 @@ impl PrefabAuthoringSession {
         source.prepare_with_admission(source_key, base_revision, candidate, upgrade, admit)
     }
 
-    #[doc(hidden)]
+    /// Binds exclusive access for installing the prepared prefab upgrade.
     pub fn bind_authored_schema_upgrade(
         &mut self,
         source_key: &SourceDocumentKey,
@@ -741,7 +737,7 @@ impl PrefabAuthoringSession {
         })
     }
 
-    #[doc(hidden)]
+    /// Checks that the prepared upgrade still applies to the current prefab revision.
     pub fn validate_authored_schema_upgrade(
         &self,
         source_key: &SourceDocumentKey,
@@ -953,6 +949,7 @@ impl<'a> SceneAuthoredSchemaUpgradeCommit<'a> {
     }
 }
 
+/// Exclusive access for installing a prepared prefab schema upgrade.
 #[derive(Debug)]
 #[must_use]
 pub struct PrefabAuthoredSchemaUpgradeCommit<'a> {
@@ -1024,7 +1021,7 @@ fn require_successor(
 fn admit_upgrade_incumbent(
     original_placements: &[crate::SceneEntityPlacement],
     original_entities: &[SceneEntityRecord],
-    original_inputs: Option<&std::collections::BTreeSet<nara_identity::ReferenceInputId>>,
+    original_inputs: Option<&std::collections::BTreeSet<nara_ecs::identity::ReferenceInputId>>,
     state: &AuthoringDocumentState,
     history: &AuthoringHistory,
     admit: &mut AdmissionCallback<'_>,
@@ -1069,7 +1066,7 @@ fn retain_incumbent(
     history: &AuthoringHistory,
     placements: &[crate::SceneEntityPlacement],
     entities: &[SceneEntityRecord],
-    inputs: Option<&std::collections::BTreeSet<nara_identity::ReferenceInputId>>,
+    inputs: Option<&std::collections::BTreeSet<nara_ecs::identity::ReferenceInputId>>,
     kind: SourceDocumentKind,
     work: &mut AuthoredSchemaUpgradeWork,
 ) -> Result<RetainedAuthoredSchemaUpgradeSource, ScenePatchReport> {

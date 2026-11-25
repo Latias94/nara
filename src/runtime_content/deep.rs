@@ -6,16 +6,16 @@ use std::{
     sync::Arc,
 };
 
+use crate::fs::ContentDigest;
 #[cfg(feature = "runtime-2d")]
 use nara_asset::AssetRef;
 #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
 use nara_asset::{AssetProductRef, AssetRuntimeError};
 #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
-use nara_diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
-    SafeSummary,
+use nara_core::diagnostic::{
+    DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
+    ReportDiagnostic as Diagnostic, SafeSummary,
 };
-use nara_fs::ContentDigest;
 #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
 use nara_reflect::ComponentTypeId;
 #[cfg(feature = "runtime-2d")]
@@ -39,11 +39,11 @@ use nara_render::tilemap::{
 #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
 use nara_scene::SceneEntityId;
 #[cfg(all(feature = "runtime-2d", feature = "runtime-ui"))]
-use nara_ui::__private::persisted_ui_visual_image_value;
+use nara_ui::prefab_authoring::persisted_ui_visual_image_value;
 #[cfg(feature = "runtime-ui")]
 use nara_ui::{
-    __private::{UI_VISUAL_ID, UI_VISUAL_IMAGE_FIELD_ID},
     UI_SCHEMA_OWNER_ID, UiVisual,
+    prefab_authoring::{UI_VISUAL_ID, UI_VISUAL_IMAGE_FIELD_ID},
 };
 
 #[cfg(feature = "runtime-2d")]

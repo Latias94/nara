@@ -1,8 +1,8 @@
+use nara_app::tasks::TaskPoolConfig;
 use nara_app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeSettings};
 use nara_core::SourceUniverseId;
-use nara_diagnostic::RuntimeDiagnosticsSettings;
+use nara_core::diagnostic::RuntimeDiagnosticsSettings;
 use nara_ecs::Resource;
-use nara_tasks::TaskPoolConfig;
 
 use crate::authoring::ProjectAuthoringState;
 use crate::capability::{ProductCapabilitySet, RuntimePreset};

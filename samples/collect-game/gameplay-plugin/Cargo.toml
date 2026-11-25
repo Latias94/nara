@@ -6,7 +6,7 @@ rust-version = "1.95"
 publish = false
 
 [dependencies]
-nara = { path = "../../..", default-features = false, features = ["runtime-2d", "serde"] }
+nara = { path = "../../..", default-features = false, features = ["project-runtime", "runtime-2d", "serde"] }
 
 [features]
 default = []

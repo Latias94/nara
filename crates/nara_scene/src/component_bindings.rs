@@ -2,12 +2,9 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use nara_core::ItemLimit;
 use nara_reflect::{
-    __private::{
-        ComponentRegistrySnapshotWitness, component_registry_snapshot_witness,
-        component_registry_snapshot_witness_matches, scene_component_composition_fingerprint,
-    },
     ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaOwnerSnapshot, ComponentTypeId,
     PersistentComponentSchemaOwnerId, SchemaCompositionFingerprint,
+    provider::scene_component_composition_fingerprint, registry::ComponentRegistrySnapshotWitness,
 };
 
 /// Bounds the data-owner and declaration indexes built for one Scene binding selection.
@@ -159,7 +156,7 @@ impl SceneComponentBindingsWitness {
     /// the native snapshot and does not grant permission to replace a managed Runtime.
     #[must_use]
     pub fn matches(&self, bindings: &SceneComponentBindings) -> bool {
-        component_registry_snapshot_witness_matches(&self.native, bindings.native_snapshot())
+        self.native.matches(bindings.native_snapshot())
             && self.owners.len() == bindings.data_owners().len()
             && self
                 .owners
@@ -286,7 +283,7 @@ impl SceneComponentBindings {
     #[must_use]
     pub fn witness(&self) -> SceneComponentBindingsWitness {
         SceneComponentBindingsWitness {
-            native: component_registry_snapshot_witness(self.native_snapshot()),
+            native: self.native_snapshot().witness(),
             owners: self.data_owners().to_vec(),
         }
     }
