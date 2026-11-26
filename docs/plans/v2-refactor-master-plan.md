@@ -266,6 +266,36 @@ viewport on Windows. Verify warmed-up allocation and texture copies with the [sh
 procedure](../../examples/shared-viewport/README.md). Verify resize, paused refresh, and GPU
 completion. Run the locked workspace checks and hosted CI.
 
+### Phase 3C source and verification
+
+| Scope | `4293f60` | `56c9c7f` |
+| --- | ---: | ---: |
+| Project Rust lines, including tests and examples | 144,099 | 85,261 |
+| `nara_render`, including tests and examples | 79,204 | 20,407 |
+| `nara_render/src` | 76,796 | 18,530 |
+| `nara_render/src/hud` | 8,425 | 1,239 |
+
+On Windows 11 with Rust 1.95.0, the locked all-feature, all-target workspace check passed without
+compiler warnings. All 623 workspace tests, eight DX12 probes, seven Vulkan renderer probes,
+four reference-game tests, and the Wasm core check passed. The GPU readbacks covered scene and
+HUD composition, BGRA direct and RGBA leased targets, editor overlay ordering, fallback glyphs,
+incremental glyph and tile updates, and reuse after the producer and sampler both release a texture.
+
+Night Relay presented its first 1152 × 768 frame with 110 HUD glyphs on DX12 and Vulkan. The
+headless replay finished eight rounds over 9,320 fixed ticks. The 98-line `first_game` opened a
+native window and exited on close. The clear example also presented its first frame.
+
+The shared viewport development build passed on DX12 with an RTX 4090 and a 144 Hz display at
+150% scale. In 2.007 seconds it submitted 286 viewport frames at 142.5 FPS, with zero Inspector
+submissions and zero new Nara textures or buffers. Resize, one paused refresh, and shared-queue
+completion passed. A separate 12-present PIX capture on the same build found zero in-frame GPU
+resource creations and zero texture copies in the application commands. Native macOS and Linux
+desktop presentation remain separate platform qualifications.
+
+The [hosted CI run](https://github.com/Latias94/nara/actions/runs/45792564236) passed all seven
+jobs, including the offscreen WGPU probes on Mesa software Vulkan. The workflow took 12 minutes
+24 seconds including runner queues. The longest job ran for 3 minutes 26 seconds.
+
 ## Phase 4 — Deliver the desktop editor workflow
 
 **Entry.** Phase 3C passes and RFC-3 defines the editor and supervised Play behavior.
