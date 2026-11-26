@@ -263,14 +263,28 @@ the batch that validates and publishes Image changes. Project owns Cook member a
 catalog construction, and delivery closure checks. The executable still selects its schema,
 codecs, and product recipe for Cook admission and deep validation.
 
-The ownership cut passed 204 targeted tests and 23 reference-game tests on Windows. The workspace
-and Two-Level game passed their locked all-feature, all-target checks. Fresh Two-Level Player and
-Server builds each completed four Scene switches with their previous pack and with a new Export
-moved to another directory. The old, fresh Cook, and fresh Export pack bytes matched for each
-product. Cook rejected an existing destination. With one byte changed in the Cavern member, both
-products rejected travel while Meadow remained active and cleaned up on exit. The Player also
-retained its original Scene receipt and resident Images. These were the shipped headless
-verification modes.
+The request and pack ownership changes passed 204 targeted tests and 23 reference-game tests on
+Windows. The workspace and Two-Level game passed their locked all-feature, all-target checks.
+
+Render also owns Material2d generation sharing, replacement, and retirement. The host authorizes
+source and cooked inputs and attaches their receipts to the Scene. Primary Scene replacement
+prepares one TileSet batch and carries it through the exclusive World commit. The batch is
+validated before the Scene and its stock resources are published. The replacement reserves two
+`AssetServer` snapshots, matching the snapshots it holds.
+
+On Windows, 171 targeted Render, residency, and Scene request tests passed. Regressions covered
+stale Material source bindings, the first invalid TileSet slot winning over a later type conflict,
+release of TileSet custody and the preparation reservation on overlay rejection, and the cooked
+replacement's two-snapshot reservation. The locked workspace all-feature, all-target check and the
+lean cooked Server check passed.
+
+On the same revision, the Windows Player and Server each completed four Scene switches from a
+previous pack and from a relocated fresh Export in their shipped headless verification modes.
+Each product's previous, fresh Cook, and fresh Export packs were byte-identical. Cook refused an
+existing destination. Both products rejected the damaged Cavern member and kept Meadow active.
+The Player preserved its Scene receipt and three resident Images. A wider Two-Level test run
+passed 564 cases, with two marked leaky, and failed 14. Targeted reruns reproduced the same 14
+failures with the same diagnostics on baseline `c4df934` and on the final change.
 
 Windows passed the locked all-feature, all-target workspace and two-level game checks. The
 Scene startup, pack admission, Schema, and Project checks passed 461 tests on that build.
@@ -292,18 +306,18 @@ workflow creation to the last job's completion, including queueing and runner se
 job, Windows core tests, took 4 minutes 5 seconds and passed 2,057 tests. Ubuntu core passed
 2,046 tests and the reference game passed 23. This run passed the 15-minute cold CI gate.
 
-The facade budget remains open. Root `src/` has 66,083 Rust lines including in-source tests,
-down from 67,908 before this cut. It still integrates authored loading, Scene residency, runtime
-content admission, and project Cook. `nara_project/src/` has 25,418 Rust lines, including native
-build, supervision, Cook, and packaging. The reference game's `src/` has about 8,300 lines. The
-simple VFS has 309 lines with its native adapter. The opt-in capability module has 10,524 lines
-of scoped publication and tests. The UI crate has 36,975 Rust lines in `src/`, above the package
-review threshold. The remaining ownership and size gates keep the Phase 3 exit open.
+The facade budget remains open. Root `src/` has 65,625 Rust lines including in-source tests,
+down from 66,083 before the Material and TileSet cut. It still integrates authored loading, Scene
+residency, runtime content admission, and project Cook. `nara_project/src/` has 25,418 Rust lines,
+including native build, supervision, Cook, and packaging. The reference game's `src/` has about
+8,300 lines. The simple VFS has 309 lines with its native adapter. The opt-in capability module has
+10,524 lines of scoped publication and tests. The UI crate has 36,975 Rust lines in `src/`, above
+the package review threshold. The remaining ownership and size gates keep the Phase 3 exit open.
 
-Move hosted content selection, Scene residency, and joint World publication to their runtime
-owners. Move project source discovery and the remaining Cook orchestration into `nara_project`
-through the production runtime validation path. Recheck both relocated shipping products as
-these integrations move.
+Move hosted content selection, Scene residency, and the remaining joint World publication to
+their runtime owners. Retire the manual residency byte estimates under ADR-001. Move project
+source discovery and the remaining Cook orchestration into `nara_project` through the production
+runtime validation path. Recheck both relocated shipping products as these integrations move.
 
 ## Phase 4 — Deliver the desktop editor workflow
 

@@ -34,4 +34,6 @@ selected asset members. `nara_scene::runtime_catalog` owns the catalog and canon
 The executable supplies the expected digest and target. Admission checks both before the runtime
 selects member codecs or starts the world. Scene owns the deferred Scene request and checks the
 active Scene receipt again at commit. It holds a cancelled request until the preparation task
-returns. Render owns Image publication within that commit.
+returns. Render owns Image, Material2d, and TileSet publication within that commit. Primary Scene
+replacement carries one prepared TileSet batch through the exclusive World boundary. The host
+authorizes stock asset inputs and attaches the published resource receipts to the Scene.
