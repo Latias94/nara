@@ -153,24 +153,38 @@ pub(crate) fn watch_events_from_notify(event: Event) -> Result<Vec<AssetWatchEve
     if event.need_rescan() {
         return Err(discarded_events);
     }
+    if matches!(event.kind, EventKind::Access(_)) {
+        return Ok(Vec::new());
+    }
+    if event.paths.is_empty() {
+        return Err(discarded_events);
+    }
     let convert: fn(PathBuf) -> AssetWatchEvent = match event.kind {
         EventKind::Remove(RemoveKind::File) => AssetWatchEvent::removed,
         EventKind::Create(CreateKind::File) | EventKind::Modify(ModifyKind::Data(_)) => {
             AssetWatchEvent::modified
         }
-        EventKind::Create(CreateKind::Any) | EventKind::Modify(ModifyKind::Any)
-            if event.paths.iter().all(|path| {
-                path.is_absolute() && path.symlink_metadata().is_ok_and(|meta| meta.is_file())
-            }) =>
-        {
-            AssetWatchEvent::modified
+        EventKind::Create(CreateKind::Any) | EventKind::Modify(ModifyKind::Any) => {
+            // ReadDirectoryChangesW also signals directory metadata as Modified. Directory
+            // additions, removals and renames arrive as distinct native actions.
+            let skip_directory_metadata =
+                cfg!(windows) && matches!(event.kind, EventKind::Modify(ModifyKind::Any));
+            let mut files = Vec::new();
+            for path in event.paths {
+                if !path.is_absolute() {
+                    return Err(discarded_events);
+                }
+                let metadata = path.symlink_metadata().map_err(|_| discarded_events)?;
+                if metadata.is_file() {
+                    files.push(AssetWatchEvent::modified(path));
+                } else if !skip_directory_metadata || !metadata.is_dir() {
+                    return Err(discarded_events);
+                }
+            }
+            return Ok(files);
         }
-        EventKind::Access(_) => return Ok(Vec::new()),
         _ => return Err(discarded_events),
     };
-    if event.paths.is_empty() {
-        return Err(discarded_events);
-    }
     Ok(event.paths.into_iter().map(convert).collect())
 }
 

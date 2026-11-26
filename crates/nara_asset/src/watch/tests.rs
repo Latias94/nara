@@ -176,6 +176,7 @@ fn notify_directory_unknown_and_rename_scope_remains_sticky_until_host_reconcili
         EventKind::Remove(RemoveKind::Any),
         EventKind::Create(CreateKind::Folder),
         EventKind::Create(CreateKind::Any),
+        #[cfg(not(windows))]
         EventKind::Modify(ModifyKind::Any),
         EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
         EventKind::Any,
@@ -199,6 +200,38 @@ fn notify_directory_unknown_and_rename_scope_remains_sticky_until_host_reconcili
             Err(AssetWatchQueueSendError::RescanRequired)
         );
     }
+    remove_temp_root(&root);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_directory_metadata_preserves_file_changes_and_explicit_rescans() {
+    let root = temp_root();
+    let directory = root.join("textures");
+    fs::create_dir_all(&directory).unwrap();
+    let file = directory.join("player.png");
+    fs::write(&file, b"modified source").unwrap();
+    let kind = EventKind::Modify(ModifyKind::Any);
+    let mut queue = AssetWatchEventQueue::new();
+    let sender = queue.sender();
+    admit_notify_event(&sender, Event::new(kind).add_path(directory.clone()));
+    admit_notify_event(
+        &sender,
+        Event::new(kind)
+            .add_path(directory.clone())
+            .add_path(file.clone()),
+    );
+    let drained = queue.drain();
+    assert!(!drained.rescan_required());
+    assert_eq!(drained.into_events(), [AssetWatchEvent::modified(&file)]);
+    assert!(watch_events_from_notify(Event::new(kind).add_path(root.join("missing"))).is_err());
+    admit_notify_event(
+        &sender,
+        Event::new(kind)
+            .add_path(directory)
+            .set_flag(notify::event::Flag::Rescan),
+    );
+    assert!(queue.drain().rescan_required());
     remove_temp_root(&root);
 }
 
