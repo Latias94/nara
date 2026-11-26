@@ -236,7 +236,8 @@ and macOS arm64 gamepad cross-check passed. Night Relay drew the first 1152×768
 glyphs. The headless simulation repeated eight identical rounds over 9,320 fixed ticks, including
 collision, shield depletion, restart, and escape. The CLI created and checked an independent
 starter, refreshed and read its Schema cache, and supervised a two-round run of the reference
-game. The independent starter passed a desktop all-target check.
+game. The independent starter passed a desktop all-target check. The 98-line `first_game`
+example opened a native window and exited successfully on close.
 
 The shared viewport completed its two-window DX12 smoke on a GeForce RTX 4090. At 144 Hz, it
 recorded 286 retained viewport submissions over 2.015 seconds (141.9 FPS) and zero Inspector
@@ -245,10 +246,10 @@ and texture copies. Resize, paused refresh, and shared-queue completion passed. 
 the development profile and application counters. The Phase 2 PIX and manual display results
 above describe the earlier build.
 
-The [historical Phase 3 cold CI run](https://github.com/Latias94/nara/actions/runs/45741886841)
-passed all seven jobs at `f971bd2` in 4 minutes 8 seconds with no workflow Cargo cache. Phase 3B
-needs its own hosted measurement. Take the Phase 4 editor after the retained game and tooling
-workflows are verified.
+GitHub-hosted CI passed all seven jobs at `85dad83` in 3 minutes 35 seconds from workflow creation
+to the last job completion. The workflow used Windows and Ubuntu runners without a Cargo cache.
+The [Phase 3B run](https://github.com/Latias94/nara/actions/runs/45775718470) includes the restored
+all-target workspace checks and Linux gamepad build coverage.
 
 ## Phase 4 — Deliver the desktop editor workflow
 
