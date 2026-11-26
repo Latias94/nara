@@ -42,14 +42,8 @@ pub struct UiCompileWorkStats {
     pub layout_passes: u64,
     /// Taffy measurement callback invocations, including calls without text or after errors.
     pub measurement_callbacks: u64,
-    /// Reached node dispatches, custom callbacks and child requests, including cache hits/failure.
+    /// Taffy node dispatches, including cache hits and failures.
     pub layout_work_units: u64,
-    /// Actual invocations of user-authored custom layout descriptions.
-    pub custom_layout_callbacks: u64,
-    /// Child measurement requests reached inside custom layouts.
-    pub custom_child_measurements: u64,
-    /// Child placement/hide requests reached inside custom layouts.
-    pub custom_child_placements: u64,
     /// Compatible last-good visuals selected after local rejection, even in failed candidates.
     ///
     /// This counts failure fallback, not active incremental reuse of valid roots.
@@ -151,6 +145,16 @@ impl UiCompiler {
         environment: UiEnvironment,
         theme: UiTheme,
     ) -> Result<Arc<UiFrame>, UiCompileError> {
+        self.compile_frame(snapshot, environment, theme)
+            .map(Arc::new)
+    }
+
+    pub(crate) fn compile_frame(
+        &mut self,
+        snapshot: &UiAuthoringSnapshot,
+        environment: UiEnvironment,
+        theme: UiTheme,
+    ) -> Result<UiFrame, UiCompileError> {
         let cache = std::mem::replace(
             &mut self.text_layout_cache,
             TextLayoutCache::new(
@@ -172,7 +176,7 @@ impl UiCompiler {
         environment: UiEnvironment,
         theme: UiTheme,
         text_session: &mut TextCompileSession,
-    ) -> Result<Arc<UiFrame>, UiCompileError> {
+    ) -> Result<UiFrame, UiCompileError> {
         self.work_stats.compile_attempts = self.work_stats.compile_attempts.saturating_add(1);
         if environment.theme_revision() != theme.revision() {
             return Err(UiCompileError::ThemeRevisionMismatch {
@@ -211,7 +215,7 @@ impl UiCompiler {
             self.work_stats.root_compile_attempts =
                 self.work_stats.root_compile_attempts.saturating_add(1);
             let compiled = match envelope.body() {
-                crate::kernel::authoring::UiRootEnvelopeBody::Ready(index) => root::compile_root(
+                crate::kernel::tree::UiRootEnvelopeBody::Ready(index) => root::compile_root(
                     &mut self.text_engine,
                     &mut self.work_stats,
                     &snapshot.roots[*index],
@@ -227,7 +231,7 @@ impl UiCompiler {
                         self.limits.max_paint_primitives,
                     ),
                 ),
-                crate::kernel::authoring::UiRootEnvelopeBody::Rejected(diagnostic) => {
+                crate::kernel::tree::UiRootEnvelopeBody::Rejected(diagnostic) => {
                     Err(RootCompileError::Local(diagnostic.clone()))
                 }
             };
@@ -359,7 +363,17 @@ impl UiCompiler {
         semantics.sort_by(|left, right| left.order.cmp(&right.order));
 
         let diagnostics = bounded_diagnostics(&outcomes, self.limits.max_diagnostics);
-        let frame = Arc::new(UiFrame {
+        let modal_root = layouts
+            .iter()
+            .rev()
+            .map(|entry| &entry.value)
+            .find(|layout| {
+                layout.layer == UiLayer::Modal
+                    && layout.structural_index == 0
+                    && layout.visible_on_surface
+            })
+            .map(|layout| layout.root_key.clone());
+        let frame = UiFrame {
             revision: frame_revision,
             source_revision: snapshot.source_revision,
             environment,
@@ -370,7 +384,10 @@ impl UiCompiler {
             focus: focus.into_iter().map(|entry| entry.value).collect(),
             semantics: semantics.into_iter().map(|entry| entry.value).collect(),
             diagnostics,
-        });
+            modal_root,
+            #[cfg(feature = "runtime")]
+            bindings: None,
+        };
 
         let published = candidates.iter().filter_map(|candidate| {
             let CandidateBody::Published(compiled) = &candidate.body else {
@@ -421,7 +438,7 @@ impl UiCompiler {
                     key: envelope.key().clone(),
                 });
             }
-            if let crate::kernel::authoring::UiRootEnvelopeBody::Ready(index) = envelope.body() {
+            if let crate::kernel::tree::UiRootEnvelopeBody::Ready(index) = envelope.body() {
                 let Some(root) = snapshot.roots.get(*index) else {
                     return Err(UiCompileError::SnapshotEnvelopeMismatch {
                         ordinal: expected_ordinal,

@@ -185,139 +185,70 @@ above remain open as platform qualifications. Phase 3 work proceeds with those c
   diagnostics, and VFS in `nara_core`. Retire the gameplay queue, task pool, fault routes,
   quarantine, and private runtime driver tunnels.
 - Consolidate the five game UI and text packages into `nara_ui`. Move manifests, starters, builds,
-  Schema discovery, supervised Play, Cook, Export, and the `nara` CLI to headless `nara_project`.
-  Keep the root facade within its budget. Use the current Scene and pack formats until Phase 5.
+  Schema discovery, supervised Play, and the `nara` CLI to headless `nara_project`. Keep the root
+  facade within its budget. Phase 3B retires the v0 Scene and pack formats before Phase 5.
 
 **Exit.** Build and test the core workspace and a new reference game using public APIs. Demonstrate
 movement, sprite animation, tilemap, collision, sound, and HUD in at most 100 lines. Eliminate private
 crate tunnels, process aborts, and intentional teardown leaks in first-party production Rust. Measure
 cold CI below 15 minutes.
 
-### Phase 3 implementation and verification
+### Phase 3B: remove the v0 runtime
 
-The Nara workspace moved from 30 to 18 packages, with 17 under `crates/`. Using the Phase 1
-counting rules, project Rust source moved from 830,883 to about 803,000 lines, with 6 fixture lines.
-The four active Nara lockfiles agree on the WGPU pin.
+The Phase 3 package consolidation kept the old hosted scene and pack system alive while its
+owners changed. Phase 3B retires it. The v0 tag preserves the two-level game and the previous
+reference game. The live reference game, starter, and examples construct their worlds in Rust.
 
-`App` now provides a normal desktop runner and deterministic fixed steps. Bevy owns the ECS
-hierarchy and task execution. Spatial propagation skips clean component tables, checks changed
-rows in dirty tables, and updates affected branches. Input, physics, audio, and HUD each have a
-public runtime surface. The reference game drives `App` on its ordinary headless and desktop
-paths. On Windows, the 100-line example displayed the tilemap and HUD, animated the player during
-movement, stopped at the collision wall, played the collision sound, and closed with exit code 0.
+- Delete the v0 root project host, full scene and prefab stack, cooked pack and publication
+  contracts, and the NT filesystem capability backend. Keep native Bevy relationships and
+  incremental spatial propagation, VFS paths and atomic writing, and typed asset storage.
+- Keep the game runnable through Winit and the shared viewport runnable through the same WGPU
+  device and queue as Open-GPUI. Retain one-shot GPU ownership and completion where native
+  resources depend on it. Publish UI hit-test geometry only after the backend presents it.
+- Keep project creation, Check, Schema refresh, and supervised Play. Phase 5 owns the new data
+  formats and Cook and Export. There is no v0 project migration feature in the v2 runtime.
+- Check the retained features and games with Rust 1.95. Measure the live Rust source against
+  `850d419` using the Phase 1 counting rules, and report regular crates above 30,000 source lines.
 
-`nara_project` owns the `nara` CLI and starter. Windows verification with real Cargo covered
-project creation, read-only validation, successful Schema refresh, preservation of the cache on a
-failed refresh, normal Play exit, and interrupt-driven process cleanup. The two-level game's
-independent source copy passed Check, Schema refresh, cache read, and supervised headless Play with
-four Scene transitions. `nara cook` and `nara export` exercised that game's v0 cooker. The Windows
-Player and Server graphs exclude `nara_project`, editor crates, and Open-GPUI. Both executables
-opened their pre-cutover packs in independent directories, traveled from Meadow to Cavern, and
-shut down cleanly. A fresh Export also ran from a relocated directory, and a second Cook to the
-same destination refused to replace the first. The production Server test exercised a new Cook,
-checkpoint restoration, and service shutdown. Scene owns the cooked configuration and catalog.
-Asset owns the v1 pack wire I/O.
+### Phase 3B source and verification
 
-Project owns bounded manifest snapshots and source lineage, Cargo metadata, structured compiler
-messages, native Cargo builds, executable and Rust input capture, the native product process
-adapter, and Cook and Player package publication.
-Asset owns CPU image import, reload, asset artifact construction, the local artifact cache, and
-shared captured pack bytes. Render owns image preparation, GPU upload, and Winit presentation.
-Audio owns the fixed-step mixer plugin. Scene owns format diagnostics and the capability, digest,
-and target checks for cooked catalog admission. An earlier locked Windows test run passed 643
-cases across these owners and the cooked product boundaries. The artifact feature also compiled
-in Asset alone.
+| Scope | `850d419` | Phase 3B |
+| --- | ---: | ---: |
+| Project Rust lines, including tests and examples | 804,533 | 144,099 |
+| Rust fixture lines | 6 | 0 |
+| Root facade | 65,625 | 367 |
+| `nara_scene` | 194,014 | 746 |
+| `nara_asset` | 42,235 | 5,074 |
+| `nara_app` | 26,431 | 4,954 |
+| `nara_ui` | 59,974 | 13,926 |
+| `nara_render` | 112,337 | 79,204 |
+| `reference-game` | 18,954 | 1,356 |
 
-The root source-directory Export, inherited desktop READY protocol, public dual-template starter,
-unused live asset build plugin, and Collect sample have retired. The reference game continues to
-package its source-based candidate. `nara check` and the source runner compile authored RON action
-maps through the same API. In the Windows watch test, a valid edit replaced the selected input map,
-invalid edits retained the last accepted map, and later Scene preparation used the updated mapping.
-The private tunnel, abort, and intentional leak source checks passed.
+The workspace has 18 packages including the facade and the derive crates. `nara_render` is the
+only crate over the review threshold, with 76,796 lines under `src/`. Its stock frame submit and
+present skip outer error scopes. Resource creation and custom encoders still have local validation.
+Native error-scope completion is polled once, without blocking the frame to await a pending result.
 
-Manifest byte reads, profile lowering, digest framing, source lineage, and redacted manifest
-diagnostics now live in `nara_project::manifest_source`. The root keeps only the product capability
-ceiling adapter. Real Check, Cook, Export, relocated Player, and prior-pack Server and Player
-verification passed after the ownership cut.
+On Windows 11 with Rust 1.95.0, the locked all-feature, all-target workspace check and 1,153
+workspace tests passed. Five additional native probes covered HUD pixels, alpha blending, dirty
+tile chunks, device loss and GPU resource retirement, and keyboard focus loss. The Wasm core check
+and macOS arm64 gamepad cross-check passed. Night Relay drew the first 1152×768 frame with 110 HUD
+glyphs. The headless simulation repeated eight identical rounds over 9,320 fixed ticks, including
+collision, shield depletion, restart, and escape. The CLI created and checked an independent
+starter, refreshed and read its Schema cache, and supervised a two-round run of the reference
+game. The independent starter passed a desktop all-target check.
 
-Scene owns primary activation and replacement, including matching the staged replacement with the
-current receipt. Code that compiles a Scene in memory can pass the admitted candidate directly to
-startup or replacement. Systems read the active Scene through Bevy's `Res<CurrentScene>`. Schema
-bundle refresh uses one VFS publication operation. The compiled project Check used a real Cargo
-build to read the reference game's custom Schema. Cook assembles its pack from in-memory members.
-The shipping path reads `content.pack` from a held file.
+The shared viewport completed its two-window DX12 smoke on a GeForce RTX 4090. At 144 Hz, it
+recorded 286 retained viewport submissions over 2.015 seconds (141.9 FPS) and zero Inspector
+submissions during the sample. Nara's steady-state counters recorded zero new textures, buffers,
+and texture copies. Resize, paused refresh, and shared-queue completion passed. This run used
+the development profile and application counters. The Phase 2 PIX and manual display results
+above describe the earlier build.
 
-Project Scene travel uses a synchronous commit at an exclusive World boundary. The cross-frame
-native-domain state machine, its simulation gate, and the retirement-claim exception are gone.
-On Windows, 426 App and hosted runtime tests passed after the travel cutover. Eight Two-Level
-tests covered travel, collision, and checkpoint reconstruction. The Scene and Player packaging
-changes passed another 426 targeted checks. A fresh Cook and Export from Project emitted the
-same pack bytes as the preceding producer. The relocated Player traveled from Meadow to Cavern,
-shut down cleanly, and an Export to the existing destination left all three files intact.
-
-Scene now owns the request lifecycle for primary and additive Scene changes. It checks the active
-Scene receipt, runtime generation, and captured source before publication. A cancelled request
-holds its slot until the preparation task has physically returned. Asset owns held-file and
-captured member reads, the shared decode budget, and bounded typed asset preparation. Render owns
-the batch that validates and publishes Image changes. Project owns Cook member assembly, canonical
-catalog construction, and delivery closure checks. The executable still selects its schema,
-codecs, and product recipe for Cook admission and deep validation.
-
-The request and pack ownership changes passed 204 targeted tests and 23 reference-game tests on
-Windows. The workspace and Two-Level game passed their locked all-feature, all-target checks.
-
-Render also owns Material2d generation sharing, replacement, and retirement. The host authorizes
-source and cooked inputs and attaches their receipts to the Scene. Primary Scene replacement
-prepares one TileSet batch and carries it through the exclusive World commit. The batch is
-validated before the Scene and its stock resources are published. The replacement reserves two
-`AssetServer` snapshots, matching the snapshots it holds.
-
-On Windows, 171 targeted Render, residency, and Scene request tests passed. Regressions covered
-stale Material source bindings, the first invalid TileSet slot winning over a later type conflict,
-release of TileSet custody and the preparation reservation on overlay rejection, and the cooked
-replacement's two-snapshot reservation. The locked workspace all-feature, all-target check and the
-lean cooked Server check passed.
-
-On the same revision, the Windows Player and Server each completed four Scene switches from a
-previous pack and from a relocated fresh Export in their shipped headless verification modes.
-Each product's previous, fresh Cook, and fresh Export packs were byte-identical. Cook refused an
-existing destination. Both products rejected the damaged Cavern member and kept Meadow active.
-The Player preserved its Scene receipt and three resident Images. A wider Two-Level test run
-passed 564 cases, with two marked leaky, and failed 14. Targeted reruns reproduced the same 14
-failures with the same diagnostics on baseline `c4df934` and on the final change.
-
-Windows passed the locked all-feature, all-target workspace and two-level game checks. The
-Scene startup, pack admission, Schema, and Project checks passed 461 tests on that build.
-Another 41 reference game tests covered first-wave play, desktop composition, and HUD behavior.
-The portable core compiled for `wasm32-unknown-unknown`. In a clean WSL2 Ubuntu 26.04 build directory,
-Rust 1.95 ran the Linux workspace check in 2 minutes 23 seconds and the 1,717-test CI suite in
-2 minutes 48 seconds. The Linux CLI also checked the reference game and stopped a trusted game
-and its child process after `SIGINT`, with an exit status of 130.
-
-On Windows 11 with an i9-13900KF, Rust 1.95, one Cargo build job, downloaded dependency sources,
-and an empty target per job, the formatting commands took 29 seconds. The combined workspace check
-and test job took 13 minutes 23 seconds and passed 1,720 tests. The reference-game job passed 23
-tests in 6 minutes 24 seconds. The Wasm check took 1 minute 29 seconds. Running those jobs in
-sequence took 21 minutes 45 seconds. CI now runs workspace checks and core tests in separate jobs.
-
-On 2026-11-26, the [GitHub-hosted cold CI run](https://github.com/Latias94/nara/actions/runs/45741886841)
-at `f971bd2` passed all seven jobs with no workflow Cargo cache. It took 4 minutes 8 seconds from
-workflow creation to the last job's completion, including queueing and runner setup. The longest
-job, Windows core tests, took 4 minutes 5 seconds and passed 2,057 tests. Ubuntu core passed
-2,046 tests and the reference game passed 23. This run passed the 15-minute cold CI gate.
-
-The facade budget remains open. Root `src/` has 65,625 Rust lines including in-source tests,
-down from 66,083 before the Material and TileSet cut. It still integrates authored loading, Scene
-residency, runtime content admission, and project Cook. `nara_project/src/` has 25,418 Rust lines,
-including native build, supervision, Cook, and packaging. The reference game's `src/` has about
-8,300 lines. The simple VFS has 309 lines with its native adapter. The opt-in capability module has
-10,524 lines of scoped publication and tests. The UI crate has 36,975 Rust lines in `src/`, above
-the package review threshold. The remaining ownership and size gates keep the Phase 3 exit open.
-
-Move hosted content selection, Scene residency, and the remaining joint World publication to
-their runtime owners. Retire the manual residency byte estimates under ADR-001. Move project
-source discovery and the remaining Cook orchestration into `nara_project` through the production
-runtime validation path. Recheck both relocated shipping products as these integrations move.
+The [historical Phase 3 cold CI run](https://github.com/Latias94/nara/actions/runs/45741886841)
+passed all seven jobs at `f971bd2` in 4 minutes 8 seconds with no workflow Cargo cache. Phase 3B
+needs its own hosted measurement. Take the Phase 4 editor after the retained game and tooling
+workflows are verified.
 
 ## Phase 4 — Deliver the desktop editor workflow
 
@@ -343,7 +274,7 @@ process. Pass `nara_editor_core` headless tests and verify its UI-framework-free
 
 - Implement derived Schema, packed fields, `FieldPath`, UUID sidecars, compact RON, nested prefab
   overrides, and unknown-component round trips. Cook the dependency closure into `.nscn` and `.npak`.
-  Update `reference-game`, `samples/two-level-game`, and the `nara_project` starter at the cutover.
+  Add a data-authored scene to `reference-game` and update the `nara_project` starter at the cutover.
 - Qualify data hot reload and measure edit-to-result latency. Integrate retained `gpui-fast` layout,
   read tracking, and frame reuse so texture updates can redraw without relaying out static panels.
 - Export the reference game as an executable with cooked assets and verify an independent launch.

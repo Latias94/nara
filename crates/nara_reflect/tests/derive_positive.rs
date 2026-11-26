@@ -26,11 +26,11 @@ mod nested_aliases {
     use std::collections::BTreeMap;
 
     use nara_asset::AssetRef;
+    use nara_core::EntityUuid;
     use nara_ecs::Component;
-    use nara_ecs::identity::EntityReference;
-    use nara_reflect::{ComponentRegistryBuilder, PersistentComponent};
+    use nara_reflect::{ComponentSchemaCatalog, PersistentComponent, PersistentComponentProvider};
 
-    type EntityTargets = Vec<Option<EntityReference>>;
+    type EntityTargets = Vec<Option<EntityUuid>>;
     type AssetGroups = BTreeMap<String, Vec<Option<AssetRef>>>;
 
     #[derive(Component, PersistentComponent)]
@@ -51,20 +51,15 @@ mod nested_aliases {
     }
 
     #[test]
-    fn aliased_nested_references_register_and_freeze() {
-        let mut registry = ComponentRegistryBuilder::new();
-        registry
-            .register_persistent_component::<NestedAliases>()
+    fn aliased_nested_references_admit_schema() {
+        ComponentSchemaCatalog::from_components([NestedAliases::persistent_component_schema()])
             .unwrap();
-        registry.freeze().unwrap();
     }
 }
 
 mod typed_float_literals {
     use nara_ecs::Component;
-    use nara_reflect::{
-        ComponentRegistryBuilder, PersistentComponent, PersistentComponentProvider,
-    };
+    use nara_reflect::{ComponentSchemaCatalog, PersistentComponent, PersistentComponentProvider};
 
     mod wide_float_alias {
         #[allow(non_camel_case_types)]
@@ -102,13 +97,12 @@ mod typed_float_literals {
     }
 
     #[test]
-    fn actual_wide_alias_and_self_associated_type_register_and_freeze() {
-        let mut registry = ComponentRegistryBuilder::new();
-        registry
-            .register_persistent_component::<TypedFloatLiterals>()
-            .unwrap();
-        registry.freeze().unwrap();
-        let schema = TypedFloatLiterals::persistent_component_schema();
+    fn actual_wide_alias_and_self_associated_type_admit_schema() {
+        let catalog = ComponentSchemaCatalog::from_components([
+            TypedFloatLiterals::persistent_component_schema(),
+        ])
+        .unwrap();
+        let schema = &catalog.components()[0];
         let initial = schema.authoring_initial_value().unwrap();
         assert_eq!(initial.field("wide").unwrap().as_f64(), Some(1e100));
         assert_eq!(initial.field("associated").unwrap().as_f64(), Some(1.5));

@@ -437,14 +437,6 @@ impl UiBackendPresentationFrame {
 }
 
 impl UiPresentationOutcomes {
-    pub(crate) fn begin_close(&self) {
-        self.receiver.begin_close();
-    }
-
-    pub(crate) fn has_unsettled_backend_results(&self) -> bool {
-        !self.outcomes.is_empty() || self.receiver.has_unsettled_backend_results()
-    }
-
     pub fn commit_backend(&mut self, completed: UiCompletedBackendOutcome) {
         self.try_commit_backend(completed)
             .expect("a backend outcome must return to the runtime that reserved its permit");

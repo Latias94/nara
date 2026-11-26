@@ -3,7 +3,6 @@ use std::{
     collections::HashMap,
     error::Error,
     fmt::{self, Display, Formatter},
-    mem::size_of,
 };
 
 #[cfg(feature = "runtime")]
@@ -155,56 +154,19 @@ impl AssetServer {
         }
     }
 
-    /// Returns checked logical storage for this catalogue or an independent clone.
-    ///
-    /// The model includes the owner, every map entry, two machine words of indexing metadata
-    /// per entry, and both owned copies of each source path. Anonymous type claims count too;
-    /// borrowed static Rust type names allocate no cloned string storage. This pure borrowed
-    /// query uses logical lengths, not hash-table capacity, allocator overhead or process RSS.
-    /// `None` means the logical byte calculation overflowed.
-    #[must_use]
-    pub fn checked_retained_bytes(&self) -> Option<usize> {
-        let mut bytes = size_of::<Self>();
-        for entries in [
-            checked_map_bytes::<AssetSourcePath, AssetId>(self.paths.len())?,
-            checked_map_bytes::<AssetId, AssetSourcePath>(self.reverse_paths.len())?,
-            checked_map_bytes::<AssetProductRef, AssetId>(self.products.len())?,
-            checked_map_bytes::<AssetId, AssetProductRef>(self.reverse_products.len())?,
-            checked_map_bytes::<AssetId, (TypeId, &'static str)>(self.type_claims.len())?,
-        ] {
-            bytes = bytes.checked_add(entries)?;
-        }
-        for path in self.paths.keys().chain(self.reverse_paths.values()) {
-            bytes = bytes.checked_add(path.as_str().len())?;
-        }
-        Some(bytes)
-    }
-
-    /// Returns the logical growth bound for one new typed Product and optional source alias.
-    ///
-    /// This uses the same model as [`Self::checked_retained_bytes`], excluding the catalogue
-    /// owner itself. It is a conservative admission bound when some of the binding already
-    /// exists; it neither allocates a runtime identity nor changes this or another catalogue.
-    #[must_use]
-    pub fn checked_product_binding_retained_bytes(path: Option<&AssetSourcePath>) -> Option<usize> {
-        let mut bytes = checked_map_bytes::<AssetProductRef, AssetId>(1)?
-            .checked_add(checked_map_bytes::<AssetId, AssetProductRef>(1)?)?
-            .checked_add(checked_map_bytes::<AssetId, (TypeId, &'static str)>(1)?)?;
-        if let Some(path) = path {
-            bytes = bytes
-                .checked_add(checked_map_bytes::<AssetSourcePath, AssetId>(1)?)?
-                .checked_add(checked_map_bytes::<AssetId, AssetSourcePath>(1)?)?
-                .checked_add(path.as_str().len().checked_mul(2)?)?;
-        }
-        Some(bytes)
-    }
-
     /// Reserves a canonical source location, independently of authored alias scopes.
     pub fn reserve<T: 'static>(
         &mut self,
         path: impl Into<String>,
     ) -> Result<Handle<T>, AssetError> {
         let path = AssetSourcePath::new(path.into()).map_err(AssetError::InvalidPath)?;
+        self.reserve_source(path)
+    }
+
+    pub(crate) fn reserve_source<T: 'static>(
+        &mut self,
+        path: AssetSourcePath,
+    ) -> Result<Handle<T>, AssetError> {
         let id = self.reserve_path_id(path)?;
         self.claim(id)
     }
@@ -271,7 +233,7 @@ impl AssetServer {
         {
             self.validate_type_claim::<T>(id)?;
         }
-        let id = self.reserve_record_id(record)?;
+        let id = self.reserve_primary(record, primary)?;
         self.claim(id)
     }
 
@@ -279,6 +241,14 @@ impl AssetServer {
     pub fn reserve_record_id(&mut self, record: &AssetRecord) -> Result<AssetId, AssetError> {
         let primary = AssetProductRef::new(record.stable_id(), ImportedProductId::PRIMARY)
             .map_err(AssetError::InvalidProductIdentity)?;
+        self.reserve_primary(record, primary)
+    }
+
+    fn reserve_primary(
+        &mut self,
+        record: &AssetRecord,
+        primary: AssetProductRef,
+    ) -> Result<AssetId, AssetError> {
         let path_id = self.paths.get(record.path()).copied();
         let product_id = self.products.get(&primary).copied();
 
@@ -376,13 +346,13 @@ impl AssetServer {
     }
 
     #[must_use]
-    #[cfg(any(feature = "runtime", test))]
+    #[cfg(any(all(feature = "image-import", any(unix, windows)), test))]
     pub(crate) fn id_for_path(&self, path: &AssetSourcePath) -> Option<AssetId> {
         self.paths.get(path).copied()
     }
 
     #[must_use]
-    #[cfg(any(feature = "runtime", test))]
+    #[cfg(test)]
     pub(crate) fn id_for_stable_id(&self, stable_id: StableAssetId) -> Option<AssetId> {
         let primary = AssetProductRef::new(stable_id, ImportedProductId::PRIMARY).ok()?;
         self.products.get(&primary).copied()
@@ -486,10 +456,6 @@ impl AssetServer {
 
         Ok(())
     }
-}
-
-fn checked_map_bytes<K, V>(entries: usize) -> Option<usize> {
-    entries.checked_mul(size_of::<(K, V)>().checked_add(2 * size_of::<usize>())?)
 }
 
 #[cfg(test)]

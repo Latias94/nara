@@ -29,7 +29,9 @@ use crate::{
     Extent2d, ExtractedViews, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
     RenderFrameSkipReason,
 };
-use nara_app::{App, CoreStage, FrameExecutionStart, RuntimeFaultKind, RuntimeState};
+use nara_app::{
+    App, CoreStage, FrameExecutionStart, RuntimeFaultKind, RuntimeInstance, RuntimeState,
+};
 #[cfg(feature = "sprite-render")]
 use nara_ecs::Entity;
 #[cfg(feature = "hud-runtime")]
@@ -45,15 +47,6 @@ use nara_window::{
 #[cfg(feature = "hud-runtime")]
 use crate::gpu::frame::WgpuUiSubmissionState;
 
-fn admit_runtime(app: App) -> nara_app::RuntimeCandidate {
-    nara_app::RuntimeCandidate::admit(
-        app.seal().unwrap(),
-        nara_app::RuntimeObligationLedger::new(),
-        nara_app::RuntimeClosePolicy::default(),
-    )
-    .unwrap()
-}
-
 fn take_captured_frame(runtime: &mut nara_app::RuntimeInstance) -> WgpuRuntimeCapture {
     let outcome = take_runtime_frame(runtime).unwrap();
     assert!(outcome.post_operation_fault.is_none());
@@ -64,9 +57,7 @@ fn take_captured_frame(runtime: &mut nara_app::RuntimeInstance) -> WgpuRuntimeCa
 
 fn install_render_foundation(app: &mut App, with_window: bool) {
     app.add_plugins((
-        nara_reflect::ComponentRegistryPlugin,
         nara_scene::spatial::SpatialPlugin,
-        crate::RenderComponentsPlugin,
         crate::RenderPlugin::default(),
     ))
     .unwrap();
@@ -347,8 +338,7 @@ fn compiled_but_uninstalled_sprite_contribution_does_not_collect_domain_batches(
         crate::sprite::Sprite::from_color(nara_core::Vec2::ONE, Color::WHITE),
         nara_scene::spatial::Transform2d::default(),
     ));
-    let candidate = admit_runtime(app);
-    let mut runtime = candidate.complete_startup().unwrap().promote();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
 
     runtime.drive(std::time::Duration::ZERO).unwrap();
 
@@ -425,8 +415,7 @@ fn compiled_but_uninstalled_ui_contribution_does_not_drain_the_backend_frame() {
         .is_empty()
     );
 
-    let candidate = admit_runtime(app);
-    let mut runtime = candidate.complete_startup().unwrap().promote();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(std::time::Duration::ZERO).unwrap();
 
     let observation = runtime
@@ -500,7 +489,7 @@ fn replacement_before_ui_collection_cannot_take_original_permissions() {
             .chain(),
     )
     .unwrap();
-    let mut runtime = admit_runtime(app).complete_startup().unwrap().promote();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
 
     runtime.drive(std::time::Duration::ZERO).unwrap();
 
@@ -603,7 +592,7 @@ fn blocked_ui_collection_keeps_the_existing_transaction_and_next_frame_available
             .chain(),
     )
     .unwrap();
-    let mut runtime = admit_runtime(app).complete_startup().unwrap().promote();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
 
     runtime.drive(std::time::Duration::ZERO).unwrap();
 
@@ -678,7 +667,7 @@ fn managed_shutdown_returns_buffered_ui_permissions_before_world_destruction() {
     .unwrap();
     let receiver = backend_outcome_receiver(world).unwrap();
 
-    let mut runtime = admit_runtime(app).complete_startup().unwrap().promote();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(Duration::ZERO).unwrap();
     assert_eq!(receiver.pending_backend_count(), 1);
     assert!(
@@ -712,8 +701,7 @@ fn managed_shutdown_returns_buffered_ui_permissions_before_world_destruction() {
 fn managed_frame_captures_before_local_execution_publishes_its_terminal_state() {
     let mut app = App::new();
     install_test_plugins(&mut app, false);
-    let candidate = admit_runtime(app);
-    let mut runtime = candidate.complete_startup().unwrap().promote();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
     let mut host = WgpuRenderHost::offscreen();
     let producer = host.create_producer().unwrap();
     let handles = BackendWindowHandles::default();
@@ -768,7 +756,7 @@ fn managed_frame_captures_before_local_execution_publishes_its_terminal_state() 
 fn delayed_result_preserves_the_current_frame_and_survives_the_next_capture_reset() {
     let mut app = App::new();
     install_test_plugins(&mut app, false);
-    let mut runtime = admit_runtime(app).complete_startup().unwrap().promote();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
     let mut host = WgpuRenderHost::offscreen();
     let producer = host.create_producer().unwrap();
     let handles = BackendWindowHandles::default();
@@ -832,8 +820,7 @@ fn exact_fixed_step_does_not_require_app_and_render_frame_counters_to_match() {
         crate::Camera2d::default(),
         nara_scene::spatial::Transform2d::default(),
     ));
-    let candidate = admit_runtime(app);
-    let mut runtime = candidate.complete_startup().unwrap().promote();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
     let mut host = WgpuRenderHost::offscreen();
     let producer = host.create_producer().unwrap();
     let handles = BackendWindowHandles::default();
@@ -901,8 +888,7 @@ fn captured_topology_is_immutable_and_next_frame_rejects_before_surface_work() {
         inject_second_camera_after_capture.after(WgpuPolicyCaptureSet::Publish),
     )
     .unwrap();
-    let candidate = admit_runtime(app);
-    let mut runtime = candidate.complete_startup().unwrap().promote();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
     let mut host = WgpuRenderHost::offscreen();
     let producer = host.create_producer().unwrap();
     let handles = BackendWindowHandles::default();
@@ -1600,7 +1586,7 @@ fn stock_ui_input(
         crate::Camera2d::default(),
         nara_scene::spatial::Transform2d::default(),
     ));
-    let mut runtime = admit_runtime(app).complete_startup().unwrap().promote();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
     runtime.drive(std::time::Duration::ZERO).unwrap();
     let input = take_captured_frame(&mut runtime)
         .pending

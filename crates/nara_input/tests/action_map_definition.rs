@@ -12,6 +12,30 @@ use nara_input::{
     MAX_BINDINGS_PER_INPUT, MouseButton,
 };
 
+#[cfg(feature = "serde")]
+#[test]
+fn direct_ron_definition_uses_named_keys_and_the_action_compiler() {
+    let ron = r#"(
+        contexts: [(context: "gameplay", enabled: true)],
+        bindings: [(action: "jump", input: Key(KeyW), context: "gameplay")],
+    )"#;
+    let definition: ActionMapDefinition = ron::from_str(ron).unwrap();
+    assert_eq!(
+        definition.bindings()[0].input,
+        InputBinding::Key(KeyCode::KeyW)
+    );
+    let encoded = ron::to_string(&definition).unwrap();
+    let roundtrip: ActionMapDefinition = ron::from_str(&encoded).unwrap();
+    assert_eq!(definition.bindings(), roundtrip.bindings());
+    assert!(ron::from_str::<ActionMapDefinition>(&ron.replace("KeyW", "Character('w')")).is_err());
+    assert!(
+        ron::from_str::<ActionMapDefinition>(
+            &ron.replace("context: \"gameplay\")", "context: \"menu\")")
+        )
+        .is_err()
+    );
+}
+
 fn sample_definition(limits: ActionMapLimits) -> Result<ActionMapDefinition, ActionMapError> {
     let mut builder = ActionMapBuilder::new(limits);
     builder.declare_context(ActionContext::gameplay(), true)?;

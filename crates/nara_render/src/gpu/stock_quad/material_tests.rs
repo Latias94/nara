@@ -1,7 +1,6 @@
 use super::*;
 use crate::gpu::{
     allocation::AllocationFailureGuard,
-    output::OutputBudget,
     quad::{WgpuMaterial2dPipelineKey, WgpuQuadInstance, validate_material_device_limits},
     readback_tests::{
         MIXED_MATERIAL_FRAGMENT, MixedMaterialParameters, ReadbackGpu, TEXTURE_MATERIAL_FRAGMENT,
@@ -251,12 +250,9 @@ fn native_view_sharing_table_is_bounded_and_original_prefix_owns_every_unique_al
     assert_eq!(gpu.budget.retained(), 0);
 }
 
-fn source_retained_generation(
-    source_generations: &Arc<OutputBudget>,
-    fragment: &str,
-) -> (Material2dGeneration, Weak<OutputReservation>) {
-    let owner = Arc::new(source_generations.reserve(1).unwrap());
-    let weak = Arc::downgrade(&owner);
+fn source_retained_generation(fragment: &str) -> (Material2dGeneration, Weak<str>) {
+    let source = Arc::<str>::from(fragment);
+    let weak = Arc::downgrade(&source);
     let declaration = Material2dDeclaration::from_parameters::<TestMaterialParameters>(
         "test.cache-source-retention",
         1,
@@ -264,9 +260,9 @@ fn source_retained_generation(
         vec![MaterialTextureDeclaration::new("texture", "material_texture", 1).unwrap()],
     )
     .unwrap();
-    let generation = Material2dGeneration::from_shader_source(declaration, fragment)
-        .unwrap()
-        .with_lifetime_owner(owner);
+    let path = nara_asset::AssetPath::new("native-material/retention.wgsl").unwrap();
+    let generation =
+        Material2dGeneration::from_shader_inputs(declaration, vec![(path, source)]).unwrap();
     (generation, weak)
 }
 
@@ -274,7 +270,6 @@ fn source_retained_generation(
 fn native_ready_cache_releases_source_generations_and_draw_refs_keep_actual_captures() {
     let gpu = ReadbackGpu::new();
     let mut resources = StockQuadResources::default();
-    let source_generations = Arc::new(OutputBudget::new(2));
     let (texture, [red, _]) = image_versions_with_handle(1, 1);
     for revision in 0..3 {
         let fragment = format!(
@@ -283,7 +278,7 @@ fn native_ready_cache_releases_source_generations_and_draw_refs_keep_actual_capt
         let mut draws = Vec::new();
         let mut owners = Vec::new();
         for _ in 0..2 {
-            let (generation, owner) = source_retained_generation(&source_generations, &fragment);
+            let (generation, owner) = source_retained_generation(&fragment);
             let binding =
                 crate::gpu::readback_tests::material_binding(&generation, [1.0; 4], texture);
             let batches = [material_batch(binding.clone(), vec![(1, red.clone())])];
@@ -310,16 +305,12 @@ fn native_ready_cache_releases_source_generations_and_draw_refs_keep_actual_capt
                 .iter()
                 .all(|entry| matches!(entry, CachedQuadPipeline::Ready { .. }))
         );
-        assert_eq!(source_generations.retained(), 2);
-        assert!(source_generations.reserve(1).is_none());
         let second = draws.pop().unwrap();
         drop(draws);
         assert!(owners[0].upgrade().is_none());
         assert!(owners[1].upgrade().is_some());
-        assert_eq!(source_generations.retained(), 1);
         drop(second);
         assert!(owners[1].upgrade().is_none());
-        assert_eq!(source_generations.retained(), 0);
         resources.trim_pipeline_cache();
         assert_eq!(resources.pipeline_stats(), (revision + 1, revision + 1, 1));
         assert_eq!(gpu.budget.retained(), 0);
@@ -330,15 +321,13 @@ fn native_ready_cache_releases_source_generations_and_draw_refs_keep_actual_capt
 fn native_rejected_cache_releases_source_generations_with_two_exact_live_leases() {
     let gpu = ReadbackGpu::new();
     let mut resources = StockQuadResources::default();
-    let source_generations = Arc::new(OutputBudget::new(2));
-    let (retained, retained_owner) =
-        source_retained_generation(&source_generations, TEXTURE_MATERIAL_FRAGMENT);
+    let (retained, retained_owner) = source_retained_generation(TEXTURE_MATERIAL_FRAGMENT);
     let (texture, [red, _]) = image_versions_with_handle(1, 1);
     for revision in 0..3 {
         let fragment = format!(
             "{TEXTURE_MATERIAL_FRAGMENT}\nconst source_retention_revision: u32 = {revision}u;"
         );
-        let (generation, owner) = source_retained_generation(&source_generations, &fragment);
+        let (generation, owner) = source_retained_generation(&fragment);
         let binding = crate::gpu::readback_tests::material_binding(&generation, [1.0; 4], texture);
         let batches = [material_batch(binding.clone(), vec![(1, red.clone())])];
         let keys =
@@ -346,8 +335,8 @@ fn native_rejected_cache_releases_source_generations_with_two_exact_live_leases(
         assert_eq!(keys.len(), 1);
         let invalid =
             crate::gpu::quad::QuadShaderSourceGuard::invalid(keys[0].material.as_ref().unwrap());
-        assert_eq!(source_generations.retained(), 2);
-        assert!(source_generations.reserve(1).is_none());
+        assert!(owner.upgrade().is_some());
+        assert!(retained_owner.upgrade().is_some());
         for _ in 0..2 {
             let (result, prefix) = gpu.with_preparation::<()>(|preparation| {
                 let error = resources
@@ -377,7 +366,6 @@ fn native_rejected_cache_releases_source_generations_with_two_exact_live_leases(
         drop(generation);
         assert!(owner.upgrade().is_none());
         assert!(retained_owner.upgrade().is_some());
-        assert_eq!(source_generations.retained(), 1);
         assert_eq!(resources.pipeline_stats(), (revision + 1, revision + 1, 1));
         assert!(
             resources
@@ -390,7 +378,6 @@ fn native_rejected_cache_releases_source_generations_with_two_exact_live_leases(
     }
     drop(retained);
     assert!(retained_owner.upgrade().is_none());
-    assert_eq!(source_generations.retained(), 0);
     assert_eq!(resources.pipeline_stats(), (3, 3, 1));
 }
 

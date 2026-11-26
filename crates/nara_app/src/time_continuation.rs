@@ -5,10 +5,8 @@ use std::time::Duration;
 use nara_ecs::World;
 use thiserror::Error;
 
-use crate::{
-    FixedCatchUpPolicy, FixedTime, RenderTime, RuntimeFault, RuntimeState, RuntimeTimeSettings,
-    ScaledTimeRemainder, duration_remainder,
-};
+use super::{FixedCatchUpPolicy, FixedTime, RenderTime, RuntimeTimeSettings, duration_remainder};
+use crate::{RuntimeFault, RuntimeState, ScaledTimeRemainder};
 
 /// Fixed scheduling phase and policy, independently of a Runtime's identity or clock history.
 #[derive(Debug, Clone, Copy)]
@@ -159,7 +157,6 @@ impl RuntimeTimeContinuation {
         let mut updated = *fixed;
         updated.pending = self.pending;
         updated.scaled_remainder = self.scaled_remainder;
-        updated.update_pending_parts();
         let mut render = *world.resource::<RenderTime>();
         render.update_from_fixed(&updated);
         *world.resource_mut::<FixedTime>() = updated;

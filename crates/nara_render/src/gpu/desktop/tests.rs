@@ -1,34 +1,20 @@
 use std::{cell::Cell, rc::Rc};
 
 use crate::{FrameStats, RenderFrame, RenderFrameState};
-use nara_app::{
-    App, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeClosePolicy,
-    RuntimeObligationLedger,
-};
+use nara_app::{App, RuntimeCandidateRetirementState};
 
 use super::*;
 
 mod observer_deadlines;
 
 fn live_runtime() -> RuntimeInstance {
-    RuntimeCandidate::admit(
-        App::new().seal().unwrap(),
-        RuntimeObligationLedger::new(),
-        RuntimeClosePolicy::default(),
-    )
-    .unwrap()
-    .complete_startup()
-    .unwrap()
-    .promote()
+    RuntimeInstance::start(App::new()).unwrap()
 }
 
 fn render_runtime() -> RuntimeInstance {
     let mut app = App::new();
     app.add_plugins((
-        nara_reflect::ComponentRegistryPlugin,
-        nara_scene::hierarchy::HierarchyPlugin,
-        nara_scene::SpatialPlugin,
-        crate::RenderComponentsPlugin,
+        nara_scene::spatial::SpatialPlugin,
         crate::RenderPlugin::default(),
         crate::gpu::WgpuCapturePlugin,
         crate::gpu::WgpuStockCapturePlugin,

@@ -54,9 +54,7 @@ fn fixed_motion_is_extracted_from_the_latest_global_without_mutating_simulation(
 fn presentation_app() -> App {
     let mut app = App::new();
     app.add_plugins((
-        nara_reflect::ComponentRegistryPlugin,
         SpatialPlugin,
-        nara_render::RenderComponentsPlugin,
         nara_render::RenderPlugin::default(),
         nara_render::image::ImagePreparePlugin,
         SpriteRenderPlugin,

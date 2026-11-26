@@ -244,3 +244,31 @@ fn plugin_propagates_startup_and_both_fixed_boundaries() {
     .unwrap();
     app.step_fixed(Duration::from_millis(16)).unwrap();
 }
+
+#[test]
+fn post_update_systems_observe_deferred_parent_and_visibility_edits() {
+    let mut app = App::new();
+    app.add_plugin(SpatialPlugin).unwrap();
+    let world = app.world_mut().unwrap();
+    let parent = world.spawn(Transform2d::from_xy(3.0, 0.0)).id();
+    let child = world.spawn(Transform2d::from_xy(2.0, 0.0)).id();
+
+    app.add_systems(
+        CoreStage::PostUpdate,
+        (
+            (move |mut commands: Commands| {
+                commands.entity(parent).insert(Visibility::Hidden);
+                commands.entity(child).insert(ChildOf(parent));
+            })
+            .before(SpatialSet::PostUpdate),
+            (move |spatial: Query<(&GlobalTransform2d, &InheritedVisibility)>| {
+                let (global, visibility) = spatial.get(child).unwrap();
+                assert_eq!(global.translation(), Vec2::new(5.0, 0.0));
+                assert!(!visibility.get());
+            })
+            .after(SpatialSet::PostUpdate),
+        ),
+    )
+    .unwrap();
+    app.update_with_delta(Duration::ZERO).unwrap();
+}

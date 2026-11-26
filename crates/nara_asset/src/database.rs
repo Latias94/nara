@@ -4,9 +4,6 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use nara_core::source::{
-    SourceDocumentBindingError, SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin,
-};
 #[cfg(feature = "runtime")]
 use nara_ecs::Resource;
 
@@ -32,70 +29,6 @@ impl Display for AssetSourceKind {
             Self::Prefab => formatter.write_str("prefab"),
             Self::Other(kind) => formatter.write_str(kind),
         }
-    }
-}
-
-impl AssetSourceKind {
-    pub(crate) fn retained_bytes(&self) -> usize {
-        match self {
-            Self::Other(kind) => kind.capacity(),
-            Self::Unknown | Self::Image | Self::Scene | Self::Prefab => 0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
-pub struct AssetMetaIdentity {
-    stable_id: StableAssetId,
-    path: AssetPath,
-    source_kind: AssetSourceKind,
-}
-
-impl AssetMetaIdentity {
-    #[must_use]
-    pub const fn new(
-        stable_id: StableAssetId,
-        path: AssetPath,
-        source_kind: AssetSourceKind,
-    ) -> Self {
-        Self {
-            stable_id,
-            path,
-            source_kind,
-        }
-    }
-
-    #[must_use]
-    pub const fn stable_id(&self) -> StableAssetId {
-        self.stable_id
-    }
-
-    #[must_use]
-    pub const fn path(&self) -> &AssetPath {
-        &self.path
-    }
-
-    #[must_use]
-    pub const fn source_kind(&self) -> &AssetSourceKind {
-        &self.source_kind
-    }
-
-    /// Binds this metadata's local alias to a canonical catalogue location.
-    ///
-    /// The caller must first check the metadata against the actual local source path. Use
-    /// [`ProjectAssetDatabase::insert_identity`] to check and insert in one operation.
-    #[must_use]
-    pub fn into_record(self, scope: &AssetPathScope) -> AssetRecord {
-        AssetRecord::new(self.stable_id, scope.resolve(&self.path), self.source_kind)
-    }
-
-    #[cfg(feature = "serde")]
-    pub(crate) fn retained_bytes(&self) -> Option<usize> {
-        self.path
-            .retained_bytes()
-            .checked_add(self.source_kind.retained_bytes())
     }
 }
 
@@ -135,72 +68,6 @@ impl AssetRecord {
     pub const fn source_kind(&self) -> &AssetSourceKind {
         &self.source_kind
     }
-
-    /// Checks metadata compatibility with a canonical Scene or Prefab source-document key.
-    ///
-    /// This validates only the identity facts represented by the record. It does not admit a
-    /// source file, inspect metadata, or grant filesystem authority to the key or record owner.
-    pub fn validate_source_document_key(
-        &self,
-        key: &SourceDocumentKey,
-    ) -> Result<(), SourceDocumentBindingError> {
-        let expected = match key.kind() {
-            SourceDocumentKind::Scene => AssetSourceKind::Scene,
-            SourceDocumentKind::Prefab => AssetSourceKind::Prefab,
-        };
-        if self.source_kind() != &expected {
-            return Err(SourceDocumentBindingError::SourceKind);
-        }
-        if self.stable_id().as_uuid().is_nil() {
-            return Err(SourceDocumentBindingError::SourceIdentity);
-        }
-        let matches_key = match key.origin() {
-            SourceDocumentOrigin::StableAsset { stable_id } => *stable_id == self.stable_id(),
-            SourceDocumentOrigin::ProjectLocation { path, .. } => path == self.path(),
-            SourceDocumentOrigin::Named { .. } => true,
-        };
-        if !matches_key {
-            return Err(SourceDocumentBindingError::SourceKeyMismatch);
-        }
-        Ok(())
-    }
-
-    #[cfg(feature = "runtime")]
-    pub(crate) fn retained_bytes(&self) -> Option<usize> {
-        self.path
-            .retained_bytes()
-            .checked_add(self.source_kind.retained_bytes())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
-pub struct AssetMeta<TSettings> {
-    asset: AssetMetaIdentity,
-    settings: TSettings,
-}
-
-impl<TSettings> AssetMeta<TSettings> {
-    #[must_use]
-    pub const fn new(asset: AssetMetaIdentity, settings: TSettings) -> Self {
-        Self { asset, settings }
-    }
-
-    #[must_use]
-    pub const fn identity(&self) -> &AssetMetaIdentity {
-        &self.asset
-    }
-
-    #[must_use]
-    pub const fn settings(&self) -> &TSettings {
-        &self.settings
-    }
-
-    #[must_use]
-    pub fn into_parts(self) -> (AssetMetaIdentity, TSettings) {
-        (self.asset, self.settings)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,15 +84,8 @@ pub enum AssetDatabaseError {
         existing_path: AssetSourcePath,
         new_path: AssetSourcePath,
     },
-    MetaPathMismatch {
-        source_path: AssetPath,
-        meta_path: AssetPath,
-    },
     UnknownPath(AssetSourcePath),
     UnknownStableId(StableAssetId),
-    NonUtf8Path,
-    SourceOutsideRoot,
-    Filesystem(String),
 }
 
 impl Display for AssetDatabaseError {
@@ -249,22 +109,10 @@ impl Display for AssetDatabaseError {
                 formatter,
                 "asset paths '{existing_path}' and '{new_path}' collide on case-insensitive filesystems"
             ),
-            Self::MetaPathMismatch {
-                source_path,
-                meta_path,
-            } => write!(
-                formatter,
-                "asset meta path '{meta_path}' does not match source path '{source_path}'"
-            ),
             Self::UnknownPath(path) => write!(formatter, "asset path '{path}' is not registered"),
             Self::UnknownStableId(id) => {
                 write!(formatter, "stable asset id '{id}' is not registered")
             }
-            Self::NonUtf8Path => formatter.write_str("asset source path is not valid UTF-8"),
-            Self::SourceOutsideRoot => {
-                formatter.write_str("asset source path is outside the asset root")
-            }
-            Self::Filesystem(error) => write!(formatter, "asset filesystem error: {error}"),
         }
     }
 }
@@ -281,22 +129,6 @@ pub struct ProjectAssetDatabase {
 }
 
 impl ProjectAssetDatabase {
-    pub fn insert_identity(
-        &mut self,
-        scope: &AssetPathScope,
-        local_source_path: AssetPath,
-        identity: AssetMetaIdentity,
-    ) -> Result<(), AssetDatabaseError> {
-        if local_source_path != identity.path {
-            return Err(AssetDatabaseError::MetaPathMismatch {
-                source_path: local_source_path,
-                meta_path: identity.path,
-            });
-        }
-
-        self.insert(identity.into_record(scope))
-    }
-
     pub fn insert(&mut self, record: AssetRecord) -> Result<(), AssetDatabaseError> {
         self.validate_insert(&record)?;
 
@@ -418,31 +250,6 @@ impl<'a> AssetReferenceResolver<'a> {
         self.database.record_for_path(&self.scope.resolve(path))
     }
 
-    /// Returns the temporary path-text bytes needed by a successful [`Self::resolve_ref`].
-    ///
-    /// Root aliases and stable/Product lookups borrow existing keys. Scoped aliases allocate
-    /// one joined canonical spelling. Error diagnostic storage remains the caller's concern.
-    #[must_use]
-    pub fn resolution_work_bytes(self, asset_ref: &AssetRef) -> Option<usize> {
-        match asset_ref {
-            AssetRef::Path(path) => self.path_resolution_work_bytes(path),
-            AssetRef::StableId(_) | AssetRef::Product(_) => Some(0),
-        }
-    }
-
-    /// Returns temporary path-text bytes for a successful [`Self::record_for_path`].
-    #[must_use]
-    pub fn path_resolution_work_bytes(self, path: &AssetPath) -> Option<usize> {
-        match self.scope.prefix() {
-            Some(prefix) => prefix
-                .as_str()
-                .len()
-                .checked_add(1)?
-                .checked_add(path.as_str().len()),
-            None => Some(0),
-        }
-    }
-
     /// Resolves only the enclosing source, including for an explicit product selection.
     ///
     /// A source record does not prove product membership. The concrete domain must validate
@@ -557,98 +364,5 @@ mod insertion_tests {
         database.insert(accepted.clone()).unwrap();
         assert_eq!(database.record_for_stable_id(second_id), Some(&accepted));
         assert_eq!(database.len(), 2);
-    }
-}
-
-#[cfg(test)]
-mod source_document_binding_tests {
-    use super::*;
-
-    fn stable_id() -> StableAssetId {
-        StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap()
-    }
-
-    fn universe() -> nara_core::SourceUniverseId {
-        "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap()
-    }
-
-    fn record() -> AssetRecord {
-        AssetRecord::new(
-            stable_id(),
-            AssetSourcePath::new("content/templates/leaf.prefab.json").unwrap(),
-            AssetSourceKind::Prefab,
-        )
-    }
-
-    #[test]
-    fn source_document_binding_checks_kind_identity_and_exact_location() {
-        let record = record();
-        let path = record.path().clone();
-
-        assert_eq!(
-            record.validate_source_document_key(&SourceDocumentKey::project_location(
-                universe(),
-                path.clone(),
-                SourceDocumentKind::Prefab,
-            )),
-            Ok(())
-        );
-        assert_eq!(
-            record.validate_source_document_key(&SourceDocumentKey::stable_asset(
-                stable_id(),
-                SourceDocumentKind::Prefab,
-            )),
-            Ok(())
-        );
-        assert_eq!(
-            record.validate_source_document_key(
-                &SourceDocumentKey::named(
-                    universe(),
-                    "generated-prefab",
-                    SourceDocumentKind::Prefab,
-                )
-                .unwrap(),
-            ),
-            Ok(())
-        );
-        assert_eq!(
-            record.validate_source_document_key(&SourceDocumentKey::project_location(
-                universe(),
-                AssetSourcePath::new("content/templates/other.prefab.json").unwrap(),
-                SourceDocumentKind::Prefab,
-            )),
-            Err(SourceDocumentBindingError::SourceKeyMismatch)
-        );
-        assert_eq!(
-            record.validate_source_document_key(&SourceDocumentKey::stable_asset(
-                StableAssetId::parse_str("b73f0f16-09e8-4265-b090-b689b41c197e").unwrap(),
-                SourceDocumentKind::Prefab,
-            )),
-            Err(SourceDocumentBindingError::SourceKeyMismatch)
-        );
-        assert_eq!(
-            record.validate_source_document_key(&SourceDocumentKey::stable_asset(
-                stable_id(),
-                SourceDocumentKind::Scene,
-            )),
-            Err(SourceDocumentBindingError::SourceKind)
-        );
-    }
-
-    #[test]
-    fn source_document_binding_rejects_nil_record_identity() {
-        let record = AssetRecord::new(
-            StableAssetId::from_uuid(uuid::Uuid::nil()),
-            AssetSourcePath::new("content/templates/leaf.prefab.json").unwrap(),
-            AssetSourceKind::Prefab,
-        );
-        let key =
-            SourceDocumentKey::named(universe(), "generated-prefab", SourceDocumentKind::Prefab)
-                .unwrap();
-
-        assert_eq!(
-            record.validate_source_document_key(&key),
-            Err(SourceDocumentBindingError::SourceIdentity)
-        );
     }
 }

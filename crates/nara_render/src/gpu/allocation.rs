@@ -1,5 +1,50 @@
+use std::{
+    future::Future,
+    pin::pin,
+    task::{Context, Poll, Waker},
+};
+
+use crate::gpu::WgpuRenderError;
 #[cfg(any(feature = "sprite-render", feature = "hud-runtime"))]
 use crate::gpu::texture::WgpuTextureError;
+
+/// The pinned WGPU core backend returns a ready future after popping the thread-local scope.
+/// Other backends can require an async boundary. A synchronous caller must reject that attempt.
+pub(super) fn pop_error_scope(
+    scope: wgpu::ErrorScopeGuard,
+) -> Result<Option<wgpu::Error>, WgpuRenderError> {
+    let mut context = Context::from_waker(Waker::noop());
+    match pin!(scope.pop()).poll(&mut context) {
+        Poll::Ready(error) => Ok(error),
+        Poll::Pending => Err(WgpuRenderError::ErrorScopePending),
+    }
+}
+
+pub(super) struct ExecutionErrorScopes {
+    allocation: wgpu::ErrorScopeGuard,
+    internal: wgpu::ErrorScopeGuard,
+    validation: wgpu::ErrorScopeGuard,
+}
+
+impl ExecutionErrorScopes {
+    pub(super) fn push(device: &wgpu::Device) -> Self {
+        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let allocation = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        Self {
+            allocation,
+            internal,
+            validation,
+        }
+    }
+
+    pub(super) fn pop(self) -> Result<Option<wgpu::Error>, WgpuRenderError> {
+        let allocation = pop_error_scope(self.allocation);
+        let internal = pop_error_scope(self.internal);
+        let validation = pop_error_scope(self.validation);
+        Ok(allocation?.or(internal?).or(validation?))
+    }
+}
 
 /// Checks a single resource operation before its returned handle can be consumed.
 #[cfg(any(feature = "sprite-render", feature = "hud-runtime"))]
@@ -28,9 +73,8 @@ pub(crate) fn checked_resource<T>(
     let allocation_scope = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
     let validation_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let resource = create();
-    let validation_error = pollster::block_on(validation_scope.pop());
-    let allocation_error =
-        pollster::block_on(allocation_scope.pop()).map(|error| error.to_string());
+    let validation_error = pop_error_scope(validation_scope);
+    let allocation_error = pop_error_scope(allocation_scope)?.map(|error| error.to_string());
     #[cfg(test)]
     let allocation_error = allocation_error.or_else(|| take_test_failure(label));
     // OOM can also invalidate a returned handle. Keep it retryable even when validation fails.
@@ -39,7 +83,7 @@ pub(crate) fn checked_resource<T>(
             message: format!("{label}: {message}"),
         });
     }
-    if let Some(error) = validation_error {
+    if let Some(error) = validation_error? {
         return Err(crate::gpu::WgpuRenderError::ContentRejected {
             message: format!("{label}: {error}"),
         });

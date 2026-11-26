@@ -11,7 +11,6 @@ resolver = "3"
 exclude = [
     "examples/shared-viewport",
     "reference-game",
-    "samples/two-level-game",
     "vendor/winit",
 ]
 members = [
@@ -49,7 +48,6 @@ nara_ecs = { path = "crates/nara_ecs" }
 nara_ecs_derive = { path = "crates/nara_ecs_derive" }
 nara_input = { path = "crates/nara_input" }
 nara_material_derive = { path = "crates/nara_material_derive" }
-nara_project = { path = "crates/nara_project", default-features = false }
 nara_physics2d = { path = "crates/nara_physics2d" }
 nara_reflect = { path = "crates/nara_reflect" }
 nara_reflect_derive = { path = "crates/nara_reflect_derive" }
@@ -60,12 +58,10 @@ nara_window = { path = "crates/nara_window" }
 
 bevy_ecs = { version = "=0.20.0", default-features = false, features = ["std", "async_executor", "backtrace"] }
 bevy_tasks = { version = "=0.20.0", default-features = false }
-base64 = "0.21.7"
 bevy_ecs_macro_logic = "=0.20.0"
 bevy_macro_utils = "=0.20.0"
 blake3 = "1"
 bytemuck = { version = "1", features = ["derive"] }
-dunce = "1.0.5"
 encase = "=0.12.1"
 glam = { version = "0.33", features = ["serde"] }
 getrandom = { version = "0.3.4", features = ["std"] }
@@ -80,8 +76,6 @@ raw-window-handle = "0.6"
 ron = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
-semver = { version = "1", features = ["serde"] }
-static_assertions = "1"
 swash = "=0.2.6"
 thiserror = "2"
 ttf-parser = { version = "=0.25.1", default-features = false, features = ["std"] }
@@ -97,7 +91,6 @@ quote = "1"
 syn = { version = "2", features = ["full", "visit"] }
 trybuild = "1.0.118"
 wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
-rustix = "1.1.4"
 windows-sys = "0.61.2"
 
 [patch.crates-io]
@@ -105,9 +98,6 @@ wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767
 winit = { path = "vendor/winit" }
 
 [dependencies]
-blake3 = { workspace = true, optional = true }
-getrandom = { workspace = true, optional = true }
-uuid = { workspace = true, optional = true }
 nara_app = { workspace = true, optional = true }
 nara_asset = { workspace = true, optional = true, features = ["runtime"] }
 nara_audio = { workspace = true, optional = true }
@@ -115,41 +105,17 @@ nara_core = { workspace = true, optional = true }
 nara_ecs = { workspace = true, optional = true }
 nara_input = { workspace = true, optional = true }
 nara_physics2d = { workspace = true, optional = true }
-nara_project = { workspace = true, optional = true }
 nara_reflect = { workspace = true, optional = true }
 nara_render = { workspace = true, optional = true, features = ["runtime"] }
 nara_scene = { workspace = true, optional = true }
-nara_ui = { workspace = true, optional = true }
+nara_ui = { workspace = true, optional = true, features = ["runtime"] }
 nara_window = { workspace = true, optional = true, features = ["runtime"] }
-serde = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
-toml = { workspace = true, optional = true }
-thiserror = { workspace = true, optional = true }
-tracing = { workspace = true, optional = true }
-
-[target.'cfg(windows)'.dev-dependencies]
-windows-sys = { workspace = true, features = [
-    "Win32_Foundation",
-    "Win32_Storage_FileSystem",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_WindowsAndMessaging",
-] }
 
 [dev-dependencies]
-bevy_ecs.workspace = true
-image.workspace = true
 raw-window-handle.workspace = true
-ron.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-static_assertions.workspace = true
-toml.workspace = true
-tracing.workspace = true
 
 [features]
-scene-work-observation = ["dep:tracing", "nara_scene?/work-observation"]
 default = ["runtime-core", "runtime-input", "runtime-window"]
-parallel-executor = ["runtime-core", "nara_app/parallel-executor"]
 runtime-core = [
     "dep:nara_app",
     "nara_app/diagnostics",
@@ -159,35 +125,22 @@ runtime-core = [
     "dep:nara_ecs",
     "dep:nara_reflect",
     "dep:nara_scene",
-    "dep:thiserror",
 ]
+parallel-executor = ["runtime-core", "nara_app/parallel-executor"]
 runtime-input = ["runtime-core", "dep:nara_input"]
 runtime-window = ["runtime-core", "dep:nara_window"]
 runtime-2d = [
     "runtime-input",
     "runtime-window",
     "dep:nara_render",
-    "nara_render/image-runtime",
     "nara_render/animation",
-    "nara_render/persistent",
+    "nara_render/image-runtime",
     "nara_render/sprites",
     "nara_render/tiles",
 ]
-presentation-2d = [
-    "runtime-2d",
-    "nara_render/sprite-render",
-]
-runtime-ui = [
-    "runtime-input",
-    "runtime-window",
-    "dep:nara_ui",
-    "nara_ui/runtime",
-]
-presentation-ui = [
-    "runtime-ui",
-    "dep:nara_render",
-    "nara_render/hud-presentation",
-]
+presentation-2d = ["runtime-2d", "nara_render/sprite-render"]
+runtime-ui = ["runtime-input", "runtime-window", "dep:nara_ui"]
+presentation-ui = ["runtime-ui", "dep:nara_render", "nara_render/hud-presentation"]
 asset-watch = ["runtime-core", "nara_asset/hot-reload"]
 desktop-winit = ["runtime-input", "runtime-window", "nara_window/winit", "nara_render?/winit"]
 audio = ["runtime-core", "dep:nara_audio"]
@@ -196,184 +149,34 @@ physics-2d = ["runtime-2d", "dep:nara_physics2d"]
 gamepad = ["runtime-input", "nara_input/gamepad"]
 render-wgpu = ["runtime-window", "dep:nara_render", "nara_render/wgpu"]
 serde = [
-    "dep:serde",
-    "dep:serde_json",
-    "nara_app?/serde",
     "nara_asset?/serde",
     "nara_core?/serde",
-    "nara_ecs?/serde",
     "nara_input?/serde",
     "nara_reflect?/serde",
     "nara_render?/serde",
-    "nara_scene?/serde",
-    "nara_ui?/serde",
     "nara_window?/serde",
 ]
-project-runtime = [
-    "runtime-core",
-    "dep:blake3",
-    "nara_asset/pack",
-    "nara_core/fs-capabilities",
-    "nara_scene/runtime-catalog",
-]
-project-source = [
-    "project-runtime",
-    "runtime-2d",
-    "serde",
-    "dep:nara_project",
-    "nara_project/manifest-source",
-]
-project-workflow = [
-    "project-source",
-    "nara_project/cook",
-    "dep:getrandom",
-    "dep:uuid",
-    "dep:toml",
-    "nara_asset/artifact-build",
-]
-project-workflow-cargo-facts = ["project-workflow", "nara_project/cargo-facts"]
-project-tooling = ["project-workflow-cargo-facts", "nara_project/player-package", "nara_project/product-process"]
-
-[[example]]
-name = "windowed_clear"
-path = "examples/windowed_clear.rs"
-required-features = ["desktop-winit", "render-wgpu"]
 
 [[example]]
 name = "first_game"
 required-features = ["physics-2d", "audio", "presentation-2d", "presentation-ui", "desktop-winit", "render-wgpu"]
 
 [[example]]
-name = "window_surface_retirement_smoke"
-path = "examples/window_surface_retirement_smoke.rs"
-required-features = ["project-runtime", "desktop-winit", "render-wgpu"]
-
-[[example]]
-name = "windowed_sprites"
-path = "examples/windowed_sprites.rs"
-required-features = ["project-runtime", "presentation-2d", "desktop-winit", "render-wgpu"]
-
-[[example]]
-name = "palette_material"
-path = "examples/palette_material.rs"
-required-features = ["project-runtime", "presentation-2d", "desktop-winit", "render-wgpu"]
-
-[[example]]
-name = "ui_presentation_gallery"
-path = "examples/ui_presentation_gallery.rs"
-required-features = ["project-runtime", "presentation-ui", "desktop-winit", "render-wgpu"]
-
-[[example]]
-name = "asset_import_texture"
-path = "examples/asset_import_texture.rs"
-required-features = ["presentation-2d"]
+name = "windowed_clear"
+required-features = ["desktop-winit", "render-wgpu"]
 
 [[example]]
 name = "headless_server"
-path = "examples/headless_server.rs"
 required-features = ["runtime-core"]
-
-[[example]]
-name = "scene_prefab_roundtrip"
-path = "examples/scene_prefab_roundtrip.rs"
-required-features = ["presentation-2d", "serde"]
-
-[[example]]
-name = "scene_patch_roundtrip"
-path = "examples/scene_patch_roundtrip.rs"
-required-features = ["runtime-2d", "serde"]
-
-[[example]]
-name = "component_schema_export"
-path = "examples/component_schema_export.rs"
-required-features = ["presentation-2d", "serde"]
-
-[[example]]
-name = "prefab_overlay"
-path = "examples/prefab_overlay.rs"
-required-features = ["runtime-2d", "serde"]
 
 [[example]]
 name = "hello_world"
-path = "examples/hello_world.rs"
 required-features = ["runtime-2d"]
 
 [[example]]
-name = "sprite_tilemap_scene"
-path = "examples/sprite_tilemap_scene.rs"
-required-features = ["presentation-2d"]
-
-[[test]]
-name = "product_capabilities"
-path = "tests/product_capabilities.rs"
-required-features = ["project-runtime", "runtime-core"]
-
-[[test]]
-name = "project_composition"
-path = "tests/project_composition.rs"
-required-features = ["project-source"]
-
-[[test]]
-name = "runtime_configuration_composition"
-path = "tests/runtime_configuration_composition.rs"
-required-features = ["project-source"]
-
-[[test]]
-name = "runtime_scene_activation"
-path = "tests/runtime_scene_activation.rs"
-required-features = ["project-runtime", "runtime-core", "serde"]
-
-[[test]]
-name = "project_content_boot"
-path = "tests/project_content_boot.rs"
-required-features = ["project-source"]
-
-[[test]]
-name = "project_content_boundary"
-path = "tests/project_content_boundary.rs"
-required-features = ["project-source"]
-
-[[test]]
-name = "project_content_limits"
-path = "tests/project_content_limits.rs"
-required-features = ["project-source"]
-
-[[test]]
-name = "project_host_boundary"
-path = "tests/project_host_boundary.rs"
-required-features = ["project-source"]
-
-[[test]]
-name = "project_runtime_boot"
-path = "tests/project_runtime_boot.rs"
-required-features = ["project-source"]
-
-[[test]]
-name = "plugin_composition"
-path = "tests/plugin_composition.rs"
-required-features = ["project-source"]
-
-[[test]]
-name = "scene_authoring_session"
-path = "tests/scene_authoring_session.rs"
-required-features = ["runtime-core"]
-
-[[test]]
-name = "scene_component_composition"
-path = "tests/scene_component_composition.rs"
-required-features = ["runtime-core"]
-
-[[test]]
-name = "scene_patch_transactions"
-path = "tests/scene_patch_transactions.rs"
-required-features = ["runtime-core"]
-
-[[test]]
-name = "scene_sprite_serialization"
-path = "tests/scene_sprite_serialization.rs"
-required-features = ["runtime-2d"]
+name = "component_schema_export"
+required-features = ["runtime-core", "serde"]
 
 [[test]]
 name = "window_surface_retirement"
-path = "tests/window_surface_retirement.rs"
-required-features = ["desktop-winit", "render-wgpu"]
+required-features = ["runtime-window"]

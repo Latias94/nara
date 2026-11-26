@@ -1,17 +1,11 @@
 //! Local 2D spatial components and their derived world-space values.
 
-mod codec;
 mod plugin;
 mod propagation;
 #[cfg(test)]
 mod tests;
 
 pub use bevy_ecs::hierarchy::{ChildOf, Children};
-pub use codec::{
-    TRANSFORM_COMPONENTS_PLUGIN_DECLARATION, TRANSFORM_COMPONENTS_PLUGIN_ID,
-    TRANSFORM_SCHEMA_OWNER_ID, TRANSFORM_SCHEMA_PROVIDER, TRANSFORM_SCHEMA_PROVIDER_ID,
-    TransformComponentsPlugin, register_transform_components,
-};
 pub use plugin::{SPATIAL_PLUGIN_ID, SpatialPlugin, SpatialSet};
 pub use propagation::{SpatialPropagation, propagate_spatial, register_spatial};
 
@@ -20,19 +14,17 @@ use nara_core::{Affine2, Mat3, Vec2};
 
 /// Editable transform relative to the parent, or to world space on a root.
 ///
-/// The required components are derived values. An omitted local [`Visibility`] inherits without
-/// creating a persistent visibility component.
+/// The required components are derived values. An omitted local [`Visibility`] inherits from its
+/// parent, or is visible on a root.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 #[component(summary_tick)]
 #[require(GlobalTransform2d, InheritedVisibility)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Transform2d {
     pub translation: Vec2,
     /// Counterclockwise rotation in radians.
     pub rotation: f32,
     pub scale: Vec2,
     /// Draw depth relative to the parent. This has no effect on planar positions.
-    #[cfg_attr(feature = "serde", serde(default))]
     pub z: f32,
 }
 
@@ -112,7 +104,6 @@ impl Default for GlobalTransform2d {
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[component(summary_tick)]
 #[require(InheritedVisibility)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Visibility {
     /// Use the parent's effective visibility, or visible for a root.
     #[default]

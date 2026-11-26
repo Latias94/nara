@@ -6,30 +6,28 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-bevy_ecs = { workspace = true, optional = true }
 blake3.workspace = true
+image = { workspace = true, optional = true }
 nara_app = { workspace = true, optional = true }
 nara_core.workspace = true
 nara_ecs = { workspace = true, optional = true }
-notify = { workspace = true, optional = true }
-png = { version = "=0.18.1", optional = true }
 serde = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
-thiserror = { workspace = true, optional = true }
+thiserror.workspace = true
 uuid.workspace = true
 
+[target.'cfg(any(unix, windows))'.dependencies]
+notify = { workspace = true, optional = true }
+
 [dev-dependencies]
-image.workspace = true
-nara_app = { workspace = true, features = ["diagnostics", "tasks"] }
 ron.workspace = true
 serde_json.workspace = true
-tracing.workspace = true
+
+[target.'cfg(any(unix, windows))'.dev-dependencies]
+tempfile = "3.27"
 
 [features]
 default = []
-artifact-build = ["image-import", "serde"]
-hot-reload = ["runtime", "dep:notify", "nara_app/diagnostics"]
-image-import = ["runtime", "nara_core/fs-capabilities", "nara_app/tasks", "dep:png"]
-pack = ["nara_core/fs-capabilities", "dep:thiserror"]
-runtime = ["dep:bevy_ecs", "dep:nara_app", "dep:nara_ecs", "dep:thiserror"]
-serde = ["dep:serde", "dep:serde_json", "nara_core/serde"]
+hot-reload = ["image-import", "dep:notify"]
+image-import = ["runtime", "dep:image"]
+runtime = ["dep:nara_app", "dep:nara_ecs"]
+serde = ["dep:serde", "nara_core/serde"]

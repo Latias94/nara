@@ -264,11 +264,7 @@ fn resolve_sprite_material(
     }
 
     let image = match sprite.material.image {
-        Some(texture) => Some(match &sprite.image_content {
-            Some(image) if image.handle() == texture => image.prepared_snapshot(),
-            Some(_) => return None,
-            None => resolve_image(texture, prepared_images, stats)?,
-        }),
+        Some(texture) => Some(resolve_image(texture, prepared_images, stats)?),
         None => None,
     };
     let material_extension = sprite.material_extension.clone();

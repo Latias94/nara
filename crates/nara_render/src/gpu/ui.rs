@@ -27,17 +27,16 @@ use crate::gpu::{
 
 /// Replay packets can outnumber new permits. Each actual permit still needs exactly one
 /// original packet/target fact, including a packet whose drawing was completely clipped.
+#[cfg(test)]
 pub(crate) fn validate_submission_packets(
     submissions: &[crate::hud::presentation::UiSubmittedBackendSubmission],
     packets: &[WgpuLoweredUiPacketFacts],
 ) -> Result<(), WgpuRenderError> {
     for submission in submissions {
         let identity = submission.submission().identity();
-        let mut matching = packets.iter().filter(|facts| {
-            facts.packet == identity.packet()
-                && facts.target == identity.target()
-                && Arc::ptr_eq(&facts.original_packet, submission.submission().packet())
-        });
+        let mut matching = packets
+            .iter()
+            .filter(|facts| facts.matches_submission(submission.submission()));
         if matching.next().is_none() || matching.next().is_some() {
             return Err(WgpuRenderError::UiSubmissionRejected {
                 message: format!(
@@ -376,6 +375,16 @@ pub(crate) struct WgpuLoweredUiPacketFacts {
 }
 
 impl WgpuLoweredUiPacketFacts {
+    pub(crate) fn matches_submission(
+        &self,
+        submission: &crate::hud::advanced::UiSubmittedBackendPresentation,
+    ) -> bool {
+        let identity = submission.identity();
+        self.packet == identity.packet()
+            && self.target == identity.target()
+            && Arc::ptr_eq(&self.original_packet, submission.packet())
+    }
+
     fn new(packet: &Arc<UiPaintPacket>) -> Self {
         Self {
             original_packet: Arc::clone(packet),
@@ -1894,14 +1903,7 @@ mod tests {
         let mut images = Assets::<ImageAsset>::default();
         let mut states = AssetStates::default();
         images
-            .commit_loaded(
-                handle,
-                image,
-                &mut states,
-                &mut AssetEvents::default(),
-                None,
-                None,
-            )
+            .commit_loaded(handle, image, &mut states, &mut AssetEvents::default())
             .unwrap();
         PreparedImageSnapshot::capture(handle, &images, &states).unwrap()
     }

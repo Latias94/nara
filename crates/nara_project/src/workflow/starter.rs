@@ -6,10 +6,8 @@ use std::{
 
 use nara_core::vfs::AssetPath;
 use thiserror::Error;
-use uuid::Uuid;
 
 use super::SCHEMA_BINARY;
-use crate::CURRENT_PROJECT_SCHEMA_VERSION;
 
 pub const GAME_BINARY: &str = "game";
 pub const DESKTOP_FEATURE: &str = "desktop";
@@ -51,9 +49,7 @@ pub fn create_project(
     let cargo_manifest = cargo_manifest(package, nara_checkout)?;
     let project_manifest = format!(
         include_str!("template/nara.toml.in"),
-        schema_version = CURRENT_PROJECT_SCHEMA_VERSION,
         name = toml_string(package),
-        source_universe = Uuid::new_v4(),
     );
     let files = [
         (".gitignore", "/target/\n/.nara/\n"),
@@ -136,7 +132,7 @@ fn write_project(destination: &Path, files: &[(&str, &str)]) -> io::Result<()> {
     let mut directories = Vec::new();
     let mut written = Vec::new();
     let result = (|| {
-        for directory in ["assets", "scenes", "prefabs", "src", "src/bin"] {
+        for directory in ["assets", "src", "src/bin"] {
             let path = destination.join(directory);
             fs::create_dir(&path)?;
             directories.push(path);

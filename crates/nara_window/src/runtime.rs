@@ -140,11 +140,8 @@ pub struct WindowPlugin {
 pub const WINDOW_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.window");
 const WINDOW_PLUGIN_DEFINITION_ID: nara_app::PluginDefinitionId =
     nara_app::PluginDefinitionId::new("nara.window.configured", 1);
-const WINDOW_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
-    &[nara_app::PluginProductCapability::new("desktop-winit")];
 pub const WINDOW_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
-    nara_app::PluginDeclaration::new(WINDOW_PLUGIN_ID, nara_app::PluginCategory::Platform)
-        .requires_product_capabilities(WINDOW_PRODUCT_REQUIREMENTS);
+    nara_app::PluginDeclaration::new(WINDOW_PLUGIN_ID, nara_app::PluginCategory::Platform);
 
 /// Creates a repeatable window plugin definition from primary-window data.
 #[must_use]
@@ -321,18 +318,22 @@ mod tests {
     #[test]
     fn window_plugin_definition_binds_canonical_window_configuration() {
         let window = Window::new("configured", WindowResolution::new(960, 540));
-        let first = plugin(Some(window.clone()));
-        let repeated = plugin(Some(window.clone()));
+        let mut app = App::new();
+        app.add_plugins(plugin(Some(window.clone()))).unwrap();
+        app.add_plugins(plugin(Some(window.clone()))).unwrap();
+
         let changed = plugin(Some(Window::new(
             "changed",
             WindowResolution::new(960, 540),
         )));
-
-        assert_eq!(first.key(), repeated.key());
-        assert_ne!(first.key(), changed.key());
-
-        let plan = nara_app::PluginPlan::resolve(first).unwrap();
-        let app = plan.instantiate().unwrap();
+        assert!(matches!(
+            app.add_plugins(changed),
+            Err(nara_app::AddPluginsError::Plan(
+                nara_app::PluginPlanError::Duplicate {
+                    plugin: WINDOW_PLUGIN_ID,
+                }
+            ))
+        ));
         let mut query = app
             .world()
             .iter_entities()
@@ -452,13 +453,7 @@ mod tests {
         app.insert_resource(ChangedWindowIds::default()).unwrap();
         app.add_systems(CoreStage::Update, record_changed_windows)
             .unwrap();
-        let candidate = nara_app::RuntimeCandidate::admit(
-            app.seal().unwrap(),
-            nara_app::RuntimeObligationLedger::new(),
-            nara_app::RuntimeClosePolicy::default(),
-        )
-        .unwrap();
-        let mut runtime = candidate.complete_startup().unwrap().promote();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
         runtime.drive(Duration::ZERO).unwrap();
         runtime
             .with_driver_scope(|scope| {

@@ -34,13 +34,6 @@ pub const WGPU_STOCK_CAPTURE_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.render-wgpu.stock-capture");
 pub const WGPU_STOCK_POLICY_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.render-wgpu.stock-policy");
-pub const WGPU_BACKEND_SHUTDOWN_OBLIGATION: nara_app::PluginShutdownObligationId =
-    nara_app::PluginShutdownObligationId::new("nara.render-wgpu.backend");
-const WGPU_STOCK_CAPTURE_SHUTDOWN_OBLIGATION: nara_app::PluginShutdownObligationId =
-    nara_app::PluginShutdownObligationId::new("nara.render-wgpu.stock-capture");
-
-const WGPU_RENDER_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
-    &[nara_app::PluginProductCapability::new("render-wgpu")];
 const WGPU_CAPTURE_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[crate::RENDER_PLUGIN_ID];
 const WGPU_WINDOW_PRESENTATION_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] =
     &[WGPU_CAPTURE_PLUGIN_ID];
@@ -50,31 +43,25 @@ const WGPU_STOCK_POLICY_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] =
 
 pub const WGPU_CAPTURE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(WGPU_CAPTURE_PLUGIN_ID, nara_app::PluginCategory::Backend)
-        .requires_plugins(WGPU_CAPTURE_PLUGIN_REQUIREMENTS)
-        .requires_product_capabilities(WGPU_RENDER_PRODUCT_REQUIREMENTS)
-        .shutdown_obligations(&[WGPU_BACKEND_SHUTDOWN_OBLIGATION]);
+        .requires_plugins(WGPU_CAPTURE_PLUGIN_REQUIREMENTS);
 pub const WGPU_WINDOW_PRESENTATION_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(
         WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
         nara_app::PluginCategory::Backend,
     )
-    .requires_plugins(WGPU_WINDOW_PRESENTATION_PLUGIN_REQUIREMENTS)
-    .requires_product_capabilities(WGPU_RENDER_PRODUCT_REQUIREMENTS);
+    .requires_plugins(WGPU_WINDOW_PRESENTATION_PLUGIN_REQUIREMENTS);
 pub const WGPU_STOCK_CAPTURE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(
         WGPU_STOCK_CAPTURE_PLUGIN_ID,
         nara_app::PluginCategory::Backend,
     )
-    .requires_plugins(WGPU_STOCK_CAPTURE_PLUGIN_REQUIREMENTS)
-    .requires_product_capabilities(WGPU_RENDER_PRODUCT_REQUIREMENTS)
-    .shutdown_obligations(&[WGPU_STOCK_CAPTURE_SHUTDOWN_OBLIGATION]);
+    .requires_plugins(WGPU_STOCK_CAPTURE_PLUGIN_REQUIREMENTS);
 pub const WGPU_STOCK_POLICY_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(
         WGPU_STOCK_POLICY_PLUGIN_ID,
         nara_app::PluginCategory::Backend,
     )
-    .requires_plugins(WGPU_STOCK_POLICY_PLUGIN_REQUIREMENTS)
-    .requires_product_capabilities(WGPU_RENDER_PRODUCT_REQUIREMENTS);
+    .requires_plugins(WGPU_STOCK_POLICY_PLUGIN_REQUIREMENTS);
 
 /// Installs CPU policy capture and its original managed Runtime connection.
 /// A consumer takes the sealed input without requiring a native presentation owner.
@@ -584,8 +571,7 @@ impl Plugin for WgpuStockCapturePlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<StockCaptureBuilder>()?;
-        app.register_plugin_runtime_close_participant(
-            WGPU_STOCK_CAPTURE_SHUTDOWN_OBLIGATION,
+        app.register_close_participant(
             RuntimeCloseParticipantId::new("nara.render-wgpu.stock-capture"),
             StockCaptureClose,
         )?;
@@ -723,18 +709,12 @@ const WGPU_STOCK_SPRITE_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
     crate::sprite_render::SPRITE_RENDER_PLUGIN_ID,
 ];
 #[cfg(feature = "sprite-render")]
-const WGPU_STOCK_SPRITE_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] = &[
-    nara_app::PluginProductCapability::new("presentation-2d"),
-    nara_app::PluginProductCapability::new("render-wgpu"),
-];
-#[cfg(feature = "sprite-render")]
 pub const WGPU_STOCK_SPRITE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(
         WGPU_STOCK_SPRITE_PLUGIN_ID,
         nara_app::PluginCategory::Backend,
     )
-    .requires_plugins(WGPU_STOCK_SPRITE_PLUGIN_REQUIREMENTS)
-    .requires_product_capabilities(WGPU_STOCK_SPRITE_PRODUCT_REQUIREMENTS);
+    .requires_plugins(WGPU_STOCK_SPRITE_PLUGIN_REQUIREMENTS);
 
 #[cfg(feature = "sprite-render")]
 impl Plugin for WgpuStockSpritePlugin {
@@ -781,15 +761,9 @@ const WGPU_STOCK_UI_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
     crate::hud::UI_RENDER_PLUGIN_ID,
 ];
 #[cfg(feature = "hud-runtime")]
-const WGPU_STOCK_UI_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] = &[
-    nara_app::PluginProductCapability::new("presentation-ui"),
-    nara_app::PluginProductCapability::new("render-wgpu"),
-];
-#[cfg(feature = "hud-runtime")]
 pub const WGPU_STOCK_UI_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(WGPU_STOCK_UI_PLUGIN_ID, nara_app::PluginCategory::Backend)
-        .requires_plugins(WGPU_STOCK_UI_PLUGIN_REQUIREMENTS)
-        .requires_product_capabilities(WGPU_STOCK_UI_PRODUCT_REQUIREMENTS);
+        .requires_plugins(WGPU_STOCK_UI_PLUGIN_REQUIREMENTS);
 
 #[cfg(feature = "hud-runtime")]
 impl Plugin for WgpuStockUiPlugin {
@@ -849,9 +823,7 @@ mod tests {
     pub(super) fn capture_app() -> App {
         let mut app = App::new();
         app.add_plugins((
-            nara_reflect::ComponentRegistryPlugin,
             nara_scene::spatial::SpatialPlugin,
-            crate::RenderComponentsPlugin,
             crate::RenderPlugin::default(),
             WgpuCapturePlugin,
         ))
@@ -870,14 +842,6 @@ mod tests {
     fn capture_plugin_declaration_is_feature_invariant() {
         let declaration = WgpuCapturePlugin::declaration();
         assert_eq!(declaration.requires_plugins, &[crate::RENDER_PLUGIN_ID]);
-        assert_eq!(
-            declaration.requires_product_capabilities,
-            &[nara_app::PluginProductCapability::new("render-wgpu")]
-        );
-        assert_eq!(
-            declaration.shutdown_obligations,
-            &[WGPU_BACKEND_SHUTDOWN_OBLIGATION]
-        );
     }
 
     #[test]
@@ -1126,10 +1090,6 @@ mod tests {
                 crate::sprite_render::SPRITE_RENDER_PLUGIN_ID
             ]
         );
-        assert_eq!(
-            declaration.requires_product_capabilities,
-            WGPU_STOCK_SPRITE_PRODUCT_REQUIREMENTS
-        );
     }
 
     #[cfg(feature = "hud-runtime")]
@@ -1142,10 +1102,6 @@ mod tests {
                 WGPU_STOCK_CAPTURE_PLUGIN_ID,
                 crate::hud::UI_RENDER_PLUGIN_ID
             ]
-        );
-        assert_eq!(
-            declaration.requires_product_capabilities,
-            WGPU_STOCK_UI_PRODUCT_REQUIREMENTS
         );
     }
 }

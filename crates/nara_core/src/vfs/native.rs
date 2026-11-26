@@ -24,6 +24,12 @@ impl DirAssetSource {
         Ok(Self { root })
     }
 
+    /// Returns the canonical directory used by this source.
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     /// Opens a regular file for streaming or a caller-bounded read.
     pub fn open(&self, path: &AssetPath) -> io::Result<fs::File> {
         fs::File::open(self.resolve_file(path)?)

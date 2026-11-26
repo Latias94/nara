@@ -1,12 +1,6 @@
 //! Compatibility cases for the existing tagged wire and untagged payload classification.
 mod scalars;
 
-use nara_core::source::{AssetSourcePath, SourceDocumentKey, SourceDocumentKind, StableAssetId};
-use nara_ecs::identity::{
-    AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, PersistentRuntimeId,
-    PersistentRuntimeNamespaceId, PersistentRuntimeReference, PrefabEntityOrigin,
-    PrefabInstanceHop, ReferenceInputId, SceneEntityId,
-};
 use serde::Deserialize;
 
 use crate::{ComponentFloat, ComponentValue};
@@ -165,12 +159,12 @@ fn canonical_tags_and_payload_shapes_are_stable() {
             r#"{"a":(type:"i64",value:1),"z":(type:"null")}"#,
         ),
         (
-            ComponentValue::EntityReference(EntityReference::SceneLocal {
-                entity: SceneEntityId::new("target").unwrap(),
-            }),
+            ComponentValue::EntityReference(
+                "11111111-1111-4111-8111-111111111111".parse().unwrap(),
+            ),
             "entity_ref",
-            r#"{"kind":"scene_local","entity":"target"}"#,
-            r#"(kind:"scene_local",entity:"target")"#,
+            r#""11111111-1111-4111-8111-111111111111""#,
+            r#""11111111-1111-4111-8111-111111111111""#,
         ),
     ] {
         assert_eq!(
@@ -729,145 +723,26 @@ fn multiline_malformed_nested_children_report_data_errors_without_position_contr
 }
 
 #[test]
-fn every_entity_reference_form_survives_field_order_and_parent_buffering() {
-    let target = SceneEntityId::new("target").unwrap();
-    let mut references = vec![
-        EntityReference::SceneLocal {
-            entity: target.clone(),
-        },
-        EntityReference::Persistent {
-            entity: PersistentRuntimeReference::new(
-                PersistentRuntimeNamespaceId::new("game.save").unwrap(),
-                PersistentRuntimeId::parse_str("11111111-1111-4111-8111-111111111111").unwrap(),
-            ),
-        },
-        EntityReference::Authored {
-            reference: AuthoredEntityReference::source(target.clone()),
-        },
-        EntityReference::Authored {
-            reference: AuthoredEntityReference::addition(target),
-        },
-        EntityReference::Authored {
-            reference: AuthoredEntityReference::input(ReferenceInputId::new("target").unwrap()),
-        },
-    ];
-    let universe = "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap();
-    for expected_base in [
-        SourceDocumentKey::named(universe, "base", SourceDocumentKind::Prefab).unwrap(),
-        SourceDocumentKey::project_location(
-            universe,
-            AssetSourcePath::new("prefabs/base.ron").unwrap(),
-            SourceDocumentKind::Prefab,
-        ),
-        SourceDocumentKey::stable_asset(
-            StableAssetId::parse_str("22222222-2222-4222-8222-222222222222").unwrap(),
-            SourceDocumentKind::Prefab,
-        ),
-    ] {
-        references.push(EntityReference::Authored {
-            reference: AuthoredEntityReference {
-                through: vec![
-                    PrefabInstanceHop {
-                        anchor: PrefabEntityOrigin::SourceEntity(
-                            SceneEntityId::new("outer").unwrap(),
-                        ),
-                        expected_base: expected_base.clone(),
-                    },
-                    PrefabInstanceHop {
-                        anchor: PrefabEntityOrigin::InstanceAddition(
-                            SceneEntityId::new("inner").unwrap(),
-                        ),
-                        expected_base,
-                    },
-                ],
-                target: AuthoredReferenceTarget::Input(ReferenceInputId::new("endpoint").unwrap()),
-            },
-        });
-    }
-    for reference in references {
-        let json = serde_json::to_string(&reference).unwrap();
-        let ron = ron::to_string(&reference).unwrap();
-        let expected = ComponentValue::EntityReference(reference);
-        assert_decodes_in_both_orders("entity_ref", &json, &ron, &expected);
-        assert_eq!(
-            serde_json::to_string(&expected).unwrap(),
-            format!(r#"{{"type":"entity_ref","value":{json}}}"#)
-        );
-        assert_eq!(
-            ron::to_string(&expected).unwrap(),
-            format!(r#"(type:"entity_ref",value:{ron})"#)
-        );
-        assert_parent_buffered(
-            &format!(r#"{{"value":{json},"type":"entity_ref"}}"#),
-            &format!(r#"(value:{ron},type:"entity_ref")"#),
-            &expected,
-        );
-    }
-}
-
-#[test]
-fn entity_reference_fields_can_precede_their_own_discriminants() {
-    assert_decodes_in_both_orders(
-        "entity_ref",
-        r#"{"entity":"target","kind":"scene_local"}"#,
-        r#"(entity:"target",kind:"scene_local")"#,
-        &ComponentValue::EntityReference(EntityReference::SceneLocal {
-            entity: SceneEntityId::new("target").unwrap(),
-        }),
-    );
-    assert_decodes_in_both_orders(
-        "entity_ref",
-        r#"{"reference":{"target":{"value":{"entity":"target","kind":"source_entity"},"kind":"entity"}},"kind":"authored"}"#,
-        r#"(reference:(target:(value:(entity:"target",kind:"source_entity"),kind:"entity")),kind:"authored")"#,
-        &ComponentValue::EntityReference(EntityReference::Authored {
-            reference: AuthoredEntityReference::source(SceneEntityId::new("target").unwrap()),
-        }),
+fn entity_uuid_survives_parent_buffering() {
+    let uuid = "11111111-1111-4111-8111-111111111111";
+    assert_parent_buffered(
+        &format!(r#"{{"value":"{uuid}","type":"entity_ref"}}"#),
+        &format!(r#"(value:"{uuid}",type:"entity_ref")"#),
+        &ComponentValue::EntityReference(uuid.parse().unwrap()),
     );
 }
 
 #[test]
-fn entity_reference_payloads_reject_invalid_ids_shapes_and_fields() {
+fn entity_reference_payloads_reject_invalid_and_nil_uuids() {
     for (json, ron) in [
-        (r#"{"kind":"scene_local"}"#, r#"(kind:"scene_local")"#),
+        (r#""target""#, r#""target""#),
         (
-            r#"{"kind":"scene_local","entity":""}"#,
-            r#"(kind:"scene_local",entity:"")"#,
+            r#""00000000-0000-0000-0000-000000000000""#,
+            r#""00000000-0000-0000-0000-000000000000""#,
         ),
         (
-            r#"{"kind":"persistent","entity":"target"}"#,
-            r#"(kind:"persistent",entity:"target")"#,
-        ),
-        (
-            r#"{"kind":"persistent","entity":{"namespace":"","entity":"11111111-1111-4111-8111-111111111111"}}"#,
-            r#"(kind:"persistent",entity:(namespace:"",entity:"11111111-1111-4111-8111-111111111111"))"#,
-        ),
-        (
-            r#"{"kind":"persistent","entity":{"namespace":"game","entity":"invalid"}}"#,
-            r#"(kind:"persistent",entity:(namespace:"game",entity:"invalid"))"#,
-        ),
-        (
-            r#"{"kind":"authored","reference":{"through":[]}}"#,
-            r#"(kind:"authored",reference:(through:[]))"#,
-        ),
-        (
-            r#"{"kind":"authored","reference":{"target":{"kind":"input","value":""}}}"#,
-            r#"(kind:"authored",reference:(target:(kind:"input",value:"")))"#,
-        ),
-        (
-            r#"{"kind":"scene_local","entity":"target","reference":{"target":{"kind":"input","value":"input"}}}"#,
-            r#"(kind:"scene_local",entity:"target",reference:(target:(kind:"input",value:"input")))"#,
-        ),
-        (
-            r#"{"kind":"unknown","entity":"target"}"#,
-            r#"(kind:"unknown",entity:"target")"#,
-        ),
-        (
-            r#"{"kind":"scene_local","entity":"target","extra":true}"#,
-            r#"(kind:"scene_local",entity:"target",extra:true)"#,
-        ),
-        (
-            r#"{"kind":"scene_local","entity":"first","entity":"second"}"#,
-            r#"(kind:"scene_local",entity:"first",entity:"second")"#,
+            r#"{"kind":"scene_local","entity":"target"}"#,
+            r#"(kind:"scene_local",entity:"target")"#,
         ),
     ] {
         assert_rejects_in_both_orders("entity_ref", json, ron);

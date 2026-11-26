@@ -9,19 +9,12 @@ use nara_core::vfs::write_atomic;
 use nara_reflect::{ComponentCatalogFileError, ComponentCatalogFileLimits, ComponentSchemaCatalog};
 use thiserror::Error;
 
-use crate::play::{BuildError, BuildEvent, BuildRequest, build_interruptible, capture_stdout};
+use crate::play::{
+    BuildError, BuildEvent, BuildRequest, ProjectTrust, build_interruptible, capture_stdout,
+};
 
 pub const SCHEMA_BINARY: &str = "nara_schema";
 pub const SCHEMA_CACHE_PATH: &str = ".nara/schema_cache.json";
-
-/// The caller's trust decision for executing the selected project's Cargo build and exporter.
-/// Trust covers the workspace, its Cargo configuration and its build-time dependencies.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum ProjectTrust {
-    #[default]
-    Untrusted,
-    Trusted,
-}
 
 #[derive(Debug, Error)]
 pub enum SchemaCacheError {
@@ -29,8 +22,6 @@ pub enum SchemaCacheError {
     UntrustedProject,
     #[error("Schema refresh requires the {SCHEMA_BINARY} Cargo binary")]
     WrongBinary,
-    #[error("the Schema exporter manifest must be in the selected project directory")]
-    ManifestOutsideProject,
     #[error(transparent)]
     Build(#[from] BuildError),
     #[error("could not run the Schema exporter: {0}")]
@@ -76,21 +67,12 @@ pub fn refresh_schema_interruptible(
         return Err(SchemaCacheError::WrongBinary);
     }
     let project_dir = request.project_dir.canonicalize().map_err(BuildError::Io)?;
-    let manifest_path = project_dir
-        .join(request.manifest_path)
-        .canonicalize()
-        .map_err(BuildError::Io)?;
-    if !manifest_path.starts_with(&project_dir) {
-        return Err(SchemaCacheError::ManifestOutsideProject);
-    }
     let request = BuildRequest {
         project_dir: &project_dir,
-        manifest_path: &manifest_path,
-        target: Some("host-tuple"),
         ..*request
     };
 
-    let executable = match build_interruptible(&request, &mut interrupted, &mut emit) {
+    let executable = match build_interruptible(&request, trust, &mut interrupted, &mut emit) {
         Err(BuildError::Interrupted) => return Err(SchemaCacheError::Interrupted),
         result => result?,
     };
@@ -155,10 +137,11 @@ pub(super) fn finish_refresh(
         return Err(SchemaCacheError::ProducerFailed(status));
     }
     let catalog = ComponentSchemaCatalog::from_json_bytes(stdout)?;
+    let path = cache_path(project_dir, true)?;
     if interrupted() {
         return Err(SchemaCacheError::Interrupted);
     }
-    write_atomic(&cache_path(project_dir, true)?, stdout)?;
+    write_atomic(&path, stdout)?;
     Ok(catalog)
 }
 

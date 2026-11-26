@@ -1,21 +1,12 @@
 #![cfg(feature = "animation")]
 use std::time::Duration;
 
-use nara_asset::{AssetProductRef, ImportedProductId, StableAssetId};
 use nara_core::Vec2;
 use nara_render::animation::{
     Clip, ClipError, Frame, FrameSample, MAX_CLIP_NAME_BYTES, MAX_CLIPS, MAX_FRAMES_PER_CLIP,
     MAX_TOTAL_FRAMES, PlaybackMode, SpriteAnimationSet,
 };
 use nara_render::sprite::TextureRegion;
-
-fn product() -> AssetProductRef {
-    AssetProductRef::new(
-        StableAssetId::parse_str("10000000-0000-4000-8000-000000000001").unwrap(),
-        ImportedProductId::PRIMARY,
-    )
-    .unwrap()
-}
 
 fn region(index: usize) -> TextureRegion {
     TextureRegion::new(Vec2::new(index as f32 * 0.25, 0.0), Vec2::new(0.25, 1.0))
@@ -39,7 +30,7 @@ fn repeated_clip(frames: usize) -> Clip {
 }
 
 #[test]
-fn public_accessors_preserve_authored_frames_and_product_identity() {
+fn public_accessors_preserve_authored_frames_and_clip_names() {
     let clip = unequal_clip(PlaybackMode::Once);
     assert_eq!(clip.mode(), PlaybackMode::Once);
     assert_eq!(clip.duration(), Duration::from_nanos(10));
@@ -57,8 +48,7 @@ fn public_accessors_preserve_authored_frames_and_product_identity() {
         ]
     );
 
-    let set = SpriteAnimationSet::new(product(), [("walk".to_owned(), clip.clone())]).unwrap();
-    assert_eq!(set.product(), product());
+    let set = SpriteAnimationSet::new([("walk".to_owned(), clip.clone())]).unwrap();
     assert_eq!(set.get("walk"), Some(&clip));
     assert!(set.get("Walk").is_none());
     assert!(set.get("missing").is_none());
@@ -276,15 +266,12 @@ fn clips_reject_empty_input_and_stop_at_the_frame_limit() {
 fn names_accept_exact_ascii_bounds_and_reject_duplicate_or_invalid_input() {
     let clip = repeated_clip(1);
     let max_name = "x".repeat(MAX_CLIP_NAME_BYTES);
-    let set = SpriteAnimationSet::new(
-        product(),
-        [
-            ("walk_2.left-fast".to_owned(), clip.clone()),
-            ("Idle".to_owned(), clip.clone()),
-            ("idle".to_owned(), clip.clone()),
-            (max_name.clone(), clip.clone()),
-        ],
-    )
+    let set = SpriteAnimationSet::new([
+        ("walk_2.left-fast".to_owned(), clip.clone()),
+        ("Idle".to_owned(), clip.clone()),
+        ("idle".to_owned(), clip.clone()),
+        (max_name.clone(), clip.clone()),
+    ])
     .unwrap();
     assert!(set.get(&max_name).is_some());
     assert!(set.get("Idle").is_some());
@@ -302,30 +289,24 @@ fn names_accept_exact_ascii_bounds_and_reject_duplicate_or_invalid_input() {
         "caf\u{e9}".to_owned(),
     ] {
         assert_eq!(
-            SpriteAnimationSet::new(product(), [(invalid.clone(), clip.clone())]),
+            SpriteAnimationSet::new([(invalid.clone(), clip.clone())]),
             Err(ClipError::InvalidClipName),
             "name: {invalid:?}"
         );
     }
     assert_eq!(
-        SpriteAnimationSet::new(
-            product(),
-            [("walk".to_owned(), clip.clone()), ("walk".to_owned(), clip)]
-        ),
+        SpriteAnimationSet::new([("walk".to_owned(), clip.clone()), ("walk".to_owned(), clip)]),
         Err(ClipError::DuplicateClipName("walk".to_owned()))
     );
 }
 
 #[test]
 fn clip_iteration_borrows_in_name_order_with_an_exact_remaining_length() {
-    let set = SpriteAnimationSet::new(
-        product(),
-        [
-            ("walk".to_owned(), repeated_clip(3)),
-            ("idle".to_owned(), repeated_clip(1)),
-            ("jump".to_owned(), repeated_clip(2)),
-        ],
-    )
+    let set = SpriteAnimationSet::new([
+        ("walk".to_owned(), repeated_clip(3)),
+        ("idle".to_owned(), repeated_clip(1)),
+        ("jump".to_owned(), repeated_clip(2)),
+    ])
     .unwrap();
     let mut clips = set.clips();
     assert_eq!(clips.len(), 3);
@@ -338,7 +319,7 @@ fn clip_iteration_borrows_in_name_order_with_an_exact_remaining_length() {
     }
     assert!(clips.next().is_none());
 
-    let empty = SpriteAnimationSet::new(product(), []).unwrap();
+    let empty = SpriteAnimationSet::new([]).unwrap();
     assert_eq!(empty.clips().len(), 0);
     assert!(empty.get("idle").is_none());
 }
@@ -346,16 +327,12 @@ fn clip_iteration_borrows_in_name_order_with_an_exact_remaining_length() {
 #[test]
 fn sets_admit_the_named_clip_limit_and_reject_the_next_entry() {
     let set = SpriteAnimationSet::new(
-        product(),
         (0..MAX_CLIPS).map(|index| (format!("clip-{index}"), repeated_clip(1))),
     )
     .unwrap();
     assert_eq!(set.clips().len(), MAX_CLIPS);
     assert_eq!(
-        SpriteAnimationSet::new(
-            product(),
-            (0..).map(|index| (format!("clip-{index}"), repeated_clip(1)))
-        ),
+        SpriteAnimationSet::new((0..).map(|index| (format!("clip-{index}"), repeated_clip(1)))),
         Err(ClipError::TooManyClips)
     );
 }
@@ -364,7 +341,6 @@ fn sets_admit_the_named_clip_limit_and_reject_the_next_entry() {
 fn aggregate_frame_limit_applies_across_individually_valid_clips() {
     let full_clips = MAX_TOTAL_FRAMES / MAX_FRAMES_PER_CLIP;
     let set = SpriteAnimationSet::new(
-        product(),
         (0..full_clips).map(|index| (format!("clip-{index}"), repeated_clip(MAX_FRAMES_PER_CLIP))),
     )
     .unwrap();
@@ -376,7 +352,6 @@ fn aggregate_frame_limit_applies_across_individually_valid_clips() {
     );
     assert_eq!(
         SpriteAnimationSet::new(
-            product(),
             (0..full_clips)
                 .map(|index| (format!("clip-{index}"), repeated_clip(MAX_FRAMES_PER_CLIP)))
                 .chain(std::iter::once(("overflow".to_owned(), repeated_clip(1))))

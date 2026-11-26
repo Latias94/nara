@@ -474,9 +474,9 @@ impl WgpuRenderHost {
                     .push_error_scope(wgpu::ErrorFilter::Validation)
             });
             namespace.queue.present(acquired.texture);
-            let error = scope.and_then(|scope| pollster::block_on(scope.pop()));
+            let error = scope.map_or(Ok(None), crate::gpu::allocation::pop_error_scope);
             self.backend.check_device_health()?;
-            if let Some(error) = error {
+            if let Some(error) = error? {
                 return Err(Self::native_error(error));
             }
             self.backend.complete_editor_surface_presentation(
@@ -567,7 +567,7 @@ impl WgpuRenderHost {
         let RenderFrameTarget::Window(window) = packet.target() else {
             return Ok(None);
         };
-        self.invalidate_replaced_world_presentations(window.id, Some(id));
+        self.invalidate_replaced_world_presentations(window.id, id);
         let Some(mapping) = mapping else {
             self.invalidate_runtime_presentation(id);
             return Ok(None);

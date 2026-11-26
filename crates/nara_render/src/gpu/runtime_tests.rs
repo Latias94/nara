@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use nara_app::{
-    Plugin, PluginDeclaration, PluginId, RuntimeCandidate, RuntimeCandidateRetirementState,
-    RuntimeClosePolicy, RuntimeControl, RuntimeControlRequestResult, RuntimeFault,
-    RuntimeFaultKind, RuntimeFaultReporter, RuntimeObligationLedger,
+    Plugin, PluginDeclaration, PluginId, RuntimeCandidateRetirementState, RuntimeClosePolicy,
+    RuntimeControl, RuntimeControlRequestResult, RuntimeFault, RuntimeFaultKind,
+    RuntimeFaultReporter,
 };
 use nara_window::backend::BackendWindowHandles;
 
@@ -17,7 +17,6 @@ enum HarnessMutation {
     RemoveStats,
     RestoreStats,
     BackendStatus(RenderBackendStatus),
-    RuntimeGeneration(RuntimeGeneration),
     CaptureError(WgpuFrameCaptureError),
     EmptyFrame(u64),
     Fault,
@@ -41,10 +40,6 @@ fn mutate(world: &mut World, mutation: HarnessMutation) -> Option<WgpuRuntimeCon
         }
         HarnessMutation::BackendStatus(status) => {
             world.insert_resource(status);
-            None
-        }
-        HarnessMutation::RuntimeGeneration(generation) => {
-            world.insert_resource(generation);
             None
         }
         HarnessMutation::CaptureError(error) => {
@@ -97,8 +92,7 @@ impl Plugin for ConnectionHarness {
         static DECLARATION: PluginDeclaration = PluginDeclaration::new(
             PluginId::new("nara.test.render-connection"),
             nara_app::PluginCategory::Backend,
-        )
-        .shutdown_obligations(&[crate::gpu::WGPU_BACKEND_SHUTDOWN_OBLIGATION]);
+        );
         &DECLARATION
     }
 
@@ -142,15 +136,7 @@ fn runtime(fault_after_return: bool) -> RuntimeInstance {
     let mut app = App::new();
     app.add_plugins(ConnectionHarness { fault_after_return })
         .unwrap();
-    RuntimeCandidate::admit(
-        app.seal().unwrap(),
-        RuntimeObligationLedger::new(),
-        RuntimeClosePolicy::new(Duration::ZERO),
-    )
-    .unwrap()
-    .complete_startup()
-    .unwrap()
-    .promote()
+    RuntimeInstance::start_with_close_policy(app, RuntimeClosePolicy::new(Duration::ZERO)).unwrap()
 }
 
 fn control(
@@ -215,32 +201,6 @@ fn window_capture(runtime: &mut RuntimeInstance, source: RuntimeGeneration) -> W
         work_started_at: std::time::Instant::now(),
     }));
     capture
-}
-
-#[test]
-fn replacing_world_generation_faults_before_a_foreign_capture_can_be_issued() {
-    let mut owner = runtime(false);
-    let foreign = runtime(false);
-    let result = result(&mut owner);
-    control(
-        &mut owner,
-        HarnessMutation::RuntimeGeneration(foreign.generation()),
-    );
-    assert_eq!(owner.state(), RuntimeState::Faulted);
-    let failure = take_runtime_frame(&mut owner).unwrap_err();
-    assert!(matches!(
-        failure.error,
-        WgpuRuntimeExchangeError::Scope(RuntimeScopeError::Unavailable {
-            state: RuntimeState::Faulted
-        })
-    ));
-    let completion = complete_runtime_frame(&mut owner, result).unwrap();
-    assert!(completion.output.retired);
-    assert!(completion.output.presented.is_none());
-    let generation = owner.generation();
-    control(&mut owner, HarnessMutation::RuntimeGeneration(generation));
-    finish(owner);
-    finish(foreign);
 }
 
 #[test]
@@ -753,7 +713,8 @@ fn consumed_result_keeps_its_output_when_the_scope_reports_a_fault() {
         receipt.render_transaction_frame_index(),
         Some(receipt.app_frame_index()),
     );
-    backend.record_editor_window_presentation();
+    backend.record_runtime_program_submission();
+    backend.commit_runtime_presentation(receipt, true);
     result.observation = Some(WgpuRenderObservation::from_parts(
         receipt.backend_instance_id(),
         receipt.device_epoch(),

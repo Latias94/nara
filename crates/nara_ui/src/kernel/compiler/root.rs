@@ -19,8 +19,8 @@ use super::{
     order::{RootOrder, RootOrdered},
     text::{TextCompileError, TextCompileSession},
 };
-use crate::kernel::authoring::UiNodeText;
 use crate::kernel::mesh::MeshCounts;
+use crate::kernel::tree::UiNodeText;
 use crate::text::{TextEngine, TextLayoutError, TextRect};
 
 #[derive(Clone, Debug)]
@@ -178,7 +178,6 @@ pub(super) fn compile_root(
             order.clone(),
             RootLayoutFact {
                 key: node.key.clone(),
-                route_parent: node.keyed_parent.clone(),
                 root_key: root.key.clone(),
                 structural_index: node.structural_index,
                 local_z: node.node.style.z_index,
@@ -530,7 +529,6 @@ fn flatten_root<'a>(
         None,
         1,
         Vec::new(),
-        None,
         &mut nodes,
         &mut keys,
         limits,
@@ -546,7 +544,6 @@ fn visit_node<'a>(
     parent: Option<usize>,
     depth: usize,
     stacking_ancestors: Vec<(i32, usize)>,
-    keyed_parent: Option<UiKey>,
     nodes: &mut Vec<FlatNode<'a>>,
     keys: &mut BTreeSet<UiKey>,
     limits: UiLimits,
@@ -567,11 +564,6 @@ fn visit_node<'a>(
             .map_err(|error| UiRootDiagnostic::InvalidStyle {
                 message: error.to_string(),
             })?;
-    }
-    if node.custom_layout.is_some() && node.text.is_some() {
-        return Err(UiRootDiagnostic::LayoutRejected {
-            message: "a custom layout container must put intrinsic text in a child node".into(),
-        });
     }
     if let Some(text) = &node.text {
         text.validate()
@@ -612,7 +604,6 @@ fn visit_node<'a>(
     }
 
     let index = nodes.len();
-    let child_keyed_parent = key.clone().or_else(|| keyed_parent.clone());
     let mut child_stacking = stacking_ancestors.clone();
     if node.style.stacking_context {
         child_stacking.push((node.style.z_index, index));
@@ -624,7 +615,6 @@ fn visit_node<'a>(
         key,
         structural_index: index,
         stacking_ancestors,
-        keyed_parent,
     });
     for child in &node.children {
         let child_index = visit_node(
@@ -634,7 +624,6 @@ fn visit_node<'a>(
             Some(index),
             depth + 1,
             child_stacking.clone(),
-            child_keyed_parent.clone(),
             nodes,
             keys,
             limits,
@@ -750,7 +739,6 @@ pub(super) struct FlatNode<'a> {
     key: Option<UiKey>,
     structural_index: usize,
     stacking_ancestors: Vec<(i32, usize)>,
-    keyed_parent: Option<UiKey>,
 }
 
 #[derive(Clone, Copy, Debug)]

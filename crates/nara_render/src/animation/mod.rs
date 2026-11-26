@@ -4,10 +4,8 @@
 //! the clock, playback state, image selection, and application of the sampled region to a Sprite.
 //! Construction admits immutable resources; sampling does not allocate or revalidate frames.
 
-mod asset;
 mod clip;
 
-pub use asset::{SpriteAnimationCodec, SpriteAnimationDomain, SpriteAnimationSettings};
 pub use clip::{
     Clip, ClipError, Frame, FrameSample, MAX_CLIP_NAME_BYTES, MAX_CLIPS, MAX_FRAMES_PER_CLIP,
     MAX_TOTAL_FRAMES, PlaybackMode, SpriteAnimationSet,

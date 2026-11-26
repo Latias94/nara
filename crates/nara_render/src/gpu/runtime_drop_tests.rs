@@ -12,8 +12,8 @@ use crate::hud::{
     presentation::{UiBackendOutcomeReceiver, UiPresentationOutcomes, backend_outcome_receiver},
 };
 use nara_app::{
-    Plugin, PluginDeclaration, PluginId, RuntimeCandidate, RuntimeCandidateRetirementState,
-    RuntimeClosePolicy, RuntimeControl, RuntimeControlRequestResult, RuntimeObligationLedger,
+    Plugin, PluginDeclaration, PluginId, RuntimeCandidateRetirementState, RuntimeClosePolicy,
+    RuntimeControl, RuntimeControlRequestResult,
 };
 
 use super::*;
@@ -35,8 +35,7 @@ impl Plugin for DropConnectionHarness {
         static DECLARATION: PluginDeclaration = PluginDeclaration::new(
             PluginId::new("nara.test.render-connection-drop"),
             nara_app::PluginCategory::Backend,
-        )
-        .shutdown_obligations(&[crate::gpu::WGPU_BACKEND_SHUTDOWN_OBLIGATION]);
+        );
         &DECLARATION
     }
 
@@ -54,9 +53,7 @@ fn capture_with_original_ui_permit() -> (
 ) {
     let mut app = App::new();
     app.add_plugins((
-        nara_reflect::ComponentRegistryPlugin,
         nara_scene::spatial::SpatialPlugin,
-        crate::RenderComponentsPlugin,
         crate::RenderPlugin::default(),
         crate::image::ImagePreparePlugin,
         crate::hud::UiRenderPlugin::default(),
@@ -85,15 +82,9 @@ fn capture_with_original_ui_permit() -> (
             canvas: None,
             ui: Some(WgpuUiSubmissionState::Prepared(vec![submission])),
         });
-    let mut runtime = RuntimeCandidate::admit(
-        app.seal().unwrap(),
-        RuntimeObligationLedger::new(),
-        RuntimeClosePolicy::new(Duration::ZERO),
-    )
-    .unwrap()
-    .complete_startup()
-    .unwrap()
-    .promote();
+    let mut runtime =
+        RuntimeInstance::start_with_close_policy(app, RuntimeClosePolicy::new(Duration::ZERO))
+            .unwrap();
     let taken = take_runtime_frame(&mut runtime).unwrap();
     assert!(taken.post_operation_fault.is_none());
     let capture = taken.output.unwrap();

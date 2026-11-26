@@ -1,11 +1,6 @@
-use std::{
-    mem::{size_of, size_of_val},
-    time::Duration,
-};
+use std::time::Duration;
 
 use crate::sprite::TextureRegion;
-use nara_asset::AssetProductRef;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Maximum number of named clips in one animation set.
@@ -18,8 +13,9 @@ pub const MAX_TOTAL_FRAMES: usize = 4096;
 pub const MAX_CLIP_NAME_BYTES: usize = 64;
 
 /// Behavior at and after the clip's total duration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum PlaybackMode {
     /// Repeat forever; the exact end of each cycle samples the first frame.
     Loop,
@@ -191,14 +187,12 @@ pub struct FrameSample {
     pub finished: bool,
 }
 
-/// Named sprite clips associated with one logical animation asset product.
+/// Named sprite clips for a game animation.
 ///
 /// Names are case-sensitive, contain 1 to [`MAX_CLIP_NAME_BYTES`] ASCII letters, digits,
 /// underscores, periods, or hyphens, and are unique within the set. An empty set is allowed.
-/// The product identifies this resource; it does not load or select the sprite's image.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpriteAnimationSet {
-    product: AssetProductRef,
     clips: Box<[(Box<str>, Clip)]>,
 }
 
@@ -206,10 +200,7 @@ impl SpriteAnimationSet {
     /// Admits the clip count, names, uniqueness, and aggregate frame count once.
     ///
     /// Individual frames and clips have already been admitted by their constructors.
-    pub fn new(
-        product: AssetProductRef,
-        clips: impl IntoIterator<Item = (String, Clip)>,
-    ) -> Result<Self, ClipError> {
+    pub fn new(clips: impl IntoIterator<Item = (String, Clip)>) -> Result<Self, ClipError> {
         let mut admitted = Vec::new();
         let mut total_frames = 0;
         for (name, clip) in clips {
@@ -237,14 +228,8 @@ impl SpriteAnimationSet {
             }
         }
         Ok(Self {
-            product,
             clips: admitted.into_boxed_slice(),
         })
-    }
-
-    #[must_use]
-    pub const fn product(&self) -> AssetProductRef {
-        self.product
     }
 
     #[must_use]
@@ -258,21 +243,5 @@ impl SpriteAnimationSet {
     /// Borrows all named clips in ascending name order without allocation.
     pub fn clips(&self) -> impl ExactSizeIterator<Item = (&str, &Clip)> {
         self.clips.iter().map(|(name, clip)| (name.as_ref(), clip))
-    }
-
-    /// Requested storage retained by this value and its normalized owned allocations.
-    /// Allocator bookkeeping is excluded; boxed slices and names retain no spare capacity.
-    pub(crate) fn retained_bytes(&self) -> usize {
-        size_of::<Self>()
-            + size_of_val(self.clips.as_ref())
-            + self
-                .clips
-                .iter()
-                .map(|(name, clip)| {
-                    name.len()
-                        + size_of_val(clip.frames.as_ref())
-                        + size_of_val(clip.frame_ends_ns.as_ref())
-                })
-                .sum::<usize>()
     }
 }

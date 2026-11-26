@@ -18,7 +18,6 @@
 
 mod input_events;
 mod keyboard;
-mod keyboard_continuation;
 mod maintenance_wake;
 #[cfg(all(test, target_os = "windows"))]
 mod native_tests;
@@ -28,7 +27,6 @@ pub use keyboard::{
     UnsupportedKeyboardBinding, convert_key_code, convert_physical_key,
     validate_action_map_keyboard,
 };
-pub use keyboard_continuation::{WinitInputActivation, WinitKeyboardContinuationError};
 pub use maintenance_wake::WinitMaintenanceWake;
 
 /// Presentation integration supplied by the desktop runner.
@@ -62,7 +60,7 @@ pub struct WinitPresentationProgress {
 use maintenance_wake::MaintenanceWakeState;
 
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -82,14 +80,15 @@ use nara_app::{
     RuntimeState, RuntimeTimeContinuation, RuntimeTimeContinuationError,
     RuntimeTimeContinuationRejection,
 };
+use nara_ecs::bevy_ecs::message::Messages;
+#[cfg(test)]
+use nara_input::KeyCode;
 use nara_input::{
-    ButtonDriverInput, ButtonInputDriverError, InputIngressError, InputPointerId, InputSeatId,
-    InputTimeline, InputWindowEvent, InputWindowId, KeyCode, MouseButton, PointerDriverInput,
-    apply_keyboard_driver_input_at, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
-    apply_window_input_driver_event, connect_input_endpoint, connect_input_pointer,
+    ButtonTransitionPhase, InputEdge, InputEdgeKind, InputPointerId, InputSeatId, InputWindowEvent,
+    InputWindowId, MouseButton,
 };
 #[cfg(test)]
-use winit::keyboard::PhysicalKey;
+use winit::keyboard::{KeyCode as WinitKeyCode, PhysicalKey};
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -97,7 +96,6 @@ use winit::{
         ElementState, MouseButton as WinitMouseButton, RawKeyEvent, WindowEvent as WinitWindowEvent,
     },
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
-    keyboard::KeyCode as WinitKeyCode,
     window::{Window as WinitWindow, WindowId as WinitWindowId},
 };
 
@@ -326,7 +324,6 @@ impl ApplicationHandler<WinitUserEvent> for WinitHandoffDrain<'_> {
 pub struct WinitRunner {
     pub control_flow: WinitControlFlow,
     initial_visibility: bool,
-    input_isolation: bool,
 }
 
 impl WinitRunner {
@@ -335,7 +332,6 @@ impl WinitRunner {
         Self {
             control_flow,
             initial_visibility: true,
-            input_isolation: false,
         }
     }
 
@@ -343,13 +339,6 @@ impl WinitRunner {
     #[must_use]
     pub fn with_initial_visibility(mut self, visible: bool) -> Self {
         self.initial_visibility = visible;
-        self
-    }
-
-    /// Isolates ordinary native input until explicit keyboard activation completes.
-    #[must_use]
-    pub fn with_input_isolation(mut self, isolated: bool) -> Self {
-        self.input_isolation = isolated;
         self
     }
 
@@ -386,7 +375,6 @@ impl WinitRunner {
             DEFAULT_NATIVE_RETIREMENT_BUDGET,
         );
         app.initial_visibility = self.initial_visibility;
-        app.configure_input_isolation(self.input_isolation);
         if expects_presentation {
             app.record_primary_failure(AppRunError::runner(
                 "platform-only Winit run cannot own an expected presentation backend",
@@ -423,7 +411,6 @@ impl WinitRunner {
     ) -> WinitSession {
         let mut app = WinitApp::new(runtime, driver, self.control_flow, native_retirement_budget);
         app.initial_visibility = self.initial_visibility;
-        app.configure_input_isolation(self.input_isolation);
         WinitSession::start(app, event_loop)
     }
 }
@@ -570,15 +557,8 @@ impl WinitSession {
                 control,
             });
         }
-        if !app.keyboard_control_allowed(control) {
-            return RuntimeControlRequestResult::Rejected(RuntimeControlRejection::InvalidState {
-                state: app.runtime.state(),
-                control,
-            });
-        }
         let result = app.runtime.request_control(control);
-        if let RuntimeControlRequestResult::Accepted(ticket) = result {
-            app.note_keyboard_control(control, ticket);
+        if matches!(result, RuntimeControlRequestResult::Accepted(_)) {
             app.request_frame();
             if control == RuntimeControl::Stop {
                 app.exit = AppExit::Requested;
@@ -591,6 +571,22 @@ impl WinitSession {
     #[must_use]
     pub fn control_status(&self, ticket: RuntimeControlTicket) -> Option<RuntimeControlStatus> {
         self.runtime().control_status(ticket)
+    }
+
+    /// Requests a full paused frame without advancing fixed simulation.
+    pub fn request_paused_maintenance(&mut self) -> Result<(), AppRunError> {
+        let Some(app) = self.app.as_mut() else {
+            return Err(AppRunError::runner(
+                "native paused maintenance is unavailable",
+            ));
+        };
+        if !app.is_healthy_live() || app.runtime.state() != RuntimeState::Paused {
+            return Err(AppRunError::runner(
+                "native paused maintenance requires a live paused runtime",
+            ));
+        }
+        app.request_frame();
+        Ok(())
     }
 
     /// Fences new input and begins shutdown of the original Runtime and native owners.
@@ -1001,110 +997,10 @@ struct WinitApp {
     boundary_serviced: bool,
     runtime_close_incomplete_observed: bool,
     native_resumed: bool,
-    input_gate: WinitInputGate,
-    keyboard_continuation: keyboard_continuation::WinitKeyboardContinuation,
-    input_window_id: WindowId,
+    input_focused: bool,
     event_proxy: Option<EventLoopProxy<WinitUserEvent>>,
     session_wake_id: Option<SessionWakeId>,
     maintenance_wake: Option<Arc<MaintenanceWakeState>>,
-}
-
-#[derive(Debug)]
-struct WinitInputGate {
-    focused: bool,
-    suppressed_keys: HashMap<KeyCode, KeySuppression>,
-    suppressed_mouse_buttons: HashSet<MouseButton>,
-}
-
-#[derive(Debug)]
-enum KeySuppression {
-    FocusLoss,
-    ActivationReconciliation,
-}
-
-impl Default for WinitInputGate {
-    fn default() -> Self {
-        Self::reset_for_focus(true)
-    }
-}
-
-impl WinitInputGate {
-    fn reset_for_focus(focused: bool) -> Self {
-        Self {
-            focused,
-            suppressed_keys: HashMap::new(),
-            suppressed_mouse_buttons: HashSet::new(),
-        }
-    }
-
-    fn lose_focus(
-        &mut self,
-        released_keys: impl IntoIterator<Item = KeyCode>,
-        released_mouse_buttons: impl IntoIterator<Item = MouseButton>,
-    ) {
-        self.focused = false;
-        for key in released_keys {
-            self.suppressed_keys
-                .entry(key)
-                .or_insert(KeySuppression::FocusLoss);
-        }
-        self.suppress_mouse_buttons(released_mouse_buttons);
-    }
-
-    fn suppress_mouse_buttons(
-        &mut self,
-        released_mouse_buttons: impl IntoIterator<Item = MouseButton>,
-    ) {
-        self.suppressed_mouse_buttons.extend(released_mouse_buttons);
-    }
-
-    fn gain_focus(&mut self) {
-        self.focused = true;
-    }
-
-    fn physical_keyboard_input(
-        &mut self,
-        key: KeyCode,
-        state: ElementState,
-        repeat: bool,
-    ) -> Option<ButtonDriverInput<KeyCode>> {
-        match state {
-            ElementState::Released => {
-                self.suppressed_keys.remove(&key);
-                self.focused.then_some(ButtonDriverInput::Release(key))
-            }
-            ElementState::Pressed if self.focused && !repeat => {
-                match self.suppressed_keys.get(&key) {
-                    Some(KeySuppression::FocusLoss) if cfg!(target_os = "windows") => {
-                        self.suppressed_keys.remove(&key);
-                    }
-                    Some(_) => return None,
-                    None => {}
-                }
-                Some(ButtonDriverInput::Press(key))
-            }
-            ElementState::Pressed => None,
-        }
-    }
-
-    fn mouse_input(
-        &mut self,
-        button: MouseButton,
-        state: ElementState,
-    ) -> Option<ButtonDriverInput<MouseButton>> {
-        match state {
-            ElementState::Released => {
-                self.suppressed_mouse_buttons.remove(&button);
-                self.focused.then_some(ButtonDriverInput::Release(button))
-            }
-            ElementState::Pressed
-                if self.focused && !self.suppressed_mouse_buttons.contains(&button) =>
-            {
-                Some(ButtonDriverInput::Press(button))
-            }
-            ElementState::Pressed => None,
-        }
-    }
 }
 
 impl WinitApp {
@@ -1152,9 +1048,7 @@ impl WinitApp {
             boundary_serviced: false,
             runtime_close_incomplete_observed: false,
             native_resumed: false,
-            input_gate: WinitInputGate::default(),
-            keyboard_continuation: keyboard_continuation::WinitKeyboardContinuation::default(),
-            input_window_id: WindowId::PRIMARY,
+            input_focused: true,
             event_proxy: None,
             session_wake_id: None,
             maintenance_wake: None,
@@ -1170,16 +1064,16 @@ impl WinitApp {
         with_runtime_driver_scope(&mut self.runtime, operation)
     }
 
-    fn submit_button_event(
+    fn submit_input(
         &mut self,
-        operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> Result<(), ButtonInputDriverError>,
+        window_id: WindowId,
+        kind: InputEdgeKind,
     ) -> Result<bool, AppRunError> {
-        self.with_driver_scope(|scope| match operation(scope) {
-            Ok(()) => Ok(true),
-            Err(ButtonInputDriverError::Timeline(
-                InputIngressError::ActionOutputAllocationRefused,
-            )) => Ok(false),
-            Err(error) => Err(error),
+        if !self.input_installed() {
+            return Ok(false);
+        }
+        self.with_driver_scope(|scope| {
+            Ok::<_, std::convert::Infallible>(write_input(scope, window_id, kind))
         })
     }
 
@@ -1251,40 +1145,18 @@ impl WinitApp {
             )
             .map_err(|_| AppRunError::runner("native window target is already registered"))?;
         self.owned_window_ids.insert(window_id);
-        self.input_gate = WinitInputGate::reset_for_focus(platform_window.has_focus());
-        self.connect_window_input(window_id)?;
-        if self.input_timeline_installed() {
+        self.input_focused = platform_window.has_focus();
+        if self.input_installed() {
+            self.submit_input(
+                window_id,
+                InputEdgeKind::Window(InputWindowEvent::Focused(self.input_focused)),
+            )?;
             platform_window.set_ime_allowed(true);
         }
         self.with_driver_scope(|scope| {
             push_window_driver_event(scope, WindowEvent::Created { window_id })
         })?;
 
-        Ok(())
-    }
-
-    fn connect_window_input(&mut self, window_id: WindowId) -> Result<(), AppRunError> {
-        if !self.input_timeline_installed() {
-            return Ok(());
-        }
-        // The synchronous native owner connects once, before registered callbacks can run.
-        // Shutdown retires this endpoint and never recreates a window in the same session.
-        let window = InputWindowId::new(window_id.get());
-        self.with_driver_scope(|scope| {
-            connect_input_endpoint(scope, window, InputSeatId::PRIMARY)?;
-            connect_input_pointer(scope, window, InputSeatId::PRIMARY, InputPointerId::PRIMARY)
-        })?;
-        if window_id == WindowId::PRIMARY {
-            self.keyboard_continuation.claim = Some(
-                self.runtime
-                    .world()
-                    .resource::<InputTimeline>()
-                    .claim_endpoint(window, InputSeatId::PRIMARY)
-                    .map_err(|_| {
-                        AppRunError::runner("original keyboard endpoint claim is unavailable")
-                    })?,
-            );
-        }
         Ok(())
     }
 
@@ -1314,9 +1186,6 @@ impl WinitApp {
                 Some(RuntimeFrameKind::ExactFixedTick) => self.request_frame(),
                 None => {}
             }
-        }
-        if let Err(error) = self.finish_keyboard_activation() {
-            self.record_primary_failure(error);
         }
         let now = Instant::now();
         // Return original presentation/UI facts before interpreting success, failure or exit.
@@ -1454,21 +1323,12 @@ impl WinitApp {
         }
         self.frame_requested |=
             window_event_requests_frame(&event) || self.runtime.state() == RuntimeState::Paused;
-        self.input_window_id = window_id;
-
         match event {
             WinitWindowEvent::CloseRequested => {
-                if self.input_timeline_installed() {
-                    self.with_driver_scope(|scope| {
-                        apply_window_input_driver_event(
-                            scope,
-                            InputWindowId::new(window_id.get()),
-                            InputSeatId::PRIMARY,
-                            InputWindowEvent::CloseRequested,
-                        )
-                        .map(|_| ())
-                    })?;
-                }
+                self.submit_input(
+                    window_id,
+                    InputEdgeKind::Window(InputWindowEvent::CloseRequested),
+                )?;
                 self.with_driver_scope(|scope| {
                     push_window_driver_event(scope, WindowEvent::CloseRequested { window_id })
                 })?;
@@ -1484,17 +1344,10 @@ impl WinitApp {
                     size.width as f32 / scale_factor as f32,
                     size.height as f32 / scale_factor as f32,
                 );
-                if self.input_timeline_installed() {
-                    self.with_driver_scope(|scope| {
-                        apply_window_input_driver_event(
-                            scope,
-                            InputWindowId::new(window_id.get()),
-                            InputSeatId::PRIMARY,
-                            InputWindowEvent::Resized { logical_size },
-                        )
-                        .map(|_| ())
-                    })?;
-                }
+                self.submit_input(
+                    window_id,
+                    InputEdgeKind::Window(InputWindowEvent::Resized { logical_size }),
+                )?;
                 self.with_driver_scope(|scope| {
                     push_window_driver_event(
                         scope,
@@ -1509,17 +1362,10 @@ impl WinitApp {
                 self.apply_focus_driver_event(window_id, focused)?;
             }
             WinitWindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                if self.input_timeline_installed() {
-                    self.with_driver_scope(|scope| {
-                        apply_window_input_driver_event(
-                            scope,
-                            InputWindowId::new(window_id.get()),
-                            InputSeatId::PRIMARY,
-                            InputWindowEvent::ScaleFactorChanged { scale_factor },
-                        )
-                        .map(|_| ())
-                    })?;
-                }
+                self.submit_input(
+                    window_id,
+                    InputEdgeKind::Window(InputWindowEvent::ScaleFactorChanged { scale_factor }),
+                )?;
                 self.with_driver_scope(|scope| {
                     push_window_driver_event(
                         scope,
@@ -1541,6 +1387,7 @@ impl WinitApp {
                 ..
             } => {
                 self.apply_keyboard_event_with_origin(
+                    window_id,
                     RawKeyEvent {
                         physical_key: event.physical_key,
                         state: event.state,
@@ -1555,69 +1402,37 @@ impl WinitApp {
             | WinitWindowEvent::Touch(_)) => {
                 self.apply_native_device_event(window_id, event)?;
             }
-            WinitWindowEvent::MouseInput { state, button, .. } => {
-                let button = convert_mouse_button(button);
-                if self.input_timeline_installed()
-                    && let Some(input) = self.mouse_driver_input(state, button)
-                {
-                    self.submit_button_event(|scope| {
-                        apply_mouse_driver_input_at(
-                            scope,
-                            InputWindowId::new(window_id.get()),
-                            InputSeatId::PRIMARY,
-                            InputPointerId::PRIMARY,
-                            input,
-                        )
-                        .map(|_| ())
-                    })?;
-                }
+            WinitWindowEvent::MouseInput { state, button, .. } if self.input_focused => {
+                self.submit_input(
+                    window_id,
+                    InputEdgeKind::PointerButton {
+                        pointer: InputPointerId::PRIMARY,
+                        button: convert_mouse_button(button),
+                        phase: button_phase(state),
+                        position: None,
+                    },
+                )?;
             }
             WinitWindowEvent::CursorMoved { position, .. } => {
-                if !self.input_timeline_installed() || !self.ordinary_input_enabled() {
-                    return Ok(());
-                }
                 let scale_factor = self
                     .platform_windows
                     .get(&window_id)
                     .map_or(1.0, |window| window.scale_factor());
-                let position = nara_core::Vec2::new(
-                    position.x as f32 / scale_factor as f32,
-                    position.y as f32 / scale_factor as f32,
-                );
-                self.with_driver_scope(|scope| {
-                    apply_pointer_driver_input_at(
-                        scope,
-                        InputWindowId::new(window_id.get()),
-                        InputSeatId::PRIMARY,
-                        InputPointerId::PRIMARY,
-                        PointerDriverInput::Moved(position),
-                    )
-                    .map(|_| ())
-                })?;
+                self.submit_input(
+                    window_id,
+                    InputEdgeKind::PointerMoved {
+                        pointer: InputPointerId::PRIMARY,
+                        position: input_events::logical_position(position, scale_factor),
+                    },
+                )?;
             }
-            WinitWindowEvent::CursorLeft { .. }
-                if self.input_timeline_installed() && self.ordinary_input_enabled() =>
-            {
-                let outcome = self
-                    .runtime
-                    .with_driver_scope(|scope| {
-                        apply_pointer_driver_input_at(
-                            scope,
-                            InputWindowId::new(window_id.get()),
-                            InputSeatId::PRIMARY,
-                            InputPointerId::PRIMARY,
-                            PointerDriverInput::Left,
-                        )
-                    })
-                    .map_err(runtime_scope_error)?;
-                let (_, released_mouse_buttons) = outcome
-                    .output
-                    .map_err(|_| AppRunError::runner("runtime pointer release failed"))?;
-                self.input_gate
-                    .suppress_mouse_buttons(released_mouse_buttons);
-                if let Some(fault) = outcome.post_operation_fault {
-                    return Err(runtime_fault_error(&fault));
-                }
+            WinitWindowEvent::CursorLeft { .. } => {
+                self.submit_input(
+                    window_id,
+                    InputEdgeKind::PointerLeft {
+                        pointer: InputPointerId::PRIMARY,
+                    },
+                )?;
             }
             _ => {}
         }
@@ -1631,35 +1446,33 @@ impl WinitApp {
         event: RawKeyEvent,
         repeat: bool,
     ) -> Result<bool, AppRunError> {
-        self.apply_keyboard_event_with_origin(event, repeat, false)
+        self.apply_keyboard_event_with_origin(WindowId::PRIMARY, event, repeat, false)
     }
 
     fn apply_keyboard_event_with_origin(
         &mut self,
+        window_id: WindowId,
         event: RawKeyEvent,
         repeat: bool,
         is_synthetic: bool,
     ) -> Result<bool, AppRunError> {
-        if self.shutdown.is_started() {
-            return Ok(false);
-        }
-        if !self.input_timeline_installed() || !self.ordinary_input_enabled() || is_synthetic {
+        if self.shutdown.is_started()
+            || !self.input_focused
+            || is_synthetic
+            || (repeat && event.state == ElementState::Pressed)
+        {
             return Ok(false);
         }
         let Some(key) = convert_physical_key(event.physical_key) else {
             return Ok(false);
         };
-        let Some(input) = self
-            .input_gate
-            .physical_keyboard_input(key, event.state, repeat)
-        else {
-            return Ok(false);
-        };
-        let input_window_id = InputWindowId::new(self.input_window_id.get());
-        self.submit_button_event(|scope| {
-            apply_keyboard_driver_input_at(scope, input_window_id, InputSeatId::PRIMARY, input)
-                .map(|_| ())
-        })
+        self.submit_input(
+            window_id,
+            InputEdgeKind::Key {
+                key,
+                phase: button_phase(event.state),
+            },
+        )
     }
 
     fn apply_focus_driver_event(
@@ -1667,109 +1480,20 @@ impl WinitApp {
         window_id: WindowId,
         focused: bool,
     ) -> Result<(), AppRunError> {
-        self.paused_frame_complete = false;
-        self.frame_requested = true;
-        if self.keyboard_continuation.isolated
-            && self.keyboard_continuation.activation != WinitInputActivation::Active
-        {
-            if focused {
-                self.input_gate.gain_focus();
-            } else {
-                self.input_gate.lose_focus([], []);
-                if matches!(
-                    self.keyboard_continuation.activation,
-                    WinitInputActivation::AwaitingFocus
-                        | WinitInputActivation::ReconciliationPending
-                ) {
-                    self.keyboard_continuation.activation = WinitInputActivation::AwaitingFocus;
-                }
-            }
-            self.with_driver_scope(|scope| {
-                push_window_driver_event(scope, WindowEvent::Focused { window_id, focused })
-            })?;
-            if focused
-                && window_id == WindowId::PRIMARY
-                && self.keyboard_continuation.activation == WinitInputActivation::AwaitingFocus
-            {
-                self.with_driver_scope(|scope| {
-                    apply_window_input_driver_event(
-                        scope,
-                        InputWindowId::new(window_id.get()),
-                        InputSeatId::PRIMARY,
-                        InputWindowEvent::Focused(true),
-                    )
-                    .map(|_| ())
-                })?;
-                self.acknowledge_keyboard_focus()?;
-            }
-            return Ok(());
-        }
-        if !self.input_timeline_installed() {
-            if focused {
-                self.input_gate.gain_focus();
-            } else {
-                self.input_gate.lose_focus([], []);
-            }
-            return self.with_driver_scope(|scope| {
-                push_window_driver_event(scope, WindowEvent::Focused { window_id, focused })
-            });
-        }
-        if focused {
-            self.input_gate.gain_focus();
-        } else {
-            let outcome = self
-                .runtime
-                .with_driver_scope(|scope| {
-                    apply_window_input_driver_event(
-                        scope,
-                        InputWindowId::new(window_id.get()),
-                        InputSeatId::PRIMARY,
-                        InputWindowEvent::Focused(false),
-                    )
-                })
-                .map_err(runtime_scope_error)?;
-            let (_, released_keys, released_mouse_buttons) = outcome
-                .output
-                .map_err(|_| AppRunError::runner("runtime focus release failed"))?;
-            self.input_gate
-                .lose_focus(released_keys, released_mouse_buttons);
-            if let Some(fault) = outcome.post_operation_fault {
-                return Err(runtime_fault_error(&fault));
-            }
-            if self.keyboard_continuation.isolated && self.runtime.state() == RuntimeState::Paused {
-                self.keyboard_continuation.activation = WinitInputActivation::AwaitingFocus;
-            }
-        }
-        if focused {
-            self.with_driver_scope(|scope| {
-                apply_window_input_driver_event(
-                    scope,
-                    InputWindowId::new(window_id.get()),
-                    InputSeatId::PRIMARY,
-                    InputWindowEvent::Focused(true),
-                )
-                .map(|_| ())
-            })?;
-        }
+        self.input_focused = focused;
+        self.submit_input(
+            window_id,
+            InputEdgeKind::Window(InputWindowEvent::Focused(focused)),
+        )?;
         self.with_driver_scope(|scope| {
             push_window_driver_event(scope, WindowEvent::Focused { window_id, focused })
         })
     }
 
-    fn mouse_driver_input(
-        &mut self,
-        state: ElementState,
-        button: MouseButton,
-    ) -> Option<ButtonDriverInput<MouseButton>> {
-        if self.ordinary_input_enabled() {
-            self.input_gate.mouse_input(button, state)
-        } else {
-            None
-        }
-    }
-
-    fn input_timeline_installed(&self) -> bool {
-        self.runtime.world().contains_resource::<InputTimeline>()
+    fn input_installed(&self) -> bool {
+        self.runtime
+            .world()
+            .contains_resource::<Messages<InputEdge>>()
     }
 
     fn handle_destroyed_window(
@@ -1805,12 +1529,11 @@ impl WinitApp {
             }
         }
         if externally_destroyed && !self.shutdown.is_started() {
-            if self.input_timeline_installed() {
-                if let Err(error) =
-                    self.with_driver_scope(|scope| retire_window_input(scope, window_id))
-                {
-                    self.record_primary_failure(error);
-                }
+            if let Err(error) = self.submit_input(
+                window_id,
+                InputEdgeKind::Window(InputWindowEvent::SurfaceRetired),
+            ) {
+                self.record_primary_failure(error);
             }
             if let Err(error) = self.with_driver_scope(|scope| {
                 push_window_driver_event(scope, WindowEvent::Closed { window_id })
@@ -2229,24 +1952,27 @@ fn should_process_window_event_during_shutdown(
     !shutdown.is_started() || matches!(event, WinitWindowEvent::Destroyed)
 }
 
-fn retire_window_input(
+fn button_phase(state: ElementState) -> ButtonTransitionPhase {
+    match state {
+        ElementState::Pressed => ButtonTransitionPhase::Pressed,
+        ElementState::Released => ButtonTransitionPhase::Released,
+    }
+}
+
+fn write_input(
     scope: &mut RuntimeDriverScope<'_>,
     window_id: WindowId,
-) -> Result<(), ButtonInputDriverError> {
-    match apply_window_input_driver_event(
-        scope,
-        InputWindowId::new(window_id.get()),
-        InputSeatId::PRIMARY,
-        InputWindowEvent::SurfaceRetired,
-    ) {
-        // A failed connection or an already reclaimed retirement has no accepted input to end.
-        // Neither may prevent the native owner from releasing its remaining physical resources.
-        Ok(_)
-        | Err(ButtonInputDriverError::Timeline(InputIngressError::UnknownEndpoint { .. })) => {
-            Ok(())
-        }
-        Err(error) => Err(error),
-    }
+    kind: InputEdgeKind,
+) -> bool {
+    scope.with_world_mut(|world| {
+        world
+            .write_message(InputEdge::new(
+                InputWindowId::new(window_id.get()),
+                InputSeatId::PRIMARY,
+                kind,
+            ))
+            .is_some()
+    })
 }
 
 fn retire_runtime_input(
@@ -2254,22 +1980,18 @@ fn retire_runtime_input(
     owned_window_ids: &[WindowId],
 ) -> Result<(), AppRunError> {
     if runtime.state() != RuntimeState::Stopped
-        && runtime.world().contains_resource::<InputTimeline>()
+        && runtime.world().contains_resource::<Messages<InputEdge>>()
     {
-        let outcome = runtime
-            .with_driver_scope(|scope| {
-                for window_id in owned_window_ids.iter().copied() {
-                    retire_window_input(scope, window_id)?;
-                }
-                Ok::<(), ButtonInputDriverError>(())
-            })
-            .map_err(runtime_scope_error)?;
-        outcome
-            .output
-            .map_err(|_| AppRunError::runner("input route retirement failed"))?;
-        if let Some(fault) = outcome.post_operation_fault {
-            return Err(runtime_fault_error(&fault));
-        }
+        with_runtime_driver_scope(runtime, |scope| {
+            for window_id in owned_window_ids.iter().copied() {
+                write_input(
+                    scope,
+                    window_id,
+                    InputEdgeKind::Window(InputWindowEvent::SurfaceRetired),
+                );
+            }
+            Ok::<_, std::convert::Infallible>(())
+        })?;
     }
     Ok(())
 }

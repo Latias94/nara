@@ -1,17 +1,10 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
-
-use nara_ecs::Component;
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentFloat,
     ComponentNumericBound::{Excluded, Included},
-    ComponentNumericDomain, ComponentNumericInterval, ComponentRegistryBuilder,
-    ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId,
-    ComponentSchemaVersion, ComponentShapeErrorKind, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueShape, validate_component_value,
+    ComponentNumericDomain, ComponentNumericInterval, ComponentRegistryError, ComponentSchema,
+    ComponentSchemaCatalog, ComponentSchemaVersion, ComponentShapeErrorKind, ComponentTypeId,
+    ComponentValue, ComponentValueKind, ComponentValueShape, validate_component_value,
 };
 
 fn float(value: f64) -> ComponentFloat {
@@ -44,18 +37,11 @@ fn schema(shape: ComponentValueShape) -> ComponentSchema {
 }
 
 fn catalog(schema: ComponentSchema) -> ComponentSchemaCatalog {
-    ComponentSchemaCatalog {
-        components: vec![schema],
-        ..ComponentSchemaCatalog::default()
-    }
+    admit(schema).unwrap()
 }
 
-fn admit(schema: ComponentSchema) -> Result<ComponentRegistryBuilder, ComponentRegistryError> {
-    ComponentRegistryBuilder::from_owner_catalog_candidate(
-        ComponentSchemaOwnerId::new("nara.test.numeric-interval-owner"),
-        catalog(schema),
-        None,
-    )
+fn admit(schema: ComponentSchema) -> Result<ComponentSchemaCatalog, ComponentRegistryError> {
+    ComponentSchemaCatalog::from_components([schema])
 }
 
 #[test]
@@ -258,7 +244,7 @@ fn defaults_and_creation_values_use_interval_validation_with_correct_error_class
     with_default.fields[0].default_value = Some(ComponentValue::f64(0.0).unwrap());
     assert!(matches!(
         admit(with_default.clone()),
-        Err(ComponentRegistryError::InvalidComponentFieldDefaultShape { source, .. })
+        Err(ComponentRegistryError::InvalidComponentFieldDefault { source, .. })
             if source.kind == ComponentShapeErrorKind::NumericInterval
     ));
     with_default.fields[0].default_value = Some(ComponentValue::f64(f64::from(f32::MAX)).unwrap());
@@ -266,7 +252,8 @@ fn defaults_and_creation_values_use_interval_validation_with_correct_error_class
     with_default.fields[0].default_value = Some(ComponentValue::f64(f64::MAX).unwrap());
     assert!(matches!(
         admit(with_default),
-        Err(ComponentRegistryError::ComponentFieldDefaultOutsideNumericDomain { .. })
+        Err(ComponentRegistryError::InvalidComponentFieldDefault { source, .. })
+            if matches!(source.kind, ComponentShapeErrorKind::NumericDomain(_))
     ));
 
     let invalid_initial = schema(positive_f32()).with_authoring_initial_value(ComponentValue::map(
@@ -274,12 +261,12 @@ fn defaults_and_creation_values_use_interval_validation_with_correct_error_class
     ));
     assert!(matches!(admit(invalid_initial),
         Err(ComponentRegistryError::InvalidComponentAuthoringInitialValue {
-            source: ComponentCodecError::Domain(error), ..
-        }) if error.field() == Some(&ComponentFieldId::new("value"))));
+            source: ComponentCodecError::InvalidField { field, .. }, ..
+        }) if field == "value"));
 }
 
 #[test]
-fn recursive_intervals_report_the_stable_root_without_dynamic_keys_or_values() {
+fn recursive_intervals_validate_the_selected_value() {
     let schema = schema(ComponentValueShape::map(ComponentValueShape::list(
         ComponentValueShape::optional(positive_f32()),
     )));
@@ -287,7 +274,7 @@ fn recursive_intervals_report_the_stable_root_without_dynamic_keys_or_values() {
     let value = |entries| {
         ComponentValue::map([(
             "value",
-            ComponentValue::map([("private-map-key", ComponentValue::List(entries))]),
+            ComponentValue::map([("entry", ComponentValue::List(entries))]),
         )])
     };
     validate_component_value(
@@ -302,88 +289,14 @@ fn recursive_intervals_report_the_stable_root_without_dynamic_keys_or_values() {
         ComponentValue::Null,
         ComponentValue::f64(0.0).unwrap(),
     ]);
-    let error = validate_component_value(&schema, &invalid).unwrap_err();
-    let ComponentCodecError::Domain(domain) = &error else {
-        panic!("expected safe interval failure")
-    };
-    assert_eq!(domain.code().as_str(), "nara.reflect.numeric-range");
-    assert_eq!(domain.field(), Some(&ComponentFieldId::new("value")));
-    assert!(!error.to_string().contains("private-map-key"));
-    assert!(!error.to_string().contains("[1]"));
-    let mut references = schema.clone();
-    references.fields[0].shape = ComponentValueShape::record([
-        ("target".to_owned(), ComponentValueShape::EntityRef),
-        ("amount".to_owned(), positive_f32()),
-    ]);
-    references.fields[0]
-        .capabilities
-        .insert(ComponentCapability::EntityRef);
-    let with_reference = |amount| {
-        ComponentValue::map([(
-            "value",
-            ComponentValue::map([
-                (
-                    "target",
-                    ComponentValue::EntityReference(nara_reflect::EntityReference::SceneLocal {
-                        entity: nara_ecs::identity::SceneEntityId::new("target").unwrap(),
-                    }),
-                ),
-                ("amount", ComponentValue::f64(amount).unwrap()),
-            ]),
-        )])
-    };
-    for (amount, accepted) in [(1.0, true), (0.0, false)] {
-        assert_eq!(
-            nara_reflect::entity_reference::plan_declared_entity_references::<()>(
-                &references,
-                &with_reference(amount),
-                nara_reflect::EntityReferenceTraversalLimits::default(),
-            )
-            .is_ok(),
-            accepted
-        );
-    }
-}
-
-#[derive(Component)]
-struct NativeNumber(f32);
-
-#[test]
-fn native_preflight_rejects_interval_failure_before_calling_a_codec() {
-    let schema = schema(positive_f32());
-    let id = schema.id.clone();
-    let calls = Arc::new(AtomicUsize::new(0));
-    let codec_calls = calls.clone();
-    let mut registry = ComponentRegistryBuilder::new();
-    registry
-        .register_persistent_component_with_codec::<NativeNumber, _, _>(
-            schema,
-            move |value| {
-                codec_calls.fetch_add(1, Ordering::Relaxed);
-                Ok(NativeNumber(value.field_f64("value")? as f32))
-            },
-            |number| {
-                Ok(ComponentValue::map([(
-                    "value",
-                    ComponentValue::f64(f64::from(number.0))?,
-                )]))
-            },
-        )
-        .unwrap();
-    let snapshot = registry.freeze().unwrap();
-    let invalid = ComponentValue::map([("value", ComponentValue::f64(f64::MIN_POSITIVE).unwrap())]);
     assert!(matches!(
-        snapshot.preflight_component(&id, &invalid),
-        Err(ComponentCodecError::Domain(_))
+        validate_component_value(&schema, &invalid),
+        Err(ComponentCodecError::InvalidField { field, .. }) if field == "value.entry[1]"
     ));
-    assert_eq!(calls.load(Ordering::Relaxed), 0);
-    let valid = ComponentValue::map([("value", ComponentValue::f64(0.5).unwrap())]);
-    snapshot.preflight_component(&id, &valid).unwrap();
-    assert_eq!(calls.load(Ordering::Relaxed), 1);
 }
 
 #[test]
-fn interval_identity_tracks_endpoints_and_all_semantic_changes_require_successors() {
+fn interval_identity_tracks_endpoints() {
     let unbounded = catalog(schema(ComponentValueShape::scalar(ComponentValueKind::I64)));
     let intervals = [
         ComponentNumericInterval::I64 {
@@ -411,29 +324,6 @@ fn interval_identity_tracks_endpoints_and_all_semantic_changes_require_successor
     });
     for catalog in &catalogs {
         assert!(fingerprints.insert(catalog.fingerprint()));
-    }
-    for (before, after) in [
-        (&unbounded, &catalogs[0]),
-        (&catalogs[0], &catalogs[1]),
-        (&catalogs[0], &unbounded),
-    ] {
-        let mut successor = ComponentSchemaCatalog::successor_of(before).unwrap();
-        successor.components = after.components.clone();
-        assert!(matches!(
-            ComponentRegistryBuilder::from_owner_catalog_candidate(
-                ComponentSchemaOwnerId::new("nara.test.numeric-interval-owner"),
-                successor.clone(),
-                Some(before.clone()),
-            ),
-            Err(ComponentRegistryError::ComponentSchemaChangedWithoutVersionBump { .. })
-        ));
-        successor.components[0].version = ComponentSchemaVersion::new(2).unwrap();
-        ComponentRegistryBuilder::from_owner_catalog_candidate(
-            ComponentSchemaOwnerId::new("nara.test.numeric-interval-owner"),
-            successor,
-            Some(before.clone()),
-        )
-        .unwrap();
     }
     let zero = |value| {
         catalog(schema(
@@ -479,11 +369,6 @@ fn interval_metadata_round_trips_and_unknown_contracts_fail_closed() {
     let decoded = ComponentSchemaCatalog::from_json_bytes(json.as_bytes()).unwrap();
     assert_eq!(decoded, ranged);
     assert_eq!(decoded.fingerprint(), ranged.fingerprint());
-    let ron = ranged.to_ron_string().unwrap();
-    assert_eq!(
-        ComponentSchemaCatalog::from_ron_bytes(ron.as_bytes()).unwrap(),
-        ranged
-    );
     for shape in [
         ComponentValueShape::scalar(ComponentValueKind::I64).with_numeric_interval(
             ComponentNumericInterval::I64 {
@@ -504,11 +389,6 @@ fn interval_metadata_round_trips_and_unknown_contracts_fail_closed() {
                 .unwrap(),
             expected
         );
-        assert_eq!(
-            ComponentSchemaCatalog::from_ron_bytes(expected.to_ron_string().unwrap().as_bytes())
-                .unwrap(),
-            expected
-        );
     }
     assert!(
         ComponentSchemaCatalog::from_json_bytes(
@@ -518,28 +398,11 @@ fn interval_metadata_round_trips_and_unknown_contracts_fail_closed() {
         .is_err()
     );
     let mut wire: serde_json::Value = serde_json::from_str(&json).unwrap();
-    wire["payload"]["components"][0]["fields"][0]["shape"]["numeric_interval"]["kind"] =
+    wire["components"][0]["fields"][0]["shape"]["numeric_interval"]["kind"] =
         serde_json::json!("f16");
     assert!(ComponentSchemaCatalog::from_json_bytes(&serde_json::to_vec(&wire).unwrap()).is_err());
     let mut wire: serde_json::Value = serde_json::from_str(&json).unwrap();
-    let interval = &mut wire["payload"]["components"][0]["fields"][0]["shape"]["numeric_interval"];
+    let interval = &mut wire["components"][0]["fields"][0]["shape"]["numeric_interval"];
     interval["future_rule"] = serde_json::json!(true);
     assert!(ComponentSchemaCatalog::from_json_bytes(&serde_json::to_vec(&wire).unwrap()).is_err());
-
-    // This is the previous Scalar reader: unsupported metadata must reject, not disappear.
-    #[derive(serde::Deserialize)]
-    #[serde(tag = "shape", rename_all = "snake_case", deny_unknown_fields)]
-    enum PreviousShape {
-        Scalar {
-            #[serde(rename = "kind")]
-            _kind: ComponentValueKind,
-            #[serde(default, rename = "numeric_domain")]
-            _numeric_domain: Option<ComponentNumericDomain>,
-        },
-    }
-    let current_shape = serde_json::to_value(positive_f32()).unwrap();
-    assert!(serde_json::from_value::<PreviousShape>(current_shape).is_err());
-    let old_shape =
-        serde_json::to_value(ComponentValueShape::scalar(ComponentValueKind::F64)).unwrap();
-    assert!(serde_json::from_value::<PreviousShape>(old_shape).is_ok());
 }

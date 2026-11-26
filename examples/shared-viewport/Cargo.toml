@@ -16,7 +16,6 @@ nara_app = { path = "../../crates/nara_app" }
 nara_asset = { path = "../../crates/nara_asset" }
 nara_core = { path = "../../crates/nara_core" }
 nara_ecs = { path = "../../crates/nara_ecs" }
-nara_reflect = { path = "../../crates/nara_reflect" }
 nara_scene = { path = "../../crates/nara_scene" }
 nara_window = { path = "../../crates/nara_window", features = ["runtime"] }
 open_gpui = { package = "open-gpui", path = "../../../open-gpui/crates/gpui", default-features = false }

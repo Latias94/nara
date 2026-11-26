@@ -18,6 +18,8 @@ pub enum WgpuRenderError {
     DeviceLost,
     #[error("wgpu reported an uncaptured device error: {message}")]
     UncapturedDeviceError { message: String },
+    #[error("wgpu error scope requires asynchronous completion on this backend")]
+    ErrorScopePending,
     #[error("wgpu device epoch was exhausted")]
     DeviceEpochExhausted,
     #[error("wgpu telemetry completion wait timed out")]

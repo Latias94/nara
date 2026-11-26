@@ -3,40 +3,10 @@ use std::{any::TypeId, fmt, sync::Arc};
 use thiserror::Error;
 
 pub const MAX_UI_KEY_BYTES: usize = 256;
-const MAX_UI_KEY_ATOM_BYTES: usize = MAX_UI_KEY_BYTES;
 
-/// Bounded textual identifier. Binary source coordinates use [`UiOpaqueId`] instead.
+/// Bounded textual identifier.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiKeyAtom(String);
-
-/// Exact bounded identity bytes supplied by an owning adapter, without text interpretation.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UiOpaqueId(Arc<[u8]>);
-
-impl UiOpaqueId {
-    pub fn new(value: impl AsRef<[u8]>) -> Result<Self, UiKeyError> {
-        let value = value.as_ref();
-        if value.is_empty() {
-            return Err(UiKeyError::EmptyAtom);
-        }
-        if value.len() > MAX_UI_KEY_ATOM_BYTES {
-            return Err(UiKeyError::AtomTooLong {
-                actual: value.len(),
-                maximum: MAX_UI_KEY_ATOM_BYTES,
-            });
-        }
-        Ok(Self(Arc::from(value)))
-    }
-
-    #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-
-    fn encoded_len(&self) -> usize {
-        self.0.len()
-    }
-}
 
 impl UiKeyAtom {
     pub fn new(value: impl Into<String>) -> Result<Self, UiKeyError> {
@@ -44,10 +14,10 @@ impl UiKeyAtom {
         if value.is_empty() {
             return Err(UiKeyError::EmptyAtom);
         }
-        if value.len() > MAX_UI_KEY_ATOM_BYTES {
+        if value.len() > MAX_UI_KEY_BYTES {
             return Err(UiKeyError::AtomTooLong {
                 actual: value.len(),
-                maximum: MAX_UI_KEY_ATOM_BYTES,
+                maximum: MAX_UI_KEY_BYTES,
             });
         }
         if value.chars().any(char::is_control) {
@@ -60,133 +30,52 @@ impl UiKeyAtom {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-
-    fn encoded_len(&self) -> usize {
-        self.0.len()
-    }
-}
-
-/// Complete adapter-owned persistent address, independent of its eventual UI root.
-///
-/// Context and placement are required exact values. The adapter owns their canonical structure;
-/// the kernel neither interprets Scene paths nor inherits missing context from a root key.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UiPersistentIdentity {
-    context: UiOpaqueId,
-    placement: UiOpaqueId,
-}
-
-impl UiPersistentIdentity {
-    #[must_use]
-    pub const fn new(context: UiOpaqueId, placement: UiOpaqueId) -> Self {
-        Self { context, placement }
-    }
-
-    #[must_use]
-    pub const fn context(&self) -> &UiOpaqueId {
-        &self.context
-    }
-
-    #[must_use]
-    pub const fn placement(&self) -> &UiOpaqueId {
-        &self.placement
-    }
-
-    fn encoded_len(&self) -> usize {
-        4 + self.context.encoded_len() + self.placement.encoded_len()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct UiRuntimeIdentity {
-    domain: UiKeyAtom,
-    local: UiKeyAtom,
-}
-
-impl UiRuntimeIdentity {
-    const fn new(domain: UiKeyAtom, local: UiKeyAtom) -> Self {
-        Self { domain, local }
-    }
-
-    fn encoded_len(&self) -> usize {
-        4 + self.domain.encoded_len() + self.local.encoded_len()
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum UiIdentity {
-    Persistent(UiPersistentIdentity),
-    Runtime(UiRuntimeIdentity),
+    #[cfg(feature = "runtime")]
+    Entity(u64),
+    Named {
+        domain: UiKeyAtom,
+        local: UiKeyAtom,
+    },
 }
 
 impl UiIdentity {
+    fn named(domain: impl Into<String>, local: impl Into<String>) -> Result<Self, UiKeyError> {
+        Ok(Self::Named {
+            domain: UiKeyAtom::new(domain)?,
+            local: UiKeyAtom::new(local)?,
+        })
+    }
+
     fn encoded_len(&self) -> usize {
-        1 + match self {
-            Self::Persistent(identity) => identity.encoded_len(),
-            Self::Runtime(identity) => identity.encoded_len(),
+        match self {
+            #[cfg(feature = "runtime")]
+            Self::Entity(_) => 1 + size_of::<u64>(),
+            Self::Named { domain, local } => 5 + domain.as_str().len() + local.as_str().len(),
         }
-    }
-
-    fn canonical_bytes(&self) -> [u8; MAX_UI_KEY_BYTES] {
-        debug_assert!(self.encoded_len() <= MAX_UI_KEY_BYTES);
-        let (tag, first, second) = match self {
-            Self::Persistent(identity) => (
-                0,
-                identity.context.as_bytes(),
-                identity.placement.as_bytes(),
-            ),
-            Self::Runtime(identity) => (
-                1,
-                identity.domain.as_str().as_bytes(),
-                identity.local.as_str().as_bytes(),
-            ),
-        };
-        let mut output = [0; MAX_UI_KEY_BYTES];
-        output[0] = tag;
-        output[1..3].copy_from_slice(&(first.len() as u16).to_le_bytes());
-        let end_first = 3 + first.len();
-        output[3..end_first].copy_from_slice(first);
-        let end_second = end_first + second.len();
-        output[end_first..end_second].copy_from_slice(second);
-        // The outer address length frames the final field. Its length belongs after its bytes:
-        // placing it first would erase shared path prefixes whenever leaf lengths differ.
-        output[end_second..end_second + 2].copy_from_slice(&(second.len() as u16).to_le_bytes());
-        output
-    }
-
-    fn common_prefix_len(&self, other: &Self) -> usize {
-        let left = self.canonical_bytes();
-        let right = other.canonical_bytes();
-        left[..self.encoded_len()]
-            .iter()
-            .zip(&right[..other.encoded_len()])
-            .take_while(|(left, right)| left == right)
-            .count()
     }
 }
 
-/// Stable identity of one authored root on a surface.
+/// Identity of one layout root on its surface.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiRootKey(Arc<UiIdentity>);
 
 impl UiRootKey {
-    pub fn persistent(identity: UiPersistentIdentity) -> Result<Self, UiKeyError> {
-        Self::admit(UiIdentity::Persistent(identity))
-    }
-
     pub fn runtime(
         domain: impl Into<String>,
         local: impl Into<String>,
     ) -> Result<Self, UiKeyError> {
-        Self::admit(UiIdentity::Runtime(UiRuntimeIdentity::new(
-            UiKeyAtom::new(domain)?,
-            UiKeyAtom::new(local)?,
-        )))
-    }
-
-    fn admit(identity: UiIdentity) -> Result<Self, UiKeyError> {
+        let identity = UiIdentity::named(domain, local)?;
         validate_key_len(3 + identity.encoded_len())?;
         Ok(Self(Arc::new(identity)))
+    }
+
+    #[cfg(feature = "runtime")]
+    pub(crate) fn entity(bits: u64) -> Self {
+        Self(Arc::new(UiIdentity::Entity(bits)))
     }
 
     pub(crate) fn encoded_len(&self) -> usize {
@@ -194,28 +83,23 @@ impl UiRootKey {
     }
 }
 
-/// Stable identity of one keyed node inside an authored root.
+/// Identity of one node relative to its layout root.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiLocalKey(Arc<UiIdentity>);
 
 impl UiLocalKey {
-    pub fn persistent(identity: UiPersistentIdentity) -> Result<Self, UiKeyError> {
-        Self::admit(UiIdentity::Persistent(identity))
-    }
-
     pub fn runtime(
         domain: impl Into<String>,
         local: impl Into<String>,
     ) -> Result<Self, UiKeyError> {
-        Self::admit(UiIdentity::Runtime(UiRuntimeIdentity::new(
-            UiKeyAtom::new(domain)?,
-            UiKeyAtom::new(local)?,
-        )))
-    }
-
-    fn admit(identity: UiIdentity) -> Result<Self, UiKeyError> {
+        let identity = UiIdentity::named(domain, local)?;
         validate_key_len(identity.encoded_len())?;
         Ok(Self(Arc::new(identity)))
+    }
+
+    #[cfg(feature = "runtime")]
+    pub(crate) fn entity(bits: u64) -> Self {
+        Self(Arc::new(UiIdentity::Entity(bits)))
     }
 
     fn encoded_len(&self) -> usize {
@@ -223,7 +107,7 @@ impl UiLocalKey {
     }
 }
 
-/// Exact root-scoped logical node identity used by frame facts.
+/// Node identity used by immutable frame data.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiKey {
     root: UiRootKey,
@@ -232,9 +116,7 @@ pub struct UiKey {
 
 impl UiKey {
     pub fn root(root: UiRootKey) -> Result<Self, UiKeyError> {
-        let key = Self { root, local: None };
-        validate_key_len(key.encoded_len())?;
-        Ok(key)
+        Ok(Self { root, local: None })
     }
 
     pub fn scoped(root: UiRootKey, local: UiLocalKey) -> Result<Self, UiKeyError> {
@@ -256,23 +138,13 @@ impl UiKey {
         self.local.as_ref()
     }
 
-    /// Exact canonical cost used by admission and owner-local reduced key limits.
-    ///
-    /// Shared content is charged once in the canonical scoped representation, regardless of
-    /// pointer sharing. This is not an allocator or stable wire-format size promise.
+    /// Size used by the frame compiler to bound keys.
     #[must_use]
     pub fn encoded_len(&self) -> usize {
-        match &self.local {
-            None => self.root.encoded_len(),
-            Some(local) => {
-                7 + self.root.0.encoded_len() + local.encoded_len()
-                    - self.root.0.common_prefix_len(&local.0)
-            }
-        }
+        self.root.encoded_len() + self.local.as_ref().map_or(0, UiLocalKey::encoded_len)
     }
 }
 
-/// Bounded typed action identifier. It names intent but carries no callback or domain authority.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiActionId(UiKeyAtom);
 
@@ -287,10 +159,7 @@ impl UiActionId {
     }
 }
 
-/// Opaque image identity retained without importing an asset or renderer handle.
-///
-/// Named IDs and provider-scoped external tokens are disjoint. External identity is strictly
-/// process-local: neither its provider TypeId nor its token is a persistent reference.
+/// Image identity retained in paint data without an asset or renderer handle.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiImageId(UiImageIdentity);
 
@@ -301,12 +170,11 @@ enum UiImageIdentity {
 }
 
 impl UiImageId {
-    /// Creates a name without interpreting path, UUID or Product-like text.
     pub fn new(value: impl Into<String>) -> Result<Self, UiKeyError> {
         Ok(Self(UiImageIdentity::Named(UiKeyAtom::new(value)?)))
     }
 
-    /// Selects an exact external resource in the provider's process-local identity domain.
+    /// Selects a process-local resource in the provider's identity domain.
     #[must_use]
     pub fn external<T: 'static>(token: u64) -> Self {
         Self(UiImageIdentity::External {
@@ -316,7 +184,6 @@ impl UiImageId {
     }
 
     #[must_use]
-    /// Returns text only for a Named identity. This is never binding or persistence evidence.
     pub fn as_name(&self) -> Option<&str> {
         match &self.0 {
             UiImageIdentity::Named(name) => Some(name.as_str()),
@@ -355,8 +222,6 @@ pub enum UiKeyError {
     AtomTooLong { actual: usize, maximum: usize },
     #[error("UI key atom contains a control character")]
     ControlCharacter,
-    #[error("UI projection path exceeds {maximum} steps")]
-    ProjectionDepthExceeded { maximum: usize },
-    #[error("UI key has {actual} encoded bytes; maximum is {maximum}")]
+    #[error("UI key has {actual} bytes; maximum is {maximum}")]
     KeyTooLong { actual: usize, maximum: usize },
 }

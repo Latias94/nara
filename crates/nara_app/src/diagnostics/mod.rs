@@ -1,31 +1,48 @@
-//! Application diagnostics, runtime pressure snapshots, and tracing sinks.
+//! Routes runtime diagnostics to the configured tracing subscriber.
 
-mod plugin;
-mod pressure;
-mod runtime;
-mod sink;
-
-pub use nara_core::diagnostic::{
-    PressureMetricId, PressureSourceId, RuntimeDiagnosticRetention, RuntimeDiagnosticsSettings,
-};
-pub use plugin::{
-    DIAGNOSTICS_PLUGIN_DECLARATION, DIAGNOSTICS_PLUGIN_ID, DiagnosticCleanupSet, DiagnosticsPlugin,
-    plugin,
-};
-pub use pressure::{
-    PressureDraftError, PressureMeasurement, PressureMetricKind, PressurePublishOutcome,
-    PressurePublishRejection, PressureSettingsError, PressureStats, PressureUnit,
-    RuntimePressureRetention, RuntimePressureSettings, RuntimePressureSnapshot,
-    RuntimePressureSnapshotDraft, RuntimePressureSnapshots, RuntimePressureSnapshotsSnapshot,
-};
-pub use runtime::{
-    DiagnosticDedupePolicy, RuntimeDiagnosticDraft, RuntimeDiagnosticEntry,
-    RuntimeDiagnosticFilter, RuntimeDiagnosticFilterError, RuntimeDiagnostics,
-    RuntimeDiagnosticsSnapshot, RuntimeDiagnosticsStats, RuntimePublishOutcome,
-    RuntimePublishRejection, RuntimeTracingCursor,
+use nara_core::{Diagnostic, DiagnosticSeverity};
+use nara_ecs::bevy_ecs::{
+    event::{Event, GlobalTrigger},
+    observer::On,
 };
 
-pub use sink::{emit_diagnostic_to_tracing, emit_report_to_tracing};
+use crate::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
 
-#[cfg(test)]
-mod tests;
+pub struct DiagnosticEvent(pub Diagnostic);
+
+impl Event for DiagnosticEvent {
+    type Trigger<'a> = GlobalTrigger;
+}
+
+#[derive(Debug, Default)]
+pub struct DiagnosticsPlugin;
+
+impl Plugin for DiagnosticsPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        static DECLARATION: PluginDeclaration =
+            PluginDeclaration::new(PluginId::new("nara.diagnostics"), PluginCategory::Service);
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_observer(|event: On<DiagnosticEvent>| emit_diagnostic_to_tracing(&event.0))?;
+        Ok(())
+    }
+}
+
+pub fn emit_diagnostic_to_tracing(diagnostic: &Diagnostic) {
+    let code = diagnostic.code.as_deref();
+    let location = diagnostic.location.as_ref();
+    let message = &diagnostic.message;
+    match diagnostic.severity {
+        DiagnosticSeverity::Error => {
+            tracing::error!(target: "nara.diagnostics", code, ?location, "{message}")
+        }
+        DiagnosticSeverity::Warning => {
+            tracing::warn!(target: "nara.diagnostics", code, ?location, "{message}")
+        }
+        DiagnosticSeverity::Info => {
+            tracing::info!(target: "nara.diagnostics", code, ?location, "{message}")
+        }
+    }
+}

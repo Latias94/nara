@@ -594,8 +594,7 @@ pub(crate) fn install(app: &mut App) -> Result<(), PluginError> {
     app.insert_resource(WgpuRuntimeConnection::default())?;
     let original = Arc::clone(&app.world().resource::<WgpuRuntimeConnection>().owner);
     app.insert_resource(ConnectionAuthority(Arc::clone(&original)))?;
-    app.register_plugin_runtime_close_participant(
-        crate::gpu::WGPU_BACKEND_SHUTDOWN_OBLIGATION,
+    app.register_close_participant(
         RuntimeCloseParticipantId::new("nara.render-wgpu.connection"),
         ConnectionClose(original),
     )?;

@@ -412,11 +412,8 @@ pub(crate) struct WgpuRenderBackend {
 
 pub(super) struct WgpuDeviceNamespace {
     pub(super) epoch_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    pub(super) instance: wgpu::Instance,
-    pub(super) adapter: wgpu::Adapter,
     pub(super) device: wgpu::Device,
     pub(super) queue: wgpu::Queue,
-    pub(super) surface: Option<(wgpu::TextureFormat, Extent2d)>,
     pub(super) backend_instance_id: u64,
     pub(super) device_epoch: u64,
 }
@@ -775,7 +772,7 @@ impl WgpuRenderBackend {
             window.resolution.physical_width,
             window.resolution.physical_height,
         );
-        let size = if let Some(size) = size {
+        if let Some(size) = size {
             let timing = RuntimeFramePhaseCapture::start(namespace_timing.is_some());
             let instance = self.ensure_instance();
             timing.finish(|elapsed| {
@@ -806,20 +803,15 @@ impl WgpuRenderBackend {
                 }
             });
             configured?;
-            size
         } else {
             self.configured_surface_extent(window.id)
-                .ok_or(WgpuRenderError::BackendNotReady)?
-        };
-        let surface_format = self.surface_view_format(window.id)?;
+                .ok_or(WgpuRenderError::BackendNotReady)?;
+        }
         let ready = self.device_owner.ready()?;
         Ok(WgpuDeviceNamespace {
             epoch_lost: self.device_owner.output_epoch_guard()?,
-            instance: self.device_owner.instance()?.clone(),
-            adapter: ready.adapter.clone(),
             device: ready.device.clone(),
             queue: ready.queue.clone(),
-            surface: Some((surface_format, size)),
             backend_instance_id: self.instance_id(),
             device_epoch: self.device_epoch(),
         })
@@ -836,11 +828,8 @@ impl WgpuRenderBackend {
         let ready = self.device_owner.ready()?;
         Ok(WgpuDeviceNamespace {
             epoch_lost: self.device_owner.output_epoch_guard()?,
-            instance: self.device_owner.instance()?.clone(),
-            adapter: ready.adapter.clone(),
             device: ready.device.clone(),
             queue: ready.queue.clone(),
-            surface: None,
             backend_instance_id: self.instance_id(),
             device_epoch: self.device_epoch(),
         })
@@ -958,9 +947,9 @@ impl WgpuRenderBackend {
         for submission in submissions {
             let submitted = submission.submission();
             let identity = submitted.identity();
-            let mut matches = lowered.iter().filter(|facts| {
-                facts.packet == identity.packet() && facts.target == identity.target()
-            });
+            let mut matches = lowered
+                .iter()
+                .filter(|facts| facts.matches_submission(submitted));
             let Some(lowered) = matches.next() else {
                 return Err(WgpuRenderError::UiSubmissionRejected {
                     message: format!(
@@ -1115,15 +1104,6 @@ impl WgpuRenderBackend {
         self.stock_quad.reserve_instance_buffer_bytes(bytes)
     }
 
-    pub(super) fn record_editor_window_presentation(&mut self) {
-        self.frame_transaction_stats.queue_submissions = self
-            .frame_transaction_stats
-            .queue_submissions
-            .saturating_add(1);
-        self.frame_transaction_stats.presents =
-            self.frame_transaction_stats.presents.saturating_add(1);
-    }
-
     fn ensure_instance(&mut self) -> Result<(), WgpuRenderError> {
         self.device_owner.ensure_instance()
     }
@@ -1258,21 +1238,6 @@ impl WgpuRenderBackend {
         Ok(())
     }
 
-    fn surface_view_format(
-        &self,
-        window_id: WindowId,
-    ) -> Result<wgpu::TextureFormat, WgpuRenderError> {
-        let surface = self
-            .surfaces
-            .get(&window_id)
-            .ok_or(WgpuRenderError::SurfaceMissing { window_id })?;
-        let config = surface
-            .config
-            .as_ref()
-            .ok_or(WgpuRenderError::SurfaceUnconfigured { window_id })?;
-        Ok(config.format.add_srgb_suffix())
-    }
-
     pub(super) fn retain_editor_world_presentation(
         &self,
         view: crate::gpu::host::WgpuRenderProducerId,
@@ -1330,10 +1295,7 @@ mod tests {
 
     #[cfg(any(feature = "sprite-render", feature = "hud-runtime"))]
     use crate::material::AlphaMode2d;
-    use nara_app::{
-        App, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeClosePolicy,
-        RuntimeGeneration, RuntimeObligationLedger,
-    };
+    use nara_app::{App, RuntimeCandidateRetirementState, RuntimeGeneration, RuntimeInstance};
     use nara_window::backend::{WindowHandleProvider, WindowTargetPhase};
     use raw_window_handle::{
         DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
@@ -1806,14 +1768,7 @@ mod tests {
     }
 
     fn test_runtime_generation() -> RuntimeGeneration {
-        let candidate = RuntimeCandidate::admit(
-            App::new().seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
-        let ready = candidate.complete_startup().unwrap();
-        let runtime = ready.promote();
+        let runtime = RuntimeInstance::start(App::new()).unwrap();
         let generation = runtime.generation();
         let mut retirement = runtime.begin_retirement();
         while retirement.retirement_state() != RuntimeCandidateRetirementState::Retired {

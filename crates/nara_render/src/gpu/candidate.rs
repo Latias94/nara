@@ -102,15 +102,6 @@ pub struct WgpuCandidateSubmitFailure {
     pub candidate: WgpuRenderCandidate,
 }
 
-/// Failed display preparation keeps both the pinned candidate and its original UI permissions.
-#[cfg(feature = "hud-runtime")]
-#[derive(Debug)]
-pub struct WgpuUiCandidateSubmitFailure {
-    pub error: WgpuRenderHostError,
-    pub candidate: WgpuRenderCandidate,
-    pub ui: crate::gpu::WgpuUiSubmission,
-}
-
 impl WgpuCandidateSubmitFailure {
     #[must_use]
     pub fn is_retryable(&self) -> bool {

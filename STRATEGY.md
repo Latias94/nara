@@ -7,8 +7,8 @@ and designers working in the same project.
 
 ## Product direction
 
-- Grow the engine from complete games. Use `reference-game` to prove public APIs end to end and
-  `samples/two-level-game` to prove scene travel, audio, and persistence.
+- Grow the engine from complete games. Use `reference-game` to prove the public 2D runtime, its
+  headless simulation, and its desktop presentation.
 - Deliver a standalone editor with multi-window docking, a live scene viewport, schema-driven
   authoring, and supervised Play for an external Rust project.
 - Keep shipping games small and independent of editor infrastructure. Use one lean desktop runner

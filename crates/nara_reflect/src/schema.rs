@@ -1,18 +1,14 @@
 //! Runtime-independent component schema identities and catalog data.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, btree_map::Entry},
+    collections::BTreeSet,
     error::Error,
     fmt::{self, Display, Formatter},
 };
 
-use nara_core::source::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin};
-use nara_ecs::identity::{AuthoredReferenceTarget, EntityReference, PrefabEntityOrigin};
-
 use crate::{
     AssetReferenceDemand, ComponentFieldPath, ComponentFieldPathSegment, ComponentNumericInterval,
-    ComponentPropertyKey, ComponentValue, ComponentValueRef, property::KeyedListLocations,
-    value_ref::ComponentListRef,
+    ComponentValue, ComponentValueRef,
 };
 
 const MAX_ALIAS_BYTES: usize = 128;
@@ -311,29 +307,6 @@ impl ComponentSchema {
         self.authoring_initial_value.as_ref()
     }
 
-    /// Compares the complete declaration except its creation-only initial value.
-    ///
-    /// Stored definitions, including aliases, defaults and wire versions, must match exactly.
-    /// This borrows both declarations and performs no allocation or canonicalization.
-    #[must_use]
-    pub fn same_definition_except_initial_value(&self, other: &Self) -> bool {
-        let Self {
-            id,
-            aliases,
-            version,
-            capabilities,
-            fields,
-            field_tombstones,
-            authoring_initial_value: _,
-        } = self;
-        id == &other.id
-            && aliases == &other.aliases
-            && version == &other.version
-            && capabilities == &other.capabilities
-            && fields == &other.fields
-            && field_tombstones == &other.field_tombstones
-    }
-
     #[must_use]
     pub const fn id(&self) -> &ComponentTypeId {
         &self.id
@@ -363,108 +336,32 @@ impl ComponentSchema {
     pub fn has_capability(&self, capability: ComponentCapability) -> bool {
         self.capabilities.contains(&capability)
     }
-}
 
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
-pub struct ComponentSchemaCatalog {
-    pub generation: u64,
-    #[cfg_attr(
-        feature = "serde",
-        serde(default, skip_serializing_if = "Option::is_none")
-    )]
-    pub predecessor: Option<CatalogFingerprint>,
-    pub components: Vec<ComponentSchema>,
-    #[cfg_attr(feature = "serde", serde(default))]
-    pub type_tombstones: Vec<ComponentTypeId>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ComponentCatalogGenerationError {
-    generation: u64,
-}
-
-impl ComponentCatalogGenerationError {
-    #[must_use]
-    pub const fn new(generation: u64) -> Self {
-        Self { generation }
-    }
-
-    #[must_use]
-    pub const fn generation(self) -> u64 {
-        self.generation
-    }
-}
-
-impl Display for ComponentCatalogGenerationError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "component catalog generation {} has no successor",
-            self.generation
-        )
-    }
-}
-
-impl Error for ComponentCatalogGenerationError {}
-
-impl Default for ComponentSchemaCatalog {
-    fn default() -> Self {
-        Self {
-            generation: 1,
-            predecessor: None,
-            components: Vec::new(),
-            type_tombstones: Vec::new(),
+    pub(crate) fn canonicalize(&mut self) {
+        self.aliases.sort();
+        self.fields.sort_by(|left, right| left.id.cmp(&right.id));
+        self.field_tombstones.sort();
+        for field in &mut self.fields {
+            field.aliases.sort();
+            field.member_tombstones.sort();
+            field.shape.canonicalize();
         }
     }
+}
+
+#[derive(Debug, Default, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct ComponentSchemaCatalog {
+    pub(crate) components: Vec<ComponentSchema>,
 }
 
 impl ComponentSchemaCatalog {
-    /// Starts the immediate successor of one schema owner's catalog.
-    ///
-    /// This helper carries owner-local generation, predecessor, and tombstone lineage only. A
-    /// flattened Runtime composition has no owner-attribution proof and must not be supplied as
-    /// the predecessor of a later product recipe.
-    pub fn successor_of(predecessor: &Self) -> Result<Self, ComponentCatalogGenerationError> {
-        let generation = predecessor
-            .generation
-            .checked_add(1)
-            .ok_or_else(|| ComponentCatalogGenerationError::new(predecessor.generation))?;
-        Ok(Self {
-            generation,
-            predecessor: Some(predecessor.fingerprint()),
-            components: Vec::new(),
-            type_tombstones: predecessor.type_tombstones.clone(),
-        })
-    }
-
-    pub fn canonicalize(&mut self) {
+    pub(crate) fn canonicalize(&mut self) {
         self.components
             .sort_by(|left, right| left.id.cmp(&right.id));
-        self.type_tombstones.sort();
         for schema in &mut self.components {
-            schema.aliases.sort();
-            schema.fields.sort_by(|left, right| left.id.cmp(&right.id));
-            schema.field_tombstones.sort();
-            for field in &mut schema.fields {
-                field.aliases.sort();
-                field.member_tombstones.sort();
-                if field.shape.validate().is_ok() {
-                    field.shape.canonicalize();
-                }
-            }
+            schema.canonicalize();
         }
-    }
-
-    #[must_use]
-    pub const fn generation(&self) -> u64 {
-        self.generation
-    }
-
-    #[must_use]
-    pub const fn predecessor(&self) -> Option<&CatalogFingerprint> {
-        self.predecessor.as_ref()
     }
 
     #[must_use]
@@ -473,51 +370,18 @@ impl ComponentSchemaCatalog {
     }
 
     #[must_use]
-    pub fn type_tombstones(&self) -> &[ComponentTypeId] {
-        &self.type_tombstones
-    }
-
-    #[must_use]
     pub fn fingerprint(&self) -> CatalogFingerprint {
         let mut hasher = blake3::Hasher::new();
-        // Generation and predecessor are deliberately excluded: this is a canonical content
-        // fingerprint, and including predecessor would make the lineage identity recursive.
-        feed_bytes(&mut hasher, b"nara.component-schema-catalog-fingerprint.v3");
-        let mut components = self.components.iter().collect::<Vec<_>>();
-        components.sort_by(|left, right| left.id.cmp(&right.id));
-        feed_len(&mut hasher, components.len());
-        for schema in components {
-            if let Err((_, error)) = validate_component_shape_budget(schema) {
-                feed_bytes(&mut hasher, b"invalid-unadmitted-schema-shape");
-                feed_str(&mut hasher, schema.id.as_str());
-                feed_str(&mut hasher, &error.to_string());
-                continue;
-            }
-            if schema
-                .fields
-                .iter()
-                .filter_map(|field| field.default_value.as_ref())
-                .chain(schema.authoring_initial_value.iter())
-                .any(|value| validate_component_value_budget(value).is_err())
-            {
-                feed_bytes(&mut hasher, b"invalid-unadmitted-schema-value");
-                feed_str(&mut hasher, schema.id.as_str());
-                continue;
-            }
+        feed_bytes(&mut hasher, b"nara.schema-catalog");
+        feed_len(&mut hasher, self.components.len());
+        for schema in &self.components {
             feed_schema(&mut hasher, schema);
-        }
-        let mut tombstones = self.type_tombstones.iter().collect::<Vec<_>>();
-        tombstones.sort();
-        feed_len(&mut hasher, tombstones.len());
-        for tombstone in tombstones {
-            feed_bytes(&mut hasher, b"type-tombstone");
-            feed_str(&mut hasher, tombstone.as_str());
         }
         CatalogFingerprint(*hasher.finalize().as_bytes())
     }
 }
 
-pub(crate) const MAX_SHAPE_DEPTH: usize = 64;
+const MAX_SHAPE_DEPTH: usize = 40;
 const MAX_SHAPE_NODES: usize = 16_384;
 pub(crate) const MAX_SHAPE_BYTES: usize = 4 * 1024 * 1024;
 
@@ -710,6 +574,24 @@ impl ComponentShapeMember {
 pub struct ComponentShapeError {
     pub path: ComponentFieldPath,
     pub kind: ComponentShapeErrorKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ComponentPropertyKey {
+    String(String),
+    I64(i64),
+    U64(u64),
+}
+
+impl ComponentPropertyKey {
+    fn from_value(value: ComponentValueRef<'_>) -> Option<Self> {
+        match value.kind() {
+            ComponentValueKind::String => value.as_str().map(|value| Self::String(value.into())),
+            ComponentValueKind::I64 => value.as_i64().map(Self::I64),
+            ComponentValueKind::U64 => value.as_u64().map(Self::U64),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1048,65 +930,19 @@ impl ComponentValueShape {
 
     #[must_use]
     pub fn contains_kind(&self, kind: ComponentValueKind) -> bool {
-        if self.validate().is_err() {
-            return false;
-        }
-        match self
-            .contains_kind_with_admission(kind, |_, _, _| Ok::<(), std::convert::Infallible>(()))
-        {
-            Ok(found) => found,
-            Err(never) => match never {},
-        }
+        self.validate().is_ok() && self.declares_kind(kind)
     }
 
-    /// Scans an already admitted shape without validating its declarations again.
-    ///
-    /// The callback admits each examined node and pending-vector growth before it occurs.
-    /// Opaque containers remain outside the declared kind scan. Shared shape storage and
-    /// member names are neither copied nor charged; refusals return the exact caller error.
-    pub(crate) fn contains_kind_with_admission<E>(
-        &self,
-        kind: ComponentValueKind,
-        mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
-    ) -> Result<bool, E> {
-        let mut pending = Vec::new();
-        Self::reserve_kind_scan(&mut pending, 1, &mut admit)?;
-        pending.push(self);
-        while let Some(shape) = pending.pop() {
-            admit(1, 0, 0)?;
-            match shape {
-                Self::Record { members } => {
-                    Self::reserve_kind_scan(&mut pending, members.len(), &mut admit)?;
-                    pending.extend(members.iter().map(|member| &member.shape));
-                }
-                Self::List { item } | Self::KeyedList { item, .. } => {
-                    Self::reserve_kind_scan(&mut pending, 1, &mut admit)?;
-                    pending.push(item);
-                }
-                Self::Map { value } | Self::Optional { value } => {
-                    Self::reserve_kind_scan(&mut pending, 1, &mut admit)?;
-                    pending.push(value);
-                }
-                Self::Opaque { .. } => {}
-                shape if shape.value_kind() == kind => return Ok(true),
-                _ => {}
-            }
+    pub(crate) fn declares_kind(&self, kind: ComponentValueKind) -> bool {
+        match self {
+            Self::Record { members } => members
+                .iter()
+                .any(|member| member.shape.declares_kind(kind)),
+            Self::List { item } | Self::KeyedList { item, .. } => item.declares_kind(kind),
+            Self::Map { value } | Self::Optional { value } => value.declares_kind(kind),
+            Self::Opaque { .. } => false,
+            _ => self.value_kind() == kind,
         }
-        Ok(false)
-    }
-
-    fn reserve_kind_scan<E>(
-        pending: &mut Vec<&Self>,
-        additional: usize,
-        admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
-    ) -> Result<(), E> {
-        let needed = pending.len().saturating_add(additional);
-        if needed > pending.capacity() {
-            let capacity = needed.max(pending.capacity().saturating_mul(2)).max(4);
-            admit(0, 0, capacity.saturating_mul(std::mem::size_of::<&Self>()))?;
-            pending.reserve_exact(capacity - pending.len());
-        }
-        Ok(())
     }
 
     pub fn validate(&self) -> Result<(), ComponentShapeError> {
@@ -1233,52 +1069,24 @@ impl ComponentValueShape {
         self.validate_value(value).is_ok()
     }
 
-    /// Whether a durable selector can address keyed rows below this admitted declaration.
-    #[doc(hidden)]
-    pub fn has_keyed_property_lists(&self) -> bool {
-        match self {
-            Self::KeyedList { .. } => true,
-            Self::Record { members } => members
-                .iter()
-                .any(|member| member.id.is_some() && member.shape.has_keyed_property_lists()),
-            Self::Optional { value } | Self::Map { value } => value.has_keyed_property_lists(),
-            _ => false,
-        }
-    }
-
-    /// Checks declared structure without imposing a payload allocation or traversal budget.
-    ///
-    /// Callers own admission of the value's size and work. Opaque containers validate their outer
-    /// kind only; reference traversal and persistent file owners enforce their own payload limits.
+    /// Checks the declared shape of a component value.
     pub fn validate_value<'a>(
         &self,
         value: impl Into<ComponentValueRef<'a>>,
     ) -> Result<(), ComponentShapeError> {
         self.validate()?;
-        self.validate_value_node(value.into(), &mut Vec::new(), &mut None)
-    }
-
-    pub(crate) fn validate_value_and_index(
-        &self,
-        value: ComponentValueRef<'_>,
-        locations: &mut KeyedListLocations,
-    ) -> Result<(), ComponentShapeError> {
-        self.validate()?;
-        self.validate_value_node(value, &mut Vec::new(), &mut Some(locations))
+        self.validate_value_node(value.into(), &mut Vec::new())
     }
 
     fn validate_value_node(
         &self,
         value: ComponentValueRef<'_>,
         path: &mut Vec<ComponentFieldPathSegment>,
-        locations: &mut Option<&mut KeyedListLocations>,
     ) -> Result<(), ComponentShapeError> {
         let expected = self.value_kind();
         match (self, value.kind()) {
             (Self::Optional { .. }, ComponentValueKind::Null) => Ok(()),
-            (Self::Optional { value: shape }, _) => {
-                shape.validate_value_node(value, path, locations)
-            }
+            (Self::Optional { value: shape }, _) => shape.validate_value_node(value, path),
             (
                 Self::Scalar {
                     kind,
@@ -1303,9 +1111,7 @@ impl ComponentValueShape {
                 Ok(())
             }
             (Self::EntityRef, ComponentValueKind::EntityRef) => Ok(()),
-            (Self::AssetRef { .. }, _)
-                if crate::asset_reference::is_asset_reference_value(value) =>
-            {
+            (Self::AssetRef { .. }, _) if crate::decode_asset_reference_value(value).is_ok() => {
                 Ok(())
             }
             (Self::Opaque { kind }, actual) if actual == *kind => Ok(()),
@@ -1323,13 +1129,7 @@ impl ComponentValueShape {
                         )
                     })?;
                     path.push(ComponentFieldPathSegment::field(&member.name));
-                    if member.id.is_some() {
-                        member
-                            .shape
-                            .validate_indexed_child(value, path, locations)?;
-                    } else {
-                        member.shape.validate_value_node(value, path, &mut None)?;
-                    }
+                    member.shape.validate_value_node(value, path)?;
                     path.pop();
                 }
                 for name in values.keys() {
@@ -1346,7 +1146,7 @@ impl ComponentValueShape {
                 let values = value.as_list().expect("List kind checked");
                 for (index, value) in values.iter().enumerate() {
                     path.push(ComponentFieldPathSegment::index(index as u32));
-                    item.validate_value_node(value, path, &mut None)?;
+                    item.validate_value_node(value, path)?;
                     path.pop();
                 }
                 Ok(())
@@ -1355,37 +1155,33 @@ impl ComponentValueShape {
                 let values = value.as_list().expect("List kind checked");
                 let member =
                     keyed_list_member(item, key).map_err(|kind| shape_error(path, kind))?;
-                if locations.is_some() && !values.is_empty() {
-                    let mut rows = BTreeMap::new();
-                    let mut key_string_bytes = 0usize;
-                    item.validate_list_keys(values, member, path, locations, |key, position| {
-                        match rows.entry(key) {
-                            Entry::Vacant(row) => {
-                                if let ComponentPropertyKey::String(key) = row.key() {
-                                    key_string_bytes = key_string_bytes.saturating_add(key.len());
-                                }
-                                row.insert(position);
-                                Ok(())
-                            }
-                            Entry::Occupied(row) => Err(row.key().clone()),
-                        }
-                    })?;
-                    locations
-                        .as_deref_mut()
-                        .expect("indexed validation retains the collection locations")
-                        .retain_rows(rows, key_string_bytes);
-                } else {
-                    let mut keys = BTreeSet::new();
-                    item.validate_list_keys(values, member, path, locations, |key, _| {
-                        keys.insert(key.clone()).then_some(()).ok_or(key)
-                    })?;
+                let mut keys = BTreeSet::new();
+                for (index, value) in values.iter().enumerate() {
+                    path.push(ComponentFieldPathSegment::index(index as u32));
+                    item.validate_value_node(value, path)?;
+                    let key = value
+                        .get(&member.name)
+                        .and_then(ComponentPropertyKey::from_value)
+                        .ok_or_else(|| {
+                            shape_error(
+                                path,
+                                ComponentShapeErrorKind::MissingMember(member.name.clone()),
+                            )
+                        })?;
+                    if !keys.insert(key.clone()) {
+                        return Err(shape_error(
+                            path,
+                            ComponentShapeErrorKind::DuplicateListKey(key),
+                        ));
+                    }
+                    path.pop();
                 }
                 Ok(())
             }
             (Self::Map { value: shape }, ComponentValueKind::Map) => {
                 for (name, value) in value.as_map().expect("Map kind checked").iter() {
                     path.push(ComponentFieldPathSegment::field(name));
-                    shape.validate_indexed_child(value, path, locations)?;
+                    shape.validate_value_node(value, path)?;
                     path.pop();
                 }
                 Ok(())
@@ -1398,50 +1194,6 @@ impl ComponentValueShape {
                 },
             )),
         }
-    }
-
-    fn validate_indexed_child(
-        &self,
-        value: ComponentValueRef<'_>,
-        path: &mut Vec<ComponentFieldPathSegment>,
-        locations: &mut Option<&mut KeyedListLocations>,
-    ) -> Result<(), ComponentShapeError> {
-        let Some(locations) = locations.as_deref_mut() else {
-            return self.validate_value_node(value, path, &mut None);
-        };
-        let mut child = KeyedListLocations::default();
-        self.validate_value_node(value, path, &mut Some(&mut child))?;
-        if !child.is_empty() {
-            locations.retain_child(path.last().expect("child path retains its segment"), child);
-        }
-        Ok(())
-    }
-
-    fn validate_list_keys(
-        &self,
-        values: ComponentListRef<'_>,
-        member: &ComponentShapeMember,
-        path: &mut Vec<ComponentFieldPathSegment>,
-        locations: &mut Option<&mut KeyedListLocations>,
-        mut insert: impl FnMut(ComponentPropertyKey, usize) -> Result<(), ComponentPropertyKey>,
-    ) -> Result<(), ComponentShapeError> {
-        for (index, value) in values.iter().enumerate() {
-            path.push(ComponentFieldPathSegment::index(index as u32));
-            self.validate_indexed_child(value, path, locations)?;
-            let key = value
-                .get(&member.name)
-                .and_then(ComponentPropertyKey::from_value)
-                .ok_or_else(|| {
-                    shape_error(
-                        path,
-                        ComponentShapeErrorKind::MissingMember(member.name.clone()),
-                    )
-                })?;
-            insert(key, index)
-                .map_err(|key| shape_error(path, ComponentShapeErrorKind::DuplicateListKey(key)))?;
-            path.pop();
-        }
-        Ok(())
     }
 
     pub(crate) fn canonicalize(&mut self) {
@@ -1525,11 +1277,7 @@ fn validate_value_budget(
 ) -> Result<(), ComponentShapeError> {
     let (nodes, bytes) = match value.kind() {
         ComponentValueKind::String => (1, value.as_str().expect("String kind checked").len()),
-        ComponentValueKind::EntityRef => {
-            let reference = value.as_entity_reference().expect("reference kind checked");
-            let cost = reference.cost();
-            (cost.nodes(), cost.logical_bytes())
-        }
+        ComponentValueKind::EntityRef => (1, 16),
         _ => (1, 8),
     };
     budget.observe_cost(depth, nodes, bytes, path)?;
@@ -1717,16 +1465,10 @@ impl ComponentFieldSchema {
         self
     }
 
-    /// Collects only members with a fully identified parent chain, after bounded validation.
-    /// Unkeyed lists have no durable item selector and do not contribute descendant paths.
-    pub(crate) fn active_member_paths(
-        &self,
-    ) -> Result<Vec<ComponentMemberPath>, (ComponentFieldId, ComponentShapeError)> {
-        validate_field_shape_budget(self, &mut ShapeBudget::default())
-            .map_err(|error| (self.id.clone(), error))?;
+    pub(crate) fn active_member_paths(&self) -> Vec<ComponentMemberPath> {
         let mut paths = Vec::new();
         collect_member_paths(&self.shape, &mut Vec::new(), &mut paths);
-        Ok(paths)
+        paths
     }
 
     #[must_use]
@@ -1991,11 +1733,6 @@ pub struct CatalogFingerprint([u8; 32]);
 impl CatalogFingerprint {
     pub const HEX_LENGTH: usize = 64;
 
-    #[must_use]
-    pub(crate) const fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
-    }
-
     pub fn from_hex(value: &str) -> Result<Self, CatalogFingerprintParseError> {
         if value.len() != Self::HEX_LENGTH
             || !value
@@ -2206,48 +1943,6 @@ fn feed_path(hasher: &mut blake3::Hasher, path: &ComponentFieldPath) {
 }
 
 fn feed_value(hasher: &mut blake3::Hasher, value: &ComponentValue) {
-    feed_value_with_zero_sign(hasher, value, false);
-}
-
-/// Fingerprints an already admitted value for exact in-memory replay, including signed zero.
-pub fn exact_component_value_witness(value: &ComponentValue) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    feed_bytes(&mut hasher, b"nara.component-value-witness.v1");
-    feed_value_with_zero_sign(&mut hasher, value, true);
-    *hasher.finalize().as_bytes()
-}
-
-/// Compares two admitted component values without normalizing floating-point zero.
-pub fn component_values_exactly_match(left: &ComponentValue, right: &ComponentValue) -> bool {
-    match (left, right) {
-        (ComponentValue::F64(left), ComponentValue::F64(right)) => {
-            left.get().to_bits() == right.get().to_bits()
-        }
-        (ComponentValue::List(left), ComponentValue::List(right)) => {
-            left.len() == right.len()
-                && left
-                    .iter()
-                    .zip(right)
-                    .all(|(left, right)| component_values_exactly_match(left, right))
-        }
-        (ComponentValue::Map(left), ComponentValue::Map(right)) => {
-            left.len() == right.len()
-                && left
-                    .iter()
-                    .zip(right)
-                    .all(|((left_key, left), (right_key, right))| {
-                        left_key == right_key && component_values_exactly_match(left, right)
-                    })
-        }
-        _ => left == right,
-    }
-}
-
-fn feed_value_with_zero_sign(
-    hasher: &mut blake3::Hasher,
-    value: &ComponentValue,
-    preserve_zero_sign: bool,
-) {
     feed_bytes(hasher, &[component_value_kind_tag(value.kind())]);
     match value {
         ComponentValue::Null => {}
@@ -2256,93 +1951,24 @@ fn feed_value_with_zero_sign(
         ComponentValue::U64(value) => feed_bytes(hasher, &value.to_le_bytes()),
         ComponentValue::F64(value) => {
             let number = value.get();
-            let number = if !preserve_zero_sign && number == 0.0 {
-                0.0
-            } else {
-                number
-            };
+            let number = if number == 0.0 { 0.0 } else { number };
             feed_bytes(hasher, &number.to_bits().to_le_bytes());
         }
         ComponentValue::String(value) => feed_str(hasher, value),
         ComponentValue::List(values) => {
             feed_len(hasher, values.len());
             for value in values {
-                feed_value_with_zero_sign(hasher, value, preserve_zero_sign);
+                feed_value(hasher, value);
             }
         }
         ComponentValue::Map(values) => {
             feed_len(hasher, values.len());
             for (key, value) in values {
                 feed_str(hasher, key);
-                feed_value_with_zero_sign(hasher, value, preserve_zero_sign);
+                feed_value(hasher, value);
             }
         }
-        ComponentValue::EntityReference(reference) => match reference {
-            EntityReference::SceneLocal { entity } => {
-                feed_bytes(hasher, &[0]);
-                feed_str(hasher, entity.as_str());
-            }
-            EntityReference::Persistent { entity } => {
-                feed_bytes(hasher, &[1]);
-                feed_str(hasher, entity.namespace.as_str());
-                feed_str(hasher, &entity.entity.to_string());
-            }
-            EntityReference::Authored { reference } => {
-                feed_bytes(hasher, &[2]);
-                feed_len(hasher, reference.through.len());
-                for hop in &reference.through {
-                    feed_entity_origin(hasher, &hop.anchor);
-                    feed_source_key(hasher, &hop.expected_base);
-                }
-                match &reference.target {
-                    AuthoredReferenceTarget::Entity(entity) => {
-                        feed_bytes(hasher, &[0]);
-                        feed_entity_origin(hasher, entity);
-                    }
-                    AuthoredReferenceTarget::Input(input) => {
-                        feed_bytes(hasher, &[1]);
-                        feed_str(hasher, input.as_str());
-                    }
-                }
-            }
-        },
-    }
-}
-
-fn feed_entity_origin(hasher: &mut blake3::Hasher, origin: &PrefabEntityOrigin) {
-    feed_bytes(
-        hasher,
-        &[match origin {
-            PrefabEntityOrigin::SourceEntity(_) => 0,
-            PrefabEntityOrigin::InstanceAddition(_) => 1,
-        }],
-    );
-    feed_str(hasher, origin.entity().as_str());
-}
-
-fn feed_source_key(hasher: &mut blake3::Hasher, key: &SourceDocumentKey) {
-    feed_bytes(
-        hasher,
-        &[match key.kind() {
-            SourceDocumentKind::Scene => 0,
-            SourceDocumentKind::Prefab => 1,
-        }],
-    );
-    match key.origin() {
-        SourceDocumentOrigin::Named { universe, name } => {
-            feed_bytes(hasher, &[0]);
-            feed_bytes(hasher, universe.as_uuid().as_bytes());
-            feed_str(hasher, name);
-        }
-        SourceDocumentOrigin::ProjectLocation { universe, path } => {
-            feed_bytes(hasher, &[1]);
-            feed_bytes(hasher, universe.as_uuid().as_bytes());
-            feed_str(hasher, path.as_str());
-        }
-        SourceDocumentOrigin::StableAsset { stable_id } => {
-            feed_bytes(hasher, &[2]);
-            feed_bytes(hasher, stable_id.as_uuid().as_bytes());
-        }
+        ComponentValue::EntityReference(uuid) => feed_bytes(hasher, uuid.as_uuid().as_bytes()),
     }
 }
 

@@ -623,6 +623,81 @@ fn pixels<S: 'static>(
     result
 }
 
+struct CopyColorPass;
+
+impl WgpuRenderFeature for CopyColorPass {
+    type Capture = (WgpuProgramTexture<Color>, WgpuProgramTexture<Color>);
+    type State = ();
+    type Prepared = Self::Capture;
+    type Report = ();
+
+    fn create_state(
+        &self,
+        _: &mut WgpuFeaturePrepareContext<'_>,
+    ) -> Result<(), WgpuRenderProgramError> {
+        Ok(())
+    }
+
+    fn prepare(
+        &self,
+        _: &mut (),
+        capture: &Self::Capture,
+        _: &mut WgpuFeaturePrepareContext<'_>,
+    ) -> Result<Self::Prepared, WgpuRenderProgramError> {
+        Ok(capture.clone())
+    }
+
+    fn encode(
+        &self,
+        (source, destination): &Self::Prepared,
+        context: &mut WgpuFeatureEncodeContext<'_>,
+    ) -> Result<(), WgpuRenderProgramError> {
+        let (resources, encoder) = context.split();
+        let source = resources.texture_native(source)?;
+        let destination = resources.texture_native(destination)?;
+        encoder.copy_texture_to_texture(
+            source.as_image_copy(),
+            destination.as_image_copy(),
+            source.size(),
+        );
+        Ok(())
+    }
+}
+
+#[test]
+#[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
+fn native_render_pass_executes_after_its_declared_input_writer() {
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    let feature = host
+        .create_feature_instance(&producer, &WgpuFeatureDefinition::new(CopyColorPass))
+        .unwrap();
+    let mut builder = WgpuRenderProgramBuilder::new(source(), 1, GraphLimits::default()).unwrap();
+    let source = builder.texture::<Color>(descriptor()).unwrap();
+    let output = builder.texture::<Color>(descriptor()).unwrap();
+    builder
+        .add_pass(crate::gpu::RenderPass::new(
+            1,
+            &feature,
+            Arc::new((source.clone(), output.clone())),
+            &[source.read(AccessRole::CopySource)],
+            &[output.clear(wgpu::Color::BLACK, AccessRole::CopyDestination)],
+        ))
+        .unwrap();
+    builder
+        .initialize(9, &[source.clear(wgpu::Color::RED, AccessRole::Attachment)])
+        .unwrap();
+
+    host.begin_frame(1).unwrap();
+    let program = builder.finish(&[output.output()]).unwrap();
+    let published = host.submit_program(&producer, &program).unwrap();
+    assert_eq!(
+        pixels(&mut host, &published.texture(&output).unwrap()),
+        [[255, 0, 0, 255]; 16]
+    );
+    drain(published.submitted_prefix());
+}
+
 #[test]
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
 fn native_program_submission_failure_keeps_the_entire_group_and_capture_unpublished() {

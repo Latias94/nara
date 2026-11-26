@@ -37,9 +37,7 @@ fn setup(world: &mut World) -> nara::ecs::bevy_ecs::error::Result {
         pixels,
     )?;
     let texture = add_asset(world, image)?;
-    let sound = AudioClip::from_bytes(include_bytes!(
-        "../samples/two-level-game/assets/audio/pickup.wav"
-    ))?;
+    let sound = AudioClip::from_bytes(include_bytes!("assets/pickup.wav"))?;
     let sound = add_asset(world, sound)?;
     let half = Vec2::new(0.5, 1.0);
     let frames = [Vec2::ZERO, Vec2::new(0.5, 0.0)]

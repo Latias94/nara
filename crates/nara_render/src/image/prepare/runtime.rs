@@ -9,9 +9,6 @@ use super::{
 };
 use crate::image::ImageAsset;
 
-#[cfg(test)]
-mod tests;
-
 #[derive(Debug, Default, Resource)]
 pub struct ImagePrepareStats {
     pub prepared: u32,
@@ -25,13 +22,8 @@ pub struct ImagePreparePlugin;
 
 pub const IMAGE_PREPARE_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.image.prepare");
-const IMAGE_PREPARE_PRODUCT_ALTERNATIVES: &[nara_app::PluginProductCapability] = &[
-    nara_app::PluginProductCapability::new("presentation-2d"),
-    nara_app::PluginProductCapability::new("presentation-ui"),
-];
 pub const IMAGE_PREPARE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
-    nara_app::PluginDeclaration::new(IMAGE_PREPARE_PLUGIN_ID, nara_app::PluginCategory::Render)
-        .requires_any_product_capabilities(IMAGE_PREPARE_PRODUCT_ALTERNATIVES);
+    nara_app::PluginDeclaration::new(IMAGE_PREPARE_PLUGIN_ID, nara_app::PluginCategory::Render);
 
 impl Plugin for ImagePreparePlugin {
     fn declaration() -> &'static nara_app::PluginDeclaration {

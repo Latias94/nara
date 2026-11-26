@@ -1,55 +1,179 @@
-//! Runtime close state and obligation ledger.
-//!
-//! The public close protocol remains defined in `runtime.rs`; this module owns the
-//! implementation state used while an owner is being retired.
-
 use std::{
-    collections::BTreeSet,
-    fmt::{self, Debug, Display, Formatter},
+    any::type_name,
+    fmt,
+    panic::{AssertUnwindSafe, catch_unwind},
+    time::Duration,
 };
 
 use bevy_platform::time::Instant;
-use nara_ecs::World;
+use nara_ecs::{Mut, Resource, World, bevy_ecs::component::Mutable};
 use thiserror::Error;
 
-use super::{
-    RuntimeCloseCause, RuntimeCloseContext, RuntimeCloseErrorDisposition, RuntimeCloseEvidence,
-    RuntimeCloseParticipant, RuntimeCloseParticipantId, RuntimeCloseParticipantPhase,
-    RuntimeCloseProgress,
+use crate::{
+    PluginError, PluginHook, PluginId, PluginShutdownContext,
+    plugin::{InstalledPlugin, run_hook},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RuntimeCloseParticipantId(&'static str);
+
+impl RuntimeCloseParticipantId {
+    pub const fn new(id: &'static str) -> Self {
+        Self(id)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl fmt::Display for RuntimeCloseParticipantId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PluginShutdownState {
+pub enum RuntimeCloseProgress {
     Pending,
     Complete,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) struct OwnerCloseAttempt {
-    pub(super) deadline: Instant,
-    pub(super) plugin_shutdown: PluginShutdownState,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) enum OwnerCloseState {
-    Open,
-    Closing(OwnerCloseAttempt),
-    Incomplete {
-        plugin_shutdown: PluginShutdownState,
+    /// The participant finished closing and reported a teardown error.
+    CompleteWithError {
+        code: &'static str,
     },
-    Complete,
 }
 
-struct RuntimeCloseEntry {
-    id: RuntimeCloseParticipantId,
-    participant: Box<dyn RuntimeCloseParticipant>,
-    begun: bool,
-    phase: RuntimeCloseParticipantPhase,
-    complete: bool,
-    terminal_failure: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeCloseErrorDisposition {
+    Retryable,
+    Terminal,
 }
 
-/// Current unfinished physical responsibility, separate from historical close errors.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+#[error("runtime close participant failed with code {code}")]
+pub struct RuntimeCloseParticipantError {
+    code: &'static str,
+    disposition: RuntimeCloseErrorDisposition,
+}
+
+impl RuntimeCloseParticipantError {
+    pub const fn new(code: &'static str) -> Self {
+        Self::retryable(code)
+    }
+
+    pub const fn retryable(code: &'static str) -> Self {
+        Self {
+            code,
+            disposition: RuntimeCloseErrorDisposition::Retryable,
+        }
+    }
+
+    pub const fn terminal(code: &'static str) -> Self {
+        Self {
+            code,
+            disposition: RuntimeCloseErrorDisposition::Terminal,
+        }
+    }
+
+    pub const fn code(self) -> &'static str {
+        self.code
+    }
+
+    pub const fn disposition(self) -> RuntimeCloseErrorDisposition {
+        self.disposition
+    }
+}
+
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeWorldAccessError {
+    #[error("runtime resource {type_name} is missing")]
+    MissingResource { type_name: &'static str },
+}
+
+pub struct RuntimeCloseContext<'a> {
+    world: &'a mut World,
+}
+
+impl RuntimeCloseContext<'_> {
+    pub fn world(&self) -> &World {
+        self.world
+    }
+
+    pub fn with_world_mut<R>(&mut self, operation: impl FnOnce(&mut World) -> R) -> R {
+        operation(self.world)
+    }
+
+    pub fn get_resource_mut<R: Resource<Mutability = Mutable>>(
+        &mut self,
+    ) -> Result<Option<Mut<'_, R>>, RuntimeWorldAccessError> {
+        Ok(self.world.get_resource_mut())
+    }
+
+    pub fn resource_mut<R: Resource<Mutability = Mutable>>(
+        &mut self,
+    ) -> Result<Mut<'_, R>, RuntimeWorldAccessError> {
+        self.world
+            .get_resource_mut()
+            .ok_or(RuntimeWorldAccessError::MissingResource {
+                type_name: type_name::<R>(),
+            })
+    }
+}
+
+/// Local teardown with explicit ownership until native work has finished.
+/// Participants are driven in reverse registration order. Register dependent resources as one
+/// participant when a dependency must remain usable through the entire close.
+pub trait RuntimeCloseParticipant: 'static {
+    fn begin_close(
+        &mut self,
+        context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError>;
+    fn poll_close(
+        &mut self,
+        context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeClosePolicy(Duration);
+
+impl Default for RuntimeClosePolicy {
+    fn default() -> Self {
+        Self(Duration::from_secs(5))
+    }
+}
+
+impl RuntimeClosePolicy {
+    pub const fn new(timeout: Duration) -> Self {
+        Self(timeout)
+    }
+
+    pub const fn timeout(self) -> Duration {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeCloseParticipantPhase {
+    Begin,
+    Poll,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeCloseCause {
+    PluginShutdown {
+        plugin: PluginId,
+        error: PluginError,
+    },
+    ParticipantError {
+        participant: RuntimeCloseParticipantId,
+        phase: RuntimeCloseParticipantPhase,
+        code: &'static str,
+        disposition: RuntimeCloseErrorDisposition,
+    },
+    DeadlineExceeded,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeClosePendingParticipant {
     participant: RuntimeCloseParticipantId,
@@ -57,199 +181,229 @@ pub struct RuntimeClosePendingParticipant {
 }
 
 impl RuntimeClosePendingParticipant {
-    #[must_use]
     pub const fn participant(self) -> RuntimeCloseParticipantId {
         self.participant
     }
 
-    /// The unfinished phase. `Begin` also covers a participant not yet invoked.
-    #[must_use]
     pub const fn phase(self) -> RuntimeCloseParticipantPhase {
         self.phase
     }
 }
 
-/// Owns concrete close participants on the thread where the runtime App is constructed.
-///
-/// Construct transportable definitions on another thread, then bind their concrete participants
-/// here. The ledger itself cannot be sent to a different thread, even when its entries own only
-/// Send worker handles.
-///
-/// ```compile_fail
-/// fn require_send<T: Send>() {}
-/// require_send::<nara_app::RuntimeObligationLedger>();
-/// ```
-pub struct RuntimeObligationLedger {
-    ids: BTreeSet<RuntimeCloseParticipantId>,
-    entries: Vec<RuntimeCloseEntry>,
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimeCloseEvidence {
+    causes: Vec<RuntimeCloseCause>,
+    pending: Vec<RuntimeClosePendingParticipant>,
 }
 
-impl Default for RuntimeObligationLedger {
-    fn default() -> Self {
-        Self::new()
+impl RuntimeCloseEvidence {
+    pub fn causes(&self) -> &[RuntimeCloseCause] {
+        &self.causes
+    }
+
+    pub fn pending_participants(&self) -> &[RuntimeClosePendingParticipant] {
+        &self.pending
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.causes.is_empty() && self.pending.is_empty()
+    }
+
+    pub fn plugin_shutdown_failed(&self) -> bool {
+        self.causes
+            .iter()
+            .any(|cause| matches!(cause, RuntimeCloseCause::PluginShutdown { .. }))
+    }
+
+    pub fn has_terminal_failure(&self) -> bool {
+        self.causes.iter().any(|cause| {
+            matches!(
+                cause,
+                RuntimeCloseCause::PluginShutdown { .. }
+                    | RuntimeCloseCause::ParticipantError {
+                        disposition: RuntimeCloseErrorDisposition::Terminal,
+                        ..
+                    }
+            )
+        })
     }
 }
 
-impl Debug for RuntimeObligationLedger {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("RuntimeObligationLedger")
-            .field("ids", &self.ids)
-            .field("entries", &self.entries.len())
-            .finish()
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeCandidateRetirementState {
+    Retiring,
+    RetirementIncomplete,
+    Retired,
 }
 
-impl RuntimeObligationLedger {
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            ids: BTreeSet::new(),
-            entries: Vec::new(),
-        }
-    }
+#[derive(Default)]
+enum CloseState {
+    #[default]
+    Open,
+    Closing(Instant),
+    Incomplete,
+    Closed,
+}
 
-    /// Transfers a participant into this local ledger, or returns it unchanged on duplicate ID.
-    ///
-    /// Registration invokes no callbacks. Entries are driven in reverse registration order;
-    /// dependency completion must be enforced by a typed owner holding the dependent aggregate.
-    pub fn register<P>(
+struct CloseEntry {
+    participant: Box<dyn RuntimeCloseParticipant>,
+    id: RuntimeCloseParticipantId,
+    phase: RuntimeCloseParticipantPhase,
+    finished: bool,
+    terminal_error: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct Close {
+    state: CloseState,
+    shutdown_invoked: bool,
+    participants: Vec<CloseEntry>,
+    pub(crate) evidence: RuntimeCloseEvidence,
+    pub(crate) policy: RuntimeClosePolicy,
+}
+
+impl Close {
+    pub(crate) fn register(
         &mut self,
         id: RuntimeCloseParticipantId,
-        participant: P,
-    ) -> Result<(), RuntimeObligationRegistrationError<P>>
-    where
-        P: RuntimeCloseParticipant,
-    {
-        if !self.ids.insert(id) {
-            return Err(RuntimeObligationRegistrationError {
-                error: RuntimeObligationLedgerError::Duplicate { id },
-                participant,
+        participant: impl RuntimeCloseParticipant,
+    ) -> Result<(), PluginError> {
+        if self.participants.iter().any(|entry| entry.id == id) {
+            return Err(PluginError::DuplicateCloseParticipant { id });
+        }
+        self.participants.push(CloseEntry {
+            participant: Box::new(participant),
+            id,
+            phase: RuntimeCloseParticipantPhase::Begin,
+            finished: false,
+            terminal_error: false,
+        });
+        Ok(())
+    }
+
+    pub(crate) fn is_open(&self) -> bool {
+        matches!(self.state, CloseState::Open)
+    }
+
+    pub(crate) fn state(&self) -> RuntimeCandidateRetirementState {
+        match self.state {
+            CloseState::Open | CloseState::Closing(_) => RuntimeCandidateRetirementState::Retiring,
+            CloseState::Incomplete => RuntimeCandidateRetirementState::RetirementIncomplete,
+            CloseState::Closed => RuntimeCandidateRetirementState::Retired,
+        }
+    }
+
+    pub(crate) fn begin(&mut self) {
+        if matches!(self.state, CloseState::Open | CloseState::Incomplete) {
+            let now = Instant::now();
+            self.state = CloseState::Closing(now.checked_add(self.policy.timeout()).unwrap_or(now));
+            self.observe_pending();
+        }
+    }
+
+    pub(crate) fn drive(&mut self, world: &mut World, plugins: &[InstalledPlugin]) {
+        let CloseState::Closing(deadline) = self.state else {
+            return;
+        };
+        let shutdown_pending = !std::mem::replace(&mut self.shutdown_invoked, true);
+        for installed in plugins.iter().rev().filter(|_| shutdown_pending) {
+            let plugin = installed.entry.plugin_id();
+            let result = run_hook(plugin, PluginHook::Shutdown, || {
+                installed
+                    .plugin
+                    .shutdown(&mut PluginShutdownContext { world })
             });
+            if let Err(error) = result {
+                self.evidence
+                    .causes
+                    .push(RuntimeCloseCause::PluginShutdown { plugin, error });
+            }
         }
-        self.entries.push(RuntimeCloseEntry {
-            id,
-            participant: Box::new(participant),
-            begun: false,
-            phase: RuntimeCloseParticipantPhase::Begin,
-            complete: false,
-            terminal_failure: false,
-        });
-        Ok(())
-    }
 
-    pub(super) fn preflight_append(
-        &self,
-        other: &Self,
-    ) -> Result<(), RuntimeObligationLedgerError> {
-        if let Some(id) = self.ids.intersection(&other.ids).next().copied() {
-            return Err(RuntimeObligationLedgerError::Duplicate { id });
-        }
-        Ok(())
-    }
-
-    pub(super) fn append_for_retirement(&mut self, mut other: Self) {
-        self.ids.append(&mut other.ids);
-        self.entries.append(&mut other.entries);
-    }
-
-    pub(crate) fn retain_for_retirement<P>(&mut self, id: RuntimeCloseParticipantId, participant: P)
-    where
-        P: RuntimeCloseParticipant,
-    {
-        self.entries.push(RuntimeCloseEntry {
-            id,
-            participant: Box::new(participant),
-            begun: false,
-            phase: RuntimeCloseParticipantPhase::Begin,
-            complete: false,
-            terminal_failure: false,
-        });
-    }
-
-    pub(super) fn drive_close_once_with_evidence(
-        &mut self,
-        world: &mut World,
-        evidence: &mut RuntimeCloseEvidence,
-    ) -> bool {
         let mut failed = false;
-        for entry in self.entries.iter_mut().rev() {
-            if entry.complete || entry.terminal_failure {
+        for entry in self
+            .participants
+            .iter_mut()
+            .rev()
+            .filter(|entry| !entry.finished)
+        {
+            if entry.terminal_error {
+                failed = true;
                 continue;
             }
             let mut context = RuntimeCloseContext { world };
-            if !entry.begun {
-                entry.begun = true;
-                match entry.participant.begin_close(&mut context) {
+            loop {
+                let result = catch_unwind(AssertUnwindSafe(|| match entry.phase {
+                    RuntimeCloseParticipantPhase::Begin => {
+                        entry.participant.begin_close(&mut context)
+                    }
+                    RuntimeCloseParticipantPhase::Poll => {
+                        entry.participant.poll_close(&mut context)
+                    }
+                }))
+                .unwrap_or(Err(RuntimeCloseParticipantError::terminal(
+                    "close-participant-panicked",
+                )));
+                let error = match result {
                     Ok(RuntimeCloseProgress::Complete) => {
-                        entry.complete = true;
+                        entry.finished = true;
+                        break;
+                    }
+                    Ok(RuntimeCloseProgress::Pending)
+                        if entry.phase == RuntimeCloseParticipantPhase::Begin =>
+                    {
+                        entry.phase = RuntimeCloseParticipantPhase::Poll;
                         continue;
                     }
+                    Ok(RuntimeCloseProgress::Pending) => break,
                     Ok(RuntimeCloseProgress::CompleteWithError { code }) => {
-                        entry.complete = true;
-                        evidence.record(RuntimeCloseCause::ParticipantError {
-                            participant: entry.id,
-                            phase: RuntimeCloseParticipantPhase::Begin,
-                            code,
-                            disposition: RuntimeCloseErrorDisposition::Terminal,
-                        });
-                        continue;
+                        entry.finished = true;
+                        RuntimeCloseParticipantError::terminal(code)
                     }
-                    Ok(RuntimeCloseProgress::Pending) => {}
                     Err(error) => {
-                        evidence.record(RuntimeCloseCause::ParticipantError {
-                            participant: entry.id,
-                            phase: RuntimeCloseParticipantPhase::Begin,
-                            code: error.code(),
-                            disposition: error.disposition(),
-                        });
-                        entry.terminal_failure =
+                        entry.terminal_error =
                             error.disposition() == RuntimeCloseErrorDisposition::Terminal;
-                        if !entry.terminal_failure {
-                            entry.begun = false;
-                        }
                         failed = true;
-                        continue;
+                        error
                     }
+                };
+                let cause = RuntimeCloseCause::ParticipantError {
+                    participant: entry.id,
+                    phase: entry.phase,
+                    code: error.code(),
+                    disposition: error.disposition(),
+                };
+                if !self.evidence.causes.contains(&cause) {
+                    self.evidence.causes.push(cause);
                 }
-            }
-            entry.phase = RuntimeCloseParticipantPhase::Poll;
-            match entry.participant.poll_close(&mut context) {
-                Ok(RuntimeCloseProgress::Complete) => {
-                    entry.complete = true;
-                }
-                Ok(RuntimeCloseProgress::CompleteWithError { code }) => {
-                    entry.complete = true;
-                    evidence.record(RuntimeCloseCause::ParticipantError {
-                        participant: entry.id,
-                        phase: RuntimeCloseParticipantPhase::Poll,
-                        code,
-                        disposition: RuntimeCloseErrorDisposition::Terminal,
-                    });
-                }
-                Ok(RuntimeCloseProgress::Pending) => {}
-                Err(error) => {
-                    evidence.record(RuntimeCloseCause::ParticipantError {
-                        participant: entry.id,
-                        phase: RuntimeCloseParticipantPhase::Poll,
-                        code: error.code(),
-                        disposition: error.disposition(),
-                    });
-                    entry.terminal_failure =
-                        error.disposition() == RuntimeCloseErrorDisposition::Terminal;
-                    failed = true;
-                }
+                break;
             }
         }
-        failed
+        self.observe_pending();
+        if self.evidence.pending.is_empty() {
+            self.state = CloseState::Closed;
+        } else if Instant::now() >= deadline {
+            if !self
+                .evidence
+                .causes
+                .contains(&RuntimeCloseCause::DeadlineExceeded)
+            {
+                self.evidence
+                    .causes
+                    .push(RuntimeCloseCause::DeadlineExceeded);
+            }
+            self.state = CloseState::Incomplete;
+        } else if failed {
+            self.state = CloseState::Incomplete;
+        }
     }
 
-    pub(super) fn update_pending_evidence(&self, evidence: &mut RuntimeCloseEvidence) {
-        evidence.pending_participants.clear();
-        evidence.pending_participants.extend(
-            self.entries
+    fn observe_pending(&mut self) {
+        self.evidence.pending.clear();
+        self.evidence.pending.extend(
+            self.participants
                 .iter()
-                .filter(|entry| !entry.complete)
+                .filter(|entry| !entry.finished)
                 .map(|entry| RuntimeClosePendingParticipant {
                     participant: entry.id,
                     phase: entry.phase,
@@ -257,127 +411,14 @@ impl RuntimeObligationLedger {
         );
     }
 
-    pub(super) fn is_close_complete(&self) -> bool {
-        self.entries.iter().all(|entry| entry.complete)
-    }
-}
-
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeObligationLedgerError {
-    #[error("runtime close participant {id} is registered more than once")]
-    Duplicate { id: RuntimeCloseParticipantId },
-}
-
-pub struct RuntimeObligationRegistrationError<P> {
-    error: RuntimeObligationLedgerError,
-    participant: P,
-}
-
-impl<P> Debug for RuntimeObligationRegistrationError<P> {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("RuntimeObligationRegistrationError")
-            .field("error", &self.error)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<P> Display for RuntimeObligationRegistrationError<P> {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.error, formatter)
-    }
-}
-
-impl<P> std::error::Error for RuntimeObligationRegistrationError<P> where P: 'static {}
-
-impl<P> RuntimeObligationRegistrationError<P> {
-    #[must_use]
-    pub const fn error(&self) -> RuntimeObligationLedgerError {
-        self.error
-    }
-
-    #[must_use]
-    pub fn into_parts(self) -> (RuntimeObligationLedgerError, P) {
-        (self.error, self.participant)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-
-    use nara_ecs::World;
-
-    use super::RuntimeObligationLedger;
-    use crate::runtime::{
-        RuntimeCloseContext, RuntimeCloseEvidence, RuntimeCloseParticipant,
-        RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseParticipantPhase,
-        RuntimeCloseProgress,
-    };
-
-    struct TerminalParticipant {
-        begins: Arc<AtomicUsize>,
-        polls: Arc<AtomicUsize>,
-    }
-
-    impl RuntimeCloseParticipant for TerminalParticipant {
-        fn begin_close(
-            &mut self,
-            _context: &mut RuntimeCloseContext<'_>,
-        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-            self.begins.fetch_add(1, Ordering::SeqCst);
-            Err(RuntimeCloseParticipantError::terminal("terminal-close"))
+    pub(crate) fn finish(&mut self, world: &mut World, plugins: &[InstalledPlugin]) {
+        self.begin();
+        self.drive(world, plugins);
+        #[cfg(not(target_arch = "wasm32"))]
+        while let CloseState::Closing(deadline) = self.state {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            std::thread::sleep(remaining.min(Duration::from_millis(1)));
+            self.drive(world, plugins);
         }
-
-        fn poll_close(
-            &mut self,
-            _context: &mut RuntimeCloseContext<'_>,
-        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-            self.polls.fetch_add(1, Ordering::SeqCst);
-            Ok(RuntimeCloseProgress::Complete)
-        }
-    }
-
-    #[test]
-    fn terminal_failure_is_not_reported_as_complete_or_driven_again() {
-        let begins = Arc::new(AtomicUsize::new(0));
-        let polls = Arc::new(AtomicUsize::new(0));
-        let mut ledger = RuntimeObligationLedger::new();
-        ledger
-            .register(
-                RuntimeCloseParticipantId::new("nara.test.terminal-ledger"),
-                TerminalParticipant {
-                    begins: Arc::clone(&begins),
-                    polls: Arc::clone(&polls),
-                },
-            )
-            .expect("participant id is unique");
-        let mut world = World::new();
-        let mut evidence = RuntimeCloseEvidence::default();
-
-        assert!(ledger.drive_close_once_with_evidence(&mut world, &mut evidence));
-        assert!(!ledger.is_close_complete());
-        assert_eq!(begins.load(Ordering::SeqCst), 1);
-        assert_eq!(polls.load(Ordering::SeqCst), 0);
-        ledger.update_pending_evidence(&mut evidence);
-        assert_eq!(evidence.pending_participants().len(), 1);
-        assert_eq!(
-            evidence.pending_participants()[0].participant(),
-            RuntimeCloseParticipantId::new("nara.test.terminal-ledger")
-        );
-        assert_eq!(
-            evidence.pending_participants()[0].phase(),
-            RuntimeCloseParticipantPhase::Begin
-        );
-        let failed = evidence.clone();
-        assert!(!ledger.drive_close_once_with_evidence(&mut world, &mut evidence));
-        ledger.update_pending_evidence(&mut evidence);
-        assert!(!ledger.is_close_complete());
-        assert_eq!(evidence, failed);
-        assert_eq!(begins.load(Ordering::SeqCst), 1);
-        assert_eq!(polls.load(Ordering::SeqCst), 0);
     }
 }

@@ -455,13 +455,13 @@ impl WgpuStockProgramBuilder<'_> {
             )?;
             let reads = sprite_capture.bind_material_textures(bindings)?;
             add_draw_facts(&mut self.facts, &sprite_capture.batches)?;
-            self.graph.operation(
+            self.graph.add_pass(crate::gpu::RenderPass::new(
                 operation,
                 &self.bindings.world,
                 Arc::new(sprite_capture),
                 &reads,
                 &[scene.clear(premultiplied_clear_color(clear), AccessRole::Attachment)],
-            )?;
+            ))?;
             return Ok(scene);
         }
         if !bindings.is_empty() {
@@ -502,7 +502,7 @@ impl WgpuStockProgramBuilder<'_> {
         let capture =
             crate::gpu::canvas::CanvasCompositeCapture::new(scene.clone(), resolved.clone(), frame);
         capture.validate()?;
-        self.graph.operation(
+        self.graph.add_pass(crate::gpu::RenderPass::new(
             operation,
             &self.bindings.canvas,
             Arc::new(capture),
@@ -511,7 +511,7 @@ impl WgpuStockProgramBuilder<'_> {
                 premultiplied_clear_color(frame.bar_color()),
                 AccessRole::Attachment,
             )],
-        )?;
+        ))?;
         self.facts.frame.draw_calls = self.facts.frame.draw_calls.saturating_add(1);
         Ok(resolved)
     }
@@ -577,13 +577,13 @@ impl WgpuStockProgramBuilder<'_> {
                 &self.bindings.ui,
                 Arc::clone(&ui_capture),
             );
-            self.graph.operation(
+            self.graph.add_pass(crate::gpu::RenderPass::new(
                 ui_operation,
                 &self.bindings.ui,
                 ui_capture,
                 &[],
                 &[initialized],
-            )?;
+            ))?;
             let final_output = final_color.output();
             let outputs =
                 (0..count).map(|index| additional_outputs.get(index).unwrap_or(&final_output));

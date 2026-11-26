@@ -7,8 +7,6 @@ use std::sync::{
 
 use crate::gpu::presented::WgpuSubmittedImageReceipt;
 
-static NEXT_DISPLAY_OCCURRENCE: AtomicU64 = AtomicU64::new(1);
-
 #[derive(Debug)]
 pub(crate) struct OutputBudget {
     limit: AtomicU64,
@@ -166,54 +164,3 @@ impl PartialEq for WgpuImageOutput {
 }
 
 impl Eq for WgpuImageOutput {}
-
-/// Nominal identity of one exact output's display placement, issued by its owning Host.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct WgpuDisplayOccurrence(u64);
-
-impl WgpuDisplayOccurrence {
-    /// Process-local fact for renderer-neutral display correlation; not persistent identity.
-    #[must_use]
-    pub const fn get(self) -> u64 {
-        self.0
-    }
-}
-
-/// A retained output selected for one display occurrence.
-///
-/// Repaint the same occurrence by cloning this owner. Request another occurrence from the Host
-/// for a mirror, even when both placements sample the same pixels in the same window.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WgpuImageDisplay {
-    pub(crate) output: WgpuImageOutput,
-    pub(crate) occurrence: WgpuDisplayOccurrence,
-}
-
-impl WgpuImageDisplay {
-    pub(crate) fn issue(output: WgpuImageOutput) -> Self {
-        let serial = NEXT_DISPLAY_OCCURRENCE
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
-                value.checked_add(1)
-            })
-            .expect("WGPU display occurrence identity exhausted");
-        Self {
-            output,
-            occurrence: WgpuDisplayOccurrence(serial),
-        }
-    }
-
-    #[must_use]
-    pub const fn occurrence(&self) -> WgpuDisplayOccurrence {
-        self.occurrence
-    }
-
-    #[must_use]
-    pub const fn output(&self) -> &WgpuImageOutput {
-        &self.output
-    }
-
-    #[must_use]
-    pub fn receipt(&self) -> WgpuSubmittedImageReceipt {
-        self.output.receipt()
-    }
-}

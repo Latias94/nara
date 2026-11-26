@@ -1,29 +1,17 @@
 use super::*;
 use crate::{WindowEvents, WindowPlugin};
-use nara_app::{
-    App, CoreStage, RuntimeCandidate, RuntimeClosePolicy, RuntimeFaultKind, RuntimeObligationLedger,
-};
+use nara_app::{App, CoreStage, RuntimeClosePolicy, RuntimeFaultKind};
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
-    ActionMaps, ActionPhase, ActionState, AxisDeadZone, AxisDirection, ButtonInput, GamepadButton,
-    InputEventKind, InputEventOrigin, InputGeometryGeneration, InputInvalidationReason,
-    InputPlugin, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputSet,
-    InputSlotGeneration, InputSurfaceId, PointerState,
+    ActionMaps, ActionPhase, ActionState, AxisDeadZone, ButtonInput, GamepadButton, InputPlugin,
+    InputSet, PointerState,
 };
 
 mod owned_session;
 
 fn start_runtime(app: App) -> RuntimeInstance {
-    RuntimeCandidate::admit(
-        app.seal().unwrap(),
-        RuntimeObligationLedger::new(),
-        RuntimeClosePolicy::default(),
-    )
-    .unwrap()
-    .complete_startup()
-    .unwrap()
-    .promote()
+    RuntimeInstance::start(app).unwrap()
 }
 
 fn platform_app(runtime: RuntimeInstance) -> WinitApp {
@@ -118,43 +106,8 @@ fn converts_named_physical_keys_and_ignores_unidentified_codes() {
 }
 
 #[test]
-fn punctuation_dispatch_and_action_map_validation_agree() {
-    let action = ActionId::new("test.punctuation").unwrap();
-    let mut bindings = ActionMapBuilder::new(ActionMapLimits::default());
-    bindings
-        .declare_context(ActionContext::gameplay(), true)
-        .unwrap();
-    for (code, character) in [
-        (WinitKeyCode::Backquote, '`'),
-        (WinitKeyCode::Minus, '-'),
-        (WinitKeyCode::Equal, '='),
-        (WinitKeyCode::BracketLeft, '['),
-        (WinitKeyCode::BracketRight, ']'),
-        (WinitKeyCode::Backslash, '\\'),
-        (WinitKeyCode::Semicolon, ';'),
-        (WinitKeyCode::Quote, '\''),
-        (WinitKeyCode::Comma, ','),
-        (WinitKeyCode::Period, '.'),
-        (WinitKeyCode::Slash, '/'),
-    ] {
-        let key = KeyCode::Character(character);
-        assert_eq!(convert_key_code(code), Some(key));
-        assert_eq!(convert_physical_key(PhysicalKey::Code(code)), Some(key));
-        bindings
-            .bind(ActionBinding::key(action.clone(), key))
-            .unwrap();
-    }
-    bindings
-        .bind(ActionBinding::key(action, KeyCode::IntlBackslash))
-        .unwrap();
-    let definition = bindings.compile().unwrap();
-    assert_eq!(validate_action_map_keyboard(&definition), Ok(()));
-}
-
-#[test]
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn iso_extra_key_release_does_not_release_a_held_backquote() {
-    use nara_input::SemanticActions;
     use winit::platform::scancode::PhysicalKeyExtScancode;
 
     #[cfg(target_os = "macos")]
@@ -175,7 +128,7 @@ fn iso_extra_key_release_does_not_release_a_held_backquote() {
     builder.declare_context(context.clone(), true).unwrap();
     for (action, key) in actions
         .iter()
-        .zip([KeyCode::Character('`'), KeyCode::IntlBackslash])
+        .zip([KeyCode::Backquote, KeyCode::IntlBackslash])
     {
         builder
             .bind(ActionBinding::key(action.clone(), key))
@@ -194,7 +147,6 @@ fn iso_extra_key_release_does_not_release_a_held_backquote() {
     .unwrap();
     app.add_plugin(InputPlugin).unwrap();
     let mut state = platform_app(start_runtime(app));
-    state.connect_window_input(WindowId::PRIMARY).unwrap();
     for (physical_key, phase, expected) in [
         (backquote, ElementState::Pressed, [true, false]),
         (iso, ElementState::Pressed, [true, true]),
@@ -213,12 +165,9 @@ fn iso_extra_key_release_does_not_release_a_held_backquote() {
                 .unwrap()
         );
         state.runtime.drive(Duration::ZERO).unwrap();
-        let semantic = state.runtime.world().resource::<SemanticActions>();
+        let semantic = state.runtime.world().resource::<ActionState>();
         for (action, expected) in actions.iter().zip(expected) {
-            assert_eq!(
-                semantic.pressed(InputSeatId::PRIMARY, action, &context),
-                expected
-            );
+            assert_eq!(semantic.button(action.as_str()), expected);
         }
     }
     finish_unit_app(state);
@@ -244,33 +193,6 @@ fn keyboard_validation_accepts_non_keyboard_bindings() {
 }
 
 #[test]
-fn keyboard_validation_reports_the_first_unsupported_binding_index() {
-    let confirm = ActionId::new("test.confirm").unwrap();
-    let movement = ActionId::new("test.move").unwrap();
-    let first_unsupported = KeyCode::Character('~');
-    let mut bindings = ActionMapBuilder::new(ActionMapLimits::default());
-    bindings
-        .declare_context(ActionContext::gameplay(), true)
-        .unwrap();
-    for binding in [
-        ActionBinding::mouse(confirm.clone(), MouseButton::Left),
-        ActionBinding::key(confirm.clone(), KeyCode::NumpadDivide),
-        ActionBinding::key_axis(movement, first_unsupported, AxisDirection::Positive),
-        ActionBinding::key(confirm, KeyCode::Character('A')),
-    ] {
-        bindings.bind(binding).unwrap();
-    }
-    let definition = bindings.compile().unwrap();
-    assert_eq!(
-        validate_action_map_keyboard(&definition),
-        Err(UnsupportedKeyboardBinding {
-            index: 2,
-            key: first_unsupported,
-        })
-    );
-}
-
-#[test]
 fn converts_mouse_buttons() {
     for (native, button) in [
         (WinitMouseButton::Left, MouseButton::Left),
@@ -281,64 +203,6 @@ fn converts_mouse_buttons() {
     ] {
         assert_eq!(convert_mouse_button(native), button);
     }
-}
-
-#[test]
-fn focus_gate_rejects_repeats_and_requires_a_fresh_press_after_regain() {
-    let key = convert_physical_key(PhysicalKey::Code(WinitKeyCode::ControlRight)).unwrap();
-    let mut gate = WinitInputGate::default();
-    assert_eq!(
-        gate.physical_keyboard_input(key, ElementState::Pressed, false),
-        Some(ButtonDriverInput::Press(key))
-    );
-    gate.lose_focus([key], [MouseButton::Left]);
-    assert_eq!(
-        gate.physical_keyboard_input(key, ElementState::Pressed, false),
-        None
-    );
-    gate.gain_focus();
-    assert_eq!(
-        gate.physical_keyboard_input(key, ElementState::Pressed, true),
-        None
-    );
-    assert_eq!(
-        gate.physical_keyboard_input(key, ElementState::Pressed, false),
-        cfg!(target_os = "windows").then_some(ButtonDriverInput::Press(key))
-    );
-    assert_eq!(
-        gate.mouse_input(MouseButton::Left, ElementState::Pressed),
-        None
-    );
-    assert_eq!(
-        gate.physical_keyboard_input(key, ElementState::Released, false),
-        Some(ButtonDriverInput::Release(key))
-    );
-    assert_eq!(
-        gate.mouse_input(MouseButton::Left, ElementState::Released),
-        Some(ButtonDriverInput::Release(MouseButton::Left))
-    );
-    assert_eq!(
-        gate.physical_keyboard_input(key, ElementState::Pressed, false),
-        Some(ButtonDriverInput::Press(key))
-    );
-    assert_eq!(
-        gate.mouse_input(MouseButton::Left, ElementState::Pressed),
-        Some(ButtonDriverInput::Press(MouseButton::Left))
-    );
-}
-
-#[test]
-fn initial_focus_state_is_applied_to_the_input_gate() {
-    let mut gate = WinitInputGate::reset_for_focus(false);
-    assert_eq!(
-        gate.physical_keyboard_input(KeyCode::Enter, ElementState::Pressed, false),
-        None
-    );
-    gate.gain_focus();
-    assert_eq!(
-        gate.physical_keyboard_input(KeyCode::Enter, ElementState::Pressed, false),
-        Some(ButtonDriverInput::Press(KeyCode::Enter))
-    );
 }
 
 fn raw_key_event(code: WinitKeyCode, state: ElementState) -> RawKeyEvent {
@@ -367,7 +231,7 @@ fn focus_event_wiring_preserves_ordered_semantic_action_edges() {
         (move |actions: Res<ActionState>, mut observed: ResMut<ObservedActionPhases>| {
             observed.0.extend(
                 actions
-                    .as_slice()
+                    .edges()
                     .iter()
                     .filter(|edge| edge.seat == InputSeatId::PRIMARY && edge.action == action)
                     .map(|edge| edge.phase),
@@ -377,7 +241,6 @@ fn focus_event_wiring_preserves_ordered_semantic_action_edges() {
     )
     .unwrap();
     let mut state = platform_app(start_runtime(app));
-    state.connect_window_input(WindowId::PRIMARY).unwrap();
     assert!(
         state
             .apply_physical_keyboard_driver_event(
@@ -390,11 +253,6 @@ fn focus_event_wiring_preserves_ordered_semantic_action_edges() {
     assert_eq!(
         state.runtime.world().resource::<ObservedActionPhases>().0,
         [ActionPhase::Started]
-    );
-    assert!(
-        !state
-            .submit_button_event(|_| Err(InputIngressError::ActionOutputAllocationRefused.into()))
-            .unwrap()
     );
     assert!(state.is_healthy_live());
     state
@@ -410,7 +268,7 @@ fn focus_event_wiring_preserves_ordered_semantic_action_edges() {
             .runtime
             .world()
             .resource::<ButtonInput<KeyCode>>()
-            .pressed(KeyCode::Character('w'))
+            .pressed(KeyCode::KeyW)
     );
     state
         .apply_focus_driver_event(WindowId::PRIMARY, true)
@@ -423,6 +281,7 @@ fn focus_event_wiring_preserves_ordered_semantic_action_edges() {
         assert!(
             !state
                 .apply_keyboard_event_with_origin(
+                    WindowId::PRIMARY,
                     raw_key_event(WinitKeyCode::KeyW, edge),
                     repeat,
                     synthetic,
@@ -435,27 +294,14 @@ fn focus_event_wiring_preserves_ordered_semantic_action_edges() {
         state.runtime.world().resource::<ObservedActionPhases>().0,
         [ActionPhase::Started, ActionPhase::Released]
     );
-    assert_eq!(
+    assert!(
         state
             .apply_physical_keyboard_driver_event(
                 raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
                 false
             )
-            .unwrap(),
-        cfg!(target_os = "windows")
+            .unwrap()
     );
-    if !cfg!(target_os = "windows") {
-        for edge in [ElementState::Released, ElementState::Pressed] {
-            assert!(
-                state
-                    .apply_physical_keyboard_driver_event(
-                        raw_key_event(WinitKeyCode::KeyW, edge),
-                        false,
-                    )
-                    .unwrap()
-            );
-        }
-    }
     state.runtime.drive(Duration::ZERO).unwrap();
     assert_eq!(
         state.runtime.world().resource::<ObservedActionPhases>().0,
@@ -469,100 +315,9 @@ fn focus_event_wiring_preserves_ordered_semantic_action_edges() {
 }
 
 #[test]
-fn winit_ingress_captures_the_exact_route_before_focus_loss_invalidation() {
-    let mut app = window_app();
-    app.add_plugin(InputPlugin).unwrap();
-    let window = InputWindowId::new(WindowId::PRIMARY.get());
-    {
-        let mut timeline = app.world_mut().unwrap().resource_mut::<InputTimeline>();
-        timeline
-            .connect_endpoint(window, InputSeatId::PRIMARY)
-            .unwrap();
-        timeline
-            .connect_pointer(window, InputSeatId::PRIMARY, InputPointerId::PRIMARY)
-            .unwrap();
-        timeline
-            .publish_presented_route(InputPresentedRoute::new(
-                window,
-                InputSurfaceId::new(41),
-                InputSeatId::PRIMARY,
-                InputPresentationEpoch::new(73).unwrap(),
-                InputSlotGeneration::new(3).unwrap(),
-                InputRouteGeneration::new(5).unwrap(),
-                InputGeometryGeneration::new(7).unwrap(),
-            ))
-            .unwrap();
-    }
-    let mut state = platform_app(start_runtime(app));
-    state
-        .apply_focus_driver_event(WindowId::PRIMARY, true)
-        .unwrap();
-    assert!(
-        state
-            .apply_physical_keyboard_driver_event(
-                raw_key_event(WinitKeyCode::Enter, ElementState::Pressed),
-                false
-            )
-            .unwrap()
-    );
-    state
-        .apply_focus_driver_event(WindowId::PRIMARY, false)
-        .unwrap();
-    let entries = state
-        .runtime
-        .world()
-        .resource::<InputTimeline>()
-        .entries()
-        .copied()
-        .collect::<Vec<_>>();
-    let pressed = entries
-        .iter()
-        .find(|entry| {
-            matches!(
-                entry.kind(),
-                InputEventKind::Key {
-                    key: KeyCode::Enter,
-                    phase: nara_input::ButtonTransitionPhase::Pressed,
-                }
-            )
-        })
-        .unwrap();
-    assert_eq!(pressed.route().surface(), Some(InputSurfaceId::new(41)));
-    assert_eq!(pressed.origin(), InputEventOrigin::Platform);
-    assert_eq!(
-        pressed.route().presentation_epoch(),
-        InputPresentationEpoch::new(73)
-    );
-    assert_eq!(
-        pressed.route().slot_generation(),
-        InputSlotGeneration::new(3)
-    );
-    assert_eq!(
-        pressed.route().route_generation(),
-        InputRouteGeneration::new(5)
-    );
-    assert_eq!(
-        pressed.route().geometry_generation(),
-        InputGeometryGeneration::new(7)
-    );
-    let focus_loss = entries.last().unwrap();
-    assert!(matches!(
-        focus_loss.kind(),
-        InputEventKind::FocusChanged { focused: false }
-    ));
-    assert_eq!(
-        focus_loss.invalidation(),
-        Some(InputInvalidationReason::FocusLost)
-    );
-    assert_eq!(focus_loss.route(), pressed.route());
-    finish_unit_app(state);
-}
-
-#[test]
 fn window_input_activation_without_input_plugin_keeps_input_optional() {
     let mut state = platform_app(start_runtime(window_app()));
-    state.connect_window_input(WindowId::PRIMARY).unwrap();
-    assert!(!state.input_timeline_installed());
+    assert!(!state.input_installed());
     assert!(
         !state
             .apply_physical_keyboard_driver_event(
@@ -574,76 +329,6 @@ fn window_input_activation_without_input_plugin_keeps_input_optional() {
     state
         .apply_focus_driver_event(WindowId::PRIMARY, true)
         .unwrap();
-    finish_unit_app(state);
-}
-
-#[test]
-fn window_input_activation_connects_pointer_and_retirement_rejects_late_input() {
-    let mut app = window_app();
-    app.add_plugin(InputPlugin).unwrap();
-    let mut state = platform_app(start_runtime(app));
-    state.connect_window_input(WindowId::PRIMARY).unwrap();
-    assert!(
-        state
-            .apply_physical_keyboard_driver_event(
-                raw_key_event(WinitKeyCode::Enter, ElementState::Pressed),
-                false
-            )
-            .unwrap()
-    );
-    state
-        .with_driver_scope(|scope| {
-            apply_mouse_driver_input_at(
-                scope,
-                InputWindowId::new(WindowId::PRIMARY.get()),
-                InputSeatId::PRIMARY,
-                InputPointerId::PRIMARY,
-                ButtonDriverInput::Press(MouseButton::Left),
-            )
-            .map(|_| ())
-        })
-        .unwrap();
-    retire_runtime_input(&mut state.runtime, &[WindowId::PRIMARY]).unwrap();
-    let entries = state
-        .runtime
-        .world()
-        .resource::<InputTimeline>()
-        .entries()
-        .copied()
-        .collect::<Vec<_>>();
-    assert!(matches!(
-        entries.last().unwrap().kind(),
-        InputEventKind::SurfaceRetired
-    ));
-    for kind in [
-        InputEventKind::Key {
-            key: KeyCode::Enter,
-            phase: nara_input::ButtonTransitionPhase::Released,
-        },
-        InputEventKind::PointerButton {
-            button: MouseButton::Left,
-            phase: nara_input::ButtonTransitionPhase::Released,
-        },
-    ] {
-        assert!(entries.iter().any(|entry| entry.kind() == kind));
-    }
-    assert!(
-        state
-            .apply_physical_keyboard_driver_event(
-                raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
-                false
-            )
-            .is_err()
-    );
-    assert_eq!(
-        state
-            .runtime
-            .world()
-            .resource::<InputTimeline>()
-            .entries()
-            .count(),
-        entries.len()
-    );
     finish_unit_app(state);
 }
 

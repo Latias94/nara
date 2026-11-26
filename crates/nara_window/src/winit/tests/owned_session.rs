@@ -7,7 +7,6 @@ use nara_app::{
     RealTime, RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
     RuntimeCloseParticipantId, RuntimeCloseProgress,
 };
-use nara_input::{InputLimits, InputTimeline};
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
 };
@@ -21,7 +20,6 @@ use std::{
     },
 };
 
-mod keyboard_continuation;
 mod polling;
 
 // These sources test registry ordering, not native pump behavior. The separate Windows tests use
@@ -198,27 +196,17 @@ impl RuntimeCloseParticipant for PendingClose {
 }
 
 fn pending_runtime(
-    app: App,
+    mut app: App,
     released: Arc<AtomicBool>,
     polls: Arc<AtomicUsize>,
     timeout: Duration,
 ) -> RuntimeInstance {
-    let mut obligations = RuntimeObligationLedger::new();
-    obligations
-        .register(
-            RuntimeCloseParticipantId::new("nara.test.winit-pending"),
-            PendingClose { released, polls },
-        )
-        .unwrap();
-    RuntimeCandidate::admit(
-        app.seal().unwrap(),
-        obligations,
-        RuntimeClosePolicy::new(timeout),
+    app.register_close_participant(
+        RuntimeCloseParticipantId::new("nara.test.winit-pending"),
+        PendingClose { released, polls },
     )
-    .unwrap()
-    .complete_startup()
-    .unwrap()
-    .promote()
+    .unwrap();
+    RuntimeInstance::start_with_close_policy(app, RuntimeClosePolicy::new(timeout)).unwrap()
 }
 
 struct ShutdownProbe {
@@ -248,32 +236,6 @@ impl Plugin for ShutdownProbe {
         } else {
             Ok(())
         }
-    }
-}
-
-#[test]
-fn input_connection_refusal_preserves_native_provider_retirement() {
-    for (endpoints, pointers) in [(1, 2), (2, 1)] {
-        let mut app = window_app();
-        app.insert_resource(
-            InputTimeline::with_limits(InputLimits::new(16, endpoints, pointers, 1).unwrap())
-                .unwrap(),
-        )
-        .unwrap();
-        app.add_plugin(InputPlugin).unwrap();
-        let handles = app.world().resource::<BackendWindowHandles>().clone();
-        let events = register_test_provider(&handles, WindowId::PRIMARY);
-        let mut state = platform_app(start_runtime(app));
-        state.owned_window_ids.insert(WindowId::PRIMARY);
-        assert!(state.connect_window_input(WindowId::PRIMARY).is_err());
-        state.begin_shutdown_transition(Instant::now());
-        assert_eq!(*events.lock().unwrap(), vec!["provider"]);
-        assert_eq!(
-            handles.snapshot(WindowId::PRIMARY).unwrap().phase,
-            WindowTargetPhase::ProviderReleased
-        );
-        handles.mark_native_destroyed(WindowId::PRIMARY).unwrap();
-        finish_unit_app(state);
     }
 }
 
@@ -710,22 +672,13 @@ fn completed_close_error_is_terminal_without_leaving_a_live_runtime() {
             panic!("a completed participant must not be polled again")
         }
     }
-    let mut obligations = RuntimeObligationLedger::new();
-    obligations
-        .register(
-            RuntimeCloseParticipantId::new("test.winit-completed"),
-            CompletedCloseError,
-        )
-        .unwrap();
-    let runtime = RuntimeCandidate::admit(
-        window_app().seal().unwrap(),
-        obligations,
-        RuntimeClosePolicy::default(),
+    let mut app = window_app();
+    app.register_close_participant(
+        RuntimeCloseParticipantId::new("test.winit-completed"),
+        CompletedCloseError,
     )
-    .unwrap()
-    .complete_startup()
-    .unwrap()
-    .promote();
+    .unwrap();
+    let runtime = RuntimeInstance::start(app).unwrap();
     let mut state = platform_app(runtime);
     state.begin_shutdown_transition(Instant::now());
     state.poll_native_shutdown_once(Instant::now());

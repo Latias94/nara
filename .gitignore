@@ -2,10 +2,7 @@ target/
 repo-ref/
 .worktrees/
 .nara-supervised-play-canary-*/
-.nara/import-cache/
-.nara/source-tools/artifacts/
+.nara/schema_cache.json
 __pycache__/
 docs/reviews/
 .codex-research/
-vendor/dear-imgui-wgpu/Cargo.lock
-vendor/dear-imgui-wgpu/imgui.ini

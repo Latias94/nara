@@ -64,12 +64,6 @@ impl PreparedImageResource {
     pub fn pixels(&self) -> &[u8] {
         self.pixels.as_slice()
     }
-
-    /// Reports whether this snapshot retains the image allocation's lifetime owner or lease.
-    #[must_use]
-    pub const fn has_retention_owner(&self) -> bool {
-        self.pixels.has_retention_owner()
-    }
 }
 
 impl Debug for PreparedImageResource {
@@ -81,7 +75,6 @@ impl Debug for PreparedImageResource {
             .field("color_space", &self.color_space)
             .field("content_hash", &self.content_hash)
             .field("pixel_len", &self.pixel_len())
-            .field("has_retention_owner", &self.has_retention_owner())
             .finish()
     }
 }
@@ -93,7 +86,6 @@ impl PartialEq for PreparedImageResource {
             && self.color_space == other.color_space
             && self.content_hash == other.content_hash
             && self.pixels == other.pixels
-            && self.has_retention_owner() == other.has_retention_owner()
     }
 }
 

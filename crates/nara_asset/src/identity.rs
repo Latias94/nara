@@ -101,16 +101,6 @@ impl AssetPath {
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
-
-    #[cfg(feature = "serde")]
-    pub(crate) fn retained_bytes(&self) -> usize {
-        self.0.retained_bytes()
-    }
-
-    #[must_use]
-    pub fn meta_path(&self) -> String {
-        self.0.meta_path()
-    }
 }
 
 impl Display for AssetPath {

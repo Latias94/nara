@@ -201,10 +201,7 @@ mod ui {
             snapshot_ui_paint_packets,
         },
     };
-    use nara_app::{
-        RuntimeCandidate, RuntimeClosePolicy, RuntimeControl, RuntimeControlRequestResult,
-        RuntimeObligationLedger, RuntimeState,
-    };
+    use nara_app::{RuntimeControl, RuntimeControlRequestResult, RuntimeInstance, RuntimeState};
     use nara_window::WindowId;
 
     use crate::gpu::frame::WgpuUiSubmissionState;
@@ -615,15 +612,7 @@ mod ui {
         ));
         assert_eq!(receiver.pending_backend_count(), 1);
 
-        let mut runtime = RuntimeCandidate::admit(
-            app.seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap()
-        .complete_startup()
-        .unwrap()
-        .promote();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
         assert!(matches!(
             runtime.request_control(RuntimeControl::Stop),
             RuntimeControlRequestResult::Accepted(_)

@@ -1,156 +1,35 @@
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
-use crate::kernel::{
-    UiDispatchError, UiEnvironmentError, UiFrame, UiJournalError, UiPresentationReceipt,
-    UiRouteStamp, UiSeatId, UiSemanticSnapshot, UiSurfaceId,
-};
-use nara_ecs::{Entity, Mut, Resource, With, World};
-use nara_input::{
-    InputGeometryGeneration, InputIngressError, InputInvalidationReason, InputPresentationEpoch,
-    InputPresentedRoute, InputRouteGeneration, InputSlotGeneration, InputSurfaceId, InputTimeline,
-    timeline::{InputEndpointClaim, InputRouteCommit, PreparedInputRoutePublication},
-};
-use nara_scene::{hierarchy::HierarchyOrder, spatial::ChildOf};
+use nara_ecs::{Entity, Mut, Resource, World};
+use nara_input::{InputSeatId, InputWindowId};
 use thiserror::Error;
 
-use crate::{UiRoot, UiTheme};
+use crate::interaction::SurfaceInteraction;
+use crate::kernel::{
+    UiAuthoringSnapshot, UiCompileError, UiCompiler, UiEnvironmentError, UiFrame, UiKey, UiLimits,
+    UiPoint, UiPresentationReceipt, UiSurfaceContentTransform, UiSurfaceId,
+};
+use crate::{FontFace, UiActionId, UiRoot, UiTheme};
 
-pub(crate) mod candidate;
-mod identity;
-pub(crate) mod presentation;
 mod projection;
-pub(crate) mod state;
 mod surface;
-mod targets;
+#[cfg(test)]
+mod tests;
 
-pub(crate) use state::UiRuntimeState;
 pub use surface::{
     UiSurfaceAvailability, UiSurfaceEndpoint, UiSurfaceRetirement, UiSurfaceSlot,
     UiSurfaceSlotError, UiSurfaceSlotSnapshot, UiSurfaceSuspension, UiSurfaceSuspensionReason,
 };
 
-/// Move-only UI authority staged before one exact backend submission.
-///
-/// The ordinary runtime API does not expose this token. The first-party Host presentation bridge
-/// retains it until the backend accepts, defers, aborts, or supersedes the matching packet.
-#[must_use = "a prepared UI presentation must be committed, aborted, or superseded"]
-pub struct UiPreparedPresentationAuthority {
-    surface_id: UiSurfaceId,
-    facts: candidate::UiPresentationFacts,
-    prepared: state::UiPreparedPresentation,
-    input_route: PreparedInputRoutePublication,
-}
-
-impl UiPreparedPresentationAuthority {
-    #[must_use]
-    pub const fn surface_id(&self) -> UiSurfaceId {
-        self.surface_id
-    }
-
-    #[must_use]
-    pub fn frame(&self) -> &Arc<UiFrame> {
-        self.facts.frame()
-    }
-
-    #[must_use]
-    pub const fn receipt(&self) -> UiPresentationReceipt {
-        self.prepared.receipt()
-    }
-}
-
-/// Total completion of one backend-accepted prepared UI presentation.
-///
-/// Invalidation preserves backend pixel acceptance, publishes no interactive receipt, and leaves
-/// the live presentation, interaction and reducers unchanged.
-#[must_use = "interactive publication requires a committed UI presentation"]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UiPresentationCommit {
-    Committed(UiPresentationReceipt),
-    Invalidated {
-        reason: UiPresentationInvalidationReason,
-    },
-}
-
-/// Observed cause that prevents one prepared snapshot from becoming interactive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UiPresentationInvalidationReason {
-    Input(InputInvalidationReason),
-    InteractionChanged,
-    SurfaceUnavailable,
-}
-
-/// Move-only exact candidate retained while a backend makes retryable residency progress.
-#[must_use = "a deferred UI presentation must be retried, aborted, or superseded"]
-pub struct UiDeferredPresentationAuthority {
-    surface_id: UiSurfaceId,
-    facts: candidate::UiPresentationFacts,
-    presentation_epoch: u64,
-}
-
-impl UiDeferredPresentationAuthority {
-    #[must_use]
-    pub const fn surface_id(&self) -> UiSurfaceId {
-        self.surface_id
-    }
-
-    #[must_use]
-    pub fn frame(&self) -> &Arc<UiFrame> {
-        self.facts.frame()
-    }
-
-    #[must_use]
-    pub const fn presentation_epoch(&self) -> u64 {
-        self.presentation_epoch
-    }
-}
-
-/// Result of atomically validating and restaging one deferred presentation.
-pub enum UiDeferredPresentationRetry {
-    Prepared(Box<UiPreparedPresentationAuthority>),
-    Superseded,
-}
-
-const MAX_ADAPTER_DIAGNOSTICS: usize = 64;
-const MAX_DIAGNOSTIC_BYTES: usize = 1_024;
-
-/// One bounded adapter diagnostic without runtime entity identity leakage.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UiAdapterDiagnostic {
-    code: &'static str,
-    message: String,
-}
-
-impl UiAdapterDiagnostic {
-    #[must_use]
-    pub const fn code(&self) -> &'static str {
-        self.code
-    }
-
-    #[must_use]
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-}
-
-/// Current bounded projection diagnostics from the most recent compile pass.
 #[derive(Debug, Default, Resource)]
-pub struct UiAdapterDiagnostics {
-    entries: Vec<UiAdapterDiagnostic>,
-}
+pub struct UiAdapterDiagnostics(Vec<String>);
 
 impl UiAdapterDiagnostics {
-    #[must_use]
-    pub fn as_slice(&self) -> &[UiAdapterDiagnostic] {
-        &self.entries
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    fn replace(&mut self, entries: Vec<UiAdapterDiagnostic>) {
-        self.entries = entries;
+    pub fn as_slice(&self) -> &[String] {
+        &self.0
     }
 }
 
@@ -158,690 +37,418 @@ impl UiAdapterDiagnostics {
 pub enum UiAdapterError {
     #[error("UI runtime adapter is not installed")]
     RuntimeUnavailable,
-    #[error("UI runtime setup failed: {0}")]
-    RuntimeSetup(String),
-    #[error("UI source revision space was exhausted")]
-    SourceRevisionExhausted,
-    #[error("UI surface {surface} was retired and cannot be reused")]
-    RetiredSurface { surface: u64 },
-    #[error("UI surface {surface} is unknown")]
-    UnknownSurface { surface: u64 },
-    #[error("UI surface {surface} is already installed")]
-    SurfaceAlreadyInstalled { surface: u64 },
-    #[error("UI surface {surface} has no installed presentation authority")]
-    PresentationAuthorityMissing { surface: u64 },
-    #[error("UI surface limit was exceeded")]
+    #[error("UI surface {0:?} is unknown")]
+    UnknownSurface(UiSurfaceId),
+    #[error("UI surface {0:?} is already installed")]
+    SurfaceAlreadyInstalled(UiSurfaceId),
+    #[error("UI surface {0:?} was retired and cannot be reinstalled")]
+    RetiredSurface(UiSurfaceId),
+    #[error("UI surface {0:?} is suspended")]
+    SurfaceSuspended(UiSurfaceId),
+    #[error("UI surface {0:?} is already active")]
+    SurfaceAlreadyActive(UiSurfaceId),
+    #[error("UI surface capacity was exceeded")]
     SurfaceLimitExceeded,
-    #[error("UI surface identity lifetime space was exhausted")]
-    SurfaceIdentitySpaceExhausted,
-    #[error("UI presentation target window {window} is already owned by surface {surface}")]
-    PresentationTargetConflict { window: u64, surface: u64 },
-    #[error(
-        "UI presentation target window {window} expected surface {expected_surface}, but owner is {actual_surface:?}"
-    )]
-    PresentationTargetOwnerMismatch {
-        window: u64,
-        expected_surface: u64,
-        actual_surface: Option<u64>,
-    },
-    #[error("UI surface {surface} is suspended")]
-    SurfaceSuspended { surface: u64 },
-    #[error("UI surface {surface} is already active")]
-    SurfaceAlreadyActive { surface: u64 },
-    #[error("UI surface seat {actual} does not match endpoint seat {expected}")]
-    SeatOwnerMismatch { expected: u32, actual: u32 },
-    #[error("the submitted frame is not the adapter's latest frame for surface {surface}")]
-    FrameNotLatest { surface: u64 },
-    #[error(
-        "surface {surface} presentation epoch {presentation_epoch} has no retained behavior snapshot"
-    )]
-    PresentedBehaviorMissing {
-        surface: u64,
-        presentation_epoch: u64,
-    },
+    #[error("an installed UI surface already owns window {0:?}")]
+    WindowAlreadyOwned(InputWindowId),
+    #[error("compiled UI frame does not belong to the active surface generation")]
+    FrameSuperseded,
+    #[error("presentation epoch or frame revision predates the last accepted frame")]
+    StalePresentation,
     #[error(transparent)]
     Environment(#[from] UiEnvironmentError),
     #[error(transparent)]
     SurfaceSlot(#[from] UiSurfaceSlotError),
     #[error(transparent)]
-    Journal(#[from] UiJournalError),
-    #[error(transparent)]
-    Input(#[from] InputIngressError),
-    #[error(transparent)]
-    Dispatch(#[from] UiDispatchError),
-    #[error("UI widget interaction failed: {0}")]
-    Widget(String),
+    Compile(#[from] UiCompileError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UiButtonBinding {
+    pub(crate) entity: Entity,
+    pub(crate) action: UiActionId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UiTarget {
+    pub(crate) key: UiKey,
+    pub(crate) binding: UiButtonBinding,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) struct UiFrameBindings {
+    producer: Arc<()>,
+    pub(crate) buttons: BTreeMap<UiKey, UiButtonBinding>,
+}
+
+struct Candidate {
+    source: UiAuthoringSnapshot,
+    theme: UiTheme,
+    frame: Arc<UiFrame>,
+}
+
+pub(crate) struct Surface {
+    pub(crate) slot: UiSurfaceSlot,
+    availability: UiSurfaceAvailability,
+    producer: Arc<()>,
+    compiler: UiCompiler,
+    candidate: Option<Candidate>,
+    pub(crate) presented: Option<(UiPresentationReceipt, Arc<UiFrame>)>,
+    pub(crate) interaction: SurfaceInteraction,
+}
+
+impl Surface {
+    fn set_slot(&mut self, slot: UiSurfaceSlot, availability: UiSurfaceAvailability) {
+        self.slot = slot;
+        self.availability = availability;
+        self.candidate = None;
+        self.presented = None;
+        self.interaction = SurfaceInteraction::default();
+    }
+
+    fn compile(
+        &mut self,
+        world: &World,
+        roots: &[(Entity, UiRoot)],
+        revision: u64,
+        theme: UiTheme,
+    ) -> Result<(), String> {
+        let (source, buttons) = projection::project(world, roots, revision, &self.interaction)
+            .map_err(|error| error.to_string())?;
+        let environment = self
+            .slot
+            .environment(theme.revision().get())
+            .map_err(|error| error.to_string())?;
+        if self.candidate.as_ref().is_some_and(|current| {
+            current.theme == theme
+                && current.source.same_tree(&source)
+                && current
+                    .frame
+                    .bindings
+                    .as_ref()
+                    .is_some_and(|bindings| bindings.buttons == buttons)
+        }) {
+            return Ok(());
+        }
+        let mut frame = self
+            .compiler
+            .compile_frame(&source, environment, theme.kernel())
+            .map_err(|error| error.to_string())?;
+        frame.bindings = Some(UiFrameBindings {
+            producer: Arc::clone(&self.producer),
+            buttons,
+        });
+        self.candidate = Some(Candidate {
+            source,
+            theme,
+            frame: Arc::new(frame),
+        });
+        Ok(())
+    }
+
+    pub(crate) fn authored_pointer(&self, logical: [f32; 2]) -> Option<UiPoint> {
+        self.slot
+            .transform()
+            .platform_logical_to_authored(UiPoint::new(logical[0], logical[1]))
+    }
 }
 
 #[derive(Resource)]
-pub(crate) struct UiDefaultTheme(pub(crate) UiTheme);
+pub(crate) struct UiRuntimeState {
+    font: FontFace,
+    surfaces: BTreeMap<UiSurfaceId, Surface>,
+    retired: BTreeSet<UiSurfaceId>,
+    source_revision: u64,
+    pub(crate) action_sequence: u64,
+}
+
+impl UiRuntimeState {
+    pub(crate) fn new(font: FontFace) -> Self {
+        Self {
+            font,
+            surfaces: BTreeMap::new(),
+            retired: BTreeSet::new(),
+            source_revision: 0,
+            action_sequence: 0,
+        }
+    }
+
+    fn ensure_window_available(
+        &self,
+        id: UiSurfaceId,
+        endpoint: UiSurfaceEndpoint,
+    ) -> Result<(), UiAdapterError> {
+        if self.surfaces.values().any(|surface| {
+            surface.slot.surface_id() != id && surface.slot.endpoint().window() == endpoint.window()
+        }) {
+            return Err(UiAdapterError::WindowAlreadyOwned(endpoint.window()));
+        }
+        Ok(())
+    }
+
+    fn surface_mut(&mut self, id: UiSurfaceId) -> Result<&mut Surface, UiAdapterError> {
+        if self.retired.contains(&id) {
+            return Err(UiAdapterError::RetiredSurface(id));
+        }
+        self.surfaces
+            .get_mut(&id)
+            .ok_or(UiAdapterError::UnknownSurface(id))
+    }
+
+    pub(crate) fn input_surface(
+        &mut self,
+        window: InputWindowId,
+        seat: Option<InputSeatId>,
+    ) -> Option<&mut Surface> {
+        self.surfaces.values_mut().find(|surface| {
+            let endpoint = surface.slot.endpoint();
+            surface.availability.is_active()
+                && endpoint.window() == window
+                && seat.is_none_or(|seat| endpoint.seat() == seat)
+        })
+    }
+}
 
 pub(crate) fn compile_ui_frames(world: &mut World) {
-    world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
-        let mut diagnostics = Vec::new();
-        if nara_scene::hierarchy::completed_topology_generation(world).is_none() {
-            state.discard_all_candidates();
-            push_diagnostic(
-                &mut diagnostics,
-                "hierarchy-incomplete",
-                "UI compilation requires a completed structural hierarchy generation",
-            );
-            world
-                .resource_mut::<UiAdapterDiagnostics>()
-                .replace(diagnostics);
+    world.resource_scope(|world, mut runtime: Mut<UiRuntimeState>| {
+        if !runtime
+            .surfaces
+            .values()
+            .any(|surface| surface.availability.is_active())
+        {
+            world.resource_mut::<UiAdapterDiagnostics>().0.clear();
             return;
         }
-        let mut runtime_roots = world.query_filtered::<Entity, With<UiRoot>>();
-        let Some(order) = world.get_resource::<HierarchyOrder>() else {
-            state.discard_all_candidates();
-            push_diagnostic(
-                &mut diagnostics,
-                "hierarchy-order-missing",
-                "UI compilation requires the hierarchy order projection",
-            );
-            world
-                .resource_mut::<UiAdapterDiagnostics>()
-                .replace(diagnostics);
-            return;
-        };
-        let mut ordered_entities = order.as_slice().to_vec();
-        let mut runtime_roots = runtime_roots
+        runtime.source_revision = runtime.source_revision.saturating_add(1);
+        let revision = runtime.source_revision;
+        let mut roots: Vec<_> = world
+            .query::<(Entity, &UiRoot)>()
             .iter(world)
-            .filter(|&entity| {
-                world.get::<ChildOf>(entity).is_none() && order.index(entity).is_none()
+            .take(UiLimits::default().max_roots() + 1)
+            .map(|(entity, root)| (entity, *root))
+            .collect();
+        roots.sort_unstable_by_key(|(entity, _)| entity.index());
+        let theme = world
+            .get_resource::<UiTheme>()
+            .copied()
+            .or_else(|| {
+                roots
+                    .iter()
+                    .find_map(|(entity, _)| world.get::<UiTheme>(*entity).copied())
             })
-            .collect::<Vec<_>>();
-        runtime_roots.sort_unstable_by_key(|entity| entity.index());
-        ordered_entities.extend(runtime_roots);
-        let theme = projection::select_theme(world, &ordered_entities, &mut diagnostics);
-        let source_revision = state.source_revision();
-        if state.advance_source_revision().is_err() {
-            state.discard_all_candidates();
-            push_diagnostic(
-                &mut diagnostics,
-                "source-revision-exhausted",
-                "UI source revision space was exhausted",
-            );
-            world
-                .resource_mut::<UiAdapterDiagnostics>()
-                .replace(diagnostics);
-            return;
-        }
-
-        for (_, surface) in state.active_surfaces_mut() {
-            let Some(projected) = projection::project_authoring(
-                world,
-                &ordered_entities,
-                source_revision,
-                surface.reducer_states(),
-                &mut diagnostics,
-            ) else {
-                surface.discard_candidate();
-                continue;
-            };
-            let environment = match surface.slot().environment(theme.revision().get()) {
-                Ok(environment) => environment,
-                Err(error) => {
-                    push_diagnostic(
-                        &mut diagnostics,
-                        "surface-environment-rejected",
-                        &error.to_string(),
-                    );
-                    surface.discard_candidate();
-                    continue;
-                }
-            };
-            match surface.prepare_candidate(projected, environment, theme.kernel()) {
-                Ok(None) => {}
-                Ok(Some(staging)) => {
-                    let Some(projected) = projection::project_authoring(
-                        world,
-                        &ordered_entities,
-                        source_revision,
-                        staging.reducers(),
-                        &mut diagnostics,
-                    ) else {
-                        surface.discard_candidate();
-                        continue;
-                    };
-                    if let Err(error) =
-                        surface.finish_candidate(staging, projected, environment, theme.kernel())
-                    {
-                        surface.discard_candidate();
-                        push_diagnostic(
-                            &mut diagnostics,
-                            "candidate-reprojection-rejected",
-                            &error.to_string(),
-                        );
-                    }
-                }
-                Err(error) => {
-                    surface.discard_candidate();
-                    push_diagnostic(
-                        &mut diagnostics,
-                        "candidate-preparation-rejected",
-                        &error.to_string(),
-                    );
+            .unwrap_or_default();
+        let mut diagnostics = Vec::new();
+        for (id, surface) in &mut runtime.surfaces {
+            if surface.availability.is_active() {
+                if roots.len() > UiLimits::default().max_roots() {
+                    surface.candidate = None;
+                    diagnostics.push(format!("UI surface {}: root capacity exceeded", id.get()));
+                } else if let Err(error) = surface.compile(world, &roots, revision, theme) {
+                    surface.candidate = None;
+                    diagnostics.push(format!("UI surface {}: {error}", id.get()));
                 }
             }
         }
-        world
-            .resource_mut::<UiAdapterDiagnostics>()
-            .replace(diagnostics);
+        world.resource_mut::<UiAdapterDiagnostics>().0 = diagnostics;
     });
 }
 
-/// Installs one new Host-owned surface lifetime without reusing retired identities.
-///
-/// The Host supplies the initial immutable slot while the runtime remains the only successor-
-/// generation allocator. The Host must connect the logical Input endpoint before installation;
-/// the surface retains that exact lifetime claim independently of presented-route authority.
 pub fn install_ui_surface(world: &mut World, slot: UiSurfaceSlot) -> Result<(), UiAdapterError> {
-    let theme_revision = active_theme_revision(world);
-    slot.environment(theme_revision)?;
-    world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
-        let prepared = state.prepare_surface_install(slot, world.resource::<InputTimeline>())?;
-        state.commit_surface_install(prepared);
-        Ok(())
-    })
+    let mut runtime = state_mut(world)?;
+    let id = slot.surface_id();
+    if runtime.retired.contains(&id) {
+        return Err(UiAdapterError::RetiredSurface(id));
+    }
+    if runtime.surfaces.contains_key(&id) {
+        return Err(UiAdapterError::SurfaceAlreadyInstalled(id));
+    }
+    let limits = UiLimits::default();
+    if runtime.surfaces.len() >= limits.max_surfaces
+        || runtime.surfaces.len() + runtime.retired.len() >= limits.max_surface_lifetimes
+    {
+        return Err(UiAdapterError::SurfaceLimitExceeded);
+    }
+    runtime.ensure_window_available(id, slot.endpoint())?;
+    let compiler = UiCompiler::new(runtime.font.clone(), limits)?;
+    runtime.surfaces.insert(
+        id,
+        Surface {
+            slot,
+            availability: UiSurfaceAvailability::Active,
+            producer: Arc::new(()),
+            compiler,
+            candidate: None,
+            presented: None,
+            interaction: SurfaceInteraction::default(),
+        },
+    );
+    Ok(())
 }
 
-/// Atomically replaces one slot's endpoint and exact coordinate transform.
-///
-/// Endpoint and transform facts cannot be updated independently. Any change advances the slot,
-/// route, and presentation generations. A transform change also advances geometry generation.
-/// Endpoint changes capture the destination's connected Input lifetime; geometry-only updates
-/// retain the existing claim.
 pub fn update_ui_surface_slot(
     world: &mut World,
-    surface_id: UiSurfaceId,
+    id: UiSurfaceId,
     endpoint: UiSurfaceEndpoint,
-    transform: crate::kernel::UiSurfaceContentTransform,
+    transform: UiSurfaceContentTransform,
 ) -> Result<UiSurfaceSlot, UiAdapterError> {
-    let theme_revision = active_theme_revision(world);
-    world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
-        let previous =
-            state
-                .surface_snapshot(surface_id)
-                .ok_or(UiAdapterError::UnknownSurface {
-                    surface: surface_id.get(),
-                })?;
-        if !previous.availability().is_active() {
-            return Err(UiAdapterError::SurfaceSuspended {
-                surface: surface_id.get(),
-            });
-        }
-        let previous = previous.slot();
-        let updated = previous.successor(endpoint, transform)?;
-        updated.environment(theme_revision)?;
-        if updated == previous {
-            return Ok(updated);
-        }
-        let input_endpoint = if endpoint == previous.endpoint() {
-            state
-                .surface(surface_id)
-                .expect("the installed surface retains its endpoint claim")
-                .input_endpoint()
-                .clone()
-        } else {
-            world
-                .resource::<InputTimeline>()
-                .claim_endpoint(endpoint.window(), endpoint.seat())?
-        };
-        let prepared = state.prepare_surface_slot_update(
-            updated,
+    let mut runtime = state_mut(world)?;
+    runtime.ensure_window_available(id, endpoint)?;
+    let surface = runtime.surface_mut(id)?;
+    if !surface.availability.is_active() {
+        return Err(UiAdapterError::SurfaceSuspended(id));
+    }
+    if surface.slot.endpoint() != endpoint || surface.slot.transform() != transform {
+        surface.set_slot(
+            surface.slot.advance(endpoint, transform)?,
             UiSurfaceAvailability::Active,
-            input_endpoint,
-        )?;
-        world
-            .resource_mut::<InputTimeline>()
-            .unbind_claimed_endpoint(
-                prepared.released_input_endpoint(),
-                prepared.released_input_route(),
-            )?;
-        state.commit_surface_slot_update(prepared);
-        Ok(updated)
-    })
+        );
+    }
+    Ok(surface.slot)
 }
 
-/// Suspends one active Surface Slot while preserving balanced physical held-edge ownership.
-///
-/// Suspension advances the slot, route, geometry, and presentation generations, retires every
-/// presented receipt, clears pointer/capture authority, removes the input route, and discards the
-/// unpresented candidate. The stable Surface ID and target reservation remain installed so only an
-/// explicit restore or retirement can continue the lifetime.
 pub fn suspend_ui_surface(
     world: &mut World,
-    surface_id: UiSurfaceId,
+    id: UiSurfaceId,
     reason: UiSurfaceSuspensionReason,
 ) -> Result<Option<UiSurfaceSuspension>, UiAdapterError> {
-    world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
-        let Some((prepared, suspension)) = state.prepare_surface_suspension(surface_id, reason)?
-        else {
-            return Ok(None);
-        };
-        world
-            .resource_mut::<InputTimeline>()
-            .unbind_claimed_endpoint(
-                prepared.released_input_endpoint(),
-                prepared.released_input_route(),
-            )?;
-        state.commit_surface_slot_update(prepared);
-        Ok(Some(suspension))
-    })
+    let mut runtime = state_mut(world)?;
+    let surface = runtime.surface_mut(id)?;
+    if !surface.availability.is_active() {
+        return Ok(None);
+    }
+    let previous = surface.slot;
+    let slot = previous.advance(previous.endpoint(), previous.transform())?;
+    let availability = UiSurfaceAvailability::Suspended(reason);
+    surface.set_slot(slot, availability);
+    Ok(Some(UiSurfaceSuspension {
+        previous_slot_generation: previous.slot_generation(),
+        snapshot: UiSurfaceSlotSnapshot { slot, availability },
+    }))
 }
 
-/// Restores one suspended Surface Slot with a fresh endpoint/transform generation.
-///
-/// Restore never revives the previous packet or receipt. A fresh candidate must compile and pass
-/// backend acceptance before input or semantics become authoritative again.
-/// The destination Input endpoint must already be connected; restore captures its current lifetime.
 pub fn restore_ui_surface(
     world: &mut World,
-    surface_id: UiSurfaceId,
+    id: UiSurfaceId,
     endpoint: UiSurfaceEndpoint,
-    transform: crate::kernel::UiSurfaceContentTransform,
+    transform: UiSurfaceContentTransform,
 ) -> Result<UiSurfaceSlot, UiAdapterError> {
-    let theme_revision = active_theme_revision(world);
-    world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
-        let prepared = state.prepare_surface_restoration(
-            surface_id,
-            endpoint,
-            transform,
-            world.resource::<InputTimeline>(),
-        )?;
-        let restored = prepared.slot();
-        restored.environment(theme_revision)?;
-        world
-            .resource_mut::<InputTimeline>()
-            .unbind_claimed_endpoint(
-                prepared.released_input_endpoint(),
-                prepared.released_input_route(),
-            )?;
-        state.commit_surface_slot_update(prepared);
-        Ok(restored)
-    })
+    let mut runtime = state_mut(world)?;
+    runtime.ensure_window_available(id, endpoint)?;
+    let surface = runtime.surface_mut(id)?;
+    if surface.availability.is_active() {
+        return Err(UiAdapterError::SurfaceAlreadyActive(id));
+    }
+    let slot = surface.slot.advance(endpoint, transform)?;
+    surface.set_slot(slot, UiSurfaceAvailability::Active);
+    Ok(slot)
 }
 
-fn active_theme_revision(world: &World) -> u64 {
-    world
-        .get_resource::<UiDefaultTheme>()
-        .map_or_else(UiTheme::default, |theme| theme.0)
-        .revision()
-        .get()
-}
-
-/// Retires one surface after balancing and clearing exactly the physical endpoint it owns.
-///
-/// Its retained Input claim protects same-label replacements even without a presented route stamp.
 pub fn retire_ui_surface(
     world: &mut World,
-    surface_id: UiSurfaceId,
+    id: UiSurfaceId,
 ) -> Result<Option<UiSurfaceRetirement>, UiAdapterError> {
-    world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
-        let Some(prepared) = state.prepare_surface_retirement(surface_id)? else {
-            return Ok(None);
-        };
-        let retirement = prepared.retirement();
-        world
-            .resource_mut::<InputTimeline>()
-            .retire_claimed_endpoint(prepared.input_endpoint(), retirement.input_route())?;
-        Ok(Some(state.commit_surface_retirement(prepared)))
-    })
-}
-
-#[doc(hidden)]
-pub fn retired_ui_surface_token(
-    world: &World,
-    surface_id: UiSurfaceId,
-) -> Result<Option<crate::kernel::UiSurfaceRetirementToken>, UiAdapterError> {
-    let Some(state) = world.get_resource::<UiRuntimeState>() else {
-        return Err(UiAdapterError::RuntimeUnavailable);
+    let mut runtime = state_mut(world)?;
+    let Some(surface) = runtime.surfaces.get(&id) else {
+        return Ok(None);
     };
-    Ok(state.retirement(surface_id))
+    let slot = surface.slot;
+    let retirement_generation = slot.next_generation()?;
+    runtime.surfaces.remove(&id);
+    runtime.retired.insert(id);
+    Ok(Some(UiSurfaceRetirement {
+        slot,
+        retirement_generation,
+    }))
 }
 
-/// Returns the current unpresented immutable candidate for one surface.
-///
-/// A successful presentation commit consumes the candidate. The presentation owner retains the
-/// accepted frame in its presentation packet.
-pub fn ui_candidate_frame(
-    world: &World,
-    surface_id: UiSurfaceId,
-) -> Result<Option<Arc<UiFrame>>, UiAdapterError> {
-    let Some(state) = world.get_resource::<UiRuntimeState>() else {
-        return Err(UiAdapterError::RuntimeUnavailable);
-    };
-    Ok(state
-        .surface(surface_id)
-        .and_then(|surface| surface.candidate())
-        .map(state::candidate_frame))
-}
-
-/// Returns the current unpresented immutable candidates in stable surface order.
-///
-/// A successful presentation commit consumes the corresponding candidate. The presentation owner
-/// retains each accepted frame in its presentation packet.
-pub fn ui_candidate_frames(world: &World) -> Result<Vec<Arc<UiFrame>>, UiAdapterError> {
-    let Some(state) = world.get_resource::<UiRuntimeState>() else {
-        return Err(UiAdapterError::RuntimeUnavailable);
-    };
-    Ok(state
-        .surfaces()
-        .filter_map(|(_, surface)| surface.candidate().map(state::candidate_frame))
-        .collect())
-}
-
-/// Returns the active Host-owned Surface Slot snapshots in stable surface order.
-///
-/// Presentation adapters use this bounded snapshot to mirror explicit window routes without
-/// making the renderer-neutral UI authoring crate depend on a presentation backend.
-pub fn active_ui_surface_slots(world: &World) -> Result<Vec<UiSurfaceSlot>, UiAdapterError> {
-    let Some(state) = world.get_resource::<UiRuntimeState>() else {
-        return Err(UiAdapterError::RuntimeUnavailable);
-    };
-    Ok(state
-        .surfaces()
-        .filter(|(_, surface)| surface.is_active())
-        .map(|(_, surface)| surface.slot())
-        .collect())
-}
-
-/// Returns every installed, non-retired Surface Slot and its explicit availability state.
 pub fn ui_surface_slot_snapshots(
     world: &World,
 ) -> Result<Vec<UiSurfaceSlotSnapshot>, UiAdapterError> {
-    let Some(state) = world.get_resource::<UiRuntimeState>() else {
-        return Err(UiAdapterError::RuntimeUnavailable);
-    };
-    Ok(state
-        .surfaces()
-        .map(|(_, surface)| surface.snapshot())
+    Ok(state(world)?
+        .surfaces
+        .values()
+        .map(|surface| UiSurfaceSlotSnapshot {
+            slot: surface.slot,
+            availability: surface.availability,
+        })
         .collect())
 }
 
-/// Stages every fallible UI and input-route fact before the exact frame reaches a backend.
-/// The surface's retained endpoint claim must still identify its original Input lifetime.
-pub fn prepare_ui_presentation(
-    world: &mut World,
-    frame: Arc<UiFrame>,
-    presentation_epoch: u64,
-) -> Result<UiPreparedPresentationAuthority, UiAdapterError> {
-    world.resource_scope(|world, state: Mut<UiRuntimeState>| {
-        let surface_id = frame.environment().surface_id();
-        let (slot, input_endpoint, facts, prepared) = {
-            let surface = state
-                .surface(surface_id)
-                .ok_or(UiAdapterError::UnknownSurface {
-                    surface: surface_id.get(),
-                })?;
-            if !surface.is_active() {
-                return Err(UiAdapterError::SurfaceSuspended {
-                    surface: surface_id.get(),
-                });
-            }
-            let Some(candidate) = surface.candidate() else {
-                return Err(UiAdapterError::FrameNotLatest {
-                    surface: surface_id.get(),
-                });
-            };
-            if !Arc::ptr_eq(candidate.frame(), &frame) {
-                return Err(UiAdapterError::FrameNotLatest {
-                    surface: surface_id.get(),
-                });
-            }
-            let prepared = surface.prepare_presentation(presentation_epoch)?;
-            (
-                surface.slot(),
-                surface.input_endpoint(),
-                candidate.presentation_facts(),
-                prepared,
-            )
-        };
-        let input_route = prepare_input_route(world, input_endpoint, slot, prepared.receipt())?;
-        Ok(UiPreparedPresentationAuthority {
-            surface_id,
-            facts,
-            prepared,
-            input_route,
-        })
-    })
+pub fn active_ui_surface_slots(world: &World) -> Result<Vec<UiSurfaceSlot>, UiAdapterError> {
+    Ok(ui_surface_slot_snapshots(world)?
+        .into_iter()
+        .filter_map(UiSurfaceSlotSnapshot::active_slot)
+        .collect())
 }
 
-/// Releases live route capacity while retaining one exact retryable candidate.
-pub fn defer_prepared_ui_presentation(
-    world: &mut World,
-    authority: UiPreparedPresentationAuthority,
-) -> UiDeferredPresentationAuthority {
-    let UiPreparedPresentationAuthority {
-        surface_id,
-        facts,
-        prepared,
-        input_route,
-    } = authority;
-    world
-        .resource_mut::<InputTimeline>()
-        .abort_presented_route(input_route);
-    UiDeferredPresentationAuthority {
-        surface_id,
-        facts,
-        presentation_epoch: prepared.receipt().presentation_epoch(),
-    }
+pub fn ui_candidate_frame(
+    world: &World,
+    id: UiSurfaceId,
+) -> Result<Option<Arc<UiFrame>>, UiAdapterError> {
+    Ok(state(world)?
+        .surfaces
+        .get(&id)
+        .and_then(|surface| surface.candidate.as_ref())
+        .map(|candidate| Arc::clone(&candidate.frame)))
 }
 
-/// Restages current session/reducer facts for one exact equivalent deferred packet.
-pub fn retry_deferred_ui_presentation(
-    world: &mut World,
-    authority: UiDeferredPresentationAuthority,
-) -> Result<UiDeferredPresentationRetry, UiAdapterError> {
-    world.resource_scope(|world, state: Mut<UiRuntimeState>| {
-        let surface =
-            state
-                .surface(authority.surface_id)
-                .ok_or(UiAdapterError::UnknownSurface {
-                    surface: authority.surface_id.get(),
-                })?;
-        let slot = surface.slot();
-        let Some(prepared) = surface
-            .prepare_retained_presentation(&authority.facts, authority.presentation_epoch)?
-        else {
-            return Ok(UiDeferredPresentationRetry::Superseded);
-        };
-        let input_route =
-            prepare_input_route(world, surface.input_endpoint(), slot, prepared.receipt())?;
-        Ok(UiDeferredPresentationRetry::Prepared(Box::new(
-            UiPreparedPresentationAuthority {
-                surface_id: authority.surface_id,
-                facts: authority.facts,
-                prepared,
-                input_route,
-            },
-        )))
-    })
+pub fn ui_candidate_frames(world: &World) -> Result<Vec<Arc<UiFrame>>, UiAdapterError> {
+    Ok(state(world)?
+        .surfaces
+        .values()
+        .filter_map(|surface| surface.candidate.as_ref())
+        .map(|candidate| Arc::clone(&candidate.frame))
+        .collect())
 }
 
-/// Terminates deferred authority after a newer candidate is admitted.
-pub fn supersede_deferred_ui_presentation(_authority: UiDeferredPresentationAuthority) {}
+/// Returns the single accepted layout used to route this surface's input.
+pub fn latest_presented_ui_frame(
+    world: &World,
+    id: UiSurfaceId,
+) -> Option<(UiPresentationReceipt, Arc<UiFrame>)> {
+    state(world).ok()?.surfaces.get(&id)?.presented.clone()
+}
 
-/// Consumes one backend-accepted prepared presentation with no fallible post-submit work.
-///
-/// Input loss takes precedence over UI invalidation. Otherwise, an unavailable surface or changed
-/// interaction basis aborts the exact route token before publication. All checks and completion
-/// share this exclusive World access; a newer authored candidate alone does not invalidate the
-/// immutable packet accepted by the backend.
-#[must_use]
-pub fn commit_prepared_ui_presentation(
+/// Publishes the exact frame already drawn by the backend. A compiled candidate alone never
+/// becomes interactive. Renderer-owned in-flight frames may complete after a newer candidate.
+pub fn publish_presented_frame(
     world: &mut World,
-    authority: UiPreparedPresentationAuthority,
-) -> UiPresentationCommit {
-    let UiPreparedPresentationAuthority {
-        surface_id,
-        facts: _,
-        prepared,
-        input_route,
-    } = authority;
-    if world
-        .resource::<InputTimeline>()
-        .prepared_route_invalidation(&input_route)
-        .is_some()
+    frame: &Arc<UiFrame>,
+    epoch: u64,
+) -> Result<UiPresentationReceipt, UiAdapterError> {
+    let receipt = frame
+        .presentation_receipt(epoch)
+        .ok_or(UiAdapterError::StalePresentation)?;
+    let mut runtime = state_mut(world)?;
+    let surface = runtime.surface_mut(receipt.surface_id())?;
+    if !surface.availability.is_active()
+        || frame.environment().slot_generation().get() != surface.slot.slot_generation()
+        || !frame
+            .bindings
+            .as_ref()
+            .is_some_and(|bindings| Arc::ptr_eq(&surface.producer, &bindings.producer))
     {
-        let InputRouteCommit::Invalidated { reason } = world
-            .resource_mut::<InputTimeline>()
-            .commit_presented_route(input_route)
-        else {
-            unreachable!("exclusive completion preserves the observed Input invalidation");
-        };
-        return UiPresentationCommit::Invalidated {
-            reason: UiPresentationInvalidationReason::Input(reason),
-        };
+        return Err(UiAdapterError::FrameSuperseded);
     }
-    let ui_invalidation = world
-        .get_resource::<UiRuntimeState>()
-        .and_then(|state| state.surface(surface_id))
-        .map_or(
-            Some(UiPresentationInvalidationReason::SurfaceUnavailable),
-            |surface| surface.prepared_presentation_invalidation(&prepared),
-        );
-    if let Some(reason) = ui_invalidation {
-        world
-            .resource_mut::<InputTimeline>()
-            .abort_presented_route(input_route);
-        return UiPresentationCommit::Invalidated { reason };
+    if surface.presented.as_ref().is_some_and(|(previous, _)| {
+        previous.presentation_epoch() >= epoch
+            || previous.frame_revision() > receipt.frame_revision()
+    }) {
+        return Err(UiAdapterError::StalePresentation);
     }
-    let input_commit = world
-        .resource_mut::<InputTimeline>()
-        .commit_presented_route(input_route);
-    match input_commit {
-        InputRouteCommit::Published(input_route) => {
-            let receipt = prepared.receipt();
-            world
-                .resource_mut::<UiRuntimeState>()
-                .surface_mut(surface_id)
-                .expect("a valid prepared UI presentation keeps its Surface Slot installed")
-                .commit_presentation(prepared, input_route);
-            UiPresentationCommit::Committed(receipt)
-        }
-        InputRouteCommit::Invalidated { reason } => UiPresentationCommit::Invalidated {
-            reason: UiPresentationInvalidationReason::Input(reason),
-        },
-    }
+    surface.interaction.reconcile(frame);
+    surface.presented = Some((receipt, Arc::clone(frame)));
+    Ok(receipt)
 }
 
-fn prepare_input_route(
-    world: &mut World,
-    input_endpoint: &InputEndpointClaim,
-    slot: UiSurfaceSlot,
-    receipt: UiPresentationReceipt,
-) -> Result<PreparedInputRoutePublication, UiAdapterError> {
-    let epoch = InputPresentationEpoch::new(receipt.presentation_epoch())
-        .ok_or(UiJournalError::ZeroPresentationEpoch)?;
+fn state(world: &World) -> Result<&UiRuntimeState, UiAdapterError> {
     world
-        .resource_mut::<InputTimeline>()
-        .prepare_claimed_route(
-            input_endpoint,
-            InputPresentedRoute::new(
-                slot.endpoint().window(),
-                InputSurfaceId::new(receipt.surface_id().get()),
-                slot.endpoint().seat(),
-                epoch,
-                InputSlotGeneration::new(receipt.slot_generation().get())
-                    .expect("validated receipt slot generation is non-zero"),
-                InputRouteGeneration::new(receipt.route_revision().get())
-                    .expect("validated receipt route generation is non-zero"),
-                InputGeometryGeneration::new(receipt.geometry_generation().get())
-                    .expect("validated receipt geometry generation is non-zero"),
-            ),
-        )
-        .map_err(UiAdapterError::from)
+        .get_resource()
+        .ok_or(UiAdapterError::RuntimeUnavailable)
 }
 
-/// Checks that the original Input owner still retains this authority's exact route reservation.
-#[doc(hidden)]
-#[must_use]
-pub fn can_abort_prepared_ui_presentation(
-    world: &World,
-    authority: &UiPreparedPresentationAuthority,
-) -> bool {
+fn state_mut(world: &mut World) -> Result<Mut<'_, UiRuntimeState>, UiAdapterError> {
     world
-        .get_resource::<InputTimeline>()
-        .is_some_and(|input| input.owns_prepared_route(&authority.input_route))
-}
-
-/// Aborts one prepared presentation before backend acceptance.
-pub fn abort_prepared_ui_presentation(
-    world: &mut World,
-    authority: UiPreparedPresentationAuthority,
-) {
-    world
-        .resource_mut::<InputTimeline>()
-        .abort_presented_route(authority.input_route);
-}
-
-/// Supersedes one prepared presentation before a newer attempt is admitted.
-pub fn supersede_prepared_ui_presentation(
-    world: &mut World,
-    authority: UiPreparedPresentationAuthority,
-) {
-    abort_prepared_ui_presentation(world, authority);
-}
-
-/// Projects accessibility semantics from the latest submitted frame and interaction state.
-pub fn ui_semantic_snapshot(
-    world: &World,
-    receipt: UiPresentationReceipt,
-    seat: UiSeatId,
-) -> Result<UiSemanticSnapshot, UiAdapterError> {
-    let Some(state) = world.get_resource::<UiRuntimeState>() else {
-        return Err(UiAdapterError::RuntimeUnavailable);
-    };
-    let surface = state
-        .surface(receipt.surface_id())
-        .ok_or(UiAdapterError::UnknownSurface {
-            surface: receipt.surface_id().get(),
-        })?;
-    let expected_seat = surface.slot().endpoint().seat();
-    if expected_seat.get() != seat.get() {
-        return Err(UiAdapterError::SeatOwnerMismatch {
-            expected: expected_seat.get(),
-            actual: seat.get(),
-        });
-    }
-    surface.semantic_snapshot(UiRouteStamp::from_receipt(receipt), seat)
-}
-
-#[cfg(test)]
-pub(crate) fn presented_receipt(
-    world: &World,
-    surface_id: UiSurfaceId,
-    presentation_epoch: u64,
-) -> Option<UiPresentationReceipt> {
-    world
-        .get_resource::<UiRuntimeState>()?
-        .surface(surface_id)?
-        .presented_receipt(presentation_epoch)
-}
-
-pub(super) fn push_diagnostic(
-    diagnostics: &mut Vec<UiAdapterDiagnostic>,
-    code: &'static str,
-    message: &str,
-) {
-    if diagnostics.len() == MAX_ADAPTER_DIAGNOSTICS {
-        return;
-    }
-    diagnostics.push(UiAdapterDiagnostic {
-        code,
-        message: truncate_message(message),
-    });
-}
-
-fn truncate_message(message: &str) -> String {
-    if message.len() <= MAX_DIAGNOSTIC_BYTES {
-        return message.to_string();
-    }
-    let mut end = MAX_DIAGNOSTIC_BYTES;
-    while !message.is_char_boundary(end) {
-        end -= 1;
-    }
-    message[..end].to_string()
+        .get_resource_mut()
+        .ok_or(UiAdapterError::RuntimeUnavailable)
 }

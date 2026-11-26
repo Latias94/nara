@@ -601,129 +601,6 @@ fn resizing_one_view_preserves_both_producer_admission_and_other_view_identity()
 }
 
 #[test]
-fn multiple_composites_certify_only_exact_sampled_images_in_one_window() {
-    let mut execution = WgpuRenderHost::offscreen();
-    let Some(namespace) = test_namespace(&mut execution) else {
-        return;
-    };
-    let frame = test_image_frame();
-    let target = image_target(&frame);
-    let first = WgpuSubmittedImageReceipt::new(
-        WgpuRenderProducerId::new(1),
-        target,
-        1,
-        frame.source_generation(),
-        1,
-        21,
-        4,
-        1,
-    );
-    let second = WgpuSubmittedImageReceipt::new(
-        WgpuRenderProducerId::new(2),
-        target,
-        1,
-        frame.source_generation(),
-        1,
-        21,
-        4,
-        1,
-    );
-    let unsampled = WgpuSubmittedImageReceipt::new(
-        WgpuRenderProducerId::new(3),
-        target,
-        1,
-        frame.source_generation(),
-        1,
-        21,
-        4,
-        1,
-    );
-    let foreign = WgpuSubmittedImageReceipt::new(
-        WgpuRenderProducerId::new(4),
-        target,
-        1,
-        frame.source_generation(),
-        1,
-        21,
-        4,
-        1,
-    );
-    let first_display =
-        WgpuImageDisplay::issue(allocated_test_output(&execution, &namespace, first));
-    let mirror = WgpuImageDisplay::issue(first_display.output().clone());
-    let second_display =
-        WgpuImageDisplay::issue(allocated_test_output(&execution, &namespace, second));
-    let unsampled_display =
-        WgpuImageDisplay::issue(allocated_test_output(&execution, &namespace, unsampled));
-    let foreign_display =
-        WgpuImageDisplay::issue(allocated_test_output(&execution, &namespace, foreign));
-    assert_eq!(mirror.receipt(), first_display.receipt());
-    assert_ne!(mirror.occurrence(), first_display.occurrence());
-    assert_eq!(
-        first_display.clone().occurrence(),
-        first_display.occurrence()
-    );
-    let window = WgpuWindowPresentedReceipt::new(WindowId::PRIMARY, 3, 21, 4, 19);
-    let mut generation = 0;
-    let mut composites = Vec::with_capacity(4);
-    join_composite_receipts_into(
-        &mut generation,
-        &[
-            first_display.clone(),
-            second_display.clone(),
-            unsampled_display,
-            mirror.clone(),
-        ],
-        &[
-            ImageSample {
-                image: second,
-                occurrence: second_display.occurrence(),
-            },
-            ImageSample {
-                image: first,
-                occurrence: first_display.occurrence(),
-            },
-            ImageSample {
-                image: foreign,
-                occurrence: foreign_display.occurrence(),
-            },
-            ImageSample {
-                image: second,
-                occurrence: first_display.occurrence(),
-            },
-            ImageSample {
-                image: first,
-                occurrence: mirror.occurrence(),
-            },
-            ImageSample {
-                image: first,
-                occurrence: first_display.occurrence(),
-            },
-        ],
-        window,
-        &mut composites,
-    )
-    .unwrap();
-
-    assert_eq!(composites.len(), 3);
-    assert_eq!(composites[0].image(), second);
-    assert_eq!(composites[1].image(), first);
-    assert_eq!(composites[2].image(), first);
-    assert_eq!(composites[0].occurrence(), second_display.occurrence());
-    assert_eq!(composites[1].occurrence(), first_display.occurrence());
-    assert_eq!(composites[2].occurrence(), mirror.occurrence());
-    assert!(
-        composites
-            .iter()
-            .all(|composite| composite.window() == window)
-    );
-    assert_eq!(composites[0].presentation_generation(), 1);
-    assert_eq!(composites[1].presentation_generation(), 2);
-    assert_eq!(composites[2].presentation_generation(), 3);
-    assert_eq!(generation, 3);
-}
-
-#[test]
 fn viewport_identity_does_not_authenticate_another_view_with_equal_generations() {
     let frame = test_image_frame();
     let target = image_target(&frame);
@@ -750,130 +627,6 @@ fn viewport_identity_does_not_authenticate_another_view_with_equal_generations()
     );
 
     assert!(!WgpuImageTargetIdentity { stamp }.matches_submission(receipt));
-}
-
-#[test]
-fn composite_receipt_requires_the_exact_submitted_sample_and_window_namespace() {
-    let mut execution = WgpuRenderHost::offscreen();
-    let Some(namespace) = test_namespace(&mut execution) else {
-        return;
-    };
-    let frame = test_image_frame();
-    let image = image_target(&frame);
-    let submitted = WgpuSubmittedImageReceipt::new(
-        WgpuRenderProducerId::new(1),
-        image,
-        4,
-        frame.source_generation(),
-        6,
-        10,
-        2,
-        7,
-    );
-    let window = WgpuWindowPresentedReceipt::new(
-        WindowId::PRIMARY,
-        3,
-        submitted.backend_instance_id(),
-        submitted.device_epoch(),
-        9,
-    );
-    let mut presentation_generation = 0;
-
-    assert_eq!(
-        join_composite_receipt(&mut presentation_generation, Some(submitted), None, window,)
-            .unwrap(),
-        None,
-    );
-    assert_eq!(presentation_generation, 0);
-
-    let foreign_window = WgpuWindowPresentedReceipt::new(
-        WindowId::PRIMARY,
-        3,
-        submitted.backend_instance_id().saturating_add(1),
-        submitted.device_epoch(),
-        9,
-    );
-    let display = WgpuImageDisplay::issue(allocated_test_output(&execution, &namespace, submitted));
-    let sample = ImageSample {
-        image: submitted,
-        occurrence: display.occurrence(),
-    };
-    assert_eq!(
-        join_composite_receipt(
-            &mut presentation_generation,
-            Some(submitted),
-            Some(sample),
-            foreign_window,
-        )
-        .unwrap(),
-        None,
-    );
-    assert_eq!(presentation_generation, 0);
-
-    let foreign_epoch = WgpuWindowPresentedReceipt::new(
-        WindowId::PRIMARY,
-        3,
-        submitted.backend_instance_id(),
-        submitted.device_epoch() + 1,
-        9,
-    );
-    assert_eq!(
-        join_composite_receipt(
-            &mut presentation_generation,
-            Some(submitted),
-            Some(sample),
-            foreign_epoch,
-        )
-        .unwrap(),
-        None,
-    );
-    let same_configuration = WgpuSubmittedImageReceipt::new(
-        submitted.producer_id(),
-        submitted.target(),
-        submitted.target_generation(),
-        submitted.source_generation(),
-        submitted.source_handoff_generation(),
-        submitted.backend_instance_id(),
-        submitted.device_epoch(),
-        submitted.render_transaction_frame_index(),
-    );
-    assert_ne!(
-        same_configuration.output_version(),
-        submitted.output_version()
-    );
-    assert_eq!(
-        join_composite_receipt(
-            &mut presentation_generation,
-            Some(same_configuration),
-            Some(sample),
-            window,
-        )
-        .unwrap(),
-        None,
-    );
-    assert_eq!(
-        join_composite_receipt(&mut presentation_generation, None, Some(sample), window).unwrap(),
-        None,
-    );
-    assert_eq!(presentation_generation, 0);
-
-    let composite = join_composite_receipt(
-        &mut presentation_generation,
-        Some(submitted),
-        Some(sample),
-        window,
-    )
-    .unwrap()
-    .unwrap();
-    assert_eq!(composite.presentation_generation(), 1);
-    assert_eq!(composite.image(), submitted);
-    assert_eq!(composite.occurrence(), display.occurrence());
-    assert_eq!(
-        composite.image().source_generation(),
-        frame.source_generation()
-    );
-    assert_eq!(composite.image().source_handoff_generation(), 6);
-    assert_eq!(presentation_generation, 1);
 }
 
 #[test]
@@ -1070,19 +823,20 @@ fn editor_ui_completion_maps_every_terminal_path_without_stranding_permits() {
     let backend_generation = UiPresentationBackendGeneration::new(21, 4).unwrap();
 
     let (outcomes, mut presented) = editor_ui_submission(31);
-    presented.bind_backend(backend_generation).unwrap();
+    presented.state.bind_backend(backend_generation).unwrap();
     assert!(matches!(
         publish_editor_ui_outcomes(outcomes, presented.presented()).remove(0),
         UiPresentationOutcome::Presented(_)
     ));
 
     let (outcomes, mut deferred) = editor_ui_submission(32);
-    deferred.bind_backend(backend_generation).unwrap();
-    let upload_deferred = WgpuRenderHostError::Backend(WgpuRenderError::UploadDeferred {
-        message: "shared upload budget exhausted".to_owned(),
-    });
+    deferred.state.bind_backend(backend_generation).unwrap();
     assert!(matches!(
-        publish_editor_ui_outcomes(outcomes, deferred.failed(&upload_deferred)).remove(0),
+        publish_editor_ui_outcomes(
+            outcomes,
+            deferred.deferred("shared upload budget exhausted".to_owned()),
+        )
+        .remove(0),
         UiPresentationOutcome::Deferred { .. }
     ));
 
@@ -1097,7 +851,7 @@ fn editor_ui_completion_maps_every_terminal_path_without_stranding_permits() {
     ));
 
     let (outcomes, mut target_fault) = editor_ui_submission(34);
-    target_fault.bind_backend(backend_generation).unwrap();
+    target_fault.state.bind_backend(backend_generation).unwrap();
     assert!(matches!(
         publish_editor_ui_outcomes(
             outcomes,
@@ -1115,7 +869,7 @@ fn editor_ui_completion_maps_every_terminal_path_without_stranding_permits() {
     ));
 
     let (outcomes, mut device_fault) = editor_ui_submission(35);
-    device_fault.bind_backend(backend_generation).unwrap();
+    device_fault.state.bind_backend(backend_generation).unwrap();
     assert!(matches!(
         publish_editor_ui_outcomes(
             outcomes,
@@ -1148,80 +902,6 @@ fn editor_ui_completion_maps_every_terminal_path_without_stranding_permits() {
     ));
 }
 
-#[cfg(feature = "hud-runtime")]
-#[test]
-fn editor_ui_presented_completion_requires_the_exact_final_composite() {
-    let mut execution = WgpuRenderHost::offscreen();
-    let Some(namespace) = test_namespace(&mut execution) else {
-        return;
-    };
-    let frame = test_image_frame();
-    let image = image_target(&frame);
-    let submitted = WgpuSubmittedImageReceipt::new(
-        WgpuRenderProducerId::new(1),
-        image,
-        8,
-        frame.source_generation(),
-        3,
-        21,
-        4,
-        12,
-    );
-    let window = WgpuWindowPresentedReceipt::new(
-        WindowId::PRIMARY,
-        5,
-        submitted.backend_instance_id(),
-        submitted.device_epoch(),
-        17,
-    );
-    let (outcomes, mut ui) = editor_ui_submission(38);
-    ui.bind_backend(UiPresentationBackendGeneration::new(21, 4).unwrap())
-        .unwrap();
-    let output = allocated_test_output(&execution, &namespace, submitted);
-    let display = WgpuImageDisplay::issue(output.clone());
-    let mirror = WgpuImageDisplay::issue(output.clone());
-    let submission = WgpuUiImageSubmission {
-        display: display.clone(),
-        interaction: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-        producer_closed: Arc::new(AtomicBool::new(false)),
-        ui,
-    };
-    assert_eq!(submission.image(), submitted);
-    assert_eq!(submission.output(), &output);
-    assert_eq!(submission.display(), &display);
-    let foreign = WgpuImageCompositeReceipt::new(
-        WgpuSubmittedImageReceipt::new(
-            WgpuRenderProducerId::new(1),
-            image,
-            9,
-            frame.source_generation(),
-            3,
-            21,
-            4,
-            12,
-        ),
-        display.occurrence(),
-        window,
-        1,
-    );
-    let submission = submission
-        .presented(foreign)
-        .expect_err("a foreign image receipt must not commit Runtime UI presentation");
-    let submission = submission
-        .presented(WgpuImageCompositeReceipt::new(
-            submitted,
-            mirror.occurrence(),
-            window,
-            1,
-        ))
-        .expect_err("a passive same-window mirror must not consume the original UI permit");
-    let exact = WgpuImageCompositeReceipt::new(submitted, display.occurrence(), window, 1);
-
-    let completed = publish_editor_ui_outcomes(outcomes, submission.presented(exact).unwrap());
-    assert_eq!(completed.len(), 1);
-    assert!(matches!(completed[0], UiPresentationOutcome::Presented(_)));
-}
-
 #[test]
 fn editor_admission_validation_is_read_only_until_success_is_committed() {
     let source = test_image_frame().source_generation();
@@ -1252,135 +932,6 @@ fn editor_admission_validation_is_read_only_until_success_is_committed() {
     ));
     assert_eq!(admission.source_generation, Some(source));
     assert_eq!(admission.last_frame_index, Some(8));
-}
-
-#[cfg(feature = "hud-runtime")]
-#[test]
-#[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
-fn native_editor_ui_rejected_after_close_or_loss_retains_the_original_permit() {
-    for lost in [false, true] {
-        let mut execution = WgpuRenderHost::offscreen();
-        execution.begin_frame(1).unwrap();
-        let frame = test_image_frame();
-        let producer = execution.create_producer().unwrap();
-        let view_id = producer.id();
-        let reservation = execution
-            .reserve_image_target(&producer, frame.source_generation(), image_target(&frame))
-            .unwrap();
-        execution
-            .activate_image_target(&producer, reservation)
-            .unwrap();
-        let namespace = execution.backend.prepare_image_device().unwrap();
-        let backend_generation = UiPresentationBackendGeneration::new(
-            namespace.backend_instance_id,
-            namespace.device_epoch,
-        )
-        .unwrap();
-        let (outcomes, mut ui) = editor_ui_submission_with_packet(
-            if lost { 91 } else { 90 },
-            compile_test_ui_packet(
-                nara_ui::kernel::UiVisual::solid(nara_ui::kernel::UiColor::rgba(
-                    1.0, 1.0, 1.0, 1.0,
-                )),
-                RenderTarget::Image(image_target(&frame).image()),
-                &crate::hud::UiPreparedImages::default(),
-            ),
-        );
-        let (packet, attempt) = match &ui.state {
-            WgpuUiSubmissionState::Prepared(submissions) => (
-                Arc::clone(submissions[0].submission().packet()),
-                crate::hud::presentation::prepared_attempt(submissions[0].submission()),
-            ),
-            WgpuUiSubmissionState::Submitted(_) => {
-                panic!("fixture must start with its original prepared permit")
-            }
-        };
-        let input = test_stock_capture(
-            frame,
-            crate::gpu::WgpuStockCapture::new().with_ui(vec![Arc::clone(&packet)], None, None),
-        );
-        let output = execution
-            .submit_image_in_namespace(view_id, &namespace, &input, Some(&mut ui))
-            .unwrap();
-        let original_submission = std::ptr::from_ref(&ui.state.bound_submissions()[0]);
-        let original_identity = ui.state.bound_submissions()[0].submission().identity();
-        let display = execution.display_image(output.clone()).unwrap();
-        let interaction = Arc::clone(&execution.views[&view_id].interaction);
-        let producer_closed = Arc::clone(&producer.closed);
-        let submission = WgpuUiImageSubmission {
-            display: display.clone(),
-            interaction: Arc::clone(&interaction),
-            producer_closed: Arc::clone(&producer_closed),
-            ui,
-        };
-        let window = WgpuWindowPresentedReceipt::new(
-            WindowId::PRIMARY,
-            1,
-            namespace.backend_instance_id,
-            namespace.device_epoch,
-            1,
-        );
-        let composite =
-            WgpuImageCompositeReceipt::new(output.receipt(), display.occurrence(), window, 1);
-        assert_eq!(
-            read_output_pixel(&mut execution, &output, 16, 16),
-            [255, 255, 255, 255]
-        );
-        let domain = if lost {
-            namespace.device.destroy();
-            namespace.device.poll(wgpu::PollType::Poll).unwrap();
-            assert!(
-                !output.is_current(),
-                "the original device signal immediately revokes retained pixels"
-            );
-            assert!(interaction.load(std::sync::atomic::Ordering::Acquire));
-            UiPresentationBackendFaultDomain::Device
-        } else {
-            drain_submission_prefix(&execution.retire_producer(&producer).unwrap());
-            assert!(!interaction.load(std::sync::atomic::Ordering::Acquire));
-            assert!(
-                output.is_current(),
-                "producer close preserves passive pixel leases"
-            );
-            assert_eq!(
-                read_output_pixel(&mut execution, &output, 16, 16),
-                [255, 255, 255, 255]
-            );
-            UiPresentationBackendFaultDomain::Target
-        };
-        let returned = submission
-            .presented(composite)
-            .expect_err("an exact old composite cannot restore revoked UI authority");
-        assert!(Arc::ptr_eq(&returned.output().0, &output.0));
-        assert!(Arc::ptr_eq(&returned.interaction, &interaction));
-        assert!(Arc::ptr_eq(&returned.producer_closed, &producer_closed));
-        assert_eq!(returned.display(), &display);
-        assert_eq!(returned.ui.state.submission_count(), 1);
-        let original = &returned.ui.state.bound_submissions()[0];
-        assert!(std::ptr::eq(original, original_submission));
-        assert_eq!(original.submission().identity(), original_identity);
-        assert!(Arc::ptr_eq(original.submission().packet(), &packet));
-        let returned = returned
-            .presented(composite)
-            .expect_err("repeating the composite must retain the same one-shot permit");
-        let completed = publish_editor_ui_outcomes(
-            outcomes,
-            returned.backend_fault(
-                Some(backend_generation),
-                domain,
-                "original display authority revoked".to_owned(),
-            ),
-        );
-        assert_eq!(completed.len(), 1);
-        assert!(
-            matches!(&completed[0], UiPresentationOutcome::BackendFault {
-            attempt: Some(actual), backend_generation: Some(generation), domain: actual_domain, ..
-        } if *actual == attempt && *generation == backend_generation && *actual_domain == domain)
-        );
-        if lost {
-            drain_submission_prefix(&execution.retire_producer(&producer).unwrap());
-        }
-    }
 }
 
 #[test]
@@ -1481,59 +1032,6 @@ fn viewport_generation_exhaustion_never_wraps_or_requires_a_spurious_handoff() {
 }
 
 #[test]
-fn composite_generation_exhaustion_cannot_publish_or_wrap() {
-    let mut execution = WgpuRenderHost::offscreen();
-    let Some(namespace) = test_namespace(&mut execution) else {
-        return;
-    };
-    let frame = test_image_frame();
-    let receipt = WgpuSubmittedImageReceipt::new(
-        WgpuRenderProducerId::new(1),
-        image_target(&frame),
-        1,
-        frame.source_generation(),
-        1,
-        namespace.backend_instance_id,
-        namespace.device_epoch,
-        1,
-    );
-    let display = WgpuImageDisplay::issue(allocated_test_output(&execution, &namespace, receipt));
-    let window = WgpuWindowPresentedReceipt::new(
-        WindowId::PRIMARY,
-        1,
-        namespace.backend_instance_id,
-        namespace.device_epoch,
-        1,
-    );
-    let sample = ImageSample {
-        image: receipt,
-        occurrence: display.occurrence(),
-    };
-    let mut generation = u64::MAX;
-    assert_eq!(
-        join_composite_receipt(&mut generation, Some(receipt), None, window).unwrap(),
-        None
-    );
-    assert!(matches!(
-        join_composite_receipt(&mut generation, Some(receipt), Some(sample), window),
-        Err(WgpuRenderHostError::PresentationGenerationExhausted)
-    ));
-    let mut composites = Vec::with_capacity(1);
-    assert!(matches!(
-        join_composite_receipts_into(
-            &mut generation,
-            &[display],
-            &[sample],
-            window,
-            &mut composites,
-        ),
-        Err(WgpuRenderHostError::PresentationGenerationExhausted)
-    ));
-    assert!(composites.is_empty());
-    assert_eq!(generation, u64::MAX);
-}
-
-#[test]
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
 fn native_offscreen_outputs_retain_exact_pixels_through_resize_and_close() {
     let mut execution = WgpuRenderHost::offscreen();
@@ -1631,11 +1129,11 @@ fn native_offscreen_outputs_retain_exact_pixels_through_resize_and_close() {
         read_output_pixel(&mut execution, &third, 16, 16),
         [0, 0, 255, 255]
     );
-    execution.display_image(retained).unwrap();
+    execution.with_image(&retained, |_, _, _| ()).unwrap();
     drain_submission_prefix(&prefix);
 
     let mut namespace = execution.backend.prepare_image_device().unwrap();
-    assert!(namespace.surface.is_none());
+    assert_eq!(execution.backend.surface_count(), 0);
     namespace.device_epoch += 1;
     assert!(matches!(
         execution.validate_viewport_submission(&namespace, &first),
@@ -2176,10 +1674,6 @@ fn native_loss_rejects_old_outputs_and_new_host_replays_the_original_input() {
     device.poll(wgpu::PollType::Poll).unwrap();
     assert!(!old_output.is_current());
     assert!(matches!(
-        original.display_image(old_output.clone()),
-        Err(WgpuRenderHostError::Backend(WgpuRenderError::DeviceLost))
-    ));
-    assert!(matches!(
         original.with_image(&old_output, |_, _, _| ()),
         Err(WgpuRenderHostError::Backend(WgpuRenderError::DeviceLost))
     ));
@@ -2203,10 +1697,6 @@ fn native_loss_rejects_old_outputs_and_new_host_replays_the_original_input() {
         replacement.backend_instance_id(),
         original.backend_instance_id()
     );
-    assert!(matches!(
-        replacement.display_image(old_output.clone()),
-        Err(WgpuRenderHostError::StaleImageSubmission)
-    ));
     assert!(matches!(
         replacement.with_image(&old_output, |_, _, _| ()),
         Err(WgpuRenderHostError::StaleImageSubmission)
@@ -2342,10 +1832,7 @@ fn drain_submission_prefix(prefix: &WgpuSubmissionPrefix) {
 fn test_namespace(execution: &mut WgpuRenderHost) -> Option<WgpuDeviceNamespace> {
     match execution.backend.prepare_image_device() {
         Ok(namespace) => {
-            assert!(
-                namespace.surface.is_none(),
-                "image setup must not create a surface"
-            );
+            assert_eq!(execution.backend.surface_count(), 0);
             Some(namespace)
         }
         Err(error @ WgpuRenderError::AdapterUnavailable { .. })
@@ -2424,8 +1911,6 @@ fn activate_test_view(
         .or_default()
         .admission
         .activate(stamp);
-    execution.views.get_mut(&view_id).unwrap().interaction =
-        Arc::new(std::sync::atomic::AtomicBool::new(true));
     stamp
 }
 

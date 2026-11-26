@@ -198,6 +198,37 @@ impl WgpuRenderProgram {
     }
 }
 
+/// One captured render feature and its read/write declarations for this program.
+///
+/// Reads name existing logical resource versions. Writes produce new versions with explicit
+/// initialization, so the program can order passes by dependency before any native encoding.
+pub struct RenderPass<'a, F: WgpuRenderFeature> {
+    key: u64,
+    feature: &'a WgpuFeatureInstance<F>,
+    capture: Arc<F::Capture>,
+    reads: &'a [WgpuProgramRead],
+    writes: &'a [WgpuProgramWrite],
+}
+
+impl<'a, F: WgpuRenderFeature> RenderPass<'a, F> {
+    #[must_use]
+    pub fn new(
+        key: u64,
+        feature: &'a WgpuFeatureInstance<F>,
+        capture: Arc<F::Capture>,
+        reads: &'a [WgpuProgramRead],
+        writes: &'a [WgpuProgramWrite],
+    ) -> Self {
+        Self {
+            key,
+            feature,
+            capture,
+            reads,
+            writes,
+        }
+    }
+}
+
 /// Builds one complete publication candidate. Stable operation keys only break ready ties;
 /// resource reads and preservation declare the actual dependency edges.
 pub struct WgpuRenderProgramBuilder {
@@ -459,7 +490,15 @@ impl WgpuRenderProgramBuilder {
         reads: &[WgpuProgramRead],
         writes: &[WgpuProgramWrite],
     ) -> Result<(), WgpuRenderProgramError> {
-        if instance.identity.is_closed() {
+        self.add_pass(RenderPass::new(key, instance, capture, reads, writes))
+    }
+
+    /// Admits a pass into the same dependency and execution order used by stock rendering.
+    pub fn add_pass<F: WgpuRenderFeature>(
+        &mut self,
+        pass: RenderPass<'_, F>,
+    ) -> Result<(), WgpuRenderProgramError> {
+        if pass.feature.identity.is_closed() {
             return Err(WgpuRenderProgramError::FeatureClosed);
         }
         let metadata = feature::operation_metadata_bytes::<F>()
@@ -469,15 +508,15 @@ impl WgpuRenderProgramBuilder {
                 crate::gpu::LimitKind::MetadataBytes,
             ))?;
         self.graph.add_operation_refs(
-            key,
-            reads.iter().map(|read| &read.0),
-            writes.iter().map(|write| &write.0),
+            pass.key,
+            pass.reads.iter().map(|read| &read.0),
+            pass.writes.iter().map(|write| &write.0),
         )?;
         // Declaration validation and count/metadata admission precede this engine-owned Arc.
         // A concurrent close after admission is revalidated by the actual Host before use.
         self.operations.push(ProgramOperation {
-            key,
-            capture: Some(instance.capture(capture)),
+            key: pass.key,
+            capture: Some(pass.feature.capture(pass.capture)),
         });
         self.modeled_metadata_bytes = metadata;
         Ok(())

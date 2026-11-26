@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 
 use nara_asset::{AssetRef, AssetReferenceDemand};
-use nara_ecs::{Component, World};
+use nara_ecs::Component;
 use nara_reflect::{
-    ComponentRegistryBuilder, ComponentValue, ComponentValueShape, PersistentComponent,
-    PersistentComponentProvider, collect_declared_asset_references_from_schema,
-    validate_component_value,
+    ComponentSchemaCatalog, ComponentValue, ComponentValueShape, PersistentComponent,
+    PersistentComponentProvider, validate_component_value,
 };
 
 type AssetAlias = AssetRef;
@@ -92,25 +91,22 @@ fn field_demand_overrides_recursive_shapes_including_aliases_and_associated_type
 }
 
 #[test]
-fn demand_survives_native_round_trips_with_nested_empty_and_absent_values() {
-    let mut registry = ComponentRegistryBuilder::new();
-    registry
-        .register_persistent_component::<AssetDemandProbe>()
-        .unwrap();
-    let snapshot = registry.freeze().unwrap();
-    let schema = AssetDemandProbe::persistent_component_schema();
+fn asset_codecs_round_trip_nested_empty_and_absent_values() {
+    let catalog =
+        ComponentSchemaCatalog::from_components([AssetDemandProbe::persistent_component_schema()])
+            .unwrap();
+    let schema = &catalog.components()[0];
     let shared = AssetRef::path("scenes/shared.scene").unwrap();
     let other = AssetRef::path("scenes/later.scene").unwrap();
 
-    for (links, groups, expected_reference_count) in [
-        (None, BTreeMap::new(), 3),
+    for (links, groups) in [
+        (None, BTreeMap::new()),
         (
             Some(Vec::new()),
             BTreeMap::from([
                 ("empty".to_owned(), Vec::new()),
                 ("absent".to_owned(), vec![None]),
             ]),
-            3,
         ),
         (
             Some(vec![shared.clone(), other.clone()]),
@@ -118,7 +114,6 @@ fn demand_survives_native_round_trips_with_nested_empty_and_absent_values() {
                 "next".to_owned(),
                 vec![Some(shared.clone()), None, Some(other.clone())],
             )]),
-            9,
         ),
     ] {
         let expected = AssetDemandProbe {
@@ -129,13 +124,8 @@ fn demand_survives_native_round_trips_with_nested_empty_and_absent_values() {
             immediate: shared.clone(),
             implicit: Some(vec![shared.clone()]),
         };
-        let mut source = World::new();
-        let source_entity = source.spawn(expected.clone()).id();
-        let encoded = snapshot
-            .encode_component(schema.id(), &source, source_entity)
-            .unwrap()
-            .unwrap();
-        validate_component_value(&schema, &encoded).unwrap();
+        let encoded = expected.encode_persistent_component().unwrap();
+        validate_component_value(schema, &encoded).unwrap();
         assert_eq!(
             encoded.field("future").unwrap(),
             encoded.field("alias").unwrap()
@@ -149,42 +139,9 @@ fn demand_survives_native_round_trips_with_nested_empty_and_absent_values() {
             Some(_) => {}
         }
 
-        let references =
-            collect_declared_asset_references_from_schema(&schema, schema.version(), &encoded)
-                .unwrap();
-        assert_eq!(references.len(), expected_reference_count);
-        for reference in &references {
-            let expected_demand = match reference.field_id().as_str() {
-                "future" | "alias" | "groups" | "associated" => AssetReferenceDemand::Deferred,
-                "immediate" | "implicit" => AssetReferenceDemand::Immediate,
-                field => panic!("unexpected asset field {field}"),
-            };
-            assert_eq!(
-                reference.demand(),
-                expected_demand,
-                "{:?}",
-                reference.path()
-            );
-            assert!(reference.asset_ref() == &shared || reference.asset_ref() == &other);
-        }
         assert_eq!(
-            references
-                .iter()
-                .filter(|reference| reference.demand() == AssetReferenceDemand::Immediate)
-                .count(),
-            2
-        );
-
-        let mut target = World::new();
-        let target_entity = target.spawn_empty().id();
-        snapshot
-            .preflight_component(schema.id(), &encoded)
-            .unwrap()
-            .apply(&mut target, target_entity)
-            .unwrap();
-        assert_eq!(
-            target.get::<AssetDemandProbe>(target_entity),
-            Some(&expected)
+            AssetDemandProbe::decode_persistent_component((&encoded).into()).unwrap(),
+            expected,
         );
     }
 }

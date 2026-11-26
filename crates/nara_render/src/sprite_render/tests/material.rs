@@ -548,8 +548,7 @@ fn retained_generations_values_and_image_versions_remain_distinct_batch_inputs()
 
     let path = AssetPath::new("palette.wgsl").unwrap();
     let successor_source = Arc::<str>::from(
-        include_str!("../../../../../examples/support/palette_material.wgsl")
-            .replace("color * tint.rgb", "color.bgr * tint.rgb"),
+        include_str!("palette.wgsl").replace("color * tint.rgb", "color.bgr * tint.rgb"),
     );
     let read_shader = |_: &AssetPath| Ok(Arc::clone(&successor_source));
     let prepared = materials
@@ -689,18 +688,7 @@ fn publish_image_snapshot(
     events: &mut AssetEvents,
 ) -> PreparedImageSnapshot {
     let image = test_image_with_pixels(pixels);
-    let source_hash = image.source().unwrap().source_hash();
-    let import_recipe_digest = image.source().unwrap().import_recipe().digest();
-    images
-        .commit_loaded(
-            handle,
-            image,
-            states,
-            events,
-            Some(source_hash),
-            Some(import_recipe_digest),
-        )
-        .unwrap();
+    images.commit_loaded(handle, image, states, events).unwrap();
     PreparedImageSnapshot::capture(handle, images, states).unwrap()
 }
 

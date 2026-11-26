@@ -1,28 +1,22 @@
-use nara::{
-    prelude::*, render::register_render_components, scene::register_scene_components,
-    scene::register_transform_components, sprite::register_sprite_components,
-    tilemap::register_tilemap_components,
-};
+use nara::{prelude::*, reflect::schema_json};
 
-fn main() {
-    let mut registry = ComponentRegistryBuilder::new();
-    register_scene_components(&mut registry).expect("scene components should register once");
-    register_transform_components(&mut registry)
-        .expect("transform components should register once");
-    register_render_components(&mut registry).expect("render components should register once");
-    register_sprite_components(&mut registry).expect("sprite components should register once");
-    register_tilemap_components(&mut registry).expect("tilemap components should register once");
-    let registry = registry.freeze().expect("component registry should freeze");
+#[derive(Component, PersistentComponent)]
+#[nara(
+    id = "example.Speed",
+    version = 1,
+    alias = "Speed",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit)
+)]
+struct Speed {
+    #[nara(id = "units-per-second", alias = "Units per second")]
+    units_per_second: f32,
+}
 
-    let catalog = registry.catalog();
-    let json = catalog.to_json_string().unwrap();
-
-    assert!(json.contains("nara.transform.Transform2d"));
-    assert!(json.contains("nara.sprite.Sprite"));
-    assert!(json.contains("nara.tilemap.Tilemap"));
-    assert!(json.contains("translation"));
-    assert!(json.contains("material.image"));
-    assert!(!json.contains("bevy_ecs::"));
-
-    println!("{json}");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)?;
+    app.register_schema::<Speed>()?;
+    println!("{}", schema_json(&app)?);
+    Ok(())
 }

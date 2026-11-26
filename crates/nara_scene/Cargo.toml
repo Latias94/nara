@@ -6,34 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-base64.workspace = true
 bevy_ecs.workspace = true
-getrandom.workspace = true
 nara_app.workspace = true
-nara_asset = { workspace = true, features = ["runtime"] }
 nara_core.workspace = true
-nara_ecs.workspace = true
-nara_reflect.workspace = true
-ron = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
-thiserror.workspace = true
-tracing = { workspace = true, optional = true }
-
-[dev-dependencies]
-toml.workspace = true
-
-[features]
-default = []
-runtime-catalog = ["runtime-configuration", "nara_core/fs-capabilities"]
-runtime-configuration = ["serde", "nara_app/tasks"]
-work-observation = ["dep:tracing"]
-serde = [
-    "dep:serde",
-    "nara_asset/serde",
-    "nara_core/serde",
-    "nara_ecs/serde",
-    "nara_reflect/serde",
-    "dep:ron",
-    "dep:serde_json",
-]

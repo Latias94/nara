@@ -12,7 +12,7 @@ use nara_app::{
     App, RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
     RuntimeCloseParticipantId, RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl,
     RuntimeControlFailure, RuntimeControlRequestResult, RuntimeControlStatus, RuntimeControlTicket,
-    RuntimeInstance, RuntimeObligationLedger, RuntimeState,
+    RuntimeInstance, RuntimeState,
 };
 
 struct RetryUntilReleased(Arc<AtomicBool>);
@@ -49,16 +49,14 @@ fn accept(runtime: &mut RuntimeInstance, control: RuntimeControl) -> RuntimeCont
 #[test]
 fn reissued_stop_remains_observable_after_many_failed_close_attempts() {
     let released = Arc::new(AtomicBool::new(false));
-    let mut obligations = RuntimeObligationLedger::new();
-    obligations
-        .register(
-            RuntimeCloseParticipantId::new("nara.test.control-history-owner"),
-            RetryUntilReleased(Arc::clone(&released)),
-        )
-        .unwrap();
+    let mut app = App::new();
+    app.register_close_participant(
+        RuntimeCloseParticipantId::new("nara.test.control-history-owner"),
+        RetryUntilReleased(Arc::clone(&released)),
+    )
+    .unwrap();
     let mut runtime =
-        RuntimeInstance::start_with_options(App::new(), obligations, RuntimeClosePolicy::default())
-            .unwrap();
+        RuntimeInstance::start_with_close_policy(app, RuntimeClosePolicy::default()).unwrap();
     let stop = accept(&mut runtime, RuntimeControl::Stop);
     assert_eq!(
         runtime.control_status(stop),

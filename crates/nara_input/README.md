@@ -1,108 +1,37 @@
-# Optional native gamepad input
+# Input
 
-Enable `nara_input/gamepad` to use the native backend on Windows. It pins Gilrs `=0.11.2`
-(MIT OR Apache-2.0) and uses its default Windows WGI backend.
-The embedded controller mappings retain their [original third-party notice](THIRD-PARTY-NOTICES.md).
+Install `InputPlugin` to project keyboard, mouse, touch, and controller input. The Winit runner
+writes `InputEdge` messages automatically. A headless host can write the same messages with
+`World::write_message` before updating or stepping the app.
 
-```rust,no_run
-use nara_app::App;
-use nara_input::{
-    GamepadButton, GamepadRoute, GilrsInputPlugin, InputPlugin, InputSeatId, InputWindowId,
-};
+Install `ActionMaps::new(ActionMap::from_bindings(bindings)?)` as a resource for a single-seat game.
+Read `ActionState::button`, `axis`, or `axis_2d` in `FixedUpdate`. The two-dimensional accessor
+reads `<action>.x` and `<action>.y`. On a frame with several fixed ticks, held values are the same
+in every tick. Read ordered actions once per frame after `InputSet::ResolveActions` in `PreUpdate`,
+or in `FrameIntentSet::Collect` to include exact steps. Use `ActionState::for_seat` for other seats.
 
-let mut app = App::new();
-app.add_plugin(InputPlugin)?;
-app.add_plugin(GilrsInputPlugin::new(Some(GamepadRoute::new(
-    InputWindowId::new(1),
-    InputSeatId::PRIMARY,
-))))?;
-let south_binding_code: u16 = GamepadButton::South.code();
-# Ok::<(), Box<dyn std::error::Error>>(())
+UI adapters inspect `InputFrame::edges()` in `InputSet::RouteUi` and call `consume(index)` for an
+edge the UI handles. Register the routing system in `First` and `FrameIntent` to cover frame updates
+and exact fixed steps. Skip routing when `InputFrame::is_resolved()` is true. The raw `ButtonInput`
+resources still show physical input after consumption. A release always clears an existing gameplay
+hold. `TextInput`, `ImeEvent`, `MouseWheel`, `TouchInput`, and `GamepadInput` are Bevy messages.
+
+With `serde`, deserializing an action definition uses the same builder as code-defined bindings.
+This RON definition binds Space to `jump`.
+
+```ron
+(
+    contexts: [(context: "gameplay", enabled: true)],
+    bindings: [(action: "jump", input: Key(Space), context: "gameplay")],
+)
 ```
 
-The plugin polls automatically. Read admitted controller samples with
-`nara_ecs::bevy_ecs::message::MessageReader<nara_input::GamepadInput>`. Bind standard
-buttons and axes using `GamepadButton::code()` and `GamepadAxis::code()` and read the
-resulting values from `ActionState` in ordinary systems. A host that waits for explicit frame
-requests must continue to drive frames for controller polling.
+## Native gamepads
 
-`GilrsInputPlugin::new` only stores configuration. Plugin build registers the original
-close participant before acquiring one Gilrs context. Its NonSend state is polled in
-`CoreStage::First` before `InputSet::ProjectTimeline`. The adapter creates no polling
-thread, scheduler, window, endpoint or seat. Force feedback is disabled at construction
-to avoid the optional Gilrs FF server thread; rumble and battery APIs are not exposed.
-
-The host must connect and focus the exact supplied Input endpoint. A default route applies
-to each newly connected native device. Without a default route, devices remain available
-in the inventory until explicitly assigned. At most 16 devices and 256 mapped events per
-frame are admitted by default. Public configuration permits 1–64 devices and 1–4096 events
-per frame. Extra native devices fault rather than silently evicting accepted devices.
-Gilrs and OS internal discovery storage is outside this adapter's allocation bounds.
-
-For two seats, read current tokens and assign them through the same `GilrsDevices` Resource:
-
-```rust,no_run
-use nara_ecs::ResMut;
-use nara_input::{GamepadRoute, GilrsDevices, InputSeatId, InputWindowId};
-
-fn assign_two_seats(mut devices: ResMut<GilrsDevices>) {
-    let tokens: Vec<_> = devices.connected().iter().take(2).map(|d| d.token()).collect();
-    for (index, token) in tokens.iter().enumerate() {
-        devices.assign(token, GamepadRoute::new(
-            InputWindowId::new(1), InputSeatId::new(index as u32),
-        )).unwrap();
-    }
-}
-```
-
-Each target seat still needs an original, focused Input endpoint. `unassign(&token)` removes
-assignment for that native connection. This is finite current state, with no command queue.
-Foreign and disconnected tokens are rejected. Reconnection renews the token even if Gilrs
-reuses its native label. Names are bounded display metadata; no hardware identity is persisted.
-Route changes, including unassign/reassign between polls, terminate the original connection.
-Reassignments take effect after queued events drain; a continuously busy native stream can
-delay a new route. Assignments written by ordinary systems take effect on the next poll.
-When original disconnected Input connections still occupy every slot, activation waits for
-their actual consumers to retire them. The bridge retries on a later drained poll without
-replaying held controls. A zero-slot or entirely live full pool remains an explicit error;
-the adapter neither increases the selected limit nor releases the old owner's storage.
-
-The adapter drains queued native events into a private physical-state shadow before admitting
-a new route. Startup, route changes, focus loss/regain and endpoint replacement suppress known
-held buttons and nonneutral axes until release/neutral. It never replays cached holds into Input.
-The endpoint observation's original invalidation sequence detects focus loss/regain between
-polls; it grants no input authority. Original `GamepadConnection` values and timeline admission
-remain authoritative. Button repeat and analog `ButtonChanged` samples do not duplicate digital
-edges. Analog triggers use Gilrs's threshold-generated press/release events.
-
-Gilrs state is an event cache, not a synchronous hardware snapshot. WGI may initially provide
-no event for a held control. Unknown controls accept fresh native events after the drain boundary;
-instantaneous hardware snapshots and detection of every unknown startup hold are not promised.
-Previously observed nonneutral axes remain suppressed until an actual neutral observation.
-
-Gilrs SDL mappings and normalization remain enabled. Bounded explicit filtering applies Gilrs's
-`axis_dpad_to_button` followed by its radial `deadzone`, including companion-axis neutral events.
-The adapter manually updates the original cache and counter; it does not enable the default
-filter loop or Jitter filter. Redundant filtered axis samples still preserve neutral observations.
-There is no platform-specific Y inversion. Authored `ActionTransform` dead zones remain explicit
-and are applied after native normalization; the native radial filter does not substitute for them.
-Portable `GamepadButton` and `GamepadAxis` codes use deliberate mappings independent of Gilrs
-discriminants. Shoulder buttons map to Gilrs `LeftTrigger`/`RightTrigger`, while Nara trigger
-buttons map to Gilrs `LeftTrigger2`/`RightTrigger2`. No analog trigger binding is implied by a
-consumer using only button edges.
-
-Close quiesces ingress, disconnects original Input connections, clears inventory and drops the
-original Gilrs on its owning thread, including configured retirement and startup/runtime failure.
-Admission and terminal errors enter the managed runtime fault/close evidence paths. No native
-thread join receipt is invented. The pinned Windows WGI destructor signals and joins its native
-backend thread; that join has no bounded-latency guarantee. The pinned Linux/macOS backends do
-not expose synchronous retirement of all their internal threads. The concrete plugin is
-therefore only available on Windows. Typed gamepad messages and bindings remain available
-for other input producers on other platforms.
-
-Deterministic unit tests execute the same private bridge reducer with actual Gilrs `EventType`
-values and small private state snapshots. Lifecycle tests exercise the original close participant
-with an owner-thread drop probe. An ignored Windows-only test initializes actual Gilrs and closes
-without requiring a controller. Tests have not established physical controller execution or
-Linux/macOS native runtime qualification. Run the ignored test explicitly for native Windows
-initialization evidence; physical button, stick, reconnect and multi-seat checks require hardware.
+Enable `nara_input/gamepad` and install `GilrsInputPlugin::default()` after `InputPlugin` on Linux,
+macOS, or Windows. Linux builds require the libudev development package and `pkg-config`. By default,
+each controller maps to the first standalone window and primary seat. Use `GilrsDevices` to assign
+or unassign a connected controller. Bind controls with `GamepadButton::code()` and `GamepadAxis::code()`.
+Controller polling runs before input projection in `First`. Games that wait for explicit frame
+requests need to continue driving frames while controller input is enabled. See the
+[third-party notice](THIRD-PARTY-NOTICES.md) for controller mapping credits.

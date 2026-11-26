@@ -327,9 +327,7 @@ fn consume_ui(world: &mut World) {
 fn run_case(case: Case) {
     let mut app = App::new();
     app.add_plugins((
-        nara_reflect::ComponentRegistryPlugin,
         nara_scene::spatial::SpatialPlugin,
-        nara_render::RenderComponentsPlugin,
         nara_render::RenderPlugin::default(),
         nara_window::WindowPlugin::default(),
         nara_render::image::ImagePreparePlugin,
@@ -369,15 +367,7 @@ fn run_case(case: Case) {
     )
     .unwrap();
     app.add_systems(CoreStage::Last, consume_ui).unwrap();
-    let mut runtime = nara_app::RuntimeCandidate::admit(
-        app.seal().unwrap(),
-        nara_app::RuntimeObligationLedger::new(),
-        Default::default(),
-    )
-    .unwrap()
-    .complete_startup()
-    .unwrap()
-    .promote();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
     for _ in 0..consume_after {
         runtime.drive(std::time::Duration::ZERO).unwrap();
     }

@@ -2,14 +2,9 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use crate::RenderTarget;
 use crate::image::{
-    ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageImportSettings,
-    ImageSourceMetadata, PreparedImageSnapshot, PreparedImages,
+    ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, PreparedImageSnapshot, PreparedImages,
 };
-use nara_asset::{
-    AssetEvents, AssetPathScope, AssetProductRef, AssetRecord, AssetServer, AssetSourceKind,
-    AssetSourcePath, AssetStates, Assets, ImportDependencyDigest, ImportRecipe, ImportedProductId,
-    ImporterId, ImporterVersion, SourceHash, StableAssetId,
-};
+use nara_asset::{AssetEvents, AssetServer, AssetStates, Assets};
 use nara_ui::kernel::{
     UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii, UiEdges,
     UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiOverflow, UiPaintPrimitive, UiPoint,
@@ -97,25 +92,10 @@ fn solid_node(key: &str, x: f32) -> UiNode {
 }
 
 fn image_asset(pixels: [u8; 4]) -> ImageAsset {
-    let stable_id = StableAssetId::parse_str("d7961f69-0e25-41d5-8893-0ef85ab19615").unwrap();
-    let source_hash = SourceHash::from_bytes(pixels);
-    let import_recipe = ImportRecipe::new(
-        stable_id,
-        source_hash,
-        ImportDependencyDigest::empty(),
-        ImporterId::new("nara-ui-planner-test").unwrap(),
-        ImporterVersion::new(1),
-        ImageImportSettings::default().settings_hash(),
-    );
-    ImageAsset::from_import(
-        ImageSourceMetadata::new(
-            AssetSourcePath::new("ui/planner.png").unwrap(),
-            ImageImportSettings::default(),
-            import_recipe,
-        )
-        .unwrap(),
+    ImageAsset::new(
         ImageExtent::new(1, 1),
         ImageFormat::Rgba8,
+        ImageColorSpace::Srgb,
         pixels.to_vec(),
     )
     .unwrap()
@@ -132,8 +112,6 @@ fn captured_image_snapshot() -> PreparedImageSnapshot {
             image_asset([240, 16, 120, 255]),
             &mut states,
             &mut events,
-            None,
-            None,
         )
         .unwrap();
     PreparedImageSnapshot::capture(handle, &images, &states).unwrap()
@@ -899,14 +877,7 @@ fn planned_packets_retain_image_snapshots_across_successor_publication() {
     let mut prepared = PreparedImages::default();
     let first_pixels = [240, 16, 120, 255];
     let first_version = assets
-        .commit_loaded(
-            handle,
-            image_asset(first_pixels),
-            &mut states,
-            &mut events,
-            None,
-            None,
-        )
+        .commit_loaded(handle, image_asset(first_pixels), &mut states, &mut events)
         .unwrap();
     let first_snapshot = PreparedImageSnapshot::capture(handle, &assets, &states).unwrap();
     prepared.insert(first_snapshot.clone());
@@ -929,8 +900,6 @@ fn planned_packets_retain_image_snapshots_across_successor_publication() {
             image_asset(successor_pixels),
             &mut states,
             &mut events,
-            None,
-            None,
         )
         .unwrap();
     let successor_snapshot = PreparedImageSnapshot::capture(handle, &assets, &states).unwrap();
@@ -979,169 +948,6 @@ fn planned_packets_retain_image_snapshots_across_successor_publication() {
         &successor_pixels
     );
     assert!(Arc::ptr_eq(&planner.planned(target).unwrap(), &successor));
-}
-
-#[test]
-fn captured_canonical_image_paths_select_exact_root_and_retain_paint_resource() {
-    let local = nara_asset::AssetPath::new("ui/panel.png").unwrap();
-    let scope = AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
-    let foreign_scope = AssetPathScope::under(AssetSourcePath::new("package/art").unwrap());
-    let source = StableAssetId::parse_str("d7961f69-0e25-41d5-8893-0ef85ab19615").unwrap();
-    let foreign = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
-    let mut server = AssetServer::new();
-    let mut assets = Assets::<ImageAsset>::default();
-    let mut states = AssetStates::default();
-    let mut events = AssetEvents::default();
-    let mut prepared = PreparedImages::default();
-    let mut expected = None;
-    for (scope, source, pixels) in [
-        (&scope, source, [240, 16, 120, 255]),
-        (&foreign_scope, foreign, [16, 240, 120, 255]),
-    ] {
-        let record = AssetRecord::new(source, scope.resolve(&local), AssetSourceKind::Image);
-        let handle = server.reserve_record::<ImageAsset>(&record).unwrap();
-        let product = AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap();
-        let image = ImageAsset::from_product(
-            product,
-            ImageExtent::new(1, 1),
-            ImageFormat::Rgba8,
-            ImageColorSpace::Srgb,
-            pixels.to_vec(),
-        )
-        .unwrap();
-        assets
-            .commit_loaded(handle, image, &mut states, &mut events, None, None)
-            .unwrap();
-        let snapshot = PreparedImageSnapshot::capture(handle, &assets, &states).unwrap();
-        if expected.is_none() {
-            expected = Some(snapshot.clone());
-        }
-        prepared.insert(snapshot);
-    }
-    let id = UiImageId::external::<ImageAsset>(
-        expected.as_ref().unwrap().identity().key().asset_id().raw(),
-    );
-    let unresolved_local = UiImageId::new(local.as_str()).unwrap();
-    let referenced = BTreeSet::from([id.clone(), unresolved_local.clone()]);
-    let images = UiPreparedImages::capture(&referenced, Some(&prepared));
-    let missing = UiPresentationPlanner::default().plan(
-        frame(
-            1,
-            1,
-            vec![text_node(
-                "unbound",
-                "",
-                Some(UiVisual::image(
-                    unresolved_local,
-                    UiColor::rgba(1.0, 1.0, 1.0, 1.0),
-                )),
-            )],
-        ),
-        RenderTarget::Window(WindowId::PRIMARY),
-        &images,
-    );
-    assert!(matches!(
-        missing,
-        Err(UiPresentationContentError::MissingImage { .. })
-    ));
-    let packet = UiPresentationPlanner::default()
-        .plan(
-            frame(
-                1,
-                1,
-                vec![text_node(
-                    "selected",
-                    "",
-                    Some(UiVisual::image(id, UiColor::rgba(1.0, 1.0, 1.0, 1.0))),
-                )],
-            ),
-            RenderTarget::Window(WindowId::PRIMARY),
-            &images,
-        )
-        .unwrap();
-    drop(server);
-    drop(assets);
-    drop(prepared);
-    drop(images);
-    assert_eq!(packet.images().len(), 1);
-    assert_eq!(packet.images()[0].snapshot(), &expected.unwrap());
-    assert_eq!(
-        packet.images()[0].snapshot().resource().pixels(),
-        &[240, 16, 120, 255]
-    );
-}
-
-#[test]
-fn captured_pathless_products_keep_primary_auxiliary_and_source_separate() {
-    let source = StableAssetId::parse_str("d7961f69-0e25-41d5-8893-0ef85ab19615").unwrap();
-    let foreign = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
-    let auxiliary =
-        ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
-    // Runtime-only image bindings and pixels have no source catalogue or source paths.
-    let mut server = AssetServer::new();
-    let mut assets = Assets::<ImageAsset>::default();
-    let mut states = AssetStates::default();
-    let mut events = AssetEvents::default();
-    let mut prepared = PreparedImages::default();
-    let mut expected = Vec::new();
-    let mut ids = Vec::new();
-    for (source, product, pixels) in [
-        (source, ImportedProductId::PRIMARY, [240, 0, 0, 255]),
-        (source, auxiliary, [0, 240, 0, 255]),
-        (foreign, auxiliary, [0, 0, 240, 255]),
-    ] {
-        let reference = AssetProductRef::new(source, product).unwrap();
-        let handle = server.reserve_product::<ImageAsset>(reference).unwrap();
-        assert!(server.path(handle.id()).is_none());
-        let image = ImageAsset::from_product(
-            reference,
-            ImageExtent::new(1, 1),
-            ImageFormat::Rgba8,
-            ImageColorSpace::Srgb,
-            pixels.to_vec(),
-        )
-        .unwrap();
-        assets
-            .commit_loaded(handle, image, &mut states, &mut events, None, None)
-            .unwrap();
-        let snapshot = PreparedImageSnapshot::capture(handle, &assets, &states).unwrap();
-        prepared.insert(snapshot.clone());
-        expected.push(snapshot);
-        ids.push(UiImageId::external::<ImageAsset>(handle.id().raw()));
-    }
-    let referenced = ids.iter().cloned().collect();
-    let images = UiPreparedImages::capture(&referenced, Some(&prepared));
-    let nodes = ids
-        .into_iter()
-        .enumerate()
-        .map(|(index, id)| {
-            text_node(
-                &format!("product-{index}"),
-                "",
-                Some(UiVisual::image(id, UiColor::rgba(1.0, 1.0, 1.0, 1.0))),
-            )
-        })
-        .collect();
-    let packet = UiPresentationPlanner::default()
-        .plan(
-            frame(1, 1, nodes),
-            RenderTarget::Window(WindowId::PRIMARY),
-            &images,
-        )
-        .unwrap();
-    drop(server);
-    drop(assets);
-    drop(prepared);
-    drop(images);
-    assert_eq!(packet.images().len(), expected.len());
-    for snapshot in expected {
-        assert!(
-            packet
-                .images()
-                .iter()
-                .any(|image| image.snapshot() == &snapshot)
-        );
-    }
 }
 
 #[test]

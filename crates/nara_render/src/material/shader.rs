@@ -1,6 +1,5 @@
 //! Bounded WGSL compilation for the stock 2D material interface.
 
-use std::any::Any;
 use std::error::Error;
 use std::fmt::{self, Write as _};
 use std::sync::Arc;
@@ -42,7 +41,6 @@ pub struct MaterialShaderArtifact {
     source: Arc<str>,
     digest: [u8; 32],
     interface_digest: [u8; 32],
-    retention: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl fmt::Debug for MaterialShaderArtifact {
@@ -53,7 +51,6 @@ impl fmt::Debug for MaterialShaderArtifact {
             .field("source", &self.source)
             .field("digest", &self.digest)
             .field("interface_digest", &self.interface_digest)
-            .field("retained", &self.retention.is_some())
             .finish()
     }
 }
@@ -70,16 +67,6 @@ impl PartialEq for MaterialShaderArtifact {
 impl Eq for MaterialShaderArtifact {}
 
 impl MaterialShaderArtifact {
-    pub(crate) fn with_lifetime_owner(&self, owner: Arc<dyn Any + Send + Sync>) -> Self {
-        Self {
-            user_source: Arc::clone(&self.user_source),
-            source: Arc::clone(&self.source),
-            digest: self.digest,
-            interface_digest: self.interface_digest,
-            retention: Some(owner),
-        }
-    }
-
     /// Assembles and validates a material against the actual Naga type results.
     ///
     /// `source` supplies ordinary WGSL functions, including
@@ -171,7 +158,6 @@ impl MaterialShaderArtifact {
             source: Arc::from(assembled),
             digest,
             interface_digest,
-            retention: None,
         })
     }
 

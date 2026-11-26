@@ -63,9 +63,7 @@ fn invalid_material_shader_is_a_local_content_rejection() {
 fn captured_batches() -> Vec<WgpuQuadBatch> {
     let mut app = App::new();
     app.add_plugins((
-        nara_reflect::ComponentRegistryPlugin,
         nara_scene::spatial::SpatialPlugin,
-        crate::RenderComponentsPlugin,
         crate::RenderPlugin::default(),
         crate::image::ImagePreparePlugin,
         crate::sprite_render::SpriteRenderPlugin,
@@ -187,14 +185,7 @@ fn publish_image(
     .unwrap();
     let handle = nara_asset::allocate_anonymous_handle().unwrap();
     images
-        .commit_loaded(
-            handle,
-            image,
-            states,
-            &mut AssetEvents::default(),
-            None,
-            None,
-        )
+        .commit_loaded(handle, image, states, &mut AssetEvents::default())
         .unwrap();
     handle
 }

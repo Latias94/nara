@@ -13,18 +13,15 @@ mod integration;
 mod limits;
 mod packet;
 mod planner;
-mod surface;
-#[cfg(test)]
-mod surface_tests;
 
 pub use backend::UiPresentationIntegrationError;
+#[cfg(all(feature = "hud-presentation", feature = "wgpu"))]
+pub use bridge::UiPostHostConnection;
 #[cfg(feature = "hud-presentation")]
 pub use bridge::{
-    PresentedUiObservation, UI_PRESENTATION_BRIDGE_PLUGIN_DECLARATION,
-    UI_PRESENTATION_BRIDGE_PLUGIN_ID, UiPresentationBridgePlugin, latest_presented_ui_observation,
+    UI_PRESENTATION_BRIDGE_PLUGIN_DECLARATION, UI_PRESENTATION_BRIDGE_PLUGIN_ID,
+    UiPresentationBridgePlugin,
 };
-#[cfg(all(feature = "hud-presentation", feature = "wgpu"))]
-pub use bridge::{PresentedUiWgpuFacts, UiPostHostConnection};
 #[cfg(feature = "hud-runtime")]
 pub use integration::{
     UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiPaintCompileStats, UiRenderPlugin,
@@ -44,7 +41,6 @@ pub use planner::{
     UiPreparedImages, UiPresentationContentError, UiPresentationPlanner,
     UiPresentationPlannerCreateError, UiPresentationWorkStats,
 };
-pub use surface::{UiSurfacePresentationError, UiSurfacePresentationEvent, UiSurfacePresenter};
 
 #[doc(hidden)]
 pub mod presentation {

@@ -807,12 +807,6 @@ fn native_driver_input_invalidates_capture_until_the_original_paused_frame() {
     let mut app = counted_app(true);
     app.add_plugin(InputPlugin).unwrap();
     let mut session = cpu_session(app, WinitControlFlow::Wait);
-    session
-        .app
-        .as_mut()
-        .unwrap()
-        .connect_window_input(WindowId::PRIMARY)
-        .unwrap();
     assert_eq!(poll_cpu(&mut session), WinitRunProgress::Running);
     assert!(session.paused_frame_complete());
     let phase = session.capture_time_continuation().unwrap();
@@ -873,12 +867,6 @@ fn input_after_the_full_frame_in_the_same_pump_keeps_capture_invalid() {
     let mut app = counted_app(true);
     app.add_plugin(InputPlugin).unwrap();
     let mut session = cpu_session(app, WinitControlFlow::Wait);
-    session
-        .app
-        .as_mut()
-        .unwrap()
-        .connect_window_input(WindowId::PRIMARY)
-        .unwrap();
     let progress = session.poll_with(|app, event_loop, first_native_pump| {
         assert!(event_loop.is_none());
         assert!(first_native_pump);

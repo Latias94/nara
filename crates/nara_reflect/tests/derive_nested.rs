@@ -1,13 +1,12 @@
 use std::collections::BTreeMap;
 
 use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
-use nara_core::Vec2;
-use nara_ecs::identity::{EntityReference, SceneEntityId};
-use nara_ecs::{Component, World};
+use nara_core::{EntityUuid, Vec2};
+use nara_ecs::Component;
 use nara_reflect::{
     AssetReferenceDemand, ComponentCapability, ComponentFieldPath, ComponentNumericDomain,
-    ComponentRegistryBuilder, ComponentRegistryError, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueShape, PersistentComponent, PersistentComponentProvider,
+    ComponentRegistryError, ComponentSchemaCatalog, ComponentValue, ComponentValueKind,
+    ComponentValueShape, PersistentComponent, PersistentComponentProvider,
     validate_component_value,
 };
 
@@ -25,7 +24,7 @@ struct NestedReferenceProbe {
         alias = "Targets",
         capabilities(scene, inspect, edit, entity_ref)
     )]
-    targets: Vec<Option<EntityReference>>,
+    targets: Vec<Option<EntityUuid>>,
     #[nara(
         id = "assets",
         alias = "Assets",
@@ -41,9 +40,7 @@ struct NestedReferenceProbe {
 fn nested_probe() -> NestedReferenceProbe {
     NestedReferenceProbe {
         targets: vec![
-            Some(EntityReference::SceneLocal {
-                entity: SceneEntityId::new("enemy").unwrap(),
-            }),
+            Some("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f".parse().unwrap()),
             None,
         ],
         assets: BTreeMap::from([(
@@ -75,14 +72,12 @@ fn nested_probe() -> NestedReferenceProbe {
 }
 
 #[test]
-fn generated_nested_reference_codecs_round_trip_through_native_registry() {
-    let mut registry = ComponentRegistryBuilder::new();
-    registry
-        .register_persistent_component::<NestedReferenceProbe>()
-        .unwrap();
-    let snapshot = registry.freeze().unwrap();
-    let component_id = ComponentTypeId::new("nara.test.NestedReferenceProbe");
-    let schema = snapshot.schema(&component_id).unwrap();
+fn generated_nested_reference_codecs_round_trip() {
+    let catalog = ComponentSchemaCatalog::from_components([
+        NestedReferenceProbe::persistent_component_schema(),
+    ])
+    .unwrap();
+    let schema = &catalog.components()[0];
     assert!(schema.fields().iter().all(|field| field.is_required()));
     assert_eq!(
         schema
@@ -120,34 +115,20 @@ fn generated_nested_reference_codecs_round_trip_through_native_registry() {
     );
 
     let expected = nested_probe();
-    let mut source = World::new();
-    let source_entity = source.spawn(expected.clone()).id();
-    let encoded = snapshot
-        .encode_component(&component_id, &source, source_entity)
-        .unwrap()
-        .unwrap();
+    let encoded = expected.encode_persistent_component().unwrap();
     assert_eq!(encoded.field("fallback").unwrap(), &ComponentValue::Null);
     assert_eq!(
         encoded.field("targets").unwrap(),
         &ComponentValue::List(vec![
-            ComponentValue::EntityReference(EntityReference::SceneLocal {
-                entity: SceneEntityId::new("enemy").unwrap(),
-            }),
+            ComponentValue::EntityReference(expected.targets[0].unwrap()),
             ComponentValue::Null,
         ])
     );
     validate_component_value(schema, &encoded).unwrap();
 
-    let mut target = World::new();
-    let target_entity = target.spawn_empty().id();
-    snapshot
-        .preflight_component(&component_id, &encoded)
-        .unwrap()
-        .apply(&mut target, target_entity)
-        .unwrap();
     assert_eq!(
-        target.get::<NestedReferenceProbe>(target_entity),
-        Some(&expected)
+        NestedReferenceProbe::decode_persistent_component((&encoded).into()).unwrap(),
+        expected,
     );
 }
 
@@ -228,14 +209,13 @@ struct AmbiguousOptionalProbe {
 }
 
 #[test]
-fn generated_ambiguous_optional_shape_cannot_admit_a_registry() {
-    let mut registry = ComponentRegistryBuilder::new();
+fn generated_ambiguous_optional_shape_is_rejected() {
     assert!(
-        registry
-            .register_persistent_component::<AmbiguousOptionalProbe>()
-            .is_err()
+        ComponentSchemaCatalog::from_components([
+            AmbiguousOptionalProbe::persistent_component_schema()
+        ])
+        .is_err()
     );
-    assert!(registry.catalog_candidate().components().is_empty());
 }
 
 #[test]
@@ -258,12 +238,9 @@ fn generated_nested_reference_markers_are_checked_against_actual_shape() {
                 field.capabilities.insert(ComponentCapability::EntityRef);
             }
         }
-        let mut registry = ComponentRegistryBuilder::new();
-        registry.register_component_schema(schema).unwrap();
-        let failure = registry.freeze().unwrap_err().into_error();
         assert!(matches!(
-            failure,
-            ComponentRegistryError::InvalidFieldCapability { .. }
+            ComponentSchemaCatalog::from_components([schema]),
+            Err(ComponentRegistryError::InvalidFieldCapability { .. })
         ));
     }
 }

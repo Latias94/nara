@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crate::WindowPlugin;
 use nara_app::{App, RuntimeInstance, RuntimeState};
 use nara_ecs::bevy_ecs::message::{Message, Messages};
-use nara_input::InputPlugin;
+use nara_input::{ImeEvent, InputPlugin, InputWindowId, TextInput, TouchInput};
 use winit::{
     dpi::PhysicalPosition,
     event::{DeviceId, Force, Touch},
@@ -38,7 +38,6 @@ fn mapped_callbacks_request_frames_and_deliver_typed_input_through_the_runtime()
     let window = WindowId::PRIMARY;
     let input_window = InputWindowId::new(window.get());
     let device_id = DeviceId::dummy();
-    app.connect_window_input(window).unwrap();
     app.handle_mapped_window_event(window, WinitWindowEvent::Focused(true))
         .unwrap();
     app.handle_mapped_window_event(

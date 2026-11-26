@@ -1,138 +1,32 @@
-# Direct `nara_scene` consumption
+# `nara_scene`
 
-`nara_scene` can be used directly for the supported scene parse, validation, and spawn slice. The
-consumer owns its registry and ECS world; it does not need the integrated root `nara` facade.
-
-The checked-in `tests/fixtures/module-consumer/Cargo.toml` uses these paths relative to its
-fixture directory:
-
-```toml
-[dependencies]
-nara_reflect = { path = "../../../crates/nara_reflect" }
-nara_scene = { path = "../../../crates/nara_scene", default-features = false, features = ["serde"] }
-
-[dev-dependencies]
-bevy_ecs = "0.20"
-```
-
-- `nara_scene` owns the canonical scene file candidate, scene component registration, stable scene
-  identity, and spawn operation. Enable `serde` to decode canonical scene files.
-- `nara_reflect` supplies the caller-owned `ComponentRegistryBuilder`. Register the required
-  component providers, then consume the builder with `freeze` to obtain the
-  `ComponentRegistrySnapshot` used to publish, validate, and spawn scenes.
-- `bevy_ecs` supplies the caller-owned `World`. Its version must match the version supported by the
-  selected `nara_scene` release.
-
-An external project should select the corresponding published, Git, or local package locations;
-the package names, `nara_scene/serde` feature, and direct prerequisite roles remain the same. The
-checked-in [`module-consumer`](../../tests/fixtures/module-consumer/) workspace is the executable contract. It uses
-its own manifest and lockfile, parses a committed RON scene, validates it against a frozen registry,
-spawns it into a fresh world, and ends the exact instance through the Scene owner.
-
-## Source And Placement
-
-Source documents retain authored graphs, declarations and reference intent. Compile a source
-with `document.compile(&registry, &resolver)`; even a source without Prefabs uses this complete
-operation, with an empty `InMemoryPrefabSourceResolver`. A successful `SceneCompilationReport`
-owns a move-only `CompiledSceneDocument`. Its source owner consumes `bind_source(source)` to
-obtain the required `CompiledSceneCandidate` without copying or assembling provenance.
-
-Compiled records expose borrowed accessors for the ordered flat hierarchy, actual selected Schema
-owner, current version, effective value and canonical provenance. They have no unchecked source
-constructor or mutable public fields. Native reception checks the complete batch before codecs
-and does not migrate these values or insert defaults. `ExpandedSceneDocument` remains an
-authoring observation; it cannot be passed to materialization.
-
-`ExpandedSceneEntity::components()` borrows `ExpandedSceneComponent` records, distinct from
-raw `SceneComponentRecord` source records. Expanded and compiled `value()` reads return
-`ComponentValueRef`, including scalar access and borrowed Map/List iteration. Current-version
-values can retain their immutable raw backing with only the selected default insertions frozen.
-The read never consults receiving defaults and cannot retain ownership independently. Use
-`to_owned()` for an explicitly admitted deep copy; `as_value()` borrows only an untouched owning
-subtree. Public source `value()`, mutable access, deep `Clone` and serialized omissions retain
-their original contracts. Prepared data preserves the same borrowed reads, while cook admits and
-copies independent actual values for processed wire output. Each retained owner pays the complete
-logical value and its raw backing plus frozen storage independently.
-
-Materialize with `spawn_scene(world, registry, &candidate, &occurrence, database)`. The occurrence
-is an explicit `SceneOccurrenceKey::new(namespace, slot)` selected by the instantiating consumer.
-Source identity says which document; occurrence says where that document is logically placed.
-Two placements of one source require different slots, and two different sources cannot occupy
-the same slot concurrently. A product can declare its fixed startup or preview slot as consumer
-policy; Scene does not infer one from a source, instance counter or callsite.
-
-Runtime `SceneEntitySource` exposes `containing_source()` and `occurrence()` alongside its
-source-local entity and structured Prefab provenance. Scene shares the containing context across
-an activation rather than copying a long root path into every entity. This does not change the
-independent exact runtime incarnation carried by Identity.
-
-## Instance Lifetime
-
-Retain the successful `SpawnedSceneInstance` receipt. Use
-`retire_and_despawn_scene_instance(&mut world, &instance)` to unload that activation and remove
-its remaining runtime entities. It also ends an empty instance, including one whose entities were
-individually retired. Deleting the final entity or dropping the receipt does not end the instance.
-Both retain the logical slot. Exact end releases that activation's slot; a stale retry cannot
-release a successor. Exact replacement obtains the predecessor's already-declared slot from the
-Scene association and changes source/activation in the same exclusive publication transaction.
-The active association is World-bound and separately budgeted by `SceneOccurrenceLimits`; it
-does not retain permanent slot history or resolve entities independently of Identity.
-
-The operation rejects foreign or stale receipts and unsupported native lifecycle work before
-Scene retirement. Owning native domains must complete their cleanup first; the function does not
-run arbitrary destruction callbacks. Pending World commands are flushed before admission, so
-rejection does not promise to undo those commands. Ordinary identity history remains retained;
-ending one instance does not reset the World domain or affect independently resident instances.
-
-`SceneAuthoringSession::clear_live_world` uses this same retirement path while updating its session
-receipt. A `SceneProjection` owner instead uses `SceneProjection::clear`, which additionally retires
-its complete disposable domain epoch. Construct it with an explicit occurrence, then publish
-source-bound candidates. Do not end their retained receipts behind those owners.
-
-This evidence covers the documented direct scene-module workflow only. It does not promise
-arbitrary cross-engine compatibility, arbitrary combinations of Nara modules, or a stable dynamic
-ABI. Other module workflows must document and prove their own prerequisites.
-
-## Prefab Source Binding
-
-`PrefabSourceResolver` has one required operation: return a `ResolvedPrefabSource` containing
-the immutable Prefab and its canonical `SourceDocumentKey` together. Lookup requests are not
-source identity. A code author declares the source explicitly, independently of the path used to
-request it:
+Create scene entities with ordinary Bevy ECS components. Use `ChildOf` to attach an entity to a
+parent, `Name` to label it, and `Transform2d` and `Visibility` to control its local spatial state.
 
 ```rust
-use nara_asset::AssetRef;
+use std::time::Duration;
+
+use nara_app::App;
 use nara_scene::{
-    InMemoryPrefabSourceResolver, PrefabDocument, SourceDocumentKey, SourceDocumentKind,
+    Name, SpatialPlugin,
+    spatial::{ChildOf, GlobalTransform2d, Transform2d},
 };
 
-let key = SourceDocumentKey::named(
-    "46806b15-ef25-4da2-9983-32078fd5b5a7".parse().unwrap(),
-    "game.characters.hero",
-    SourceDocumentKind::Prefab,
-).unwrap();
-let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
-    AssetRef::path("prefabs/hero.ron").unwrap(),
-    key,
-    PrefabDocument::default(),
-);
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut app = App::new();
+    app.add_plugin(SpatialPlugin)?;
+    let world = app.world_mut()?;
+    let parent = world.spawn((Name::new("Room"), Transform2d::from_xy(10.0, 0.0))).id();
+    let child = world.spawn((Transform2d::from_xy(2.0, 0.0), ChildOf(parent))).id();
+
+    app.update_with_delta(Duration::ZERO)?;
+    let global = app.world().get::<GlobalTransform2d>(child).unwrap();
+    assert_eq!(global.translation().x, 12.0);
+    Ok(())
+}
 ```
 
-The in-memory resolver keeps one document per canonical key. `insert(request, key, document)`
-rebinds that request and replaces the document for **every** alias of the key. Its return value is
-the previous document for that key, not the request's previous target. Adding an alias through
-this operation is a content publication too: inserting an old copy replaces newer content rather
-than inferring which copy is newer. An unaddressed old key is released after request rebinding.
-File-backed conflict admission still belongs to Project Content; this author-owned container does
-not replace its duplicate stable-ID refusal.
-
-Compilation detects cycles in the effective canonical source and declaration/demand state, not
-lookup spelling, and retains the required key on every projection step. Finite re-entry under a
-different selected declaration remains valid. Repeated siblings remain independent placements. The
-separately compiled
-[`Prefab consumer`](../../tests/fixtures/module-consumer/tests/prefab_sources.rs) exercises alias
-replacement, cycle refusal and successful re-expansion through public interfaces.
-
-Containing Scene binding and runtime occurrence are supplied separately when materializing the
-compiled document. Runtime identity uses the complete canonical source, occurrence and typed
-entity provenance rather than private compiler locators.
+`SpatialPlugin` propagates global transforms and inherited visibility at startup, around fixed
+simulation, and in `PostUpdate`. Systems in the same schedule can order themselves against
+`SpatialSet`. If you own the Bevy schedules directly, call `spatial::register_spatial` once per
+world and schedule `spatial::propagate_spatial` after local writes and deferred hierarchy commands.

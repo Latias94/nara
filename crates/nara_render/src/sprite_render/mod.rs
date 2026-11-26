@@ -48,14 +48,9 @@ const SPRITE_RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
     crate::RENDER_PLUGIN_ID,
     crate::image::IMAGE_PREPARE_PLUGIN_ID,
 ];
-const SPRITE_RENDER_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] = &[
-    nara_app::PluginProductCapability::new("runtime-2d"),
-    nara_app::PluginProductCapability::new("presentation-2d"),
-];
 pub const SPRITE_RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(SPRITE_RENDER_PLUGIN_ID, nara_app::PluginCategory::Render)
-        .requires_plugins(SPRITE_RENDER_PLUGIN_REQUIREMENTS)
-        .requires_product_capabilities(SPRITE_RENDER_PRODUCT_REQUIREMENTS);
+        .requires_plugins(SPRITE_RENDER_PLUGIN_REQUIREMENTS);
 
 impl Plugin for SpriteRenderPlugin {
     fn declaration() -> &'static nara_app::PluginDeclaration {

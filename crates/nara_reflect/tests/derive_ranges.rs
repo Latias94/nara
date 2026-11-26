@@ -1,8 +1,7 @@
 use nara_ecs::Component;
 use nara_reflect::{
-    ComponentCodecError, ComponentNumericBound as Bound, ComponentNumericInterval,
-    ComponentRegistryBuilder, ComponentValue, PersistentComponent, PersistentComponentProvider,
-    validate_component_value,
+    ComponentNumericBound as Bound, ComponentNumericInterval, ComponentSchemaCatalog,
+    ComponentValue, PersistentComponent, PersistentComponentProvider, validate_component_value,
 };
 
 type Seconds = f32;
@@ -36,18 +35,6 @@ struct Cooldown {
     count: u64,
 }
 
-nara_reflect::persistent_components! { pub mod inventory = [Cooldown]; }
-nara_reflect::persistent_components! { mod duplicate_inventory = [Cooldown, Cooldown]; }
-
-mod nested_inventory {
-    use super::Cooldown as ImportedCooldown;
-
-    #[allow(non_snake_case, dead_code)]
-    fn Ok() {}
-
-    nara_reflect::persistent_components! { pub mod types = [ImportedCooldown]; }
-}
-
 #[test]
 fn typed_range_literals_and_aliases_reach_shared_validation() {
     let schema = Cooldown::persistent_component_schema();
@@ -67,9 +54,8 @@ fn typed_range_literals_and_aliases_reach_shared_validation() {
             )),
         })
     );
-    let mut registry = ComponentRegistryBuilder::new();
-    inventory::register(&mut registry).unwrap();
-    let snapshot = registry.freeze().unwrap();
+    let catalog = ComponentSchemaCatalog::from_components([schema]).unwrap();
+    let schema = &catalog.components()[0];
     for (seconds, offset, count, valid) in [
         (0.0, -9, 0, true),
         (30.0, 10, 4, true),
@@ -82,36 +68,16 @@ fn typed_range_literals_and_aliases_reach_shared_validation() {
             ("offset", ComponentValue::I64(offset)),
             ("count", ComponentValue::U64(count)),
         ]);
-        assert_eq!(validate_component_value(&schema, &value).is_ok(), valid);
-        assert_eq!(
-            snapshot.preflight_component(&schema.id, &value).is_ok(),
-            valid
-        );
-        if !valid {
-            assert!(matches!(
-                snapshot.preflight_component(&schema.id, &value),
-                Err(ComponentCodecError::Domain(_))
-            ));
-        }
+        assert_eq!(validate_component_value(schema, &value).is_ok(), valid);
     }
 }
 
 #[test]
-fn inventory_callbacks_validate_the_same_explicit_membership() {
-    let schemas = inventory::schemas().unwrap();
-    let initial = inventory::initial_catalog().unwrap();
-    assert_eq!(schemas, initial.components);
-    assert_eq!(initial.generation(), 1);
-    let mut registry = ComponentRegistryBuilder::new();
-    inventory::register(&mut registry).unwrap();
-    let registry = registry.freeze().unwrap();
-    assert_eq!(registry.catalog().components, schemas);
-    assert!(duplicate_inventory::schemas().is_err());
-    assert!(duplicate_inventory::initial_catalog().is_err());
-    assert_eq!(nested_inventory::types::schemas().unwrap(), schemas);
-    assert_eq!(nested_inventory::types::initial_catalog().unwrap(), initial);
-    let mut nested = ComponentRegistryBuilder::new();
-    nested_inventory::types::register(&mut nested).unwrap();
-    let nested = nested.freeze().unwrap();
-    assert_eq!(nested.catalog().components, schemas);
+fn initial_values_use_the_declared_scalar_types() {
+    let schema = Cooldown::persistent_component_schema();
+    let initial = schema.authoring_initial_value().unwrap();
+    let value = Cooldown::decode_persistent_component(initial.into()).unwrap();
+    assert_eq!(value.seconds, 0.5);
+    assert_eq!(value.offset, -2);
+    assert_eq!(value.count, 1);
 }

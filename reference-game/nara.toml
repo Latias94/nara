@@ -1,73 +1,11 @@
-schema_version = 1
-
 [project]
-source_universe = 'ee6d3cbc-9b11-5dc8-96fa-94299e28c369'
-native_document_identity = 'project_location'
-name = "Nara Reference Game"
-stable_id = "nara-reference-game"
+name = "Night Relay"
 version = "0.1.0"
 
 [paths]
 assets = "assets"
-scenes = "scenes"
-prefabs = "prefabs"
 
-[authoring]
-state = "ready"
-schema_bundle = "schema/authoring.bundle.json"
-
-[startup]
-default_scene = "startup.scene.json"
-
-[runtime]
-preset = "local-headless"
-fixed_timestep_seconds = 0.02
-
-[tasks.io]
-workers = 2
-pending_capacity = 512
-
-[tasks.compute]
-workers = 4
-pending_capacity = 512
-
-[tasks.async_compute]
-workers = 2
-pending_capacity = 256
-
-[tasks.shutdown]
-drain_timeout_ms = 250
-cancel_timeout_ms = 250
-join_timeout_ms = 100
-
-[capabilities]
-requested = ["runtime-2d", "runtime-ui"]
-
-[ui.primary_surface]
-logical_width = 960
-logical_height = 540
-
-[profiles.desktop.capabilities]
-requested = [
-    "runtime-2d",
-    "runtime-ui",
-    "presentation-2d",
-    "presentation-ui",
-    "desktop-winit",
-    "render-wgpu",
-]
-
-[profiles.desktop.execution]
-contract = "desktop-supervised-play/v1"
-
-[profiles.desktop.runtime]
-preset = "local-headless"
-fixed_timestep_seconds = 0.1
-
-[profiles.desktop.window]
-enabled = true
-title = "Nara Reference Wave"
-width = 1280
-height = 720
-present_mode = "fifo"
-resizable = true
+[window]
+title = "Night Relay"
+width = 1152
+height = 768

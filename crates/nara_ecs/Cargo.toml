@@ -7,17 +7,9 @@ license.workspace = true
 
 [dependencies]
 bevy_ecs.workspace = true
-nara_core.workspace = true
 nara_ecs_derive.workspace = true
-serde = { workspace = true, optional = true }
-thiserror.workspace = true
-uuid.workspace = true
-
-[dev-dependencies]
-ron.workspace = true
-serde_json.workspace = true
 
 [features]
 default = []
 parallel-executor = ["bevy_ecs/multi_threaded"]
-serde = ["dep:serde", "bevy_ecs/serialize", "nara_core/serde"]
+serde = ["bevy_ecs/serialize"]

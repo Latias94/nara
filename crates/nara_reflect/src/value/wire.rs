@@ -23,7 +23,6 @@ enum Payload {
     Text(String),
     List(Vec<ComponentValue>),
     Map(std::collections::BTreeMap<String, ComponentValue>),
-    Reference(nara_ecs::identity::EntityReference),
     Unit(()),
 }
 
@@ -143,9 +142,10 @@ fn decode_value<E: de::Error>(kind: &str, value: Option<Payload>) -> Result<Comp
         ("string", Some(Payload::Text(value))) => Ok(ComponentValue::String(value)),
         ("list", Some(Payload::List(value))) => Ok(ComponentValue::List(value)),
         ("map", Some(Payload::Map(value))) => Ok(ComponentValue::Map(value)),
-        ("entity_ref", Some(Payload::Reference(value))) => {
-            Ok(ComponentValue::EntityReference(value))
-        }
+        ("entity_ref", Some(Payload::Text(value))) => value
+            .parse()
+            .map(ComponentValue::EntityReference)
+            .map_err(de::Error::custom),
         _ => Err(serde::de::Error::custom(
             "component value payload does not match its type",
         )),
@@ -161,7 +161,7 @@ impl<'de> DeserializeSeed<'de> for PayloadSeed<'_> {
         match self.0 {
             Some("list") => deserializer.deserialize_any(ListVisitor).map(Payload::List),
             Some("map") => deserializer.deserialize_any(MapVisitor).map(Payload::Map),
-            Some("bool" | "i64" | "u64" | "f64" | "string") => {
+            Some("bool" | "i64" | "u64" | "f64" | "string" | "entity_ref") => {
                 deserializer.deserialize_any(ScalarPayloadVisitor)
             }
             _ => Payload::deserialize(deserializer),
@@ -333,7 +333,7 @@ impl Serialize for ComponentValue {
             Self::String(value) => wire.serialize_field("value", value)?,
             Self::List(value) => wire.serialize_field("value", value)?,
             Self::Map(value) => wire.serialize_field("value", value)?,
-            Self::EntityReference(value) => wire.serialize_field("value", value)?,
+            Self::EntityReference(value) => wire.serialize_field("value", &value.to_string())?,
         }
         wire.end()
     }

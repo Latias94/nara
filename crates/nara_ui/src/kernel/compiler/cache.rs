@@ -11,7 +11,6 @@ use crate::kernel::mesh::MeshCounts;
 #[derive(Clone, Debug)]
 pub(super) struct RootLayoutFact {
     pub(super) key: Option<UiKey>,
-    pub(super) route_parent: Option<UiKey>,
     pub(super) root_key: UiRootKey,
     pub(super) structural_index: usize,
     pub(super) local_z: i32,
@@ -27,7 +26,6 @@ impl RootLayoutFact {
     pub(super) fn bind(&self, layer: UiLayer) -> UiLayoutFact {
         UiLayoutFact {
             key: self.key.clone(),
-            route_parent: self.route_parent.clone(),
             root_key: self.root_key.clone(),
             layer,
             structural_index: self.structural_index,

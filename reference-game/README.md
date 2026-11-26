@@ -1,117 +1,44 @@
-# Nara Reference Game
+# Night Relay
 
-This small 2D game validates Nara's public headless and desktop product paths. It exercises project
-manifest loading, versioned scene and prefab data, image import, semantic gameplay commands, fixed
-ticks, sprites, input, HUD rendering, retry, runtime shutdown, and stable headless output.
+Fly through a dark relay station, collect three amber power cells, and reach the lower-right gate
+before time runs out. Walls block the courier and red patrol drones drain its shields. The gate turns
+green when it has power.
 
-It is a development and product-regression fixture, not a finished commercial game.
+Use **WASD** or the **arrow keys** to fly, **R** or **Enter** to restart, and **Esc** to quit.
 
-## Rust Composition
+## Desktop
 
-The headless and desktop entries compose the same gameplay and schema through `wave_recipe()`.
-`bundled_wave_recipe()` supplies the deterministic headless input, and `desktop_wave_recipe()`
-adds the desktop presentation plugin. Both ordinary entries use `load_project_app` to load the
-manifest, startup scene, and assets. Headless play advances the configured timestep with
-`App::step_fixed`. Interactive desktop play uses `App::run` with the Winit runner.
+From the repository root, run the Winit/WGPU game with audio and the in-game HUD.
 
-## Run From Source
-
-From the repository root, run the deterministic headless wave:
-
-```text
-cargo run --manifest-path reference-game/Cargo.toml --locked --bin headless
+```sh
+cargo run --manifest-path reference-game/Cargo.toml --features desktop
 ```
 
-The command writes exactly one terminal JSON object to standard output. `--max-ticks` accepts a
-value from 1 through 256 and returns a non-zero exit status if the wave does not finish.
+Add `-- --verify-first-present` to exit successfully after the primary window presents a frame with
+HUD glyphs. The probe requests exit if that evidence has not arrived within 15 seconds.
 
-Run the desktop game:
+## Headless
 
-```text
-cargo run --manifest-path reference-game/Cargo.toml --locked --features desktop --bin desktop
+The `simulation` feature uses the same game plugin with exact fixed ticks and mock audio. The replay
+checks wall collision, shield depletion, restart, and a complete escape. Repeated runs compare their
+results for deterministic behavior.
+
+```sh
+cargo run --manifest-path reference-game/Cargo.toml --features simulation --bin headless -- --stress 8
 ```
 
-See `CONTROLS.md` for the input map.
+## Project CLI
 
-The project CLI builds and supervises the same desktop binary. It also discovers the game's schema
-through its `nara_schema` binary. With `nara` installed from `crates/nara_project`, run these commands
-from the repository root:
+Run these from the repository root with the Nara CLI on `PATH`.
 
-```text
+```sh
 nara check reference-game
 nara schema reference-game --trusted
-nara play reference-game --trusted --bin desktop
+nara play reference-game --trusted
+nara play reference-game --trusted --bin headless -- --stress 8
 ```
 
-## Project Data
-
-`nara.toml` is the project settings authority. The startup content closure includes:
-
-- `scenes/startup.scene.json`
-- `prefabs/enemy.prefab.json`
-- `prefabs/reference-ui.prefab.json`
-- the referenced image assets and `.meta` records under `assets/`
-
-The packaged binaries do not search the current working directory or user home for these files.
-The `schema/` directory contains the authoring bundle declared in `nara.toml` and the owner-lineage
-fixtures. The `authoring_bundle` generator loads the manifest and resolves `project_recipe()` to
-project the selected schema providers into the bundle.
-
-Refresh the canonical authoring bundle after changing a persistent provider catalog:
-
-```text
-cargo run --manifest-path reference-game/Cargo.toml --locked --bin authoring_bundle -- --write
-```
-
-Verify that the checked-in bundle is current without modifying it:
-
-```text
-cargo run --manifest-path reference-game/Cargo.toml --locked --bin authoring_bundle -- --check
-```
-
-## Standalone Candidate Layout
-
-The release-candidate tooling creates one fixed ZIP with this shape:
-
-```text
-nara-reference-game/
-  manifest.json
-  README.md
-  CONTROLS.md
-  LICENSE-MIT
-  LICENSE-APACHE
-  FiraSans-LICENSE.txt
-  bin/
-    headless[.exe]
-    desktop[.exe]
-  project/
-    nara.toml
-    assets/
-    prefabs/
-    scenes/
-    schema/
-```
-
-Packaged executables resolve only the sibling `project/` directory. Candidate consumers execute the
-formal `bin/desktop[.exe] --candidate-smoke` entry, which runs the normal desktop product recipe and
-exits only after a bounded submitted product frame. The source-only desktop render probe remains a
-focused renderer test utility and is not part of the candidate package. Each consumer run creates
-an isolated extraction, home, working-directory, and temporary root beneath the supplied
-safe work parent. The archive consumer verifies the fixed entry table, regular-file modes, byte
-budgets, manifest, and every file digest before extraction.
-
-UI correlation compares the source document/entity and control facts. The emitted expanded Scene
-`entity_id` is diagnostic and is excluded from normalized authoring equality; independent Hosts
-need not allocate the same projection identifiers. Presented UI/GPU correlation still requires the
-exact accepted frame, receipt and backend generation.
-
-No public candidate has been published yet. A local archive is preparation evidence only until the
-documented hosted Windows and Linux candidate and no-checkout consumer jobs pass.
-
-## Asset Attribution
-
-The Tiny Dungeon art is provided by Kenney under CC0. The bundled attribution record is
-`assets/kenney-tiny-dungeon.LICENSE.txt`.
-
-The desktop binary embeds Fira Sans Bold for deterministic UI shaping and rasterization. The
-candidate root includes `FiraSans-LICENSE.txt`, the SIL Open Font License that governs that font.
+The `nara_schema` target builds with default features and exports the registered `RunRules`
+component. `GamePlugin` uses those rules for the timer, flight speed, and shield count. Game logic,
+the arena, the animated courier texture, and the sound cues all live in Rust. `nara.toml` supplies
+project metadata to the CLI.

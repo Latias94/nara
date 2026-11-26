@@ -33,7 +33,6 @@ jobs:
       - run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt
       - run: cargo fmt --all -- --check
       - run: cargo fmt --manifest-path reference-game/Cargo.toml --all -- --check
-      - run: cargo fmt --manifest-path samples/two-level-game/Cargo.toml --all -- --check
 
   workspace:
     name: Workspace (${{ matrix.os }})
@@ -58,7 +57,7 @@ jobs:
         run: python ci/check_boundaries.py
       - name: Resolve a single WGPU package
         run: cargo tree --locked --workspace --all-features --invert wgpu --depth 1
-      - run: cargo check --workspace --locked --all-features
+      - run: cargo check --workspace --locked --all-features --all-targets
 
   engine-tests:
     name: Core engine tests (${{ matrix.os }})
@@ -77,13 +76,17 @@ jobs:
         with:
           tool: nextest@0.9.138
           fallback: none
+      - name: Install Linux gamepad dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends libudev-dev pkg-config
       - name: Test core engine crates
         run: >-
           cargo nextest run --locked -p nara_app -p nara_asset -p nara_editor_core
           -p nara_input -p nara_scene -p nara_core -p nara_audio -p nara_physics2d -p nara_project
-          --lib --bin nara --test vfs --test filesystem_contract --test path_contract
-          --test mock_audio --test fixed_physics
-          --features nara_app/tasks,nara_asset/artifact-build,nara_asset/hot-reload,nara_asset/pack,nara_core/fs-capabilities,nara_input/serde,nara_project/player-package,nara_project/product-process,nara_scene/runtime-catalog
+          -p nara_reflect -p nara_ui --lib --bin nara --test vfs --test mock_audio
+          --test fixed_physics --test lifecycle --test code_first_images --test direct_input
+          --test schema_registration --test kernel --test text
+          --features nara_app/tasks,nara_asset/image-import,nara_asset/hot-reload,nara_input/gamepad,nara_project/workflow,nara_reflect/serde,nara_ui/runtime
           --no-tests fail --no-fail-fast
 
   reference-game:
@@ -102,7 +105,6 @@ jobs:
       - name: Build desktop and test the game
         run: >-
           cargo nextest run --manifest-path reference-game/Cargo.toml --locked --features desktop
-          --test headless_cli --test headless_snapshot --test ui_product --test desktop_flow
           --no-tests fail
 
   wasm-core:

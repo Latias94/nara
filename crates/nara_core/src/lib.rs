@@ -1,32 +1,15 @@
 //! Shared engine primitives that are independent from ECS and rendering.
 
 pub mod diagnostic;
-pub mod document;
-pub mod format;
 pub mod identity;
 pub mod limits;
-#[cfg(feature = "serde")]
-pub mod serde_shape;
 pub mod source;
 pub mod vfs;
 
 pub use diagnostic::{Diagnostic, DiagnosticSeverity, SourceLoc};
-pub use document::{
-    DocumentContentState, DocumentHistoryStatus, DocumentRevision, DocumentSourceId,
-};
-pub use format::{
-    EngineVersion, EngineVersionParseError, FormatGenerator, FormatGeneratorError, FormatKind,
-    FormatKindError, FormatVersion, PersistentFileContract, PersistentFileContractError,
-    PersistentFileDecodeError, PersistentFileEnvelope, PersistentFileHeader,
-    decode_persistent_file, decode_persistent_file_with_preflight,
-};
 pub use glam::{Affine2, Affine3A, IVec2, Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
 pub use identity::{AssetId, DocumentId, EntityUuid, UuidIdError};
 pub use limits::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
-#[cfg(feature = "serde")]
-pub use serde_shape::{
-    SerdeShapeError, SerdeShapeLimits, SerdeShapePreflightError, preflight_serde_shape,
-};
 pub use source::{SourceUniverseId, SourceUniverseIdError};
 
 /// Linear-sRGB RGB channels with linear, unassociated alpha.

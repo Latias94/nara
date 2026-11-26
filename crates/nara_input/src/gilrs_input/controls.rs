@@ -3,12 +3,8 @@ use gilrs::{Axis, Button};
 use crate::{GamepadAxis, GamepadButton};
 
 macro_rules! native_controls {
-    ($table:ident, $convert:ident, $control:ident, $native:ident;
+    ($convert:ident, $control:ident, $native:ident;
      $($variant:ident => $mapped:ident),+ $(,)?) => {
-        pub(super) const $table: &[($control, $native)] = &[
-            $(($control::$variant, $native::$mapped),)+
-        ];
-
         pub(super) fn $convert(value: $native) -> Option<$control> {
             match value {
                 $($native::$mapped => Some($control::$variant),)+
@@ -19,7 +15,7 @@ macro_rules! native_controls {
 }
 
 native_controls! {
-    BUTTONS, button_from_native, GamepadButton, Button;
+    button_from_native, GamepadButton, Button;
     South => South,
     East => East,
     West => West,
@@ -42,7 +38,7 @@ native_controls! {
 }
 
 native_controls! {
-    AXES, axis_from_native, GamepadAxis, Axis;
+    axis_from_native, GamepadAxis, Axis;
     LeftStickX => LeftStickX,
     LeftStickY => LeftStickY,
     RightStickX => RightStickX,

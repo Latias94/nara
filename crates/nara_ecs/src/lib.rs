@@ -16,6 +16,7 @@ mod authoring {
         change_detection::{DetectChanges, DetectChangesMut, Mut, Ref},
         component::Component,
         entity::Entity,
+        hierarchy::{ChildOf, Children},
         query::{Added, AnyOf, Changed, Has, Or, QueryState, With, Without},
         resource::Resource,
         schedule::{
@@ -63,9 +64,6 @@ pub mod schedule {
         IntoScheduleConfigs, IntoSystemSet, Schedule, ScheduleLabel, SystemCondition, SystemSet,
     };
 }
-
-pub mod identity;
-pub mod transaction;
 
 /// Nara's maintained ordinary ECS authoring surface.
 ///

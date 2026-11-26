@@ -1,35 +1,19 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    error::Error,
     fs::File,
-    io::{self, Read},
+    io::{self, Read as _},
     path::{Path, PathBuf},
 };
 
-use nara_core::diagnostic::DiagnosticReport;
-use nara_core::vfs::{AssetPath, DirAssetSource};
-use nara_input::{ActionMapFileCandidate, ActionMapFileLimits};
-use nara_reflect::{
-    AuthoringSchemaBundle, AuthoringSchemaBundleLimits, ComponentSchema, ComponentTypeId,
-    PersistentComponentSchemaOwnerId, collect_declared_asset_references_from_schema,
-    validate_component_value,
-};
-use nara_scene::{
-    PrefabDocumentCandidate, SceneDocumentCandidate, SceneEntityRecord, SceneFileLimits,
-};
+use serde::Deserialize;
 use thiserror::Error;
 
-use super::{SchemaCacheError, read_schema_cache};
-use crate::{DEFAULT_MANIFEST_BYTE_LIMIT, ProjectManifest, ProjectProfileError};
+use super::GAME_BINARY;
+use crate::{
+    ProjectManifest,
+    manifest::{nonempty, optional_nonempty},
+};
 
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct ProjectCheck {
-    pub scenes: usize,
-    pub prefabs: usize,
-    pub asset_paths: usize,
-    /// Components or references that require a newer Schema or native asset resolution.
-    pub deferred: usize,
-}
+const MANIFEST_BYTE_LIMIT: u64 = 256 * 1024;
 
 #[derive(Debug, Error)]
 pub enum ProjectCheckError {
@@ -39,251 +23,93 @@ pub enum ProjectCheckError {
         #[source]
         source: io::Error,
     },
-    #[error("invalid nara.toml")]
-    Manifest { diagnostics: Box<DiagnosticReport> },
-    #[error(transparent)]
-    Profile(#[from] ProjectProfileError),
-    #[error(transparent)]
-    Cache(#[from] SchemaCacheError),
-    #[error("invalid {path}: {source}")]
-    Source {
-        path: String,
+    #[error("invalid {}: {source}", .path.display())]
+    Parse {
+        path: PathBuf,
         #[source]
-        source: Box<dyn Error + Send + Sync>,
+        source: toml::de::Error,
     },
 }
 
-/// Validates the manifest, selected action map, optional Schema files, declared Scene roots, and
-/// their direct path-based asset references without invoking Cargo or loading native code.
-/// Path-based Prefab sources are checked recursively.
-/// Unavailable Schema, stable asset IDs, and Prefab overrides are left for runtime admission.
-pub fn check_project(
-    root: &Path,
-    profile: Option<&str>,
-) -> Result<ProjectCheck, ProjectCheckError> {
-    let files = ProjectFiles {
-        root,
-        source: DirAssetSource::new(root).map_err(|source| ProjectCheckError::Read {
-            path: root.to_path_buf(),
-            source,
-        })?,
-    };
-    let manifest = files.read("nara.toml", DEFAULT_MANIFEST_BYTE_LIMIT)?;
-    let loaded = ProjectManifest::parse_toml_bytes(&manifest);
-    if loaded.has_errors() {
-        return Err(ProjectCheckError::Manifest {
-            diagnostics: Box::new(loaded.diagnostics),
-        });
-    }
-    let manifest = loaded.manifest.ok_or_else(|| ProjectCheckError::Manifest {
-        diagnostics: Box::new(loaded.diagnostics),
-    })?;
-    let settings = manifest.resolve_profile(profile)?;
-    let bundle = settings
-        .authoring_schema_bundle
-        .as_ref()
-        .map(|path| {
-            let path = path.as_str();
-            let bytes = files.read(
-                path,
-                AuthoringSchemaBundleLimits::default().encoded_bytes().get() as u64,
-            )?;
-            AuthoringSchemaBundle::from_json_bytes(&bytes)
-                .map_err(|source| invalid_source(path, source))
-        })
-        .transpose()?;
-    let cache = read_schema_cache(root)?;
-    let mut schemas = BTreeMap::new();
-    if let Some(cache) = &cache {
-        schemas.extend(
-            cache
-                .components()
-                .iter()
-                .map(|schema| (schema.id(), (schema, None))),
-        );
-    }
-    if let Some(bundle) = &bundle {
-        for owner in bundle.owners() {
-            schemas.extend(
-                owner
-                    .current()
-                    .components()
-                    .iter()
-                    .map(|schema| (schema.id(), (schema, Some(owner.owner_id())))),
-            );
-        }
-    }
-    let mut check = ContentCheck {
-        files: &files,
-        schemas,
-        assets_dir: settings.paths.assets.as_str(),
-        prefabs_dir: settings.paths.prefabs.as_str(),
-        assets: BTreeSet::new(),
-        prefabs: BTreeSet::new(),
-        pending_prefabs: Vec::new(),
-        report: ProjectCheck::default(),
-    };
-    let scenes: BTreeSet<_> = settings
-        .startup
-        .default_scene
-        .iter()
-        .chain(&settings.content.scenes)
-        .map(|path| format!("{}/{path}", settings.paths.scenes))
-        .collect();
-    let scene_limit = SceneFileLimits::default().encoded_bytes().get() as u64;
-    for path in &scenes {
-        let bytes = files.read(path, scene_limit)?;
-        let scene = if path.ends_with(".ron") {
-            SceneDocumentCandidate::decode_ron_bytes(&bytes)
-        } else {
-            SceneDocumentCandidate::decode_json_bytes(&bytes)
-        }
-        .map_err(|source| invalid_source(path, source))?;
-        let scene = scene
-            .into_composition_source()
-            .map_err(|source| invalid_source(path, source))?;
-        check.entities(path, &scene.entities)?;
-    }
-    while let Some(path) = check.pending_prefabs.pop() {
-        let bytes = files.read(&path, scene_limit)?;
-        let prefab = if path.ends_with(".ron") {
-            PrefabDocumentCandidate::decode_ron_bytes(&bytes)
-        } else {
-            PrefabDocumentCandidate::decode_json_bytes(&bytes)
-        }
-        .map_err(|source| invalid_source(&path, source))?;
-        let prefab = prefab
-            .into_composition_source()
-            .map_err(|source| invalid_source(&path, source))?;
-        check.entities(&path, &prefab.entities)?;
-    }
-    if let Some(path) = &settings.input.action_map {
-        let path = path.as_str();
-        let limits = ActionMapFileLimits::default();
-        let bytes = files.read(path, limits.encoded_bytes().get() as u64)?;
-        ActionMapFileCandidate::decode_source_bytes(path, &bytes, limits)
-            .map_err(|source| invalid_source(path, source))?;
-    }
-    check.report.scenes = scenes.len();
-    check.report.prefabs = check.prefabs.len();
-    check.report.asset_paths = check.assets.len();
-    Ok(check.report)
+/// Reads `nara.toml` and the local Cargo package declaration without running Cargo.
+pub fn check_project(project_dir: &Path) -> Result<ProjectManifest, ProjectCheckError> {
+    let manifest = read_manifest(project_dir.join("nara.toml"))?;
+    CargoPackage::read(project_dir)?;
+    Ok(manifest)
 }
 
-struct ContentCheck<'a> {
-    files: &'a ProjectFiles<'a>,
-    schemas: BTreeMap<
-        &'a ComponentTypeId,
-        (
-            &'a ComponentSchema,
-            Option<&'a PersistentComponentSchemaOwnerId>,
-        ),
-    >,
-    assets_dir: &'a str,
-    prefabs_dir: &'a str,
-    assets: BTreeSet<String>,
-    prefabs: BTreeSet<String>,
-    pending_prefabs: Vec<String>,
-    report: ProjectCheck,
+/// Cargo manifest fields used to select a local binary and its required features.
+#[derive(Debug, Deserialize)]
+pub struct CargoPackage {
+    package: Package,
+    #[serde(default, rename = "bin")]
+    targets: Vec<Binary>,
 }
 
-impl ContentCheck<'_> {
-    fn entities(
-        &mut self,
-        source: &str,
-        entities: &[SceneEntityRecord],
-    ) -> Result<(), ProjectCheckError> {
-        for entity in entities {
-            if let Some(prefab) = &entity.prefab {
-                if let Some(path) = prefab.source.as_path() {
-                    let path = format!("{}/{path}", self.prefabs_dir);
-                    if self.prefabs.insert(path.clone()) {
-                        self.pending_prefabs.push(path);
-                    }
-                } else {
-                    self.report.deferred += 1;
-                }
-                self.report.deferred += usize::from(prefab.overrides.is_some());
-            }
-            for (component, record) in &entity.components {
-                let Some((schema, _)) = self.schemas.get(component).filter(|(schema, owner)| {
-                    schema.version() == record.version
-                        && record.contextual_defaults.is_empty()
-                        && owner
-                            .zip(record.owner())
-                            .is_none_or(|(expected, actual)| expected == actual)
-                }) else {
-                    self.report.deferred += 1;
-                    continue;
-                };
-                let location = || format!("{source} entity {} component {component}", entity.id);
-                validate_component_value(schema, record.value())
-                    .map_err(|source| invalid_source(location(), source))?;
-                let references = collect_declared_asset_references_from_schema(
-                    schema,
-                    record.version,
-                    record.value(),
-                )
-                .map_err(|source| invalid_source(location(), source))?;
-                for reference in references {
-                    if let Some(path) = reference.asset_ref().as_path() {
-                        let path = format!("{}/{path}", self.assets_dir);
-                        if self.assets.insert(path.clone()) {
-                            drop(self.files.open(&path)?);
-                        }
-                    } else {
-                        self.report.deferred += 1;
-                    }
-                }
-            }
-        }
-        Ok(())
+impl CargoPackage {
+    pub fn read(project_dir: &Path) -> Result<Self, ProjectCheckError> {
+        read_manifest(project_dir.join("Cargo.toml"))
+    }
+
+    pub fn name(&self) -> &str {
+        &self.package.name
+    }
+
+    pub fn default_binary(&self) -> &str {
+        self.package.default_run.as_deref().unwrap_or(GAME_BINARY)
+    }
+
+    pub fn required_features(&self, binary: &str) -> &[String] {
+        self.targets
+            .iter()
+            .find(|target| target.name == binary)
+            .map_or(&[], |target| &target.required_features)
     }
 }
 
-struct ProjectFiles<'a> {
-    root: &'a Path,
-    source: DirAssetSource,
+#[derive(Debug, Deserialize)]
+struct Package {
+    #[serde(deserialize_with = "nonempty")]
+    name: String,
+    #[serde(
+        default,
+        rename = "default-run",
+        deserialize_with = "optional_nonempty"
+    )]
+    default_run: Option<String>,
 }
 
-impl ProjectFiles<'_> {
-    fn open(&self, path: &str) -> Result<File, ProjectCheckError> {
-        let open = || self.source.open(&AssetPath::new(path)?);
-        open().map_err(|source| self.read_error(path, source))
-    }
+#[derive(Debug, Deserialize)]
+struct Binary {
+    #[serde(deserialize_with = "nonempty")]
+    name: String,
+    #[serde(default, rename = "required-features")]
+    required_features: Vec<String>,
+}
 
-    fn read(&self, path: &str, limit: u64) -> Result<Vec<u8>, ProjectCheckError> {
-        let mut bytes = Vec::new();
-        self.open(path)?
-            .take(limit + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|source| self.read_error(path, source))?;
-        if bytes.len() as u64 > limit {
-            return Err(self.read_error(
-                path,
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("file exceeds {limit} bytes"),
-                ),
+fn read_manifest<T: serde::de::DeserializeOwned>(path: PathBuf) -> Result<T, ProjectCheckError> {
+    let read = || {
+        if !path.metadata()?.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected a file",
             ));
         }
-        Ok(bytes)
-    }
-
-    fn read_error(&self, path: &str, source: io::Error) -> ProjectCheckError {
-        ProjectCheckError::Read {
-            path: self.root.join(path),
-            source,
+        let mut contents = String::new();
+        File::open(&path)?
+            .take(MANIFEST_BYTE_LIMIT + 1)
+            .read_to_string(&mut contents)?;
+        if contents.len() as u64 > MANIFEST_BYTE_LIMIT {
+            return Err(io::Error::new(
+                io::ErrorKind::FileTooLarge,
+                format!("manifest exceeds {MANIFEST_BYTE_LIMIT} bytes"),
+            ));
         }
-    }
-}
-
-fn invalid_source(
-    path: impl Into<String>,
-    source: impl Error + Send + Sync + 'static,
-) -> ProjectCheckError {
-    ProjectCheckError::Source {
-        path: path.into(),
-        source: Box::new(source),
-    }
+        Ok(contents)
+    };
+    let contents = read().map_err(|source| ProjectCheckError::Read {
+        path: path.clone(),
+        source,
+    })?;
+    toml::from_str(&contents).map_err(|source| ProjectCheckError::Parse { path, source })
 }

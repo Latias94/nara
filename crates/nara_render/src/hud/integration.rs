@@ -414,6 +414,18 @@ pub fn commit_ui_backend_presentation(
     accepted
 }
 
+#[cfg(feature = "hud-presentation")]
+pub(super) fn try_commit_ui_backend_presentation(
+    world: &mut World,
+    commit: OneShotPresentationCommit,
+) -> Option<UiAcceptedBackendPresentation> {
+    world
+        .get_resource::<UiPresentationState>()?
+        .0
+        .accepts(commit.submission(), commit.packet())
+        .then(|| commit_ui_backend_presentation(world, commit))
+}
+
 /// Terminates the exact active plan after rejection, abort, or supersession.
 ///
 /// The previous presented packet becomes the replay plan. If this target has never presented, the
@@ -564,12 +576,9 @@ pub fn plugin(font: FontFace) -> PluginDefinition {
 pub const UI_RENDER_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.ui-render");
 const UI_RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] =
     &[crate::RENDER_PLUGIN_ID, IMAGE_PREPARE_PLUGIN_ID];
-const UI_RENDER_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
-    &[nara_app::PluginProductCapability::new("presentation-ui")];
 pub const UI_RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(UI_RENDER_PLUGIN_ID, nara_app::PluginCategory::Render)
-        .requires_plugins(UI_RENDER_PLUGIN_REQUIREMENTS)
-        .requires_product_capabilities(UI_RENDER_PRODUCT_REQUIREMENTS);
+        .requires_plugins(UI_RENDER_PLUGIN_REQUIREMENTS);
 
 impl Plugin for UiRenderPlugin {
     fn declaration() -> &'static nara_app::PluginDeclaration {

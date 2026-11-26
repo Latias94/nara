@@ -2,8 +2,8 @@ use super::*;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use crate::image::{
-    ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
-    PreparedImageSnapshot, PreparedImages, image_resource_key,
+    ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, PreparedImageSnapshot, PreparedImages,
+    image_resource_key,
 };
 use crate::material::{
     AlphaMode2d, Material2dDeclaration, Material2dLibrary, MaterialParameters,
@@ -12,21 +12,13 @@ use crate::material::{
 use crate::sprite::{Sprite, TextureRegion};
 use crate::tilemap::{TileAtlasLayout, TileCell, TileCoord, TileIndex, TileSet, Tilemap};
 use crate::{Camera2d, ExtractedView, RenderImage2d, RenderTarget, ViewportRect};
-use nara_app::{
-    App, CoreStage, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeClosePolicy,
-    RuntimeInstance, RuntimeObligationLedger,
-};
-use nara_asset::{
-    AssetEvents, AssetPath, AssetSourcePath, AssetStates, Assets, Handle, ImportDependencyDigest,
-    ImportRecipe, ImporterId, ImporterVersion, SourceHash, StableAssetId,
-};
+use nara_app::{App, CoreStage, RuntimeCandidateRetirementState, RuntimeInstance};
+use nara_asset::{AssetEvents, AssetPath, AssetStates, Assets, Handle};
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, World, schedule::IntoScheduleConfigs};
 use nara_scene::spatial::{ChildOf, GlobalTransform2d, Transform2d, Visibility};
 
-mod authored_material;
 mod material;
-mod source_refresh;
 mod visibility;
 
 #[derive(MaterialParameters)]
@@ -55,11 +47,7 @@ fn palette_materials(id: &str, alpha_mode: AlphaMode2d) -> Material2dLibrary {
         )
         .unwrap();
     let path = AssetPath::new("palette.wgsl").unwrap();
-    let read_shader = |_: &AssetPath| {
-        Ok(Arc::<str>::from(include_str!(
-            "../../../../examples/support/palette_material.wgsl"
-        )))
-    };
+    let read_shader = |_: &AssetPath| Ok(Arc::<str>::from(include_str!("tests/palette.wgsl")));
     let prepared = materials.prepare_update(id, &[path], read_shader).unwrap();
     materials.publish(&prepared, read_shader).unwrap();
     materials
@@ -93,9 +81,7 @@ fn instance() -> SpriteInstance {
 fn sprite_app() -> App {
     let mut app = App::new();
     app.add_plugins((
-        nara_reflect::ComponentRegistryPlugin,
         nara_scene::spatial::SpatialPlugin,
-        crate::RenderComponentsPlugin,
         crate::RenderPlugin::default(),
         crate::image::ImagePreparePlugin,
         SpriteRenderPlugin,
@@ -105,15 +91,7 @@ fn sprite_app() -> App {
 }
 
 fn start_runtime(app: App) -> RuntimeInstance {
-    RuntimeCandidate::admit(
-        app.seal().unwrap(),
-        RuntimeObligationLedger::new(),
-        RuntimeClosePolicy::default(),
-    )
-    .unwrap()
-    .complete_startup()
-    .unwrap()
-    .promote()
+    RuntimeInstance::start(app).unwrap()
 }
 
 fn retire_runtime(runtime: RuntimeInstance) {
@@ -134,7 +112,6 @@ fn extraction_clears_stale_sprites_and_uses_explicit_identity_transform() {
             source_order: 99,
             kind: ExtractedSpriteKind::Sprite,
             material: ExtractedSpriteMaterial::from_color(Color::WHITE),
-            image_content: None,
             material_extension: None,
             texture_region: TextureUvRect::FULL,
             world_center: Vec2::new(9.0, 9.0),
@@ -778,17 +755,8 @@ fn queued_image_snapshots_survive_successor_publication_and_cache_removal() {
 
     let [old, new] = [vec![255; 16], [0, 255, 0, 255].repeat(4)].map(|pixels| {
         let image = test_image_with_pixels(pixels);
-        let source_hash = image.source().unwrap().source_hash();
-        let import_recipe_digest = image.source().unwrap().import_recipe().digest();
         let version = images
-            .commit_loaded(
-                handle,
-                image,
-                &mut states,
-                &mut events,
-                Some(source_hash),
-                Some(import_recipe_digest),
-            )
+            .commit_loaded(handle, image, &mut states, &mut events)
             .unwrap();
         let snapshot = PreparedImageSnapshot::capture(handle, &images, &states).unwrap();
         assert_eq!(snapshot.identity().asset_version(), version);
@@ -1666,7 +1634,6 @@ fn tilemap_extraction_context_is_scoped_to_each_map_and_frame() {
                         tile: TileIndex::new(tile),
                     },
                     material,
-                    image_content: None,
                     material_extension: None,
                     texture_region,
                     world_center: affine.transform_point2(center),
@@ -1776,7 +1743,6 @@ fn placeholder_extracted_sprite() -> ExtractedSprite {
         source_order: 99,
         kind: ExtractedSpriteKind::Sprite,
         material: ExtractedSpriteMaterial::from_color(Color::WHITE),
-        image_content: None,
         material_extension: None,
         texture_region: TextureUvRect::FULL,
         world_center: Vec2::new(9.0, 9.0),
@@ -1812,20 +1778,11 @@ fn queued_item(entity_index: u32) -> QueuedSpriteItem {
 
 fn insert_loaded_image(app: &mut App, handle: Handle<ImageAsset>) {
     let image = test_image();
-    let source_hash = image.source().unwrap().source_hash();
-    let import_recipe_digest = image.source().unwrap().import_recipe().digest();
     let mut images = Assets::<ImageAsset>::default();
     let mut states = AssetStates::default();
     let mut events = AssetEvents::default();
     images
-        .commit_loaded(
-            handle,
-            image,
-            &mut states,
-            &mut events,
-            Some(source_hash),
-            Some(import_recipe_digest),
-        )
+        .commit_loaded(handle, image, &mut states, &mut events)
         .unwrap();
     app.world_mut()
         .expect("app should allow world mutation")
@@ -1840,23 +1797,13 @@ fn test_image() -> ImageAsset {
 }
 
 fn test_image_with_pixels(pixels: Vec<u8>) -> ImageAsset {
-    let stable_id = StableAssetId::parse_str("ce2ab2f8-c58b-48e3-b94e-9465340262a1").unwrap();
-    let source_hash = SourceHash::from_bytes(&pixels);
-    let import_recipe = ImportRecipe::new(
-        stable_id,
-        source_hash,
-        ImportDependencyDigest::empty(),
-        ImporterId::new("nara-image").unwrap(),
-        ImporterVersion::new(1),
-        ImageImportSettings::default().settings_hash(),
-    );
-    let source = ImageSourceMetadata::new(
-        AssetSourcePath::new("textures/test.png").unwrap(),
-        ImageImportSettings::default(),
-        import_recipe,
+    ImageAsset::new(
+        ImageExtent::new(2, 2),
+        ImageFormat::Rgba8,
+        ImageColorSpace::Srgb,
+        pixels,
     )
-    .unwrap();
-    ImageAsset::from_import(source, ImageExtent::new(2, 2), ImageFormat::Rgba8, pixels).unwrap()
+    .unwrap()
 }
 
 fn prepared_image_snapshot() -> PreparedImageSnapshot {
@@ -1864,17 +1811,8 @@ fn prepared_image_snapshot() -> PreparedImageSnapshot {
     let mut images = Assets::<ImageAsset>::default();
     let mut states = AssetStates::default();
     let image = test_image();
-    let source_hash = image.source().unwrap().source_hash();
-    let import_recipe_digest = image.source().unwrap().import_recipe().digest();
     images
-        .commit_loaded(
-            handle,
-            image,
-            &mut states,
-            &mut AssetEvents::default(),
-            Some(source_hash),
-            Some(import_recipe_digest),
-        )
+        .commit_loaded(handle, image, &mut states, &mut AssetEvents::default())
         .unwrap();
     PreparedImageSnapshot::capture(handle, &images, &states).unwrap()
 }

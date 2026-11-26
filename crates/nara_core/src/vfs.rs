@@ -1,8 +1,5 @@
 //! Raw asset bytes at source-relative paths.
 
-#[cfg(feature = "fs-capabilities")]
-pub mod capabilities;
-
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt, io,

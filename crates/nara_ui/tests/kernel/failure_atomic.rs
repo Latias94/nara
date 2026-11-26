@@ -1,7 +1,7 @@
 use nara_ui::kernel::{
     UiAuthoringSnapshotBuilder, UiCompileError, UiCompiler, UiEnvironment, UiInteraction, UiLayer,
-    UiLimits, UiLocalKey, UiNode, UiOpaqueId, UiPersistentIdentity, UiPoint, UiRoot, UiRootKey,
-    UiRootStatus, UiSemanticRole, UiSemantics, UiStyle, UiSurfaceId, UiTheme, UiVisual,
+    UiLimits, UiLocalKey, UiNode, UiPoint, UiRoot, UiRootKey, UiRootStatus, UiSemanticRole,
+    UiSemantics, UiStyle, UiSurfaceId, UiTheme, UiVisual,
 };
 use nara_ui::text::bundled_font_face;
 
@@ -103,19 +103,10 @@ fn failed_root_retains_only_environment_compatible_visuals() {
 }
 
 #[test]
-fn persistent_fallback_cannot_cross_complete_contexts_with_equal_local_placement() {
-    let root = |context: &[u8], invalid| {
-        let context = UiOpaqueId::new(context).unwrap();
-        let root_key = UiRootKey::persistent(UiPersistentIdentity::new(
-            context.clone(),
-            UiOpaqueId::new("root").unwrap(),
-        ))
-        .unwrap();
-        let local = UiLocalKey::persistent(UiPersistentIdentity::new(
-            context,
-            UiOpaqueId::new("retry").unwrap(),
-        ))
-        .unwrap();
+fn fallback_cannot_cross_named_roots_with_equal_local_keys() {
+    let root = |domain: &str, invalid| {
+        let root_key = UiRootKey::runtime(domain, "root").unwrap();
+        let local = UiLocalKey::runtime("hud", "retry").unwrap();
         let child = UiNode::new(UiStyle::absolute(10.0, 10.0, 80.0, 40.0))
             .with_key(local)
             .with_visual(UiVisual::solid(nara_ui::kernel::UiColor::rgba(
@@ -129,11 +120,11 @@ fn persistent_fallback_cannot_cross_complete_contexts_with_equal_local_placement
             root.with_child(child)
         }
     };
-    for other_context in [b"source-b/slot-1".as_slice(), b"source-a/slot-2"] {
+    for other_context in ["hud-b", "hud-c"] {
         let mut compiler =
             UiCompiler::new(bundled_font_face().unwrap(), Default::default()).unwrap();
         let valid = UiAuthoringSnapshotBuilder::new(1)
-            .with_root(root(b"source-a/slot-1", false))
+            .with_root(root("hud-a", false))
             .build()
             .unwrap();
         let first = compiler
@@ -143,7 +134,7 @@ fn persistent_fallback_cannot_cross_complete_contexts_with_equal_local_placement
         assert!(!first.paint().is_empty());
 
         let compatible = UiAuthoringSnapshotBuilder::new(2)
-            .with_root(root(b"source-a/slot-1", true))
+            .with_root(root("hud-a", true))
             .build()
             .unwrap();
         let retained = compiler

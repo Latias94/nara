@@ -26,7 +26,6 @@ def check_wgpu():
     for path in (
         "Cargo.lock",
         "reference-game/Cargo.lock",
-        "samples/two-level-game/Cargo.lock",
         "examples/shared-viewport/Cargo.lock",
     ):
         with Path(path).open("rb") as locked:
@@ -43,7 +42,7 @@ def check_rust_sources():
     )
     files = subprocess.check_output(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--",
-         "src", "crates", "examples", "reference-game", "samples", "tests"],
+         "src", "crates", "examples", "reference-game", "tests"],
         encoding="utf-8",
     ).split("\0")
     for path in sorted(set(files)):
@@ -52,6 +51,22 @@ def check_rust_sources():
         for number, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
             if not line.lstrip().startswith("//") and prohibited.search(line):
                 raise SystemExit(f"{path}:{number} uses a retired pattern: {line.strip()}")
+
+
+def check_source_size():
+    def rust_lines(directory):
+        return sum(
+            len(path.read_text(encoding="utf-8").splitlines())
+            for path in directory.rglob("*.rs")
+        )
+
+    facade = rust_lines(Path("src"))
+    if facade > 1_500:
+        raise SystemExit(f"Root src has {facade:,} Rust lines; the limit is 1,500")
+    for manifest in sorted(Path("crates").glob("*/Cargo.toml")):
+        lines = rust_lines(manifest.parent / "src")
+        if lines > 30_000:
+            print(f"Warning: {manifest.parent.name}/src has {lines:,} Rust lines; review its scope")
 
 
 if __name__ == "__main__":
@@ -64,16 +79,16 @@ if __name__ == "__main__":
         "--no-default-features", "--features",
         "physics-2d,audio-device,presentation-2d,presentation-ui,desktop-winit,render-wgpu",
     )
-    for target in ("cooked-server", "cooked-player,desktop"):
-        check_dependencies(
-            "two-level-game", shipping, "--manifest-path", "samples/two-level-game/Cargo.toml",
-            "--no-default-features", "--features", target,
-        )
+    check_dependencies(
+        "nara-reference-game", shipping, "--manifest-path", "reference-game/Cargo.toml",
+        "--features", "desktop",
+    )
     check_dependencies("nara_project", re.compile(rf"{editor}|^(?:wgpu|winit)$"), "--all-features")
     check_dependencies("nara_editor_core", re.compile(ui), "--all-features")
     if len(set(check_wgpu())) != 1:
         raise SystemExit("The engine and game workspaces resolve different wgpu package identities")
     check_rust_sources()
+    check_source_size()
     first_game = Path("examples/first_game.rs")
     lines = len(first_game.read_text(encoding="utf-8").splitlines())
     if lines > 100:

@@ -3,7 +3,7 @@ use std::{error::Error, fmt, sync::Arc};
 use crate::{InputSeatId, InputWindowId};
 use nara_ecs::Resource;
 
-/// An explicit existing window and seat; this value creates neither endpoint nor seat.
+/// The window and seat that receive a controller's input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GamepadRoute {
     pub window: InputWindowId,
@@ -41,10 +41,16 @@ pub struct GilrsDevice {
     pub(crate) token: GilrsDeviceToken,
     pub(crate) name: String,
     pub(crate) route: Option<GamepadRoute>,
-    pub(crate) revision: u64,
+    pub(crate) emitted_route: Option<GamepadRoute>,
+    pub(crate) native: gilrs::GamepadId,
 }
 
 impl GilrsDevice {
+    #[must_use]
+    pub const fn id(&self) -> u64 {
+        self.token.serial
+    }
+
     #[must_use]
     pub fn token(&self) -> GilrsDeviceToken {
         self.token.clone()
@@ -67,7 +73,6 @@ pub enum GamepadAssignmentError {
     ForeignToken,
     StaleToken,
     Closed,
-    RevisionExhausted,
 }
 
 impl fmt::Display for GamepadAssignmentError {
@@ -80,9 +85,8 @@ impl Error for GamepadAssignmentError {}
 
 /// Bounded connected-device inventory and explicit per-device assignment owner.
 ///
-/// Changes take effect at the next native poll after queued events drain. A route is intent;
-/// only the original focused Input endpoint can admit a gamepad connection. Unassignment is
-/// retained for this connection and does not fall back to the plugin's default route.
+/// Changes take effect when the native event queue next drains. Unassignment stays in effect
+/// for that connection until explicitly changed.
 #[derive(Debug, Resource)]
 pub struct GilrsDevices {
     pub(crate) owner: Arc<()>,
@@ -124,14 +128,7 @@ impl GilrsDevices {
             .iter_mut()
             .find(|d| d.token == *token)
             .ok_or(GamepadAssignmentError::StaleToken)?;
-        if device.route != route {
-            let revision = device
-                .revision
-                .checked_add(1)
-                .ok_or(GamepadAssignmentError::RevisionExhausted)?;
-            device.route = route;
-            device.revision = revision;
-        }
+        device.route = route;
         Ok(())
     }
 }

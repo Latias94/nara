@@ -204,6 +204,8 @@ impl fmt::Display for ActionMapError {
 impl Error for ActionMapError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct ActionContextDefinition {
     pub context: ActionContext,
     pub enabled: bool,
@@ -227,6 +229,47 @@ struct CompiledActionMap {
 impl AsRef<ActionMapDefinition> for ActionMapDefinition {
     fn as_ref(&self) -> &ActionMapDefinition {
         self
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for ActionMapDefinition {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(serde::Serialize)]
+        struct Definition<'a> {
+            contexts: &'a [ActionContextDefinition],
+            bindings: &'a [ActionBinding],
+        }
+
+        Definition {
+            contexts: self.contexts(),
+            bindings: self.bindings(),
+        }
+        .serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ActionMapDefinition {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Definition {
+            contexts: Vec<ActionContextDefinition>,
+            bindings: Vec<ActionBinding>,
+        }
+
+        let definition = Definition::deserialize(deserializer)?;
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        for context in definition.contexts {
+            builder
+                .declare_context(context.context, context.enabled)
+                .map_err(serde::de::Error::custom)?;
+        }
+        for binding in definition.bindings {
+            builder.bind(binding).map_err(serde::de::Error::custom)?;
+        }
+        builder.compile().map_err(serde::de::Error::custom)
     }
 }
 

@@ -1,27 +1,20 @@
-use std::{
-    any::Any,
-    collections::BTreeMap,
-    sync::{Arc, OnceLock},
-};
+use std::{any::Any, collections::BTreeMap, sync::Arc};
 
-use nara_app::{App, RuntimeCandidateScope, RuntimeGeneration};
 use nara_core::ByteLimit;
-use nara_ecs::{Resource, World};
+use nara_ecs::Resource;
 
 use crate::{
     ActionBinding, ActionContext, ActionMapBindings, ActionMapBuilder, ActionMapDefinition,
     ActionMapError, ActionMapLimitKind, ActionMapLimits, InputBinding, InputSeatId,
-    MAX_ACTION_CONTEXTS, MAX_INPUT_TIMELINE_ENTRIES, definition::check_limit,
-    semantic::ActionMapRevision,
+    MAX_ACTION_CONTEXTS, definition::check_limit,
 };
 
 /// Independently mutable context and mapping state for one seat. It is deliberately not cloneable
 /// or serializable; immutable bindings share their actual data owner instead.
 pub struct ActionMap {
     bindings: ActionMapBindings,
-    enabled: Box<[bool]>,
-    pub(crate) revision: Arc<ActionMapRevision>,
-    explicit: bool,
+    enabled: Box<[Option<Arc<()>>]>,
+    pub(crate) revision: Arc<()>,
     _state_owner: Option<Arc<dyn Any + Send + Sync>>,
 }
 
@@ -77,13 +70,9 @@ impl ActionMaps {
         Ok(self.maps.insert(seat, map))
     }
 
-    /// Returns the original owned state; later staging observes that this seat has no mapping.
+    /// Returns the original owned state. The next input resolution releases its active actions.
     pub fn remove(&mut self, seat: InputSeatId) -> Option<ActionMap> {
         self.maps.remove(&seat)
-    }
-
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (InputSeatId, &ActionMap)> {
-        self.maps.iter().map(|(seat, map)| (*seat, map))
     }
 }
 
@@ -123,7 +112,6 @@ impl std::fmt::Debug for ActionMap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ActionMap")
             .field("bindings", &self.bindings)
-            .field("enabled", &self.enabled)
             .finish_non_exhaustive()
     }
 }
@@ -158,17 +146,10 @@ impl ActionMap {
         )
     }
 
-    /// Fixed logical allowance for context state and all retained revision/staging snapshots.
-    ///
-    /// The single finite ingress log can retain distinct snapshots. A fixed maximum-context allowance
-    /// remains charged across replacement while old snapshots survive. Ingress endpoints, held
-    /// semantic contributions and transient action output have separate ownership and are excluded.
+    /// Fixed allowance for the live map and its configurable contexts.
     #[must_use]
     pub const fn required_state_bytes() -> usize {
-        let snapshots = MAX_INPUT_TIMELINE_ENTRIES + 8;
-        snapshots * (128 + MAX_ACTION_CONTEXTS * (4 * size_of::<usize>()))
-            + size_of::<Self>()
-            + MAX_ACTION_CONTEXTS
+        size_of::<Self>() + (3 * MAX_ACTION_CONTEXTS + 2) * size_of::<usize>()
     }
 
     pub fn new(
@@ -188,22 +169,10 @@ impl ActionMap {
             Self::required_state_bytes(),
             state_limit.get(),
         )?;
-        let enabled = bindings
-            .definition()
-            .contexts()
-            .iter()
-            .map(|entry| entry.enabled)
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
-        let revision = Arc::new(ActionMapRevision::new_with_retention_owner(
-            enabled.len(),
-            state_owner.clone(),
-        ));
         Ok(Self {
+            enabled: enabled_contexts(&bindings),
             bindings,
-            enabled,
-            revision,
-            explicit: true,
+            revision: Arc::new(()),
             _state_owner: state_owner,
         })
     }
@@ -230,23 +199,10 @@ impl ActionMap {
 
     /// Installs an already compiled definition and starts a new mapping lifetime, including when
     /// the same bindings return. Candidate compilation can fail without touching this state.
-    /// The fixed maximum-context allowance covers replacement and all retained old snapshots.
     pub fn replace_bindings(&mut self, bindings: ActionMapBindings) {
-        let enabled = bindings
-            .definition()
-            .contexts()
-            .iter()
-            .map(|entry| entry.enabled)
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
-        let revision = Arc::new(ActionMapRevision::new_with_retention_owner(
-            enabled.len(),
-            self._state_owner.clone(),
-        ));
+        self.enabled = enabled_contexts(&bindings);
         self.bindings = bindings;
-        self.enabled = enabled;
-        self.revision = revision;
-        self.explicit = true;
+        self.revision = Arc::new(());
     }
 
     pub fn disable_context(&mut self, context: &ActionContext) -> Result<bool, ActionMapError> {
@@ -266,20 +222,24 @@ impl ActionMap {
             .definition()
             .context_index(context)
             .ok_or_else(|| ActionMapError::UnknownContext(context.clone()))?;
-        self.explicit = true;
-        if self.enabled[slot] == enabled {
+        if self.enabled[slot].is_some() == enabled {
             return Ok(false);
         }
-        ActionMapRevision::context_changed(&mut self.revision, slot);
-        self.enabled[slot] = enabled;
+        self.enabled[slot] = enabled.then(|| Arc::new(()));
         Ok(true)
     }
 
     #[must_use]
     pub fn is_context_enabled(&self, context: &ActionContext) -> bool {
-        self.definition()
-            .context_index(context)
-            .is_some_and(|slot| self.enabled[slot])
+        self.context_token(context).is_some()
+    }
+
+    pub(crate) fn context_token(&self, context: &ActionContext) -> Option<&Arc<()>> {
+        self.enabled[self.definition().context_index(context)?].as_ref()
+    }
+
+    pub(crate) fn binding_context_token(&self, index: usize) -> Option<&Arc<()>> {
+        self.enabled[self.definition().binding_context_index(index)?].as_ref()
     }
 
     #[must_use]
@@ -298,133 +258,13 @@ impl ActionMap {
     pub fn binding_at(&self, index: usize) -> Option<&ActionBinding> {
         self.bindings().get(index)
     }
-
-    pub(crate) fn pristine() -> Self {
-        Self {
-            explicit: false,
-            ..Self::default()
-        }
-    }
 }
 
-#[derive(Resource)]
-pub(crate) struct InputInstallation {
-    pristine: Option<Arc<ActionMapRevision>>,
-    selected: Option<ActionMapBindings>,
-    finalized: bool,
-}
-
-impl InputInstallation {
-    pub(crate) fn new(pristine: Option<Arc<ActionMapRevision>>) -> Self {
-        Self {
-            pristine,
-            finalized: false,
-            selected: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InputSelectionError {
-    MissingInputOwner,
-    MissingActionMap,
-    RuntimeStarted,
-    AlreadyFinalized,
-    CompetingConfiguration,
-}
-
-impl std::fmt::Display for InputSelectionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "input selection rejected: {self:?}")
-    }
-}
-impl std::error::Error for InputSelectionError {}
-
-/// Borrows the immutable PRIMARY definition selected in unpublished Host admission.
-///
-/// Returns `None` before finalization or when no PRIMARY map was selected. Later
-/// replacement of the mutable map or its contexts does not change this original selection.
-/// This observation supplies no authority to install a map or reconstruct physical held state.
-#[must_use]
-pub fn startup_action_map_bindings(world: &World) -> Option<&ActionMapBindings> {
-    world.get_resource::<InputInstallation>()?.selected.as_ref()
-}
-
-/// Installs a startup action map on a configured App before its first update.
-///
-/// `None` preserves the primary map already configured by the game's plugins.
-pub fn configure_startup_action_map(
-    app: &mut App,
-    selection: Option<ActionMap>,
-) -> Result<(), InputSelectionError> {
-    if app.world().contains_resource::<RuntimeGeneration>() {
-        return Err(InputSelectionError::RuntimeStarted);
-    }
-    let world = app
-        .world_mut()
-        .map_err(|_| InputSelectionError::MissingInputOwner)?;
-    receive_selection(world, selection)
-}
-
-/// Finalizes the Host's PRIMARY selection once in the unpublished candidate admission phase.
-/// `None` preserves code-first configuration. The scope type prevents post-Startup installation.
-pub fn finalize_input_selection(
-    scope: &mut RuntimeCandidateScope<'_>,
-    selection: Option<ActionMap>,
-) -> Result<(), InputSelectionError> {
-    let result = Arc::new(OnceLock::new());
-    let output = Arc::clone(&result);
-    scope.apply_command(move |world: &mut World| {
-        let value = receive_selection(world, selection);
-        output
-            .set(value)
-            .expect("immediate selection command runs once");
-    });
-    result
-        .get()
-        .copied()
-        .expect("candidate commands apply synchronously")
-}
-
-fn receive_selection(
-    world: &mut World,
-    selection: Option<ActionMap>,
-) -> Result<(), InputSelectionError> {
-    let installation = world
-        .get_resource::<InputInstallation>()
-        .ok_or(InputSelectionError::MissingInputOwner)?;
-    if installation.finalized {
-        return Err(InputSelectionError::AlreadyFinalized);
-    }
-    let maps = world
-        .get_resource::<ActionMaps>()
-        .ok_or(InputSelectionError::MissingActionMap)?;
-    if selection.is_some() {
-        let current = maps
-            .get(InputSeatId::PRIMARY)
-            .ok_or(InputSelectionError::MissingActionMap)?;
-        if current.explicit
-            || !installation
-                .pristine
-                .as_ref()
-                .is_some_and(|pristine| Arc::ptr_eq(pristine, &current.revision))
-        {
-            return Err(InputSelectionError::CompetingConfiguration);
-        }
-    }
-    if let Some(map) = selection {
-        world
-            .resource_mut::<ActionMaps>()
-            .insert(InputSeatId::PRIMARY, map)
-            .expect("the pristine PRIMARY slot is already installed");
-    }
-    let selected = world
-        .resource::<ActionMaps>()
-        .get(InputSeatId::PRIMARY)
-        .map(ActionMap::bindings_handle);
-    let mut installation = world.resource_mut::<InputInstallation>();
-    installation.finalized = true;
-    installation.pristine = None;
-    installation.selected = selected;
-    Ok(())
+fn enabled_contexts(bindings: &ActionMapBindings) -> Box<[Option<Arc<()>>]> {
+    bindings
+        .definition()
+        .contexts()
+        .iter()
+        .map(|entry| entry.enabled.then(|| Arc::new(())))
+        .collect()
 }

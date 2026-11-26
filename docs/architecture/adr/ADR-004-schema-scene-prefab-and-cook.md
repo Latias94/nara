@@ -26,14 +26,7 @@ inspector, prefab overrides, and future animation. Use compact `PackedU16`, `Pac
   payloads and contiguous packed arrays. Instantiate ECS components without an intermediate value tree.
 - Place cooked assets in a deterministic `.npak` archive with a versioned `NPAK` header and a
   directory sorted by `AssetId`. Support optional per-entry LZ4 compression and independent reads.
-- Let the game own its save snapshots separately from its cooked asset and scene formats. Migrate
-  the shipped examples and starter at the format cutover and retire the v0 JSON readers.
+- Let the game own its save snapshots separately from its cooked asset and scene formats.
 
-The Phase 3 `.pack` format uses `nara_asset::pack` for v1 archive I/O and bounded preparation of
-selected asset members. `nara_scene::runtime_catalog` owns the catalog and canonical member order.
-The executable supplies the expected digest and target. Admission checks both before the runtime
-selects member codecs or starts the world. Scene owns the deferred Scene request and checks the
-active Scene receipt again at commit. It holds a cancelled request until the preparation task
-returns. Render owns Image, Material2d, and TileSet publication within that commit. Primary Scene
-replacement carries one prepared TileSet batch through the exclusive World boundary. The host
-authorizes stock asset inputs and attaches the published resource receipts to the Scene.
+Phase 3B retires the old JSON scene and `.pack` workflows. The starter and reference game construct
+their worlds in Rust. Phase 5 introduces the formats above for authoring and distribution.

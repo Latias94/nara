@@ -242,7 +242,9 @@ mod native {
                     .submit_image_use::<()>(&[], |device, queue, encoder, _| {
                         queue.write_buffer(&source, 0, &[37; 16]);
                         match failure {
-                            0 => Err(WgpuRenderHostError::window_paint("refused after upload")),
+                            0 => Err(WgpuRenderHostError::ImageUseCallbackFailed {
+                                message: "refused after upload".to_owned(),
+                            }),
                             1 => panic!("injected native callback panic after upload"),
                             _ => {
                                 let invalid = device.create_buffer(&wgpu::BufferDescriptor {
@@ -258,7 +260,10 @@ mod native {
                     })
                     .unwrap_err();
                 match failure {
-                    0 => assert!(matches!(error, WgpuRenderHostError::WindowPaint { .. })),
+                    0 => assert!(matches!(
+                        error,
+                        WgpuRenderHostError::ImageUseCallbackFailed { .. }
+                    )),
                     1 => assert!(matches!(
                         error,
                         WgpuRenderHostError::NativeCallbackPanicked { stage: "image use" }

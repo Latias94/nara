@@ -392,12 +392,7 @@ fn native_world_pointer_uses_the_presented_camera_without_canvas_configuration()
 #[test]
 fn default_render_plugin_preserves_a_directly_configured_world_canvas() {
     let mut app = App::new();
-    app.add_plugins((
-        ComponentRegistryPlugin,
-        SpatialPlugin,
-        RenderComponentsPlugin,
-    ))
-    .unwrap();
+    app.add_plugins(SpatialPlugin).unwrap();
     let canvas = WorldCanvas::new(320, 180).unwrap();
     app.insert_resource(canvas).unwrap();
     app.add_plugin(RenderPlugin::default()).unwrap();

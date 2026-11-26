@@ -2000,10 +2000,6 @@ dependencies = [
 name = "nara"
 version = "0.1.0"
 dependencies = [
- "bevy_ecs",
- "blake3",
- "getrandom 0.3.4",
- "image",
  "nara_app",
  "nara_asset",
  "nara_audio",
@@ -2011,22 +2007,12 @@ dependencies = [
  "nara_ecs",
  "nara_input",
  "nara_physics2d",
- "nara_project",
  "nara_reflect",
  "nara_render",
  "nara_scene",
  "nara_ui",
  "nara_window",
  "raw-window-handle",
- "ron",
- "serde",
- "serde_json",
- "static_assertions",
- "thiserror 2.0.18",
- "toml",
- "tracing",
- "uuid",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2036,11 +2022,8 @@ dependencies = [
  "bevy_ecs",
  "bevy_platform",
  "bevy_tasks",
- "blake3",
  "nara_core",
  "nara_ecs",
- "serde",
- "serde_json",
  "thiserror 2.0.18",
  "tracing",
 ]
@@ -2049,19 +2032,17 @@ dependencies = [
 name = "nara_asset"
 version = "0.1.0"
 dependencies = [
- "bevy_ecs",
  "blake3",
  "image",
  "nara_app",
  "nara_core",
  "nara_ecs",
  "notify",
- "png",
  "ron",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
- "tracing",
  "uuid",
 ]
 
@@ -2083,18 +2064,14 @@ dependencies = [
 name = "nara_core"
 version = "0.1.0"
 dependencies = [
- "blake3",
  "getrandom 0.3.4",
  "glam 0.33.12",
  "ron",
- "rustix 1.1.4",
- "semver",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "uuid",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2102,13 +2079,7 @@ name = "nara_ecs"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
- "nara_core",
  "nara_ecs_derive",
- "ron",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "uuid",
 ]
 
 [[package]]
@@ -2128,7 +2099,7 @@ name = "nara_editor_core"
 version = "0.1.0"
 dependencies = [
  "nara_asset",
- "nara_ecs",
+ "nara_core",
  "nara_reflect",
 ]
 
@@ -2139,7 +2110,6 @@ dependencies = [
  "bevy_ecs",
  "gilrs",
  "nara_app",
- "nara_asset",
  "nara_core",
  "nara_ecs",
  "ron",
@@ -2174,24 +2144,15 @@ dependencies = [
 name = "nara_project"
 version = "0.1.0"
 dependencies = [
- "blake3",
  "ctrlc",
- "getrandom 0.3.4",
  "libc",
- "nara_app",
- "nara_asset",
  "nara_core",
- "nara_ecs",
- "nara_input",
  "nara_reflect",
- "nara_scene",
- "rustix 1.1.4",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "toml",
- "uuid",
  "windows-sys 0.61.2",
 ]
 
@@ -2199,7 +2160,6 @@ dependencies = [
 name = "nara_reflect"
 version = "0.1.0"
 dependencies = [
- "bevy_ecs",
  "blake3",
  "nara_app",
  "nara_asset",
@@ -2240,7 +2200,6 @@ dependencies = [
  "nara_ecs",
  "nara_input",
  "nara_material_derive",
- "nara_reflect",
  "nara_scene",
  "nara_ui",
  "nara_window",
@@ -2260,20 +2219,9 @@ dependencies = [
 name = "nara_scene"
 version = "0.1.0"
 dependencies = [
- "base64",
  "bevy_ecs",
- "getrandom 0.3.4",
  "nara_app",
- "nara_asset",
  "nara_core",
- "nara_ecs",
- "nara_reflect",
- "ron",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "toml",
- "tracing",
 ]
 
 [[package]]
@@ -2284,13 +2232,8 @@ dependencies = [
  "icu_segmenter",
  "nara_app",
  "nara_asset",
- "nara_core",
  "nara_ecs",
  "nara_input",
- "nara_reflect",
- "nara_render",
- "nara_scene",
- "nara_window",
  "parley",
  "sha2",
  "swash",
@@ -3365,10 +3308,6 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
-dependencies = [
- "serde",
- "serde_core",
-]
 
 [[package]]
 name = "send_wrapper"

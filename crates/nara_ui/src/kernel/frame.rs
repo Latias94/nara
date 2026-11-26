@@ -2,10 +2,26 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
+/// Nonzero identifier of a host-managed HUD surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct UiSurfaceId(u64);
+
+impl UiSurfaceId {
+    #[must_use]
+    pub const fn new(value: u64) -> Option<Self> {
+        if value == 0 { None } else { Some(Self(value)) }
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
 use crate::kernel::{
     UiActionId, UiColor, UiCornerRadii, UiImageId, UiInteraction, UiKey, UiLayer, UiMesh,
     UiPhysicalRect, UiPoint, UiRect, UiRevision, UiRootKey, UiSemanticRole, UiSize, UiSnapPolicy,
-    UiSurfaceContentTransform, UiSurfaceId,
+    UiSurfaceContentTransform,
 };
 use crate::text::TextLayout;
 
@@ -286,7 +302,6 @@ impl UiResolvedBorder {
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiLayoutFact {
     pub(crate) key: Option<UiKey>,
-    pub(crate) route_parent: Option<UiKey>,
     pub(crate) root_key: UiRootKey,
     pub(crate) layer: UiLayer,
     pub(crate) structural_index: usize,
@@ -303,12 +318,6 @@ impl UiLayoutFact {
     #[must_use]
     pub const fn key(&self) -> Option<&UiKey> {
         self.key.as_ref()
-    }
-
-    /// Returns the nearest stable-key ancestor used for routed-event propagation.
-    #[must_use]
-    pub const fn route_parent(&self) -> Option<&UiKey> {
-        self.route_parent.as_ref()
     }
 
     #[must_use]
@@ -350,10 +359,6 @@ impl UiLayoutFact {
     #[must_use]
     pub const fn visible(&self) -> bool {
         self.visible
-    }
-
-    pub(crate) const fn visible_on_surface(&self) -> bool {
-        self.visible_on_surface
     }
 
     /// Returns the exact immutable input declaration that produced this layout fact.
@@ -483,7 +488,7 @@ impl UiFocusFact {
         self.rect
     }
 
-    pub(crate) const fn visible_rect(&self) -> UiRect {
+    pub const fn visible_rect(&self) -> UiRect {
         self.visible_rect
     }
 
@@ -640,6 +645,9 @@ pub struct UiFrame {
     pub(crate) focus: Vec<UiFocusFact>,
     pub(crate) semantics: Vec<UiSemanticNode>,
     pub(crate) diagnostics: Vec<UiDiagnostic>,
+    pub(crate) modal_root: Option<UiRootKey>,
+    #[cfg(feature = "runtime")]
+    pub(crate) bindings: Option<crate::runtime::UiFrameBindings>,
 }
 
 impl UiFrame {
@@ -695,6 +703,17 @@ impl UiFrame {
         &self.diagnostics
     }
 
+    /// Identifies this frame after a presenter has accepted it with a nonzero epoch.
+    #[must_use]
+    pub fn presentation_receipt(&self, epoch: u64) -> Option<UiPresentationReceipt> {
+        (epoch != 0).then_some(UiPresentationReceipt {
+            surface_id: self.environment.surface_id(),
+            frame_revision: self.revision,
+            generations: self.environment.generations(),
+            presentation_epoch: epoch,
+        })
+    }
+
     /// Finds the top enabled rectangular hit at an authored point using visible pixel bounds.
     #[must_use]
     pub fn hit_test(&self, point: UiPoint) -> Option<&UiHitRegion> {
@@ -728,14 +747,8 @@ impl UiFrame {
         self.active_modal_root().is_some()
     }
 
-    pub(crate) fn active_modal_root(&self) -> Option<&UiRootKey> {
-        self.root_outcomes
-            .iter()
-            .rev()
-            .find(|outcome| {
-                outcome.layer == UiLayer::Modal && outcome.status != UiRootStatus::Absent
-            })
-            .map(|outcome| &outcome.key)
+    pub(crate) const fn active_modal_root(&self) -> Option<&UiRootKey> {
+        self.modal_root.as_ref()
     }
 }
 

@@ -11,20 +11,18 @@ use nara_core::{Diagnostic, DiagnosticSeverity, SourceLoc};
 use serde::{Deserialize, Deserializer};
 use thiserror::Error;
 
-use super::{OutputLine, OutputStream, Run};
+use super::{OutputLine, OutputStream, ProjectTrust, Run};
 
-/// Selects one binary from a package for an incremental Cargo build.
+/// Selects one binary from a package for an incremental Cargo build for the current host.
 #[derive(Debug, Clone, Copy)]
 pub struct BuildRequest<'paths> {
     pub project_dir: &'paths Path,
-    /// The selected package's manifest, absolute or relative to `project_dir`.
+    /// The selected package's manifest within `project_dir`, absolute or relative to that root.
     pub manifest_path: &'paths Path,
     pub package: &'paths str,
     pub binary: &'paths str,
     pub features: &'paths [&'paths str],
     pub release: bool,
-    /// An explicit Cargo target. `None` uses Cargo configuration. Use `host-tuple` to run it locally.
-    pub target: Option<&'paths str>,
 }
 
 impl<'paths> BuildRequest<'paths> {
@@ -36,7 +34,6 @@ impl<'paths> BuildRequest<'paths> {
             binary,
             features: &[],
             release: false,
-            target: None,
         }
     }
 }
@@ -110,6 +107,10 @@ pub struct DiagnosticSpan {
 
 #[derive(Debug, Error)]
 pub enum BuildError {
+    #[error("running Cargo requires a trusted project")]
+    UntrustedProject,
+    #[error("the Cargo manifest must be in the selected project directory")]
+    ManifestOutsideProject,
     #[error("could not run the Cargo build: {0}")]
     Io(#[from] io::Error),
     #[error("Cargo build failed ({0})")]
@@ -130,33 +131,42 @@ pub enum BuildError {
 /// the executable reported for the selected package and binary after a successful build.
 pub fn build(
     request: &BuildRequest<'_>,
+    trust: ProjectTrust,
     emit: impl FnMut(BuildEvent),
 ) -> Result<PathBuf, BuildError> {
-    build_interruptible(request, || false, emit)
+    build_interruptible(request, trust, || false, emit)
 }
 
 /// Runs Cargo like [`build`] and shuts down its process tree when `stop` requests cancellation.
 pub fn build_interruptible(
     request: &BuildRequest<'_>,
+    trust: ProjectTrust,
     mut stop: impl FnMut() -> bool,
     mut emit: impl FnMut(BuildEvent),
 ) -> Result<PathBuf, BuildError> {
+    if trust != ProjectTrust::Trusted {
+        return Err(BuildError::UntrustedProject);
+    }
     if stop() {
         return Err(BuildError::Interrupted);
     }
-    let directory = path::absolute(request.project_dir)?;
-    let manifest = directory.join(request.manifest_path);
-    let canonical_manifest = fs::canonicalize(&manifest)?;
+    let directory = request.project_dir.canonicalize()?;
+    let manifest = directory.join(request.manifest_path).canonicalize()?;
+    if !manifest.starts_with(&directory) {
+        return Err(BuildError::ManifestOutsideProject);
+    }
     let cargo = cargo_executable()?;
-    let mut arguments: Vec<OsString> = ["build", "--message-format=json", "--manifest-path"]
-        .map(OsString::from)
-        .into();
-    arguments.push(manifest.into_os_string());
+    let mut arguments: Vec<OsString> = [
+        "build",
+        "--message-format=json",
+        "--target=host-tuple",
+        "--manifest-path",
+    ]
+    .map(OsString::from)
+    .into();
+    arguments.push(manifest.as_os_str().to_owned());
     arguments.push(format!("--package={}", request.package).into());
     arguments.push(format!("--bin={}", request.binary).into());
-    if let Some(target) = request.target {
-        arguments.push(format!("--target={target}").into());
-    }
     if request.release {
         arguments.push("--release".into());
     }
@@ -164,7 +174,7 @@ pub fn build_interruptible(
         arguments.push(format!("--features={}", request.features.join(",")).into());
     }
 
-    let mut messages = BuildMessages::new(&canonical_manifest, request.binary);
+    let mut messages = BuildMessages::new(&manifest, request.binary);
     let mut interrupted = false;
     let status = Run::spawn(&directory, &cargo, &arguments)?.wait(
         || {

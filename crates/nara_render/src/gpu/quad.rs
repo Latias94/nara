@@ -282,8 +282,6 @@ pub(crate) struct WgpuQuadBatchBuffer {
     alpha_mode: AlphaMode2d,
     scissor: Option<WgpuScissorRect>,
     instances: std::ops::Range<u32>,
-    #[cfg(test)]
-    logical_bytes: u64,
 }
 
 #[derive(Debug)]
@@ -358,10 +356,6 @@ pub(crate) fn create_material_bind_group_layout(
 
 #[cfg(test)]
 impl WgpuQuadBatchBuffer {
-    pub(crate) const fn logical_bytes(&self) -> u64 {
-        self.logical_bytes
-    }
-
     pub(crate) fn captured_view_bind_group(&self) -> Option<&wgpu::BindGroup> {
         self.view.as_ref().map(|view| &view.bind_group)
     }
@@ -453,9 +447,9 @@ fn finish_quad_pipeline_stage(
     validation_scope: wgpu::ErrorScopeGuard,
     key: &WgpuQuadPipelineKey,
 ) -> Result<(), crate::gpu::WgpuRenderError> {
-    let validation_error = pollster::block_on(validation_scope.pop());
+    let validation_error = crate::gpu::allocation::pop_error_scope(validation_scope);
     let allocation_error =
-        pollster::block_on(allocation_scope.pop()).map(|error| error.to_string());
+        crate::gpu::allocation::pop_error_scope(allocation_scope)?.map(|error| error.to_string());
     #[cfg(test)]
     let allocation_error = allocation_error.or_else(|| {
         QUAD_PIPELINE_ALLOCATION_FAILURE.with(|failure| {
@@ -471,7 +465,7 @@ fn finish_quad_pipeline_stage(
             message: format!("2D pipeline allocation: {message}"),
         });
     }
-    if let Some(error) = validation_error {
+    if let Some(error) = validation_error? {
         return Err(crate::gpu::WgpuRenderError::ContentRejected {
             message: format!(
                 "2D material {:?}: {error}",
@@ -740,8 +734,6 @@ pub(crate) fn create_quad_batch_buffers(
                 None
             };
             let instance_count = saturating_u32(batch.instances.len());
-            #[cfg(test)]
-            let logical_bytes = quad_instance_byte_len(batch.instances.len());
             let ((buffer, instance_allocation), instances) = match &batch.instances {
                 WgpuQuadInstances::Transient(_) if pack_transient => {
                     let storage = match &frame_buffer {
@@ -804,8 +796,6 @@ pub(crate) fn create_quad_batch_buffers(
                 alpha_mode: batch.material.alpha_mode,
                 scissor: batch.scissor,
                 instances,
-                #[cfg(test)]
-                logical_bytes,
             })
         })
         .collect()

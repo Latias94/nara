@@ -12,12 +12,10 @@ See the [strategy](STRATEGY.md), [architecture](docs/architecture/overview.md), 
 
 - `App`, `DefaultPlugins`, deterministic fixed stepping, and a native Winit runner;
 - ECS hierarchy, transform propagation, typed input, 2D physics, and audio;
-- versioned scene, prefab, schema, asset, and project-manifest data;
-- a headless project CLI for project creation, validation, Schema discovery, supervised Play, Cook,
-  and Export;
+- code-first scenes, typed asset handles, PNG loading, and project Schema discovery;
+- a headless project CLI for project creation, validation, Schema discovery, and supervised Play;
 - a deterministic 2D reference game with sprites, input, HUD, and headless and desktop entry points;
-- shared format and image data in `tests/fixtures/`, with game-facing coverage in `reference-game`
-  and `samples/two-level-game`.
+- a two-window shared-viewport example for the editor's WGPU integration.
 
 ## Requirements
 
@@ -37,17 +35,16 @@ cargo nextest run --locked
 Run the headless reference game:
 
 ```text
-cargo run --manifest-path reference-game/Cargo.toml --locked --bin headless
+cargo run --manifest-path reference-game/Cargo.toml --locked --features simulation --bin headless
 ```
 
 Run the desktop reference game:
 
 ```text
-cargo run --manifest-path reference-game/Cargo.toml --locked --features desktop --bin desktop
+cargo run --manifest-path reference-game/Cargo.toml --locked --features desktop --bin game
 ```
 
-See [`reference-game/README.md`](reference-game/README.md) for the gameplay controls, project data,
-and standalone candidate layout.
+See [`reference-game/README.md`](reference-game/README.md) for the gameplay controls and project layout.
 
 The [short code-first game](examples/first_game.rs) demonstrates movement, sprite animation, a
 tilemap, collision, sound, and a HUD. Run it with the features below.
@@ -56,7 +53,8 @@ tilemap, collision, sound, and a HUD. Run it with the features below.
 cargo run --locked --example first_game --features physics-2d,audio-device,presentation-2d,presentation-ui,desktop-winit,render-wgpu
 ```
 
-On Linux, a desktop build with audio requires the ALSA development headers.
+On Linux, audio device support requires the ALSA development headers. Optional gamepad support
+requires the libudev development headers.
 
 Create a standalone project from the engine checkout. The destination's parent must exist.
 
@@ -71,19 +69,16 @@ Use `--trusted` for projects whose Rust and Cargo build code you trust to run. F
 README for the project layout and [the first-game guide](docs/guides/first-2d-game.md) for edits
 to the starter.
 
-For cross-level travel and game-owned checkpoint saves, see the independent
-[`samples/two-level-game`](samples/two-level-game/README.md) consumer.
-
 ## Repository Layout
 
 - `crates/`: engine modules and native adapters
-- `src/`: the game facade and the current authored and cooked runtime integrations
+- `src/`: the game facade
 - `reference-game/`: the first complete headless and desktop game tracer
-- [`tests/fixtures/`](tests/fixtures/README.md) contains shared format and image test data.
 - [`docs/architecture/`](docs/architecture/overview.md) contains the v2 architecture and accepted ADRs.
 - [`docs/plans/`](docs/plans/v2-refactor-master-plan.md) contains the active roadmap and phase gates.
 
-The `legacy/v0-imgui-reference` tag contains the previous editor, guides, and architecture records.
+The `legacy/v0-imgui-reference` tag contains the previous editor, reference game, two-level game,
+guides, and architecture records.
 
 ## License
 

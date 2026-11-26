@@ -1,8 +1,8 @@
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentNumericDomain,
-    ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
-    ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueShape, validate_component_value,
+    ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
+    validate_component_value,
 };
 
 fn schema(shape: ComponentValueShape) -> ComponentSchema {
@@ -70,32 +70,16 @@ fn typed_lists_validate_large_payloads_and_reject_the_exact_wrong_item() {
 fn catalog_defaults_and_creation_values_keep_their_complete_value_budget() {
     let mut with_default = schema(ComponentValueShape::opaque(ComponentValueKind::List));
     with_default.fields[0].default_value = Some(ComponentValue::List(payload_values()));
-    let catalog = ComponentSchemaCatalog {
-        components: vec![with_default],
-        ..ComponentSchemaCatalog::default()
-    };
     assert!(matches!(
-        ComponentRegistryBuilder::from_owner_catalog_candidate(
-            ComponentSchemaOwnerId::new("nara.test.payload-budget-owner"),
-            catalog,
-            None,
-        ),
-        Err(ComponentRegistryError::InvalidComponentFieldDefaultShape { .. })
+        ComponentSchemaCatalog::from_components([with_default]),
+        Err(ComponentRegistryError::InvalidComponentFieldDefault { .. })
     ));
     let with_initial =
         schema(ComponentValueShape::opaque(ComponentValueKind::List)).with_authoring_initial_value(
             ComponentValue::map([("data", ComponentValue::List(payload_values()))]),
         );
-    let catalog = ComponentSchemaCatalog {
-        components: vec![with_initial],
-        ..ComponentSchemaCatalog::default()
-    };
     assert!(matches!(
-        ComponentRegistryBuilder::from_owner_catalog_candidate(
-            ComponentSchemaOwnerId::new("nara.test.payload-budget-owner"),
-            catalog,
-            None,
-        ),
+        ComponentSchemaCatalog::from_components([with_initial]),
         Err(ComponentRegistryError::InvalidComponentAuthoringInitialValue { .. })
     ));
 }

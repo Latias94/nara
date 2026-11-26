@@ -1,30 +1,13 @@
 //! Shared sampling/alpha policy and admitted 2D material declarations, values and Shader artifacts.
 
-#[cfg(feature = "material-asset")]
-mod asset;
 #[cfg(feature = "material")]
 mod declaration;
 #[cfg(feature = "material")]
 mod library;
 #[cfg(feature = "material")]
 mod parameters;
-#[cfg(feature = "persistent")]
-mod persistent;
 #[cfg(feature = "material")]
 mod shader;
-
-#[cfg(feature = "material-asset")]
-pub use asset::{
-    Material2dAsset, Material2dContentReceipt, Material2dDomain, Material2dPublicationError,
-    Material2dPublicationInput, Material2dPublicationMode, Material2dRuntimeCodec,
-    Material2dSource, MaterialAssetError, PreparedMaterial2dPublications,
-};
-#[cfg(feature = "persistent")]
-pub use persistent::{
-    MATERIAL_PLUGIN_DECLARATION, MATERIAL_PLUGIN_ID, MATERIAL_SCHEMA_OWNER_ID,
-    MATERIAL_SCHEMA_PROVIDER, MATERIAL_SCHEMA_PROVIDER_ID, Material2d, Material2dPlugin,
-    Material2dRecord, material2d_schema, register_material_components,
-};
 
 #[cfg(feature = "material")]
 pub use declaration::{
@@ -126,13 +109,6 @@ impl Default for AlphaMode2d {
 
 pub mod prelude {
     pub use crate::material::{AddressMode, AlphaMode2d, FilterMode, SamplerDescriptor};
-    #[cfg(feature = "persistent")]
-    pub use crate::material::{Material2d, Material2dPlugin, Material2dRecord};
-    #[cfg(feature = "material-asset")]
-    pub use crate::material::{
-        Material2dAsset, Material2dDomain, Material2dRuntimeCodec, Material2dSource,
-        MaterialAssetError,
-    };
     #[cfg(feature = "material")]
     pub use crate::material::{
         Material2dBinding, Material2dDeclaration, Material2dGeneration, Material2dLibrary,

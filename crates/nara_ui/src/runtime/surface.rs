@@ -1,13 +1,11 @@
-use crate::kernel::{
-    UiEnvironment, UiEnvironmentError, UiSurfaceContentTransform, UiSurfaceGenerations,
-    UiSurfaceId, UiSurfaceRetirementToken,
-};
-use nara_input::{InputPointerId, InputRouteStamp, InputSeatId, InputWindowId};
+use nara_input::{InputPointerId, InputSeatId, InputWindowId};
 use thiserror::Error;
 
-const INITIAL_SURFACE_GENERATION: u64 = 1;
+use crate::kernel::{
+    UiEnvironment, UiEnvironmentError, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId,
+};
 
-/// Host-owned platform endpoint for one UI surface lifetime.
+/// Window, input seat and pointer used by a HUD surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UiSurfaceEndpoint {
     window: InputWindowId,
@@ -16,7 +14,6 @@ pub struct UiSurfaceEndpoint {
 }
 
 impl UiSurfaceEndpoint {
-    #[must_use]
     pub const fn new(window: InputWindowId, seat: InputSeatId, pointer: InputPointerId) -> Self {
         Self {
             window,
@@ -25,33 +22,26 @@ impl UiSurfaceEndpoint {
         }
     }
 
-    #[must_use]
     pub const fn window(self) -> InputWindowId {
         self.window
     }
 
-    #[must_use]
     pub const fn seat(self) -> InputSeatId {
         self.seat
     }
 
-    #[must_use]
     pub const fn pointer(self) -> InputPointerId {
         self.pointer
     }
 }
 
-/// One immutable Host-installed UI surface generation.
+/// Host-installed surface and its exact coordinate transform.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct UiSurfaceSlot {
     surface_id: UiSurfaceId,
     endpoint: UiSurfaceEndpoint,
     transform: UiSurfaceContentTransform,
-    slot_generation: u64,
-    route_generation: u64,
-    geometry_generation: u64,
-    presentation_generation: u64,
-    font_generation: u64,
+    generation: u64,
 }
 
 impl UiSurfaceSlot {
@@ -64,139 +54,82 @@ impl UiSurfaceSlot {
             surface_id,
             endpoint,
             transform,
-            slot_generation: INITIAL_SURFACE_GENERATION,
-            route_generation: INITIAL_SURFACE_GENERATION,
-            geometry_generation: INITIAL_SURFACE_GENERATION,
-            presentation_generation: INITIAL_SURFACE_GENERATION,
-            font_generation: INITIAL_SURFACE_GENERATION,
+            generation: 1,
         };
-        slot.environment(INITIAL_SURFACE_GENERATION)?;
+        slot.environment(1)?;
         Ok(slot)
     }
 
-    #[must_use]
     pub const fn surface_id(self) -> UiSurfaceId {
         self.surface_id
     }
 
-    #[must_use]
     pub const fn endpoint(self) -> UiSurfaceEndpoint {
         self.endpoint
     }
 
-    #[must_use]
     pub const fn transform(self) -> UiSurfaceContentTransform {
         self.transform
     }
 
-    #[must_use]
     pub const fn slot_generation(self) -> u64 {
-        self.slot_generation
+        self.generation
     }
 
-    #[must_use]
     pub const fn route_generation(self) -> u64 {
-        self.route_generation
+        self.generation
     }
 
-    #[must_use]
     pub const fn geometry_generation(self) -> u64 {
-        self.geometry_generation
+        self.generation
     }
 
-    #[must_use]
     pub const fn presentation_generation(self) -> u64 {
-        self.presentation_generation
+        self.generation
     }
 
-    #[must_use]
     pub const fn font_generation(self) -> u64 {
-        self.font_generation
-    }
-
-    pub(super) fn generations(self) -> Result<UiSurfaceGenerations, UiEnvironmentError> {
-        UiSurfaceGenerations::new(
-            self.slot_generation,
-            self.route_generation,
-            self.geometry_generation,
-            self.presentation_generation,
-        )
+        1
     }
 
     pub(super) fn environment(
         self,
-        theme_generation: u64,
+        theme_revision: u64,
     ) -> Result<UiEnvironment, UiEnvironmentError> {
         UiEnvironment::for_surface(
             self.surface_id,
             self.transform,
-            self.generations()?,
-            theme_generation,
-            self.font_generation,
+            UiSurfaceGenerations::new(
+                self.generation,
+                self.generation,
+                self.generation,
+                self.generation,
+            )?,
+            theme_revision,
+            self.font_generation(),
         )
     }
 
-    pub(super) fn successor(
-        self,
-        endpoint: UiSurfaceEndpoint,
-        transform: UiSurfaceContentTransform,
-    ) -> Result<Self, UiSurfaceSlotError> {
-        let endpoint_changed = self.endpoint != endpoint;
-        let transform_changed = self.transform != transform;
-        if !endpoint_changed && !transform_changed {
-            return Ok(self);
-        }
-
-        let slot_generation = advance_generation(self.slot_generation, "slot_generation")?;
-        let route_generation = advance_generation(self.route_generation, "route_generation")?;
-        let presentation_generation =
-            advance_generation(self.presentation_generation, "presentation_generation")?;
-        let geometry_generation = if transform_changed {
-            advance_generation(self.geometry_generation, "geometry_generation")?
-        } else {
-            self.geometry_generation
-        };
-        Ok(Self {
-            surface_id: self.surface_id,
-            endpoint,
-            transform,
-            slot_generation,
-            route_generation,
-            geometry_generation,
-            presentation_generation,
-            font_generation: self.font_generation,
-        })
-    }
-
-    pub(super) fn availability_successor(
+    pub(super) fn advance(
         self,
         endpoint: UiSurfaceEndpoint,
         transform: UiSurfaceContentTransform,
     ) -> Result<Self, UiSurfaceSlotError> {
         Ok(Self {
-            surface_id: self.surface_id,
             endpoint,
             transform,
-            slot_generation: advance_generation(self.slot_generation, "slot_generation")?,
-            route_generation: advance_generation(self.route_generation, "route_generation")?,
-            geometry_generation: advance_generation(
-                self.geometry_generation,
-                "geometry_generation",
-            )?,
-            presentation_generation: advance_generation(
-                self.presentation_generation,
-                "presentation_generation",
-            )?,
-            font_generation: self.font_generation,
+            generation: self.next_generation()?,
+            ..self
         })
     }
 
-    pub(super) fn next_retirement_generation(self) -> Result<u64, UiSurfaceSlotError> {
-        advance_generation(self.slot_generation, "retirement_generation")
+    pub(super) fn next_generation(self) -> Result<u64, UiSurfaceSlotError> {
+        self.generation
+            .checked_add(1)
+            .ok_or(UiSurfaceSlotError::GenerationExhausted)
     }
 }
 
-/// Host-observed reason that temporarily removed a Surface Slot from presentation authority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiSurfaceSuspensionReason {
     ZeroExtent,
@@ -204,7 +137,6 @@ pub enum UiSurfaceSuspensionReason {
     InvalidScale,
 }
 
-/// Current availability of one installed, non-retired Surface Slot lifetime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiSurfaceAvailability {
     Active,
@@ -212,12 +144,10 @@ pub enum UiSurfaceAvailability {
 }
 
 impl UiSurfaceAvailability {
-    #[must_use]
     pub const fn is_active(self) -> bool {
         matches!(self, Self::Active)
     }
 
-    #[must_use]
     pub const fn suspension_reason(self) -> Option<UiSurfaceSuspensionReason> {
         match self {
             Self::Active => None,
@@ -226,150 +156,74 @@ impl UiSurfaceAvailability {
     }
 }
 
-/// Immutable Host-facing snapshot of one installed Surface Slot and its availability.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct UiSurfaceSlotSnapshot {
-    slot: UiSurfaceSlot,
-    availability: UiSurfaceAvailability,
+    pub(super) slot: UiSurfaceSlot,
+    pub(super) availability: UiSurfaceAvailability,
 }
 
 impl UiSurfaceSlotSnapshot {
-    pub(super) const fn new(slot: UiSurfaceSlot, availability: UiSurfaceAvailability) -> Self {
-        Self { slot, availability }
-    }
-
-    #[must_use]
     pub const fn slot(self) -> UiSurfaceSlot {
         self.slot
     }
 
-    #[must_use]
     pub const fn availability(self) -> UiSurfaceAvailability {
         self.availability
     }
 
-    #[must_use]
     pub const fn active_slot(self) -> Option<UiSurfaceSlot> {
-        match self.availability {
-            UiSurfaceAvailability::Active => Some(self.slot),
-            UiSurfaceAvailability::Suspended(_) => None,
+        if self.availability.is_active() {
+            Some(self.slot)
+        } else {
+            None
         }
     }
 }
 
-/// Exact transition record emitted after one Surface Slot becomes suspended.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct UiSurfaceSuspension {
-    previous_slot_generation: u64,
-    reason: UiSurfaceSuspensionReason,
-    snapshot: UiSurfaceSlotSnapshot,
+    pub(super) previous_slot_generation: u64,
+    pub(super) snapshot: UiSurfaceSlotSnapshot,
 }
 
 impl UiSurfaceSuspension {
-    pub(super) const fn new(
-        previous_slot_generation: u64,
-        slot: UiSurfaceSlot,
-        reason: UiSurfaceSuspensionReason,
-    ) -> Self {
-        Self {
-            previous_slot_generation,
-            reason,
-            snapshot: UiSurfaceSlotSnapshot::new(slot, UiSurfaceAvailability::Suspended(reason)),
-        }
-    }
-
-    #[must_use]
-    pub const fn surface_id(self) -> UiSurfaceId {
-        self.snapshot.slot().surface_id()
-    }
-
-    #[must_use]
-    pub const fn endpoint(self) -> UiSurfaceEndpoint {
-        self.snapshot.slot().endpoint()
-    }
-
-    #[must_use]
     pub const fn previous_slot_generation(self) -> u64 {
         self.previous_slot_generation
     }
 
-    #[must_use]
-    pub const fn suspended_slot_generation(self) -> u64 {
-        self.snapshot.slot().slot_generation()
-    }
-
-    #[must_use]
-    pub const fn reason(self) -> UiSurfaceSuspensionReason {
-        self.reason
-    }
-
-    #[must_use]
     pub const fn snapshot(self) -> UiSurfaceSlotSnapshot {
         self.snapshot
     }
 }
 
-/// Exact bounded tombstone returned when one Surface Slot lifetime is retired.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct UiSurfaceRetirement {
-    endpoint: UiSurfaceEndpoint,
-    token: UiSurfaceRetirementToken,
-    input_route: Option<InputRouteStamp>,
+    pub(super) slot: UiSurfaceSlot,
+    pub(super) retirement_generation: u64,
 }
 
 impl UiSurfaceRetirement {
-    pub(super) const fn new(
-        endpoint: UiSurfaceEndpoint,
-        token: UiSurfaceRetirementToken,
-        input_route: Option<InputRouteStamp>,
-    ) -> Self {
-        Self {
-            endpoint,
-            token,
-            input_route,
-        }
-    }
-
-    #[must_use]
     pub const fn surface_id(self) -> UiSurfaceId {
-        self.token.surface_id()
+        self.slot.surface_id()
     }
 
-    #[must_use]
     pub const fn endpoint(self) -> UiSurfaceEndpoint {
-        self.endpoint
+        self.slot.endpoint()
     }
 
-    #[must_use]
     pub const fn slot_generation(self) -> u64 {
-        self.token.slot_generation().get()
+        self.slot.slot_generation()
     }
 
-    #[must_use]
     pub const fn retirement_generation(self) -> u64 {
-        self.token.retirement_generation().get()
+        self.retirement_generation
     }
-
-    #[must_use]
-    pub const fn token(self) -> UiSurfaceRetirementToken {
-        self.token
-    }
-
-    pub(super) const fn input_route(self) -> Option<InputRouteStamp> {
-        self.input_route
-    }
-}
-
-fn advance_generation(current: u64, field: &'static str) -> Result<u64, UiSurfaceSlotError> {
-    current
-        .checked_add(1)
-        .ok_or(UiSurfaceSlotError::GenerationExhausted { field })
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum UiSurfaceSlotError {
-    #[error("UI surface generation `{field}` was exhausted")]
-    GenerationExhausted { field: &'static str },
+    #[error("UI surface generation was exhausted")]
+    GenerationExhausted,
     #[error(transparent)]
     Environment(#[from] UiEnvironmentError),
 }

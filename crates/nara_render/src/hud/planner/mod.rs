@@ -267,6 +267,17 @@ impl UiPresentationPlanner {
         Ok(())
     }
 
+    #[cfg(feature = "hud-presentation")]
+    pub(crate) fn accepts(
+        &self,
+        identity: UiBackendSubmissionIdentity,
+        packet: &Arc<UiPaintPacket>,
+    ) -> bool {
+        self.targets.get(&identity.target()).is_some_and(|state| {
+            state.active_submission == Some(identity) && Arc::ptr_eq(&state.planned, packet)
+        })
+    }
+
     /// Commits one backend-accepted packet after `replace_backend_submissions` has reserved the
     /// exact planner state. The active-submission lock makes a missing or mismatched target an
     /// internal invariant violation rather than a recoverable post-submit outcome.

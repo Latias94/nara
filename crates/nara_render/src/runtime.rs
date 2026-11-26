@@ -1,6 +1,6 @@
 use crate::{
-    Camera2d, CapturedRenderTime, Color, Extent2d, ExtractedView, ExtractedViews, RenderTarget,
-    RenderViewId, ViewLoadOp, ViewMapping2d, ViewportRect, WorldCanvas, frame, world_pointer,
+    Camera2d, CapturedRenderTime, Color, Extent2d, ExtractedView, ExtractedViews, RenderViewId,
+    ViewLoadOp, ViewMapping2d, ViewportRect, WorldCanvas, frame, world_pointer,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Resource)]
@@ -14,8 +14,7 @@ impl Default for ClearColor {
 }
 
 use nara_app::{
-    App, CoreStage, Plugin, PluginError, PluginPreflightContext, RealTime, RenderTime,
-    RuntimeTimeSettings, VirtualTime,
+    App, CoreStage, Plugin, PluginError, RealTime, RenderTime, RuntimeTimeSettings, VirtualTime,
 };
 #[cfg(test)]
 use nara_app::{FixedTime, RuntimeGeneration};
@@ -25,11 +24,6 @@ use nara_ecs::{
     DetectChanges, Entity, FromWorld, Mut, Query, QueryState, Ref, Res, ResMut, Resource, World,
     bevy_ecs::entity::EntityHashMap, bevy_ecs::entity_disabling::DefaultQueryFilters,
     bevy_ecs::error::BevyError, bevy_ecs::system::SystemState, schedule::IntoScheduleConfigs,
-};
-use nara_reflect::{
-    ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueRef,
 };
 use nara_scene::spatial::{
     GlobalTransform2d, InheritedVisibility, SPATIAL_PLUGIN_ID, propagate_spatial,
@@ -297,64 +291,6 @@ impl RenderBackendStatus {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct RenderComponentsPlugin;
-
-pub const RENDER_COMPONENTS_PLUGIN_ID: nara_app::PluginId =
-    nara_app::PluginId::new("nara.render-components");
-pub const RENDER_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
-    nara_app::PluginSchemaProviderId::new("nara.render.components");
-pub const RENDER_SCHEMA_OWNER_ID: nara_reflect::ComponentSchemaOwnerId =
-    nara_reflect::ComponentSchemaOwnerId::new("nara.render.components");
-pub const RENDER_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
-    nara_reflect::ComponentSchemaProviderDefinition::with_validation(
-        RENDER_SCHEMA_OWNER_ID,
-        RENDER_SCHEMA_PROVIDER_ID,
-        nara_reflect::ComponentSchemaProviderBindingId::new("nara.render.components.native", 1),
-        render_schema_catalog,
-        validate_render_components,
-        register_render_components,
-    );
-const RENDER_COMPONENTS_PLUGIN_PRODUCT_ALTERNATIVES: &[nara_app::PluginProductCapability] = &[
-    nara_app::PluginProductCapability::new("runtime-2d"),
-    nara_app::PluginProductCapability::new("presentation-ui"),
-    nara_app::PluginProductCapability::new("render-wgpu"),
-];
-pub const RENDER_COMPONENTS_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
-    nara_app::PluginDeclaration::new(
-        RENDER_COMPONENTS_PLUGIN_ID,
-        nara_app::PluginCategory::Runtime,
-    )
-    .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
-    .requires_any_product_capabilities(RENDER_COMPONENTS_PLUGIN_PRODUCT_ALTERNATIVES)
-    .provides_schema(&[RENDER_SCHEMA_PROVIDER_ID]);
-
-impl Plugin for RenderComponentsPlugin {
-    fn declaration() -> &'static nara_app::PluginDeclaration {
-        &RENDER_COMPONENTS_PLUGIN_DECLARATION
-    }
-
-    fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
-        let component_id = ComponentTypeId::new("nara.render.Camera2d");
-        nara_reflect::validate_schema_provider_for_plugin(
-            context,
-            RENDER_COMPONENTS_PLUGIN_ID,
-            component_id.as_str(),
-            &RENDER_SCHEMA_PROVIDER,
-        )
-    }
-
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        let component_id = ComponentTypeId::new("nara.render.Camera2d");
-        nara_reflect::register_schema_provider_for_plugin(
-            app,
-            RENDER_COMPONENTS_PLUGIN_ID,
-            component_id.as_str(),
-            &RENDER_SCHEMA_PROVIDER,
-        )
-    }
-}
-
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RenderPlugin {
     pub world_canvas: Option<WorldCanvas>,
@@ -384,17 +320,10 @@ pub fn plugin(world_canvas: Option<WorldCanvas>) -> nara_app::PluginDefinition {
 }
 
 pub const RENDER_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.render");
-const RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] =
-    &[RENDER_COMPONENTS_PLUGIN_ID, SPATIAL_PLUGIN_ID];
-const RENDER_PLUGIN_PRODUCT_ALTERNATIVES: &[nara_app::PluginProductCapability] = &[
-    nara_app::PluginProductCapability::new("presentation-2d"),
-    nara_app::PluginProductCapability::new("presentation-ui"),
-    nara_app::PluginProductCapability::new("render-wgpu"),
-];
+const RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[SPATIAL_PLUGIN_ID];
 pub const RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(RENDER_PLUGIN_ID, nara_app::PluginCategory::Render)
-        .requires_plugins(RENDER_PLUGIN_REQUIREMENTS)
-        .requires_any_product_capabilities(RENDER_PLUGIN_PRODUCT_ALTERNATIVES);
+        .requires_plugins(RENDER_PLUGIN_REQUIREMENTS);
 
 impl Plugin for RenderPlugin {
     fn declaration() -> &'static nara_app::PluginDeclaration {
@@ -428,242 +357,6 @@ impl Plugin for RenderPlugin {
         app.add_systems(CoreStage::Render, begin_render_frame)?;
         Ok(())
     }
-}
-
-pub fn register_render_components(
-    registry: &mut ComponentRegistryBuilder,
-) -> Result<(), ComponentRegistryError> {
-    validate_render_components(registry)?;
-    registry.register_persistent_component_with_codec::<Camera2d, _, _>(
-        camera_schema(),
-        |value| {
-            Ok(Camera2d {
-                target: read_render_target(value.get("target"))?,
-                viewport: read_optional_viewport(value.get("viewport"))?,
-                clear_color: read_optional_color(value.get("clear_color"))?,
-                viewport_height: read_f32(value.field("viewport_height")?, "viewport_height")?,
-                order: optional_i32(value, "order")?.unwrap_or(0),
-            })
-        },
-        |camera| {
-            Ok(ComponentValue::map([
-                ("target", render_target_value(camera.target)?),
-                (
-                    "viewport",
-                    camera
-                        .viewport
-                        .map(viewport_value)
-                        .transpose()?
-                        .unwrap_or(ComponentValue::Null),
-                ),
-                (
-                    "clear_color",
-                    camera
-                        .clear_color
-                        .map(color_value)
-                        .transpose()?
-                        .unwrap_or(ComponentValue::Null),
-                ),
-                (
-                    "viewport_height",
-                    ComponentValue::f64(f64::from(camera.viewport_height))?,
-                ),
-                ("order", ComponentValue::I64(i64::from(camera.order))),
-            ]))
-        },
-    )?;
-    Ok(())
-}
-
-fn render_schema_catalog()
--> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
-    Ok(nara_reflect::ComponentSchemaCatalog {
-        components: vec![camera_schema()],
-        ..nara_reflect::ComponentSchemaCatalog::default()
-    })
-}
-
-fn camera_schema() -> ComponentSchema {
-    ComponentSchema::new(
-        ComponentTypeId::new("nara.render.Camera2d"),
-        "Camera 2D",
-        ComponentSchemaVersion::ONE,
-    )
-    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-    .with_fields(camera_fields())
-}
-
-fn validate_render_components(
-    registry: &ComponentRegistryBuilder,
-) -> Result<(), ComponentRegistryError> {
-    registry
-        .validate_component_registration::<Camera2d>(&ComponentTypeId::new("nara.render.Camera2d"))
-}
-
-fn camera_fields() -> [ComponentFieldSchema; 5] {
-    [
-        ComponentFieldSchema::optional_with_default(
-            ComponentFieldId::new("target"),
-            "Target",
-            ComponentFieldPath::from_fields(["target"]),
-            ComponentValueKind::String,
-            ComponentValue::String("primary_window".to_string()),
-        )
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
-        ComponentFieldSchema::optional_with_default(
-            ComponentFieldId::new("viewport"),
-            "Viewport",
-            ComponentFieldPath::from_fields(["viewport"]),
-            ComponentValueKind::Map,
-            ComponentValue::Null,
-        )
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
-        ComponentFieldSchema::optional_with_default(
-            ComponentFieldId::new("clear_color"),
-            "Clear color",
-            ComponentFieldPath::from_fields(["clear_color"]),
-            ComponentValueKind::Map,
-            ComponentValue::Null,
-        )
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
-        ComponentFieldSchema::required(
-            ComponentFieldId::new("viewport_height"),
-            "Viewport height",
-            ComponentFieldPath::from_fields(["viewport_height"]),
-            ComponentValueKind::F64,
-        )
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
-        ComponentFieldSchema::optional_with_default(
-            ComponentFieldId::new("order"),
-            "Order",
-            ComponentFieldPath::from_fields(["order"]),
-            ComponentValueKind::I64,
-            ComponentValue::I64(0),
-        )
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
-    ]
-}
-
-fn read_render_target(
-    value: Option<ComponentValueRef<'_>>,
-) -> Result<RenderTarget, ComponentCodecError> {
-    match value.and_then(ComponentValueRef::as_str) {
-        None | Some("primary_window") => Ok(RenderTarget::PrimaryWindow),
-        Some(_) => Err(ComponentCodecError::invalid_field(
-            "target",
-            "'primary_window'",
-        )),
-    }
-}
-
-fn render_target_value(target: RenderTarget) -> Result<ComponentValue, ComponentCodecError> {
-    match target {
-        RenderTarget::PrimaryWindow => Ok(ComponentValue::String("primary_window".to_string())),
-        RenderTarget::Window(_) | RenderTarget::Image(_) => Err(ComponentCodecError::Message(
-            "only primary window camera targets are scene-capable in this slice".to_string(),
-        )),
-    }
-}
-
-fn read_optional_viewport(
-    value: Option<ComponentValueRef<'_>>,
-) -> Result<Option<ViewportRect>, ComponentCodecError> {
-    match value {
-        None => Ok(None),
-        Some(value) if value.kind() == ComponentValueKind::Null => Ok(None),
-        Some(value) => Ok(Some(
-            ViewportRect::new(
-                read_u32(value, "physical_x", "viewport.physical_x")?,
-                read_u32(value, "physical_y", "viewport.physical_y")?,
-                read_u32(value, "physical_width", "viewport.physical_width")?,
-                read_u32(value, "physical_height", "viewport.physical_height")?,
-            )
-            .ok_or_else(|| ComponentCodecError::invalid_field("viewport", "non-empty viewport"))?,
-        )),
-    }
-}
-
-fn read_u32(
-    value: ComponentValueRef<'_>,
-    field: &str,
-    display_field: &str,
-) -> Result<u32, ComponentCodecError> {
-    let value = value.field_u64(field)?;
-    u32::try_from(value).map_err(|_| ComponentCodecError::invalid_field(display_field, "u32"))
-}
-
-fn viewport_value(value: ViewportRect) -> Result<ComponentValue, ComponentCodecError> {
-    Ok(ComponentValue::map([
-        (
-            "physical_x",
-            ComponentValue::U64(u64::from(value.physical_x)),
-        ),
-        (
-            "physical_y",
-            ComponentValue::U64(u64::from(value.physical_y)),
-        ),
-        (
-            "physical_width",
-            ComponentValue::U64(u64::from(value.physical_width)),
-        ),
-        (
-            "physical_height",
-            ComponentValue::U64(u64::from(value.physical_height)),
-        ),
-    ]))
-}
-
-fn read_optional_color(
-    value: Option<ComponentValueRef<'_>>,
-) -> Result<Option<Color>, ComponentCodecError> {
-    match value {
-        None => Ok(None),
-        Some(value) if value.kind() == ComponentValueKind::Null => Ok(None),
-        Some(value) => read_color(value, "clear_color").map(Some),
-    }
-}
-
-fn read_color(value: ComponentValueRef<'_>, field: &str) -> Result<Color, ComponentCodecError> {
-    Ok(Color::rgba(
-        read_f32(value.field("r")?, &format!("{field}.r"))?,
-        read_f32(value.field("g")?, &format!("{field}.g"))?,
-        read_f32(value.field("b")?, &format!("{field}.b"))?,
-        read_f32(value.field("a")?, &format!("{field}.a"))?,
-    ))
-}
-
-fn read_f32(value: ComponentValueRef<'_>, field: &str) -> Result<f32, ComponentCodecError> {
-    let value = value
-        .as_f64()
-        .ok_or_else(|| ComponentCodecError::invalid_field(field, "finite f32"))?;
-    if value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
-        return Err(ComponentCodecError::invalid_field(field, "finite f32"));
-    }
-    Ok(value as f32)
-}
-
-fn color_value(value: Color) -> Result<ComponentValue, ComponentCodecError> {
-    Ok(ComponentValue::map([
-        ("r", ComponentValue::f64(f64::from(value.r))?),
-        ("g", ComponentValue::f64(f64::from(value.g))?),
-        ("b", ComponentValue::f64(f64::from(value.b))?),
-        ("a", ComponentValue::f64(f64::from(value.a))?),
-    ]))
-}
-
-fn optional_i32(
-    value: ComponentValueRef<'_>,
-    field: &str,
-) -> Result<Option<i32>, ComponentCodecError> {
-    value
-        .get(field)
-        .map(|value| {
-            let value = value
-                .as_i64()
-                .ok_or_else(|| ComponentCodecError::invalid_field(field, "i32"))?;
-            i32::try_from(value).map_err(|_| ComponentCodecError::invalid_field(field, "i32"))
-        })
-        .transpose()
 }
 
 #[derive(nara_ecs::SystemParam)]
@@ -858,23 +551,14 @@ mod tests {
     use crate::*;
     use std::time::Duration;
 
-    use nara_app::{
-        App, CoreStage, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeClosePolicy,
-        RuntimeInstance, RuntimeObligationLedger,
-    };
+    use nara_app::{App, CoreStage, RuntimeCandidateRetirementState, RuntimeInstance};
     use nara_ecs::{Entity, World, schedule::IntoScheduleConfigs};
-    use nara_reflect::ComponentRegistryPlugin;
     use nara_scene::spatial::ChildOf;
     use nara_window::WindowPlugin;
 
     fn render_app(with_window: bool) -> App {
         let mut app = App::new();
-        app.add_plugins((
-            ComponentRegistryPlugin,
-            SpatialPlugin,
-            RenderComponentsPlugin,
-        ))
-        .unwrap();
+        app.add_plugins(SpatialPlugin).unwrap();
         if with_window {
             app.add_plugin(WindowPlugin::default()).unwrap();
         }
@@ -887,15 +571,7 @@ mod tests {
     }
 
     fn start_runtime(app: App) -> RuntimeInstance {
-        RuntimeCandidate::admit(
-            app.seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap()
-        .complete_startup()
-        .unwrap()
-        .promote()
+        RuntimeInstance::start(app).unwrap()
     }
 
     fn retire_runtime(runtime: RuntimeInstance) {
@@ -1423,14 +1099,7 @@ mod tests {
     }
 
     fn test_runtime_generation() -> RuntimeGeneration {
-        let candidate = RuntimeCandidate::admit(
-            App::new().seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
-        let ready = candidate.complete_startup().unwrap();
-        let runtime = ready.promote();
+        let runtime = start_runtime(App::new());
         let generation = runtime.generation();
         let mut retirement = runtime.begin_retirement();
         while retirement.retirement_state() != RuntimeCandidateRetirementState::Retired {
@@ -1626,33 +1295,5 @@ mod tests {
         assert_eq!(status.state(), RenderBackendState::Ready);
         assert_eq!(status.last_error(), None);
         assert_eq!(status.last_skip(), None);
-    }
-
-    #[test]
-    fn camera_schema_exposes_authoring_fields() {
-        let mut registry = ComponentRegistryBuilder::new();
-        register_render_components(&mut registry).expect("component registration should succeed");
-        let registry = registry.freeze().expect("component registry should freeze");
-
-        let schema = registry
-            .schema(&ComponentTypeId::new("nara.render.Camera2d"))
-            .unwrap();
-        let mut fields = schema
-            .fields
-            .iter()
-            .map(|field| (field.path.to_string(), field.value_kind(), field.required))
-            .collect::<Vec<_>>();
-        fields.sort_by(|left, right| left.0.cmp(&right.0));
-
-        assert_eq!(
-            fields,
-            vec![
-                ("clear_color".to_string(), ComponentValueKind::Map, false),
-                ("order".to_string(), ComponentValueKind::I64, false),
-                ("target".to_string(), ComponentValueKind::String, false),
-                ("viewport".to_string(), ComponentValueKind::Map, false),
-                ("viewport_height".to_string(), ComponentValueKind::F64, true),
-            ]
-        );
     }
 }

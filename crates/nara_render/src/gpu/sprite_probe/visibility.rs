@@ -7,9 +7,7 @@ use nara_scene::spatial::ChildOf;
 fn per_view_culling_matches_unclipped_runtime_geometry_pixels() {
     let mut app = App::new();
     app.add_plugins((
-        nara_reflect::ComponentRegistryPlugin,
         nara_scene::spatial::SpatialPlugin,
-        crate::RenderComponentsPlugin,
         crate::RenderPlugin::default(),
         crate::image::ImagePreparePlugin,
         crate::sprite_render::SpriteRenderPlugin,

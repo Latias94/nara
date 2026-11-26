@@ -8,7 +8,6 @@ use nara_app::{App, CoreStage, RuntimeInstance, VirtualTime};
 use nara_asset::Handle;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Component, Query, Res, Resource, Single, World};
-use nara_reflect::ComponentRegistryPlugin;
 use nara_render::gpu::{
     TextureCacheStats, WgpuCapturePlugin, WgpuFrameCaptureError, WgpuImageOutput, WgpuRenderHost,
     WgpuRenderInput, WgpuRenderProducer, WgpuStockCapturePlugin, WgpuStockPolicyPlugin,
@@ -18,16 +17,8 @@ use nara_render::image::ImagePreparePlugin;
 use nara_render::sprite::Sprite;
 use nara_render::sprite_render::{SpriteRenderPlugin, SpriteRenderStats};
 use nara_render::tilemap::{TileCell, TileCoord, TileIndex, Tilemap};
-use nara_render::{
-    Camera2d, Extent2d, RenderComponentsPlugin, RenderImage2d, RenderImagePacket, RenderPlugin,
-};
-use nara_scene::{
-    hierarchy::{
-        HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyPlugin,
-        HierarchyWriter,
-    },
-    spatial::{SpatialPlugin, Transform2d},
-};
+use nara_render::{Camera2d, Extent2d, RenderImage2d, RenderImagePacket, RenderPlugin};
+use nara_scene::spatial::{SpatialPlugin, Transform2d};
 use nara_window::{Window, WindowResolution};
 use parking_lot::Mutex;
 
@@ -63,10 +54,7 @@ impl Scene {
     pub(crate) fn new(mut host: WgpuRenderHost) -> Result<Self> {
         let mut app = App::new();
         app.add_plugins((
-            ComponentRegistryPlugin,
-            HierarchyPlugin,
             SpatialPlugin,
-            RenderComponentsPlugin,
             RenderPlugin::default(),
             ImagePreparePlugin,
             SpriteRenderPlugin,
@@ -82,7 +70,7 @@ impl Scene {
         app.add_systems(CoreStage::First, set_capture_resolution)?;
         app.add_systems(CoreStage::Update, animate_sprites)?;
         app.add_systems(CoreStage::Last, take_stock_capture)?;
-        populate_scene(app.world_mut()?)?;
+        populate_scene(app.world_mut()?);
 
         Ok(Self {
             producer: host.create_producer()?,
@@ -181,18 +169,16 @@ fn animate_sprites(time: Res<VirtualTime>, mut sprites: Query<(&Orbit, &mut Tran
     }
 }
 
-fn populate_scene(world: &mut World) -> Result<()> {
+fn populate_scene(world: &mut World) {
     world.spawn(Window::new("Viewport capture", WindowResolution::new(1, 1)));
-    let camera = world
-        .spawn((
-            Camera2d {
-                viewport_height: 336.0,
-                clear_color: Some(Color::rgba(0.022, 0.035, 0.075, 0.72)),
-                ..Camera2d::default()
-            },
-            Transform2d::IDENTITY,
-        ))
-        .id();
+    world.spawn((
+        Camera2d {
+            viewport_height: 336.0,
+            clear_color: Some(Color::rgba(0.022, 0.035, 0.075, 0.72)),
+            ..Camera2d::default()
+        },
+        Transform2d::IDENTITY,
+    ));
 
     let mut tilemap = Tilemap::new(Vec2::splat(16.0));
     for row in -8_i32..8 {
@@ -210,8 +196,7 @@ fn populate_scene(world: &mut World) -> Result<()> {
             );
         }
     }
-    let ground = world.spawn((tilemap, Transform2d::IDENTITY)).id();
-    let mut roots = vec![camera, ground];
+    world.spawn((tilemap, Transform2d::IDENTITY));
     for (phase, radius, size, color) in [
         (
             0.0,
@@ -232,21 +217,10 @@ fn populate_scene(world: &mut World) -> Result<()> {
             Color::rgba(0.92, 0.22, 0.62, 0.70),
         ),
     ] {
-        roots.push(
-            world
-                .spawn((
-                    Sprite::from_color(Vec2::splat(size), color).with_layer(1),
-                    Transform2d::IDENTITY,
-                    Orbit { radius, phase },
-                ))
-                .id(),
-        );
+        world.spawn((
+            Sprite::from_color(Vec2::splat(size), color).with_layer(1),
+            Transform2d::IDENTITY,
+            Orbit { radius, phase },
+        ));
     }
-    let placement = HierarchyPlacement::last(HierarchyPlacementOwner::Root);
-    let operations: Vec<_> = roots
-        .into_iter()
-        .map(|entity| HierarchyOperation::Place { entity, placement })
-        .collect();
-    HierarchyWriter::new(world).apply_batch(&operations)?;
-    Ok(())
 }

@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use crate::image::{ImageAsset, ImageContentSnapshot, PreparedImageSnapshot};
+use crate::image::{ImageAsset, PreparedImageSnapshot};
 use crate::material::{AlphaMode2d, Material2dBinding, SamplerDescriptor};
 use crate::sprite::TextureRegion;
 use crate::tilemap::{DirtyTileChunk, TileChunkCoord, TileCoord, TileIndex};
@@ -37,7 +37,6 @@ pub struct ExtractedSprite {
     pub source_order: u64,
     pub kind: ExtractedSpriteKind,
     pub material: ExtractedSpriteMaterial,
-    pub image_content: Option<ImageContentSnapshot>,
     pub material_extension: Option<Arc<PreparedMaterial2d>>,
     pub texture_region: TextureUvRect,
     pub world_center: Vec2,

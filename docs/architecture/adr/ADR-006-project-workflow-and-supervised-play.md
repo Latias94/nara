@@ -6,10 +6,9 @@ Put `nara.toml`, project creation, Cargo build orchestration, Schema discovery, 
 Cook, and Export in headless `nara_project`. The `nara` CLI and desktop editor use the same project
 workflow. Leave project orchestration outside the shipping game graph.
 
-- Project source settings lower to the cooked runtime configuration owned by `nara_scene`.
-  A cooked Player or Server loads that configuration through its runtime build. The source runner
-  enables the project manifest and source loading separately.
-- Run a small project-owned Schema export entry point on demand. Load its `SchemaCatalog` from
+- The project manifest describes a code-first game and its asset directory. The game owns its
+  runtime configuration. The CLI checks the manifest and builds the selected Cargo binary.
+- Run a small project-owned Schema export entry point on demand. Load its `ComponentSchemaCatalog` from
   `.nara/schema_cache.json` and keep the last successful catalog available after a build failure.
   Replace the cache only after a successful exporter exits with a bounded UTF-8 JSON catalog.
   Cancelling a refresh stops the build or exporter and preserves the last cache before publication.

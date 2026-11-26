@@ -51,14 +51,12 @@ fn wake_session(event_loop: WinitEventLoop) -> (WinitSession, Rc<DriverCounts>) 
     })
     .unwrap();
     let counts = Rc::new(DriverCounts::default());
-    let session = WinitRunner::new(WinitControlFlow::Poll)
-        .with_input_isolation(true)
-        .start_with_presentation_on(
-            RuntimeInstance::start(app).unwrap(),
-            Box::new(WakeDriver(counts.clone())),
-            RETIREMENT_BUDGET,
-            Some(event_loop),
-        );
+    let session = WinitRunner::new(WinitControlFlow::Poll).start_with_presentation_on(
+        RuntimeInstance::start(app).unwrap(),
+        Box::new(WakeDriver(counts.clone())),
+        RETIREMENT_BUDGET,
+        Some(event_loop),
+    );
     (session, counts)
 }
 

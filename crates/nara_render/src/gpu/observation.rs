@@ -155,10 +155,7 @@ impl WgpuRenderObservation {
 
 #[cfg(test)]
 mod tests {
-    use nara_app::{
-        App, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeClosePolicy,
-        RuntimeGeneration, RuntimeObligationLedger,
-    };
+    use nara_app::{App, RuntimeCandidateRetirementState, RuntimeGeneration, RuntimeInstance};
     use nara_window::WindowId;
 
     use super::*;
@@ -167,7 +164,8 @@ mod tests {
     fn transaction(app_frame: Option<u64>, render_frame: u64) -> WgpuFrameTransactionStats {
         let mut backend = WgpuRenderBackend::default();
         backend.begin_frame_transaction(render_frame, app_frame);
-        backend.record_editor_window_presentation();
+        backend.record_runtime_program_submission();
+        backend.commit_runtime_presentation(presented_receipt(), true);
         let stats = backend.frame_transaction_stats();
         #[cfg(feature = "hud-runtime")]
         let stats = {
@@ -182,13 +180,7 @@ mod tests {
     }
 
     fn presented_receipt() -> WgpuPresentedFrameReceipt {
-        let candidate = RuntimeCandidate::admit(
-            App::new().seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
-        let runtime = candidate.complete_startup().unwrap().promote();
+        let runtime = RuntimeInstance::start(App::new()).unwrap();
         let generation: RuntimeGeneration = runtime.generation();
         let mut retirement = runtime.begin_retirement();
         while retirement.retirement_state() != RuntimeCandidateRetirementState::Retired {

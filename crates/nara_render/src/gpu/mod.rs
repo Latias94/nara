@@ -71,8 +71,6 @@ use crate::{RenderBackendStatus, RenderFrameSkipReason};
 use nara_app::{RuntimeFault, RuntimeFaultKind};
 
 pub use crate::gpu::backend::{WgpuBackendState, WgpuFrameTransactionStats};
-#[cfg(feature = "hud-runtime")]
-pub use crate::gpu::candidate::WgpuUiCandidateSubmitFailure;
 pub use crate::gpu::candidate::{
     WgpuCandidateSubmitFailure, WgpuPublishedFrame, WgpuRenderCandidate,
 };
@@ -89,21 +87,19 @@ pub use crate::gpu::graph::{
 };
 pub use crate::gpu::host::{
     WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuImageTargetReservation, WgpuRenderHost,
-    WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProducerId, WgpuWindowDeviceScope,
-    WgpuWindowFrame, WgpuWindowFrameOutcome,
+    WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProducerId,
 };
 #[cfg(feature = "sprite-render")]
 pub use crate::gpu::material_textures::WgpuMaterialTextureBinding;
 pub use crate::gpu::observation::WgpuRenderObservation;
-pub use crate::gpu::output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageOutput};
+pub use crate::gpu::output::WgpuImageOutput;
 pub use crate::gpu::plugin::{
-    WGPU_BACKEND_SHUTDOWN_OBLIGATION, WGPU_CAPTURE_PLUGIN_DECLARATION, WGPU_CAPTURE_PLUGIN_ID,
-    WGPU_STOCK_CAPTURE_PLUGIN_DECLARATION, WGPU_STOCK_CAPTURE_PLUGIN_ID,
-    WGPU_STOCK_POLICY_PLUGIN_DECLARATION, WGPU_STOCK_POLICY_PLUGIN_ID,
-    WGPU_WINDOW_PRESENTATION_PLUGIN_DECLARATION, WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
-    WgpuCapturePlugin, WgpuPolicyFrameWriter, WgpuStockCapturePlugin, WgpuStockCaptureSet,
-    WgpuStockFrame, WgpuStockFrameReader, WgpuStockPolicyPlugin, WgpuWindowPresentationPlugin,
-    install_wgpu_policy,
+    WGPU_CAPTURE_PLUGIN_DECLARATION, WGPU_CAPTURE_PLUGIN_ID, WGPU_STOCK_CAPTURE_PLUGIN_DECLARATION,
+    WGPU_STOCK_CAPTURE_PLUGIN_ID, WGPU_STOCK_POLICY_PLUGIN_DECLARATION,
+    WGPU_STOCK_POLICY_PLUGIN_ID, WGPU_WINDOW_PRESENTATION_PLUGIN_DECLARATION,
+    WGPU_WINDOW_PRESENTATION_PLUGIN_ID, WgpuCapturePlugin, WgpuPolicyFrameWriter,
+    WgpuStockCapturePlugin, WgpuStockCaptureSet, WgpuStockFrame, WgpuStockFrameReader,
+    WgpuStockPolicyPlugin, WgpuWindowPresentationPlugin, install_wgpu_policy,
 };
 #[cfg(feature = "sprite-render")]
 pub use crate::gpu::plugin::{
@@ -120,16 +116,14 @@ pub use crate::gpu::policy::{
     WgpuPolicyInstallation, WgpuPolicyInstallationId, WgpuPolicyProgram, WgpuRenderInput,
     WgpuRenderPolicy,
 };
-pub use crate::gpu::presented::{
-    WgpuImageCompositeReceipt, WgpuSubmittedImageReceipt, WgpuWindowPresentedReceipt,
-};
+pub use crate::gpu::presented::WgpuSubmittedImageReceipt;
 pub use crate::gpu::program::{
-    WgpuFeatureAllocation, WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureEncodeContext,
-    WgpuFeatureInstance, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
-    WgpuNativeResources, WgpuOperationResources, WgpuProgramBuffer, WgpuProgramBufferOutput,
-    WgpuProgramOutput, WgpuProgramOutputs, WgpuProgramRead, WgpuProgramTexture,
-    WgpuProgramTextureDescriptor, WgpuProgramTextureOutput, WgpuProgramWrite, WgpuRenderFeature,
-    WgpuRenderProgram, WgpuRenderProgramBuilder, WgpuRenderProgramError,
+    RenderPass, WgpuFeatureAllocation, WgpuFeatureDeclaration, WgpuFeatureDefinition,
+    WgpuFeatureEncodeContext, WgpuFeatureInstance, WgpuFeaturePreflightContext,
+    WgpuFeaturePrepareContext, WgpuNativeResources, WgpuOperationResources, WgpuProgramBuffer,
+    WgpuProgramBufferOutput, WgpuProgramOutput, WgpuProgramOutputs, WgpuProgramRead,
+    WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuProgramTextureOutput, WgpuProgramWrite,
+    WgpuRenderFeature, WgpuRenderProgram, WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 pub use crate::gpu::requirements::{WgpuDeviceRequirements, WgpuDeviceRequirementsError};
 pub use crate::gpu::runtime_timing::{
@@ -150,10 +144,7 @@ pub use crate::gpu::telemetry::{
 pub use crate::gpu::texture_cache::TextureCacheStats;
 pub use crate::gpu::work::WgpuNativeWorkStats;
 #[cfg(feature = "hud-runtime")]
-pub use crate::gpu::{
-    host::{WgpuUiImageSubmission, WgpuUiSubmission, WgpuUiSubmitFailure},
-    plugin::WgpuPolicyUiCaptureFailure,
-};
+pub use crate::gpu::{host::WgpuUiSubmission, plugin::WgpuPolicyUiCaptureFailure};
 
 pub use crate::gpu::surface::{
     SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus, WgpuConfiguredPresentMode,
@@ -175,7 +166,7 @@ pub mod execution {
             WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuImageTargetReservation,
             WgpuRenderHost, WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProducerId,
         },
-        output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageOutput},
+        output::WgpuImageOutput,
         presented::{WgpuPresentedFrameReceipt, WgpuSubmittedImageReceipt},
         runtime::{
             WgpuRuntimeCapture, WgpuRuntimeCaptureFailure, WgpuRuntimeCaptureIdentity,
@@ -189,7 +180,7 @@ pub mod execution {
     pub use crate::gpu::backend::WgpuSubmittedUiFacts;
 
     #[cfg(feature = "hud-runtime")]
-    pub use crate::gpu::host::{WgpuUiImageSubmission, WgpuUiSubmission, WgpuUiSubmitFailure};
+    pub use crate::gpu::host::WgpuUiSubmission;
 
     #[cfg(feature = "hud-runtime")]
     #[must_use]

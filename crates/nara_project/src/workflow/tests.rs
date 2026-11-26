@@ -6,7 +6,10 @@ use super::{
     ProjectTrust, SCHEMA_BINARY, SCHEMA_CACHE_PATH, SchemaCacheError, create_project,
     read_schema_cache, refresh_schema, schema::finish_refresh,
 };
-use crate::{ProjectManifest, play::BuildRequest};
+use crate::{
+    ProjectManifest,
+    play::{BuildError, BuildRequest},
+};
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt as _;
@@ -53,10 +56,11 @@ fn starter_uses_the_checkout_patch_sources_and_a_code_first_manifest() {
     assert_eq!(cargo["dependencies"].as_table().unwrap().len(), 1);
     assert!(project.join("src/bin/nara_schema.rs").is_file());
 
-    let project_source = fs::read_to_string(project.join("nara.toml")).unwrap();
-    let manifest = ProjectManifest::parse_toml_str(&project_source);
-    assert!(!manifest.has_errors(), "{manifest:?}");
-    assert!(manifest.manifest.unwrap().startup.default_scene.is_none());
+    let manifest = super::check_project(&project).unwrap();
+    assert_eq!(manifest.project.name, "my-game");
+    assert_eq!(manifest.project.version, "0.1.0");
+    assert_eq!(manifest.paths.assets, "assets");
+    assert!(manifest.window.is_none());
 }
 
 #[test]
@@ -76,57 +80,66 @@ fn existing_project_is_never_overwritten() {
 }
 
 #[test]
-fn projects_with_the_same_name_get_distinct_source_universes() {
-    let temp = tempfile::tempdir().unwrap();
-    let checkout = temp.path().join("engine");
-    local_checkout(&checkout);
-    let [first, second] = ["first", "second"].map(|directory| {
-        let project = temp.path().join(directory);
-        create_project(&project, "my-game", &checkout).unwrap();
-        let bytes = fs::read(project.join("nara.toml")).unwrap();
-        let manifest = ProjectManifest::parse_toml_bytes(&bytes);
-        assert!(!manifest.has_errors(), "{manifest:?}");
-        manifest.manifest.unwrap().project
-    });
-    assert_eq!(first.name, second.name);
-    assert_ne!(first.source_universe, second.source_universe);
+fn manifest_accepts_portable_paths_and_partial_window_metadata() {
+    let manifest = ProjectManifest::parse_toml(
+        r#"
+[project]
+name = "My Game"
+version = "0.2.0-dev"
+[paths]
+assets = "data/art"
+[window]
+title = "A Window"
+width = 960
+"#,
+    )
+    .unwrap();
+    assert_eq!(manifest.paths.assets, "data/art");
+    let window = manifest.window.unwrap();
+    assert_eq!(window.title.as_deref(), Some("A Window"));
+    assert_eq!(window.width.unwrap().get(), 960);
+    assert!(window.height.is_none());
 }
 
 #[test]
-fn check_compiles_the_selected_ron_action_map_without_cargo() {
+fn check_validates_only_the_two_project_manifests() {
     let temp = tempfile::tempdir().unwrap();
-    let checkout = temp.path().join("engine");
-    let project = temp.path().join("my-game");
-    local_checkout(&checkout);
-    create_project(&project, "my-game", &checkout).unwrap();
-
-    let selected = "input/default.actions.ron";
-    let manifest = project.join("nara.toml");
-    let source = fs::read_to_string(&manifest).unwrap();
+    let project = temp.path();
+    let source = "[project]\nname = 'My Game'\nversion = '0.1.0'\n";
+    let nara_manifest = project.join("nara.toml");
+    let cargo_manifest = project.join("Cargo.toml");
+    fs::write(&nara_manifest, source).unwrap();
     fs::write(
-        manifest,
-        format!("{source}\n[input]\naction_map = '{selected}'\n"),
+        &cargo_manifest,
+        "[package]\nname = 'my-game'\ndefault-run = 'demo'\n\
+         [[bin]]\nname = 'demo'\nrequired-features = ['desktop']\n",
     )
     .unwrap();
-    fs::create_dir(project.join("input")).unwrap();
-    let path = project.join(selected);
-    let map = r#"(
-        kind: "action_map",
-        format_version: 1,
-        engine_min_version: "0.1.0",
-        generator: (name: "fixture", version: "0.1.0"),
-        payload: (
-            source: "b23d8f3a-9770-5c1a-bf4d-81fb93171257",
-            contexts: [(context: "gameplay", enabled: true)],
-            bindings: [(action: "jump", input: Key(Space), context: "gameplay")],
-        ),
-    )"#;
-    fs::write(&path, map).unwrap();
-    super::check_project(&project, None).unwrap();
-    fs::write(path, map.replace("Key(Space)", "Key(UnknownKey)")).unwrap();
+    super::check_project(project).unwrap();
+    let package = super::CargoPackage::read(project).unwrap();
+    assert_eq!(package.name(), "my-game");
+    assert_eq!(package.default_binary(), "demo");
+    assert_eq!(package.required_features("demo"), ["desktop"]);
+
+    for invalid_section in [
+        "\n[paths]\nassets = '../outside'",
+        "\n[paths]\nassets = 'art\\sprites'",
+        "\n[window]\nwidth = 0",
+        "\n[window]\nheight = 4294967296",
+        "\n[window]\ntitle = ' '",
+        "\n[profiles.desktop]",
+    ] {
+        fs::write(&nara_manifest, format!("{source}{invalid_section}\n")).unwrap();
+        assert!(matches!(
+            super::check_project(project),
+            Err(super::ProjectCheckError::Parse { path, .. }) if path == nara_manifest
+        ));
+    }
+    fs::write(&nara_manifest, source).unwrap();
+    fs::write(&cargo_manifest, "[workspace]\n").unwrap();
     assert!(matches!(
-        super::check_project(&project, None),
-        Err(super::ProjectCheckError::Source { path, .. }) if path == selected
+        super::check_project(project),
+        Err(super::ProjectCheckError::Parse { path, .. }) if path == cargo_manifest
     ));
 }
 
@@ -157,7 +170,10 @@ fn a_schema_request_cannot_select_a_manifest_outside_the_trusted_root() {
         panic!("the build must not start")
     })
     .unwrap_err();
-    assert!(matches!(error, SchemaCacheError::ManifestOutsideProject));
+    assert!(matches!(
+        error,
+        SchemaCacheError::Build(BuildError::ManifestOutsideProject)
+    ));
 }
 
 #[test]

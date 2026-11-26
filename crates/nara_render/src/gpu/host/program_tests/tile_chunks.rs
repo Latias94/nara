@@ -29,9 +29,7 @@ const YELLOW: [u8; 4] = [255, 255, 0, 255];
 fn native_stock_tile_chunks_upload_only_changed_instances() {
     let mut app = App::new();
     app.add_plugins((
-        nara_reflect::ComponentRegistryPlugin,
         nara_scene::spatial::SpatialPlugin,
-        crate::RenderComponentsPlugin,
         crate::RenderPlugin::default(),
         crate::image::ImagePreparePlugin,
         crate::sprite_render::SpriteRenderPlugin,
@@ -204,13 +202,6 @@ fn publish_atlas(
     )
     .unwrap();
     images
-        .commit_loaded(
-            handle,
-            image,
-            states,
-            &mut AssetEvents::default(),
-            None,
-            None,
-        )
+        .commit_loaded(handle, image, states, &mut AssetEvents::default())
         .unwrap();
 }

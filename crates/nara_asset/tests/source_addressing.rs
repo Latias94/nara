@@ -1,9 +1,7 @@
 use nara_asset::{
-    AssetDatabaseError, AssetMetaIdentity, AssetPath, AssetPathError, AssetPathScope,
-    AssetProductRef, AssetRecord, AssetRef, AssetRefError, AssetRefExportPolicy,
-    AssetReferenceResolver, AssetServer, AssetSourceChangeKind, AssetSourceChanges,
-    AssetSourceKind, AssetSourcePath, AssetSourceRoot, ImportedProductId, ProjectAssetDatabase,
-    StableAssetId,
+    AssetDatabaseError, AssetPath, AssetPathError, AssetPathScope, AssetProductRef, AssetRecord,
+    AssetRef, AssetRefError, AssetRefExportPolicy, AssetReferenceResolver, AssetServer,
+    AssetSourceKind, AssetSourcePath, ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
 
 fn source(path: &str) -> AssetSourcePath {
@@ -176,31 +174,6 @@ fn canonical_index_distinguishes_same_names_in_multiple_roots_and_same_kind_dire
 }
 
 #[test]
-fn metadata_binding_checks_actual_local_spelling_before_global_insertion() {
-    let scope = scope("Content/Images");
-    let identity = AssetMetaIdentity::new(stable_id(1), alias("Icon.png"), AssetSourceKind::Image);
-    let expected = record(1, "Content/Images/Icon.png", AssetSourceKind::Image);
-    assert_eq!(identity.clone().into_record(&scope), expected);
-    let mut database = ProjectAssetDatabase::default();
-    let baseline = database.clone();
-    for wrong in ["icon.png", "other.png", "Content/Images/Icon.png"] {
-        let wrong = alias(wrong);
-        assert_eq!(
-            database.insert_identity(&scope, wrong.clone(), identity.clone()),
-            Err(AssetDatabaseError::MetaPathMismatch {
-                source_path: wrong,
-                meta_path: identity.path().clone(),
-            })
-        );
-        assert_eq!(database, baseline);
-    }
-    database
-        .insert_identity(&scope, alias("Icon.png"), identity)
-        .unwrap();
-    assert_eq!(database.record_for_path(expected.path()), Some(&expected));
-}
-
-#[test]
 fn borrowed_resolvers_keep_explicit_scope_and_snapshot_identity() {
     fn copied<T: Copy>(value: T) -> T {
         value
@@ -250,7 +223,7 @@ fn borrowed_resolvers_keep_explicit_scope_and_snapshot_identity() {
 }
 
 #[test]
-fn resolver_work_queries_match_scoped_joins_and_borrowed_root_lookups() {
+fn source_resolution_supports_scoped_unicode_aliases() {
     let image = record(1, "内容/Images/textures/玩家.png", AssetSourceKind::Image);
     let mut database = ProjectAssetDatabase::default();
     database.insert(image.clone()).unwrap();
@@ -259,27 +232,17 @@ fn resolver_work_queries_match_scoped_joins_and_borrowed_root_lookups() {
     let resolver = database.resolver(&asset_scope);
     let path = alias("textures/玩家.png");
     let reference = AssetRef::Path(path.clone());
-    let expected = Some(image.path().as_str().len());
-    assert_eq!(resolver.path_resolution_work_bytes(&path), expected);
-    assert_eq!(resolver.resolution_work_bytes(&reference), expected);
     assert_eq!(resolver.resolve_ref(&reference), Ok(&image));
     assert_eq!(resolver.record_for_path(&path), Some(&image));
     let root_scope = AssetPathScope::ROOT;
     let root = database.resolver(&root_scope);
     let root_path = alias(image.path().as_str());
-    assert_eq!(root.path_resolution_work_bytes(&root_path), Some(0));
-    assert_eq!(
-        root.resolution_work_bytes(&AssetRef::Path(root_path.clone())),
-        Some(0)
-    );
     assert_eq!(root.record_for_path(&root_path), Some(&image));
     assert_eq!(root.resolve_ref(&AssetRef::Path(root_path)), Ok(&image));
     for reference in [
         AssetRef::StableId(image.stable_id()),
         AssetRef::Product(primary(&image)),
     ] {
-        assert_eq!(resolver.resolution_work_bytes(&reference), Some(0));
-        assert_eq!(root.resolution_work_bytes(&reference), Some(0));
         assert_eq!(resolver.resolve_ref(&reference), Ok(&image));
     }
     assert_eq!(database, baseline);
@@ -502,51 +465,4 @@ fn exact_removal_requires_canonical_location_and_complete_record_identity() {
         Some(&replacement)
     );
     assert_eq!(baseline.record_for_path(own.path()), Some(&own));
-}
-
-#[test]
-fn source_roots_refuse_unrelated_prefixes_before_deriving_native_read_paths() {
-    let native = std::env::temp_dir().join("nara_source_addressing_no_io");
-    let root = AssetSourceRoot::new(&native, scope("Content/Images"));
-    assert_eq!(root.scope(), &scope("Content/Images"));
-    assert_eq!(
-        root.source_path(&source("Content/Images/textures/player.png")),
-        Ok(native.join("textures").join("player.png"))
-    );
-    for outside in [
-        "Content/Images",
-        "Content/Images-extra/player.png",
-        "content/Images/player.png",
-        "Other/Images/player.png",
-    ] {
-        assert_eq!(
-            root.source_path(&source(outside)),
-            Err(AssetDatabaseError::SourceOutsideRoot)
-        );
-    }
-    let root_scope = AssetSourceRoot::new(&native, AssetPathScope::ROOT);
-    assert_eq!(
-        root_scope.source_path(&source("Content/Images/player.png")),
-        Ok(native.join("Content").join("Images").join("player.png"))
-    );
-}
-
-#[test]
-fn canonical_source_changes_keep_same_named_roots_separate_and_metadata_order_intact() {
-    let first = source("Content/Images/shared.png");
-    let second = source("Packages/Images/shared.png");
-    let mut changes = AssetSourceChanges::new();
-    changes.removed(first.clone()).unwrap();
-    changes.meta_modified(first.clone()).unwrap();
-    changes.modified(second.clone()).unwrap();
-    let coalesced = changes.drain_coalesced();
-    assert_eq!(coalesced.len(), 2);
-    assert_eq!(coalesced[0].path(), &first);
-    assert_eq!(coalesced[0].kind(), AssetSourceChangeKind::Removed);
-    assert!(coalesced[0].metadata_dirty());
-    assert_eq!(coalesced[1].path(), &second);
-    assert_eq!(coalesced[1].kind(), AssetSourceChangeKind::Modified);
-    assert!(!coalesced[1].metadata_dirty());
-    assert!(changes.is_empty());
-    assert_eq!(changes.retained_payload_bytes(), 0);
 }

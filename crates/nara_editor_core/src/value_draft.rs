@@ -1,13 +1,10 @@
 use std::{
     collections::BTreeMap,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
-use nara_ecs::identity::{EntityReference, SceneEntityId};
+use nara_core::EntityUuid;
 use nara_reflect::{
     ComponentValue, ComponentValueKind, ComponentValueShape, decode_asset_reference_value,
     encode_asset_reference_value,
@@ -25,7 +22,6 @@ pub enum ValueDraft {
     Text {
         text: String,
         entered: bool,
-        original_reference: Option<Arc<OriginalEntityReference>>,
     },
     Record {
         members: Vec<(String, ValueDraft)>,
@@ -46,22 +42,6 @@ pub enum ValueDraft {
         pending: Option<(String, bool, Box<ChildDraft>)>,
         confirmed: bool,
     },
-}
-
-#[derive(Debug, PartialEq)]
-pub struct OriginalEntityReference {
-    text: String,
-    reference: EntityReference,
-}
-
-impl OriginalEntityReference {
-    fn matches_text(&self, text: &str) -> bool {
-        self.text == text
-            || self
-                .reference
-                .direct_source_entity()
-                .is_some_and(|entity| source_local_id_text(text) == entity.as_str())
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -147,30 +127,12 @@ impl ValueDraft {
                 kind: ComponentValueKind::Bool,
                 ..
             } => Self::Bool(source.and_then(ComponentValue::as_bool)),
-            ComponentValueShape::EntityRef => {
-                let text = source.map_or_else(String::new, |value| scalar_text(shape, value));
-                let original_reference =
-                    source
-                        .and_then(ComponentValue::as_entity_reference)
-                        .map(|reference| {
-                            Arc::new(OriginalEntityReference {
-                                text: text.clone(),
-                                reference: reference.clone(),
-                            })
-                        });
-                Self::Text {
-                    text,
-                    entered: source.is_some(),
-                    original_reference,
-                }
-            }
-            ComponentValueShape::Scalar { .. } | ComponentValueShape::AssetRef { .. } => {
-                Self::Text {
-                    text: source.map_or_else(String::new, |value| scalar_text(shape, value)),
-                    entered: source.is_some(),
-                    original_reference: None,
-                }
-            }
+            ComponentValueShape::EntityRef
+            | ComponentValueShape::Scalar { .. }
+            | ComponentValueShape::AssetRef { .. } => Self::Text {
+                text: source.map_or_else(String::new, |value| scalar_text(shape, value)),
+                entered: source.is_some(),
+            },
             ComponentValueShape::Record { members } => Self::Record {
                 members: members
                     .iter()
@@ -230,16 +192,6 @@ impl ValueDraft {
         let value = match (self, shape) {
             (Self::Null, _) => ComponentValue::Null,
             (Self::Bool(value), _) => ComponentValue::Bool(value.ok_or("Choose true or false")?),
-            (
-                Self::Text {
-                    text,
-                    original_reference: Some(original),
-                    ..
-                },
-                ComponentValueShape::EntityRef,
-            ) if original.matches_text(text) => {
-                ComponentValue::EntityReference(original.reference.clone())
-            }
             (Self::Text { text, entered, .. }, _) => {
                 if !entered {
                     return Err("Enter a value explicitly".to_owned());
@@ -373,12 +325,10 @@ fn scalar_text(shape: &ComponentValueShape, value: &ComponentValue) -> String {
             .unwrap_or_default();
     }
     if matches!(shape, ComponentValueShape::EntityRef) {
-        return match value.as_entity_reference() {
-            Some(EntityReference::SceneLocal { entity }) => format!("scene-local:{entity}"),
-            Some(EntityReference::Authored { .. }) => "<authored reference>".to_owned(),
-            Some(EntityReference::Persistent { .. }) => "<persistent reference>".to_owned(),
-            None => String::new(),
-        };
+        return value
+            .as_entity_reference()
+            .map(ToString::to_string)
+            .unwrap_or_default();
     }
     match value {
         ComponentValue::I64(value) => value.to_string(),
@@ -387,10 +337,6 @@ fn scalar_text(shape: &ComponentValueShape, value: &ComponentValue) -> String {
         ComponentValue::String(value) => value.clone(),
         _ => String::new(),
     }
-}
-
-fn source_local_id_text(text: &str) -> &str {
-    text.strip_prefix("scene-local:").unwrap_or(text).trim()
 }
 
 pub fn parse_scalar(shape: &ComponentValueShape, text: &str) -> Result<ComponentValue, String> {
@@ -416,11 +362,11 @@ pub fn parse_scalar(shape: &ComponentValueShape, text: &str) -> Result<Component
         return Ok(encode_asset_reference_value(&reference));
     }
     if matches!(shape, ComponentValueShape::EntityRef) {
-        let entity = SceneEntityId::new(source_local_id_text(text))
-            .map_err(|_| "Expected a valid source-local entity ID")?;
-        return Ok(ComponentValue::EntityReference(
-            EntityReference::SceneLocal { entity },
-        ));
+        return text
+            .trim()
+            .parse::<EntityUuid>()
+            .map(ComponentValue::EntityReference)
+            .map_err(|_| "Expected a non-nil entity UUID".to_owned());
     }
     match shape.value_kind() {
         ComponentValueKind::I64 => text
@@ -443,7 +389,6 @@ pub fn parse_scalar(shape: &ComponentValueShape, text: &str) -> Result<Component
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_ecs::identity::AuthoredEntityReference;
     use nara_reflect::{ComponentFieldId, ComponentNumericDomain, ComponentShapeMember};
 
     #[test]
@@ -475,7 +420,6 @@ mod tests {
         members[0].1 = ValueDraft::Text {
             text: "1".into(),
             entered: true,
-            original_reference: None,
         };
         assert!(draft.value(&shape).is_err());
         let ValueDraft::Record { members, .. } = &mut draft else {
@@ -484,7 +428,6 @@ mod tests {
         members[1].1 = ValueDraft::Text {
             text: "1e100".into(),
             entered: true,
-            original_reference: None,
         };
         assert!(draft.value(&shape).is_err());
         let empty = ComponentValueShape::record([]);
@@ -492,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn source_local_reference_descendants_are_supported_and_opaque_descendants_are_not() {
+    fn entity_references_can_be_edited_inside_records() {
         assert!(supported(&ComponentValueShape::optional(
             ComponentValueShape::record([("child".into(), ComponentValueShape::EntityRef)])
         )));
@@ -519,42 +462,24 @@ mod tests {
     }
 
     #[test]
-    fn entity_reference_draft_uses_source_local_text() {
+    fn entity_reference_draft_round_trips_and_edits_non_nil_uuids() {
         let shape = ComponentValueShape::EntityRef;
-        let value = ComponentValue::EntityReference(EntityReference::SceneLocal {
-            entity: SceneEntityId::new("target").unwrap(),
-        });
-        assert_eq!(scalar_text(&shape, &value), "scene-local:target");
-        assert_eq!(parse_scalar(&shape, "scene-local:target").unwrap(), value);
-        assert_eq!(parse_scalar(&shape, "target").unwrap(), value);
-        assert!(parse_scalar(&shape, "scene-local:bad id").is_err());
-    }
-
-    #[test]
-    fn authored_reference_draft_parses_only_changed_targets() {
-        let shape = ComponentValueShape::EntityRef;
-        let original = ComponentValue::EntityReference(EntityReference::Authored {
-            reference: AuthoredEntityReference::source(SceneEntityId::new("target").unwrap()),
-        });
+        let original_text = "cc91a0c8-e2b4-42ae-9d78-3481b9f34d65";
+        let original = ComponentValue::EntityReference(original_text.parse().unwrap());
         let mut draft = ValueDraft::from_value(&shape, Some(&original));
+        assert_eq!(draft.copy_text(), original_text);
         assert_eq!(draft.value(&shape).unwrap(), original);
-        let expected = ComponentValue::EntityReference(EntityReference::SceneLocal {
-            entity: SceneEntityId::new("other").unwrap(),
-        });
-        for (input, result) in [
-            (" target ", Ok(original.clone())),
-            ("scene-local:other", Ok(expected)),
-            (
-                "",
-                Err("Expected a valid source-local entity ID".to_owned()),
-            ),
-            ("scene-local:target", Ok(original)),
-        ] {
-            let ValueDraft::Text { text, .. } = &mut draft else {
-                panic!("reference draft");
-            };
-            *text = input.to_owned();
-            assert_eq!(draft.value(&shape), result);
+        let ValueDraft::Text { text, .. } = &mut draft else {
+            panic!("reference draft");
+        };
+        let other = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
+        *text = format!(" {other} ");
+        assert_eq!(
+            draft.value(&shape).unwrap(),
+            ComponentValue::EntityReference(other.parse().unwrap())
+        );
+        for input in ["", "target", "00000000-0000-0000-0000-000000000000"] {
+            assert!(parse_scalar(&shape, input).is_err());
         }
     }
 

@@ -254,8 +254,7 @@ impl std::error::Error for UnsupportedKeyboardBinding {}
 
 /// Checks keyboard bindings against the stock Winit physical dispatch map.
 ///
-/// Returns the first unsupported keyboard binding in definition order. Native hold
-/// reconciliation after focus recovery has its own platform snapshot coverage.
+/// Returns the first unsupported keyboard binding in definition order.
 pub fn validate_action_map_keyboard(
     definition: &ActionMapDefinition,
 ) -> Result<(), UnsupportedKeyboardBinding> {

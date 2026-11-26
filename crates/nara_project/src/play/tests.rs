@@ -2,8 +2,6 @@ use std::{
     env, fs,
     io::{self, Write as _},
     process::{Command, Stdio},
-    sync::atomic::{AtomicUsize, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use super::*;
@@ -13,42 +11,46 @@ const MODE_FILE: &str = "play-mode";
 const READY_FILE: &str = "descendant-ready";
 const EXIT_FILE: &str = "exit-now";
 
-struct TestProject(PathBuf);
+struct TestProject(tempfile::TempDir);
 
 impl TestProject {
     fn new(mode: &str) -> Self {
-        static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let project = Self(env::temp_dir().join(format!(
-            "nara-play-{}-{stamp}-{sequence}",
-            std::process::id()
-        )));
-        fs::create_dir(&project.0).unwrap();
-        fs::write(project.0.join(MODE_FILE), mode).unwrap();
+        let project = Self(tempfile::tempdir().unwrap());
+        fs::write(project.0.path().join(MODE_FILE), mode).unwrap();
         project
     }
 
     fn launch(&self) -> PlayProcess {
         PlayProcess::launch(
-            &self.0,
+            self.0.path(),
             &env::current_exe().unwrap(),
             &helper_arguments("tree_helper"),
+            ProjectTrust::Trusted,
         )
         .unwrap()
     }
 }
 
-impl Drop for TestProject {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(self.0.join(READY_FILE));
-        let _ = fs::remove_file(self.0.join(MODE_FILE));
-        let _ = fs::remove_file(self.0.join(EXIT_FILE));
-        let _ = fs::remove_dir(&self.0);
-    }
+#[test]
+fn an_untrusted_project_cannot_launch_or_build() {
+    let project = TestProject::new("hold");
+    let executable = env::current_exe().unwrap();
+    let launch = PlayProcess::launch(
+        project.0.path(),
+        &executable,
+        &helper_arguments("tree_helper"),
+        ProjectTrust::Untrusted,
+    );
+    assert!(matches!(launch, Err(error) if error.kind() == io::ErrorKind::PermissionDenied));
+
+    let request = BuildRequest::new(project.0.path(), "demo", "game");
+    assert!(matches!(
+        build(&request, ProjectTrust::Untrusted, |_| panic!(
+            "Cargo executed"
+        )),
+        Err(BuildError::UntrustedProject)
+    ));
+    assert!(!project.0.path().join(READY_FILE).exists());
 }
 
 #[test]
@@ -101,7 +103,7 @@ fn natural_exit_preserves_the_leader_status_and_cleans_up_remaining_descendants(
     let ((leader, descendant), _) = observe_tree(&mut process);
     let leader_probe = ProcessProbe::open(leader);
     let descendant = ProcessProbe::open(descendant);
-    fs::write(project.0.join(EXIT_FILE), "exit").unwrap();
+    fs::write(project.0.path().join(EXIT_FILE), "exit").unwrap();
     assert!(process.wait(|_| {}).unwrap().success());
     assert!(!leader_probe.active());
     assert!(!descendant.active());
@@ -131,7 +133,7 @@ fn oversized_stdout_stops_and_reaps_a_producer_tree() {
     let project = TestProject::new("oversized");
     let mut tree = None;
     let error = capture_stdout(
-        &project.0,
+        project.0.path(),
         &env::current_exe().unwrap(),
         &helper_arguments("tree_helper"),
         1024,

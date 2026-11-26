@@ -4,9 +4,10 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
+#[cfg(any(test, feature = "sprite-render", feature = "hud-runtime"))]
+use crate::gpu::allocation::create_checked_buffer_with_data_observed;
 use crate::gpu::{
     WgpuNativeResources, WgpuRenderError,
-    allocation::create_checked_buffer_with_data_observed,
     output::{OutputBudget, OutputReservation},
     submission::{SubmissionCapacity, WgpuSubmissionReservation},
 };
@@ -99,6 +100,7 @@ impl<'a> NativePreparation<'a> {
     }
 
     /// Refuses a complete known allocation demand before its first upload or native resource.
+    #[cfg(any(feature = "sprite-render", feature = "hud-runtime"))]
     pub(crate) fn preflight_allocation_bytes(
         &self,
         bytes: u64,
@@ -177,6 +179,7 @@ impl<'a> NativePreparation<'a> {
     }
 
     /// Reserves the actual aligned allocation before creating and initializing its mapping.
+    #[cfg(any(test, feature = "sprite-render", feature = "hud-runtime"))]
     pub(crate) fn create_buffer_with_data(
         &mut self,
         label: &'static str,

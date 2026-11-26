@@ -29,6 +29,14 @@ const TERMINATE_GRACE: Duration = Duration::from_millis(750);
 const KILL_TIMEOUT: Duration = Duration::from_secs(3);
 const DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 
+/// The caller's decision to trust the project, its Cargo configuration, and build dependencies.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectTrust {
+    #[default]
+    Untrusted,
+    Trusted,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputStream {
     Stdout,
@@ -58,7 +66,14 @@ impl PlayProcess {
         project_dir: &Path,
         executable: &Path,
         arguments: &[OsString],
+        trust: ProjectTrust,
     ) -> io::Result<Self> {
+        if trust != ProjectTrust::Trusted {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "launching a game requires a trusted project",
+            ));
+        }
         let directory = path::absolute(project_dir)?;
         let executable = directory.join(executable);
         if !executable.is_absolute() {
@@ -83,13 +98,22 @@ impl PlayProcess {
     }
 
     /// Waits for the game to exit, delivering output as it arrives.
-    pub fn wait(&mut self, mut emit: impl FnMut(OutputLine)) -> io::Result<ExitStatus> {
-        self.run.wait(|| false, &mut emit)
+    pub fn wait(&mut self, emit: impl FnMut(OutputLine)) -> io::Result<ExitStatus> {
+        self.wait_interruptible(|| false, emit)
     }
 
     /// Stops and reaps the game and waits for active members of its containment to exit.
-    pub fn stop(&mut self, mut emit: impl FnMut(OutputLine)) -> io::Result<ExitStatus> {
-        self.run.wait(|| true, &mut emit)
+    pub fn stop(&mut self, emit: impl FnMut(OutputLine)) -> io::Result<ExitStatus> {
+        self.wait_interruptible(|| true, emit)
+    }
+
+    /// Waits for the game to exit or stops and reaps it when `stop` returns true.
+    pub fn wait_interruptible(
+        &mut self,
+        stop: impl FnMut() -> bool,
+        mut emit: impl FnMut(OutputLine),
+    ) -> io::Result<ExitStatus> {
+        self.run.wait(stop, &mut emit)
     }
 
     /// Stops the previous run before launching the same command. For a rebuild, stop the game

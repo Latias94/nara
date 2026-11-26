@@ -1,9 +1,6 @@
 use nara_ecs::bevy_ecs::message::Message;
 
-use crate::{
-    AxisValue, ButtonTransitionPhase, InputEventKind, InputGamepadGeneration, InputRouteStamp,
-    InputTimelineEntry,
-};
+use crate::{AxisValue, ButtonTransitionPhase, InputSeatId, InputWindowId};
 
 macro_rules! standard_controls {
     ($(#[$doc:meta])* $control:ident { $($name:ident = $code:literal),+ $(,)? }) => {
@@ -15,7 +12,7 @@ macro_rules! standard_controls {
         }
 
         impl $control {
-            /// Returns the stable numeric code used in action bindings and timeline events.
+            /// Returns the stable numeric code used in action bindings.
             #[must_use]
             pub const fn code(self) -> u16 {
                 self as u16
@@ -34,7 +31,7 @@ macro_rules! standard_controls {
 }
 
 standard_controls! {
-    /// Standard gamepad button identities. Bindings also accept producer-specific codes.
+    /// Standard gamepad button identities.
     GamepadButton {
         South = 0,
         East = 1,
@@ -72,13 +69,13 @@ standard_controls! {
     }
 }
 
-/// A connection change or standard gamepad control sample from the input timeline.
-/// Use the generation to distinguish reconnects that reuse a numeric gamepad label.
+/// A connection change or standard gamepad control sample. A producer assigns a fresh
+/// connection ID on reconnect.
 #[derive(Debug, Clone, Copy, PartialEq, Message)]
 pub struct GamepadInput {
-    pub route: InputRouteStamp,
-    pub gamepad: u16,
-    pub connection_generation: InputGamepadGeneration,
+    pub window: InputWindowId,
+    pub seat: InputSeatId,
+    pub gamepad: u64,
     pub kind: GamepadInputKind,
 }
 
@@ -94,56 +91,4 @@ pub enum GamepadInputKind {
         axis: GamepadAxis,
         value: AxisValue,
     },
-}
-
-impl GamepadInput {
-    pub(crate) fn from_timeline(entry: InputTimelineEntry) -> Option<Self> {
-        let (gamepad, connection_generation, kind) = match entry.kind() {
-            InputEventKind::GamepadConnected {
-                gamepad,
-                connection_generation,
-            } => (gamepad, connection_generation, GamepadInputKind::Connected),
-            InputEventKind::GamepadDisconnected {
-                gamepad,
-                connection_generation,
-            } => (
-                gamepad,
-                connection_generation,
-                GamepadInputKind::Disconnected,
-            ),
-            InputEventKind::GamepadButton {
-                gamepad,
-                connection_generation,
-                button,
-                phase,
-            } => (
-                gamepad,
-                connection_generation,
-                GamepadInputKind::Button {
-                    button: GamepadButton::from_code(button)?,
-                    phase,
-                },
-            ),
-            InputEventKind::GamepadAxis {
-                gamepad,
-                connection_generation,
-                axis,
-                value,
-            } => (
-                gamepad,
-                connection_generation,
-                GamepadInputKind::Axis {
-                    axis: GamepadAxis::from_code(axis)?,
-                    value,
-                },
-            ),
-            _ => return None,
-        };
-        Some(Self {
-            route: entry.route(),
-            gamepad,
-            connection_generation,
-            kind,
-        })
-    }
 }

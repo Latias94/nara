@@ -18,7 +18,6 @@ nara_core.workspace = true
 nara_ecs = { workspace = true, optional = true }
 nara_input = { workspace = true, optional = true }
 nara_material_derive = { workspace = true, optional = true }
-nara_reflect = { workspace = true, optional = true }
 nara_scene = { workspace = true, optional = true }
 nara_ui = { workspace = true, optional = true, default-features = false }
 nara_window.workspace = true
@@ -27,6 +26,7 @@ ron = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
+tracing = { workspace = true, optional = true }
 wgpu = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -46,7 +46,6 @@ default = []
 runtime = [
     "dep:nara_app",
     "dep:nara_ecs",
-    "dep:nara_reflect",
     "dep:nara_scene",
     "nara_asset/runtime",
     "nara_window/runtime",
@@ -63,15 +62,13 @@ image = []
 image-runtime = ["image", "runtime", "nara_asset/image-import"]
 render-prepare = ["image"]
 material = ["image", "dep:encase", "dep:glam", "dep:naga", "dep:nara_ecs", "dep:nara_material_derive"]
-material-asset = ["material", "serde"]
-persistent = ["material-asset", "runtime"]
 sprites = ["runtime", "image", "material"]
 tiles = ["runtime", "image", "material"]
-animation = ["sprites", "serde"]
-sprite-render = ["sprites", "tiles", "persistent", "image-runtime", "render-prepare"]
+animation = ["sprites"]
+sprite-render = ["sprites", "tiles", "image-runtime", "render-prepare"]
 hud = ["render-prepare", "dep:guillotiere", "dep:nara_ui"]
 hud-runtime = ["hud", "runtime", "image-runtime"]
-hud-presentation = ["hud-runtime", "dep:nara_input", "nara_ui/runtime"]
+hud-presentation = ["hud-runtime", "dep:nara_input", "dep:tracing", "nara_ui/runtime"]
 wgpu = ["runtime", "material", "dep:bytemuck", "dep:pollster", "dep:wgpu"]
 winit = ["nara_window/winit"]
 desktop-winit = ["wgpu", "winit"]

@@ -3,9 +3,8 @@
 use std::collections::BTreeMap;
 
 use nara_asset::AssetRef;
-use nara_core::Vec2;
+use nara_core::{EntityUuid, Vec2};
 use nara_ecs::Component;
-use nara_ecs::identity::EntityReference;
 
 use crate::{
     AssetReferenceDemand, ComponentCodecError, ComponentNumericDomain, ComponentSchema,
@@ -274,7 +273,7 @@ impl PersistentFieldCodec for Vec2 {
     }
 }
 
-impl PersistentFieldCodec for EntityReference {
+impl PersistentFieldCodec for EntityUuid {
     const HAS_ASSET_REFERENCES: bool = false;
 
     fn value_shape() -> ComponentValueShape {
@@ -284,12 +283,12 @@ impl PersistentFieldCodec for EntityReference {
     fn decode(value: ComponentValueRef<'_>, field: &str) -> Result<Self, ComponentCodecError> {
         value
             .as_entity_reference()
-            .cloned()
+            .copied()
             .ok_or_else(|| ComponentCodecError::invalid_field(field, "entity reference"))
     }
 
     fn encode(&self) -> Result<ComponentValue, ComponentCodecError> {
-        Ok(ComponentValue::EntityReference(self.clone()))
+        Ok(ComponentValue::EntityReference(*self))
     }
 }
 
@@ -401,8 +400,8 @@ mod private {
     use std::collections::BTreeMap;
 
     use nara_asset::AssetRef;
+    use nara_core::EntityUuid;
     use nara_core::Vec2;
-    use nara_ecs::identity::EntityReference;
 
     pub trait Sealed {}
 
@@ -419,7 +418,7 @@ mod private {
     impl Sealed for u32 {}
     impl Sealed for u64 {}
     impl Sealed for Vec2 {}
-    impl Sealed for EntityReference {}
+    impl Sealed for EntityUuid {}
     impl Sealed for AssetRef {}
     impl<T: super::PersistentFieldCodec> Sealed for Vec<T> {}
     impl<T: super::PersistentFieldCodec> Sealed for BTreeMap<String, T> {}

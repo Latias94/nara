@@ -4,19 +4,15 @@ use std::{
 };
 
 use nara::{
-    advanced_prelude::StartupSceneActivationPlugin,
-    prelude::{App, DefaultPlugins},
+    prelude::{App, MinimalPlugins, RegisterSchema},
     reflect::schema_json,
 };
-use nara_reference_game::project_recipe;
+use nara_reference_game::RunRules;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
-    app.add_plugins((
-        DefaultPlugins::headless(),
-        StartupSceneActivationPlugin,
-        project_recipe()?,
-    ))?;
+    app.add_plugins(MinimalPlugins)?
+        .register_schema::<RunRules>()?;
     writeln!(io::stdout().lock(), "{}", schema_json(&app)?)?;
     Ok(())
 }

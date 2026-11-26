@@ -1,4 +1,4 @@
-//! Backend-free component values used by scene, prefab, patch, and schema code.
+//! Backend-free values for component fields.
 
 use std::{
     collections::BTreeMap,
@@ -6,7 +6,7 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use nara_ecs::identity::EntityReference;
+use nara_core::EntityUuid;
 
 use crate::{
     codec::ComponentCodecError,
@@ -58,49 +58,6 @@ impl<'de> serde::Deserialize<'de> for ComponentFloat {
     }
 }
 
-/// Deterministic structural cost for a [`ComponentValue`].
-///
-/// Nodes bound container/object overhead while logical bytes bound owned scalar and map-key
-/// payload. The accounting is independent of a serializer and uses saturating arithmetic so it
-/// remains safe for programmatically constructed values.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ComponentValueCost {
-    nodes: usize,
-    logical_bytes: usize,
-}
-
-impl ComponentValueCost {
-    pub(crate) const fn from_parts(nodes: usize, logical_bytes: usize) -> Self {
-        Self {
-            nodes,
-            logical_bytes,
-        }
-    }
-
-    pub const ZERO: Self = Self {
-        nodes: 0,
-        logical_bytes: 0,
-    };
-
-    #[must_use]
-    pub const fn nodes(self) -> usize {
-        self.nodes
-    }
-
-    #[must_use]
-    pub const fn logical_bytes(self) -> usize {
-        self.logical_bytes
-    }
-
-    #[must_use]
-    pub const fn saturating_add(self, other: Self) -> Self {
-        Self {
-            nodes: self.nodes.saturating_add(other.nodes),
-            logical_bytes: self.logical_bytes.saturating_add(other.logical_bytes),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComponentValue {
     Null,
@@ -111,7 +68,7 @@ pub enum ComponentValue {
     String(String),
     List(Vec<ComponentValue>),
     Map(BTreeMap<String, ComponentValue>),
-    EntityReference(EntityReference),
+    EntityReference(EntityUuid),
 }
 
 impl ComponentValue {
@@ -127,103 +84,6 @@ impl ComponentValue {
                 .map(|(key, value)| (key.into(), value))
                 .collect(),
         )
-    }
-
-    #[must_use]
-    pub fn cost(&self) -> ComponentValueCost {
-        let mut cost = ComponentValueCost::ZERO;
-        self.cost_up_to_impl(usize::MAX, usize::MAX, &mut cost, None);
-        cost
-    }
-
-    /// Returns the same saturating cost as [`Self::cost`] if both inclusive ceilings hold.
-    ///
-    /// Returns `None` as soon as either ceiling is provably exceeded, including from a
-    /// container's known minimum node count. Zero ceilings are valid: every value costs at
-    /// least one node, while nulls, empty containers, and empty strings can have zero logical
-    /// bytes. Traversal borrows the value and keeps one iterator frame per open container.
-    #[must_use]
-    pub fn cost_up_to(
-        &self,
-        max_nodes: usize,
-        max_logical_bytes: usize,
-    ) -> Option<ComponentValueCost> {
-        if let Self::EntityReference(reference) = self {
-            let cost = reference.cost_up_to(max_nodes, max_logical_bytes)?;
-            return Some(ComponentValueCost::from_parts(
-                cost.nodes(),
-                cost.logical_bytes(),
-            ));
-        }
-
-        let mut cost = ComponentValueCost::ZERO;
-        self.cost_up_to_impl(max_nodes, max_logical_bytes, &mut cost, None)
-            .then_some(cost)
-    }
-
-    /// Admits canonical cost traversal scratch before each iterator-stack allocation.
-    ///
-    /// The same value ceilings apply as in [`Self::cost_up_to`]. The callback accounts
-    /// complete replacement Vec requests in bytes, independently of retained value ownership.
-    /// No value tree or error path is copied, including when the caller refuses.
-    #[doc(hidden)]
-    pub fn cost_up_to_with_admission<E>(
-        &self,
-        max_nodes: usize,
-        max_logical_bytes: usize,
-        admit: impl FnMut(Option<usize>) -> Result<(), E>,
-    ) -> Result<Option<ComponentValueCost>, E> {
-        self.cost_up_to_with_admission_measured(max_nodes, max_logical_bytes, admit)
-            .0
-    }
-
-    /// Returns the ordinary attempt and its actual visited prefix, including on refusal.
-    ///
-    /// The prefix excludes unvisited children inferred by the minimum-node guard. Scratch
-    /// admission retains its original error; an owning cumulative allowance settles the
-    /// returned prefix independently of that error and of the complete-value cost. A
-    /// visited entity reference contributes its full scalar cost.
-    #[doc(hidden)]
-    pub fn cost_up_to_with_admission_measured<E>(
-        &self,
-        max_nodes: usize,
-        max_logical_bytes: usize,
-        mut admit: impl FnMut(Option<usize>) -> Result<(), E>,
-    ) -> (Result<Option<ComponentValueCost>, E>, ComponentValueCost) {
-        let mut refusal = None;
-        let mut cost = ComponentValueCost::ZERO;
-        let complete = {
-            let mut callback = |bytes| match admit(bytes) {
-                Ok(()) => true,
-                Err(error) => {
-                    refusal = Some(error);
-                    false
-                }
-            };
-            self.cost_up_to_impl(max_nodes, max_logical_bytes, &mut cost, Some(&mut callback))
-        };
-        let result = match refusal {
-            Some(error) => Err(error),
-            None => Ok(complete.then_some(cost)),
-        };
-        (result, cost)
-    }
-
-    fn cost_up_to_impl(
-        &self,
-        max_nodes: usize,
-        max_logical_bytes: usize,
-        cost: &mut ComponentValueCost,
-        admission: Option<&mut dyn FnMut(Option<usize>) -> bool>,
-    ) -> bool {
-        let (accepted, observed) = crate::ComponentValueRef::from(self).cost_up_to_impl(
-            max_nodes,
-            max_logical_bytes,
-            *cost,
-            admission,
-        );
-        *cost = observed;
-        accepted
     }
 
     #[must_use]
@@ -529,10 +389,7 @@ impl ComponentValue {
             .ok_or_else(|| ComponentCodecError::invalid_field(field, "string"))
     }
 
-    pub fn field_entity_reference(
-        &self,
-        field: &str,
-    ) -> Result<&EntityReference, ComponentCodecError> {
+    pub fn field_entity_reference(&self, field: &str) -> Result<&EntityUuid, ComponentCodecError> {
         self.field(field)?
             .as_entity_reference()
             .ok_or_else(|| ComponentCodecError::invalid_field(field, "entity reference"))
@@ -571,7 +428,7 @@ impl ComponentValue {
     }
 
     #[must_use]
-    pub const fn as_entity_reference(&self) -> Option<&EntityReference> {
+    pub const fn as_entity_reference(&self) -> Option<&EntityUuid> {
         match self {
             Self::EntityReference(reference) => Some(reference),
             _ => None,
@@ -593,185 +450,3 @@ impl Display for ComponentValueError {
 }
 
 impl Error for ComponentValueError {}
-
-#[cfg(test)]
-mod cost_traversal_tests {
-    use nara_core::source::{SourceDocumentKey, SourceDocumentKind, StableAssetId};
-    use nara_ecs::identity::{
-        AuthoredEntityReference, EntityReference, PrefabEntityOrigin, PrefabInstanceHop,
-        SceneEntityId,
-    };
-
-    use super::{ComponentValue, ComponentValueCost};
-
-    #[test]
-    fn root_reference_cost_obeys_ceilings_and_preserves_the_measured_scalar_cost() {
-        let hop_count = 2;
-        let mut reference = AuthoredEntityReference::source(SceneEntityId::new("leaf").unwrap());
-        reference.through = vec![
-            PrefabInstanceHop {
-                anchor: PrefabEntityOrigin::SourceEntity(SceneEntityId::new("branch").unwrap()),
-                expected_base: SourceDocumentKey::stable_asset(
-                    StableAssetId::parse_str("44f2caae-b658-4790-a8a7-928935839ab7").unwrap(),
-                    SourceDocumentKind::Prefab,
-                ),
-            };
-            hop_count
-        ];
-        let value = ComponentValue::EntityReference(EntityReference::Authored { reference });
-        let nodes = 2 + 2 * hop_count;
-        let bytes = "leaf".len() + hop_count * ("branch".len() + 36 + 1);
-        let cost = ComponentValueCost::from_parts(nodes, bytes);
-        assert_eq!(value.cost(), cost);
-        assert_eq!(value.cost_up_to(nodes, bytes), Some(cost));
-        for (nodes, bytes) in [(nodes - 1, bytes), (nodes, bytes - 1)] {
-            assert_eq!(value.cost_up_to(nodes, bytes), None);
-            assert_eq!(
-                value.cost_up_to_with_admission_measured(nodes, bytes, |_| {
-                    Err("scalar requires no scratch")
-                }),
-                (Ok(None), cost)
-            );
-        }
-    }
-
-    #[test]
-    fn measured_attempt_keeps_the_visited_prefix_of_late_limit_and_scratch_refusals() {
-        let value = ComponentValue::List(vec![
-            ComponentValue::List(vec![ComponentValue::String(
-                "x".into()
-            )]);
-            8_192
-        ]);
-        let (result, visited) =
-            value.cost_up_to_with_admission_measured(10_000, usize::MAX, |_| {
-                Ok::<_, std::convert::Infallible>(())
-            });
-        assert_eq!(result, Ok(None));
-        assert_eq!(visited.nodes(), 3_616);
-        assert_eq!(visited.logical_bytes(), 1_807);
-
-        let (result, visited) =
-            value.cost_up_to_with_admission_measured(usize::MAX, usize::MAX, |_| {
-                Err("scratch refused")
-            });
-        assert_eq!(result, Err("scratch refused"));
-        assert_eq!(visited, ComponentValueCost::from_parts(1, 0));
-
-        let value = ComponentValue::map([("value", ComponentValue::U64(7))]);
-        let (result, visited) =
-            value.cost_up_to_with_admission_measured(usize::MAX, usize::MAX, |_| {
-                Ok::<_, std::convert::Infallible>(())
-            });
-        assert_eq!(result, Ok(Some(value.cost())));
-        assert_eq!(visited, value.cost());
-    }
-
-    #[test]
-    fn admitted_cost_preserves_limits_and_refuses_before_each_scratch_growth() {
-        let mut source = ComponentValue::String("leaf".into());
-        for _ in 0..12 {
-            source = ComponentValue::List(vec![source]);
-        }
-        let mut requests = Vec::new();
-        let measured = source
-            .cost_up_to_with_admission(100, 100, |bytes| {
-                requests.push(bytes.unwrap());
-                Ok::<(), std::convert::Infallible>(())
-            })
-            .unwrap();
-        assert_eq!(measured, source.cost_up_to(100, 100));
-        assert!(requests.len() > 1);
-        for denied in 0..requests.len() {
-            let mut calls = 0;
-            let result = source.cost_up_to_with_admission(100, 100, |_| {
-                calls += 1;
-                if calls == denied + 1 {
-                    Err(denied)
-                } else {
-                    Ok(())
-                }
-            });
-            assert_eq!(result, Err(denied));
-            assert_eq!(calls, denied + 1);
-        }
-        for (nodes, bytes) in [(0, 100), (10, 100), (100, 3), (100, 4)] {
-            assert_eq!(
-                source
-                    .cost_up_to_with_admission(
-                        nodes,
-                        bytes,
-                        |_| Ok::<(), std::convert::Infallible>(())
-                    )
-                    .unwrap(),
-                source.cost_up_to(nodes, bytes)
-            );
-        }
-    }
-
-    #[test]
-    fn wide_containers_reject_before_visiting_children() {
-        let width = 1_024;
-        let values = [
-            ComponentValue::List(vec![ComponentValue::Null; width]),
-            ComponentValue::map((0..width).map(|index| (index.to_string(), ComponentValue::Null))),
-        ];
-
-        for value in values {
-            let mut visited_cost = ComponentValueCost::ZERO;
-            assert!(!value.cost_up_to_impl(0, usize::MAX, &mut visited_cost, None));
-            assert_eq!(visited_cost.nodes(), 0);
-            assert!(!value.cost_up_to_impl(width, usize::MAX, &mut visited_cost, None));
-            assert_eq!(visited_cost.nodes(), 1);
-        }
-    }
-
-    #[test]
-    fn unbounded_cost_accumulation_preserves_saturation() {
-        let value = ComponentValue::List(vec![ComponentValue::Bool(true), ComponentValue::U64(7)]);
-        let mut cost = ComponentValueCost {
-            nodes: usize::MAX - 1,
-            logical_bytes: usize::MAX - 1,
-        };
-
-        assert!(value.cost_up_to_impl(usize::MAX, usize::MAX, &mut cost, None));
-        assert_eq!(cost.nodes(), usize::MAX);
-        assert_eq!(cost.logical_bytes(), usize::MAX);
-    }
-
-    #[test]
-    fn minimum_nodes_include_unvisited_ancestor_siblings() {
-        let value = ComponentValue::List(vec![
-            ComponentValue::List(vec![ComponentValue::Null; 3]),
-            ComponentValue::Null,
-        ]);
-
-        let mut visited_cost = ComponentValueCost::ZERO;
-        assert!(!value.cost_up_to_impl(5, usize::MAX, &mut visited_cost, None));
-        assert_eq!(visited_cost.nodes(), 2);
-    }
-
-    #[test]
-    fn logical_byte_rejection_does_not_visit_later_siblings() {
-        let value = ComponentValue::List(vec![
-            ComponentValue::String("too large".to_owned()),
-            ComponentValue::List(vec![ComponentValue::Null; 1_024]),
-        ]);
-
-        let mut visited_cost = ComponentValueCost::ZERO;
-        assert!(!value.cost_up_to_impl(usize::MAX, 8, &mut visited_cost, None));
-        assert_eq!(visited_cost.nodes(), 2);
-    }
-
-    #[test]
-    fn map_key_rejection_does_not_visit_child_container_contents() {
-        let value = ComponentValue::map([(
-            "too large",
-            ComponentValue::List(vec![ComponentValue::Null; 1_024]),
-        )]);
-
-        let mut visited_cost = ComponentValueCost::ZERO;
-        assert!(!value.cost_up_to_impl(usize::MAX, 8, &mut visited_cost, None));
-        assert_eq!(visited_cost.nodes(), 2);
-    }
-}

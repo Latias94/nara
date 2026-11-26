@@ -1,8 +1,8 @@
 use nara_reflect::{
     ComponentCodecError, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentNumericDomain, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
-    ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, ComponentValueShape, validate_component_value,
+    ComponentNumericDomain, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
+    ComponentSchemaVersion, ComponentShapeErrorKind, ComponentTypeId, ComponentValue,
+    ComponentValueKind, ComponentValueShape, validate_component_value,
 };
 
 fn field(kind: ComponentValueKind, domain: Option<ComponentNumericDomain>) -> ComponentFieldSchema {
@@ -15,28 +15,13 @@ fn field(kind: ComponentValueKind, domain: Option<ComponentNumericDomain>) -> Co
     .with_numeric_domain(domain)
 }
 
-fn catalog(field: ComponentFieldSchema) -> ComponentSchemaCatalog {
-    ComponentSchemaCatalog {
-        components: vec![
-            ComponentSchema::new(
-                ComponentTypeId::new("nara.test.NumericConfig"),
-                "Numeric config",
-                ComponentSchemaVersion::ONE,
-            )
-            .with_fields([field]),
-        ],
-        ..ComponentSchemaCatalog::default()
-    }
-}
-
-fn admit(
-    catalog: ComponentSchemaCatalog,
-) -> Result<ComponentRegistryBuilder, ComponentRegistryError> {
-    ComponentRegistryBuilder::from_owner_catalog_candidate(
-        ComponentSchemaOwnerId::new("nara.test.numeric-owner"),
-        catalog,
-        None,
+fn catalog(field: ComponentFieldSchema) -> Result<ComponentSchemaCatalog, ComponentRegistryError> {
+    ComponentSchemaCatalog::from_components([ComponentSchema::new(
+        ComponentTypeId::new("nara.test.NumericConfig"),
+        "Numeric config",
+        ComponentSchemaVersion::ONE,
     )
+    .with_fields([field])])
 }
 
 #[test]
@@ -65,11 +50,10 @@ fn numeric_domains_are_part_of_exact_catalog_identity() {
             [ComponentNumericDomain::F32].as_slice(),
         ),
     ] {
-        let full_width = catalog(field(kind, None));
+        let full_width = catalog(field(kind, None)).unwrap();
         let mut fingerprints = std::collections::BTreeSet::from([full_width.fingerprint()]);
         for domain in domains {
-            let narrowed = catalog(field(kind, Some(*domain)));
-            admit(narrowed.clone()).unwrap();
+            let narrowed = catalog(field(kind, Some(*domain))).unwrap();
             assert!(fingerprints.insert(narrowed.fingerprint()));
         }
     }
@@ -85,8 +69,9 @@ fn numeric_domains_must_match_the_declared_wire_kind() {
         (ComponentValueKind::String, ComponentNumericDomain::I8),
     ] {
         assert!(matches!(
-            admit(catalog(field(kind, Some(domain)))),
-            Err(ComponentRegistryError::InvalidComponentFieldNumericDomain { .. })
+            catalog(field(kind, Some(domain))),
+            Err(ComponentRegistryError::InvalidComponentFieldShape { source, .. })
+                if matches!(source.kind, ComponentShapeErrorKind::InvalidNumericDomain { .. })
         ));
     }
 }
@@ -96,58 +81,29 @@ fn numeric_defaults_are_checked_before_catalog_admission() {
     let mut bounded = field(ComponentValueKind::U64, Some(ComponentNumericDomain::U8));
     bounded.default_value = Some(ComponentValue::U64(256));
     assert!(matches!(
-        admit(catalog(bounded.clone())),
-        Err(ComponentRegistryError::ComponentFieldDefaultOutsideNumericDomain { .. })
+        catalog(bounded.clone()),
+        Err(ComponentRegistryError::InvalidComponentFieldDefault { source, .. })
+            if matches!(source.kind, ComponentShapeErrorKind::NumericDomain(_))
     ));
     bounded.default_value = Some(ComponentValue::I64(1));
     assert!(matches!(
-        admit(catalog(bounded.clone())),
+        catalog(bounded.clone()),
         Err(ComponentRegistryError::InvalidComponentFieldDefault { .. })
     ));
     bounded.default_value = Some(ComponentValue::U64(255));
-    admit(catalog(bounded.clone())).unwrap();
+    catalog(bounded.clone()).unwrap();
     bounded.required = false;
     bounded.shape = ComponentValueShape::optional(bounded.shape);
     bounded.default_value = Some(ComponentValue::Null);
-    admit(catalog(bounded)).unwrap();
+    catalog(bounded).unwrap();
 
     let mut bounded_float = field(ComponentValueKind::F64, Some(ComponentNumericDomain::F32));
     bounded_float.default_value = Some(ComponentValue::f64(f64::MAX).unwrap());
     assert!(matches!(
-        admit(catalog(bounded_float)),
-        Err(ComponentRegistryError::ComponentFieldDefaultOutsideNumericDomain { .. })
+        catalog(bounded_float),
+        Err(ComponentRegistryError::InvalidComponentFieldDefault { source, .. })
+            if matches!(source.kind, ComponentShapeErrorKind::NumericDomain(_))
     ));
-}
-
-#[test]
-fn numeric_domain_addition_change_and_removal_require_a_component_version_bump() {
-    for (before, after) in [
-        (None, Some(ComponentNumericDomain::U8)),
-        (
-            Some(ComponentNumericDomain::U8),
-            Some(ComponentNumericDomain::U16),
-        ),
-        (Some(ComponentNumericDomain::U8), None),
-    ] {
-        let predecessor = catalog(field(ComponentValueKind::U64, before));
-        let mut successor = ComponentSchemaCatalog::successor_of(&predecessor).unwrap();
-        successor.components = catalog(field(ComponentValueKind::U64, after)).components;
-        assert!(matches!(
-            ComponentRegistryBuilder::from_owner_catalog_candidate(
-                ComponentSchemaOwnerId::new("nara.test.numeric-owner"),
-                successor.clone(),
-                Some(predecessor.clone()),
-            ),
-            Err(ComponentRegistryError::ComponentSchemaChangedWithoutVersionBump { .. })
-        ));
-        successor.components[0].version = ComponentSchemaVersion::new(2).unwrap();
-        ComponentRegistryBuilder::from_owner_catalog_candidate(
-            ComponentSchemaOwnerId::new("nara.test.numeric-owner"),
-            successor,
-            Some(predecessor),
-        )
-        .unwrap();
-    }
 }
 
 #[test]
@@ -156,8 +112,9 @@ fn data_validation_shares_required_paths_kinds_domains_and_unknown_leaf_coverage
         ComponentValueKind::U64,
         Some(ComponentNumericDomain::U8),
     ))
-    .components
-    .remove(0);
+    .unwrap()
+    .components()[0]
+        .clone();
     let value = |value| ComponentValue::map([("config", ComponentValue::map([("value", value)]))]);
     validate_component_value(&schema, &value(ComponentValue::U64(255))).unwrap();
     for invalid in [ComponentValue::U64(256), ComponentValue::I64(1)] {
@@ -202,7 +159,7 @@ fn data_validation_shares_required_paths_kinds_domains_and_unknown_leaf_coverage
 #[cfg(feature = "serde")]
 #[test]
 fn numeric_domain_metadata_round_trips_inside_the_authoritative_shape() {
-    let legacy = catalog(field(ComponentValueKind::F64, None));
+    let legacy = catalog(field(ComponentValueKind::F64, None)).unwrap();
     let legacy_json = legacy.to_json_string().unwrap();
     assert!(!legacy_json.contains("numeric_domain"));
     assert_eq!(
@@ -213,19 +170,14 @@ fn numeric_domain_metadata_round_trips_inside_the_authoritative_shape() {
     let narrowed = catalog(field(
         ComponentValueKind::F64,
         Some(ComponentNumericDomain::F32),
-    ));
+    ))
+    .unwrap();
     let encoded = narrowed.to_json_string().unwrap();
     assert!(encoded.contains("\"numeric_domain\": \"f32\""));
     let decoded = ComponentSchemaCatalog::from_json_bytes(encoded.as_bytes()).unwrap();
     assert_eq!(decoded, narrowed);
     assert_eq!(decoded.fingerprint(), narrowed.fingerprint());
     assert_ne!(decoded.fingerprint(), legacy.fingerprint());
-    let ron = narrowed.to_ron_string().unwrap();
-    assert_eq!(
-        ComponentSchemaCatalog::from_ron_bytes(ron.as_bytes()).unwrap(),
-        narrowed
-    );
-
     let unknown = encoded.replace("\"numeric_domain\": \"f32\"", "\"numeric_domain\": \"f16\"");
     assert!(ComponentSchemaCatalog::from_json_bytes(unknown.as_bytes()).is_err());
 }

@@ -161,9 +161,7 @@ fn captured_stock(
     );
     let mut app = App::new();
     app.add_plugins((
-        nara_reflect::ComponentRegistryPlugin,
         nara_scene::spatial::SpatialPlugin,
-        crate::RenderComponentsPlugin,
         crate::RenderPlugin { world_canvas },
         crate::image::ImagePreparePlugin,
         crate::sprite_render::SpriteRenderPlugin,
@@ -185,8 +183,6 @@ fn captured_stock(
                 .unwrap(),
                 &mut states,
                 &mut AssetEvents::default(),
-                None,
-                None,
             )
             .unwrap();
         handle

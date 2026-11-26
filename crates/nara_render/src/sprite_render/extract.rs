@@ -1,10 +1,10 @@
 use std::{cmp::Reverse, sync::Arc};
 
-use crate::image::{ImageAsset, ImageContentSnapshot, PreparedImageSnapshot};
-use crate::material::{Material2d, Material2dAsset, Material2dBinding};
+use crate::image::{ImageAsset, PreparedImageSnapshot};
+use crate::material::Material2dBinding;
 use crate::sprite::Sprite;
 use crate::tilemap::{TileCoord, TileIndex, TileSet, Tilemap};
-use nara_asset::{AssetRef, AssetServer, AssetStates, Assets, Handle};
+use nara_asset::{AssetStates, Assets, Handle};
 use nara_core::{Affine2, Color, Vec2};
 use nara_ecs::bevy_ecs::{
     entity::EntityHashSet, entity_disabling::Disabled, error::BevyError, query::Allow,
@@ -33,7 +33,6 @@ type SpriteSources<'w, 's> = Query<
         Option<&'static Sprite>,
         Option<&'static Tilemap>,
         Option<&'static Material2dBinding>,
-        Option<&'static Material2d>,
         Option<&'static GlobalTransform2d>,
         Option<&'static InheritedVisibility>,
     ),
@@ -53,9 +52,7 @@ pub(crate) fn extract_sprites(
     mut scratch: ResMut<ExtractedSpriteScratch>,
     sources: SpriteSources,
     hierarchy: SourceHierarchy,
-    materials: Option<Res<Assets<Material2dAsset>>>,
     tilesets: Option<Res<Assets<TileSet>>>,
-    server: Option<Res<AssetServer>>,
     states: Option<Res<AssetStates>>,
     images: Option<Res<Assets<ImageAsset>>>,
 ) -> Result<(), BevyError> {
@@ -65,7 +62,7 @@ pub(crate) fn extract_sprites(
     scratch.branches.clear();
     scratch.pending.clear();
 
-    for (mut entity, _, _, _, _, global, visibility) in &sources {
+    for (mut entity, _, _, _, global, visibility) in &sources {
         if visibility.is_some_and(|visibility| !visibility.get()) {
             continue;
         }
@@ -112,33 +109,24 @@ pub(crate) fn extract_sprites(
                     .filter(|child| scratch.branches.contains(child)),
             );
         }
-        let Ok((_, sprite, tilemap, binding, authored, Some(global), visibility)) =
-            sources.get(entity)
+        let Ok((_, sprite, tilemap, binding, Some(global), visibility)) = sources.get(entity)
         else {
             continue;
         };
         if visibility.is_some_and(|visibility| !visibility.get()) {
             continue;
         }
-        let material = match extract_material(
-            binding,
-            authored,
-            materials.as_deref(),
-            server.as_deref(),
-            states.as_deref(),
-            images.as_deref(),
-        ) {
-            Ok(material) => material,
-            Err(MaterialExtractionError::Material) => {
-                scratch.stats.missing_materials = scratch.stats.missing_materials.saturating_add(1);
-                continue;
-            }
-            Err(MaterialExtractionError::Texture) => {
+        let mut material = None;
+        if let Some(binding) = binding {
+            let Ok(captured) = capture_material(binding.clone(), |handle| {
+                PreparedImageSnapshot::capture(handle, images.as_deref()?, states.as_deref()?)
+            }) else {
                 scratch.stats.unprepared_textures =
                     scratch.stats.unprepared_textures.saturating_add(1);
                 continue;
-            }
-        };
+            };
+            material = Some(captured);
+        }
         if let Some(sprite) = sprite {
             let source_order = scratch.sprites.len() as u64;
             let mut extracted = extract_sprite(entity, sprite, global, source_order);
@@ -150,15 +138,9 @@ pub(crate) fn extract_sprites(
         let Some(tilemap) = tilemap else {
             continue;
         };
-        let tileset = tilemap.tileset.and_then(|handle| {
-            extract_tileset(
-                handle,
-                tilesets.as_deref()?,
-                server.as_deref(),
-                states.as_deref(),
-                images.as_deref(),
-            )
-        });
+        let tileset = tilemap
+            .tileset
+            .and_then(|handle| tilesets.as_deref()?.get(handle));
         if tilemap.tileset.is_some() && tileset.is_none() {
             scratch.stats.missing_tilesets = scratch.stats.missing_tilesets.saturating_add(1);
             continue;
@@ -187,91 +169,6 @@ pub(crate) fn extract_sprites(
     scratch.sprites.clear();
     *stats = scratch.stats;
     Ok(())
-}
-
-fn extract_tileset<'a>(
-    handle: Handle<TileSet>,
-    tilesets: &'a Assets<TileSet>,
-    server: Option<&AssetServer>,
-    states: Option<&AssetStates>,
-    images: Option<&Assets<ImageAsset>>,
-) -> Option<&'a TileSet> {
-    let tileset = tilesets.get(handle)?;
-    let Some(image) = tileset.image_content() else {
-        return Some(tileset);
-    };
-    let states = states?;
-    states.state(handle.id())?.usable_version()?;
-    if states.published_slot_revision(handle.id()) != Some(&tilesets.slot_revision(handle)) {
-        return None;
-    }
-    image
-        .is_authorized(server?, states, images?)
-        .then_some(tileset)
-}
-
-enum MaterialExtractionError {
-    Material,
-    Texture,
-}
-
-fn extract_material(
-    binding: Option<&Material2dBinding>,
-    authored: Option<&Material2d>,
-    materials: Option<&Assets<Material2dAsset>>,
-    server: Option<&AssetServer>,
-    states: Option<&AssetStates>,
-    images: Option<&Assets<ImageAsset>>,
-) -> Result<Option<Arc<PreparedMaterial2d>>, MaterialExtractionError> {
-    match (binding, authored) {
-        (Some(_), Some(_)) => Err(MaterialExtractionError::Material),
-        (Some(binding), None) => capture_material(binding.clone(), |handle| {
-            PreparedImageSnapshot::capture(handle, images?, states?)
-        })
-        .map(Some)
-        .map_err(|()| MaterialExtractionError::Texture),
-        (None, None) => Ok(None),
-        (None, Some(authored)) => {
-            let materials = materials.ok_or(MaterialExtractionError::Material)?;
-            let handle = authored.handle();
-            let asset = materials
-                .get(handle)
-                .ok_or(MaterialExtractionError::Material)?;
-            let server = server.ok_or(MaterialExtractionError::Material)?;
-            if server.get_product_handle::<Material2dAsset>(asset.product()) != Some(handle) {
-                return Err(MaterialExtractionError::Material);
-            }
-            let states = states.ok_or(MaterialExtractionError::Material)?;
-            if states
-                .state(handle.id())
-                .is_none_or(|state| state.usable_version().is_none())
-                || states.published_slot_revision(handle.id())
-                    != Some(&materials.slot_revision(handle))
-            {
-                return Err(MaterialExtractionError::Material);
-            }
-            if asset
-                .textures()
-                .values()
-                .any(|reference| !matches!(reference, AssetRef::Product(_)))
-            {
-                return Err(MaterialExtractionError::Material);
-            }
-            let binding = authored
-                .bind(asset, |reference| match reference {
-                    AssetRef::Product(product) => server.get_product_handle::<ImageAsset>(*product),
-                    AssetRef::Path(_) | AssetRef::StableId(_) => None,
-                })
-                .map_err(|_| MaterialExtractionError::Material)?;
-            capture_material(binding, |handle| {
-                ImageContentSnapshot::capture(handle, server, states, images?)
-                    .ok()
-                    .map(|image| image.prepared_snapshot())
-            })
-            .map(Some)
-            .map_err(|()| MaterialExtractionError::Material)
-        }
-    }
 }
 
 fn capture_material(
@@ -310,7 +207,6 @@ fn extract_sprite(
             alpha_mode: sprite.material.alpha_mode,
             tint: sprite.material.tint,
         },
-        image_content: None,
         material_extension: None,
         texture_region: sprite
             .texture_region
@@ -336,7 +232,6 @@ struct TilemapExtractionContext<'a> {
     affine: Affine2,
     world_z: f32,
     material: ExtractedSpriteMaterial,
-    image_content: Option<&'a ImageContentSnapshot>,
     world_x_axis: Vec2,
     world_y_axis: Vec2,
     cached_region: Option<(TileIndex, Option<TextureUvRect>)>,
@@ -372,7 +267,6 @@ impl<'a> TilemapExtractionContext<'a> {
             affine,
             world_z: global.z(),
             material,
-            image_content: tileset.and_then(TileSet::image_content),
             world_x_axis: affine.transform_vector2(local_x_axis),
             world_y_axis: affine.transform_vector2(local_y_axis),
             cached_region: None,
@@ -412,7 +306,6 @@ impl<'a> TilemapExtractionContext<'a> {
             source_order,
             kind: ExtractedSpriteKind::TilemapCell { coord, tile },
             material: self.material,
-            image_content: self.image_content.cloned(),
             material_extension: None,
             texture_region: texture_region.unwrap_or(TextureUvRect::FULL),
             world_center: self.affine.transform_point2(local_center),

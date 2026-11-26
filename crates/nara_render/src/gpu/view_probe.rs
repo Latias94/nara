@@ -16,9 +16,7 @@ pub(crate) fn capture_split_sprite_views(
 ) -> (RenderFramePacket, SpriteBatches) {
     let mut app = App::new();
     app.add_plugins((
-        nara_reflect::ComponentRegistryPlugin,
         nara_scene::spatial::SpatialPlugin,
-        crate::RenderComponentsPlugin,
         crate::RenderPlugin::default(),
         crate::image::ImagePreparePlugin,
         crate::sprite_render::SpriteRenderPlugin,

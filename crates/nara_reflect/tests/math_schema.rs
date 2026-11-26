@@ -1,10 +1,9 @@
 use nara_core::Vec2;
-use nara_ecs::{Component, World};
+use nara_ecs::Component;
 use nara_reflect::{
-    ComponentFieldPath, ComponentNumericDomain, ComponentRegistryBuilder, ComponentRegistryError,
-    ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, ComponentValueShape, PersistentComponent,
-    PersistentComponentProvider, validate_component_value,
+    ComponentFieldPath, ComponentNumericDomain, ComponentValue, ComponentValueKind,
+    ComponentValueShape, PersistentComponent, PersistentComponentProvider,
+    validate_component_value,
 };
 
 #[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
@@ -60,19 +59,10 @@ fn persistent_vec2_declares_one_closed_numeric_shape_and_keeps_xy_wire_encoding(
         ])
     );
     validate_component_value(&schema, &encoded).unwrap();
-    let mut registry = ComponentRegistryBuilder::new();
-    registry
-        .register_persistent_component::<MotionPath>()
-        .unwrap();
-    let snapshot = registry.freeze().unwrap();
-    let mut world = World::new();
-    let entity = world.spawn_empty().id();
-    snapshot
-        .preflight_component(&ComponentTypeId::new("math.MotionPath"), &encoded)
-        .unwrap()
-        .apply(&mut world, entity)
-        .unwrap();
-    assert_eq!(world.get::<MotionPath>(entity), Some(&expected));
+    assert_eq!(
+        MotionPath::decode_persistent_component((&encoded).into()).unwrap(),
+        expected
+    );
 }
 
 #[test]
@@ -109,65 +99,4 @@ fn persistent_vec2_and_vector_items_reject_missing_extra_and_out_of_domain_membe
             assert!(MotionPath::decode_persistent_component((&candidate).into()).is_err());
         }
     }
-}
-
-#[test]
-fn adopting_closed_vectors_requires_both_an_owner_successor_and_explicit_migration() {
-    let id = ComponentTypeId::new("math.MotionPath");
-    let mut old_schema = MotionPath::persistent_component_schema();
-    for field in &mut old_schema.fields {
-        match field.id().as_str() {
-            "position" => field.shape = ComponentValueShape::opaque(ComponentValueKind::Map),
-            "waypoints" => {
-                field.shape =
-                    ComponentValueShape::list(ComponentValueShape::opaque(ComponentValueKind::Map))
-            }
-            _ => {}
-        }
-    }
-    let previous = ComponentSchemaCatalog {
-        components: vec![old_schema],
-        ..Default::default()
-    };
-    let mut current = ComponentSchemaCatalog::successor_of(&previous).unwrap();
-    current.components = vec![MotionPath::persistent_component_schema()];
-    let owner = ComponentSchemaOwnerId::new("math.motion");
-    assert!(matches!(
-        ComponentRegistryBuilder::from_owner_catalog_candidate(owner, current.clone(), Some(previous.clone())),
-        Err(ComponentRegistryError::ComponentSchemaChangedWithoutVersionBump { component_id }) if component_id == id
-    ));
-    current.components[0].version = ComponentSchemaVersion::new(2).unwrap();
-    let mut registry =
-        ComponentRegistryBuilder::from_owner_catalog_candidate(owner, current, Some(previous))
-            .unwrap();
-    registry
-        .register_native_component_with_codec::<MotionPath, _, _>(
-            &id,
-            MotionPath::decode_persistent_component,
-            MotionPath::encode_persistent_component,
-        )
-        .unwrap();
-    let candidate_before = registry.catalog_candidate().clone();
-    let failure = registry.freeze().unwrap_err();
-    let (mut registry, error) = failure.into_parts();
-    assert!(matches!(
-        error,
-        ComponentRegistryError::MissingComponentMigrationChain { .. }
-    ));
-    assert_eq!(registry.catalog_candidate(), &candidate_before);
-    registry
-        .register_component_migration(
-            &id,
-            ComponentSchemaVersion::ONE,
-            ComponentSchemaVersion::new(2).unwrap(),
-            Ok,
-        )
-        .unwrap();
-    let registry = registry.freeze().unwrap();
-    let original = motion_path().encode_persistent_component().unwrap();
-    let migrated = registry
-        .migrate_component_value(&id, ComponentSchemaVersion::ONE, &original)
-        .unwrap();
-    assert_eq!(migrated.version, ComponentSchemaVersion::new(2).unwrap());
-    assert_eq!(migrated.value, original);
 }

@@ -18,7 +18,7 @@ pub(super) fn synchronize_runtime_ui_surface_metrics(world: &mut World) {
     let snapshots = match nara_ui::ui_surface_slot_snapshots(world) {
         Ok(snapshots) => snapshots,
         Err(error) => {
-            super::record_bridge_error(world, error.to_string());
+            tracing::warn!(%error, "could not inspect HUD surfaces");
             return;
         }
     };
@@ -28,7 +28,6 @@ pub(super) fn synchronize_runtime_ui_surface_metrics(world: &mut World) {
         let Some(action) = action else {
             continue;
         };
-        super::abort_surface_attempts(world, snapshot.slot().surface_id());
         let result = match action {
             UiSurfaceLifecycleAction::Suspend(reason) => {
                 nara_ui::suspend_ui_surface(world, snapshot.slot().surface_id(), reason).map(|_| ())
@@ -49,7 +48,7 @@ pub(super) fn synchronize_runtime_ui_surface_metrics(world: &mut World) {
             .map(|_| ()),
         };
         if let Err(error) = result {
-            super::record_bridge_error(world, error.to_string());
+            tracing::warn!(%error, "could not update a HUD surface");
         }
     }
 }

@@ -10,7 +10,7 @@ cargo run --locked -p nara_project --bin nara -- play ../my-game --trusted
 ```
 
 Choose a new directory under an existing parent. The generated `Cargo.toml` uses the local Nara
-checkout. `check` reads `nara.toml` and any declared scene and schema files. Play runs Cargo and the
+checkout. `check` reads `nara.toml` and validates the local Cargo package declaration. Play runs Cargo and the
 game. Use `--trusted` for project code you trust to execute. Close the game window or press Ctrl+C
 in the terminal to stop Play.
 
@@ -33,42 +33,22 @@ The first command builds the exporter and updates `.nara/schema_cache.json`. The
 cache. Keep the generated `Cargo.lock` after the first build so later builds use the same dependency
 versions.
 
-## Author an action map
+## Bind a physical key
 
-A source-hosted game can select `input/default.actions.ron` with `[input]` in `nara.toml`.
-Use physical key names such as `KeyW`, `Space`, or `ArrowLeft`. Each binding names an action and
-its context. The file's `source` UUID identifies the map across edits.
+Insert an `ActionMaps` resource before the game starts. Physical keys such as `KeyW`, `Space`,
+and `ArrowLeft` stay independent of the text typed by the player.
 
-```toml
-[input]
-action_map = "input/default.actions.ron"
+```rust
+let jump = ActionBinding::key(ActionId::new("jump")?, KeyCode::Space);
+app.insert_resource(ActionMaps::new(ActionMap::from_bindings([jump])?))?;
 ```
 
-```ron
-(
-    kind: "action_map",
-    format_version: 1,
-    engine_min_version: "0.1.0",
-    generator: (name: "my-game", version: "0.1.0"),
-    payload: (
-        source: "b23d8f3a-9770-5c1a-bf4d-81fb93171257",
-        contexts: [(context: "gameplay", enabled: true)],
-        bindings: [(action: "jump", input: Key(Space), context: "gameplay")],
-    ),
-)
-```
-
-Run `nara check` to validate the selected map. Gameplay systems read its actions through
-`Res<ActionState>`, for example `actions.button("jump")`. A source-hosted development run using
-`ProjectSceneWatchPlugin` applies valid edits to the selected map at the next input update. A
-replacement ends actions held by the previous map. Keep the `source` UUID when editing bindings.
+Gameplay systems read the binding through `Res<ActionState>` with `actions.button("jump")`.
 
 ## Explore the supplied games
 
 - Run [the compact code-first example](../../examples/first_game.rs) to see fixed-step movement,
   sprite animation, a tilemap, collision audio, and a HUD together. Its build command is in the
   [repository README](../../README.md#build-and-test).
-- Play [First Wave](../../reference-game/README.md) to see a complete game with authored scenes,
-  prefabs, and HUD. Its headless command runs the same gameplay systems as the desktop build.
-- Follow [the two-level game's delivery workflow](../../samples/two-level-game/README.md#source-free-cooked-player)
-  to cook and export a project using a project-owned `cook` target.
+- Play the [reference game](../../reference-game/README.md) to see the desktop HUD and controls.
+  Its headless command exercises the same game simulation.

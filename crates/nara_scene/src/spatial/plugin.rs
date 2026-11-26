@@ -12,7 +12,7 @@ const SPATIAL_PLUGIN_DECLARATION: PluginDeclaration =
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, SystemSet)]
 pub enum SpatialSet {
-    /// Initialize globals after startup scene content has been materialized.
+    /// Initialize globals for entities spawned at startup.
     Startup,
     /// Publish fixed-step inputs after preparation and its deferred commands.
     BeforeFixed,

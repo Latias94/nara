@@ -1,40 +1,17 @@
-//! Asset identity, project metadata, typed handles, and in-memory asset tables.
-//!
-//! Asset values, storage, source data, and Runtime codecs are available without App or ECS
-//! dependencies. The `runtime` feature enables ECS resources, reload services, and App plugins.
-//! The independent `serde` feature enables source formats without runtime integration.
-//! The `pack` feature enables wire I/O and bounded member acquisition for cooked delivery.
-//! The `hot-reload` feature adds native source watching.
-//! `image-import` enables CPU image import and reload. `artifact-build` adds the local Cook cache.
+//! Typed asset handles and stores, code-first loading, and authored asset references.
 
-#[cfg(feature = "artifact-build")]
-pub mod artifact;
-#[cfg(feature = "serde")]
-mod build;
+mod assets;
 mod database;
-#[cfg(feature = "serde")]
-mod format;
 mod identity;
 pub mod image;
-#[cfg(feature = "serde")]
-mod import;
-mod import_recipe;
-#[cfg(feature = "pack")]
-pub mod pack;
+mod load_state;
+#[cfg(feature = "runtime")]
+mod plugin;
 mod product_identity;
 mod reference;
-#[cfg(feature = "runtime")]
-mod reload;
 mod revision;
-mod runtime_codec;
 mod server;
-mod source_changes;
-mod source_root;
-#[cfg(feature = "runtime")]
-mod source_subscriptions;
-mod state;
-mod storage;
-#[cfg(feature = "hot-reload")]
+#[cfg(all(feature = "hot-reload", any(unix, windows)))]
 pub mod watch;
 
 use std::{
@@ -42,108 +19,26 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-#[cfg(feature = "serde")]
-pub use build::{AssetBuildSource, SourceAssetBuild};
+pub use assets::{Asset, AssetSlotRevision, Assets, Handle, allocate_anonymous_handle};
 pub use database::{
-    AssetDatabaseError, AssetMeta, AssetMetaIdentity, AssetRecord, AssetReferenceResolver,
-    AssetSourceKind, ProjectAssetDatabase,
-};
-#[cfg(feature = "serde")]
-pub use format::{
-    AssetMetaCandidate, AssetMetaFileLimits, AssetMetaFormatError, AssetMetaIdentityCandidate,
+    AssetDatabaseError, AssetRecord, AssetReferenceResolver, AssetSourceKind, ProjectAssetDatabase,
 };
 pub use identity::{AssetId, AssetPath, AssetPathScope, AssetRef};
-#[cfg(feature = "serde")]
-pub use import::{AssetImportError, AssetImportLimits, AssetImportSource, SourceAssetImporter};
-pub use import_recipe::{
-    DigestParseError, ImportDependency, ImportDependencyDigest, ImportDependencyRole,
-    ImportLabelError, ImportLabelKind, ImportRecipe, ImportRecipeDigest, ImportSettingsHash,
-    ImporterId, ImporterVersion, SourceHash,
+pub use load_state::{
+    AssetEvent, AssetEventKind, AssetEvents, AssetState, AssetStateError, AssetStates,
+    AssetVersion, LoadState,
 };
 pub use nara_core::source::{
-    AssetPathError, AssetSourcePath, SourceDocumentBindingError, SourceDocumentKey,
-    SourceDocumentKeyError, SourceDocumentKind, SourceDocumentOrigin, StableAssetId,
-    StableAssetIdError, StableAssetIdGenerationError,
+    AssetPathError, AssetSourcePath, StableAssetId, StableAssetIdError,
+    StableAssetIdGenerationError,
+};
+#[cfg(feature = "runtime")]
+pub use plugin::{
+    ASSET_PLUGIN_DECLARATION, ASSET_PLUGIN_ID, AddAssetError, AssetPlugin, add_asset,
 };
 pub use product_identity::{AssetProductIdentityError, AssetProductRef, ImportedProductId};
 pub use reference::AssetReferenceDemand;
-#[cfg(feature = "runtime")]
-pub use reload::{
-    ASSET_PLUGIN_DECLARATION, ASSET_PLUGIN_ID, ASSET_SOURCE_PLUGIN_DECLARATION,
-    ASSET_SOURCE_PLUGIN_ID, AssetLoadGeneration, AssetLoadGenerations, AssetPlugin,
-    AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestAdmissionError,
-    AssetReloadRequestId, AssetReloadRequestKind, AssetReloadRequestLimitKind,
-    AssetReloadRequestLimits, AssetReloadRequests, AssetSourcePlugin, AssetTaskUpdateSet,
-    ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError, SourceReloadConsumer,
-    SourceReloadDrainError, SourceReloadRegistrationError, register_image_reload_consumer,
-    register_source_reload_consumer,
-};
-pub use runtime_codec::{
-    AssetDomain, AssetRuntimeDecodeError, AssetRuntimeError, AssetRuntimeLimits, RuntimeAssetCodec,
-    decode_runtime_asset,
-};
 pub use server::{AssetError, AssetServer};
-pub use source_changes::{
-    AssetSourceChange, AssetSourceChangeAdmissionError, AssetSourceChangeKind,
-    AssetSourceChangeLimitKind, AssetSourceChangeLimits, AssetSourceChanges,
-};
-pub use source_root::AssetSourceRoot;
-#[cfg(feature = "runtime")]
-pub use source_subscriptions::{
-    PreparedSourceSubscriptions, SourceSubscriptionCommitError, SourceSubscriptionError,
-    SourceSubscriptionKind, SourceSubscriptionLimitKind, SourceSubscriptionLimits,
-    SourceSubscriptionUsage,
-};
-pub use state::{
-    AssetDependencyGraph, AssetEvent, AssetEventKind, AssetEventLimits, AssetEventPushOutcome,
-    AssetEvents, AssetPublicationRevision, AssetState, AssetStateError, AssetStateRevision,
-    AssetStates, AssetVersion, ImageRecoveryContinuity, LoadState,
-};
-pub use storage::{
-    Asset, AssetMutationBaseline, AssetSlotRevision, Assets, Handle, allocate_anonymous_handle,
-};
-
-#[cfg(feature = "runtime")]
-#[derive(Debug, thiserror::Error)]
-pub enum AddAssetError {
-    #[error("install AssetPlugin before adding a runtime asset")]
-    MissingAssetPlugin,
-    #[error(transparent)]
-    Reserve(#[from] AssetError),
-    #[error(transparent)]
-    Publish(#[from] AssetStateError),
-}
-
-/// Publishes a procedural asset as ready for immediate use by the game and renderer.
-#[cfg(feature = "runtime")]
-pub fn add_asset<T: Asset>(
-    world: &mut nara_ecs::World,
-    value: T,
-) -> Result<Handle<T>, AddAssetError> {
-    if !world.contains_resource::<AssetServer>()
-        || !world.contains_resource::<AssetStates>()
-        || !world.contains_resource::<AssetEvents>()
-    {
-        return Err(AddAssetError::MissingAssetPlugin);
-    }
-    let handle = world
-        .resource_mut::<AssetServer>()
-        .reserve_anonymous::<T>()?;
-    world.init_resource::<Assets<T>>();
-    world.resource_scope(|world, mut assets: nara_ecs::Mut<Assets<T>>| {
-        world.resource_scope(|world, mut states: nara_ecs::Mut<AssetStates>| {
-            assets.commit_loaded(
-                handle,
-                value,
-                &mut states,
-                &mut world.resource_mut::<AssetEvents>(),
-                None,
-                None,
-            )
-        })
-    })?;
-    Ok(handle)
-}
 
 /// Selects the export form for source-bound primary products.
 ///
@@ -354,11 +249,6 @@ impl AssetRef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-        time::{SystemTime, UNIX_EPOCH},
-    };
 
     fn stable_id() -> StableAssetId {
         StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap()
@@ -908,56 +798,6 @@ mod tests {
     }
 
     #[test]
-    fn project_database_rejects_mismatched_meta_paths() {
-        let mut database = ProjectAssetDatabase::default();
-        let identity = AssetMetaIdentity::new(
-            stable_id(),
-            AssetPath::new("textures/player.png").unwrap(),
-            AssetSourceKind::Image,
-        );
-
-        let error = database
-            .insert_identity(
-                &AssetPathScope::ROOT,
-                AssetPath::new("textures/other.png").unwrap(),
-                identity,
-            )
-            .unwrap_err();
-
-        assert!(matches!(error, AssetDatabaseError::MetaPathMismatch { .. }));
-    }
-
-    #[test]
-    fn source_roots_bind_native_observations_and_reject_paths_outside_the_root() {
-        let temp_root = unique_temp_root();
-        let asset_root = temp_root.join("assets");
-        let outside_root = temp_root.join("outside");
-        fs::create_dir_all(asset_root.join("textures")).unwrap();
-        fs::create_dir_all(&outside_root).unwrap();
-        let source = asset_root.join("textures").join("player.png");
-        let outside = outside_root.join("player.png");
-        fs::write(&source, b"png").unwrap();
-        fs::write(&outside, b"png").unwrap();
-
-        let root = AssetSourceRoot::new(
-            &asset_root,
-            AssetPathScope::under(AssetSourcePath::new("Content/Images").unwrap()),
-        );
-        let logical = root.logical_path_from_source_path(&source).unwrap();
-        let outside_error = root.logical_path_from_source_path(&outside).unwrap_err();
-
-        assert_eq!(logical.as_str(), "Content/Images/textures/player.png");
-        assert_eq!(root.source_path(&logical).unwrap(), source);
-        assert!(root.logical_path_from_source_path(&asset_root).is_err());
-        assert!(matches!(
-            outside_error,
-            AssetDatabaseError::SourceOutsideRoot
-        ));
-
-        remove_temp_root(&temp_root);
-    }
-
-    #[test]
     fn assets_store_under_reserved_handles_without_allocator_collisions() {
         let mut server = AssetServer::new();
         let reserved = server.reserve::<String>("textures/player.png").unwrap();
@@ -978,22 +818,5 @@ mod tests {
         let handle = assets.add(&mut server, "texture".to_string()).unwrap();
 
         assert_eq!(assets.get(handle).map(String::as_str), Some("texture"));
-    }
-
-    fn unique_temp_root() -> PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("nara_asset_test_{}_{}", std::process::id(), stamp))
-    }
-
-    fn remove_temp_root(path: &Path) {
-        if let Err(error) = fs::remove_dir_all(path) {
-            panic!(
-                "failed to remove temp test directory {}: {error}",
-                path.display()
-            );
-        }
     }
 }
