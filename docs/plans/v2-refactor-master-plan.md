@@ -300,19 +300,74 @@ jobs, including the offscreen WGPU probes on Mesa software Vulkan. The workflow 
 
 **Entry.** Phase 3C passes and RFC-3 defines the editor and supervised Play behavior.
 
-- Build the unstyled `gpui_base` controls and thin GPUI docking adapter. Keep library primitives,
-  document state, and appearance independent of the editor shell.
+- Replace the former Open-GPUI UI packages with unstyled `gpui_base` controls. Keep the retained
+  native docking adapter and its shared `dockspace` session. Keep widget behavior, document state,
+  and appearance independently owned.
 - Implement synchronous `EditorSession`, multi-select and mixed values, merged gesture Undo, typed
   drafts, registry, picking, and Gizmos in `nara_editor_core`. Integrate project builds, Schema
   refresh, external Play, and streamed Console output using `nara_project`.
 - Implement Project Manager, Hierarchy, Inspector, Scene View, Asset Browser, Console, and toolbar
-  in the Design Kit shell. Recover the Dialogue Graph prototype from the v0 tag and integrate
-  `jellyflow-core` against the current document and Undo path.
+  in the Design Kit shell. The Dialogue Graph remains a follow-up that can use the same document
+  and Undo path after its GPUI integration migrates to `gpui_base`.
 
 **Exit.** In the real reference game, drag an asset into the scene, edit multiple entities and a
 Rust component, drag a Gizmo and undo or redo it, float the Inspector onto a second display, name
 an entity through CJK IME, save, Play and observe the change, then Stop with no surviving game
 process. Pass `nara_editor_core` headless tests and verify its UI-framework-free dependency graph.
+
+### Phase 4 source and verification
+
+| Scope | Phase 4 entry | Phase 4 checkout |
+| --- | ---: | ---: |
+| Nara engine workspace packages | 18 | 19 |
+| Nara native editor workspace packages | — | 2 |
+| Nara project Rust lines | 85,329 | 97,786 |
+| Open-GPUI workspace packages | 24 | 13 |
+| Open-GPUI library crates under `crates/` | 18 | 6 |
+| Open-GPUI project Rust lines | 668,467 | 493,711 |
+| Open-GPUI fixture Rust lines | 10,496 | 9,522 |
+| `gpui_base` Rust lines | — | 4,709 |
+
+The entry revisions are Nara `d247193` and Open-GPUI `48db6cd19f6`. The editor adds 4,663 Rust
+lines in Core, 1,111 in Gizmo, 1,186 in Viewport, and 5,638 in the shell, including tests.
+
+Open-GPUI merged the `3480cc0fafa` native fixes in `2c8c63e231e` and retained the docking
+adapter with `dockspace` pinned to `129e802abc516fe6aa24075f44aa9323a13ff04b`. The engine,
+native editor, reference game, shared viewport, and Open-GPUI use WGPU 30.0.0 at
+`cddb2f5d80dc0009b2ef6767635140cacf90a007`. The boundary check keeps the editor core free
+of GPUI, WGPU, Winit, and dockspace, and keeps runtime and game graphs free of the editor.
+
+Windows 11 with Rust 1.95.0 passed the locked all-feature, all-target checks for the Nara
+engine, Nara editor, and Open-GPUI workspaces without compiler warnings. The Nara engine
+workspace passed 651 tests, with 34 ignored in that invocation. The editor passed all 15 tests
+including the native WGPU texture identity, resize, queue completion, and warm resource-reuse
+probe. Both overlay GPU tests passed on DX12 and Vulkan, including cache clearing and rebuilding
+after a simulated device-loss condition. The six reference-game tests and Wasm core build passed. Open-GPUI
+passed 443 base-control, docking, macro, example, and repository-tool tests. Its native and
+recovery smokes passed, and its real HWND placement test passed both directions between 125%
+and 150% displays, retiring three native generations in each direction. All three independent
+consumers compiled, and the public Vulkan consumer passed three native surface lifetime tests.
+The Phase 4 results here are local checks.
+
+Night Relay's native editor smoke rendered 20 authored sprites, refreshed its Rust Schema,
+edited Shield charges, and checked Undo, Redo, save, reopen, and PNG placement. The native
+game reported the edited 4-shield value, acknowledged Pause, Step and Resume, and completed
+Stop with its process reaped and both editor and source scenes intact. The smoke also floated
+the Inspector and round-tripped its layout. On the interactive desktop a Gizmo drag and
+single Undo, asset drag, two-entity size edit and Undo, sRGB edit and Undo, cross-display
+Inspector actions, and Windows Pinyin candidate selection and save were exercised on temporary
+project copies. Controlled HWND placement covers mixed-DPI geometry. The system-pointer
+capture scenario suite and native macOS and Linux editor sessions remain separate qualifications.
+
+On the RTX 4090 using DX12, the editor reused its imported image over 60 requested frames
+after resize with zero Nara texture or buffer creations, stayed idle, and presented one
+requested refresh. The separate two-window shared viewport submitted 121 retained viewport
+frames at 60.2 FPS on the current 60 Hz display, with zero Inspector submissions or Nara
+texture and buffer creations. Resize, paused refresh, and shared-queue completion passed.
+PIX captured 12 warmed-up shared-viewport presents with zero application texture copies
+and zero in-frame native resource creations. The editor-only PIX capture timed out. The editor's
+WGPU test verifies that GPUI imports the original Nara texture, and its native smoke measures
+Nara's allocations. [Native editor verification](../guides/native-editor.md)
 
 ## Phase 5 — Cut over formats and qualify delivery
 
@@ -320,7 +375,7 @@ process. Pass `nara_editor_core` headless tests and verify its UI-framework-free
 
 - Implement derived Schema, packed fields, `FieldPath`, UUID sidecars, compact RON, nested prefab
   overrides, and unknown-component round trips. Cook the dependency closure into `.nscn` and `.npak`.
-  Add a data-authored scene to `reference-game` and update the `nara_project` starter at the cutover.
+  Move the `reference-game` scene and `nara_project` starter onto the final format at the cutover.
 - Qualify data hot reload and measure edit-to-result latency. Integrate retained `gpui-fast` layout,
   read tracking, and frame reuse so texture updates can redraw without relaying out static panels.
 - Export the reference game as an executable with cooked assets and verify an independent launch.
