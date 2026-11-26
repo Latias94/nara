@@ -12,7 +12,7 @@ mod project;
 pub mod value_draft;
 pub mod viewport;
 
-pub use document::{EditorCommand, EditorDocument, EditorError, EditorSession};
+pub use document::{EditorCommand, EditorDocument, EditorError, EditorGesture, EditorSession};
 pub use inspector::{
     EditorRegistry, InspectorComponent, InspectorField, InspectorModel, InspectorValue,
 };

@@ -10,11 +10,11 @@ use std::{
     rc::Rc,
 };
 
-use nara_editor_core::InspectorModel;
+use nara_editor_core::{InspectorModel, value_draft::RootDraft};
 use nara_reflect::{ComponentSchema, ComponentSchemaVersion, ComponentTypeId};
 use open_gpui::{
-    Context, Div, Entity, FontWeight, IntoElement, Render, StyleRefinement, Subscription, Window,
-    div, prelude::*, px, rgb,
+    App, Context, Div, Entity, EntityId, FontWeight, IntoElement, Render, Rgba, StyleRefinement,
+    Subscription, Window, div, prelude::*, px, rgb,
 };
 use open_gpui_base::{Button, Menu, MenuEvent, MenuItem, Select, TextInput, TextInputEvent};
 
@@ -29,8 +29,39 @@ struct NameEdit {
     input: Entity<TextInput>,
     _subscription: Subscription,
     current: String,
+    initial_text: String,
     expected: Option<String>,
     error: Option<String>,
+}
+
+impl NameEdit {
+    fn draft(&self, cx: &App) -> Option<Draft> {
+        self.expected.as_ref()?;
+        let value = self.input.read(cx).value();
+        (value != self.initial_text).then(|| Draft::Text(value.to_owned()))
+    }
+
+    fn reset_input(&mut self, cx: &mut App) {
+        self.input
+            .update(cx, |input, cx| input.set_value(self.current.clone(), cx));
+        self.initial_text = self.input.read(cx).value().to_owned();
+    }
+}
+
+#[derive(PartialEq)]
+enum Draft {
+    Text(String),
+    Structure(Rc<RootDraft>),
+    Color(Rgba),
+}
+
+#[derive(Default, PartialEq)]
+pub(crate) struct InspectorDrafts(HashMap<EntityId, Draft>);
+
+impl InspectorDrafts {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 struct ComponentSection {
@@ -86,6 +117,21 @@ impl InspectorPanel {
         };
         panel.refresh(cx);
         panel
+    }
+
+    pub(crate) fn drafts(&self, cx: &App) -> InspectorDrafts {
+        let names = self
+            .name
+            .iter()
+            .chain(self.suspended_names.values())
+            .filter_map(|edit| Some((edit.input.entity_id(), edit.draft(cx)?)));
+        let fields = self
+            .sections
+            .iter()
+            .flat_map(|section| section.fields.iter().map(|(_, field)| field))
+            .chain(self.suspended_fields.values())
+            .filter_map(|field| Some((field.entity_id(), field.read(cx).draft(cx)?)));
+        InspectorDrafts(names.chain(fields).collect())
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) -> bool {
@@ -168,7 +214,7 @@ impl InspectorPanel {
             .flat_map(|section| section.fields)
             .collect();
         if rebound {
-            if let Some(name) = self.name.take().filter(|name| name.expected.is_some()) {
+            if let Some(name) = self.name.take().filter(|name| name.draft(cx).is_some()) {
                 self.suspended_names.insert(previous.clone(), name);
             }
             for (key, view) in existing.drain() {
@@ -238,8 +284,7 @@ impl InspectorPanel {
             if edit.current != name {
                 edit.current = name;
                 if edit.expected.is_none() {
-                    edit.input
-                        .update(cx, |input, cx| input.set_value(edit.current.clone(), cx));
+                    edit.reset_input(cx);
                 }
             }
             return;
@@ -247,6 +292,7 @@ impl InspectorPanel {
         let input = cx.new(|cx| native_text(name.clone(), "Entity name", "", cx));
         let subscription = cx.subscribe(&input, Self::rename_event);
         self.name = Some(NameEdit {
+            initial_text: input.read(cx).value().to_owned(),
             input,
             _subscription: subscription,
             current: name,
@@ -276,7 +322,7 @@ impl InspectorPanel {
             TextInputEvent::Cancel => {
                 edit.expected = None;
                 edit.error = None;
-                input.update(cx, |input, cx| input.set_value(edit.current.clone(), cx));
+                edit.reset_input(cx);
             }
             TextInputEvent::Submit(_) | TextInputEvent::Blur => {
                 let Some(expected) = edit.expected.as_ref() else {
@@ -304,6 +350,7 @@ impl InspectorPanel {
                     .map(str::to_owned);
                 if edit.error.is_none() {
                     edit.expected = None;
+                    edit.initial_text = input.read(cx).value().to_owned();
                 }
             }
         }

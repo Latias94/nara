@@ -1,4 +1,5 @@
 use std::{
+    io,
     path::PathBuf,
     sync::{
         Arc,
@@ -12,6 +13,7 @@ use std::{
 use nara_core::{Diagnostic, DiagnosticSeverity};
 use nara_editor_core::play::{PlayControl, PlayError, PlayModeSession, PlayState};
 use nara_project::{
+    EditorPlayMode,
     play::{BuildError, BuildEvent, BuildRequest, OutputLine, OutputStream},
     workflow::{
         CargoPackage, ProjectTrust, SCHEMA_BINARY, SchemaCacheError, refresh_schema_interruptible,
@@ -25,9 +27,14 @@ pub enum Message {
     Log(Diagnostic),
     Schema(ComponentSchemaCatalog),
     Play {
+        mode: EditorPlayMode,
         state: PlayState,
         pending: Option<PlayControl>,
         steps: u64,
+    },
+    PlayControlResult {
+        control: PlayControl,
+        result: Result<(), String>,
     },
     Finished(Result<(), String>),
 }
@@ -40,7 +47,7 @@ pub struct Job {
 }
 
 impl Job {
-    pub fn refresh(project: PathBuf, trust: ProjectTrust) -> std::io::Result<Self> {
+    pub fn refresh(project: PathBuf, trust: ProjectTrust) -> io::Result<Self> {
         Self::spawn(move |cancel, _, messages| {
             let package = CargoPackage::read(&project)?;
             let features = package
@@ -73,7 +80,7 @@ impl Job {
         project: PathBuf,
         document: SceneDocument,
         trust: ProjectTrust,
-    ) -> std::io::Result<Self> {
+    ) -> io::Result<Self> {
         Self::spawn(move |cancel, controls, messages| {
             let mut play = match PlayModeSession::start(
                 &project,
@@ -85,23 +92,22 @@ impl Job {
                 Err(PlayError::Cancelled) => return Ok(()),
                 result => result?,
             };
+            let mode = play.mode();
             let mut previous = None;
             let result = loop {
                 if cancel.load(Ordering::Relaxed) {
                     break Ok(());
                 }
-                while let Ok(control) = controls.try_recv() {
-                    if let Err(error) = play.control(control) {
-                        log(messages, DiagnosticSeverity::Warning, error.to_string());
-                    }
-                }
+                let delivered =
+                    deliver_controls(&controls, messages, |control| play.control(control));
                 let state = match play.poll(|line| process_line(messages, line)) {
                     Ok(state) => state,
                     Err(error) => break Err(error.into()),
                 };
                 let now = (state, play.pending_control(), play.completed_steps());
-                if previous != Some(now) {
+                if delivered || previous != Some(now) {
                     let _ = messages.send(Message::Play {
+                        mode,
                         state,
                         pending: now.1,
                         steps: now.2,
@@ -128,7 +134,7 @@ impl Job {
         work: impl FnOnce(&AtomicBool, Receiver<PlayControl>, &Sender<Message>) -> anyhow::Result<()>
         + Send
         + 'static,
-    ) -> std::io::Result<Self> {
+    ) -> io::Result<Self> {
         let (messages, output) = mpsc::channel();
         let (controls, input) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -151,8 +157,10 @@ impl Job {
         self.cancel.store(true, Ordering::Relaxed);
     }
 
-    pub fn control(&self, control: PlayControl) -> bool {
-        self.controls.send(control).is_ok()
+    pub fn control(&self, control: PlayControl) -> io::Result<()> {
+        self.controls
+            .send(control)
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "the Play worker has stopped"))
     }
 }
 
@@ -163,6 +171,20 @@ impl Drop for Job {
             let _ = worker.join();
         }
     }
+}
+
+fn deliver_controls(
+    controls: &Receiver<PlayControl>,
+    messages: &Sender<Message>,
+    mut deliver: impl FnMut(PlayControl) -> Result<(), PlayError>,
+) -> bool {
+    let mut delivered = false;
+    for control in controls.try_iter() {
+        let result = deliver(control).map_err(|error| error.to_string());
+        delivered |= result.is_ok();
+        let _ = messages.send(Message::PlayControlResult { control, result });
+    }
+    delivered
 }
 
 fn build_message(messages: &Sender<Message>, event: BuildEvent) {
@@ -189,4 +211,56 @@ fn log(messages: &Sender<Message>, severity: DiagnosticSeverity, message: String
         code: None,
         location: None,
     }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_delivery_reports_rejections_even_without_play_progress() {
+        let (input, controls) = mpsc::channel();
+        let (messages, output) = mpsc::channel();
+        input.send(PlayControl::Step).unwrap();
+        let delivered = deliver_controls(&controls, &messages, |control| {
+            Err(PlayError::ControlUnavailable(control, PlayState::Running))
+        });
+        assert!(!delivered);
+        assert!(matches!(
+            output.try_recv().unwrap(),
+            Message::PlayControlResult {
+                control: PlayControl::Step,
+                result: Err(_),
+            }
+        ));
+
+        input.send(PlayControl::Pause).unwrap();
+        assert!(deliver_controls(&controls, &messages, |_| Ok(())));
+        assert!(matches!(
+            output.try_recv().unwrap(),
+            Message::PlayControlResult {
+                control: PlayControl::Pause,
+                result: Ok(()),
+            }
+        ));
+    }
+
+    #[test]
+    fn control_queue_reports_a_disconnected_worker() {
+        let timeout = Duration::from_secs(5);
+        let job = Job::spawn(move |_, controls, _| {
+            assert_eq!(controls.recv_timeout(timeout)?, PlayControl::Pause);
+            Ok(())
+        })
+        .unwrap();
+        job.control(PlayControl::Pause).unwrap();
+        assert!(matches!(
+            job.messages.recv_timeout(timeout).unwrap(),
+            Message::Finished(Ok(()))
+        ));
+        assert_eq!(
+            job.control(PlayControl::Pause).unwrap_err().kind(),
+            io::ErrorKind::BrokenPipe
+        );
+    }
 }

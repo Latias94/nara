@@ -1,22 +1,27 @@
+mod close;
+mod layout_file;
+
+#[cfg(test)]
+mod tests;
+
 use std::{
-    fs,
+    cell::Cell,
     path::{Path, PathBuf},
+    rc::Rc,
     time::Duration,
 };
 
 use anyhow::{Context as _, Result};
-use nara_core::vfs::write_atomic;
 use open_gpui::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Entity, TitlebarOptions, WindowBounds,
-    WindowOptions, px, size,
+    AnyWindowHandle, App, AppContext as _, Bounds, Entity, TitlebarOptions, WeakEntity,
+    WindowBounds, WindowOptions, px, size,
 };
 use open_gpui_docking::{
     DockPane, DockSurface,
     dockspace::{
-        close::CloseDecision,
         model::{
             DockspaceAxis, DockspaceLayout, DockspaceNode, DockspaceRootLayout,
-            DockspaceSurfaceLayout, RootId, SurfaceId,
+            DockspaceSurfaceLayout, DockspaceView, ItemId, RootId, SurfaceId,
         },
         policy::DockPolicy,
         runtime::{DockspaceDocumentBootstrap, DockspaceDocumentId, DockspaceSession},
@@ -24,7 +29,7 @@ use open_gpui_docking::{
     persistence::{
         DockHostDocument, DockLogicalPlacementRect, DockLogicalViewportPlacement,
         DockLogicalWindowPlacement, DockSurfaceKeyBinding, DockWindowPlacementState,
-        DockWorkspaceDocument,
+        DockWorkspaceDocument, RestoredDockWorkspace,
     },
 };
 use open_gpui_wgpu::SharedWgpuContext;
@@ -58,24 +63,24 @@ pub fn open(
         "{} · Nara Editor",
         workspace.project.manifest().project.name
     );
-    let layout_path = project.join(".nara").join("editor-layout.json");
+    let layout_path = persist.then(|| project.join(".nara").join("editor-layout.json"));
     let workspace = cx.new(|_| workspace);
     let mut policy = DockPolicy::default();
     policy.set_allow_native_surfaces(cx.viewport_capabilities().platform_viewport_windows);
     policy.set_allow_contained_floating(true);
 
-    let saved = if persist {
-        restore(&layout_path, policy.clone())
-    } else {
-        Ok(None)
-    };
+    let saved = layout_path
+        .as_deref()
+        .map_or(Ok(None), |path| restore(path, policy.clone()));
     let (session, restored) = match saved {
         Ok(Some(restored)) => (restored.session, Some(restored.host)),
         Ok(None) => (default_session(policy)?, None),
         Err(error) => {
-            workspace.update(cx, |workspace, cx| {
-                workspace.warn(format!("Layout restored to defaults: {error:#}"), cx)
-            });
+            warn_layout(
+                &workspace.downgrade(),
+                format!("Layout restored to defaults: {error:#}"),
+                cx,
+            );
             (default_session(policy)?, None)
         }
     };
@@ -87,6 +92,8 @@ pub fn open(
     let preview = nara_editor_viewport::EditorViewport::new(shared)?;
     let view = cx.new(|cx| ViewportPanel::new(workspace.clone(), preview, cx));
     let receiver = view.read(cx).receiver();
+    let viewport_stats = view.read(cx).stats_entity().clone();
+    let inspector = cx.new(|cx| InspectorPanel::new(workspace.clone(), cx));
     let panes = [
         DockPane::new(
             items[0],
@@ -94,11 +101,7 @@ pub fn open(
             cx.new(|cx| HierarchyPanel::new(workspace.clone(), cx)),
         ),
         DockPane::new(items[1], "Scene View", view.clone()).with_content_receiver(receiver),
-        DockPane::new(
-            items[2],
-            "Inspector",
-            cx.new(|cx| InspectorPanel::new(workspace.clone(), cx)),
-        ),
+        DockPane::new(items[2], "Inspector", inspector.clone()),
         DockPane::new(
             items[3],
             "Assets",
@@ -107,46 +110,11 @@ pub fn open(
         DockPane::new(
             items[4],
             "Console",
-            cx.new(|cx| ConsolePanel::new(workspace.clone(), cx)),
+            cx.new(|cx| ConsolePanel::new(workspace.clone(), viewport_stats, cx)),
         ),
     ];
     let dock = DockSurface::new_managed(session, panes, theme::docking(), cx)?;
-    let weak = workspace.downgrade();
-    dock.set_close_handler(
-        move |dock, plan, cx| {
-            let dirty = weak
-                .read_with(cx, |workspace, _| workspace.session.is_dirty())
-                .unwrap_or(false);
-            let result = dock.update(
-                |frame| {
-                    let decisions = frame
-                        .pending_close_decisions(plan.request())
-                        .collect::<Vec<_>>();
-                    for decision in decisions {
-                        let decision_value = if dirty {
-                            CloseDecision::Veto
-                        } else {
-                            CloseDecision::Allow
-                        };
-                        frame.resolve_close(plan.request(), decision.token(), decision_value)?;
-                    }
-                    Ok(())
-                },
-                cx,
-            );
-            if dirty || result.is_err() {
-                let _ = weak.update(cx, |workspace, cx| {
-                    let message = result.err().map_or_else(
-                        || "Save the current scene before closing it".into(),
-                        |error| error.to_string(),
-                    );
-                    workspace.warn(message, cx);
-                });
-            }
-        },
-        cx,
-    )?;
-
+    close::keep_required_panes(&dock, workspace.downgrade(), cx)?;
     let main = if let Some(host) = restored {
         let roots = dock.open_restored_native_roots(
             &host,
@@ -161,8 +129,16 @@ pub fn open(
     } else {
         dock.open_native_root(ROOT, true, options(&title, cx, true), cx)?
     };
-    if persist {
-        persist_on_layout_changes(&dock, layout_path, workspace.downgrade(), cx)?;
+    let closing = close::guard_editor_window(
+        &dock,
+        main,
+        workspace.downgrade(),
+        inspector.downgrade(),
+        layout_path.clone(),
+        cx,
+    )?;
+    if let Some(path) = layout_path {
+        persist_on_layout_changes(&dock, path, workspace.downgrade(), closing, cx)?;
     }
     cx.activate(true);
     Ok(OpenEditor {
@@ -208,35 +184,19 @@ fn default_session(policy: DockPolicy) -> Result<DockspaceSession> {
     )?)
 }
 
-fn restore(
-    path: &Path,
-    policy: DockPolicy,
-) -> Result<Option<open_gpui_docking::persistence::RestoredDockWorkspace>> {
-    let bytes = match fs::read(path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        result => result?,
+fn restore(path: &Path, policy: DockPolicy) -> Result<Option<RestoredDockWorkspace>> {
+    let Some(bytes) = layout_file::read(path)? else {
+        return Ok(None);
     };
-    let restored =
-        DockWorkspaceDocument::restore_json(&bytes, policy, |_, key| PANES.contains(&key))?;
-    anyhow::ensure!(
-        restored
-            .session
-            .view()
-            .surfaces()
-            .any(|surface| surface.id() == ROOT),
-        "The editor root is missing"
-    );
-    for key in PANES {
-        let item = restored
-            .session
-            .item_id_for_external_key(key)
-            .context("A pane key is missing")?;
-        anyhow::ensure!(
-            restored.session.view().item(item).is_some(),
-            "A saved pane was closed"
-        );
-    }
-    Ok(Some(restored))
+    (|| -> Result<_> {
+        let restored =
+            DockWorkspaceDocument::restore_json(&bytes, policy, |_, key| PANES.contains(&key))?;
+        require_full_layout(&restored.session.view(), |key| {
+            restored.session.item_id_for_external_key(key)
+        })?;
+        Ok(Some(restored))
+    })()
+    .with_context(|| format!("Invalid editor layout at {}", path.display()))
 }
 
 fn options(title: &str, cx: &App, main: bool) -> WindowOptions {
@@ -260,31 +220,32 @@ fn options(title: &str, cx: &App, main: bool) -> WindowOptions {
 fn persist_on_layout_changes(
     dock: &DockSurface,
     path: PathBuf,
-    workspace: open_gpui::WeakEntity<Workspace>,
+    workspace: WeakEntity<Workspace>,
+    close_state: Rc<Cell<close::RootCloseState>>,
     cx: &mut App,
 ) -> Result<()> {
-    use std::{cell::Cell, rc::Rc};
     let sequence = Rc::new(Cell::new(0u64));
     dock.set_commit_handler(
         move |dock, _, cx| {
+            if close_state.get() == close::RootCloseState::Closing {
+                return;
+            }
             let revision = sequence.get().wrapping_add(1);
             sequence.set(revision);
             let sequence = sequence.clone();
             let dock = dock.clone();
             let workspace = workspace.clone();
             let path = path.clone();
+            let close_state = close_state.clone();
             cx.spawn(async move |cx| {
                 cx.background_executor()
                     .timer(Duration::from_millis(220))
                     .await;
-                if sequence.get() != revision {
+                if close_state.get() == close::RootCloseState::Closing || sequence.get() != revision
+                {
                     return;
                 }
-                let _ = workspace.update(cx, |workspace, cx| {
-                    if let Err(error) = save_layout(&dock, &path, cx) {
-                        workspace.warn(format!("Layout save: {error:#}"), cx);
-                    }
-                });
+                cx.update(|cx| persist_layout(&dock, &path, &workspace, cx));
             })
             .detach();
         },
@@ -292,14 +253,30 @@ fn persist_on_layout_changes(
     )
 }
 
-pub(crate) fn save_layout(dock: &DockSurface, path: &Path, cx: &mut App) -> Result<()> {
-    let keys = PANES.map(|key| dock.item_id_for_external_key(key));
-    if !dock.with_view(|view| {
-        keys.iter()
-            .all(|key| key.is_some_and(|item| view.item(item).is_some()))
-    }) {
-        return Ok(());
+fn persist_layout(
+    dock: &DockSurface,
+    path: &Path,
+    workspace: &WeakEntity<Workspace>,
+    cx: &mut App,
+) {
+    if let Err(error) = save_layout(dock, path, cx) {
+        warn_layout(workspace, format!("Layout save: {error:#}"), cx);
     }
+}
+
+fn warn_layout(workspace: &WeakEntity<Workspace>, message: String, cx: &mut App) {
+    eprintln!("{message}");
+    let _ = workspace.update(cx, |workspace, cx| workspace.warn(message, cx));
+}
+
+pub(crate) fn save_layout(dock: &DockSurface, path: &Path, cx: &mut App) -> Result<()> {
+    let document = capture_layout(dock, cx)
+        .with_context(|| format!("Could not capture editor layout for {}", path.display()))?;
+    layout_file::write(path, &document.to_json()?)
+}
+
+fn capture_layout(dock: &DockSurface, cx: &mut App) -> Result<DockWorkspaceDocument> {
+    dock.with_view(|view| require_full_layout(&view, |key| dock.item_id_for_external_key(key)))?;
     let inspection = dock.inspection()?;
     let windows = cx.windows();
     let surfaces = inspection
@@ -350,14 +327,30 @@ pub(crate) fn save_layout(dock: &DockSurface, path: &Path, cx: &mut App) -> Resu
             }
         })
         .collect();
-    let document = dock.capture_document(DockHostDocument {
+    Ok(dock.capture_document(DockHostDocument {
         surfaces,
         migration: None,
-    })?;
-    fs::create_dir_all(
-        path.parent()
-            .context("The layout has no parent directory")?,
-    )?;
-    write_atomic(path, &document.to_json()?)?;
+    })?)
+}
+
+fn require_full_layout(
+    view: &DockspaceView<'_>,
+    item_id: impl Fn(&str) -> Option<ItemId>,
+) -> Result<()> {
+    anyhow::ensure!(view.surface(ROOT).is_some(), "The editor root is missing");
+    let mut pane_surfaces = [ROOT; PANES.len()];
+    for (key, surface) in PANES.into_iter().zip(&mut pane_surfaces) {
+        let pane = item_id(key)
+            .filter(|item| !view.item_is_hidden(*item))
+            .and_then(|item| view.item(item))
+            .with_context(|| format!("Required editor pane {key:?} is missing or hidden"))?;
+        *surface = pane.surface();
+    }
+    for surface in view.surfaces().map(|surface| surface.id()) {
+        anyhow::ensure!(
+            surface == ROOT || pane_surfaces.contains(&surface),
+            "Floating editor window {surface:?} has no required pane"
+        );
+    }
     Ok(())
 }

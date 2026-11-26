@@ -19,8 +19,10 @@ workflow. Leave project orchestration outside the shipping game graph.
 - Supervise the process tree with a kill-on-close Job Object on Windows and a managed process group
   on Unix. Stop and restart must terminate and reap the previous game process. Use development
   asset watching for live data changes. `nara_project` owns the native product process adapter.
-- The editor passes a temporary authoring snapshot to a game that opts into `--editor-play PATH`.
-  The game owns its executable world and acknowledges Pause, Resume, and Step once applied. Stop
-  belongs to process supervision. Editing history and the original scene stay in the editor.
+- Ordinary projects launch with their normal arguments and saved data. Projects that set
+  `editor.play = "snapshot"` in `nara.toml` receive a temporary authoring snapshot through
+  `--editor-play PATH`. The game owns its executable world and acknowledges Pause, Resume, and
+  Step once applied. Stop belongs to process supervision. Editing history and the original scene
+  stay in the editor.
 - Export a self-contained executable and `.npak` with no source or editor dependencies. Verify the
   packaged game from a clean directory before claiming standalone delivery.

@@ -203,6 +203,20 @@ impl PreviewScene {
         sprite_quad(self.runtime.world(), *self.entities.get(&entity)?)
     }
 
+    pub(crate) fn scene_bounds(&self, selection: &[EntityUuid]) -> Option<[Vec2; 2]> {
+        let world = self.runtime.world();
+        let mut corners = self
+            .entities
+            .iter()
+            .filter(|(id, _)| selection.is_empty() || selection.contains(id))
+            .filter_map(|(_, &entity)| sprite_quad(world, entity))
+            .flat_map(|quad| quad.world_corners().map(|corner| corner.0));
+        let first = corners.next()?;
+        Some(corners.fold([first, first], |[min, max], corner| {
+            [min.min(corner), max.max(corner)]
+        }))
+    }
+
     pub(crate) fn world_affine(&self, entity: EntityUuid) -> Option<Affine2> {
         self.runtime
             .world()

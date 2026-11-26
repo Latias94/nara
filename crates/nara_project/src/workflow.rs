@@ -5,7 +5,7 @@ mod schema;
 mod starter;
 
 pub use crate::play::ProjectTrust;
-pub use check::{CargoPackage, ProjectCheckError, check_project};
+pub use check::{CargoPackage, ProjectCheckError, check_project, read_project_manifest};
 pub use schema::{
     SCHEMA_BINARY, SCHEMA_CACHE_PATH, SchemaCacheError, read_schema_cache, refresh_schema,
     refresh_schema_interruptible,

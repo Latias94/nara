@@ -8,7 +8,7 @@ use std::{io, sync::Arc};
 
 use nara_app::{AddPluginsError, AppRunError, PluginError, RuntimeDriveError, RuntimeScopeError};
 use nara_asset::{AssetError, AssetStateError, image::ImageDecodeError};
-use nara_core::{Affine2, EntityUuid, vfs::DirAssetSource};
+use nara_core::{Affine2, EntityUuid, Vec2, vfs::DirAssetSource};
 use nara_editor_core::viewport::{PickCandidate2D, ViewportCamera2D};
 use nara_editor_gizmo::{EditorOverlayPass, OverlayFrame, OverlayState, OverlayStroke};
 use nara_render::{
@@ -255,6 +255,12 @@ impl EditorViewport {
     #[must_use]
     pub const fn stats(&self) -> ViewportStats {
         self.stats
+    }
+
+    /// Bounds of visible authored sprites, independent of camera culling or texture publication.
+    /// An empty selection includes the whole scene.
+    pub fn scene_bounds(&self, selection: &[EntityUuid]) -> Option<[Vec2; 2]> {
+        self.scene.scene_bounds(selection)
     }
 
     /// The last installed image's visible sprite quads, in exact back-to-front draw order.

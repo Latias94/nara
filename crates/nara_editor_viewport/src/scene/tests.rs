@@ -42,6 +42,25 @@ fn sprite_entity(id: EntityUuid, layer: i32, image: Option<&str>) -> SceneEntity
 }
 
 #[test]
+fn offscreen_scene_bounds_are_available_before_the_first_render() {
+    let mut sprite = sprite_entity(entity_id(1), 0, None);
+    sprite
+        .set(&Transform2d::from_xy(12_000.0, -8_000.0))
+        .unwrap();
+    let mut hidden = sprite_entity(entity_id(2), 0, None);
+    hidden.set(&Visibility::Hidden).unwrap();
+    let mut scene = PreviewScene::new().unwrap();
+    scene
+        .set_document(&document(vec![sprite, hidden]), None)
+        .unwrap();
+
+    let expected = Some([Vec2::new(11_990.0, -8_010.0), Vec2::new(12_010.0, -7_990.0)]);
+    assert_eq!(scene.scene_bounds(&[]), expected);
+    assert_eq!(scene.scene_bounds(&[entity_id(1)]), expected);
+    assert_eq!(scene.scene_bounds(&[entity_id(2)]), None);
+}
+
+#[test]
 fn picks_follow_the_renderer_and_reparenting_preserves_surviving_entities() {
     let parent_id = entity_id(1);
     let front_id = entity_id(2);
@@ -169,6 +188,15 @@ fn png_paths_share_residency_and_bad_edits_leave_the_preview_intact() {
         Vec2::new(4.0, 7.0)
     );
     assert!(scene.selection_quad(second_id).is_some());
+
+    fs::write(directory.path().join("invalid.png"), PNG).unwrap();
+    scene.set_document(&document, Some(&source)).unwrap();
+    assert!(
+        scene
+            .images
+            .contains_key(&AssetPath::new("invalid.png").unwrap())
+    );
+    assert_eq!(scene.images[&path], handle);
 
     let other_directory = tempfile::tempdir().unwrap();
     fs::write(other_directory.path().join("sprite.png"), PNG).unwrap();

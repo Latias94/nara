@@ -2,6 +2,9 @@
 
 Run `nara play . --trusted` or `cargo run --features desktop` to open a window with a spinning
 sprite. `src/main.rs` configures the app, spawns the camera and sprite, and updates its rotation.
+In the editor, Play starts this same game and Stop closes it. Projects that implement the
+`--editor-play PATH` snapshot and control protocol can opt in with `play = "snapshot"` under
+`[editor]` in `nara.toml`.
 
 Run `nara check .` to validate `nara.toml` and the local Cargo package declaration. The project
 manifest requires `[project]` with `name` and `version`. `[paths]` can set the project-relative

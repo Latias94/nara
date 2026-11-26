@@ -1,6 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
 #[cfg(any(unix, windows))]
 use std::path::{Path, PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use nara_core::EntityUuid;
 use nara_reflect::{
@@ -68,6 +71,8 @@ pub enum EditorError {
     },
     #[error("finish or cancel the current gesture before continuing")]
     GestureActive,
+    #[error("this gesture is no longer active")]
+    StaleGesture,
     #[error("save requires a document path")]
     NoPath,
 }
@@ -114,8 +119,17 @@ pub struct EditorSession {
     registry: EditorRegistry,
     selection: SelectionState,
     history: CommandHistory,
-    gesture_before: Option<SceneDocument>,
+    gesture: Option<ActiveGesture>,
     saved_revision: Option<u64>,
+}
+
+/// Identifies the owner of one continuous editor gesture.
+#[derive(Clone, Debug)]
+pub struct EditorGesture(Arc<()>);
+
+struct ActiveGesture {
+    owner: EditorGesture,
+    before: SceneDocument,
 }
 
 impl EditorSession {
@@ -129,7 +143,7 @@ impl EditorSession {
             registry,
             selection: SelectionState::default(),
             history: CommandHistory::default(),
-            gesture_before: None,
+            gesture: None,
             saved_revision,
         }
     }
@@ -166,24 +180,46 @@ impl EditorSession {
     pub fn is_dirty(&self) -> bool {
         self.saved_revision != Some(self.history.revision())
             || self
-                .gesture_before
+                .gesture
                 .as_ref()
-                .is_some_and(|before| before.entities != self.document.scene.entities)
+                .is_some_and(|gesture| gesture.before.entities != self.document.scene.entities)
     }
 
     pub fn can_undo(&self) -> bool {
-        self.gesture_before.is_none() && self.history.cursor != 0
+        self.gesture.is_none() && self.history.cursor != 0
     }
 
     pub fn can_redo(&self) -> bool {
-        self.gesture_before.is_none() && self.history.cursor != self.history.entries.len()
+        self.gesture.is_none() && self.history.cursor != self.history.entries.len()
     }
 
     pub fn gesture_active(&self) -> bool {
-        self.gesture_before.is_some()
+        self.gesture.is_some()
     }
 
     pub fn apply(&mut self, command: EditorCommand) -> Result<bool, EditorError> {
+        self.require_idle()?;
+        self.apply_edit(command)
+    }
+
+    pub fn owns_gesture(&self, owner: &EditorGesture) -> bool {
+        self.gesture
+            .as_ref()
+            .is_some_and(|gesture| Arc::ptr_eq(&gesture.owner.0, &owner.0))
+    }
+
+    pub fn apply_gesture(
+        &mut self,
+        owner: &EditorGesture,
+        command: EditorCommand,
+    ) -> Result<bool, EditorError> {
+        if !self.owns_gesture(owner) {
+            return Err(EditorError::StaleGesture);
+        }
+        self.apply_edit(command)
+    }
+
+    fn apply_edit(&mut self, command: EditorCommand) -> Result<bool, EditorError> {
         let before = &self.document.scene;
         let mut after = before.clone();
         apply_command(&mut after, &self.registry, command)?;
@@ -192,7 +228,7 @@ impl EditorSession {
             return Ok(false);
         }
         after.validate()?;
-        if self.gesture_before.is_none() {
+        if self.gesture.is_none() {
             self.history.push(ScenePatch::between(before, &after));
         }
         self.document.scene = after;
@@ -200,24 +236,34 @@ impl EditorSession {
         Ok(true)
     }
 
-    pub fn begin_gesture(&mut self) -> Result<(), EditorError> {
+    pub fn begin_gesture(&mut self) -> Result<EditorGesture, EditorError> {
         self.require_idle()?;
-        self.gesture_before = Some(self.document.scene.clone());
-        Ok(())
+        let owner = EditorGesture(Arc::new(()));
+        self.gesture = Some(ActiveGesture {
+            owner: owner.clone(),
+            before: self.document.scene.clone(),
+        });
+        Ok(owner)
     }
 
-    pub fn end_gesture(&mut self) -> bool {
-        self.gesture_before.take().is_some_and(|before| {
+    pub fn end_gesture(&mut self, owner: &EditorGesture) -> bool {
+        if !self.owns_gesture(owner) {
+            return false;
+        }
+        self.gesture.take().is_some_and(|gesture| {
             self.history
-                .push(ScenePatch::between(&before, &self.document.scene))
+                .push(ScenePatch::between(&gesture.before, &self.document.scene))
         })
     }
 
-    pub fn cancel_gesture(&mut self) -> bool {
-        let Some(before) = self.gesture_before.take() else {
+    pub fn cancel_gesture(&mut self, owner: &EditorGesture) -> bool {
+        if !self.owns_gesture(owner) {
+            return false;
+        }
+        let Some(gesture) = self.gesture.take() else {
             return false;
         };
-        self.document.scene = before;
+        self.document.scene = gesture.before;
         self.prune_selection();
         true
     }
@@ -261,8 +307,37 @@ impl EditorSession {
         Ok(())
     }
 
+    /// Saves to a new path, failing when another file already owns that name.
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    pub fn save_new(&mut self, path: &Path) -> Result<(), EditorError> {
+        use std::io::{self, Write as _};
+
+        self.require_idle()?;
+        let source = self.document.scene.to_ron()?;
+        (|| -> io::Result<()> {
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            let mut staging = tempfile::NamedTempFile::new_in(parent)?;
+            staging.write_all(source.as_bytes())?;
+            staging.as_file().sync_all()?;
+            staging
+                .persist_noclobber(path)
+                .map_err(|error| error.error)?;
+            Ok(())
+        })()
+        .map_err(|source| SceneDocumentError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+        self.document.path = Some(path.to_owned());
+        self.saved_revision = Some(self.history.revision());
+        Ok(())
+    }
+
     fn require_idle(&self) -> Result<(), EditorError> {
-        if self.gesture_before.is_some() {
+        if self.gesture_active() {
             Err(EditorError::GestureActive)
         } else {
             Ok(())

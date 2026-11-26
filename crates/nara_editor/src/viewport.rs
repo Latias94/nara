@@ -1,22 +1,20 @@
-use nara_core::{Affine2, Color, EntityUuid, Vec2};
+use nara_core::{Color, DocumentId, EntityUuid, Vec2};
 use nara_editor_core::{
-    EditorCommand, SelectionMode,
+    EditorGesture, SelectionMode,
     actions::{ActionContext, EditorAction, EditorKeymap},
     play::PlayControl,
     viewport::{
-        Gizmo2D, GizmoDelta2D, GizmoDrag2D, GizmoGeometry2D, GizmoHandle, GridSnap2D, PanelPoint,
-        PanelSize, ToolMode, ViewportCamera2D, WorldPoint,
+        Gizmo2D, GizmoDrag2D, GizmoGeometry2D, GizmoHandle, GizmoSelection2D, GridSnap2D,
+        PanelPoint, PanelSize, ToolMode, ViewportCamera2D, WorldPoint,
     },
 };
 use nara_editor_gizmo::{OverlayFrame, OverlayGrid, OverlayPrimitive, OverlayStroke};
 use nara_editor_viewport::{EditorViewport, RenderOutcome, ViewportStats};
 use nara_project::workflow::ProjectTrust;
-use nara_reflect::{ComponentTypeId, PersistentComponentProvider};
-use nara_scene::{authoring::SceneComponent, spatial::Transform2d};
 use open_gpui::{
     Bounds, Context, Div, Entity, FocusHandle, HitboxTag, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, PointerCaptureHandle, Render,
-    TargetedEvent, Window, WindowId, canvas, div, prelude::*, px, rgb,
+    Subscription, TargetedEvent, Window, WindowId, canvas, div, prelude::*, px, rgb,
 };
 
 use crate::{
@@ -28,19 +26,25 @@ use crate::{
 pub struct ViewportPanel {
     workspace: Entity<Workspace>,
     preview: EditorViewport,
+    stats: Entity<ViewportStats>,
     receiver: HitboxTag,
     focus: FocusHandle,
+    focus_subscription: Option<Subscription>,
     capture: Option<(WindowId, PointerCaptureHandle)>,
     camera: Option<ViewportCamera2D>,
     displayed_camera: Option<ViewportCamera2D>,
     bounds: Option<Bounds<Pixels>>,
     scale: f32,
-    scene_revision: u64,
+    camera_document: Option<DocumentId>,
+    scene_revision: (u64, u64),
+    scene_ready: bool,
+    displayed_scene_revision: (u64, u64),
     selection: Vec<EntityUuid>,
     tool: ToolMode,
     keys: EditorKeymap,
     dirty: bool,
     cursor: Option<PanelPoint>,
+    hover: Hover,
     drag: Option<Drag>,
     drop_preview: Option<WorldPoint>,
     requested_frames: u32,
@@ -50,11 +54,15 @@ enum Drag {
     Pan(PanelPoint),
     Gizmo {
         gesture: GizmoDrag2D,
-        entity: EntityUuid,
-        original: Transform2d,
-        local_from_parent: Affine2,
-        world_axis: Vec2,
+        owner: EditorGesture,
+        selection: GizmoSelection2D,
     },
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct Hover {
+    entity: Option<EntityUuid>,
+    gizmo: Option<GizmoHandle>,
 }
 
 impl ViewportPanel {
@@ -67,19 +75,25 @@ impl ViewportPanel {
         Self {
             workspace,
             preview,
+            stats: cx.new(|_| ViewportStats::default()),
             receiver: HitboxTag::new(),
             focus: cx.focus_handle(),
+            focus_subscription: None,
             capture: None,
             camera: None,
             displayed_camera: None,
             bounds: None,
             scale: 0.0,
-            scene_revision: 0,
+            camera_document: None,
+            scene_revision: (0, 0),
+            scene_ready: false,
+            displayed_scene_revision: (0, 0),
             selection: Vec::new(),
             tool: ToolMode::Select,
             keys: EditorKeymap::default(),
             dirty: true,
             cursor: None,
+            hover: Hover::default(),
             drag: None,
             drop_preview: None,
             requested_frames: 0,
@@ -100,6 +114,10 @@ impl ViewportPanel {
         self.preview.stats()
     }
 
+    pub(crate) fn stats_entity(&self) -> &Entity<ViewportStats> {
+        &self.stats
+    }
+
     fn frame(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(size) = PanelSize::new(
             bounds.size.width.to_f64() as f32,
@@ -108,17 +126,25 @@ impl ViewportPanel {
             return;
         };
         let workspace = self.workspace.read(cx);
-        let revision = workspace.revision;
+        let revision = workspace.preview_revision();
         if self.scene_revision != revision {
             let assets = workspace.project.asset_source().ok();
-            let result = self
-                .preview
-                .set_scene(workspace.session.document().scene(), assets.as_ref());
+            let scene = workspace.session.document().scene();
+            let result = self.preview.set_scene(scene, assets.as_ref());
             self.scene_revision = revision;
+            self.scene_ready = result.is_ok();
             if let Err(error) = result {
+                self.dirty = false;
                 self.report(error.to_string(), cx);
                 return;
             }
+            if self.camera_document != Some(scene.id) {
+                self.camera = None;
+                self.camera_document = Some(scene.id);
+            }
+        }
+        if !self.scene_ready {
+            return;
         }
         self.selection = workspace.session.selection().entities().to_vec();
         self.bounds = Some(bounds);
@@ -132,7 +158,9 @@ impl ViewportPanel {
             self.camera = Some(camera);
             camera
         };
-        let overlay = self.overlay(&camera);
+        let gizmo = self.active_gizmo();
+        let hover = self.hover_at(&camera, self.cursor, gizmo);
+        let overlay = self.overlay(&camera, gizmo, hover);
         match self.preview.render(window, &camera, &overlay) {
             Ok(RenderOutcome::TargetsBusy) => {
                 cx.on_next_frame(window, move |view, window, cx| {
@@ -141,6 +169,8 @@ impl ViewportPanel {
             }
             Ok(outcome) => {
                 self.displayed_camera = Some(camera);
+                self.displayed_scene_revision = revision;
+                self.hover = hover;
                 if outcome == RenderOutcome::Imported {
                     cx.notify();
                 }
@@ -154,11 +184,11 @@ impl ViewportPanel {
                 cx.on_next_frame(window, |view, window, cx| {
                     view.preview.observe_presentation(window);
                     let stats = view.preview.stats();
-                    let text = format!("{} frames · {} retained · {} sprites · {} textures / {} buffers last frame",
-                        stats.rendered_frames, stats.retained_presentations, stats.extraction.extracted_sprites,
-                        stats.last_work.created_texture_calls, stats.last_work.created_buffer_calls);
-                    view.workspace.update(cx, |workspace, cx| {
-                        if workspace.viewport_stats != text { workspace.viewport_stats = text; cx.notify(); }
+                    view.stats.update(cx, |previous, cx| {
+                        if *previous != stats {
+                            *previous = stats;
+                            cx.notify();
+                        }
                     });
                 });
             }
@@ -167,35 +197,33 @@ impl ViewportPanel {
     }
 
     fn fit(&self, size: PanelSize, selection_only: bool) -> ViewportCamera2D {
-        let mut min = Vec2::splat(f32::INFINITY);
-        let mut max = Vec2::splat(f32::NEG_INFINITY);
-        let picks = self.preview.pick_candidates();
-        if picks.is_empty() {
-            return ViewportCamera2D::new(
-                size,
-                WorldPoint(Vec2::ZERO),
-                (size.as_vec2() / Vec2::new(740.0, 400.0)).min_element(),
-            )
-            .expect("finite nonzero panel size");
-        }
-        for item in picks
-            .iter()
-            .filter(|item| !selection_only || self.selection.contains(&item.entity()))
-        {
-            for corner in item.world_corners() {
-                min = min.min(corner.0);
-                max = max.max(corner.0);
+        let selection = if selection_only {
+            &self.selection[..]
+        } else {
+            &[]
+        };
+        let bounds = self.preview.scene_bounds(selection).or_else(|| {
+            if selection.is_empty() {
+                None
+            } else {
+                self.preview.scene_bounds(&[])
             }
-        }
-        if !min.is_finite() || !max.is_finite() {
-            return self.fit(size, false);
-        }
+        });
+        let (center, extent) = bounds.map_or(
+            (Vec2::ZERO, Vec2::new(740.0, 400.0).as_dvec2()),
+            |[min, max]| {
+                let min = min.as_dvec2();
+                let max = max.as_dvec2();
+                (((min + max) * 0.5).as_vec2(), (max - min) + 64.0)
+            },
+        );
+        let zoom = (size.as_vec2().as_dvec2() / extent).min_element() as f32;
         ViewportCamera2D::new(
             size,
-            WorldPoint((min + max) * 0.5),
-            (size.as_vec2() / ((max - min) + Vec2::splat(64.0))).min_element(),
+            WorldPoint(center),
+            zoom.max(ViewportCamera2D::MIN_ZOOM),
         )
-        .unwrap_or_else(|| ViewportCamera2D::new(size, WorldPoint(Vec2::ZERO), 1.0).unwrap())
+        .expect("finite scene bounds and panel size")
     }
 
     fn report(&self, message: String, cx: &mut Context<Self>) {
@@ -211,13 +239,35 @@ impl ViewportPanel {
         )))
     }
 
-    fn selection_gizmo(&self, entity: EntityUuid) -> Option<Gizmo2D> {
-        let affine = self.preview.world_affine(entity)?;
+    fn active_gizmo(&self) -> Option<Gizmo2D> {
+        let affine = self.preview.world_affine(*self.selection.last()?)?;
         let axis = affine.matrix2.x_axis;
         Gizmo2D::new(WorldPoint(affine.translation), axis.y.atan2(axis.x))
     }
 
-    fn overlay(&self, camera: &ViewportCamera2D) -> OverlayFrame {
+    fn hover_at(
+        &self,
+        camera: &ViewportCamera2D,
+        cursor: Option<PanelPoint>,
+        gizmo: Option<Gizmo2D>,
+    ) -> Hover {
+        let Some(cursor) = cursor.filter(|&cursor| camera.contains(cursor)) else {
+            return Hover::default();
+        };
+        Hover {
+            entity: camera
+                .pick(cursor, self.preview.pick_candidates())
+                .filter(|entity| !self.selection.contains(entity)),
+            gizmo: gizmo.and_then(|gizmo| gizmo.hit_test(camera, self.tool, cursor)),
+        }
+    }
+
+    fn overlay(
+        &self,
+        camera: &ViewportCamera2D,
+        gizmo: Option<Gizmo2D>,
+        hover: Hover,
+    ) -> OverlayFrame {
         let width = self.scale.min(3.0).max(1.0);
         let mut overlay = OverlayFrame {
             grid: Some(OverlayGrid::default()),
@@ -227,9 +277,7 @@ impl ViewportPanel {
             &mut overlay,
             OverlayStroke::new(Color::rgba(0.22, 0.63, 0.49, 0.35), width),
         );
-        if let Some(cursor) = self.cursor
-            && let Some(hovered) = camera.pick(cursor, self.preview.pick_candidates())
-            && !self.selection.contains(&hovered)
+        if let Some(hovered) = hover.entity
             && let Some(quad) = self.preview.selection_quad(hovered)
         {
             overlay.primitives.push(OverlayPrimitive::Rect {
@@ -245,17 +293,8 @@ impl ViewportPanel {
                 });
             }
         }
-        if let Some(gizmo) = self
-            .selection
-            .last()
-            .and_then(|&entity| self.selection_gizmo(entity))
-        {
-            let hover = self
-                .cursor
-                .and_then(|cursor| gizmo.hit_test(camera, self.tool, cursor));
-            if let Some(geometry) = gizmo.geometry(camera, self.tool) {
-                add_gizmo(&mut overlay.primitives, geometry, hover, width);
-            }
+        if let Some(geometry) = gizmo.and_then(|gizmo| gizmo.geometry(camera, self.tool)) {
+            add_gizmo(&mut overlay.primitives, geometry, hover.gizmo, width);
         }
         if let Some(center) = self.drop_preview {
             let extent = Vec2::splat(16.0);
@@ -274,6 +313,9 @@ impl ViewportPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.drag.is_some() {
+            return;
+        }
         let Ok(position) = targeted.target_local_position() else {
             return;
         };
@@ -295,30 +337,37 @@ impl ViewportPanel {
             }
             return;
         }
-        if let Some(entity) = self.selection.last().copied()
-            && let Some(gizmo) = self.selection_gizmo(entity)
-            && let Some(gesture) = gizmo.begin_drag(&camera, self.tool, cursor)
-            && let Some(parent) = self.preview.parent_affine(entity)
-            && parent.matrix2.determinant() != 0.0
-            && let Some(original) = self
-                .workspace
-                .read(cx)
-                .session
-                .document()
-                .scene()
-                .entities
-                .iter()
-                .find(|row| row.id == entity)
-                .and_then(|row| row.typed::<Transform2d>().ok().flatten())
-            && window.capture_pointer(&capture, button).is_ok()
+        let workspace = self.workspace.read(cx);
+        if workspace.session.gesture_active()
+            || self.displayed_scene_revision != workspace.preview_revision()
+            || self.selection != workspace.session.selection().entities()
         {
-            if self.workspace.update(cx, Workspace::begin_gesture) {
+            return;
+        }
+        if let Some(gizmo) = self.active_gizmo()
+            && let Some(gesture) = gizmo.begin_drag(&camera, self.tool, cursor)
+        {
+            let selection = match GizmoSelection2D::capture(&workspace.session, gizmo, |entity| {
+                self.preview.parent_affine(entity)
+            }) {
+                Ok(Some(selection)) => selection,
+                Ok(None) => {
+                    self.report("The selection has an invalid parent transform".into(), cx);
+                    return;
+                }
+                Err(error) => {
+                    self.report(error.to_string(), cx);
+                    return;
+                }
+            };
+            if window.capture_pointer(&capture, button).is_err() {
+                return;
+            }
+            if let Some(owner) = self.workspace.update(cx, Workspace::begin_gesture) {
                 self.drag = Some(Drag::Gizmo {
                     gesture,
-                    entity,
-                    original,
-                    local_from_parent: parent.inverse(),
-                    world_axis: Vec2::from_angle(gizmo.angle()),
+                    owner,
+                    selection,
                 });
                 cx.stop_propagation();
             } else {
@@ -359,21 +408,21 @@ impl ViewportPanel {
 
     fn moved(&mut self, point: PanelPoint, shift: bool, cx: &mut Context<Self>) {
         self.cursor = Some(point);
-        self.dirty = true;
+        let mut changed = false;
         if let Some(drag) = &mut self.drag {
             match drag {
                 Drag::Pan(last) => {
-                    if let Some(camera) = &mut self.camera {
-                        camera.pan(point.0 - last.0);
+                    if let Some(camera) = &mut self.camera
+                        && point != *last
+                    {
+                        changed = camera.pan(point.0 - last.0).is_some();
                     }
                     *last = point;
                 }
                 Drag::Gizmo {
                     gesture,
-                    entity,
-                    original,
-                    local_from_parent,
-                    world_axis,
+                    owner,
+                    selection,
                 } => {
                     let delta = if shift {
                         gesture.update_snapped(point, GridSnap2D::new(32.0).unwrap())
@@ -381,44 +430,27 @@ impl ViewportPanel {
                         gesture.update(point)
                     };
                     if let Some(delta) = delta {
-                        let mut transform = *original;
-                        match delta {
-                            GizmoDelta2D::Translation(delta) => {
-                                transform.translation += local_from_parent.transform_vector2(delta)
+                        changed = self.workspace.update(cx, |workspace, cx| {
+                            match selection.command(delta) {
+                                Ok(command) => workspace.apply_gesture(owner, command, cx),
+                                Err(error) => {
+                                    workspace.warn(error.to_string(), cx);
+                                    false
+                                }
                             }
-                            GizmoDelta2D::Rotation(delta) => {
-                                let desired = Vec2::from_angle(delta).rotate(*world_axis);
-                                let local = local_from_parent.transform_vector2(desired)
-                                    * original.scale.x.signum();
-                                transform.rotation = if delta == 0.0 {
-                                    original.rotation
-                                } else {
-                                    local.y.atan2(local.x)
-                                };
-                            }
-                            GizmoDelta2D::Scale(factors) => transform.scale *= factors,
-                        }
-                        if let Ok(value) = transform.encode_persistent_component() {
-                            let value = SceneComponent {
-                                version: Transform2d::persistent_component_schema().version(),
-                                value,
-                            };
-                            self.workspace.update(cx, |workspace, cx| {
-                                workspace.apply(
-                                    EditorCommand::SetComponent {
-                                        entities: vec![*entity],
-                                        component: ComponentTypeId::new(Transform2d::COMPONENT_ID),
-                                        value,
-                                    },
-                                    cx,
-                                );
-                            });
-                        }
+                        });
                     }
                 }
             }
         }
-        cx.notify();
+        let hover = self.displayed_camera.map_or(Hover::default(), |camera| {
+            self.hover_at(&camera, self.cursor, self.active_gizmo())
+        });
+        if changed || hover != self.hover {
+            self.hover = hover;
+            self.dirty = true;
+            cx.notify();
+        }
     }
 
     fn finish_drag(&mut self, cancel: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -426,13 +458,14 @@ impl ViewportPanel {
             if let Some((_, capture)) = self.capture {
                 let _ = window.release_pointer(&capture);
             }
-            if matches!(drag, Drag::Gizmo { .. }) {
-                let finish = if cancel {
-                    Workspace::cancel_gesture
-                } else {
-                    Workspace::end_gesture
-                };
-                self.workspace.update(cx, finish);
+            if let Drag::Gizmo { owner, .. } = drag {
+                self.workspace.update(cx, |workspace, cx| {
+                    if cancel {
+                        workspace.cancel_gesture(&owner, cx);
+                    } else {
+                        workspace.end_gesture(&owner, cx);
+                    }
+                });
             }
             self.dirty = true;
             cx.notify();
@@ -457,7 +490,9 @@ impl ViewportPanel {
                 self.tool = mode;
             }
             EditorAction::FrameSelection => {
-                if let Some(camera) = self.camera {
+                if self.drag.is_none()
+                    && let Some(camera) = self.camera
+                {
                     self.camera = Some(self.fit(camera.panel_size(), true));
                 }
             }
@@ -473,7 +508,8 @@ impl ViewportPanel {
     fn toolbar(&self, cx: &Context<Self>) -> Div {
         let workspace = self.workspace.read(cx);
         let status = workspace.status;
-        let pending = workspace.pending;
+        let pending = workspace.control_pending();
+        let editing = workspace.session.gesture_active();
         let trust = workspace.trust();
         let header = workspace
             .session
@@ -504,7 +540,7 @@ impl ViewportPanel {
         let doc = theme::toolbar()
             .child(div().flex_1().min_w_0().truncate().child(title))
             .child(
-                theme::button("save", "Save").on_click(
+                theme::button("save", "Save").disabled(editing).on_click(
                     cx.listener(|view, _, _, cx| view.workspace.update(cx, Workspace::save)),
                 ),
             )
@@ -562,7 +598,9 @@ impl ViewportPanel {
             })
             .child(
                 theme::button("play", "Play")
-                    .disabled(status != JobStatus::Idle || trust != ProjectTrust::Trusted)
+                    .disabled(
+                        editing || status != JobStatus::Idle || trust != ProjectTrust::Trusted,
+                    )
                     .on_click(
                         cx.listener(|view, _, _, cx| view.workspace.update(cx, Workspace::play)),
                     ),
@@ -620,12 +658,15 @@ impl Render for ViewportPanel {
         if self.capture.is_none_or(|(owner, _)| owner != window_id) {
             self.finish_drag(true, window, cx);
             self.capture = Some((window_id, window.new_pointer_capture_handle()));
+            self.focus_subscription = Some(cx.on_blur(&self.focus, window, |view, window, cx| {
+                view.finish_drag(true, window, cx);
+            }));
             self.dirty = true;
         }
         let (_, capture) = self.capture.unwrap();
         let workspace = self.workspace.read(cx);
         let render = self.dirty
-            || workspace.revision != self.scene_revision
+            || workspace.preview_revision() != self.scene_revision
             || workspace.session.selection().entities() != self.selection;
         let previous = self.bounds;
         let scale = self.scale;
@@ -699,6 +740,9 @@ impl Render for ViewportPanel {
                 cx.listener(|view, _, window, cx| view.finish_drag(false, window, cx)),
             )
             .on_raw_scroll_wheel(cx.listener(|view, event: &open_gpui::ScrollEvent, _, cx| {
+                if view.drag.is_some() {
+                    return;
+                }
                 let Some(point) = view.local(event.position) else {
                     return;
                 };
@@ -715,9 +759,12 @@ impl Render for ViewportPanel {
             .on_hover(cx.listener(|view, hovered: &bool, _, cx| {
                 if !*hovered && view.drag.is_none() {
                     view.cursor = None;
-                    view.drop_preview = None;
-                    view.dirty = true;
-                    cx.notify();
+                    let had_preview = view.drop_preview.take().is_some();
+                    if view.hover != Hover::default() || had_preview {
+                        view.hover = Hover::default();
+                        view.dirty = true;
+                        cx.notify();
+                    }
                 }
             }))
             .on_drag_move(cx.listener(
@@ -731,6 +778,7 @@ impl Render for ViewportPanel {
             ))
             .on_drop(
                 cx.listener(|view, drop: &open_gpui::DropEvent<ImageDrag>, _, cx| {
+                    let revision = view.workspace.read(cx).preview_revision();
                     let point = drop
                         .pointer()
                         .target_local_position()
@@ -738,7 +786,9 @@ impl Render for ViewportPanel {
                         .and_then(|point| {
                             view.displayed_camera?.panel_to_world(panel_point(point))
                         });
-                    if let Some(point) = point {
+                    if let Some(point) = point
+                        && view.displayed_scene_revision == revision
+                    {
                         let path = drop.value().0.clone();
                         view.workspace.update(cx, |workspace, cx| {
                             workspace.create(point.0, Some(path), None, cx)

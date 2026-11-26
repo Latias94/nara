@@ -2,7 +2,9 @@
 
 mod manifest;
 
-pub use manifest::{ProjectInfo, ProjectManifest, ProjectPaths, ProjectWindow};
+pub use manifest::{
+    EditorPlayMode, ProjectEditor, ProjectInfo, ProjectManifest, ProjectPaths, ProjectWindow,
+};
 
 #[cfg(all(
     feature = "workflow",

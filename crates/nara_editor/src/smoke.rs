@@ -41,6 +41,62 @@ pub(crate) fn start(editor: OpenEditor, failure: Rc<RefCell<Option<anyhow::Error
     .detach();
 }
 
+pub(crate) fn capture_frames(
+    editor: OpenEditor,
+    count: u32,
+    failure: Rc<RefCell<Option<anyhow::Error>>>,
+    cx: &mut App,
+) {
+    cx.spawn(async move |cx| {
+        if let Err(error) = capture_viewport(&editor, count, cx).await {
+            eprintln!("Viewport capture failed: {error:#}");
+            *failure.borrow_mut() = Some(error);
+        }
+        let _ = cx.update(|cx| cx.quit());
+    })
+    .detach();
+}
+
+async fn capture_viewport(editor: &OpenEditor, count: u32, cx: &mut AsyncApp) -> Result<()> {
+    const WARMUP: u32 = 16;
+    let initial = frames(editor, cx, 1).await?;
+    cx.update(|cx| {
+        editor
+            .viewport
+            .update(cx, |view, cx| view.request_frames(WARMUP, cx))
+    });
+    let baseline = frames(editor, cx, initial.rendered_frames + u64::from(WARMUP)).await?;
+    let presents = |cx: &mut App| {
+        editor
+            .window
+            .update(cx, |_, window, _| window.present_submission_count())
+            .ok()
+    };
+    let initial_presents = cx.update(presents).context("The capture window closed")?;
+    println!("Viewport warmed up. Requesting {count} frames");
+    cx.update(|cx| {
+        editor
+            .viewport
+            .update(cx, |view, cx| view.request_frames(count, cx))
+    });
+    let count = u64::from(count);
+    let timeout = NATIVE + Duration::from_millis(count * 100);
+    let (stats, submissions) = wait(cx, timeout, "present the captured viewport frames", |cx| {
+        let stats = editor.viewport.read(cx).stats();
+        let submissions = presents(cx)?.saturating_sub(initial_presents);
+        (stats.rendered_frames >= baseline.rendered_frames + count && submissions >= count)
+            .then_some((stats, submissions))
+    })
+    .await?;
+    println!(
+        "Viewport capture submitted {} Nara frames and {submissions} GPUI presents, with {} new textures and {} new buffers",
+        stats.rendered_frames - baseline.rendered_frames,
+        stats.created_texture_calls - baseline.created_texture_calls,
+        stats.created_buffer_calls - baseline.created_buffer_calls,
+    );
+    Ok(())
+}
+
 async fn exercise(editor: &OpenEditor, cx: &mut AsyncApp) -> Result<()> {
     let initial = wait(cx, NATIVE, "present the shared viewport", |cx| {
         let stats = editor.viewport.read(cx).stats();
@@ -360,7 +416,7 @@ async fn transport(
 ) -> Result<()> {
     wait(cx, timeout, target.label(), |cx| {
         let workspace = editor.workspace.read(cx);
-        if workspace.status == target && !workspace.pending && workspace.steps == steps {
+        if workspace.status == target && !workspace.control_pending() && workspace.steps == steps {
             Some(Ok(()))
         } else if workspace.status == JobStatus::Idle {
             Some(Err(anyhow::anyhow!("Play ended before {}", target.label())))

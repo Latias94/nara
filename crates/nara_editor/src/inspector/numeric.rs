@@ -44,7 +44,36 @@ pub(super) fn range(shape: &ComponentValueShape, value: f64) -> Option<NumericRa
     if range.normalize(value) == value {
         Some(range)
     } else {
-        NumericRange::new(min, max)
+        range.with_step_origin(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nara_scene::authoring::builtin_component_schemas;
+
+    use super::*;
+
+    #[test]
+    fn positive_sprite_size_keeps_the_authored_value_and_a_small_step() {
+        let schemas = builtin_component_schemas().unwrap();
+        let sprite = schemas
+            .iter()
+            .find(|schema| schema.id().as_str() == "nara.SpriteSource")
+            .unwrap();
+        let size = sprite
+            .fields()
+            .iter()
+            .find(|field| field.path().to_string() == "size")
+            .unwrap();
+        let ComponentValueShape::Record { members } = size.shape() else {
+            panic!("Sprite size is a vector");
+        };
+        let value = f64::from(0.65_f32);
+        let range = range(&members[0].shape, value).unwrap();
+        assert_eq!(range.normalize(value), value);
+        assert_eq!(range.step(), Some(0.125));
+        assert_eq!(range.normalize(value + 0.14), value + 0.125);
     }
 }
 

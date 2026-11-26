@@ -1,5 +1,6 @@
 use nara_core::{DiagnosticSeverity, EntityUuid, Vec2, vfs::AssetPath};
 use nara_editor_core::{AssetKind, EditorCommand};
+use nara_editor_viewport::ViewportStats;
 use nara_scene::spatial::Visibility;
 use open_gpui::{Context, Entity, IntoElement, Render, Window, div, prelude::*, px, rgb};
 use open_gpui_base::{DropPlacement, Row, TreeRow, VirtualListEvent, VirtualTree};
@@ -37,10 +38,23 @@ impl HierarchyPanel {
         });
         cx.subscribe(
             &tree,
-            |panel, _, event: &VirtualListEvent<EntityUuid>, cx| {
+            |panel, tree, event: &VirtualListEvent<EntityUuid>, cx| {
+                if panel.workspace.read(cx).session.gesture_active() {
+                    panel.sync(cx);
+                    return;
+                }
+                let active = tree.read(cx).active_key().copied();
                 panel.workspace.update(cx, |workspace, cx| match event {
                     VirtualListEvent::SelectionChanged(ids) => {
-                        workspace.select(ids.iter().copied(), cx)
+                        let active = active.filter(|entity| ids.contains(entity)).or_else(|| {
+                            workspace
+                                .session
+                                .selection()
+                                .active()
+                                .filter(|entity| ids.contains(entity))
+                        });
+                        let ordered = ids.iter().copied().filter(|entity| Some(*entity) != active);
+                        workspace.select(ordered.chain(active), cx);
                     }
                     VirtualListEvent::ReorderRequested(request) => {
                         let parent = if request.placement == DropPlacement::Into {
@@ -111,7 +125,12 @@ impl HierarchyPanel {
                     }
                 }
             }
-            if tree.selection() != selected {
+            let tree_selection = tree.selection();
+            if tree_selection.len() != selected.len()
+                || !tree_selection
+                    .iter()
+                    .all(|entity| selected.contains(entity))
+            {
                 tree.set_selection(selected, cx);
             }
         });
@@ -120,26 +139,25 @@ impl HierarchyPanel {
 
 impl Render for HierarchyPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let has_selection = !self
-            .workspace
-            .read(cx)
-            .session
-            .selection()
-            .entities()
-            .is_empty();
+        let session = &self.workspace.read(cx).session;
+        let locked = session.gesture_active();
+        let has_selection = !session.selection().entities().is_empty();
+        let can_edit_selection = has_selection && !locked;
         theme::panel()
             .child(
                 theme::toolbar()
-                    .child(theme::button("create-entity", "Add").on_click(cx.listener(
-                        |panel, _, _, cx| {
-                            panel.workspace.update(cx, |workspace, cx| {
-                                workspace.create(Vec2::ZERO, None, None, cx)
-                            });
-                        },
-                    )))
+                    .child(
+                        theme::button("create-entity", "Add")
+                            .disabled(locked)
+                            .on_click(cx.listener(|panel, _, _, cx| {
+                                panel.workspace.update(cx, |workspace, cx| {
+                                    workspace.create(Vec2::ZERO, None, None, cx)
+                                });
+                            })),
+                    )
                     .child(
                         theme::button("unparent-entity", "Unparent")
-                            .disabled(!has_selection)
+                            .disabled(!can_edit_selection)
                             .on_click(cx.listener(|panel, _, _, cx| {
                                 panel.workspace.update(cx, |workspace, cx| {
                                     workspace.apply(
@@ -158,7 +176,7 @@ impl Render for HierarchyPanel {
                     )
                     .child(
                         theme::button("hide-entities", "Hide")
-                            .disabled(!has_selection)
+                            .disabled(!can_edit_selection)
                             .on_click(cx.listener(|panel, _, _, cx| {
                                 panel.workspace.update(cx, |workspace, cx| {
                                     workspace.set_visibility(Visibility::Hidden, cx)
@@ -167,7 +185,7 @@ impl Render for HierarchyPanel {
                     )
                     .child(
                         theme::button("show-entities", "Show")
-                            .disabled(!has_selection)
+                            .disabled(!can_edit_selection)
                             .on_click(cx.listener(|panel, _, _, cx| {
                                 panel.workspace.update(cx, |workspace, cx| {
                                     workspace.set_visibility(Visibility::Visible, cx)
@@ -176,7 +194,7 @@ impl Render for HierarchyPanel {
                     )
                     .child(
                         theme::button("delete-entities", "Delete")
-                            .disabled(!has_selection)
+                            .disabled(!can_edit_selection)
                             .on_click(cx.listener(|panel, _, _, cx| {
                                 panel.workspace.update(cx, Workspace::delete_selection);
                             })),
@@ -228,15 +246,7 @@ impl Render for AssetPanel {
             .child(
                 theme::button("rescan-assets", "Refresh").on_click(cx.listener(
                     |panel, _, _, cx| {
-                        panel
-                            .0
-                            .update(cx, |workspace, cx| match workspace.project.assets() {
-                                Ok(assets) => {
-                                    workspace.assets = assets;
-                                    cx.notify();
-                                }
-                                Err(error) => workspace.warn(error.to_string(), cx),
-                            });
+                        panel.0.update(cx, Workspace::refresh_assets);
                     },
                 )),
             );
@@ -294,18 +304,32 @@ impl Render for AssetPanel {
     }
 }
 
-pub struct ConsolePanel(Entity<Workspace>);
+pub struct ConsolePanel {
+    workspace: Entity<Workspace>,
+    viewport_status: Entity<ViewportStatus>,
+}
 
 impl ConsolePanel {
-    pub fn new(workspace: Entity<Workspace>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        workspace: Entity<Workspace>,
+        viewport_stats: Entity<ViewportStats>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         cx.observe(&workspace, |_, _, cx| cx.notify()).detach();
-        Self(workspace)
+        let viewport_status = cx.new(|cx| {
+            cx.observe(&viewport_stats, |_, _, cx| cx.notify()).detach();
+            ViewportStatus(viewport_stats)
+        });
+        Self {
+            workspace,
+            viewport_status,
+        }
     }
 }
 
 impl Render for ConsolePanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let workspace = self.0.read(cx);
+        let workspace = self.workspace.read(cx);
         let lines = workspace
             .console
             .entries()
@@ -313,22 +337,15 @@ impl Render for ConsolePanel {
             .rev()
             .cloned()
             .collect::<Vec<_>>();
-        let stats = workspace.viewport_stats.clone();
         theme::panel()
-            .child(
-                theme::toolbar()
-                    .child(div().flex_1().truncate().child(stats))
-                    .child(
-                        theme::button("clear-console", "Clear").on_click(cx.listener(
-                            |panel, _, _, cx| {
-                                panel.0.update(cx, |workspace, cx| {
-                                    workspace.console.clear();
-                                    cx.notify();
-                                });
-                            },
-                        )),
-                    ),
-            )
+            .child(theme::toolbar().child(self.viewport_status.clone()).child(
+                theme::button("clear-console", "Clear").on_click(cx.listener(|panel, _, _, cx| {
+                    panel.workspace.update(cx, |workspace, cx| {
+                        workspace.console.clear();
+                        cx.notify();
+                    });
+                })),
+            ))
             .child(
                 div()
                     .id("console-log")
@@ -359,5 +376,21 @@ impl Render for ConsolePanel {
                             .child(message)
                     })),
             )
+    }
+}
+
+struct ViewportStatus(Entity<ViewportStats>);
+
+impl Render for ViewportStatus {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let stats = self.0.read(cx);
+        div().flex_1().truncate().child(format!(
+            "{} frames · {} retained · {} sprites · {} textures / {} buffers last frame",
+            stats.rendered_frames,
+            stats.retained_presentations,
+            stats.extraction.extracted_sprites,
+            stats.last_work.created_texture_calls,
+            stats.last_work.created_buffer_calls,
+        ))
     }
 }

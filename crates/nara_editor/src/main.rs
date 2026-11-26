@@ -7,7 +7,7 @@ mod theme;
 mod viewport;
 mod workspace;
 
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, num::NonZeroU32, path::PathBuf, rc::Rc};
 
 use anyhow::{Context as _, Result, bail, ensure};
 use nara_project::workflow::ProjectTrust;
@@ -21,14 +21,24 @@ fn main() -> Result<()> {
     let mut project: Option<PathBuf> = None;
     let mut trust = ProjectTrust::Untrusted;
     let mut verify = false;
+    let mut capture_frames = None;
     let mut arguments = std::env::args_os().skip(1);
     while let Some(argument) = arguments.next() {
         if argument == "--trusted" {
             trust = ProjectTrust::Trusted;
         } else if argument == "--verify" {
             verify = true;
+        } else if argument == "--capture-frames" && capture_frames.is_none() {
+            capture_frames = Some(
+                arguments
+                    .next()
+                    .and_then(|count| count.to_str()?.parse::<NonZeroU32>().ok())
+                    .context("--capture-frames requires a positive frame count")?,
+            );
         } else if argument == "--help" || argument == "-h" {
-            println!("Usage: nara_editor [--project DIRECTORY] [--trusted] [--verify]");
+            println!(
+                "Usage: nara_editor [--project DIRECTORY] [--trusted] [--verify | --capture-frames N]"
+            );
             return Ok(());
         } else if argument == "--project" && project.is_none() {
             project = Some(
@@ -45,16 +55,24 @@ fn main() -> Result<()> {
         !verify || (project.is_some() && trust == ProjectTrust::Trusted),
         "--verify requires --project and --trusted"
     );
+    ensure!(
+        capture_frames.is_none() || (project.is_some() && !verify),
+        "--capture-frames requires --project and is separate from --verify"
+    );
     let shared = pollster::block_on(create_shared_gpu())?;
     let failure = Rc::new(RefCell::new(None));
     let on_open_failure = failure.clone();
     open_gpui_platform::application_with_shared_wgpu(shared.clone())?.run(move |cx| {
         let result = if let Some(directory) = project {
             workspace::Workspace::open(&directory, trust)
-                .and_then(|workspace| docking::open(workspace, &shared, !verify, cx))
+                .and_then(|workspace| {
+                    docking::open(workspace, &shared, !verify && capture_frames.is_none(), cx)
+                })
                 .map(|editor| {
                     if verify {
                         smoke::start(editor, on_open_failure.clone(), cx);
+                    } else if let Some(frames) = capture_frames {
+                        smoke::capture_frames(editor, frames.get(), on_open_failure.clone(), cx);
                     }
                 })
         } else {

@@ -33,9 +33,14 @@ pub enum ProjectCheckError {
 
 /// Reads `nara.toml` and the local Cargo package declaration without running Cargo.
 pub fn check_project(project_dir: &Path) -> Result<ProjectManifest, ProjectCheckError> {
-    let manifest = read_manifest(project_dir.join("nara.toml"))?;
+    let manifest = read_project_manifest(project_dir)?;
     CargoPackage::read(project_dir)?;
     Ok(manifest)
+}
+
+/// Reads the tooling metadata in `nara.toml` without running project code.
+pub fn read_project_manifest(project_dir: &Path) -> Result<ProjectManifest, ProjectCheckError> {
+    read_manifest(project_dir.join("nara.toml"))
 }
 
 /// Cargo manifest fields used to select a local binary and its required features.

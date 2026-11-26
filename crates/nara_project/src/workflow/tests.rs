@@ -7,7 +7,7 @@ use super::{
     read_schema_cache, refresh_schema, schema::finish_refresh,
 };
 use crate::{
-    ProjectManifest,
+    EditorPlayMode, ProjectManifest,
     play::{BuildError, BuildRequest},
 };
 
@@ -61,6 +61,7 @@ fn starter_uses_the_checkout_patch_sources_and_a_code_first_manifest() {
     assert_eq!(manifest.project.version, "0.1.0");
     assert_eq!(manifest.paths.assets, "assets");
     assert!(manifest.window.is_none());
+    assert_eq!(manifest.editor.play, EditorPlayMode::External);
 }
 
 #[test]
@@ -99,6 +100,21 @@ width = 960
     assert_eq!(window.title.as_deref(), Some("A Window"));
     assert_eq!(window.width.unwrap().get(), 960);
     assert!(window.height.is_none());
+}
+
+#[test]
+fn snapshot_play_requires_explicit_project_opt_in() {
+    let project = "[project]\nname = 'My Game'\nversion = '0.1.0'\n";
+    for (editor, mode) in [
+        ("", EditorPlayMode::External),
+        ("[editor]\n", EditorPlayMode::External),
+        ("[editor]\nplay = 'external'\n", EditorPlayMode::External),
+        ("[editor]\nplay = 'snapshot'\n", EditorPlayMode::Snapshot),
+    ] {
+        let manifest = ProjectManifest::parse_toml(&format!("{project}{editor}")).unwrap();
+        assert_eq!(manifest.editor.play, mode);
+    }
+    assert!(ProjectManifest::parse_toml(&format!("{project}[editor]\nplay = 'auto'\n")).is_err());
 }
 
 #[test]

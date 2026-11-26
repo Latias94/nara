@@ -21,31 +21,44 @@ optional `.nara.ron` selects an entry scene relative to the project's asset dire
    entities as one Undo action.
    A color field offers an sRGB picker and exact linear-channel inputs. Apply a picked color to
    commit it in one Undo action.
-3. In Scene View, **Q**, **W**, **E**, **R**, and **B** select the tools. Drag a Gizmo handle, hold
-   Shift to snap translation, and press Escape to cancel the current gesture. Middle-button drag
-   pans, the wheel zooms at the pointer, and **F** frames the selection. Choose a PNG in Assets and
-   use the Tile Brush for grid placement, or drag a PNG onto the scene to place one sprite.
+3. In Scene View, **Q**, **W**, **E**, **R**, and **B** select the tools. Drag a Gizmo handle to
+   transform the selection around its last selected entity. A child follows a selected ancestor.
+   Hold Shift to snap translation, and press Escape to cancel the current gesture. Middle-button
+   drag pans, the wheel zooms at the pointer, and **F** frames the selection. Choose a PNG in Assets
+   and use the Tile Brush for grid placement, or drag a PNG onto the scene to place one sprite.
 4. Use **Undo**, **Redo**, or **Save** on the Scene View toolbar. The saved RON contains typed
    component values and stable entity UUIDs. Unknown components remain available for inspection
    and survive saves. **Remove** deletes a component from the selected entities that have it, and
    Undo restores its value. Saved layouts live in `.nara/editor-layout.json` beside the Schema cache.
+   The editor accepts layout files up to 1 MiB and restores a floating window only when it contains
+   an editor pane.
 
 Drag a panel tab to split or group panes. Drag outside the editor to float a pane where the native
-platform supports peer windows. The Inspector's name field accepts the platform's IME.
+platform supports peer windows. Closing a newly floated window docks its panes back. For a floating
+window restored from a saved layout, drag its tabs into the main editor. The Inspector's name field
+accepts the platform's IME. Closing the main window with unsaved edits prompts you to save,
+discard, or cancel. Unapplied Inspector drafts prompt you to review or discard them first. For an
+untitled scene, choose a new filename ending in `.nara.scene.ron` inside the asset directory.
 
 ## Play the current edit
 
-**Play** builds the project and opens the game in a separate native window using a temporary copy
-of the current scene. **Pause**, **Step**, and **Resume** become available when the running game
-confirms its state. Step advances one fixed tick. **Stop** terminates and reaps the game process
-tree. The editor keeps the original scene and its Undo history throughout Play. Cargo and game
-output appear in Console.
+**Play** builds the project and opens the game in a separate native window. An ordinary project
+runs with its usual launch arguments and saved data. **Stop** terminates and reaps either kind of
+game process tree. Cargo and game output appear in Console.
 
-The default `game` binary must implement the editor protocol to support these controls. It reads
-`--editor-play PATH`, signals `NARA_EDITOR ready` on stdout after its first frame, and reads
-`pause`, `resume`, and `step` lines on stdin. It replies `NARA_EDITOR paused`, `NARA_EDITOR running`,
-or `NARA_EDITOR stepped`, respectively, after the operation completes. Night Relay is the reference
-implementation. Its game runner has no dependency on the editor or Open-GPUI.
+To play a temporary snapshot of the current edits, add the following to `nara.toml` and implement
+the editor protocol in the selected game binary. The editor keeps the source scene and its Undo
+history throughout Play.
+
+```toml
+[editor]
+play = "snapshot"
+```
+
+The game reads `--editor-play PATH` and prints `NARA_EDITOR ready` after its first frame. When the
+editor sends `pause`, `resume`, or `step` on stdin, the game replies `NARA_EDITOR paused`,
+`NARA_EDITOR running`, or `NARA_EDITOR stepped` after applying it. Step advances one fixed tick.
+Night Relay implements this protocol in its standalone game runner.
 
 ## Verify the native workflow
 
@@ -59,3 +72,8 @@ documents still match their pre-Play values. Success prints `Night Relay editor 
 The Open-GPUI dockspace editor also provides `--smoke-native` and `--smoke-recovery`. Both run to a
 result on a Windows desktop without pointer or keyboard interaction. The separate mixed-DPI native
 placement test requires two displays with distinct scaling.
+
+For a GPU capture, launch the built editor with `--project reference-game --capture-frames 180`.
+It opens one window, warms the shared viewport, presents the requested frames, prints the texture
+and buffer creation counts, and exits. PIX on Windows can launch the DX12 editor directly in this
+mode. Allow enough frames for the capture tool to reach the warmed-up portion of the run.

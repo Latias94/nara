@@ -11,6 +11,8 @@ pub struct ProjectManifest {
     #[serde(default)]
     pub paths: ProjectPaths,
     pub window: Option<ProjectWindow>,
+    #[serde(default)]
+    pub editor: ProjectEditor,
 }
 
 impl ProjectManifest {
@@ -51,6 +53,23 @@ pub struct ProjectWindow {
     pub title: Option<String>,
     pub width: Option<NonZeroU32>,
     pub height: Option<NonZeroU32>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProjectEditor {
+    pub play: EditorPlayMode,
+}
+
+/// How the editor launches the project's default game binary.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EditorPlayMode {
+    /// Supervise an ordinary game process with its usual startup.
+    #[default]
+    External,
+    /// Pass `--editor-play PATH` and use the editor's control protocol.
+    Snapshot,
 }
 
 pub(crate) fn nonempty<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {

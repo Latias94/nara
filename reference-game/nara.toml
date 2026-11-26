@@ -5,6 +5,9 @@ version = "0.1.0"
 [paths]
 assets = "assets"
 
+[editor]
+play = "snapshot"
+
 [window]
 title = "Night Relay"
 width = 1152

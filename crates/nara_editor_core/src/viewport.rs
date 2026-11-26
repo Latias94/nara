@@ -7,6 +7,7 @@ mod gizmo;
 mod picking;
 #[cfg(test)]
 mod tests;
+mod transform;
 
 use nara_core::{Mat3, Vec2};
 
@@ -14,6 +15,7 @@ pub use gizmo::{
     Gizmo2D, GizmoAxes2D, GizmoDelta2D, GizmoDrag2D, GizmoGeometry2D, GizmoHandle, GizmoRing2D,
 };
 pub use picking::{LocalBounds2D, PickCandidate2D};
+pub use transform::GizmoSelection2D;
 
 const FLIP_Y: Vec2 = Vec2::new(1.0, -1.0);
 

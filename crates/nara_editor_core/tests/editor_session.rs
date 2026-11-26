@@ -2,10 +2,11 @@
 
 use std::fs;
 
-use nara_core::{DocumentId, EntityUuid, Vec2, vfs::AssetPath};
+use nara_core::{Affine2, DocumentId, EntityUuid, Vec2, vfs::AssetPath};
 use nara_editor_core::{
-    EditorCommand, EditorDocument, EditorProject, EditorRegistry, EditorSession, HierarchyModel,
-    InspectorModel, InspectorValue,
+    EditorCommand, EditorDocument, EditorError, EditorProject, EditorRegistry, EditorSession,
+    HierarchyModel, InspectorModel, InspectorValue,
+    viewport::{Gizmo2D, GizmoDelta2D, GizmoSelection2D, WorldPoint},
 };
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
@@ -89,6 +90,110 @@ fn value(session: &EditorSession) -> InspectorValue {
 }
 
 #[test]
+fn gizmo_applies_one_world_space_edit_across_selected_roots() {
+    let mut scene = document();
+    let mut separate = actor(1, 1);
+    let outer = Transform2d {
+        translation: Vec2::new(8.0, 0.0),
+        rotation: std::f32::consts::FRAC_PI_2,
+        scale: Vec2::new(2.0, 1.0),
+        ..Default::default()
+    };
+    separate.parent = Some(id(4));
+    separate.set(&Transform2d::from_xy(2.0, 0.0)).unwrap();
+    let mut inherited = actor(2, 1);
+    inherited.parent = Some(id(5));
+    let mut pivot = actor(3, 1);
+    pivot.set(&Transform2d::from_xy(10.0, 0.0)).unwrap();
+    let mut other_parent = actor(4, 1);
+    other_parent.set(&outer).unwrap();
+    let mut middle = actor(5, 1);
+    middle.parent = Some(id(3));
+    scene.entities = vec![separate, inherited, pivot, other_parent, middle];
+    let mut session = EditorSession::new(EditorDocument::new(scene).unwrap(), registry());
+    session.selection_mut().replace([id(1), id(2), id(3)]);
+    let gizmo = Gizmo2D::new(WorldPoint(Vec2::new(10.0, 0.0)), 0.0).unwrap();
+    let selection = GizmoSelection2D::capture(&session, gizmo, |entity| {
+        Some(if entity == id(1) {
+            outer.affine()
+        } else {
+            Affine2::IDENTITY
+        })
+    })
+    .unwrap()
+    .unwrap();
+    let transform = |session: &EditorSession, entity| {
+        session
+            .document()
+            .scene()
+            .entities
+            .iter()
+            .find(|row| row.id == entity)
+            .unwrap()
+            .typed::<Transform2d>()
+            .unwrap()
+            .unwrap()
+    };
+    let assert_position = |session: &EditorSession, entity, expected: Vec2| {
+        let local = transform(session, entity).translation;
+        let world = if entity == id(1) {
+            outer.affine().transform_point2(local)
+        } else {
+            local
+        };
+        assert!(
+            world.abs_diff_eq(expected, 0.0001),
+            "{world:?} vs {expected:?}"
+        );
+    };
+
+    let gesture = session.begin_gesture().unwrap();
+    for distance in [Vec2::new(1.0, 0.0), Vec2::new(4.0, -2.0)] {
+        let command = selection
+            .command(GizmoDelta2D::Translation(distance))
+            .unwrap();
+        assert!(session.apply_gesture(&gesture, command).unwrap());
+    }
+    assert!(session.end_gesture(&gesture));
+    assert_position(&session, id(1), Vec2::new(12.0, 2.0));
+    assert_position(&session, id(3), Vec2::new(14.0, -2.0));
+    assert_eq!(transform(&session, id(2)), Transform2d::from_xy(2.0, 0.0));
+    assert!(session.undo().unwrap());
+    assert!(!session.can_undo());
+    assert_position(&session, id(1), Vec2::new(8.0, 4.0));
+    assert_position(&session, id(3), Vec2::new(10.0, 0.0));
+
+    let gesture = session.begin_gesture().unwrap();
+    let command = selection
+        .command(GizmoDelta2D::Rotation(std::f32::consts::FRAC_PI_2))
+        .unwrap();
+    assert!(session.apply_gesture(&gesture, command).unwrap());
+    assert_position(&session, id(1), Vec2::new(6.0, -2.0));
+    assert_position(&session, id(3), Vec2::new(10.0, 0.0));
+    assert!((transform(&session, id(1)).rotation - std::f32::consts::FRAC_PI_2).abs() < 0.0001);
+    assert!(session.cancel_gesture(&gesture));
+
+    let gesture = session.begin_gesture().unwrap();
+    let factors = Vec2::new(2.0, 0.5);
+    let command = selection.command(GizmoDelta2D::Scale(factors)).unwrap();
+    assert!(session.apply_gesture(&gesture, command).unwrap());
+    assert_position(&session, id(1), Vec2::new(6.0, 2.0));
+    assert_position(&session, id(3), Vec2::new(10.0, 0.0));
+    assert!(
+        transform(&session, id(1))
+            .scale
+            .abs_diff_eq(Vec2::new(0.5, 2.0), 0.0001)
+    );
+    assert!(
+        transform(&session, id(3))
+            .scale
+            .abs_diff_eq(factors, 0.0001)
+    );
+    assert!(session.cancel_gesture(&gesture));
+    assert_position(&session, id(1), Vec2::new(8.0, 4.0));
+}
+
+#[test]
 fn mixed_fields_gestures_and_unknown_components_survive_save_and_reopen() {
     let unknown = ComponentTypeId::new("third_party.CustomComponent");
     let staying = SceneComponent {
@@ -108,10 +213,14 @@ fn mixed_fields_gestures_and_unknown_components_survive_save_and_reopen() {
     assert_eq!(value(&session), InspectorValue::Mixed);
     assert!(!session.is_dirty());
 
-    session.begin_gesture().unwrap();
-    assert!(session.apply(edit(10)).unwrap());
-    assert!(session.apply(edit(12)).unwrap());
-    assert!(session.end_gesture());
+    let gesture = session.begin_gesture().unwrap();
+    assert!(session.apply_gesture(&gesture, edit(10)).unwrap());
+    assert!(matches!(
+        session.apply(EditorCommand::Delete(vec![id(1)])),
+        Err(EditorError::GestureActive)
+    ));
+    assert!(session.apply_gesture(&gesture, edit(12)).unwrap());
+    assert!(session.end_gesture(&gesture));
     assert_eq!(
         value(&session),
         InspectorValue::Shared(ComponentValue::U64(12))
@@ -122,9 +231,15 @@ fn mixed_fields_gestures_and_unknown_components_survive_save_and_reopen() {
     assert_eq!(value(&session), InspectorValue::Mixed);
     assert!(session.redo().unwrap());
 
-    session.begin_gesture().unwrap();
-    session.apply(edit(20)).unwrap();
-    assert!(session.cancel_gesture());
+    let next = session.begin_gesture().unwrap();
+    assert!(matches!(
+        session.apply_gesture(&gesture, edit(19)),
+        Err(EditorError::StaleGesture)
+    ));
+    assert!(!session.cancel_gesture(&gesture));
+    assert!(!session.end_gesture(&gesture));
+    session.apply_gesture(&next, edit(20)).unwrap();
+    assert!(session.cancel_gesture(&next));
     assert_eq!(
         value(&session),
         InspectorValue::Shared(ComponentValue::U64(12))

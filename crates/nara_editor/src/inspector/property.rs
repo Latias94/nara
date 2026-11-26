@@ -1,7 +1,7 @@
 use std::{collections::HashMap, rc::Rc};
 
 use nara_editor_core::{
-    InspectorComponent, InspectorValue,
+    EditorGesture, InspectorComponent, InspectorValue,
     field_draft::{self, DraftAction, DraftInput, StructuredRow},
     value_draft::{self, RootDraft, ValueDraft},
 };
@@ -11,8 +11,8 @@ use nara_reflect::{
 };
 use nara_scene::authoring::SceneEntity;
 use open_gpui::{
-    AnyElement, Context, Div, Entity, EntityId, IntoElement, Render, Subscription, Window, div,
-    prelude::*, px, rgb,
+    AnyElement, App, Context, Div, Entity, EntityId, IntoElement, Render, Subscription, Window,
+    div, prelude::*, px, rgb,
 };
 use open_gpui_base::{
     Checkbox, ColorPicker, MenuEvent, MenuItem, NumericEvent, NumericRange, NumericScrubber,
@@ -22,6 +22,7 @@ use open_gpui_base::{
 use crate::{theme, workspace::Workspace};
 
 use super::{
+    Draft,
     color::ColorSeed,
     field_row, native_text, numeric, popup_style,
     target::{self, CHANGED, FieldKey, FieldTarget, Selection},
@@ -186,6 +187,7 @@ impl Property {
 struct Scalar {
     input: Entity<TextInput>,
     _subscription: Subscription,
+    initial_text: String,
     expected: Option<Vec<Option<ComponentValue>>>,
     scrub: Option<Scrub>,
 }
@@ -204,27 +206,21 @@ struct Scrub {
 }
 
 struct Gesture {
-    revision: u64,
+    owner: EditorGesture,
     expected: Vec<Option<ComponentValue>>,
 }
 
 impl Gesture {
     fn cancel(self, workspace: &mut Workspace, cx: &mut Context<Workspace>) {
-        if !workspace.session.gesture_active() {
-            return;
-        }
-        if workspace.revision == self.revision {
-            workspace.cancel_gesture(cx);
-        } else {
-            workspace.end_gesture(cx);
-        }
+        workspace.cancel_gesture(&self.owner, cx);
     }
 }
 
 struct Form {
     id: Rc<()>,
     expected: Vec<Option<ComponentValue>>,
-    draft: RootDraft,
+    initial: Rc<RootDraft>,
+    draft: Rc<RootDraft>,
     inputs: HashMap<DraftInput, (Entity<TextInput>, Subscription)>,
 }
 
@@ -282,6 +278,7 @@ impl PropertyEditor {
                     });
                     let subscription = cx.subscribe(&input, Self::text_event);
                     Control::Scalar(Scalar {
+                        initial_text: input.read(cx).value().to_owned(),
                         input,
                         _subscription: subscription,
                         expected: None,
@@ -312,12 +309,24 @@ impl PropertyEditor {
         self.property.target == next.target && self.property.editable == next.editable
     }
 
-    fn has_draft(&self) -> bool {
+    pub(super) fn draft(&self, cx: &App) -> Option<Draft> {
         match &self.control {
-            Control::Scalar(text) => text.expected.is_some(),
-            Control::Structure(form) => form.is_some(),
-            Control::Color(draft) => draft.is_some(),
-            _ => false,
+            Control::Scalar(text) => {
+                let expected = text.expected.as_ref()?;
+                let value = text.input.read(cx).value();
+                let was_shared = expected.first().is_some_and(|first| {
+                    first.is_some() && expected.iter().all(|value| value == first)
+                });
+                (value != text.initial_text || !was_shared).then(|| Draft::Text(value.to_owned()))
+            }
+            Control::Structure(Some(form)) if form.draft != form.initial => {
+                Some(Draft::Structure(form.draft.clone()))
+            }
+            Control::Color(Some(draft)) => {
+                let value = draft.picker.read(cx).value();
+                (value != draft.seed.display()).then_some(Draft::Color(value))
+            }
+            _ => None,
         }
     }
 
@@ -330,7 +339,7 @@ impl PropertyEditor {
         if let Control::Scalar(text) = &mut self.control {
             text.scrub = None;
         }
-        self.has_draft()
+        self.draft(cx).is_some()
     }
 
     fn take_gesture(&mut self) -> Option<Gesture> {
@@ -356,13 +365,14 @@ impl PropertyEditor {
         self.active = true;
         self.property = next;
         if changed {
-            if !self.has_draft() {
+            if self.draft(cx).is_none() {
                 self.error = None;
             }
             match &mut self.control {
                 Control::Scalar(text) if text.expected.is_none() => {
                     text.input
                         .update(cx, |input, cx| sync_text(input, &self.property, cx));
+                    text.initial_text = text.input.read(cx).value().to_owned();
                     if !text
                         .scrub
                         .as_ref()
@@ -414,6 +424,7 @@ impl PropertyEditor {
                 text.expected = None;
                 self.error = None;
                 input.update(cx, |input, cx| sync_text(input, &self.property, cx));
+                text.initial_text = input.read(cx).value().to_owned();
             }
             TextInputEvent::Submit(_) | TextInputEvent::Blur => {
                 let Some(expected) = text.expected.as_ref() else {
@@ -426,6 +437,7 @@ impl PropertyEditor {
                     .err();
                 if self.error.is_none() {
                     text.expected = None;
+                    text.initial_text = input.read(cx).value().to_owned();
                 }
             }
         }
@@ -488,15 +500,17 @@ impl PropertyEditor {
             cx.notify();
             return;
         }
+        let initial = Rc::new(RootDraft {
+            node: Some(ValueDraft::from_value(
+                &self.property.target.shape,
+                shared(&self.property.value),
+            )),
+        });
         *active = Some(Form {
             id: Rc::new(()),
             expected: expected.to_vec(),
-            draft: RootDraft {
-                node: Some(ValueDraft::from_value(
-                    &self.property.target.shape,
-                    shared(&self.property.value),
-                )),
-            },
+            draft: initial.clone(),
+            initial,
             inputs: HashMap::new(),
         });
         self.error = None;
@@ -570,8 +584,13 @@ impl PropertyEditor {
         if !Rc::ptr_eq(id, &form.id) {
             return;
         }
-        self.error =
-            field_draft::apply(&mut form.draft, &self.property.target.shape, None, action).err();
+        self.error = field_draft::apply(
+            Rc::make_mut(&mut form.draft),
+            &self.property.target.shape,
+            None,
+            action,
+        )
+        .err();
         form.inputs
             .retain(|key, _| field_draft::text(&form.draft, key).is_some());
         cx.notify();
@@ -600,7 +619,7 @@ impl PropertyEditor {
         }
         match event {
             TextInputEvent::Change(text) | TextInputEvent::Submit(text) => {
-                self.error = field_draft::set_text(&mut form.draft, key, text).err();
+                self.error = field_draft::set_text(Rc::make_mut(&mut form.draft), key, text).err();
             }
             TextInputEvent::Cancel => {
                 *active = None;
@@ -1068,6 +1087,9 @@ fn new_scrub(property: &Property, cx: &mut Context<PropertyEditor>) -> Option<Sc
     let (value, range) = scrub_spec(property)?;
     let view = cx.new(|cx| {
         let mut scrubber = NumericScrubber::new(value, range, cx).with_text_entry(false);
+        if let Some(step) = range.step() {
+            scrubber.set_units_per_pixel(step);
+        }
         scrubber.set_label(format!("Adjust {}", property.label), cx);
         scrubber.set_style(
             theme::input()
@@ -1096,12 +1118,12 @@ fn apply_scrub(
     value: f64,
     cx: &mut Context<Workspace>,
 ) -> Result<(), String> {
-    if scrub.gesture.as_ref().is_some_and(|gesture| {
-        gesture.revision != workspace.revision || !workspace.session.gesture_active()
-    }) {
-        if let Some(gesture) = scrub.gesture.take() {
-            gesture.cancel(workspace, cx);
-        }
+    if scrub
+        .gesture
+        .as_ref()
+        .is_some_and(|gesture| !workspace.session.owns_gesture(&gesture.owner))
+    {
+        scrub.gesture = None;
         return Err(CHANGED.into());
     }
     let expected = scrub
@@ -1133,28 +1155,32 @@ fn apply_scrub(
                 return Err("Finish the active gesture before adjusting this field.".into());
             }
             if !terminal {
-                if !workspace.begin_gesture(cx) {
+                let Some(owner) = workspace.begin_gesture(cx) else {
                     return Err("The adjustment could not begin.".into());
-                }
+                };
                 scrub.gesture = Some(Gesture {
-                    revision: workspace.revision,
+                    owner,
                     expected: Vec::new(),
                 });
             }
         }
-        if !workspace.apply(command, cx) {
+        let applied = if let Some(gesture) = &scrub.gesture {
+            workspace.apply_gesture(&gesture.owner, command, cx)
+        } else {
+            workspace.apply(command, cx)
+        };
+        if !applied {
             if let Some(gesture) = scrub.gesture.take() {
                 gesture.cancel(workspace, cx);
             }
             return Err("The adjustment was rejected. See the Console for details.".into());
         }
         if let Some(gesture) = &mut scrub.gesture {
-            gesture.revision = workspace.revision;
             gesture.expected = vec![Some(value); property.values.len()];
         }
     }
-    if terminal && scrub.gesture.take().is_some() {
-        workspace.end_gesture(cx);
+    if terminal && let Some(gesture) = scrub.gesture.take() {
+        workspace.end_gesture(&gesture.owner, cx);
     }
     Ok(())
 }

@@ -369,6 +369,18 @@ and zero in-frame native resource creations. The editor-only PIX capture timed o
 WGPU test verifies that GPUI imports the original Nara texture, and its native smoke measures
 Nara's allocations. [Native editor verification](../guides/native-editor.md)
 
+The Phase 4 closeout protected unapplied Inspector drafts at close, required a pane in each
+restored peer window, and made a multi-selection transform one undoable gesture. Snapshot Play
+requires project opt-in. Night Relay repeated Schema refresh, layout restoration, and supervised
+snapshot Play with the modified scene. The generated starter remained running past the former
+30-second handshake deadline and stopped under process supervision.
+
+Viewport counters now update independently of workspace notifications. The single-window
+`--capture-frames` mode submitted 60 Nara frames with zero new textures or buffers on the RTX 4090
+with DX12. A separate PIX capture of 12 warmed editor frames recorded zero application texture
+copies and zero in-frame native resource creations.
+[Capture and Play instructions](../guides/native-editor.md)
+
 ## Phase 5 — Cut over formats and qualify delivery
 
 **Entry.** Phase 4 passes and RFC-4 defines Schema, compact authoring formats, and the cooked layout.
