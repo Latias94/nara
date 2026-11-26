@@ -3,12 +3,12 @@
 use std::collections::BTreeMap;
 
 use nara_asset::AssetRef;
-use nara_core::{EntityUuid, Vec2};
+use nara_core::{Color, EntityUuid, Vec2};
 use nara_ecs::Component;
 
 use crate::{
-    AssetReferenceDemand, ComponentCodecError, ComponentNumericDomain, ComponentSchema,
-    ComponentValue, ComponentValueKind, ComponentValueRef, ComponentValueShape,
+    AssetReferenceDemand, ComponentCodecError, ComponentFieldEditorHint, ComponentNumericDomain,
+    ComponentSchema, ComponentValue, ComponentValueKind, ComponentValueRef, ComponentValueShape,
 };
 
 pub trait PersistentComponentProvider: Component + Sized + 'static {
@@ -31,6 +31,7 @@ pub trait PersistentComponentProvider: Component + Sized + 'static {
 pub trait PersistentFieldCodec: private::Sealed + Sized + 'static {
     /// Whether this codec's actual recursive shape declares any asset reference leaves.
     const HAS_ASSET_REFERENCES: bool;
+    const EDITOR_HINT: Option<ComponentFieldEditorHint> = None;
 
     fn value_shape() -> ComponentValueShape;
 
@@ -273,6 +274,42 @@ impl PersistentFieldCodec for Vec2 {
     }
 }
 
+impl PersistentFieldCodec for Color {
+    const HAS_ASSET_REFERENCES: bool = false;
+    const EDITOR_HINT: Option<ComponentFieldEditorHint> =
+        Some(ComponentFieldEditorHint::LinearRgba);
+
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::record(
+            ["r", "g", "b", "a"].map(|channel| (channel.to_owned(), f32::value_shape())),
+        )
+    }
+
+    fn decode(value: ComponentValueRef<'_>, field: &str) -> Result<Self, ComponentCodecError> {
+        if !value.as_map().is_some_and(|members| members.len() == 4) {
+            return Err(ComponentCodecError::invalid_field(
+                field,
+                "a closed r/g/b/a record of finite linear f32 values",
+            ));
+        }
+        Ok(Self::rgba(
+            decode_f32_component(value, field, "r")?,
+            decode_f32_component(value, field, "g")?,
+            decode_f32_component(value, field, "b")?,
+            decode_f32_component(value, field, "a")?,
+        ))
+    }
+
+    fn encode(&self) -> Result<ComponentValue, ComponentCodecError> {
+        Ok(ComponentValue::map([
+            ("r", self.r.encode()?),
+            ("g", self.g.encode()?),
+            ("b", self.b.encode()?),
+            ("a", self.a.encode()?),
+        ]))
+    }
+}
+
 impl PersistentFieldCodec for EntityUuid {
     const HAS_ASSET_REFERENCES: bool = false;
 
@@ -400,8 +437,7 @@ mod private {
     use std::collections::BTreeMap;
 
     use nara_asset::AssetRef;
-    use nara_core::EntityUuid;
-    use nara_core::Vec2;
+    use nara_core::{Color, EntityUuid, Vec2};
 
     pub trait Sealed {}
 
@@ -418,6 +454,7 @@ mod private {
     impl Sealed for u32 {}
     impl Sealed for u64 {}
     impl Sealed for Vec2 {}
+    impl Sealed for Color {}
     impl Sealed for EntityUuid {}
     impl Sealed for AssetRef {}
     impl<T: super::PersistentFieldCodec> Sealed for Vec<T> {}

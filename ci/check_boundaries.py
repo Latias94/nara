@@ -23,8 +23,14 @@ def check_dependencies(package, forbidden, *features):
 
 
 def check_wgpu():
+    expected = (
+        "30.0.0",
+        "git+https://github.com/gfx-rs/wgpu?rev=cddb2f5d80dc0009b2ef6767635140cacf90a007"
+        "#cddb2f5d80dc0009b2ef6767635140cacf90a007",
+    )
     for path in (
         "Cargo.lock",
+        "crates/nara_editor/Cargo.lock",
         "reference-game/Cargo.lock",
         "examples/shared-viewport/Cargo.lock",
     ):
@@ -32,7 +38,9 @@ def check_wgpu():
             wgpu = [entry for entry in tomllib.load(locked)["package"] if entry["name"] == "wgpu"]
         if len(wgpu) != 1:
             raise SystemExit(f"{path} resolves {len(wgpu)} wgpu package identities")
-        yield wgpu[0]["version"], wgpu[0]["source"]
+        found = wgpu[0]["version"], wgpu[0].get("source")
+        if found != expected:
+            raise SystemExit(f"{path} resolves an unexpected wgpu package: {found}")
 
 
 def check_rust_sources():
@@ -87,9 +95,18 @@ if __name__ == "__main__":
         "--features", "desktop",
     )
     check_dependencies("nara_project", re.compile(rf"{editor}|^(?:wgpu|winit)$"), "--all-features")
-    check_dependencies("nara_editor_core", re.compile(ui), "--all-features")
-    if len(set(check_wgpu())) != 1:
-        raise SystemExit("The engine and game workspaces resolve different wgpu package identities")
+    check_dependencies(
+        "nara_editor_core",
+        re.compile(rf"{editor}|(?:wgpu|winit|dockspace)(?:[-_]|$)"),
+        "--all-features",
+    )
+    editor_packages = re.compile(editor)
+    for manifest in sorted(Path("crates").glob("nara_*/Cargo.toml")):
+        with manifest.open("rb") as stream:
+            package = tomllib.load(stream)["package"]["name"]
+        if not editor_packages.match(package) and package != "nara_project":
+            check_dependencies(package, shipping, "--all-features")
+    check_wgpu()
     check_rust_sources()
     check_source_size()
     first_game = Path("examples/first_game.rs")

@@ -13,7 +13,7 @@ resolver = "3"
 
 [features]
 default = []
-simulation = ["nara/physics-2d", "nara/audio"]
+simulation = ["dep:nara_scene", "nara/physics-2d", "nara/audio"]
 desktop = [
     "simulation",
     "nara/audio-device",
@@ -25,6 +25,7 @@ desktop = [
 
 [dependencies]
 nara = { path = "..", default-features = false, features = ["runtime-core", "serde"] }
+nara_scene = { path = "../crates/nara_scene", features = ["authoring"], optional = true }
 
 [[bin]]
 name = "game"

@@ -2100,7 +2100,26 @@ version = "0.1.0"
 dependencies = [
  "nara_asset",
  "nara_core",
+ "nara_project",
  "nara_reflect",
+ "nara_scene",
+ "ron",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "nara_editor_gizmo"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "nara_app",
+ "nara_core",
+ "nara_ecs",
+ "nara_render",
+ "nara_window",
+ "wgpu",
 ]
 
 [[package]]
@@ -2215,6 +2234,11 @@ dependencies = [
  "bevy_ecs",
  "nara_app",
  "nara_core",
+ "nara_reflect",
+ "ron",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

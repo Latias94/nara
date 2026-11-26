@@ -1,5 +1,7 @@
-//! Code-first scene components and 2D spatial propagation over the Bevy hierarchy.
+//! Scene data and 2D spatial propagation over the Bevy hierarchy.
 
+#[cfg(feature = "authoring")]
+pub mod authoring;
 pub mod spatial;
 
 pub use spatial::{SPATIAL_PLUGIN_ID, SpatialPlugin, SpatialSet, Visibility};

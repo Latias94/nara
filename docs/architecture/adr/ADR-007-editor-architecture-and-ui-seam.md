@@ -13,8 +13,9 @@ renderers. Use peer top-level windows and style the shell with Design Kit v0.4.
    Inspector values, precise `value_draft` parsing, `EditorRegistry`, and gesture-merged Undo. It
    works headlessly. Only I/O, imports, builds, and Play need asynchronous jobs.
 2. Keep `dockspace`, `jellyflow-core`, Design Kit tokens, and widget behavior independent of the UI
-   shell. Use `gpui_base` for unstyled controls and a thin docking adapter. Route Dialogue Graph
-   edits through the same source document and Undo path as other edits.
+   shell. Use `gpui_base` for unstyled controls and `gpui_docking` for the retained native session,
+   including captured drag, tear-off, and window recovery. Route future Dialogue Graph edits
+   through the same source document and Undo path as other edits.
 3. Render world-space grid, colliders, selection outlines, and Gizmos in `EditorOverlayPass`.
    Nara owns CPU picking and Gizmo state. The shell owns screen-space controls, focus, keyboard
    contexts, and OS pointer capture.
@@ -24,6 +25,10 @@ renderers. Use peer top-level windows and style the shell with Design Kit v0.4.
 Scope viewport shortcuts to viewport focus and give text editing priority within its own context.
 Commit one Undo action per completed drag and cancel it on Escape or focus loss. Use asset and
 entity IDs as cross-panel drag payloads and preview viewport placement before committing it.
+
+The native `nara_editor` and `nara_editor_viewport` build together in the editor workspace. The
+editor uses the sibling Open-GPUI checkout, and the engine workspace can build its portable core
+and WGPU overlay without it. The standalone game keeps its own workspace and dependency graph.
 
 Keep the standalone game runner on Winit. Retain [`vendor/winit`](../../../vendor/winit/NARA-PATCH.md)
 until an upstream release includes and passes native qualification for both Windows 11 mixed-DPI

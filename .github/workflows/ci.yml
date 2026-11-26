@@ -86,7 +86,7 @@ jobs:
           -p nara_reflect -p nara_render -p nara_ui --lib --bin nara --test vfs --test mock_audio
           --test fixed_physics --test lifecycle --test code_first_images --test direct_input
           --test schema_registration --test kernel --test text --test clip --test generation_workflow
-          --test spatial_presentation
+          --test spatial_presentation --test editor_session --test authoring
           --features nara_app/tasks,nara_asset/image-import,nara_asset/hot-reload,nara_input/gamepad,nara_project/workflow,nara_reflect/serde,nara_render/animation,nara_render/sprite-render,nara_ui/runtime
           --no-tests fail --no-fail-fast
       - name: Test offscreen WGPU passes on software Vulkan
@@ -97,6 +97,14 @@ jobs:
         run: >-
           cargo nextest run --locked -p nara_render --lib --test ordered_hierarchy
           --features wgpu,sprite-render,hud-runtime --run-ignored only
+          --no-tests fail --no-fail-fast --test-threads 1
+      - name: Test the editor overlay on software Vulkan
+        if: runner.os == 'Linux'
+        env:
+          WGPU_BACKEND: vulkan
+          NARA_WGPU_FORCE_FALLBACK: "1"
+        run: >-
+          cargo nextest run --locked -p nara_editor_gizmo --run-ignored all
           --no-tests fail --no-fail-fast --test-threads 1
 
   reference-game:

@@ -1367,6 +1367,15 @@ pub(crate) fn validate_component_value_budget<'a>(
     )
 }
 
+/// An optional presentation hint for an authored field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+pub enum ComponentFieldEditorHint {
+    /// A closed r/g/b/a record with linear-sRGB RGB and straight alpha. RGB may be HDR.
+    LinearRgba,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
@@ -1383,6 +1392,17 @@ pub struct ComponentFieldSchema {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub default_value: Option<ComponentValue>,
+    /// Ordered string choices displayed by a generic Inspector.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Vec::is_empty")
+    )]
+    pub choices: Vec<String>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub editor_hint: Option<ComponentFieldEditorHint>,
     /// Retired nested declaration paths, retained independently of the current value shape.
     #[cfg_attr(
         feature = "serde",
@@ -1407,6 +1427,8 @@ impl ComponentFieldSchema {
             required: true,
             capabilities: BTreeSet::new(),
             default_value: None,
+            choices: Vec::new(),
+            editor_hint: None,
             member_tombstones: Vec::new(),
         }
     }
@@ -1426,6 +1448,8 @@ impl ComponentFieldSchema {
             required: false,
             capabilities: BTreeSet::new(),
             default_value: None,
+            choices: Vec::new(),
+            editor_hint: None,
             member_tombstones: Vec::new(),
         }
     }
@@ -1446,6 +1470,8 @@ impl ComponentFieldSchema {
             required: false,
             capabilities: BTreeSet::new(),
             default_value: Some(default_value),
+            choices: Vec::new(),
+            editor_hint: None,
             member_tombstones: Vec::new(),
         }
     }
@@ -1454,6 +1480,29 @@ impl ComponentFieldSchema {
     pub fn with_aliases(mut self, aliases: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.aliases.extend(aliases.into_iter().map(Into::into));
         self
+    }
+
+    /// Sets an ordered list of proposals for a string field.
+    #[must_use]
+    pub fn with_choices(mut self, choices: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.choices = choices.into_iter().map(Into::into).collect();
+        self
+    }
+
+    #[must_use]
+    pub fn choices(&self) -> &[String] {
+        &self.choices
+    }
+
+    #[must_use]
+    pub fn with_editor_hint(mut self, hint: impl Into<Option<ComponentFieldEditorHint>>) -> Self {
+        self.editor_hint = hint.into();
+        self
+    }
+
+    #[must_use]
+    pub const fn editor_hint(&self) -> Option<ComponentFieldEditorHint> {
+        self.editor_hint
     }
 
     #[must_use]
@@ -1844,6 +1893,17 @@ fn feed_schema(hasher: &mut blake3::Hasher, schema: &ComponentSchema) {
                 feed_value(hasher, value);
             }
             None => feed_bytes(hasher, &[0]),
+        }
+        if !field.choices.is_empty() {
+            feed_bytes(hasher, b"field-choices");
+            feed_len(hasher, field.choices.len());
+            for choice in &field.choices {
+                feed_str(hasher, choice);
+            }
+        }
+        match field.editor_hint {
+            Some(ComponentFieldEditorHint::LinearRgba) => feed_bytes(hasher, b"editor-linear-rgba"),
+            None => {}
         }
     }
     feed_len(hasher, schema.field_tombstones.len());

@@ -9,4 +9,16 @@ publish = false
 [dependencies]
 nara_asset.workspace = true
 nara_core.workspace = true
+nara_project.workspace = true
 nara_reflect.workspace = true
+nara_scene = { workspace = true, features = ["authoring"] }
+ron.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
+nara_project = { workspace = true, features = ["workflow"] }
+tempfile = "3.27"
+
+[dev-dependencies]
+tempfile = "3.27"

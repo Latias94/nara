@@ -4,19 +4,38 @@ use nara::{
     ecs::{Single, bevy_ecs::error::Result as SystemResult, schedule::IntoScheduleConfigs},
     prelude::*,
 };
+use nara_scene::authoring::SceneDocument;
 
-use crate::{RunRules, arena, audio::Sounds};
+use crate::{
+    RunRules,
+    arena::{self, Actor, Arena, CELL_COUNT, SceneActor},
+    audio::Sounds,
+};
 
-const PILOT_RADIUS: f32 = 10.0;
-const PICKUP_RADIUS: f32 = 15.0;
-const GATE_RADIUS: f32 = 17.0;
 const HIT_COOLDOWN: Duration = Duration::from_millis(950);
 const PLUGIN: PluginId = PluginId::new("night-relay.game");
 const DECLARATION: PluginDeclaration = PluginDeclaration::new(PLUGIN, PluginCategory::Runtime);
 
 /// Installs the shared arena and fixed simulation after Nara's `DefaultPlugins`.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct GamePlugin(pub RunRules);
+#[derive(Clone, Debug, Default)]
+pub struct GamePlugin {
+    scene: Option<SceneDocument>,
+    rules_override: Option<RunRules>,
+}
+
+impl GamePlugin {
+    pub fn from_scene(scene: SceneDocument) -> Self {
+        Self {
+            scene: Some(scene),
+            rules_override: None,
+        }
+    }
+
+    pub fn with_rules(mut self, rules: RunRules) -> Self {
+        self.rules_override = Some(rules);
+        self
+    }
+}
 
 impl Plugin for GamePlugin {
     fn declaration() -> &'static PluginDeclaration {
@@ -24,33 +43,36 @@ impl Plugin for GamePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        let rules = checked_rules(self.0).map_err(|message| PluginError::SetupFailed {
-            plugin: PLUGIN,
-            message: message.to_owned(),
-        })?;
+        let bundled;
+        let scene = if let Some(scene) = &self.scene {
+            scene
+        } else {
+            bundled = arena::bundled_scene().map_err(|error| setup_error(error.to_string()))?;
+            &bundled
+        };
+        let (arena, rules) = arena::spawn_scene(app.world_mut()?, scene, self.rules_override)
+            .map_err(setup_error)?;
+        let round = Round::new(rules, arena.pilot.pose);
         app.init_resource::<PilotInput>()?
-            .insert_resource(Round::new(rules))?
-            .add_systems(Startup, setup_arena)?
+            .insert_resource(round)?
+            .insert_resource(arena)?
+            .add_systems(Startup, setup_round)?
             .add_systems(
                 FixedUpdate,
-                advance_round
+                (advance_round, sync_actors)
+                    .chain()
                     .in_set(FixedUpdateSet::Simulate)
                     .after(Physics2dSet::Step),
             )?;
-        app.world_mut()?
-            .spawn((Name::new("Round rules"), ActiveRules, rules));
         Ok(())
     }
 }
 
-fn checked_rules(rules: RunRules) -> Result<RunRules, &'static str> {
-    if !(1..=180).contains(&rules.time_limit_seconds)
-        || !(40.0..=300.0).contains(&rules.move_speed)
-        || !(1..=5).contains(&rules.shield_charges)
-    {
-        return Err("round rules require 1–180 seconds, a speed of 40–300, and 1–5 shields");
+fn setup_error(message: String) -> PluginError {
+    PluginError::SetupFailed {
+        plugin: PLUGIN,
+        message,
     }
-    Ok(rules)
 }
 
 /// Held movement and a restart request consumed by the next fixed tick.
@@ -85,23 +107,23 @@ pub struct Round {
     pub(crate) cooldown: Duration,
     pub(crate) heading: f32,
     pub(crate) moving: bool,
-    pub(crate) cells: [bool; arena::CELLS.len()],
+    cells: [bool; CELL_COUNT],
 }
 
 impl Round {
-    fn new(rules: RunRules) -> Self {
+    fn new(rules: RunRules, starting_pose: Transform2d) -> Self {
         Self {
             status: RoundStatus::Running,
-            position: arena::START,
+            position: starting_pose.translation,
             velocity_limit: rules.move_speed,
             remaining: Duration::from_secs(u64::from(rules.time_limit_seconds)),
             shields: rules.shield_charges,
             wall_contacts: 0,
             elapsed: Duration::ZERO,
             cooldown: Duration::ZERO,
-            heading: 0.0,
+            heading: starting_pose.rotation,
             moving: false,
-            cells: [false; arena::CELLS.len()],
+            cells: [false; CELL_COUNT],
         }
     }
 
@@ -137,28 +159,16 @@ impl Round {
 #[derive(Resource)]
 struct PilotCharacter(TopDownCharacter);
 
-#[derive(Component)]
-struct ActiveRules;
-
-fn setup_arena(world: &mut World) -> SystemResult {
+fn setup_round(world: &mut World) -> SystemResult {
+    let pilot_radius = world.resource::<Arena>().pilot.radius;
     world.insert_resource(PilotCharacter(TopDownCharacter::new(
         Collider2d::Circle {
-            radius: PILOT_RADIUS,
+            radius: pilot_radius,
         },
         0.1,
     )?));
     let sounds = Sounds::register(world)?;
     world.insert_resource(sounds);
-    for (column, row, solid) in arena::tiles() {
-        if solid {
-            world.spawn((
-                Transform2d::from_translation(arena::at(column, row)),
-                Collider2d::Box {
-                    half_extents: Vec2::splat(arena::TILE * 0.5),
-                },
-            ));
-        }
-    }
     Ok(())
 }
 
@@ -166,15 +176,15 @@ fn advance_round(
     mut commands: Commands,
     mut round: ResMut<Round>,
     mut input: ResMut<PilotInput>,
-    rules: Single<&RunRules, nara::ecs::With<ActiveRules>>,
+    rules: Single<&RunRules>,
     time: Res<FixedTime>,
-    physics: Res<PhysicsWorld2d>,
-    pilot: Res<PilotCharacter>,
+    (physics, pilot): (Res<PhysicsWorld2d>, Res<PilotCharacter>),
+    arena: Res<Arena>,
     sounds: Res<Sounds>,
 ) -> SystemResult {
     if input.restart {
         input.restart = false;
-        *round = Round::new(checked_rules(**rules)?);
+        *round = Round::new(rules.checked()?, arena.pilot.pose);
         return Ok(());
     }
     if round.status != RoundStatus::Running {
@@ -212,9 +222,9 @@ fn advance_round(
     let position = round.position;
     let elapsed = round.elapsed.as_secs_f32();
     if round.cooldown.is_zero()
-        && arena::PATROLS.iter().any(|patrol| {
+        && arena.patrols.iter().any(|patrol| {
             position.distance_squared(patrol.position(elapsed))
-                <= (arena::DRONE_RADIUS + PILOT_RADIUS).powi(2)
+                <= (patrol.radius() + arena.pilot.radius).powi(2)
         })
     {
         round.shields -= 1;
@@ -226,15 +236,56 @@ fn advance_round(
         }
     }
 
-    for (collected, cell) in round.cells.iter_mut().zip(arena::CELLS) {
-        if !*collected && position.distance_squared(cell) < PICKUP_RADIUS.powi(2) {
+    for (collected, cell) in round.cells.iter_mut().zip(arena.cells) {
+        if !*collected && position.distance_squared(cell.pose.translation) < cell.radius.powi(2) {
             *collected = true;
             commands.spawn(AudioPlayer::one_shot(sounds.pickup));
         }
     }
-    if round.can_extract() && position.distance_squared(arena::GATE) < GATE_RADIUS.powi(2) {
+    if round.can_extract()
+        && position.distance_squared(arena.gate.pose.translation) < arena.gate.radius.powi(2)
+    {
         round.status = RoundStatus::Escaped;
         commands.spawn(AudioPlayer::one_shot(sounds.escaped));
     }
     Ok(())
+}
+
+fn sync_actors(
+    round: Res<Round>,
+    arena: Res<Arena>,
+    mut actors: Query<(&SceneActor, &mut Transform2d, &mut Visibility)>,
+) {
+    let age = round.elapsed.as_secs_f32();
+    for (actor, mut transform, mut visibility) in &mut actors {
+        let mut pose = *transform;
+        let hidden = match actor.role {
+            Actor::Pilot => {
+                pose.translation = round.position();
+                pose.rotation = round.heading;
+                round.status() == RoundStatus::Failed(Failure::ShieldDepleted)
+                    || !round.cooldown.is_zero() && (age * 14.0) as u32 % 2 == 0
+            }
+            Actor::Cell(index) => {
+                pose.rotation = actor.rotation + 0.15 * (age * 4.0 + index as f32).sin();
+                round.cells[index]
+            }
+            Actor::Drone(index) => {
+                pose.translation = arena.patrols[index].position(age);
+                false
+            }
+            Actor::Gate => false,
+        };
+        let shown = if hidden {
+            Visibility::Hidden
+        } else {
+            actor.visibility
+        };
+        if *transform != pose {
+            *transform = pose;
+        }
+        if *visibility != shown {
+            *visibility = shown;
+        }
+    }
 }

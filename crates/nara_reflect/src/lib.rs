@@ -31,11 +31,11 @@ pub use plugin::{SchemaExportError, schema_json};
 pub use registry::{ComponentRegistryError, validate_component_value};
 pub use schema::{
     AliasError, CatalogFingerprint, CatalogFingerprintParseError, ComponentCapability,
-    ComponentFieldId, ComponentFieldIdError, ComponentFieldSchema, ComponentMemberPath,
-    ComponentMemberPathError, ComponentMemberPathSegment, ComponentNumericDomain,
-    ComponentPropertyKey, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
-    ComponentShapeError, ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId,
-    ComponentTypeIdError, ComponentValueKind, ComponentValueShape,
+    ComponentFieldEditorHint, ComponentFieldId, ComponentFieldIdError, ComponentFieldSchema,
+    ComponentMemberPath, ComponentMemberPathError, ComponentMemberPathSegment,
+    ComponentNumericDomain, ComponentPropertyKey, ComponentSchema, ComponentSchemaCatalog,
+    ComponentSchemaVersion, ComponentShapeError, ComponentShapeErrorKind, ComponentShapeMember,
+    ComponentTypeId, ComponentTypeIdError, ComponentValueKind, ComponentValueShape,
 };
 pub use value::{ComponentFloat, ComponentValue, ComponentValueError};
 pub use value_ref::{
@@ -58,8 +58,8 @@ pub mod __macro_support {
 
 pub mod prelude {
     pub use crate::{
-        ComponentCapability, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
-        ComponentValue, ComponentValueRef, ComponentValueShape, PersistentComponent,
-        PersistentComponentProvider, RegisterSchema,
+        ComponentCapability, ComponentFieldEditorHint, ComponentFieldSchema, ComponentSchema,
+        ComponentSchemaCatalog, ComponentValue, ComponentValueRef, ComponentValueShape,
+        PersistentComponent, PersistentComponentProvider, RegisterSchema,
     };
 }

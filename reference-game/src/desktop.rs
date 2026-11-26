@@ -2,40 +2,71 @@
 
 use std::{
     error::Error,
+    path::{Path, PathBuf},
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 
 use nara::{
+    app::{FrameIntent, FrameIntentSet},
     ecs::{bevy_ecs::error::Result as SystemResult, schedule::IntoScheduleConfigs},
-    input::{ActionContext, ActionPhase, InputSeatId, InputSet},
+    input::{ActionContext, ActionPhase, InputSeatId},
     prelude::*,
-    render_wgpu::desktop::DesktopPresentation,
-    window::WindowId,
+    render::image::ImageSourceDirectory,
+    render_wgpu::desktop::{DesktopPresentation, DesktopPresentedFrame},
+    window::{WindowId, WindowSet},
 };
+use nara_scene::authoring::SceneDocument;
 
-use crate::{GamePlugin, PilotInput, RunRules, TITLE, WINDOW_SIZE};
+use crate::{DEFAULT_SCENE_PATH, GamePlugin, PilotInput, RunRules, TITLE, WINDOW_SIZE};
 
+mod editor_play;
 mod hud;
 mod world;
 
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub fn run(verify_first_present: bool) -> Result<(), Box<dyn Error>> {
-    let mut app = App::new();
-    app.add_plugins(DefaultPlugins::new(TITLE).with_window_size(WINDOW_SIZE.0, WINDOW_SIZE.1))?
-        .register_schema::<RunRules>()?
-        .add_plugins(GamePlugin::default())?
-        .add_systems(Startup, (bind_controls, world::setup, hud::setup))?
-        .add_systems(PreUpdate, read_controls.after(InputSet::ResolveActions))?
-        .add_systems(Update, (world::update, world::fit_camera, hud::update))?;
-
+    let mut app = desktop_app(&project_path(DEFAULT_SCENE_PATH))?;
     if verify_first_present {
         verify_present(&mut app)?;
     } else {
         app.run()?;
     }
     Ok(())
+}
+
+pub fn run_editor_play(scene_path: &Path) -> Result<(), Box<dyn Error>> {
+    editor_play::run(desktop_app(scene_path)?)
+}
+
+fn project_path(relative: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
+}
+
+fn desktop_app(scene_path: &Path) -> Result<App, Box<dyn Error>> {
+    let scene = SceneDocument::read(scene_path)
+        .map_err(|error| format!("could not load {}: {error}", scene_path.display()))?;
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins::new(TITLE).with_window_size(WINDOW_SIZE.0, WINDOW_SIZE.1))?
+        .register_schema::<RunRules>()?
+        .insert_resource(ImageSourceDirectory::new(project_path("assets"))?)?
+        .add_plugins(GamePlugin::from_scene(scene))?
+        .add_systems(
+            Startup,
+            (
+                bind_controls,
+                world::setup,
+                (hud::setup, hud::update).chain(),
+            ),
+        )?
+        .add_systems(FrameIntent, read_controls.in_set(FrameIntentSet::Collect))?
+        .add_systems(First, world::fit_camera.after(WindowSet::ApplyEvents))?
+        .add_systems(
+            FixedUpdate,
+            (world::update_appearance, hud::update).in_set(FixedUpdateSet::Finalize),
+        )?;
+    Ok(app)
 }
 
 fn bind_controls(world: &mut World) -> SystemResult {
@@ -93,11 +124,7 @@ fn verify_present(app: &mut App) -> Result<(), Box<dyn Error>> {
         move |observation: Res<DesktopPresentation>, mut exit: ResMut<AppExitRequests>| {
             if Instant::now() >= deadline {
                 exit.request_exit();
-            } else if let Some(frame) = observation.latest()
-                && frame.window == WindowId::PRIMARY
-                && frame.direct_surface
-                && frame.hud_glyph_primitives > 0
-            {
+            } else if let Some(frame) = observation.latest().filter(is_game_frame) {
                 let _ = receipt.set((frame.extent, frame.hud_glyph_primitives));
                 exit.request_success();
             }
@@ -112,4 +139,8 @@ fn verify_present(app: &mut App) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     Err("the window closed or timed out before presenting the game and HUD".into())
+}
+
+fn is_game_frame(frame: &DesktopPresentedFrame) -> bool {
+    frame.window == WindowId::PRIMARY && frame.direct_surface && frame.hud_glyph_primitives > 0
 }

@@ -9,3 +9,13 @@ license.workspace = true
 bevy_ecs.workspace = true
 nara_app.workspace = true
 nara_core.workspace = true
+nara_reflect = { workspace = true, features = ["serde"], optional = true }
+ron = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+
+[target.'cfg(any(unix, windows))'.dev-dependencies]
+tempfile = "3.27"
+
+[features]
+authoring = ["dep:nara_reflect", "dep:ron", "dep:serde", "dep:thiserror"]

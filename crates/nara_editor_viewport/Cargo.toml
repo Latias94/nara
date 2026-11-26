@@ -1,0 +1,28 @@
+[package]
+name = "nara_editor_viewport"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+workspace = "../nara_editor"
+
+[dependencies]
+anyhow = "1"
+nara_app = { path = "../nara_app" }
+nara_asset = { path = "../nara_asset", features = ["image-import"] }
+nara_core = { path = "../nara_core" }
+nara_ecs = { path = "../nara_ecs" }
+nara_editor_core = { path = "../nara_editor_core" }
+nara_editor_gizmo = { path = "../nara_editor_gizmo" }
+nara_reflect = { path = "../nara_reflect" }
+nara_render = { path = "../nara_render", features = ["wgpu", "sprite-render"] }
+nara_scene = { path = "../nara_scene", features = ["authoring"] }
+open_gpui = { package = "open-gpui", path = "../../../open-gpui/crates/gpui", default-features = false }
+open_gpui_wgpu = { package = "open-gpui-wgpu", path = "../../../open-gpui/crates/gpui_wgpu" }
+thiserror = "2"
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
+
+[dev-dependencies]
+pollster = "0.4"
+tempfile = "3.27"

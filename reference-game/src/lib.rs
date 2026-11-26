@@ -1,9 +1,10 @@
-//! Night Relay, a code-first 2D game built on Nara's public runtime API.
+//! Night Relay, a 2D game built on Nara's public runtime and scene authoring APIs.
 
 use nara::prelude::{Component, PersistentComponent};
 
 pub const TITLE: &str = "Night Relay";
 pub const WINDOW_SIZE: (u32, u32) = (1152, 768);
+pub const DEFAULT_SCENE_PATH: &str = "assets/night-relay.nara.scene.ron";
 
 #[derive(Clone, Copy, Debug, Component, PersistentComponent)]
 #[nara(
@@ -20,6 +21,19 @@ pub struct RunRules {
     pub move_speed: f32,
     #[nara(id = "shield-charges", alias = "Shield charges")]
     pub shield_charges: u32,
+}
+
+#[cfg(feature = "simulation")]
+impl RunRules {
+    fn checked(self) -> Result<Self, &'static str> {
+        if !(1..=180).contains(&self.time_limit_seconds)
+            || !(40.0..=300.0).contains(&self.move_speed)
+            || !(1..=5).contains(&self.shield_charges)
+        {
+            return Err("round rules require 1–180 seconds, a speed of 40–300, and 1–5 shields");
+        }
+        Ok(self)
+    }
 }
 
 impl Default for RunRules {

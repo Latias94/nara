@@ -1,10 +1,11 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    AliasError, ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema, ComponentMemberPath,
-    ComponentSchema, ComponentSchemaCatalog, ComponentShapeError, ComponentTypeId,
-    ComponentValueKind, ComponentValueRef,
+    AliasError, ComponentCapability, ComponentCodecError, ComponentFieldEditorHint,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
+    ComponentFieldSchema, ComponentMemberPath, ComponentSchema, ComponentSchemaCatalog,
+    ComponentShapeError, ComponentTypeId, ComponentValueKind, ComponentValueRef,
+    ComponentValueShape,
     schema::{validate_alias, validate_component_shape_budget, validate_component_value_budget},
 };
 
@@ -93,6 +94,17 @@ pub enum ComponentRegistryError {
         component_id: ComponentTypeId,
         path: ComponentFieldPath,
         source: ComponentShapeError,
+    },
+    #[error("field '{field_id}' of '{component_id}' requires unique nonempty string choices")]
+    InvalidFieldChoices {
+        component_id: ComponentTypeId,
+        field_id: ComponentFieldId,
+    },
+    #[error("field '{field_id}' of '{component_id}' requires four float channels for {hint:?}")]
+    InvalidFieldEditorHint {
+        component_id: ComponentTypeId,
+        field_id: ComponentFieldId,
+        hint: ComponentFieldEditorHint,
     },
     #[error("invalid initial value in component '{component_id}': {source}")]
     InvalidComponentAuthoringInitialValue {
@@ -279,6 +291,32 @@ fn validate_field(
     field: &ComponentFieldSchema,
 ) -> Result<(), ComponentRegistryError> {
     validate_aliases(&schema.id, Some(&field.id), &field.aliases)?;
+    if !field.choices().is_empty() {
+        let mut seen = BTreeSet::new();
+        if !field.shape.contains_kind(ComponentValueKind::String)
+            || field
+                .choices()
+                .iter()
+                .any(|choice| choice.trim().is_empty() || !seen.insert(choice))
+        {
+            return Err(ComponentRegistryError::InvalidFieldChoices {
+                component_id: schema.id.clone(),
+                field_id: field.id.clone(),
+            });
+        }
+    }
+    if let Some(hint @ ComponentFieldEditorHint::LinearRgba) = field.editor_hint()
+        && !matches!(field.shape(), ComponentValueShape::Record { members }
+            if members.len() == 4 && ["r", "g", "b", "a"].iter().all(|channel|
+                members.iter().any(|member| member.name == *channel
+                    && matches!(member.shape, ComponentValueShape::Scalar { kind: ComponentValueKind::F64, .. }))))
+    {
+        return Err(ComponentRegistryError::InvalidFieldEditorHint {
+            component_id: schema.id.clone(),
+            field_id: field.id.clone(),
+            hint,
+        });
+    }
     let invalid_capability = |capability| ComponentRegistryError::InvalidFieldCapability {
         component_id: schema.id.clone(),
         field_id: field.id.clone(),

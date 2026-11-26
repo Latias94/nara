@@ -2,7 +2,8 @@ target/
 repo-ref/
 .worktrees/
 .nara-supervised-play-canary-*/
-.nara/schema_cache.json
+**/.nara/schema_cache.json
+**/.nara/editor-layout.json
 __pycache__/
 docs/reviews/
 .codex-research/

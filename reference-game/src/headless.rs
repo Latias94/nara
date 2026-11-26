@@ -4,11 +4,16 @@ use std::{error::Error, time::Duration};
 
 use nara::prelude::*;
 
-use crate::{Failure, GamePlugin, PilotInput, Round, RoundStatus, RunRules, arena};
+use crate::{Failure, GamePlugin, PilotInput, Round, RoundStatus, RunRules, arena::CELL_COUNT};
 
 type GameResult<T> = Result<T, Box<dyn Error>>;
 const STEP: Duration = FixedTime::DEFAULT_TIMESTEP;
 pub const MAX_ROUNDS: u32 = 200;
+const START: Vec2 = at(2, 2);
+
+const fn at(column: usize, row: usize) -> Vec2 {
+    Vec2::new((column as f32 - 10.0) * 32.0, (5.0 - row as f32) * 32.0)
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct StressReport {
@@ -22,7 +27,7 @@ pub fn run_stress(rounds: u32) -> GameResult<StressReport> {
     if !(1..=MAX_ROUNDS).contains(&rounds) {
         return Err(format!("choose 1–{MAX_ROUNDS} stress rounds").into());
     }
-    let mut app = new_app(RunRules::default())?;
+    let mut app = new_app(GamePlugin::default())?;
     let baseline = exercise_round(&mut app)?;
     for _ in 1..rounds {
         if exercise_round(&mut app)? != baseline {
@@ -40,11 +45,11 @@ pub fn run_stress(rounds: u32) -> GameResult<StressReport> {
     Ok(report)
 }
 
-fn new_app(rules: RunRules) -> GameResult<App> {
+fn new_app(game: GamePlugin) -> GameResult<App> {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins::headless())?
         .register_schema::<RunRules>()?
-        .add_plugins(GamePlugin(rules))?;
+        .add_plugins(game)?;
     Ok(app)
 }
 
@@ -55,7 +60,7 @@ fn exercise_round(app: &mut App) -> GameResult<(u32, Round)> {
     }
     let round = app.world().resource::<Round>();
     let contacts = round.wall_contacts();
-    if contacts == 0 || round.position().x < arena::at(1, 2).x - 6.1 {
+    if contacts == 0 || round.position().x < at(1, 2).x - 6.1 {
         return Err("the west wall did not stop the pilot".into());
     }
 
@@ -94,7 +99,7 @@ fn exercise_round(app: &mut App) -> GameResult<(u32, Round)> {
         ],
     )?;
     let round = app.world().resource::<Round>();
-    if round.status() != RoundStatus::Escaped || round.collected() != arena::CELLS.len() {
+    if round.status() != RoundStatus::Escaped || round.collected() != CELL_COUNT {
         return Err("the pilot could not power the gate and escape".into());
     }
     Ok((contacts, round.clone()))
@@ -108,7 +113,7 @@ fn restart(app: &mut App) -> GameResult<()> {
     app.step_fixed(STEP)?;
     let round = app.world().resource::<Round>();
     if round.status() != RoundStatus::Running
-        || round.position() != arena::START
+        || round.position() != START
         || round.collected() != 0
         || !round.elapsed.is_zero()
     {
@@ -126,7 +131,7 @@ fn step(app: &mut App, movement: Vec2) -> GameResult<()> {
 fn follow(app: &mut App, route: &[(usize, usize)]) -> GameResult<()> {
     let stride = RunRules::default().move_speed * STEP.as_secs_f32();
     for &(column, row) in route {
-        let target = arena::at(column, row);
+        let target = at(column, row);
         for _ in 0..240 {
             let round = app.world().resource::<Round>();
             if round.status() == RoundStatus::Escaped || round.position().distance(target) < 0.1 {
@@ -158,10 +163,10 @@ mod tests {
 
     #[test]
     fn time_expiry_freezes_the_round_until_restart() -> GameResult<()> {
-        let mut app = new_app(RunRules {
+        let mut app = new_app(GamePlugin::default().with_rules(RunRules {
             time_limit_seconds: 1,
             ..Default::default()
-        })?;
+        }))?;
         for _ in 0..60 {
             step(&mut app, Vec2::ZERO)?;
         }
@@ -172,22 +177,56 @@ mod tests {
         restart(&mut app)?;
         step(&mut app, Vec2::X)?;
         let round = app.world().resource::<Round>();
-        assert!(round.position().x > arena::START.x);
+        assert!(round.position().x > START.x);
         assert_eq!(round.shields(), RunRules::default().shield_charges);
         Ok(())
     }
 
     #[test]
     fn reaching_an_unpowered_gate_keeps_the_round_running() -> GameResult<()> {
-        let mut app = new_app(RunRules::default())?;
+        let mut app = new_app(GamePlugin::default())?;
         follow(
             &mut app,
             &[(2, 5), (8, 5), (8, 4), (19, 4), (19, 9), (17, 9), (17, 8)],
         )?;
         let round = app.world().resource::<Round>();
-        assert!(round.position().distance(arena::GATE) < 0.1);
+        assert!(round.position().distance(at(17, 8)) < 0.1);
         assert_eq!(round.collected(), 0);
         assert_eq!(round.status(), RoundStatus::Running);
+        Ok(())
+    }
+
+    #[test]
+    fn authored_rules_and_positions_drive_the_fixed_simulation() -> GameResult<()> {
+        let mut scene = crate::arena::bundled_scene()?;
+        let spawn = Vec2::new(-256.0, 128.0);
+        for entity in &mut scene.entities {
+            match entity.name.as_str() {
+                "Courier" | "Power cell A" => entity.set(&Transform2d::from_translation(spawn))?,
+                "West bulkhead" => entity.set(&Transform2d::from_xy(-288.0, 0.0))?,
+                "Round rules" => entity.set(&RunRules {
+                    time_limit_seconds: 12,
+                    move_speed: 240.0,
+                    shield_charges: 4,
+                })?,
+                _ => {}
+            }
+        }
+        let mut app = new_app(GamePlugin::from_scene(scene))?;
+        let round = app.world().resource::<Round>();
+        assert_eq!(round.position(), spawn);
+        assert_eq!(round.remaining(), Duration::from_secs(12));
+        assert_eq!(round.shields(), 4);
+        step(&mut app, Vec2::NEG_X)?;
+        let round = app.world().resource::<Round>();
+        assert!((round.position().x - (spawn.x - 4.0)).abs() < 0.01);
+        assert_eq!(round.collected(), 1);
+        for _ in 0..30 {
+            step(&mut app, Vec2::NEG_X)?;
+        }
+        let round = app.world().resource::<Round>();
+        assert!(round.wall_contacts() > 0);
+        assert!((-263.0..-261.0).contains(&round.position().x));
         Ok(())
     }
 }

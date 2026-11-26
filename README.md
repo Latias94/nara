@@ -15,7 +15,7 @@ See the [strategy](STRATEGY.md), [architecture](docs/architecture/overview.md), 
 - code-first scenes, typed asset handles, PNG loading, and project Schema discovery;
 - a headless project CLI for project creation, validation, Schema discovery, and supervised Play;
 - a deterministic 2D reference game with sprites, input, HUD, and headless and desktop entry points;
-- a two-window shared-viewport example for the editor's WGPU integration.
+- a native editor with a shared WGPU Scene View, dockable panels, Schema editing, and external Play.
 
 ## Requirements
 
@@ -45,6 +45,9 @@ cargo run --manifest-path reference-game/Cargo.toml --locked --features desktop 
 ```
 
 See [`reference-game/README.md`](reference-game/README.md) for the gameplay controls and project layout.
+
+Follow the [native editor guide](docs/guides/native-editor.md) to open Night Relay, edit its authored
+scene, and play the current edit using a sibling Open-GPUI checkout.
 
 The [short code-first game](examples/first_game.rs) demonstrates movement, sprite animation, a
 tilemap, collision, sound, and a HUD. Run it with the features below.

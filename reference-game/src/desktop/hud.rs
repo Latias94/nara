@@ -165,7 +165,7 @@ pub(super) fn update(
                     readout.seconds / 60,
                     readout.seconds % 60,
                     readout.cells,
-                    arena::CELLS.len(),
+                    arena::CELL_COUNT,
                     readout.shields,
                 ))
                 .with_brush(UiBrush::Solid(
@@ -176,7 +176,7 @@ pub(super) fn update(
                     },
                 )),
             Label::Objective => text.clone().with_content(if round.can_extract() {
-                "Gate powered. Fly to the lower-right exit."
+                "Gate powered. Fly to the exit."
             } else {
                 "Collect all three amber cells to power the exit."
             }),

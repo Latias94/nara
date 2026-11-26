@@ -28,5 +28,10 @@ inspector, prefab overrides, and future animation. Use compact `PackedU16`, `Pac
   directory sorted by `AssetId`. Support optional per-entry LZ4 compression and independent reads.
 - Let the game own its save snapshots separately from its cooked asset and scene formats.
 
-Phase 3B retires the old JSON scene and `.pack` workflows. The starter and reference game construct
-their worlds in Rust. Phase 5 introduces the formats above for authoring and distribution.
+Phase 3B retires the old JSON scene and `.pack` workflows. Phase 4 introduces the flat
+`.nara.scene.ron` and `.nara.prefab.ron` source table to support the native editor and Night Relay.
+The table holds document and entity UUIDs, optional parent UUIDs, and versioned component values.
+`nara_scene::authoring` owns validation and atomic saves, and the existing `nara_reflect`
+`PersistentComponent` derive supplies the schema and typed codecs. Projects may keep code-first
+world construction. Phase 5 adds compact fields, nested prefab expansion and overrides, asset UUID
+sidecars, and cooked distribution.

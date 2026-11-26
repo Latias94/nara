@@ -732,6 +732,7 @@ fn field_schema(field: &PersistentField, support: &TokenStream2) -> TokenStream2
         )
         #additional_aliases
         .with_capabilities([#(#capability_tokens),*])
+        .with_editor_hint(<#ty as #support::PersistentFieldCodec>::EDITOR_HINT)
         #interval
     }
 }
