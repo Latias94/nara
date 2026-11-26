@@ -107,16 +107,10 @@ impl PreparedCatalog {
     pub(super) fn prepare(
         world: &World,
         content: ResidencyInput<'_>,
-        #[cfg(feature = "runtime-2d")] current: Option<&ProjectSceneResidency>,
+        current: Option<&ProjectSceneResidency>,
         addition_to: Option<&ProjectSceneResidency>,
     ) -> Result<Self, HostFault> {
-        let bytes = metadata_bytes(
-            world,
-            content,
-            #[cfg(feature = "runtime-2d")]
-            current,
-            addition_to,
-        )?;
+        let bytes = metadata_bytes(world, content, current, addition_to)?;
         match content {
             #[cfg(feature = "project-source")]
             ResidencyInput::Source(snapshot) => {
@@ -297,7 +291,7 @@ impl PreparedCatalog {
 fn metadata_bytes(
     world: &World,
     content: ResidencyInput<'_>,
-    #[cfg(feature = "runtime-2d")] current: Option<&ProjectSceneResidency>,
+    current: Option<&ProjectSceneResidency>,
     addition_to: Option<&ProjectSceneResidency>,
 ) -> Result<usize, HostFault> {
     // One conservative logical reservation covers both preparation and its committed receipts.
@@ -305,17 +299,20 @@ fn metadata_bytes(
     // their own capacity model. No catalog, path or source hash is manufactured for Runtime data.
     let mut bytes = size_of::<ProjectSceneResidency>()
         + size_of::<PreparedResidency>()
-        + size_of::<StagedProjectSceneReplacement>();
-    // SceneAssetReservations owns an original baseline and a staged catalogue. Residency also
-    // retains a staged clone across native waits. Include every existing binding, including
-    // unrelated Products, path aliases and anonymous claims, before any of those clones.
+        + size_of::<nara_scene::current_scene::StagedCurrentSceneReplacement>();
+    // SceneAssetReservations owns the original baseline and the staged catalogue. Startup
+    // and 2D additive activation also clone the staged catalogue before publication.
     let catalogue_bytes = match world.get_resource::<AssetServer>() {
         Some(server) => server
             .checked_retained_bytes()
             .ok_or_else(metadata_overflow)?,
         None => size_of::<AssetServer>(),
     };
-    let staged_copies = 2;
+    let staged_copies = match (current, addition_to) {
+        (Some(_), _) => 1,
+        (None, Some(_)) if !cfg!(feature = "runtime-2d") => 1,
+        _ => 2,
+    };
     add_entries(&mut bytes, 1 + staged_copies, catalogue_bytes)?;
     if addition_to.is_some() {
         add_entries(&mut bytes, 1, size_of::<additive::ActiveAddition>())?;
@@ -376,6 +373,7 @@ fn stock_metadata_bytes(
                 .images
                 .len()
                 .checked_add(content.tilesets.len())
+                .and_then(|products| products.checked_add(content.materials.len()))
                 .ok_or_else(metadata_overflow)?;
             add_entries(
                 bytes,

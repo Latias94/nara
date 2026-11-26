@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use nara_asset::{AssetId, AssetMutationBaseline, AssetStates, Assets, Handle};
+use nara_asset::{AssetId, AssetStates, Assets, Handle};
 #[cfg(feature = "project-source")]
 use nara_asset::{AssetRecord, AssetRef, AssetSourceKind, SourceHash};
 use nara_ecs::World;
@@ -14,29 +14,13 @@ use nara_scene::advanced::SceneAssetReservations;
 
 use super::{
     HostFault, ProjectSceneResidency, ResidencyInput, binding_changed, failure,
-    images::ImagePublications, resources_missing,
+    images::ImagePublications, resources_missing, stock::StockChange,
 };
-
-#[derive(Clone, Copy)]
-pub(super) enum TileSetChange<'a> {
-    Replace(Option<&'a ProjectSceneResidency>),
-    Add(&'a ProjectSceneResidency),
-}
-
-impl<'a> TileSetChange<'a> {
-    fn current(self) -> Option<&'a ProjectSceneResidency> {
-        match self {
-            Self::Replace(current) => current,
-            Self::Add(current) => Some(current),
-        }
-    }
-}
 
 #[derive(Default)]
 pub(super) struct TileSetChanges {
     pub(super) inputs: Vec<TileSetPublicationInput>,
     pub(super) retirements: Vec<TileSetContentReceipt>,
-    pub(super) slots: Vec<AssetMutationBaseline<TileSet>>,
     pub(super) uses: Vec<Handle<TileSet>>,
     pub(super) new_handles: BTreeSet<AssetId>,
 }
@@ -45,19 +29,12 @@ impl TileSetChanges {
     pub(super) fn has_publications(&self) -> bool {
         !self.inputs.is_empty() || !self.retirements.is_empty()
     }
-
-    pub(super) fn share_inputs(&self) -> Result<Vec<TileSetPublicationInput>, HostFault> {
-        self.inputs
-            .iter()
-            .map(|input| input.share_retained().ok_or_else(resources_missing))
-            .collect()
-    }
 }
 
 pub(super) fn prepare(
     world: &World,
     content: ResidencyInput<'_>,
-    change: TileSetChange<'_>,
+    change: StockChange<'_>,
     bindings: &mut SceneAssetReservations,
     images: &ImagePublications,
 ) -> Result<TileSetChanges, HostFault> {
@@ -65,10 +42,18 @@ pub(super) fn prepare(
         .current()
         .into_iter()
         .flat_map(ProjectSceneResidency::owned_tilesets);
-    let additive = matches!(change, TileSetChange::Add(_));
+    let additive = change.is_additive();
     if content.tileset_count() == 0 && (additive || owned.clone().next().is_none()) {
         return Ok(TileSetChanges::default());
     }
+    let values = world.resource::<Assets<TileSet>>();
+    let states = world.resource::<AssetStates>();
+    let validate_slot = |handle| {
+        values
+            .prepare_mutation(handle, states)
+            .map(|_| ())
+            .map_err(|_| tileset_failure(TileSetAssetError::Superseded))
+    };
     let old = owned
         .clone()
         .map(|receipt| (receipt.handle().id(), receipt))
@@ -88,12 +73,7 @@ pub(super) fn prepare(
         if !next_ids.insert(handle.id()) {
             return Err(binding_changed());
         }
-        changes.slots.push(
-            world
-                .resource::<Assets<TileSet>>()
-                .prepare_mutation(handle, world.resource::<AssetStates>())
-                .map_err(|_| tileset_failure(TileSetAssetError::Superseded))?,
-        );
+        validate_slot(handle)?;
         if additive {
             changes.uses.push(handle);
         }
@@ -181,12 +161,7 @@ pub(super) fn prepare(
                 .cloned(),
         );
         for receipt in &changes.retirements {
-            changes.slots.push(
-                world
-                    .resource::<Assets<TileSet>>()
-                    .prepare_mutation(receipt.handle(), world.resource::<AssetStates>())
-                    .map_err(|_| tileset_failure(TileSetAssetError::Superseded))?,
-            );
+            validate_slot(receipt.handle())?;
         }
     }
     Ok(changes)

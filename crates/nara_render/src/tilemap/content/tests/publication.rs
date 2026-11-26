@@ -852,8 +852,17 @@ fn commit_rejects_state_drift_before_removing_an_owned_source() {
             &fixture.states,
         )
         .unwrap();
+    assert!(
+        prepared
+            .validate_slots(&fixture.tilesets, &fixture.states)
+            .is_ok()
+    );
     fixture.states.set_loading(handle.id());
     let changed_state = fixture.states.state_revision(handle.id());
+    assert!(matches!(
+        prepared.validate_slots(&fixture.tilesets, &fixture.states),
+        Err(TileSetAssetError::Superseded)
+    ));
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         prepared.commit(
             &fixture.server,

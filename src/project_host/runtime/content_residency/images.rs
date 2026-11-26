@@ -11,7 +11,9 @@ pub(super) use nara_render::image::{
 };
 use nara_scene::advanced::SceneAssetReservations;
 
-use super::{HostFault, ProjectSceneResidency, ResidencyInput, binding_changed, failure};
+use super::{
+    HostFault, ProjectSceneResidency, ResidencyInput, binding_changed, failure, stock::StockChange,
+};
 use crate::runtime_content::{RuntimeContentAsset, RuntimeContentLease};
 
 struct RuntimeImageOwner {
@@ -20,26 +22,22 @@ struct RuntimeImageOwner {
     _metadata: Arc<RuntimeContentLease>,
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum ImageChange<'a> {
-    Replace(Option<&'a ProjectSceneResidency>),
-    Add(&'a ProjectSceneResidency),
-}
-
 pub(super) fn prepare(
     content: ResidencyInput<'_>,
-    change: ImageChange<'_>,
+    change: StockChange<'_>,
     bindings: &mut SceneAssetReservations,
     server: &AssetServer,
     images: &Assets<ImageAsset>,
     states: &AssetStates,
     runtime_lease: Option<&Arc<RuntimeContentLease>>,
 ) -> Result<ImagePublications, HostFault> {
-    let (current, mode) = match change {
-        ImageChange::Replace(current) => (current, ImagePublicationMode::Replace),
-        ImageChange::Add(current) => (Some(current), ImagePublicationMode::Add),
+    let mode = if change.is_additive() {
+        ImagePublicationMode::Add
+    } else {
+        ImagePublicationMode::Replace
     };
-    let owned = current
+    let owned = change
+        .current()
         .into_iter()
         .flat_map(ProjectSceneResidency::owned_images);
     if mode == ImagePublicationMode::Replace {

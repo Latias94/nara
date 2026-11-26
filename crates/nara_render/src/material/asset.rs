@@ -11,10 +11,15 @@ use crate::material::{
     MaterialParameterValues, MaterialUpdateError,
 };
 
+mod publication;
 mod runtime;
 mod source;
 mod wire;
 
+pub use publication::{
+    Material2dContentReceipt, Material2dPublicationError, Material2dPublicationInput,
+    Material2dPublicationMode, PreparedMaterial2dPublications,
+};
 pub use runtime::Material2dRuntimeCodec;
 pub use source::{Material2dDomain, Material2dSource};
 

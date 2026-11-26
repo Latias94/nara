@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     convert::Infallible,
     fs,
     path::PathBuf,
@@ -8,8 +9,8 @@ use std::{
 use crate::fs::ContentDigest;
 use nara_asset::{
     AssetImportSource, AssetMeta, AssetMetaIdentity, AssetMetaIdentityCandidate, AssetPath,
-    AssetRecord, AssetSourcePath, ImportedProductId, RuntimeAssetCodec, SourceAssetImporter,
-    StableAssetId,
+    AssetRecord, AssetSourcePath, Handle, ImportedProductId, LoadState, RuntimeAssetCodec,
+    SourceAssetImporter, StableAssetId,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_reflect::{ComponentSchemaVersion, ComponentTypeId};
@@ -345,8 +346,7 @@ fn processed_binding_outlives_residency_and_releases_original_acquisition_and_me
     let mut world = world();
     publish_processed_startup(&mut world, &content).unwrap();
     let residency = world.resource::<ProjectSceneResidency>();
-    let metadata = Arc::downgrade(&residency.stock.materials.owned[0].identity._metadata);
-    let handle = residency.stock.materials.owned[0].handle;
+    let handle = residency.stock.materials[0].handle();
     let published = world
         .resource::<Assets<Material2dAsset>>()
         .get(handle)
@@ -358,10 +358,8 @@ fn processed_binding_outlives_residency_and_releases_original_acquisition_and_me
     drop(original_generation);
     drop(content);
     drop(world);
-    assert!(metadata.upgrade().is_some());
-    assert!(retained_bytes(&base) >= baseline + acquisition_bytes);
+    assert!(retained_bytes(&base) > baseline + acquisition_bytes);
     drop(binding);
-    assert!(metadata.upgrade().is_none());
     assert_eq!(retained_bytes(&base), baseline);
 }
 
@@ -409,7 +407,7 @@ fn raw_material_mutation_revokes_retirement_receipt() {
     let mut world = world();
     publish_processed_startup(&mut world, &content).unwrap();
     let current = world.resource::<ProjectSceneResidency>();
-    let handle = current.stock.materials.owned[0].handle;
+    let handle = current.stock.materials[0].handle();
     let prepared =
         PreparedResidency::prepare(&world, ResidencyInput::Processed(&empty), Some(current))
             .unwrap();
@@ -425,6 +423,56 @@ fn raw_material_mutation_revokes_retirement_receipt() {
             .get(handle)
             .is_some()
     );
+}
+
+#[test]
+fn first_conflicting_material_is_rejected_before_reserving_a_later_destination() {
+    let (_fixture, base) = Fixture::open();
+    let mut content = base.prepare_scene_content(product(STARTUP)).unwrap();
+    Arc::get_mut(&mut content).unwrap().materials.push(
+        base.acquire_asset::<Material2dDomain, Material2dRuntimeCodec>(product(OTHER_MATERIAL))
+            .unwrap(),
+    );
+    let mut world = world();
+    let mut server = world.resource_mut::<AssetServer>();
+    let incumbent = server
+        .reserve_product::<Material2dAsset>(product(MATERIAL))
+        .unwrap();
+    server
+        .reserve_product::<String>(product(OTHER_MATERIAL))
+        .unwrap();
+    let server = server.clone();
+    let value = material();
+    world
+        .resource_mut::<Assets<Material2dAsset>>()
+        .insert(incumbent, value.clone());
+    let input = ResidencyInput::Processed(&content);
+    let change = StockChange::Replace(None);
+    let metadata = reserve(input, change).unwrap();
+    let result = prepare(
+        &world,
+        input,
+        change,
+        &mut SceneAssetReservations::from_world(&world),
+        &ImagePublications::empty(),
+        metadata,
+    );
+    let fault = result.err().unwrap();
+    assert!(fault.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.scene.material-ownership-changed"
+    }));
+    assert_eq!(world.resource::<AssetServer>(), &server);
+    assert_eq!(
+        world.resource::<Assets<Material2dAsset>>().get(incumbent),
+        Some(&value)
+    );
+    assert!(
+        world
+            .resource::<AssetStates>()
+            .state(incumbent.id())
+            .is_none()
+    );
+    assert_eq!(world.resource::<AssetEvents>().iter().count(), 0);
 }
 
 #[test]
@@ -449,5 +497,5 @@ fn incumbent_image_binding_cannot_satisfy_a_missing_candidate_texture() {
         .commit_loaded(image, &mut values, &mut states, &mut events, None, None)
         .unwrap();
     assert!(values.get(handle).is_some());
-    assert!(validate_image(&ImagePublications::empty(), &server, handle, reference).is_err());
+    assert!(planned_image(&ImagePublications::empty(), &server, reference).is_err());
 }

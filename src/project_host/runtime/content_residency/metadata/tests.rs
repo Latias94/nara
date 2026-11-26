@@ -157,14 +157,7 @@ fn unrelated_catalogue_snapshots_refuse_before_residency_clones_and_release_thei
     let input = ResidencyInput::Processed(&content);
     let mut world = World::new();
     world.insert_resource(AssetServer::new());
-    let small_bytes = metadata_bytes(
-        &world,
-        input,
-        #[cfg(feature = "runtime-2d")]
-        None,
-        None,
-    )
-    .unwrap();
+    let small_bytes = metadata_bytes(&world, input, None, None).unwrap();
     let before = active_retained_bytes(&base);
     let prepared = PreparedResidency::prepare(&world, input, None).unwrap();
     assert_eq!(active_retained_bytes(&base) - before, small_bytes);
@@ -188,14 +181,7 @@ fn unrelated_catalogue_snapshots_refuse_before_residency_clones_and_release_thei
         .resource::<AssetServer>()
         .checked_retained_bytes()
         .unwrap();
-    let large_bytes = metadata_bytes(
-        &world,
-        input,
-        #[cfg(feature = "runtime-2d")]
-        None,
-        None,
-    )
-    .unwrap();
+    let large_bytes = metadata_bytes(&world, input, None, None).unwrap();
     assert_eq!(
         large_bytes - small_bytes,
         3 * (large_catalogue - empty_catalogue),
@@ -222,4 +208,50 @@ fn unrelated_catalogue_snapshots_refuse_before_residency_clones_and_release_thei
     assert!(!world.contains_resource::<ProjectSceneResidency>());
     assert!(!world.contains_resource::<ProjectAssetDatabase>());
     assert!(!world.contains_resource::<Assets<UnrelatedAsset>>());
+}
+
+#[test]
+fn replacement_reserves_only_its_two_catalogue_snapshots() {
+    let (_fixture, base, content) = Fixture::open();
+    let input = ResidencyInput::Processed(&content);
+    let mut world = World::new();
+    world.insert_resource(AssetServer::new());
+    publish_processed_startup(&mut world, &content).unwrap();
+    let empty_catalogue = world
+        .resource::<AssetServer>()
+        .checked_retained_bytes()
+        .unwrap();
+    let small_bytes = metadata_bytes(
+        &world,
+        input,
+        Some(world.resource::<ProjectSceneResidency>()),
+        None,
+    )
+    .unwrap();
+    world
+        .resource_mut::<AssetServer>()
+        .reserve::<String>("unrelated/file.bin")
+        .unwrap();
+    let large_catalogue = world
+        .resource::<AssetServer>()
+        .checked_retained_bytes()
+        .unwrap();
+    let admitted_bytes = small_bytes + 2 * (large_catalogue - empty_catalogue);
+    let before = active_retained_bytes(&base);
+    let remaining = RuntimeContentLimits::default().retained_bytes().get() - before;
+    let held = base.reserve_retained(remaining - admitted_bytes).unwrap();
+    let prepared = PreparedResidency::prepare(
+        &world,
+        input,
+        Some(world.resource::<ProjectSceneResidency>()),
+    )
+    .unwrap_or_else(|fault| {
+        panic!(
+            "replacement must fit two snapshots: {:?}",
+            fault.diagnostics
+        )
+    });
+    assert_eq!(active_retained_bytes(&base) - before, remaining);
+    drop((prepared, held));
+    assert_eq!(active_retained_bytes(&base), before);
 }

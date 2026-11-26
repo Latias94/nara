@@ -2,10 +2,10 @@ use super::*;
 
 use nara_app::CoreStage;
 use nara_asset::{
-    AssetEvent, AssetEvents, AssetPathScope, AssetRecord, AssetServer, AssetSlotRevision,
-    AssetSourceChanges, AssetSourcePath, AssetSourcePlugin, AssetState, AssetStateRevision,
-    AssetStates, Handle, ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion,
-    LoadState, ProjectAssetDatabase, SourceHash,
+    AssetEvent, AssetEvents, AssetPathScope, AssetProductRef, AssetRecord, AssetServer,
+    AssetSlotRevision, AssetSourceChanges, AssetSourcePath, AssetSourcePlugin, AssetState,
+    AssetStateRevision, AssetStates, Handle, ImportDependencyDigest, ImportRecipe,
+    ImportedProductId, ImporterId, ImporterVersion, LoadState, ProjectAssetDatabase, SourceHash,
 };
 use nara_core::{ByteLimit, ItemLimit, Vec2};
 use nara_ecs::identity::SpawnedSceneInstance;
@@ -257,22 +257,26 @@ fn write_image(project: &TestProject, path: &str, id: &str, color: [u8; 4]) {
 }
 
 fn write_tileset(project: &TestProject, atlas: TileAtlasLayout) {
+    write_tileset_asset(project, "terrain.tileset.ron", TILESET_ID, atlas);
+}
+
+fn write_tileset_asset(project: &TestProject, path: &str, id: &str, atlas: TileAtlasLayout) {
     let source = TileSetSource::new(AssetRef::path("unique.png").unwrap(), atlas);
     fs::write(
-        project.root.join("assets/terrain.tileset.ron"),
+        project.root.join("assets").join(path),
         source.encode_ron_bytes().unwrap(),
     )
     .unwrap();
     let metadata = AssetMeta::new(
         AssetMetaIdentity::new(
-            StableAssetId::parse_str(TILESET_ID).unwrap(),
-            AssetPath::new("terrain.tileset.ron").unwrap(),
+            StableAssetId::parse_str(id).unwrap(),
+            AssetPath::new(path).unwrap(),
             AssetSourceKind::Other(String::from("tileset")),
         ),
         (),
     );
     fs::write(
-        project.root.join("assets/terrain.tileset.ron.meta"),
+        project.root.join("assets").join(format!("{path}.meta")),
         metadata.to_json_string().unwrap(),
     )
     .unwrap();
@@ -297,39 +301,7 @@ fn write_scene(project: &TestProject, path: &str, name: &str, shared: bool, tile
         );
     }
     if tiles {
-        entities.push(
-            SceneEntityRecord::new(nara_ecs::identity::SceneEntityId::new("terrain").unwrap())
-                .with_component(
-                    ComponentTypeId::new("nara.transform.Transform2d"),
-                    identity_transform_record(),
-                )
-                .with_component(
-                    ComponentTypeId::new("nara.tilemap.Tilemap"),
-                    SceneComponentRecord::new(
-                        ComponentSchemaVersion::ONE,
-                        ComponentValue::map([
-                            (
-                                "tile_size",
-                                ComponentValue::map([
-                                    ("x", ComponentValue::f64(1.0).unwrap()),
-                                    ("y", ComponentValue::f64(1.0).unwrap()),
-                                ]),
-                            ),
-                            (
-                                "tileset",
-                                ComponentValue::map([
-                                    ("kind", ComponentValue::String(String::from("path"))),
-                                    (
-                                        "value",
-                                        ComponentValue::String(String::from("terrain.tileset.ron")),
-                                    ),
-                                ]),
-                            ),
-                            ("cells", ComponentValue::List(Vec::new())),
-                        ]),
-                    ),
-                ),
-        );
+        entities.push(tilemap_record("terrain", "terrain.tileset.ron"));
     }
     fs::write(
         project.root.join("scenes").join(path),
@@ -338,6 +310,37 @@ fn write_scene(project: &TestProject, path: &str, name: &str, shared: bool, tile
             .unwrap(),
     )
     .unwrap();
+}
+
+fn tilemap_record(id: &str, path: &str) -> SceneEntityRecord {
+    SceneEntityRecord::new(nara_ecs::identity::SceneEntityId::new(id).unwrap())
+        .with_component(
+            ComponentTypeId::new("nara.transform.Transform2d"),
+            identity_transform_record(),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.tilemap.Tilemap"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([
+                    (
+                        "tile_size",
+                        ComponentValue::map([
+                            ("x", ComponentValue::f64(1.0).unwrap()),
+                            ("y", ComponentValue::f64(1.0).unwrap()),
+                        ]),
+                    ),
+                    (
+                        "tileset",
+                        ComponentValue::map([
+                            ("kind", ComponentValue::String(String::from("path"))),
+                            ("value", ComponentValue::String(path.to_owned())),
+                        ]),
+                    ),
+                    ("cells", ComponentValue::List(Vec::new())),
+                ]),
+            ),
+        )
 }
 
 fn limits() -> SceneProductTransactionLimits {
@@ -1161,6 +1164,111 @@ fn hosted_residency_rejects_atlas_retention_stale_and_foreign_image_authority_be
             &b,
             "scene.current.expected-instance-mismatch",
         );
+    });
+    fixture.close();
+}
+
+#[test]
+fn hosted_replacement_reports_first_invalid_tileset_slot_before_later_type_conflict() {
+    let mut fixture = ResidencyFixture::new(false, None);
+    let later_path = "z-later.tileset.ron";
+    let later_id = "53000000-0000-4000-8000-000000000006";
+    write_tileset_asset(
+        &fixture.project,
+        later_path,
+        later_id,
+        TileAtlasLayout::grid(Vec2::ONE, 1, 1),
+    );
+    let scene = SceneDocument::from_ordered_roots([
+        tilemap_record("terrain", "terrain.tileset.ron"),
+        tilemap_record("z-later", later_path),
+    ]);
+    fs::write(
+        fixture.project.root.join("scenes/b.scene.json"),
+        scene.to_json_string().unwrap(),
+    )
+    .unwrap();
+    let snapshot = fixture.load("b.scene.json");
+    let original = StableAssetId::parse_str(TILESET_ID).unwrap();
+    let conflict = StableAssetId::parse_str(later_id).unwrap();
+    assert_eq!(
+        snapshot
+            .tilesets()
+            .iter()
+            .map(|tileset| tileset.stable_id())
+            .collect::<Vec<_>>(),
+        [original, conflict]
+    );
+    fixture.step(move |world| {
+        let original = AssetProductRef::new(original, ImportedProductId::PRIMARY).unwrap();
+        let handle = world
+            .resource::<AssetServer>()
+            .get_product_handle::<TileSet>(original)
+            .unwrap();
+        assert!(
+            world
+                .resource_mut::<Assets<TileSet>>()
+                .get_mut(handle)
+                .is_some()
+        );
+        let conflict = snapshot
+            .asset_database()
+            .record_for_stable_id(conflict)
+            .unwrap();
+        world
+            .resource_mut::<AssetServer>()
+            .reserve_record::<String>(conflict)
+            .unwrap();
+        let current = world.resource::<CurrentScene>().receipt().clone();
+        assert_rejected(
+            world,
+            &current,
+            &snapshot,
+            "project.scene.tileset-preparation-failed",
+        );
+    });
+    fixture.close();
+}
+
+#[test]
+fn hosted_overlay_rejection_returns_the_tileset_owner_and_releases_preparation_budget() {
+    let mut fixture = ResidencyFixture::new(false, None);
+    write_scene(&fixture.project, "b.scene.json", "level-b", true, true);
+    let snapshot = fixture.load("b.scene.json");
+    let budget = fixture.loader.budget_host();
+    fixture.step(move |world| {
+        let before = PublicationBaseline::capture(world);
+        let reservation_count = budget.snapshot().active_reservations();
+        let retained = budget
+            .snapshot()
+            .active(ProjectContentBudgetKind::RetainedBytes);
+        let report = replace_scene(
+            world,
+            &before.receipt,
+            &PreparedSceneContent::Source(snapshot.clone()),
+            limits(),
+            &[],
+            |overlay| {
+                overlay.insert_component(
+                    nara_ecs::identity::SceneEntityId::new("missing-target").unwrap(),
+                    nara_scene::spatial::Transform2d::IDENTITY,
+                );
+            },
+        );
+        assert!(report.instance.is_none());
+        assert!(report_has_code(
+            &report.diagnostics,
+            "scene.product-overlay-target-missing"
+        ));
+        assert_eq!(PublicationBaseline::capture(world), before);
+        assert_eq!(budget.snapshot().active_reservations(), reservation_count);
+        assert_eq!(
+            budget
+                .snapshot()
+                .active(ProjectContentBudgetKind::RetainedBytes),
+            retained
+        );
+        replace(world, &snapshot);
     });
     fixture.close();
 }

@@ -15,7 +15,9 @@ mod shader;
 
 #[cfg(feature = "material-asset")]
 pub use asset::{
-    Material2dAsset, Material2dDomain, Material2dRuntimeCodec, Material2dSource, MaterialAssetError,
+    Material2dAsset, Material2dContentReceipt, Material2dDomain, Material2dPublicationError,
+    Material2dPublicationInput, Material2dPublicationMode, Material2dRuntimeCodec,
+    Material2dSource, MaterialAssetError, PreparedMaterial2dPublications,
 };
 #[cfg(feature = "persistent")]
 pub use persistent::{

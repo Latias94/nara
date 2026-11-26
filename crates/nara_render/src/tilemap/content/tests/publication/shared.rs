@@ -53,7 +53,6 @@ fn explicit_source_share_preserves_publication_claim_and_pixel_owner_at_full_cap
     let claim_holders = Arc::strong_count(&claim);
     let observation = fixture.owner.entries[&handle.id()].observation.clone();
     let input = shared_input(&fixture, handle, source("a.png"), original_receipt.clone());
-    let retained_input = input.share_retained().unwrap();
     drop(
         fixture
             .owner
@@ -70,10 +69,11 @@ fn explicit_source_share_preserves_publication_claim_and_pixel_owner_at_full_cap
     assert_eq!(fixture.states.state_revision(handle.id()), state);
     assert_eq!(fixture.events.len(), events);
     assert_eq!(fixture.owner.retention(), retention);
+    let input = shared_input(&fixture, handle, source("a.png"), original_receipt.clone());
     let prepared = fixture
         .owner
         .prepare_publications(
-            vec![retained_input],
+            vec![input],
             &[],
             &fixture.server,
             Some(&fixture.database),

@@ -18,7 +18,7 @@ pub(super) use additive::activate_addition;
 pub(crate) use additive::has_active_project_scene_addition;
 pub use additive::unload_project_scene_addition;
 pub use instances::{inspect_current_scene_dependency, instantiate_current_scene_dependency};
-use replacement::StagedProjectSceneReplacement;
+pub(super) use replacement::replace_scene;
 
 #[cfg(feature = "project-source")]
 use nara_asset::AssetRecord;
@@ -52,7 +52,7 @@ use crate::{
 };
 use metadata::{PreparedCatalog, ResidencyAuthority};
 #[cfg(feature = "runtime-2d")]
-use stock::{PreparedStock, StockResidency};
+use stock::{PreparedStock, StockChange, StockResidency};
 
 #[derive(Resource)]
 pub(super) struct ProjectSceneResidency {
@@ -161,7 +161,7 @@ fn publish_startup_content(
     prepared.catalog.validate(world)?;
     #[cfg(feature = "runtime-2d")]
     {
-        prepared.stock.materials.validate(world)?;
+        prepared.stock.validate(world, None)?;
         // This owner borrow fences capacity and claims through the same synchronous tail used
         // by Scene replacement. Startup has no CurrentScene or live Scene to retire yet.
         if prepared.stock.tilesets.has_publications() {
@@ -263,20 +263,13 @@ impl PreparedResidency {
             current.authority.validate(content)?;
         }
         #[cfg(feature = "runtime-2d")]
-        let (material_change, material_custody) = {
+        let (change, material_metadata) = {
             stock::validate_resources(world, content, current)?;
-            let change = materials::MaterialChange::Replace(current);
-            let custody = materials::MaterialPublications::reserve(content, change)?;
-            (change, custody)
+            let change = StockChange::Replace(current);
+            (change, materials::reserve(content, change)?)
         };
         // Admission precedes all vectors, indices, catalogue copies and retained Image wrappers.
-        let catalog = PreparedCatalog::prepare(
-            world,
-            content,
-            #[cfg(feature = "runtime-2d")]
-            current,
-            None,
-        )?;
+        let catalog = PreparedCatalog::prepare(world, content, current, None)?;
         let bindings = SceneAssetReservations::from_world(world);
         #[cfg(feature = "runtime-2d")]
         let (bindings, stock) = {
@@ -285,28 +278,16 @@ impl PreparedResidency {
             if let (Some(_), ResidencyInput::Source(snapshot)) = (current, content) {
                 catalog.stage_source_relocations(snapshot, &mut bindings)?;
             }
-            let images = stock::prepare_images(
+            let images = stock::prepare_images(world, content, change, &mut bindings, &catalog)?;
+            let materials = materials::prepare(
                 world,
                 content,
-                images::ImageChange::Replace(current),
-                &mut bindings,
-                &catalog,
-            )?;
-            let materials = materials::MaterialPublications::prepare(
-                world,
-                content,
-                material_change,
+                change,
                 &mut bindings,
                 &images,
-                material_custody,
+                material_metadata,
             )?;
-            let tilesets = tilesets::prepare(
-                world,
-                content,
-                tilesets::TileSetChange::Replace(current),
-                &mut bindings,
-                &images,
-            )?;
+            let tilesets = tilesets::prepare(world, content, change, &mut bindings, &images)?;
             let stock = PreparedStock {
                 images,
                 materials,
@@ -320,46 +301,6 @@ impl PreparedResidency {
             stock,
             catalog,
         })
-    }
-}
-
-/// Stages and publishes the replacement at the same exclusive World boundary.
-pub(super) fn replace_scene<F>(
-    world: &mut World,
-    expected: &SpawnedSceneInstance,
-    content: &PreparedSceneContent,
-    limits: SceneProductTransactionLimits,
-    additional_retirements: &[SceneProductRetirement<'_>],
-    configure: F,
-) -> SceneSpawnReport
-where
-    F: FnOnce(&mut SceneProductOverlayWriter<'_>),
-{
-    match StagedProjectSceneReplacement::stage(
-        world,
-        expected,
-        content,
-        limits,
-        additional_retirements,
-        configure,
-    ) {
-        Ok(prepared) => match prepared.commit(world) {
-            Ok(report) => report,
-            Err((prepared, report)) => match prepared.discard(world) {
-                Ok(()) => report,
-                Err(_prepared) => {
-                    let mut report = report;
-                    report.diagnostics.push(Diagnostic::error(
-                        DiagnosticCode::new("project.scene.candidate-cleanup-incomplete")
-                            .expect("engine diagnostic code is valid"),
-                        SafeSummary::new("Rejected Scene candidate could not be safely discarded")
-                            .expect("static summary"),
-                    ));
-                    report
-                }
-            },
-        },
-        Err(report) => report,
     }
 }
 

@@ -15,11 +15,7 @@ use nara_scene::{SceneOccurrenceKey, retire_and_despawn_scene_instance};
 
 use super::*;
 #[cfg(feature = "runtime-2d")]
-use super::{
-    images::{ImageChange, ImagePublications},
-    materials::{MaterialChange, MaterialPublications},
-    tilesets::{TileSetChange, TileSetChanges},
-};
+use super::{images::ImagePublications, materials::MaterialPublications, tilesets::TileSetChanges};
 use crate::startup_scene::SceneSource;
 
 #[derive(Default)]
@@ -117,52 +113,33 @@ pub(in crate::project_host::runtime) fn activate_addition(
         }
     }
     #[cfg(feature = "runtime-2d")]
-    let (material_change, material_custody) = {
+    let (change, material_metadata) = {
         stock::validate_resources(world, input, Some(residency)).map_err(rejected)?;
-        let change = MaterialChange::Add(residency);
-        let custody = MaterialPublications::reserve(input, change).map_err(rejected)?;
-        (change, custody)
+        let change = StockChange::Add(residency);
+        (change, materials::reserve(input, change).map_err(rejected)?)
     };
-    let catalog = PreparedCatalog::prepare(
-        world,
-        input,
-        #[cfg(feature = "runtime-2d")]
-        None,
-        Some(residency),
-    )
-    .map_err(rejected)?;
+    let catalog =
+        PreparedCatalog::prepare(world, input, None, Some(residency)).map_err(rejected)?;
     let reservations = SceneAssetReservations::from_world(world);
     #[cfg(feature = "runtime-2d")]
     let (reservations, stock, staged_server) = {
         let mut reservations = reservations;
-        let images = stock::prepare_images(
-            world,
-            input,
-            ImageChange::Add(residency),
-            &mut reservations,
-            &catalog,
-        )
-        .map_err(rejected)?;
-        let tilesets = tilesets::prepare(
-            world,
-            input,
-            TileSetChange::Add(residency),
-            &mut reservations,
-            &images,
-        )
-        .map_err(rejected)?;
+        let images = stock::prepare_images(world, input, change, &mut reservations, &catalog)
+            .map_err(rejected)?;
+        let tilesets = tilesets::prepare(world, input, change, &mut reservations, &images)
+            .map_err(rejected)?;
         if !tilesets.inputs.is_empty()
             && transaction::validate_resource_scope::<TileSetAssets>(world).is_err()
         {
             return Err(rejected(lifecycle_unsupported()));
         }
-        let materials = MaterialPublications::prepare(
+        let materials = materials::prepare(
             world,
             input,
-            material_change,
+            change,
             &mut reservations,
             &images,
-            material_custody,
+            material_metadata,
         )
         .map_err(rejected)?;
         let staged_server = reservations.staged_server().clone();
@@ -238,6 +215,9 @@ impl PreparedAddition {
         self.catalog.validate(world).map_err(rejected)?;
         #[cfg(feature = "runtime-2d")]
         let (images, materials, uses, new_handles) = {
+            self.stock
+                .validate(world, tilesets.as_ref())
+                .map_err(rejected)?;
             let PreparedStock {
                 images,
                 materials,
@@ -246,11 +226,9 @@ impl PreparedAddition {
                         uses, new_handles, ..
                     },
             } = self.stock;
-            stock::validate_images(world, &images).map_err(rejected)?;
-            materials.validate(world).map_err(rejected)?;
             let uses = StockUses {
                 images: images.additive_products(),
-                materials: materials.products(),
+                materials: materials.additive_products(),
                 tilesets: uses,
             };
             (images, materials, uses, new_handles)
@@ -271,7 +249,7 @@ impl PreparedAddition {
             #[cfg(feature = "runtime-2d")]
             {
                 additions.stock.images.extend(stock.images);
-                additions.stock.materials.append(stock.materials);
+                additions.stock.materials.extend(stock.materials);
                 additions.stock.tilesets.extend(
                     stock
                         .tilesets
@@ -403,7 +381,7 @@ impl PreparedUnload {
             additions
                 .stock
                 .materials
-                .retain_products(|product| !retiring_materials.contains(&product));
+                .retain(|receipt| !retiring_materials.contains(&receipt.product()));
             additions
                 .stock
                 .tilesets
@@ -467,12 +445,12 @@ fn prepare_retirement(
         }
         retiring_catalog
     };
-    let materials = MaterialPublications::retire(
+    let materials = materials::retire(
         additions.stock.materials.iter().filter(|material| {
-            active.stock.materials.contains(&material.product)
+            active.stock.materials.contains(&material.product())
                 && !remaining
                     .iter()
-                    .any(|other| other.stock.materials.contains(&material.product))
+                    .any(|other| other.stock.materials.contains(&material.product()))
         }),
         world,
     )?;

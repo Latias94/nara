@@ -1,19 +1,19 @@
 use nara_asset::{AssetEvents, AssetServer, AssetStates, Assets, ProjectAssetDatabase};
-use nara_ecs::{Mut, Res, ResMut, World, bevy_ecs::system::SystemState};
+use nara_ecs::{Res, ResMut, World, bevy_ecs::system::SystemState};
 use nara_render::image::ImageAsset;
-use nara_render::material::Material2dAsset;
+use nara_render::material::Material2dContentReceipt;
 #[cfg(feature = "project-source")]
 use nara_render::material::Material2dDomain;
 use nara_render::tilemap::{
-    PreparedTileSetPublications, TileSet, TileSetAssetError, TileSetAssets, TileSetContentReceipt,
+    PreparedTileSetPublications, TileSet, TileSetAssets, TileSetContentReceipt,
     TileSetPublicationInput,
 };
 use nara_scene::advanced::SceneAssetReservations;
 
 use super::{
     HostFault, PreparedCatalog, ProjectSceneResidency, ResidencyInput,
-    images::{self, ImageChange, ImagePublications, OwnedImage, image_failure},
-    materials::{MaterialPublications, MaterialResidency, OwnedMaterial},
+    images::{self, ImagePublications, OwnedImage, image_failure},
+    materials::{self, MaterialPublications},
     resources_missing,
     tilesets::{TileSetChanges, tileset_failure},
 };
@@ -22,7 +22,7 @@ use super::{
 pub(super) struct StockResidency {
     pub(super) images: Vec<OwnedImage>,
     pub(super) tilesets: Vec<TileSetContentReceipt>,
-    pub(super) materials: MaterialResidency,
+    pub(super) materials: Vec<Material2dContentReceipt>,
 }
 
 impl ProjectSceneResidency {
@@ -34,15 +34,17 @@ impl ProjectSceneResidency {
         self.stock.images.len() + self.additions.stock.images.len()
     }
 
-    pub(super) fn owned_materials(&self) -> impl Iterator<Item = &OwnedMaterial> + Clone {
+    pub(super) fn owned_materials(
+        &self,
+    ) -> impl Iterator<Item = &Material2dContentReceipt> + Clone {
         self.stock
             .materials
             .iter()
-            .chain(self.additions.stock.materials.iter())
+            .chain(&self.additions.stock.materials)
     }
 
     pub(super) fn material_count(&self) -> usize {
-        self.owned_materials().count()
+        self.stock.materials.len() + self.additions.stock.materials.len()
     }
 
     pub(super) fn owned_tilesets(&self) -> impl Iterator<Item = &TileSetContentReceipt> + Clone {
@@ -92,15 +94,42 @@ pub(super) struct PreparedStock {
     pub(super) tilesets: TileSetChanges,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum StockChange<'a> {
+    Replace(Option<&'a ProjectSceneResidency>),
+    Add(&'a ProjectSceneResidency),
+}
+
+impl<'a> StockChange<'a> {
+    pub(super) fn current(self) -> Option<&'a ProjectSceneResidency> {
+        match self {
+            Self::Replace(current) => current,
+            Self::Add(current) => Some(current),
+        }
+    }
+
+    pub(super) fn is_additive(self) -> bool {
+        matches!(self, Self::Add(_))
+    }
+}
+
 impl PreparedStock {
-    pub(super) fn validate_replacement(&self, world: &World) -> Result<(), HostFault> {
-        for baseline in &self.tilesets.slots {
-            baseline
-                .validate(
-                    world.resource::<Assets<TileSet>>(),
-                    world.resource::<AssetStates>(),
+    pub(super) fn validate(
+        &self,
+        world: &World,
+        tilesets: Option<&PreparedTileSetPublications<'_>>,
+    ) -> Result<(), HostFault> {
+        if let Some(tilesets) = tilesets {
+            tilesets
+                .validate_slots(
+                    world
+                        .get_resource::<Assets<TileSet>>()
+                        .ok_or_else(resources_missing)?,
+                    world
+                        .get_resource::<AssetStates>()
+                        .ok_or_else(resources_missing)?,
                 )
-                .map_err(|_| tileset_failure(TileSetAssetError::Superseded))?;
+                .map_err(tileset_failure)?;
         }
         validate_images(world, &self.images)?;
         self.materials.validate(world)
@@ -110,12 +139,12 @@ impl PreparedStock {
 pub(super) fn prepare_images(
     world: &World,
     content: ResidencyInput<'_>,
-    change: ImageChange<'_>,
+    change: StockChange<'_>,
     bindings: &mut SceneAssetReservations,
     catalog: &PreparedCatalog,
 ) -> Result<ImagePublications, HostFault> {
     let retire_or_replace =
-        matches!(change, ImageChange::Replace(Some(current)) if current.image_count() != 0);
+        matches!(change, StockChange::Replace(Some(current)) if current.image_count() != 0);
     if !retire_or_replace && content.image_count() == 0 {
         return Ok(ImagePublications::empty());
     }
@@ -159,29 +188,6 @@ pub(super) fn prepare_tilesets<'owner>(
         .map_err(tileset_failure)
 }
 
-pub(super) fn probe_tilesets(
-    world: &mut World,
-    changes: &TileSetChanges,
-    server: &AssetServer,
-    catalog: &PreparedCatalog,
-) -> Result<(), HostFault> {
-    if !changes.has_publications() {
-        return Ok(());
-    }
-    let inputs = changes.share_inputs()?;
-    world.resource_scope(|world, mut owner: Mut<TileSetAssets>| {
-        prepare_tilesets(
-            world,
-            &mut owner,
-            inputs,
-            &changes.retirements,
-            server,
-            catalog.asset_database(),
-        )
-        .map(|_| ())
-    })
-}
-
 pub(super) fn validate_resources(
     world: &World,
     content: ResidencyInput<'_>,
@@ -198,13 +204,8 @@ pub(super) fn validate_resources(
     } else if uses_images {
         validate_image_resources(world)?;
     }
-    if uses_materials
-        && (!world.contains_resource::<AssetServer>()
-            || !world.contains_resource::<Assets<Material2dAsset>>()
-            || !world.contains_resource::<AssetStates>()
-            || !world.contains_resource::<AssetEvents>())
-    {
-        return Err(resources_missing());
+    if uses_materials {
+        materials::resources(world)?;
     }
     Ok(())
 }
@@ -229,7 +230,7 @@ fn validate_image_resources(world: &World) -> Result<(), HostFault> {
     Ok(())
 }
 
-pub(super) fn validate_images(world: &World, images: &ImagePublications) -> Result<(), HostFault> {
+fn validate_images(world: &World, images: &ImagePublications) -> Result<(), HostFault> {
     if images.is_empty() {
         return Ok(());
     }
@@ -263,31 +264,11 @@ pub(super) fn commit_publications(
             .expect("TileSet residency resources passed preflight");
         prepared.commit(&server, &images, &mut values, &mut states, &mut events)
     });
-    let materials = commit_materials(world, materials);
+    let materials = materials.commit(world);
     StockResidency {
         images,
         tilesets,
         materials,
-    }
-}
-
-pub(super) fn commit_materials(
-    world: &mut World,
-    materials: MaterialPublications,
-) -> MaterialResidency {
-    if materials.is_empty() {
-        MaterialResidency::default()
-    } else {
-        let mut access = SystemState::<(
-            Res<AssetServer>,
-            ResMut<Assets<Material2dAsset>>,
-            ResMut<AssetStates>,
-            ResMut<AssetEvents>,
-        )>::new(world);
-        let (server, mut values, mut states, mut events) = access
-            .get_mut(world)
-            .expect("Material residency resources passed preflight");
-        materials.commit(&server, &mut values, &mut states, &mut events)
     }
 }
 

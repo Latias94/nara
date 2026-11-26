@@ -1,182 +1,146 @@
-//! Owned CPU residency and Scene candidate for synchronous travel.
+//! Synchronous publication of a hosted primary Scene and its prepared content.
 
 use std::borrow::Cow;
 
 use nara_ecs::Mut;
-use nara_scene::current_scene::{StagedCurrentSceneReplacement, stage_current_scene_replacement};
+use nara_scene::current_scene::stage_current_scene_replacement;
 
 use super::*;
 
-pub(super) struct StagedProjectSceneReplacement<'content> {
-    scene: Option<StagedCurrentSceneReplacement>,
-    content: &'content PreparedSceneContent,
-    #[cfg(feature = "runtime-2d")]
-    staged_server: AssetServer,
-    #[cfg(feature = "runtime-2d")]
-    stock: PreparedStock,
-    catalog: PreparedCatalog,
+pub(in crate::project_host::runtime) fn replace_scene(
+    world: &mut World,
+    expected: &SpawnedSceneInstance,
+    content: &PreparedSceneContent,
+    limits: SceneProductTransactionLimits,
+    additional_retirements: &[SceneProductRetirement<'_>],
+    configure: impl FnOnce(&mut SceneProductOverlayWriter<'_>),
+) -> SceneSpawnReport {
+    try_replace(
+        world,
+        expected,
+        content,
+        limits,
+        additional_retirements,
+        configure,
+    )
+    .unwrap_or_else(|report| report)
 }
 
-impl<'content> StagedProjectSceneReplacement<'content> {
-    pub(super) fn stage<F>(
-        world: &mut World,
-        expected: &SpawnedSceneInstance,
-        content: &'content PreparedSceneContent,
-        limits: SceneProductTransactionLimits,
-        additional_retirements: &[SceneProductRetirement<'_>],
-        configure: F,
-    ) -> Result<Self, SceneSpawnReport>
-    where
-        F: FnOnce(&mut SceneProductOverlayWriter<'_>),
-    {
-        nara_scene::hierarchy::prepare_mutation_baseline(world);
-        let component_bindings = current_scene_bindings(world, expected)?;
-        validate_resources(
-            world,
-            #[cfg(feature = "runtime-2d")]
-            content.into(),
-        )
-        .map_err(rejected)?;
-        if !content.shares_component_bindings(&component_bindings) {
-            return Err(rejected(failure(
-                "project.scene.schema-mismatch",
-                "Prepared Scene uses another schema authority",
-            )));
-        }
-        world.resource_scope(|world, current: Mut<ProjectSceneResidency>| {
-            let scene_retirements =
-                scene_retirements(world, &current, limits, additional_retirements)
-                    .map_err(rejected)?;
-            let PreparedResidency {
-                // Bind the reservation first so every fallible local drops its catalogue copies
-                // and publication scratch before this metadata owner is released.
-                catalog,
-                bindings,
-                #[cfg(feature = "runtime-2d")]
-                stock,
-            } = PreparedResidency::prepare(world, content.into(), Some(&current))
-                .map_err(rejected)?;
-            #[cfg(feature = "runtime-2d")]
-            let staged_server = {
-                let server = bindings.staged_server();
-                stock::probe_tilesets(world, &stock.tilesets, server, &catalog)
-                    .map_err(rejected)?;
-                server.clone()
-            };
-            let scene = stage_current_scene_replacement(
-                world,
-                expected,
-                Some(content.scene_source()),
-                bindings,
-                limits,
-                &scene_retirements,
-                configure,
-            )?;
-            Ok(Self {
-                scene: Some(scene),
-                content,
-                #[cfg(feature = "runtime-2d")]
-                staged_server,
-                #[cfg(feature = "runtime-2d")]
-                stock,
-                catalog,
-            })
-        })
-    }
-
-    fn validate_content(&self, world: &World) -> Result<(), SceneSpawnReport> {
-        validate_resources(
-            world,
-            #[cfg(feature = "runtime-2d")]
-            self.content.into(),
-        )
-        .map_err(rejected)?;
-        let residency = world.resource::<ProjectSceneResidency>();
-        residency
-            .authority
-            .validate(self.content.into())
-            .map_err(rejected)?;
-        self.catalog.validate(world).map_err(rejected)?;
+fn try_replace(
+    world: &mut World,
+    expected: &SpawnedSceneInstance,
+    content: &PreparedSceneContent,
+    limits: SceneProductTransactionLimits,
+    additional_retirements: &[SceneProductRetirement<'_>],
+    configure: impl FnOnce(&mut SceneProductOverlayWriter<'_>),
+) -> Result<SceneSpawnReport, SceneSpawnReport> {
+    nara_scene::hierarchy::prepare_mutation_baseline(world);
+    let component_bindings = current_scene_bindings(world, expected)?;
+    let input = ResidencyInput::from(content);
+    validate_resources(
+        world,
         #[cfg(feature = "runtime-2d")]
-        self.stock.validate_replacement(world).map_err(rejected)?;
-        Ok(())
+        input,
+    )
+    .map_err(rejected)?;
+    if !content.shares_component_bindings(&component_bindings) {
+        return Err(rejected(failure(
+            "project.scene.schema-mismatch",
+            "Prepared Scene uses another schema authority",
+        )));
     }
-
-    pub(super) fn commit(
-        self,
-        world: &mut World,
-    ) -> Result<SceneSpawnReport, (Self, SceneSpawnReport)> {
-        world.flush();
-        if let Err(report) = self.validate_content(world) {
-            return Err((self, report));
-        }
+    world.resource_scope(|world, mut current: Mut<ProjectSceneResidency>| {
+        let retirements =
+            scene_retirements(world, &current, limits, additional_retirements).map_err(rejected)?;
+        let prepared =
+            PreparedResidency::prepare(world, input, Some(&current)).map_err(rejected)?;
         #[cfg(feature = "runtime-2d")]
-        if self.stock.tilesets.has_publications() {
-            let inputs = match self.stock.tilesets.share_inputs() {
-                Ok(inputs) => inputs,
-                Err(fault) => return Err((self, rejected(fault))),
-            };
-            return world.resource_scope(|world, mut owner: Mut<TileSetAssets>| {
-                let tilesets = match stock::prepare_tilesets(
+        let uses_tilesets = prepared.stock.tilesets.has_publications();
+        let replace =
+            |world: &mut World,
+             #[cfg(feature = "runtime-2d")] owner: Option<&mut TileSetAssets>| {
+                let PreparedResidency {
+                    catalog,
+                    bindings,
+                    #[cfg(feature = "runtime-2d")]
+                    mut stock,
+                } = prepared;
+                #[cfg(feature = "runtime-2d")]
+                let tilesets = owner
+                    .map(|owner| {
+                        stock::prepare_tilesets(
+                            world,
+                            owner,
+                            std::mem::take(&mut stock.tilesets.inputs),
+                            &stock.tilesets.retirements,
+                            bindings.staged_server(),
+                            catalog.asset_database(),
+                        )
+                    })
+                    .transpose()
+                    .map_err(rejected)?;
+                let scene = stage_current_scene_replacement(
                     world,
-                    &mut owner,
-                    inputs,
-                    &self.stock.tilesets.retirements,
-                    &self.staged_server,
-                    self.catalog.asset_database(),
-                ) {
-                    Ok(prepared) => prepared,
-                    Err(fault) => return Err((self, rejected(fault))),
+                    expected,
+                    Some(content.scene_source()),
+                    bindings,
+                    limits,
+                    &retirements,
+                    configure,
+                )?;
+                world.flush();
+                let report = match catalog.validate(world).and_then(|()| {
+                    #[cfg(feature = "runtime-2d")]
+                    stock.validate(world, tilesets.as_ref())?;
+                    Ok(())
+                }) {
+                    Ok(()) => scene.commit(world),
+                    Err(fault) => Err((scene, rejected(fault))),
                 };
-                self.commit_scene(world, Some(tilesets))
-            });
-        }
-        self.commit_scene(
-            world,
-            #[cfg(feature = "runtime-2d")]
-            None,
-        )
-    }
-
-    fn commit_scene(
-        mut self,
-        world: &mut World,
-        #[cfg(feature = "runtime-2d")] tilesets: Option<PreparedTileSetPublications<'_>>,
-    ) -> Result<SceneSpawnReport, (Self, SceneSpawnReport)> {
-        let scene = self
-            .scene
-            .take()
-            .expect("unpublished replacement retains its Scene candidate");
-        let report = match scene.commit(world) {
-            Ok(report) => report,
-            Err((scene, report)) => {
-                self.scene = Some(scene);
-                return Err((self, report));
-            }
-        };
+                let report = match report {
+                    Ok(report) => report,
+                    Err((scene, mut report)) => {
+                        if scene.discard(world).is_err() {
+                            report.diagnostics.push(Diagnostic::error(
+                                DiagnosticCode::new("project.scene.candidate-cleanup-incomplete")
+                                    .expect("engine diagnostic code is valid"),
+                                SafeSummary::new(
+                                    "Rejected Scene candidate could not be safely discarded",
+                                )
+                                .expect("static summary"),
+                            ));
+                        }
+                        return Err(report);
+                    }
+                };
+                #[cfg(feature = "runtime-2d")]
+                let stock =
+                    stock::commit_publications(world, stock.images, tilesets, stock.materials);
+                let authority = catalog.commit(world);
+                world.insert_resource(content.domain_assets().clone());
+                Ok((
+                    report,
+                    ProjectSceneResidency {
+                        additions: additive::Additions::default(),
+                        #[cfg(feature = "runtime-2d")]
+                        stock,
+                        authority,
+                    },
+                ))
+            };
         #[cfg(feature = "runtime-2d")]
-        let stock =
-            stock::commit_publications(world, self.stock.images, tilesets, self.stock.materials);
-        let authority = self.catalog.commit(world);
-        world.insert_resource(self.content.domain_assets().clone());
-        *world.resource_mut::<ProjectSceneResidency>() = ProjectSceneResidency {
-            additions: additive::Additions::default(),
-            #[cfg(feature = "runtime-2d")]
-            stock,
-            authority,
-        };
+        let (report, next) = if uses_tilesets {
+            world.resource_scope(|world, mut owner: Mut<TileSetAssets>| {
+                replace(world, Some(&mut owner))
+            })
+        } else {
+            replace(world, None)
+        }?;
+        #[cfg(not(feature = "runtime-2d"))]
+        let (report, next) = replace(world)?;
+        *current = next;
         Ok(report)
-    }
-
-    pub(super) fn discard(mut self, world: &mut World) -> Result<(), Self> {
-        if let Some(scene) = self.scene.take() {
-            if let Err(scene) = scene.discard(world) {
-                self.scene = Some(scene);
-                return Err(self);
-            }
-        }
-        Ok(())
-    }
+    })
 }
 
 fn scene_retirements<'a>(
@@ -227,28 +191,24 @@ fn validate_resources(
         || transaction::validate_resource_scope::<ProjectDomainAssets>(world).is_err()
         || transaction::validate_resource_scope::<CurrentScene>(world).is_err();
     #[cfg(feature = "project-source")]
-    let source = {
-        let source = matches!(content, ResidencyInput::Source(_));
-        if source
-            && (!world.contains_resource::<ProjectAssetDatabase>()
-                || world
-                    .resource::<CurrentScene>()
-                    .source_content_stamp()
-                    .is_none())
+    let unsupported = if matches!(content, ResidencyInput::Source(_)) {
+        if !world.contains_resource::<ProjectAssetDatabase>()
+            || world
+                .resource::<CurrentScene>()
+                .source_content_stamp()
+                .is_none()
         {
             return Err(resources_missing());
         }
-        source
+        unsupported || transaction::validate_resource_scope::<ProjectAssetDatabase>(world).is_err()
+    } else {
+        unsupported
     };
     #[cfg(feature = "runtime-2d")]
     let unsupported = {
         let current = world.resource::<ProjectSceneResidency>();
         stock::validate_resources(world, content, Some(current))?;
         let uses_tilesets = content.tileset_count() != 0 || current.tileset_count() != 0;
-        #[cfg(feature = "project-source")]
-        let unsupported = unsupported
-            || source
-                && transaction::validate_resource_scope::<ProjectAssetDatabase>(world).is_err();
         unsupported
             || uses_tilesets
                 && transaction::validate_resource_scope::<TileSetAssets>(world).is_err()

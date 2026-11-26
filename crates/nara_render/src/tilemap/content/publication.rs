@@ -45,24 +45,12 @@ pub struct TileSetPublicationInput {
     receipt: Option<PublicationReceipt>,
 }
 
-#[derive(Clone)]
 enum PublicationReceipt {
     Replace(TileSetContentReceipt),
     Shared(TileSetContentReceipt),
 }
 
 impl TileSetPublicationInput {
-    /// Shares the same immutable candidate pixels for a retained owner-thread preparation.
-    pub fn share_retained(&self) -> Option<Self> {
-        Some(Self {
-            handle: self.handle,
-            declaration: self.declaration.clone(),
-            image_handle: self.image_handle,
-            image: self.image.share_retained()?,
-            receipt: self.receipt.clone(),
-        })
-    }
-
     /// Binds the source dependency before retaining an input. The caller admits this input's
     /// canonical path allowance; preparation also checks the receiving owner's actual limit.
     #[allow(clippy::too_many_arguments)]
@@ -150,16 +138,18 @@ impl<T: Asset> SlotGuard<T> {
         })
     }
 
-    fn assert_current(&self, assets: &Assets<T>, states: &AssetStates) {
+    fn validate(&self, assets: &Assets<T>, states: &AssetStates) -> Result<(), TileSetAssetError> {
         self.baseline
             .validate(assets, states)
-            .expect("prepared TileSet value/state association changed");
-        assert_eq!(
-            states
-                .next_version(self.handle.id())
-                .expect("prepared TileSet version remains available"),
-            self.next_version
-        );
+            .map_err(|_| TileSetAssetError::Superseded)?;
+        if states
+            .next_version(self.handle.id())
+            .map_err(TileSetAssetError::State)?
+            != self.next_version
+        {
+            return Err(TileSetAssetError::Superseded);
+        }
+        Ok(())
     }
 }
 
@@ -411,6 +401,27 @@ impl TileSetAssets {
 }
 
 impl PreparedTileSetPublications<'_> {
+    /// Rechecks the TileSet slots and state before a Scene installs its staged catalog and Images.
+    pub fn validate_slots(
+        &self,
+        tilesets: &Assets<TileSet>,
+        states: &AssetStates,
+    ) -> Result<(), TileSetAssetError> {
+        for item in &self.inputs {
+            match item {
+                PreparedInput::Publish(item) => item.guard.validate(tilesets, states)?,
+                PreparedInput::Shared(item) => item
+                    .baseline
+                    .validate(tilesets, states)
+                    .map_err(|_| TileSetAssetError::Superseded)?,
+            }
+        }
+        for retirement in &self.retirements {
+            retirement.validate(tilesets, states)?;
+        }
+        Ok(())
+    }
+
     /// Commits the prevalidated transition after its exact Images and staged server are published.
     /// Violating that synchronous commit contract is an invariant fault, not a recoverable result.
     pub fn commit(
@@ -421,15 +432,13 @@ impl PreparedTileSetPublications<'_> {
         states: &mut AssetStates,
         events: &mut AssetEvents,
     ) -> Vec<TileSetContentReceipt> {
+        self.validate_slots(tilesets, states)
+            .expect("prepared TileSet value/state association changed");
         let mut captured = Vec::with_capacity(self.inputs.len());
         for prepared in &self.inputs {
             let prepared = match prepared {
                 PreparedInput::Publish(prepared) => prepared,
                 PreparedInput::Shared(shared) => {
-                    shared
-                        .baseline
-                        .validate(tilesets, states)
-                        .expect("prepared shared TileSet value/state association changed");
                     let entry = self
                         .owner
                         .entries
@@ -461,7 +470,6 @@ impl PreparedTileSetPublications<'_> {
                     continue;
                 }
             };
-            prepared.guard.assert_current(tilesets, states);
             let input = &prepared.input;
             assert!(
                 input.declaration.binding_matches(input.handle, server),
@@ -493,7 +501,6 @@ impl PreparedTileSetPublications<'_> {
             captured.push(image);
         }
         for retirement in &self.retirements {
-            retirement.assert_current(tilesets, states);
             let entry = self
                 .owner
                 .entries
