@@ -405,10 +405,7 @@ impl Plugin for ExplorationPlugin {
             app,
             (collect_pickups, side_room::find_relics).chain(),
         )?;
-        app.add_systems(
-            CoreStage::FixedUpdate,
-            capture.in_set(CommandSet::Capture),
-        )?;
+        app.add_systems(CoreStage::FixedUpdate, capture.in_set(CommandSet::Capture))?;
         app.add_systems(
             CoreStage::FixedUpdate,
             verification::observe_progress.after(CommandSet::Capture),
