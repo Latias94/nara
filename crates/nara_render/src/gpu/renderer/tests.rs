@@ -1,4 +1,10 @@
-use std::{sync::mpsc, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
+    time::Duration,
+};
 
 use nara_app::{App, RuntimeInstance};
 use nara_core::Mat3;
@@ -292,6 +298,63 @@ fn output_waits_for_both_queue_and_import_owner_then_reuses_texture() {
     ));
     assert!(next.native_texture().is_none());
     assert!(reused.native_texture().is_none());
+}
+
+struct UploadTrackingOverlay {
+    clears: Arc<AtomicUsize>,
+}
+
+impl RenderPass for UploadTrackingOverlay {
+    fn attachments(&self) -> PassAttachments {
+        PassAttachments::OVERLAY
+    }
+
+    fn execute(&mut self, context: &mut RenderPassContext<'_>) -> Result<(), WgpuRenderError> {
+        let _queue = context.queue;
+        let _buffer = context.upload_buffer(
+            "test_editor_overlay_vertices",
+            wgpu::BufferUsages::VERTEX,
+            &[0u8; 16],
+        )?;
+        Ok(())
+    }
+
+    fn clear_caches(&mut self) {
+        self.clears.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[test]
+#[ignore = "requires a native WGPU adapter"]
+fn editor_overlay_reuses_uploaded_buffers_and_clears_caches_on_device_loss() {
+    let mut renderer = gpu();
+    let context = renderer.context().clone();
+    let (_, input, _) = frame(false);
+    let clears = Arc::new(AtomicUsize::new(0));
+    renderer
+        .set_editor_overlay(Some(Box::new(UploadTrackingOverlay {
+            clears: Arc::clone(&clears),
+        })))
+        .unwrap();
+
+    let (first_output, first) = renderer.render_to_image(&input).unwrap();
+    assert_eq!(first.work.created_buffer_calls, 2);
+    drop(first_output);
+    wait(context.device(), Some(first.submission));
+
+    let (second_output, second) = renderer.render_to_image(&input).unwrap();
+    assert_eq!(second.work.created_buffer_calls, 0);
+    assert_eq!(second.work.created_texture_calls, 0);
+    drop(second_output);
+    wait(context.device(), Some(second.submission));
+
+    assert_eq!(clears.load(Ordering::Relaxed), 0);
+    context.device().destroy();
+    assert!(matches!(
+        renderer.check_errors(),
+        Err(WgpuRenderError::DeviceLost)
+    ));
+    assert_eq!(clears.load(Ordering::Relaxed), 1);
 }
 
 #[test]

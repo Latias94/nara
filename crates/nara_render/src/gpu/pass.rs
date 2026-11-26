@@ -39,12 +39,14 @@ pub trait RenderPass {
 
     /// The renderer submits the encoder after every pass succeeds.
     fn execute(&mut self, context: &mut RenderPassContext<'_>) -> Result<(), WgpuRenderError>;
+
+    /// Drops device-bound caches (such as pipelines or bind groups) after device loss.
+    fn clear_caches(&mut self) {}
 }
 
 pub struct RenderPassContext<'a> {
     pub device: &'a wgpu::Device,
-    #[cfg(any(feature = "sprite-render", feature = "hud-runtime"))]
-    pub(crate) queue: &'a wgpu::Queue,
+    pub queue: &'a wgpu::Queue,
     pub encoder: &'a mut wgpu::CommandEncoder,
     pub target: RenderTargetView<'a>,
     pub frame: &'a RenderInput,
@@ -70,7 +72,8 @@ impl RenderPassContext<'_> {
         );
     }
 
-    pub(crate) fn upload_buffer(
+    /// Uploads nonempty 4-byte-aligned bytes through the renderer's pooled frame ring buffer.
+    pub fn upload_buffer(
         &mut self,
         label: &'static str,
         usage: wgpu::BufferUsages,

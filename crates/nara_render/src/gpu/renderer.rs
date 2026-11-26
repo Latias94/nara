@@ -167,6 +167,9 @@ impl Renderer {
         {
             self.hud = super::HudPass::default();
         }
+        if let Some(overlay) = &mut self.editor_overlay {
+            overlay.clear_caches();
+        }
     }
 
     /// Draws into an already acquired attachment. The caller owns presenting it.
@@ -267,7 +270,6 @@ impl Renderer {
         let mut hud = Ok(None);
         let mut context = RenderPassContext {
             device,
-            #[cfg(any(feature = "sprite-render", feature = "hud-runtime"))]
             queue,
             encoder: &mut encoder,
             target: canvas_lease.as_ref().map_or(target, |lease| lease.target()),
