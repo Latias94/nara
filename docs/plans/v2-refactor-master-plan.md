@@ -285,7 +285,12 @@ and an empty target per job, the formatting commands took 29 seconds. The combin
 and test job took 13 minutes 23 seconds and passed 1,720 tests. The reference-game job passed 23
 tests in 6 minutes 24 seconds. The Wasm check took 1 minute 29 seconds. Running those jobs in
 sequence took 21 minutes 45 seconds. CI now runs workspace checks and core tests in separate jobs.
-GitHub-hosted wall time, including runner setup, remains to be measured.
+
+On 2026-11-26, the [GitHub-hosted cold CI run](https://github.com/Latias94/nara/actions/runs/45741886841)
+at `f971bd2` passed all seven jobs with no workflow Cargo cache. It took 4 minutes 8 seconds from
+workflow creation to the last job's completion, including queueing and runner setup. The longest
+job, Windows core tests, took 4 minutes 5 seconds and passed 2,057 tests. Ubuntu core passed
+2,046 tests and the reference game passed 23. This run passed the 15-minute cold CI gate.
 
 The facade budget remains open. Root `src/` has 66,083 Rust lines including in-source tests,
 down from 67,908 before this cut. It still integrates authored loading, Scene residency, runtime
@@ -293,7 +298,7 @@ content admission, and project Cook. `nara_project/src/` has 25,418 Rust lines, 
 build, supervision, Cook, and packaging. The reference game's `src/` has about 8,300 lines. The
 simple VFS has 309 lines with its native adapter. The opt-in capability module has 10,524 lines
 of scoped publication and tests. The UI crate has 36,975 Rust lines in `src/`, above the package
-review threshold. The remaining ownership, size, and cold timing gates keep the Phase 3 exit open.
+review threshold. The remaining ownership and size gates keep the Phase 3 exit open.
 
 Move hosted content selection, Scene residency, and joint World publication to their runtime
 owners. Move project source discovery and the remaining Cook orchestration into `nara_project`
