@@ -1,7 +1,7 @@
 use std::{
     ffi::{OsStr, OsString, c_void},
     io::{self, PipeReader, PipeWriter, Read},
-    mem::{size_of, size_of_val},
+    mem::{offset_of, size_of, size_of_val},
     os::windows::{
         ffi::OsStrExt,
         io::{AsRawHandle, FromRawHandle, OwnedHandle},
@@ -14,21 +14,23 @@ use std::{
 
 use windows_sys::Win32::{
     Foundation::{
-        ERROR_BROKEN_PIPE, HANDLE, HANDLE_FLAG_INHERIT, SetHandleInformation, WAIT_OBJECT_0,
-        WAIT_TIMEOUT,
+        ERROR_BROKEN_PIPE, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, HANDLE, HANDLE_FLAG_INHERIT,
+        SetHandleInformation, WAIT_OBJECT_0, WAIT_TIMEOUT,
     },
     System::{
         JobObjects::{
-            CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
+            CreateJobObjectW, IsProcessInJob, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_BASIC_PROCESS_ID_LIST,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicAccountingInformation,
+            JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation,
             QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
         },
         Pipes::PeekNamedPipe,
         Threading::{
             CREATE_NO_WINDOW, CreateProcessW, DeleteProcThreadAttributeList,
             EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, InitializeProcThreadAttributeList,
-            PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST, PROCESS_INFORMATION,
+            OpenProcess, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST,
+            PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
             STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW, UpdateProcThreadAttribute,
             WaitForSingleObject,
         },
@@ -40,21 +42,24 @@ use crate::windows_command_line::encode_command_line;
 pub(super) struct Process {
     job: OwnedHandle,
     leader: OwnedHandle,
+    terminating_members: Vec<OwnedHandle>,
 }
 
 impl Process {
     pub(super) fn leader_exited(&mut self) -> io::Result<bool> {
-        // SAFETY: The owned process handle is valid for the nonblocking wait.
-        match unsafe { WaitForSingleObject(self.leader.as_raw_handle(), 0) } {
-            WAIT_OBJECT_0 => Ok(true),
-            WAIT_TIMEOUT => Ok(false),
-            _ => Err(io::Error::last_os_error()),
-        }
+        exited(&self.leader)
     }
 
     pub(super) fn reap_if_idle(&mut self) -> io::Result<Option<ExitStatus>> {
         if active_processes(&self.job)? > 0 {
             return Ok(None);
+        }
+        // Job accounting can reach zero while a terminating descendant's process handle is
+        // still unsignaled. Wait for the members we observed before requesting termination.
+        for member in &self.terminating_members {
+            if !exited(member)? {
+                return Ok(None);
+            }
         }
         let mut code = 0;
         // SAFETY: The leader was observed exited and `code` is writable for one DWORD.
@@ -63,19 +68,98 @@ impl Process {
     }
 
     pub(super) fn terminate(&mut self, _force: bool) -> io::Result<()> {
+        let members = member_handles(&self.job);
         // SAFETY: The non-inheritable Job handle is valid for the termination call.
         let result = unsafe { TerminateJobObject(self.job.as_raw_handle(), 1) };
         match check(result) {
-            Err(_) if active_processes(&self.job)? == 0 => Ok(()),
-            result => result,
+            Err(_) if active_processes(&self.job)? == 0 => {}
+            result => result?,
+        };
+        self.terminating_members.extend(members?);
+        Ok(())
+    }
+}
+
+fn exited(process: &OwnedHandle) -> io::Result<bool> {
+    // SAFETY: The owned handle is valid for the nonblocking wait.
+    match unsafe { WaitForSingleObject(process.as_raw_handle(), 0) } {
+        WAIT_OBJECT_0 => Ok(true),
+        WAIT_TIMEOUT => Ok(false),
+        _ => Err(io::Error::last_os_error()),
+    }
+}
+
+fn member_handles(job: &OwnedHandle) -> io::Result<Vec<OwnedHandle>> {
+    let header_words =
+        offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList) / size_of::<usize>();
+    let mut slots = (active_processes(job)? as usize).max(1);
+    let ids = loop {
+        let mut storage = vec![0usize; header_words + slots];
+        let size = u32::try_from(size_of_val(storage.as_slice()))
+            .map_err(|_| io::ErrorKind::InvalidData)?;
+        let list = storage
+            .as_mut_ptr()
+            .cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>();
+        // SAFETY: The aligned buffer covers the header and `slots` process IDs.
+        let result = unsafe {
+            QueryInformationJobObject(
+                job.as_raw_handle(),
+                JobObjectBasicProcessIdList,
+                list.cast(),
+                size,
+                null_mut(),
+            )
+        };
+        match check(result) {
+            Ok(()) => {
+                // SAFETY: A successful query initialized the header and listed IDs.
+                let count = unsafe { (*list).NumberOfProcessIdsInList } as usize;
+                storage.truncate(header_words + count.min(slots));
+                break storage;
+            }
+            Err(error) if error.raw_os_error() == Some(ERROR_MORE_DATA as i32) => {
+                slots = slots.checked_mul(2).ok_or(io::ErrorKind::InvalidData)?;
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    let mut members = Vec::new();
+    for id in ids.into_iter().skip(header_words) {
+        // SAFETY: OpenProcess takes the numeric ID and returns a new handle on success.
+        let handle = unsafe {
+            OpenProcess(
+                PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                0,
+                id as u32,
+            )
+        };
+        if handle.is_null() {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+                continue;
+            }
+            return Err(error);
+        }
+        // SAFETY: Successful OpenProcess transferred the handle. Recheck membership in case
+        // this process exited after enumeration and Windows reused its ID before OpenProcess.
+        let process = unsafe { OwnedHandle::from_raw_handle(handle) };
+        let mut member = 0;
+        // SAFETY: Both handles are owned and `member` is writable for one BOOL.
+        check(unsafe {
+            IsProcessInJob(process.as_raw_handle(), job.as_raw_handle(), &mut member)
+        })?;
+        if member != 0 {
+            members.push(process);
         }
     }
+    Ok(members)
 }
 
 pub(super) fn spawn(
     directory: &Path,
     executable: &Path,
     arguments: &[OsString],
+    stdin: PipeReader,
     stdout: PipeWriter,
     stderr: PipeWriter,
 ) -> io::Result<Process> {
@@ -83,8 +167,6 @@ pub(super) fn spawn(
     let directory = wide(directory.as_os_str())?;
     let mut command_line = encode_command_line(executable, arguments)?;
     let job = create_job()?;
-    let (stdin, stdin_writer) = io::pipe()?;
-    drop(stdin_writer);
     let inherited = [
         stdin.as_raw_handle(),
         stdout.as_raw_handle(),
@@ -132,7 +214,11 @@ pub(super) fn spawn(
         )
     };
     drop(thread);
-    Ok(Process { job, leader })
+    Ok(Process {
+        job,
+        leader,
+        terminating_members: Vec::new(),
+    })
 }
 
 pub(super) fn read_pipe(reader: &mut PipeReader, buffer: &mut [u8]) -> io::Result<usize> {

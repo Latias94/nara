@@ -4,7 +4,7 @@ use std::{
     mem::MaybeUninit,
     os::{fd::AsRawFd, unix::process::CommandExt as _},
     path::Path,
-    process::{Child, Command, ExitStatus, Stdio},
+    process::{Child, Command, ExitStatus},
 };
 
 use libc::{SIGKILL, SIGTERM, pid_t};
@@ -109,6 +109,7 @@ pub(super) fn spawn(
     directory: &Path,
     executable: &Path,
     arguments: &[OsString],
+    stdin: PipeReader,
     stdout: PipeWriter,
     stderr: PipeWriter,
 ) -> io::Result<Process> {
@@ -116,7 +117,7 @@ pub(super) fn spawn(
     command
         .current_dir(directory)
         .args(arguments)
-        .stdin(Stdio::null())
+        .stdin(stdin)
         .stdout(stdout)
         .stderr(stderr);
     // SAFETY: setsid is async-signal-safe and creates the child's group before exec. Its session
