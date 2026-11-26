@@ -40,11 +40,11 @@ use crate::{
     ProductRecipe, SchemaContribution,
     project_host::{open_explicit_product_project_root, resolve_runtime_configuration},
     runtime_content::{
-        RUNTIME_CONTENT_CATALOG_FILE, RuntimeCodecDefinitionId, RuntimeContentAssetInner,
-        RuntimeContentCatalog, RuntimeContentCatalogDefinition, RuntimeContentCatalogLimits,
-        RuntimeContentDependency, RuntimeContentDependencyRole, RuntimeContentExpectation,
-        RuntimeContentLimits, RuntimeContentMember, RuntimeContentMemberKind, RuntimeContentTarget,
-        budget::DecodeBudget,
+        DecodeBudget, RUNTIME_CONTENT_CATALOG_FILE, RuntimeCodecDefinitionId,
+        RuntimeContentAssetInner, RuntimeContentCatalog, RuntimeContentCatalogDefinition,
+        RuntimeContentCatalogLimits, RuntimeContentDependency, RuntimeContentDependencyRole,
+        RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentMember,
+        RuntimeContentMemberKind, RuntimeContentTarget,
     },
 };
 
@@ -518,7 +518,10 @@ fn charge(budget: &Arc<DecodeBudget>, limits: RuntimeContentLimits, work: bool) 
         let limit = limits.retained_bytes().get();
         (RuntimeContentBudgetKind::RetainedBytes, limit, 0, limit)
     };
-    match budget.reserve(retained, working) {
+    match budget
+        .reserve(retained, working)
+        .map_err(RuntimeContentError::from)
+    {
         Ok(lease) => {
             drop(lease);
             0

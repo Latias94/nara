@@ -19,7 +19,7 @@ fn source_product_prepares_after_admission_and_exposes_actual_path_and_original_
     let root = fixture.root.clone();
     fixture.with_world(move |world| {
         world.insert_resource(pools());
-        let context = Arc::clone(&world.resource::<RequestOwner>().context);
+        let context = Arc::clone(world.resource::<RequestOwner>().requests.source());
         let Context::Source { loader, .. } = context.as_ref() else {
             unreachable!()
         };
@@ -48,11 +48,7 @@ fn source_product_prepares_after_admission_and_exposes_actual_path_and_original_
         );
         control.release();
         wait_for_request(world, request, ProjectSceneRequestState::Ready);
-        let owner = world.resource::<RequestOwner>();
-        let Some(Slot::Ready { admission, content }) = owner.slot.as_ref() else {
-            panic!("the source Product must return captured source content")
-        };
-        assert!(api::content_matches_admission(content, admission));
+        let (_, content) = prepared(world, request);
         let PreparedSceneContent::Source(snapshot) = content else {
             panic!("source requests cannot fall back to processed content")
         };
@@ -195,7 +191,7 @@ fn source_product_missing_auxiliary_wrong_kind_and_ambiguity_reject_in_preparati
         let root = fixture.root.clone();
         fixture.with_world(move |world| {
             world.insert_resource(pools());
-            let context = Arc::clone(&world.resource::<RequestOwner>().context);
+            let context = Arc::clone(world.resource::<RequestOwner>().requests.source());
             let Context::Source { loader, .. } = context.as_ref() else {
                 unreachable!()
             };
@@ -310,12 +306,7 @@ fn source_product_commit_uses_the_captured_selection_and_content() {
         let request = ProjectScenes::scope(world, |scenes| scenes.request(primary(2))).unwrap();
         wait_for_request(world, request, ProjectSceneRequestState::Ready);
         let captured_closure = {
-            let owner = world.resource::<RequestOwner>();
-            let Some(Slot::Ready {
-                content: PreparedSceneContent::Source(snapshot),
-                ..
-            }) = owner.slot.as_ref()
-            else {
+            let (_, PreparedSceneContent::Source(snapshot)) = prepared(world, request) else {
                 panic!("source preparation retains its original closure receipt")
             };
             snapshot.content_closure()
@@ -422,7 +413,7 @@ fn source_product_publication_rejects_foreign_candidate_definitions_and_selectio
             );
             let request = ProjectScenes::scope(world, |scenes| scenes.request(primary(2))).unwrap();
             wait_for_request(world, request, ProjectSceneRequestState::Ready);
-            let context = Arc::clone(&world.resource::<RequestOwner>().context);
+            let context = Arc::clone(world.resource::<RequestOwner>().requests.source());
             let Context::Source {
                 candidate,
                 plan,
@@ -475,31 +466,49 @@ fn source_product_publication_rejects_foreign_candidate_definitions_and_selectio
                 );
                 assert!(!foreign.shares_component_bindings(plan.schema_validation().bindings()));
             }
-            {
-                let mut owner = world.resource_mut::<RequestOwner>();
-                let Some(Slot::Ready { admission, content }) = owner.slot.as_mut() else {
-                    panic!("the original request is Ready")
-                };
-                let other_selection = Admission {
-                    context: Arc::clone(&admission.context),
-                    id: admission.id,
-                    expected: admission.expected.clone(),
-                    selection: primary(4).into(),
-                    purpose: RequestPurpose::Travel,
-                };
-                assert!(!api::content_matches_admission(content, &other_selection));
-                let foreign = PreparedSceneContent::Source(foreign);
-                assert!(!api::content_matches_admission(&foreign, admission));
-                *content = foreign;
-            }
+            let (target, content) = prepared(world, request);
+            let other_selection = Target {
+                selection: primary(4).into(),
+                purpose: RequestPurpose::Travel,
+            };
+            assert!(!context.matches_prepared(&other_selection, content));
+            let foreign = PreparedSceneContent::Source(foreign);
+            assert!(!context.matches_prepared(target, &foreign));
+            ProjectScenes::scope(world, |scenes| {
+                assert!(scenes.cancel(request));
+                assert!(scenes.acknowledge(request));
+            });
+            let request = world.resource_scope(|world, mut owner: nara_ecs::Mut<RequestOwner>| {
+                owner
+                    .requests
+                    .request(
+                        world.resource::<CurrentScene>(),
+                        *world.resource::<RuntimeGeneration>(),
+                        Target {
+                            selection: primary(2).into(),
+                            purpose: RequestPurpose::Travel,
+                        },
+                        |_, _| {
+                            Preparation::spawn(world.resource::<TaskPools>(), |_| Some(Ok(foreign)))
+                        },
+                    )
+                    .unwrap()
+            });
+            wait_for_request(
+                world,
+                request,
+                ProjectSceneRequestState::Rejected(ProjectSceneRequestError::Stale),
+            );
             ProjectScenes::scope(world, |scenes| assert!(scenes.prepared(request).is_none()));
             let report = commit_prepared_project_scene(world, request, limits(), &[], |_| {
                 panic!("foreign captured facts cannot configure publication")
             });
             assert!(report.instance.is_none());
-            assert!(report.diagnostics.iter().any(|diagnostic| {
-                diagnostic.code().as_str() == "project.scene.prepared-input-mismatch"
-            }));
+            assert!(
+                report.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code().as_str() == "project.scene.request-stale"
+                })
+            );
             assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
             ProjectScenes::scope(world, |scenes| assert!(scenes.acknowledge(request)));
         });
@@ -530,16 +539,17 @@ fn source_product_stale_context_and_current_receipt_preserve_last_good() {
                     plan,
                     loader,
                     input,
-                } = owner.context.as_ref()
+                } = owner.requests.source().as_ref()
                 else {
                     unreachable!()
                 };
-                owner.context = Arc::new(Context::Source {
+                let source = Context::Source {
                     candidate: candidate.clone(),
                     plan: plan.clone(),
                     loader: Arc::clone(loader),
                     input: input.clone(),
-                });
+                };
+                owner.requests.replace_source(source);
             } else {
                 let report = crate::startup_scene::restart_current_scene_with_product(
                     world,
@@ -589,7 +599,7 @@ fn source_product_cancellation_waits_for_physical_return_and_refunds_capture() {
             primary(2),
             AssetSourceKind::Scene,
         );
-        let context = Arc::clone(&world.resource::<RequestOwner>().context);
+        let context = Arc::clone(world.resource::<RequestOwner>().requests.source());
         let Context::Source { loader, .. } = context.as_ref() else {
             unreachable!()
         };

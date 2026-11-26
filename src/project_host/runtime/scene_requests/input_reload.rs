@@ -6,7 +6,7 @@ use nara_input::{ActionMaps, InputSeatId};
 
 use crate::project_content::{ProjectContentError, ProjectInputContent};
 
-use super::{Arc, Context, Ordering, RequestOwner, Res, ResMut, Slot, TaskPools, World, rejected};
+use super::{Arc, Context, RequestOwner, Res, ResMut, TaskPools, World, rejected};
 
 #[derive(Default)]
 pub(super) struct InputReload {
@@ -42,13 +42,11 @@ pub(in crate::project_host::runtime) fn queue(
     };
     let Context::Source {
         input: Some(input), ..
-    } = owner.context.as_ref()
+    } = owner.requests.source().as_ref()
     else {
         return false;
     };
-    if owner.closing.load(Ordering::Acquire)
-        || !change.is_none_or(|change| change.path() == input.path())
-    {
+    if owner.requests.is_closing() || !change.is_none_or(|change| change.path() == input.path()) {
         return false;
     }
     owner.input_reload.pending = true;
@@ -72,11 +70,11 @@ pub(in crate::project_host::runtime) fn poll(world: &mut World) -> bool {
     let Ok((mut owner, pools, maps)) = state.get_mut(world) else {
         return false;
     };
-    if owner.closing.load(Ordering::Acquire) {
+    if owner.requests.is_closing() {
         owner.input_reload.cancel();
         return false;
     }
-    if owner.slot.as_ref().and_then(Slot::admission).is_some() {
+    if owner.requests.active_request().is_some() {
         return true;
     }
     if let Some(read) = &mut owner.input_reload.reading {
@@ -89,7 +87,7 @@ pub(in crate::project_host::runtime) fn poll(world: &mut World) -> bool {
             .take()
             .expect("the read was polled in place");
         if !owner.input_reload.pending {
-            if Arc::ptr_eq(&read.context, &owner.context) {
+            if Arc::ptr_eq(&read.context, owner.requests.source()) {
                 match terminal {
                     TaskTerminal::Completed(Ok(Some(input))) => {
                         replace_input(&mut owner, maps, input)
@@ -109,7 +107,7 @@ pub(in crate::project_host::runtime) fn poll(world: &mut World) -> bool {
         report_unavailable();
         return false;
     };
-    let context = Arc::clone(&owner.context);
+    let context = Arc::clone(owner.requests.source());
     let selection = Arc::clone(&context);
     let result = pools.spawn(
         TaskPoolKind::Io,
@@ -146,7 +144,7 @@ fn replace_input(
         plan,
         loader,
         input: Some(previous),
-    } = owner.context.as_ref()
+    } = owner.requests.source().as_ref()
     else {
         return;
     };
@@ -159,12 +157,13 @@ fn replace_input(
             .shares_owner_with(&previous.bindings())
     }) {
         map.replace_bindings(replacement.bindings());
-        owner.context = Arc::new(Context::Source {
+        let source = Context::Source {
             candidate: candidate.clone(),
             plan: plan.clone(),
             loader: Arc::clone(loader),
             input: Some(replacement),
-        });
+        };
+        owner.requests.replace_source(source);
     } else {
         emit_report_to_tracing(
             &rejected(

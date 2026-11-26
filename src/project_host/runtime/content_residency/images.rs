@@ -1,123 +1,23 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::sync::Arc;
 
-use nara_asset::{
-    AssetEvents, AssetMutationBaseline, AssetProductRef, AssetPublicationRevision, AssetServer,
-    AssetSlotRevision, AssetStateRevision, AssetStates, Assets, Handle, LoadState,
-};
 #[cfg(feature = "project-source")]
-use nara_asset::{AssetRecord, AssetRef, AssetSourceKind, ImportedProductId};
-use nara_render::image::ImageAsset;
+use nara_asset::{AssetProductRef, AssetRef, AssetSourceKind, ImportedProductId};
+use nara_asset::{AssetServer, AssetStates, Assets};
+use nara_render::image::{
+    ImageAsset, ImagePublicationError, ImagePublicationInput, ImagePublicationMode,
+};
+pub(super) use nara_render::image::{
+    ImageContentReceipt as OwnedImage, PreparedImagePublications as ImagePublications,
+};
 use nara_scene::advanced::SceneAssetReservations;
 
-use super::super::{HostFault, single_error};
-use super::{ProjectSceneResidency, ResidencyInput};
+use super::{HostFault, ProjectSceneResidency, ResidencyInput, binding_changed, failure};
 use crate::runtime_content::{RuntimeContentAsset, RuntimeContentLease};
-
-#[cfg(test)]
-mod tests;
 
 struct RuntimeImageOwner {
     _acquired: RuntimeContentAsset<ImageAsset>,
     // Escaped pixels retain the wrapper reservation as well as the original decoded output.
     _metadata: Arc<RuntimeContentLease>,
-}
-
-#[derive(Clone)]
-pub(super) struct OwnedImage {
-    pub(super) handle: Handle<ImageAsset>,
-    pub(super) product: AssetProductRef,
-    #[cfg(feature = "project-source")]
-    pub(super) record: Option<AssetRecord>,
-    slot: AssetSlotRevision,
-    state: AssetStateRevision,
-    publication: AssetPublicationRevision,
-}
-
-impl OwnedImage {
-    pub(super) fn capture(
-        handle: Handle<ImageAsset>,
-        product: AssetProductRef,
-        #[cfg(feature = "project-source")] record: Option<AssetRecord>,
-        images: &Assets<ImageAsset>,
-        states: &AssetStates,
-    ) -> Self {
-        Self {
-            handle,
-            product,
-            #[cfg(feature = "project-source")]
-            record,
-            slot: images.slot_revision(handle),
-            state: states.state_revision(handle.id()),
-            publication: states.publication_revision(handle.id()),
-        }
-    }
-
-    fn matches(
-        &self,
-        server: &AssetServer,
-        images: &Assets<ImageAsset>,
-        states: &AssetStates,
-    ) -> bool {
-        states.state_revision(self.handle.id()) == self.state
-            && self.matches_slot(server, images, states)
-    }
-
-    fn matches_slot(
-        &self,
-        server: &AssetServer,
-        images: &Assets<ImageAsset>,
-        states: &AssetStates,
-    ) -> bool {
-        images
-            .get(self.handle)
-            .is_some_and(|image| image.product() == Some(self.product))
-            && binding_matches(
-                self.handle,
-                self.product,
-                #[cfg(feature = "project-source")]
-                self.record.as_ref(),
-                server,
-            )
-            && images.slot_revision(self.handle) == self.slot
-            && states.published_slot_revision(self.handle.id()) == Some(&self.slot)
-            && states
-                .state(self.handle.id())
-                .is_some_and(|state| state.usable_version().is_some())
-    }
-
-    fn matches_retirement(
-        &self,
-        server: &AssetServer,
-        images: &Assets<ImageAsset>,
-        states: &AssetStates,
-    ) -> bool {
-        let id = self.handle.id();
-        self.matches_slot(server, images, states)
-            && states.publication_revision(id) == self.publication
-            && (states.state_revision(id) == self.state
-                || states
-                    .state(id)
-                    .is_some_and(|state| matches!(state.load_state(), LoadState::Failed { .. })))
-    }
-}
-
-pub(super) struct ImagePublication {
-    handle: Handle<ImageAsset>,
-    product: AssetProductRef,
-    #[cfg(feature = "project-source")]
-    record: Option<AssetRecord>,
-    image: ImageAsset,
-    baseline: AssetMutationBaseline<ImageAsset>,
-}
-
-/// Finite CPU publications whose only fallible version advances were checked before Scene commit.
-pub(super) struct ImagePublications {
-    publish: BTreeMap<AssetProductRef, ImagePublication>,
-    retire: Vec<OwnedImage>,
-    shared: Vec<OwnedImage>,
 }
 
 #[derive(Clone, Copy)]
@@ -126,380 +26,117 @@ pub(super) enum ImageChange<'a> {
     Add(&'a ProjectSceneResidency),
 }
 
-impl ImagePublications {
-    pub(super) fn empty() -> Self {
-        Self {
-            publish: BTreeMap::new(),
-            retire: Vec::new(),
-            shared: Vec::new(),
+pub(super) fn prepare(
+    content: ResidencyInput<'_>,
+    change: ImageChange<'_>,
+    bindings: &mut SceneAssetReservations,
+    server: &AssetServer,
+    images: &Assets<ImageAsset>,
+    states: &AssetStates,
+    runtime_lease: Option<&Arc<RuntimeContentLease>>,
+) -> Result<ImagePublications, HostFault> {
+    let (current, mode) = match change {
+        ImageChange::Replace(current) => (current, ImagePublicationMode::Replace),
+        ImageChange::Add(current) => (Some(current), ImagePublicationMode::Add),
+    };
+    let owned = current
+        .into_iter()
+        .flat_map(ProjectSceneResidency::owned_images);
+    if mode == ImagePublicationMode::Replace {
+        // Check the incumbent before staging reservations that consume process-local handles.
+        for receipt in owned.clone() {
+            receipt
+                .validate_retirement(server, images, states)
+                .map_err(image_failure)?;
         }
     }
-
-    pub(super) fn is_empty(&self) -> bool {
-        self.publish.is_empty() && self.retire.is_empty() && self.shared.is_empty()
-    }
-    pub(super) fn prepare(
-        content: ResidencyInput<'_>,
-        change: ImageChange<'_>,
-        bindings: &mut SceneAssetReservations,
-        server: &AssetServer,
-        images: &Assets<ImageAsset>,
-        states: &AssetStates,
-        runtime_lease: Option<&Arc<RuntimeContentLease>>,
-    ) -> Result<Self, HostFault> {
-        let (current, additive) = match change {
-            ImageChange::Replace(current) => (current, false),
-            ImageChange::Add(current) => (Some(current), true),
-        };
-        let owned = current
-            .into_iter()
-            .flat_map(ProjectSceneResidency::owned_images);
-        if !additive
-            && owned
-                .clone()
-                .any(|image| !image.matches_retirement(server, images, states))
-        {
-            return Err(superseded());
-        }
-        let owned_by_id = owned
-            .clone()
-            .map(|image| (image.handle.id(), image))
-            .collect::<BTreeMap<_, _>>();
-        let mut publish = BTreeMap::new();
-        let mut next_ids = BTreeSet::new();
-        let mut shared = Vec::new();
-        let mut insert = |handle: Handle<ImageAsset>,
-                          product: AssetProductRef,
-                          #[cfg(feature = "project-source")] record: Option<AssetRecord>,
-                          image: ImageAsset| {
-            if image.product() != Some(product)
-                || publish.contains_key(&product)
-                || !next_ids.insert(handle.id())
-            {
-                return Err(identity_conflict());
-            }
-            let original = owned_by_id
-                .get(&handle.id())
-                .filter(|image| image.product == product);
-            #[cfg(feature = "project-source")]
-            let original = original.filter(|image| !additive || image.record == record);
-            if additive && let Some(original) = original {
-                if !original.matches(server, images, states)
-                    || images.get(handle).is_none_or(|resident| {
-                        resident.content_hash() != image.content_hash()
-                            || resident.source() != image.source()
-                    })
-                {
-                    return Err(superseded());
-                }
-                shared.push((*original).clone());
-                return Ok(());
-            }
-            if original.is_none()
-                && (images.get(handle).is_some()
-                    || states.state(handle.id()).is_some_and(|state| {
-                        !matches!(state.load_state(), nara_asset::LoadState::Removed)
-                    }))
-            {
-                return Err(superseded());
-            }
-            states
-                .next_version(handle.id())
-                .map_err(|_| version_exhausted())?;
-            let baseline = images
-                .prepare_mutation(handle, states)
-                .map_err(|_| superseded())?;
-            publish.insert(
-                product,
-                ImagePublication {
+    let mut inputs = Vec::with_capacity(content.image_count());
+    match content {
+        #[cfg(feature = "project-source")]
+        ResidencyInput::Source(snapshot) => {
+            for (index, content) in snapshot.images().iter().enumerate() {
+                let source = content.source();
+                let product = AssetProductRef::new(source.stable_id(), ImportedProductId::PRIMARY)
+                    .map_err(|_| binding_changed())?;
+                let handle = bindings
+                    .reserve::<ImageAsset>(
+                        &AssetRef::Product(product),
+                        snapshot.asset_resolution(),
+                        &AssetSourceKind::Image,
+                    )
+                    .map_err(|_| binding_changed())?;
+                let image = snapshot.share_image_for_consumer(index).ok_or_else(|| {
+                    failure(
+                        "project.scene.image-snapshot-invalid",
+                        "Prepared Scene Image is unavailable",
+                    )
+                })?;
+                inputs.push(ImagePublicationInput::new(
                     handle,
                     product,
-                    #[cfg(feature = "project-source")]
-                    record,
+                    Some(source.path().clone()),
                     image,
-                    baseline,
-                },
-            );
-            Ok(())
-        };
-        match content {
-            #[cfg(feature = "project-source")]
-            ResidencyInput::Source(snapshot) => {
-                for (index, content) in snapshot.images().iter().enumerate() {
-                    let source = content.source();
-                    let record = AssetRecord::new(
-                        source.stable_id(),
-                        source.path().clone(),
-                        AssetSourceKind::Image,
-                    );
-                    let product =
-                        AssetProductRef::new(record.stable_id(), ImportedProductId::PRIMARY)
-                            .map_err(|_| identity_conflict())?;
-                    let handle = bindings
-                        .reserve::<ImageAsset>(
-                            &AssetRef::Product(product),
-                            snapshot.asset_resolution(),
-                            &AssetSourceKind::Image,
-                        )
-                        .map_err(|_| identity_conflict())?;
-                    let image = snapshot.share_image_for_consumer(index).ok_or_else(|| {
-                        HostFault::new(single_error(
-                            "project.scene.image-snapshot-invalid",
-                            "Prepared Scene Image is unavailable",
-                        ))
-                    })?;
-                    insert(handle, product, Some(record), image)?;
+                ));
+            }
+        }
+        ResidencyInput::Processed(content) => {
+            for acquired in &content.images {
+                if !content.base().same_base(acquired.base()) {
+                    return Err(binding_changed());
                 }
-            }
-            ResidencyInput::Processed(content) => {
-                for acquired in &content.images {
-                    if !content.base().same_base(acquired.base()) {
-                        return Err(identity_conflict());
-                    }
-                    let product = acquired.product().product().ok_or_else(identity_conflict)?;
-                    if product != acquired.reference() {
-                        return Err(identity_conflict());
-                    }
-                    let handle = bindings
-                        .reserve_product::<ImageAsset>(product)
-                        .map_err(|_| identity_conflict())?;
-                    let owner = Arc::new(RuntimeImageOwner {
-                        _acquired: acquired.clone(),
-                        _metadata: Arc::clone(runtime_lease.ok_or_else(super::resources_missing)?),
-                    });
-                    let image = acquired.product().share_with_retention_owner(owner);
-                    insert(
-                        handle,
-                        product,
-                        #[cfg(feature = "project-source")]
-                        None,
-                        image,
-                    )?;
-                }
+                let product = acquired.reference();
+                let handle = bindings
+                    .reserve_product::<ImageAsset>(product)
+                    .map_err(|_| binding_changed())?;
+                let owner = Arc::new(RuntimeImageOwner {
+                    _acquired: acquired.clone(),
+                    _metadata: Arc::clone(runtime_lease.ok_or_else(super::resources_missing)?),
+                });
+                let image = acquired.product().share_with_retention_owner(owner);
+                inputs.push(ImagePublicationInput::new(handle, product, None, image));
             }
         }
-        let retire = if additive {
-            Vec::new()
-        } else {
-            Self::retire(
-                owned.filter(|image| !next_ids.contains(&image.handle.id())),
-                server,
-                images,
-                states,
-            )?
-            .retire
-        };
-        Ok(Self {
-            publish,
-            retire,
-            shared,
-        })
     }
-
-    pub(super) fn retire<'a>(
-        owned: impl IntoIterator<Item = &'a OwnedImage>,
-        server: &AssetServer,
-        images: &Assets<ImageAsset>,
-        states: &AssetStates,
-    ) -> Result<Self, HostFault> {
-        let mut retire = Vec::new();
-        for image in owned {
-            let id = image.handle.id();
-            if !image.matches_retirement(server, images, states) {
-                return Err(superseded());
-            }
-            images
-                .prepare_mutation(image.handle, states)
-                .map_err(|_| superseded())?;
-            states.next_version(id).map_err(|_| version_exhausted())?;
-            retire.push(image.clone());
-        }
-        Ok(Self {
-            retire,
-            ..Self::empty()
-        })
-    }
-
-    pub(super) fn additive_products(&self) -> Vec<AssetProductRef> {
-        self.publish
-            .keys()
-            .copied()
-            .chain(self.shared.iter().map(|image| image.product))
-            .collect()
-    }
-
-    pub(super) fn retiring_products(&self) -> impl Iterator<Item = AssetProductRef> + '_ {
-        self.retire.iter().map(|image| image.product)
-    }
-
-    pub(super) fn image_for_product(
-        &self,
-        product: AssetProductRef,
-    ) -> Option<(Handle<ImageAsset>, ImageAsset)> {
-        let item = self.publish.get(&product)?;
-        Some((item.handle, item.image.share_retained()?))
-    }
-
-    pub(super) fn handle_for_product(
-        &self,
-        product: AssetProductRef,
-    ) -> Option<Handle<ImageAsset>> {
-        self.publish
-            .get(&product)
-            .map(|item| item.handle)
-            .or_else(|| {
-                self.shared
-                    .iter()
-                    .find(|image| image.product == product)
-                    .map(|image| image.handle)
-            })
-    }
-
-    pub(super) fn retained_image_for_product(
-        &self,
-        product: AssetProductRef,
-        images: &Assets<ImageAsset>,
-    ) -> Option<(Handle<ImageAsset>, ImageAsset)> {
-        if let Some(image) = self.image_for_product(product) {
-            return Some(image);
-        }
-        let handle = self
-            .shared
-            .iter()
-            .find(|image| image.product == product)?
-            .handle;
-        Some((handle, images.get(handle)?.share_retained()?))
-    }
-
-    pub(super) fn validate(
-        &self,
-        server: &AssetServer,
-        images: &Assets<ImageAsset>,
-        states: &AssetStates,
-    ) -> Result<(), HostFault> {
-        for item in self.publish.values() {
-            item.baseline
-                .validate(images, states)
-                .map_err(|_| superseded())?;
-        }
-        if self
-            .retire
-            .iter()
-            .any(|image| !image.matches_retirement(server, images, states))
-            || self
-                .shared
-                .iter()
-                .any(|image| !image.matches(server, images, states))
-        {
-            return Err(superseded());
-        }
-        Ok(())
-    }
-
-    pub(super) fn commit(
-        self,
-        server: &AssetServer,
-        images: &mut Assets<ImageAsset>,
-        states: &mut AssetStates,
-        events: &mut AssetEvents,
-    ) -> Vec<OwnedImage> {
-        // The Scene transaction cannot run lifecycle hooks or replace these engine resources.
-        // Validate the complete captured baseline before the first publication.
-        for item in self.publish.values() {
-            item.baseline
-                .validate(images, states)
-                .expect("Scene Image publication retained its admitted value/state association");
-            assert!(binding_matches(
-                item.handle,
-                item.product,
-                #[cfg(feature = "project-source")]
-                item.record.as_ref(),
-                server
-            ));
-        }
-        for image in &self.retire {
-            assert!(image.matches_retirement(server, images, states));
-        }
-        for image in &self.shared {
-            assert!(image.matches(server, images, states));
-        }
-        let mut receipts = Vec::with_capacity(self.publish.len());
-        for item in self.publish.into_values() {
-            let source_hash = item.image.source().map(|source| source.source_hash());
-            let import_recipe_digest = item
-                .image
-                .source()
-                .map(|source| source.import_recipe().digest());
-            item.baseline
-                .commit_loaded(
-                    item.image,
-                    images,
-                    states,
-                    events,
-                    source_hash,
-                    import_recipe_digest,
-                )
-                .expect("Scene Image publication version was preflighted");
-            receipts.push(OwnedImage::capture(
-                item.handle,
-                item.product,
-                #[cfg(feature = "project-source")]
-                item.record,
-                images,
-                states,
-            ));
-        }
-        for image in self.retire {
-            assert!(
-                images
-                    .remove_with_state(image.handle, states, events)
-                    .expect("Scene Image retirement version was preflighted")
-                    .is_some()
-            );
-        }
-        receipts
-    }
+    ImagePublications::prepare(
+        inputs,
+        owned,
+        mode,
+        server,
+        bindings.staged_server(),
+        images,
+        states,
+    )
+    .map_err(image_failure)
 }
 
-fn binding_matches(
-    handle: Handle<ImageAsset>,
-    product: AssetProductRef,
-    #[cfg(feature = "project-source")] record: Option<&AssetRecord>,
+pub(super) fn retire<'receipt>(
+    owned: impl Iterator<Item = &'receipt OwnedImage> + Clone,
     server: &AssetServer,
-) -> bool {
-    if server.get_handle::<ImageAsset>(handle.id()) != Some(handle)
-        || server.product(handle.id()) != Some(product)
-    {
-        return false;
+    images: &Assets<ImageAsset>,
+    states: &AssetStates,
+) -> Result<ImagePublications, HostFault> {
+    ImagePublications::prepare(
+        Vec::new(),
+        owned,
+        ImagePublicationMode::Replace,
+        server,
+        server,
+        images,
+        states,
+    )
+    .map_err(image_failure)
+}
+
+pub(super) fn image_failure(error: ImagePublicationError) -> HostFault {
+    match error {
+        ImagePublicationError::IdentityMismatch => binding_changed(),
+        ImagePublicationError::Superseded => failure(
+            "project.scene.image-ownership-changed",
+            "Scene Image publication is no longer owned by the current level",
+        ),
+        ImagePublicationError::VersionExhausted => failure(
+            "project.scene.image-version-exhausted",
+            "Scene Image publication versions are exhausted",
+        ),
     }
-    #[cfg(feature = "project-source")]
-    if let Some(record) = record
-        && (product.source() != record.stable_id()
-            || product.product() != ImportedProductId::PRIMARY
-            || server.path(handle.id()) != Some(record.path()))
-    {
-        return false;
-    }
-    true
-}
-
-fn superseded() -> HostFault {
-    HostFault::new(single_error(
-        "project.scene.image-ownership-changed",
-        "Scene Image publication is no longer owned by the current level",
-    ))
-}
-
-fn identity_conflict() -> HostFault {
-    HostFault::new(single_error(
-        "project.scene.asset-identity-conflict",
-        "Prepared Scene asset identity conflicts with the runtime",
-    ))
-}
-
-fn version_exhausted() -> HostFault {
-    HostFault::new(single_error(
-        "project.scene.image-version-exhausted",
-        "Scene Image publication versions are exhausted",
-    ))
 }

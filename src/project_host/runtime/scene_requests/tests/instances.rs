@@ -43,9 +43,9 @@ use super::{
 };
 #[cfg(feature = "runtime-2d")]
 use super::{
-    PreparedSceneContent, RequestOwner, Slot, assert_active_budget, poll_project_scene_requests,
+    PreparedSceneContent, RequestOwner, assert_active_budget, poll_project_scene_requests,
     preparation::{TestGate, TestPhase},
-    with_context_world_and_startup,
+    prepared, with_context_world_and_startup,
 };
 #[cfg(feature = "runtime-2d")]
 use crate::{
@@ -77,7 +77,7 @@ fn additive_cancellation_retains_the_original_slot_until_its_worker_returns() {
     let (_fixture, context, snapshot) = source_fixture();
     with_context_world_and_startup(context, snapshot.scene_source(), Some(snapshot), |world| {
         world.insert_resource(pools());
-        let context = Arc::clone(&world.resource::<RequestOwner>().context);
+        let context = Arc::clone(world.resource::<RequestOwner>().requests.source());
         let Context::Source { loader, .. } = context.as_ref() else {
             unreachable!()
         };
@@ -119,8 +119,8 @@ fn additive_cancellation_retains_the_original_slot_until_its_worker_returns() {
             ProjectScenes::scope(world, |scenes| scenes.request_additive(product(4))).unwrap();
         wait_for_request(world, request, ProjectSceneRequestState::Ready);
         assert!(matches!(
-            world.resource::<RequestOwner>().slot.as_ref(),
-            Some(Slot::Ready {content: PreparedSceneContent::Source(snapshot), .. })
+            prepared(world, request).1,
+            PreparedSceneContent::Source(snapshot)
                 if matches!(snapshot.selected_scene_source_key().origin(),
                     nara_scene::SourceDocumentOrigin::ProjectLocation { path, .. }
                         if path.as_str() == "assets/deferred.scene.json")
@@ -289,7 +289,7 @@ fn source_dependency_instances_share_capture_and_isolate_hierarchy_references_an
         snapshot.scene_source(),
         Some(snapshot),
         move |world| {
-            let context = Arc::clone(&world.resource::<RequestOwner>().context);
+            let context = Arc::clone(world.resource::<RequestOwner>().requests.source());
             let Context::Source { loader, .. } = context.as_ref() else {
                 unreachable!()
             };

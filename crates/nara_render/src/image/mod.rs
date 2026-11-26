@@ -7,6 +7,7 @@
 mod content;
 #[cfg(any(feature = "render-prepare", test))]
 mod prepare;
+mod publication;
 
 pub use content::{ImageContentError, ImageContentSnapshot};
 #[cfg(feature = "serde")]
@@ -37,4 +38,8 @@ pub use prepare::runtime::{
 pub use prepare::{
     PreparedImageResource, PreparedImageSnapshot, PreparedImages, image_content_hash,
     image_resource_key,
+};
+pub use publication::{
+    ImageContentReceipt, ImagePublicationError, ImagePublicationInput, ImagePublicationMode,
+    PreparedImagePublications,
 };

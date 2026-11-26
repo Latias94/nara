@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::{Mutex, OnceLock},
+    sync::{Mutex, OnceLock, atomic::AtomicU64},
     time::{Duration, Instant},
 };
 
@@ -154,11 +154,6 @@ fn scoped_prepared_inspection_preserves_source_receipt_pair_and_scheduled_stale_
         let source_view = CurrentScene::get(world).unwrap().source_view();
         let request = ProjectScenes::scope(world, |scenes| scenes.request(selected())).unwrap();
         wait_for_request(world, request, ProjectSceneRequestState::Ready);
-        let owner = world.resource::<RequestOwner>();
-        let Some(Slot::Ready { admission, content }) = owner.slot.as_ref() else {
-            panic!("the source preparation returned ready content")
-        };
-        assert!(api::content_matches_admission(content, admission));
         let roots = ProjectScenes::scope(world, |scenes| {
             let prepared = scenes.prepared(request).unwrap();
             assert_eq!(prepared.selected_scene_path(), Some(&selected()));
@@ -190,10 +185,7 @@ fn scoped_prepared_inspection_preserves_source_receipt_pair_and_scheduled_stale_
             assert_eq!(prepared.expected_instance(), &expected);
             assert_eq!(prepared.scene().roots(), roots);
         }
-        world
-            .resource::<RequestOwner>()
-            .closing
-            .store(true, Ordering::Release);
+        world.resource::<RequestOwner>().requests.close();
         let stale = Some(ProjectSceneRequestState::Rejected(
             ProjectSceneRequestError::Stale,
         ));
@@ -225,7 +217,7 @@ fn worker_prepares_selected_scene_and_refunds_rejected_content() {
     let pools = pools();
     let current = loader.load(candidate, plan).unwrap();
     let baseline = loader.budget_snapshot();
-    let mut preparation = Preparation::start(
+    let mut preparation = start_preparation(
         Arc::clone(&context),
         selected(),
         RequestPurpose::Travel,
@@ -259,7 +251,7 @@ fn worker_prepares_selected_scene_and_refunds_rejected_content() {
     )
     .unwrap();
     let expected = loader.load_scene(candidate, plan, &selected()).unwrap_err();
-    let mut rejected = Preparation::start(
+    let mut rejected = start_preparation(
         Arc::clone(&context),
         selected(),
         RequestPurpose::Travel,
@@ -319,7 +311,7 @@ fn cancellation_keeps_worker_and_prepared_generation_until_physical_return() {
     let baseline = loader.budget_snapshot();
     for phase in [TestPhase::BeforeRead, TestPhase::AfterPreparation] {
         let (gate, control) = TestGate::new(phase);
-        let mut preparation = Preparation::start(
+        let mut preparation = start_preparation(
             Arc::clone(&context),
             selected(),
             RequestPurpose::Travel,
@@ -331,7 +323,7 @@ fn cancellation_keeps_worker_and_prepared_generation_until_physical_return() {
         preparation.cancel();
         for _ in 0..3 {
             assert!(
-                preparation.poll().is_none(),
+                preparation.poll(PreparationFailure::unavailable).is_none(),
                 "logical cancellation cannot release a held worker"
             );
         }
@@ -368,7 +360,7 @@ fn failed_worker_discards_its_prepared_snapshot_and_closed_pool_never_reads_inli
     let _current = loader.load(candidate, plan).unwrap();
     let baseline = loader.budget_snapshot();
     let (gate, control) = TestGate::panicking(TestPhase::AfterPreparation);
-    let mut preparation = Preparation::start(
+    let mut preparation = start_preparation(
         Arc::clone(&context),
         selected(),
         RequestPurpose::Travel,
@@ -377,7 +369,7 @@ fn failed_worker_discards_its_prepared_snapshot_and_closed_pool_never_reads_inli
     )
     .unwrap();
     assert!(control.wait_until_started());
-    assert!(preparation.poll().is_none());
+    assert!(preparation.poll(PreparationFailure::unavailable).is_none());
     control.release();
     assert!(
         matches!(finish(&mut preparation), Err(failure) if failure.error == ProjectSceneRequestError::TaskUnavailable)
@@ -385,7 +377,7 @@ fn failed_worker_discards_its_prepared_snapshot_and_closed_pool_never_reads_inli
     assert_active_budget(&context, baseline);
     pools.shutdown_blocking().unwrap();
     assert!(matches!(
-        Preparation::start(
+        start_preparation(
             Arc::clone(&context),
             selected(),
             RequestPurpose::Travel,
@@ -411,7 +403,7 @@ fn inline_pool_rejects_scene_io_without_queuing_or_loading() {
     .unwrap();
     let baseline = loader.budget_snapshot();
     assert!(matches!(
-        Preparation::start(
+        start_preparation(
             Arc::clone(&context),
             selected(),
             RequestPurpose::Travel,
@@ -443,12 +435,25 @@ fn pools() -> TaskPools {
     .unwrap()
 }
 
+fn prepared(world: &World, request: ProjectSceneRequestId) -> (&Target, &PreparedSceneContent) {
+    let (target, _, content) = world
+        .resource::<RequestOwner>()
+        .requests
+        .prepared(
+            request,
+            world.get_resource::<RuntimeGeneration>().copied(),
+            CurrentScene::get(world),
+        )
+        .expect("the Scene worker returned admitted ready content");
+    (target, content)
+}
+
 fn finish(
     preparation: &mut Preparation,
 ) -> Result<PreparedSceneContent, preparation::PreparationFailure> {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if let Some(result) = preparation.poll() {
+        if let Some(result) = preparation.poll(PreparationFailure::unavailable) {
             return result;
         }
         assert!(

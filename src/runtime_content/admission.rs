@@ -2,13 +2,13 @@
 
 use std::{mem::size_of, sync::Arc};
 
-use nara_asset::pack::{CapturedPack, Pack};
+use nara_asset::pack::{CapturedPack, Pack, PackBacking};
 use nara_core::ByteLimit;
 use nara_core::vfs::capabilities::ContentDigest;
 use nara_scene::runtime_catalog::RuntimeContentCatalogAdmissionError;
 
 use super::{
-    DecodeBudget, EncodedBacking, ProductRecipe, RuntimeContentBase, RuntimeContentBaseInner,
+    DecodeBudget, ProductRecipe, RuntimeContentBase, RuntimeContentBaseInner,
     RuntimeContentBudgetKind, RuntimeContentCatalog, RuntimeContentCatalogLimits,
     RuntimeContentError, RuntimeContentExpectation, RuntimeContentLimits, budget_error, check,
     checked_add, resolve_runtime_configuration,
@@ -194,7 +194,7 @@ impl AdmittedCatalog {
         Ok(retained)
     }
 
-    pub(super) fn publish(self, backing: EncodedBacking, retained: usize) -> RuntimeContentBase {
+    pub(super) fn publish(self, backing: PackBacking, retained: usize) -> RuntimeContentBase {
         RuntimeContentBase {
             inner: Arc::new(RuntimeContentBaseInner {
                 catalog_digest: self.digest,

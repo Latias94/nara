@@ -137,7 +137,7 @@ fn optional_scene_sidecar_notices_match_the_principal_before_metadata_exists() {
 #[test]
 fn source_update_admission_preserves_pending_and_error_until_tasks_can_start() {
     Fixture::new().with_world(|world| {
-        let context = Arc::clone(&world.resource::<RequestOwner>().context);
+        let context = Arc::clone(world.resource::<RequestOwner>().requests.source());
         let Context::Source { loader, .. } = context.as_ref() else {
             unreachable!()
         };
@@ -239,7 +239,7 @@ fn preparing_notices_coalesce_and_cancellation_retains_capture_until_return_and_
         let root = fixture.root.clone();
         fixture.with_world(move |world| {
             world.insert_resource(pools());
-            let context = Arc::clone(&world.resource::<RequestOwner>().context);
+            let context = Arc::clone(world.resource::<RequestOwner>().requests.source());
             let Context::Source { loader, .. } = context.as_ref() else {
                 unreachable!()
             };
@@ -412,7 +412,7 @@ fn ready_source_updates_publish_frozen_a_then_prepare_b_only_after_exact_ack() {
     let root = fixture.root.clone();
     fixture.with_world(move |world| {
         world.insert_resource(pools());
-        let context = Arc::clone(&world.resource::<RequestOwner>().context);
+        let context = Arc::clone(world.resource::<RequestOwner>().requests.source());
         let Context::Source { loader, .. } = context.as_ref() else {
             unreachable!()
         };
@@ -588,7 +588,7 @@ fn invalid_source_update_retains_incumbent_and_error_until_repair_starts() {
     let root = fixture.root.clone();
     fixture.with_world(move |world| {
         world.insert_resource(pools());
-        let context = Arc::clone(&world.resource::<RequestOwner>().context);
+        let context = Arc::clone(world.resource::<RequestOwner>().requests.source());
         let Context::Source { loader, .. } = context.as_ref() else {
             unreachable!()
         };
@@ -689,7 +689,7 @@ fn latest_automatic_missing_path_cut_survives_unrelated_failure_and_repairs_by_n
     let root = fixture.root.clone();
     fixture.with_world(move |world| {
         world.insert_resource(pools());
-        let context = Arc::clone(&world.resource::<RequestOwner>().context);
+        let context = Arc::clone(world.resource::<RequestOwner>().requests.source());
         let Context::Source { loader, .. } = context.as_ref() else {
             unreachable!()
         };
@@ -834,7 +834,7 @@ fn cancelled_and_stale_late_failures_cannot_replace_previous_retry_interest() {
         let root = fixture.root.clone();
         fixture.with_world(move |world| {
             world.insert_resource(pools());
-            let context = Arc::clone(&world.resource::<RequestOwner>().context);
+            let context = Arc::clone(world.resource::<RequestOwner>().requests.source());
             let Context::Source { loader, .. } = context.as_ref() else {
                 unreachable!()
             };
@@ -1155,7 +1155,7 @@ fn closing_fences_source_interest_and_late_preparation_without_releasing_capture
         let root = fixture.root.clone();
         fixture.with_world(move |world| {
             world.insert_resource(pools());
-            let context = Arc::clone(&world.resource::<RequestOwner>().context);
+            let context = Arc::clone(world.resource::<RequestOwner>().requests.source());
             let Context::Source { loader, .. } = context.as_ref() else {
                 unreachable!()
             };

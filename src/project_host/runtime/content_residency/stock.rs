@@ -12,7 +12,7 @@ use nara_scene::advanced::SceneAssetReservations;
 
 use super::{
     HostFault, PreparedCatalog, ProjectSceneResidency, ResidencyInput,
-    images::{ImageChange, ImagePublications, OwnedImage},
+    images::{self, ImageChange, ImagePublications, OwnedImage, image_failure},
     materials::{MaterialPublications, MaterialResidency, OwnedMaterial},
     resources_missing,
     tilesets::{TileSetChanges, tileset_failure},
@@ -122,7 +122,7 @@ pub(super) fn prepare_images(
     if !world.contains_resource::<AssetEvents>() {
         return Err(resources_missing());
     }
-    ImagePublications::prepare(
+    images::prepare(
         content,
         change,
         bindings,
@@ -234,11 +234,13 @@ pub(super) fn validate_images(world: &World, images: &ImagePublications) -> Resu
         return Ok(());
     }
     validate_image_resources(world)?;
-    images.validate(
-        world.resource::<AssetServer>(),
-        world.resource::<Assets<ImageAsset>>(),
-        world.resource::<AssetStates>(),
-    )
+    images
+        .validate(
+            world.resource::<AssetServer>(),
+            world.resource::<Assets<ImageAsset>>(),
+            world.resource::<AssetStates>(),
+        )
+        .map_err(image_failure)
 }
 
 pub(super) fn commit_publications(
@@ -302,5 +304,7 @@ fn commit_images(world: &mut World, images: ImagePublications) -> Vec<OwnedImage
     let (server, mut values, mut states, mut events) = access
         .get_mut(world)
         .expect("Scene residency resources passed preflight");
-    images.commit(&server, &mut values, &mut states, &mut events)
+    images
+        .commit(&server, &mut values, &mut states, &mut events)
+        .expect("Scene Image residency passed preflight before Scene commit")
 }

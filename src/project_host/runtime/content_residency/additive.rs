@@ -399,7 +399,7 @@ impl PreparedUnload {
             additions
                 .stock
                 .images
-                .retain(|image| !retiring_images.contains(&image.product));
+                .retain(|image| !retiring_images.contains(&image.product()));
             additions
                 .stock
                 .materials
@@ -493,10 +493,10 @@ fn prepare_retirement(
         .images
         .iter()
         .filter(|image| {
-            active.stock.images.contains(&image.product)
+            active.stock.images.contains(&image.product())
                 && !remaining
                     .iter()
-                    .any(|other| other.stock.images.contains(&image.product))
+                    .any(|other| other.stock.images.contains(&image.product()))
         })
         .peekable();
     let images = if retiring_images.peek().is_none() {
@@ -508,7 +508,7 @@ fn prepare_retirement(
         if !world.contains_resource::<AssetEvents>() {
             return Err(resources_missing());
         }
-        ImagePublications::retire(
+        super::images::retire(
             retiring_images,
             world
                 .get_resource::<AssetServer>()

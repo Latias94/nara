@@ -1,9 +1,9 @@
-use std::sync::{Arc, Mutex, TryLockError};
+use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Mutex;
 
-use nara_app::tasks::{
-    TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskReturnState, TaskSpawnRequest,
-    TaskTerminal,
-};
+use nara_app::tasks::TaskPools;
+use nara_scene::current_scene::requests::ScenePreparation;
 
 #[cfg(feature = "project-source")]
 use super::ProjectContentErrorKind;
@@ -22,7 +22,7 @@ pub(super) struct PreparationFailure {
 }
 
 impl PreparationFailure {
-    fn unavailable() -> Self {
+    pub(super) fn unavailable() -> Self {
         let error = ProjectSceneRequestError::TaskUnavailable;
         Self {
             error,
@@ -68,193 +68,102 @@ impl PreparationFailure {
     }
 }
 
-pub(super) struct Preparation {
-    task: TaskHandle<()>,
-    work: Arc<Mutex<Option<Work>>>,
-}
+pub(super) type Preparation = ScenePreparation<PreparedSceneContent, PreparationFailure>;
 
-impl Preparation {
-    pub(super) fn start(
-        context: Arc<Context>,
-        selection: impl Into<ProjectSceneSelection>,
-        purpose: RequestPurpose,
-        pools: &TaskPools,
-        #[cfg(test)] gate: Option<TestGate>,
-    ) -> Result<Self, ProjectSceneRequestError> {
-        if !pools.is_threaded(TaskPoolKind::Io) {
-            return Err(ProjectSceneRequestError::TaskUnavailable);
+pub(super) fn start_preparation(
+    context: Arc<Context>,
+    selection: impl Into<ProjectSceneSelection>,
+    purpose: RequestPurpose,
+    pools: &TaskPools,
+    #[cfg(test)] mut gate: Option<TestGate>,
+) -> Result<Preparation, ProjectSceneRequestError> {
+    let selection = selection.into();
+    ScenePreparation::spawn(pools, move |cancellation| {
+        #[cfg(test)]
+        wait_at(&mut gate, TestPhase::BeforeRead);
+        if cancellation.is_cancelled() {
+            return None;
         }
-        let work = Arc::new(Mutex::new(Some(Work {
-            context,
-            selection: selection.into(),
-            purpose,
-            result: None,
-            #[cfg(test)]
-            gate,
-        })));
-        let input = Input {
-            work: Arc::clone(&work),
-        };
-        let task = pools
-            .spawn(
-                TaskPoolKind::Io,
-                TaskSpawnRequest::new(0, TaskDomainKey::new(0x7363_656e_65)),
-                move |cancellation| {
-                    let input = input;
-                    let mut slot = input.work.lock().unwrap_or_else(|error| error.into_inner());
-                    let Some(work) = slot.as_mut() else { return };
-                    #[cfg(test)]
-                    wait_at(&mut work.gate, TestPhase::BeforeRead);
-                    if cancellation.is_cancelled() {
-                        return;
-                    }
-                    // Startup already established executable schema agreement. Ordinary targets use the
-                    // same frozen native plan; they are not new startup attestations or schema owners.
-                    work.result = Some(match (work.context.as_ref(), &work.selection) {
-                        #[cfg(feature = "project-source")]
-                        (
-                            Context::Source {
-                                candidate,
-                                plan,
-                                loader,
-                                input,
-                            },
-                            selection,
-                        ) => {
-                            let attempt = match (selection, &work.purpose) {
-                                (ProjectSceneSelection::Source(path), RequestPurpose::Travel) => {
-                                    loader.load_scene_observed_reusing_input(
-                                        candidate,
-                                        plan,
-                                        path,
-                                        input.as_ref(),
-                                    )
-                                }
-                                (
-                                    ProjectSceneSelection::Product(product),
-                                    RequestPurpose::Travel,
-                                ) => loader.load_scene_product_observed_reusing_input(
-                                    candidate,
-                                    plan,
-                                    *product,
-                                    input.as_ref(),
-                                ),
-                                (
-                                    ProjectSceneSelection::Product(product),
-                                    RequestPurpose::AdditiveSource(path),
-                                ) => loader.load_deferred_scene_observed_reusing_input(
-                                    candidate,
-                                    plan,
-                                    *product,
-                                    path,
-                                    input.as_ref(),
-                                ),
-                                _ => unreachable!("source request purpose is selected by the Host"),
-                            };
-                            attempt
-                                .result
-                                .map_err(|error| {
-                                    PreparationFailure::source_content(error, attempt.observations)
-                                })
-                                .and_then(|snapshot| {
-                                    // Required dependencies are data, not public travel roots.
-                                    if !work.purpose.is_additive()
-                                        && !work
-                                            .context
-                                            .declares_source_path(snapshot.selected_scene_path())
-                                    {
-                                        let error = ProjectSceneRequestError::UndeclaredScene;
-                                        return Err(PreparationFailure {
-                                            error,
-                                            diagnostics: error_diagnostics(error),
-                                            observations: None,
-                                        });
-                                    }
-                                    Ok(PreparedSceneContent::Source(snapshot))
-                                })
-                        }
-                        (Context::Processed { base }, ProjectSceneSelection::Product(product)) => {
-                            let prepared =
-                                if matches!(work.purpose, RequestPurpose::AdditiveProcessed) {
-                                    base.prepare_scene_closure(*product)
-                                } else {
-                                    base.prepare_scene_content(*product)
-                                };
-                            prepared
-                                .map(PreparedSceneContent::Processed)
-                                .map_err(PreparationFailure::runtime_content)
-                        }
-                        #[cfg(feature = "project-source")]
-                        (Context::Processed { .. }, ProjectSceneSelection::Source(_)) => {
+        // Startup already established executable schema agreement. Ordinary targets use the
+        // same frozen native plan; they are not new startup attestations or schema owners.
+        let result = match (context.as_ref(), &selection) {
+            #[cfg(feature = "project-source")]
+            (
+                Context::Source {
+                    candidate,
+                    plan,
+                    loader,
+                    input,
+                },
+                selection,
+            ) => {
+                let attempt = match (selection, &purpose) {
+                    (ProjectSceneSelection::Source(path), RequestPurpose::Travel) => loader
+                        .load_scene_observed_reusing_input(candidate, plan, path, input.as_ref()),
+                    (ProjectSceneSelection::Product(product), RequestPurpose::Travel) => loader
+                        .load_scene_product_observed_reusing_input(
+                            candidate,
+                            plan,
+                            *product,
+                            input.as_ref(),
+                        ),
+                    (
+                        ProjectSceneSelection::Product(product),
+                        RequestPurpose::AdditiveSource(path),
+                    ) => loader.load_deferred_scene_observed_reusing_input(
+                        candidate,
+                        plan,
+                        *product,
+                        path,
+                        input.as_ref(),
+                    ),
+                    _ => unreachable!("source request purpose is selected by the Host"),
+                };
+                attempt
+                    .result
+                    .map_err(|error| {
+                        PreparationFailure::source_content(error, attempt.observations)
+                    })
+                    .and_then(|snapshot| {
+                        // Required dependencies are data, not public travel roots.
+                        if !purpose.is_additive()
+                            && !context.declares_source_path(snapshot.selected_scene_path())
+                        {
                             let error = ProjectSceneRequestError::UndeclaredScene;
-                            Err(PreparationFailure {
+                            return Err(PreparationFailure {
                                 error,
                                 diagnostics: error_diagnostics(error),
                                 observations: None,
-                            })
+                            });
                         }
-                    });
-                    #[cfg(test)]
-                    wait_at(&mut work.gate, TestPhase::AfterPreparation);
-                },
-            )
-            .into_handle()
-            .map_err(|_| ProjectSceneRequestError::TaskUnavailable)?;
-        Ok(Self { task, work })
-    }
-
-    pub(super) fn cancel(&self) {
-        self.task.cancel();
-    }
-
-    pub(super) fn poll(&mut self) -> Option<Result<PreparedSceneContent, PreparationFailure>> {
-        let returned = self.task.return_observer().state();
-        if returned == TaskReturnState::Pending {
-            return None;
-        }
-        if !self.task.is_finished() {
-            return None;
-        }
-        let mut slot = match self.work.try_lock() {
-            Ok(slot) => slot,
-            Err(TryLockError::WouldBlock) => return None,
-            Err(TryLockError::Poisoned(error)) => error.into_inner(),
-        };
-        let terminal = self.task.try_take()?;
-        let work = slot.take()?;
-        if returned == TaskReturnState::CleanupFailed {
-            return Some(Err(PreparationFailure::unavailable()));
-        }
-        Some(match terminal {
-            TaskTerminal::Completed(()) => work
-                .result
-                .unwrap_or_else(|| Err(PreparationFailure::unavailable())),
-            TaskTerminal::Cancelled(_) | TaskTerminal::Failed(_) => {
-                Err(PreparationFailure::unavailable())
+                        Ok(PreparedSceneContent::Source(snapshot))
+                    })
             }
-        })
-    }
-}
-
-impl Drop for Preparation {
-    fn drop(&mut self) {
-        self.cancel();
-    }
-}
-
-struct Work {
-    context: Arc<Context>,
-    selection: ProjectSceneSelection,
-    purpose: RequestPurpose,
-    result: Option<Result<PreparedSceneContent, PreparationFailure>>,
-    #[cfg(test)]
-    gate: Option<TestGate>,
-}
-
-// Keep the potentially large result in Work, not the task terminal: cancellation cannot race an
-// unobserved result destructor after the slot has been released. Tasks observes capture disposal.
-struct Input {
-    work: Arc<Mutex<Option<Work>>>,
+            (Context::Processed { base }, ProjectSceneSelection::Product(product)) => {
+                let prepared = if matches!(purpose, RequestPurpose::AdditiveProcessed) {
+                    base.prepare_scene_closure(*product)
+                } else {
+                    base.prepare_scene_content(*product)
+                };
+                prepared
+                    .map(PreparedSceneContent::Processed)
+                    .map_err(PreparationFailure::runtime_content)
+            }
+            #[cfg(feature = "project-source")]
+            (Context::Processed { .. }, ProjectSceneSelection::Source(_)) => {
+                let error = ProjectSceneRequestError::UndeclaredScene;
+                Err(PreparationFailure {
+                    error,
+                    diagnostics: error_diagnostics(error),
+                    observations: None,
+                })
+            }
+        };
+        #[cfg(test)]
+        wait_at(&mut gate, TestPhase::AfterPreparation);
+        Some(result)
+    })
+    .ok_or(ProjectSceneRequestError::TaskUnavailable)
 }
 
 #[cfg(test)]

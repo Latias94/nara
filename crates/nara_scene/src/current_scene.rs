@@ -29,6 +29,8 @@ use crate::{
 #[cfg(feature = "runtime-catalog")]
 use crate::{SceneComponentBindingsWitness, runtime_catalog::RuntimeContentCatalog};
 
+#[cfg(feature = "runtime-catalog")]
+pub mod requests;
 mod startup;
 
 pub use startup::{

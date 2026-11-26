@@ -604,7 +604,7 @@ mod tests {
         // meter. One more byte must refuse; the probe itself is returned before this helper exits.
         let remaining = budget.reserve(0, limit - used).unwrap();
         assert!(matches!(
-            budget.reserve(0, 1),
+            budget.reserve(0, 1).map_err(RuntimeContentError::from),
             Err(RuntimeContentError::Budget {
                 kind: RuntimeContentBudgetKind::WorkBytes,
                 required,

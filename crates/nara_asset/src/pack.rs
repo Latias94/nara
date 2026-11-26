@@ -1,7 +1,10 @@
-//! Wire I/O for NARAPACK v1, the cooked delivery format retained in Phase 3.
+//! Wire I/O and bounded member acquisition for NARAPACK v1.
 //!
 //! A pack stores a fixed header, opaque catalog bytes, then concatenated members in catalog order.
-//! The caller owns catalog admission, executable selection, expected digests, and allocation limits.
+//! The caller admits the catalog and supplies executable selection, digests, and limits.
+
+mod backing;
+mod budget;
 
 use std::{
     fmt,
@@ -11,6 +14,9 @@ use std::{
 };
 
 use nara_core::vfs::capabilities::{ContentDigest, FileCapability, FsError, FsOperation};
+
+pub use backing::{AssetPreparationError, PackBacking, PackBackingError, PackMember};
+pub use budget::{DecodeBudget, DecodeBudgetError, DecodeLease};
 
 const MAGIC: &[u8; 8] = b"NARAPACK";
 const VERSION: u32 = 1;
@@ -185,9 +191,7 @@ impl Pack {
         let mut reader = self.file.reader()?;
         reader.seek(SeekFrom::Start(start)).map_err(read_error)?;
         let bytes = read_exact_bytes(&mut reader, length)?;
-        if ContentDigest::of_bytes(&bytes) != expected {
-            return Err(PackError::MemberDigestMismatch);
-        }
+        verify_member(&bytes, expected)?;
         Ok(bytes)
     }
 }
@@ -228,6 +232,13 @@ pub fn write_catalog(output: &mut (impl Write + ?Sized), catalog: &[u8]) -> Resu
         .write_all(&(catalog.len() as u64).to_le_bytes())
         .map_err(write_error)?;
     output.write_all(catalog).map_err(write_error)?;
+    Ok(())
+}
+
+fn verify_member(bytes: &[u8], expected: ContentDigest) -> Result<(), PackError> {
+    if ContentDigest::of_bytes(bytes) != expected {
+        return Err(PackError::MemberDigestMismatch);
+    }
     Ok(())
 }
 
@@ -293,7 +304,8 @@ mod tests {
         let members = vec![Vec::new(), b"red".to_vec(), b"blue".to_vec()];
         let catalog_start = catalog.as_ptr();
         let member_start = members[1].as_ptr();
-        let pack = CapturedPack::new(catalog, members).unwrap();
+        let digests = [b"".as_slice(), b"red", b"blue"].map(ContentDigest::of_bytes);
+        let (backing, pack) = PackBacking::capture(catalog, members, digests.into_iter()).unwrap();
         let shared = pack.clone();
         drop(pack);
 
@@ -303,10 +315,22 @@ mod tests {
         assert!(shared.member(3).is_none());
         assert_eq!(shared.catalog_digest(), ContentDigest::of_bytes(b"cat"));
 
+        let budget = DecodeBudget::new(0, 1, 0);
+        let encoded = backing.member(&budget, 1, digests[1]).read().unwrap();
+        assert_eq!(encoded.as_ref().as_ptr(), member_start);
+        assert!(matches!(
+            backing.member(&budget, 1, digests[0]).read(),
+            Err(PackBackingError::Pack(PackError::ExtentMismatch))
+        ));
         let mut bytes = Vec::new();
         shared.write(&mut bytes).unwrap();
         assert_eq!(bytes, b"NARAPACK\x01\0\0\0\x03\0\0\0\0\0\0\0catredblue");
         assert_eq!(shared.encoded_bytes(), bytes.len() as u64);
+        let mut from_backing = Vec::new();
+        backing
+            .write(&mut from_backing, &budget, digests.into_iter())
+            .unwrap();
+        assert_eq!(from_backing, bytes);
     }
 
     #[test]
@@ -314,6 +338,8 @@ mod tests {
     fn member_reads_authenticate_exact_indexed_extents() {
         use std::{
             fs,
+            sync::Barrier,
+            thread,
             time::{SystemTime, UNIX_EPOCH},
         };
 
@@ -332,26 +358,51 @@ mod tests {
         handle.write_all(&bytes).unwrap();
         let file = FileCapability::from_host_handle(handle, TrustMode::TrustedLocal, 0).unwrap();
         let catalog = read_catalog(&file, 3).unwrap();
-        let pack = Pack::open(file, catalog.len(), [0, 3, 4, 0].into_iter()).unwrap();
-        let empty = pack.read_member(0, ContentDigest::of_bytes(b""));
-        let first = pack.read_member(1, ContentDigest::of_bytes(b"red"));
-        let second = pack.read_member(2, ContentDigest::of_bytes(b"blue"));
-        let last = pack.read_member(3, ContentDigest::of_bytes(b""));
-        let short = pack.read_member(1, ContentDigest::of_bytes(b"re"));
-        let long = pack.read_member(1, ContentDigest::of_bytes(b"redblue"));
-        let wrong = pack.read_member(1, ContentDigest::of_bytes(b"tan"));
-        let missing = pack.read_member(4, ContentDigest::of_bytes(b""));
-        drop(pack);
-        fs::remove_file(path).unwrap();
-
         assert_eq!(catalog, b"cat");
-        assert!(empty.unwrap().is_empty());
-        assert_eq!(first.unwrap(), b"red");
-        assert_eq!(second.unwrap(), b"blue");
-        assert!(last.unwrap().is_empty());
-        assert!(matches!(short, Err(PackError::ExtentMismatch)));
-        assert!(matches!(long, Err(PackError::ExtentMismatch)));
-        assert!(matches!(wrong, Err(PackError::MemberDigestMismatch)));
-        assert!(matches!(missing, Err(PackError::ExtentMismatch)));
+        let backing = PackBacking::open(file, catalog, [0, 3, 4, 0].into_iter()).unwrap();
+        let budget = DecodeBudget::new(0, 0, 7);
+        let read = |index, bytes: &[u8]| {
+            backing
+                .member(&budget, index, ContentDigest::of_bytes(bytes))
+                .read()
+        };
+        let start = Barrier::new(2);
+        let (first, second) = thread::scope(|scope| {
+            let first = scope.spawn(|| {
+                start.wait();
+                read(1, b"red").unwrap()
+            });
+            start.wait();
+            let second = read(2, b"blue").unwrap();
+            (first.join().unwrap(), second)
+        });
+        assert_eq!(first.as_ref(), b"red");
+        assert_eq!(second.as_ref(), b"blue");
+        assert!(matches!(
+            budget.reserve(0, 1),
+            Err(DecodeBudgetError::WorkBytes {
+                required: 8,
+                limit: 7
+            })
+        ));
+        drop(first);
+        drop(second);
+        assert!(budget.reserve(0, 7).is_ok());
+
+        assert!(read(0, b"").unwrap().as_ref().is_empty());
+        assert!(read(3, b"").unwrap().as_ref().is_empty());
+        for (index, bytes) in [(1, b"re".as_slice()), (1, b"redblue"), (4, b"")] {
+            assert!(matches!(
+                read(index, bytes),
+                Err(PackBackingError::Pack(PackError::ExtentMismatch))
+            ));
+        }
+        assert!(matches!(
+            read(1, b"tan"),
+            Err(PackBackingError::Pack(PackError::MemberDigestMismatch))
+        ));
+        assert!(budget.reserve(0, 7).is_ok());
+        drop(backing);
+        fs::remove_file(path).unwrap();
     }
 }

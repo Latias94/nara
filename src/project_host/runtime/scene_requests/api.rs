@@ -1,23 +1,10 @@
 //! Public finite request surface and explicit owner-thread commit.
 
-use nara_ecs::bevy_ecs::system::SystemState;
+use nara_ecs::identity::SpawnedSceneInstance;
 use nara_scene::SceneOccurrenceKey;
+use nara_scene::current_scene::requests::SceneRequestState;
 
 use super::*;
-
-/// Exact request identity. Runtime and process-wide sequence prevent cross-World replay.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ProjectSceneRequestId {
-    pub(super) generation: RuntimeGeneration,
-    pub(super) sequence: u64,
-}
-
-impl ProjectSceneRequestId {
-    #[must_use]
-    pub const fn get(self) -> u64 {
-        self.sequence
-    }
-}
 
 /// An authored source Scene path or complete Scene Product under the original Host authority.
 ///
@@ -91,6 +78,21 @@ impl ProjectSceneRequestError {
     }
 }
 
+impl From<SceneRequestError<ProjectSceneRequestError>> for ProjectSceneRequestError {
+    fn from(error: SceneRequestError<Self>) -> Self {
+        match error {
+            SceneRequestError::Unavailable => Self::Unavailable,
+            SceneRequestError::Busy => Self::Busy,
+            SceneRequestError::UndeclaredScene => Self::UndeclaredScene,
+            SceneRequestError::TaskUnavailable => Self::TaskUnavailable,
+            SceneRequestError::IdExhausted => Self::IdExhausted,
+            SceneRequestError::Stale => Self::Stale,
+            SceneRequestError::Preparation(error) => error,
+            SceneRequestError::CommitRejected => Self::CommitRejected,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectSceneRequestState {
     Preparing,
@@ -102,9 +104,16 @@ pub enum ProjectSceneRequestState {
     Committed,
 }
 
-impl ProjectSceneRequestState {
-    pub(super) fn is_terminal(self) -> bool {
-        matches!(self, Self::Cancelled | Self::Rejected(_) | Self::Committed)
+impl From<SceneRequestState<ProjectSceneRequestError>> for ProjectSceneRequestState {
+    fn from(state: SceneRequestState<ProjectSceneRequestError>) -> Self {
+        match state {
+            SceneRequestState::Preparing => Self::Preparing,
+            SceneRequestState::Cancelling => Self::Cancelling,
+            SceneRequestState::Ready => Self::Ready,
+            SceneRequestState::Cancelled => Self::Cancelled,
+            SceneRequestState::Rejected(error) => Self::Rejected(error.into()),
+            SceneRequestState::Committed => Self::Committed,
+        }
     }
 }
 
@@ -127,7 +136,8 @@ pub struct ProjectSceneSourceUpdateStatus {
 /// When obtained through [`ProjectScenes::scope`], it cannot leave the inspection scope. Build
 /// owned game data from it, return that data, then explicitly commit after the scope returns.
 pub struct PreparedProjectSceneView<'a> {
-    admission: &'a Admission,
+    target: &'a Target,
+    expected: &'a SpawnedSceneInstance,
     content: &'a PreparedSceneContent,
 }
 
@@ -169,7 +179,7 @@ impl PreparedProjectSceneView<'_> {
     /// Borrows the exact selection captured by this request.
     #[must_use]
     pub fn selected_scene(&self) -> &ProjectSceneSelection {
-        &self.admission.selection
+        &self.target.selection
     }
 
     /// Returns the captured path relative to its source directory, for source content only.
@@ -196,7 +206,7 @@ impl PreparedProjectSceneView<'_> {
 
     #[must_use]
     pub fn expected_instance(&self) -> &SpawnedSceneInstance {
-        &self.admission.expected
+        self.expected
     }
 }
 
@@ -263,12 +273,7 @@ impl ProjectScenes<'_> {
             .unwrap()
             .status()
             .request
-            .is_some_and(|request| {
-                owner.slot.as_ref().is_some_and(|slot| {
-                    slot.id() == request
-                        && matches!(slot, Slot::Preparing { .. } | Slot::Ready { .. })
-                })
-            });
+            .is_some_and(|request| owner.requests.active_request() == Some(request));
         Ok(owner
             .source_updates
             .as_mut()
@@ -313,10 +318,10 @@ impl ProjectScenes<'_> {
             .current
             .as_deref()
             .ok_or(ProjectSceneRequestError::Unavailable)?;
-        if owner.closing.load(Ordering::Acquire)
+        if owner.requests.is_closing()
             || self.generation.is_none()
             || owner.source_updates.is_none()
-            || !owner.context.matches_current(current)
+            || !owner.requests.source().matches_current(current)
         {
             return Err(ProjectSceneRequestError::Unavailable);
         }
@@ -336,8 +341,8 @@ impl ProjectScenes<'_> {
         let Some(owner) = self.owner.as_deref() else {
             return;
         };
-        if owner.closing.load(Ordering::Acquire)
-            || owner.slot.is_some()
+        if owner.requests.is_closing()
+            || owner.requests.is_occupied()
             || self
                 .residency
                 .as_deref()
@@ -435,7 +440,7 @@ impl ProjectScenes<'_> {
     pub fn cancel(&mut self, request: ProjectSceneRequestId) -> bool {
         self.owner
             .as_deref_mut()
-            .is_some_and(|owner| owner.cancel(request))
+            .is_some_and(|owner| owner.requests.cancel(request))
     }
 
     /// Requests asynchronous preparation of a declared Scene through the original Host authority.
@@ -514,10 +519,25 @@ impl ProjectScenes<'_> {
             .owner
             .as_deref_mut()
             .ok_or(ProjectSceneRequestError::Unavailable)?;
-        if !owner.context.matches_current(current) {
-            return Err(ProjectSceneRequestError::Stale);
-        }
-        owner.request(selection, purpose, generation, current.receipt(), pools)
+        owner
+            .requests
+            .request(
+                current,
+                generation,
+                Target { selection, purpose },
+                |context, target| {
+                    start_preparation(
+                        context,
+                        target.selection.clone(),
+                        target.purpose.clone(),
+                        pools,
+                        #[cfg(test)]
+                        owner.gate.take(),
+                    )
+                    .ok()
+                },
+            )
+            .map_err(Into::into)
     }
 
     /// Observes exactly this request using the current generation and expected-receipt predicates.
@@ -525,24 +545,15 @@ impl ProjectScenes<'_> {
     /// Observation does not advance preparation or release its slot.
     #[must_use]
     pub fn state(&self, request: ProjectSceneRequestId) -> Option<ProjectSceneRequestState> {
-        let owner = self.owner.as_deref()?;
-        let slot = owner.slot.as_ref().filter(|slot| slot.id() == request)?;
-        Some(
-            if let Some(admission) = slot.admission()
-                && !owner.matches(
-                    admission,
-                    self.generation.as_deref().copied(),
-                    self.current.as_deref(),
-                )
-            {
-                match slot {
-                    Slot::Preparing { .. } => ProjectSceneRequestState::Cancelling,
-                    _ => ProjectSceneRequestState::Rejected(ProjectSceneRequestError::Stale),
-                }
-            } else {
-                slot.state()
-            },
-        )
+        self.owner
+            .as_deref()?
+            .requests
+            .state(
+                request,
+                self.generation.as_deref().copied(),
+                self.current.as_deref(),
+            )
+            .map(Into::into)
     }
 
     /// Borrows ready content only while its Host, generation and expected receipt still match.
@@ -550,29 +561,22 @@ impl ProjectScenes<'_> {
     /// Construct owned game data before ending this borrow and explicitly committing the request.
     #[must_use]
     pub fn prepared(&self, request: ProjectSceneRequestId) -> Option<PreparedProjectSceneView<'_>> {
-        let owner = self.owner.as_deref()?;
-        let Slot::Ready { admission, content } = owner.slot.as_ref()? else {
-            return None;
-        };
-        (admission.id == request
-            && owner.matches(
-                admission,
-                self.generation.as_deref().copied(),
-                self.current.as_deref(),
-            )
-            && content_matches_admission(content, admission))
-        .then_some(PreparedProjectSceneView { admission, content })
+        let (target, expected, content) = self.owner.as_deref()?.requests.prepared(
+            request,
+            self.generation.as_deref().copied(),
+            self.current.as_deref(),
+        )?;
+        Some(PreparedProjectSceneView {
+            target,
+            expected,
+            content,
+        })
     }
 
     /// Safe owner-produced details for exactly this terminal request.
     #[must_use]
     pub fn diagnostics(&self, request: ProjectSceneRequestId) -> Option<&DiagnosticReport> {
-        match self.owner.as_deref()?.slot.as_ref()? {
-            Slot::Terminal {
-                id, diagnostics, ..
-            } if *id == request => Some(diagnostics),
-            _ => None,
-        }
+        self.owner.as_deref()?.requests.diagnostics(request)
     }
 
     /// Releases exactly this terminal request's slot.
@@ -585,26 +589,12 @@ impl ProjectScenes<'_> {
         let Some(owner) = self.owner.as_deref_mut() else {
             return false;
         };
-        if let Some(Slot::Ready { admission, .. }) = owner.slot.as_ref()
-            && admission.id == request
-            && !owner.matches(admission, generation, current)
-        {
-            owner.reject_stale(request);
+        let acknowledged = owner.requests.acknowledge(request, generation, current);
+        #[cfg(feature = "project-source")]
+        if acknowledged && let Some(updates) = &mut owner.source_updates {
+            updates.acknowledge(request);
         }
-        if owner
-            .slot
-            .as_ref()
-            .is_some_and(|slot| slot.id() == request && slot.state().is_terminal())
-        {
-            owner.slot = None;
-            #[cfg(feature = "project-source")]
-            if let Some(updates) = &mut owner.source_updates {
-                updates.acknowledge(request);
-            }
-            true
-        } else {
-            false
-        }
+        acknowledged
     }
 }
 
@@ -620,10 +610,10 @@ pub fn commit_prepared_project_scene<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
-    commit_ready_project_scene(world, request, false, |world, admission, content| {
+    commit_ready_project_scene(world, request, false, |world, expected, content| {
         super::super::content_residency::replace_scene(
             world,
-            &admission.expected,
+            expected,
             content,
             limits,
             additional_retirements,
@@ -642,14 +632,9 @@ pub fn activate_prepared_project_scene(
     request: ProjectSceneRequestId,
     occurrence: &SceneOccurrenceKey,
 ) -> SceneSpawnReport {
-    commit_ready_project_scene(world, request, true, |world, admission, content| {
-        super::super::content_residency::activate_addition(
-            world,
-            &admission.expected,
-            content,
-            occurrence,
-        )
-        .unwrap_or_else(|report| report)
+    commit_ready_project_scene(world, request, true, |world, expected, content| {
+        super::super::content_residency::activate_addition(world, expected, content, occurrence)
+            .unwrap_or_else(|report| report)
     })
 }
 
@@ -657,7 +642,7 @@ fn commit_ready_project_scene(
     world: &mut World,
     request: ProjectSceneRequestId,
     additive: bool,
-    publish: impl FnOnce(&mut World, &Admission, &PreparedSceneContent) -> SceneSpawnReport,
+    publish: impl FnOnce(&mut World, &SpawnedSceneInstance, &PreparedSceneContent) -> SceneSpawnReport,
 ) -> SceneSpawnReport {
     if !world.contains_resource::<RequestOwner>() {
         return rejected(
@@ -671,92 +656,34 @@ fn commit_ready_project_scene(
             "Scene request ownership cannot run lifecycle effects during commit",
         );
     }
-    world.resource_scope(|world, mut owner: nara_ecs::Mut<RequestOwner>| {
-        if owner.slot.as_ref().is_none_or(|slot| slot.id() != request) {
-            return rejected(
-                "project.scene.request-mismatch",
-                "Project Scene request identity does not match",
-            );
-        }
-        let valid = owner
-            .slot
-            .as_ref()
-            .and_then(Slot::admission)
-            .is_some_and(|admission| {
-                owner.matches(
-                    admission,
-                    world.get_resource::<RuntimeGeneration>().copied(),
-                    world.get_resource::<CurrentScene>(),
-                )
-            });
-        if !valid {
-            owner.reject_stale(request);
-            return rejected(
-                "project.scene.request-stale",
-                "Project Scene request inputs changed before commit",
-            );
-        }
-        if !matches!(owner.slot, Some(Slot::Ready { .. })) {
-            return rejected(
-                "project.scene.request-not-ready",
-                "Project Scene preparation has not returned ready content",
-            );
-        }
-        if owner
-            .slot
-            .as_ref()
-            .and_then(Slot::admission)
-            .is_some_and(|admission| admission.purpose.is_additive() != additive)
-        {
-            return wrong_publication();
-        }
-        let Some(Slot::Ready { admission, content }) = owner.slot.take() else {
-            unreachable!()
-        };
-        let report = if !content_matches_admission(&content, &admission) {
-            rejected(
-                "project.scene.prepared-input-mismatch",
-                "Prepared Scene does not match its captured Host authority",
-            )
-        } else {
-            publish(world, &admission, &content)
-        };
-        let state = if !report.diagnostics.has_errors() && report.instance.is_some() {
-            #[cfg(feature = "project-source")]
-            if !additive
-                && let (Some(updates), PreparedSceneContent::Source(snapshot), Some(instance)) = (
-                    &mut owner.source_updates,
-                    &content,
-                    report.instance.as_ref(),
-                )
-            {
-                updates.publish(snapshot.content_closure(), instance);
-            }
-            ProjectSceneRequestState::Committed
-        } else {
-            ProjectSceneRequestState::Rejected(ProjectSceneRequestError::CommitRejected)
-        };
-        owner.slot = Some(Slot::Terminal {
-            id: request,
-            state,
-            diagnostics: report.diagnostics.clone(),
-        });
-        report
+    world.resource_scope(|world, owner: nara_ecs::Mut<RequestOwner>| {
+        let owner = owner.into_inner();
+        owner.requests.commit(
+            world,
+            request,
+            |target| target.purpose.is_additive() == additive,
+            |world, expected, content| {
+                let report = publish(world, expected, content);
+                #[cfg(feature = "project-source")]
+                if !additive
+                    && !report.diagnostics.has_errors()
+                    && let (Some(updates), PreparedSceneContent::Source(snapshot), Some(instance)) =
+                        (&mut owner.source_updates, content, report.instance.as_ref())
+                {
+                    updates.publish(snapshot.content_closure(), instance);
+                }
+                report
+            },
+        )
     })
-}
-
-fn wrong_publication() -> SceneSpawnReport {
-    rejected(
-        "project.scene.request-purpose-mismatch",
-        "Scene request must be published through the operation that admitted it",
-    )
 }
 
 pub(super) fn content_matches_admission(
     content: &PreparedSceneContent,
-    admission: &Admission,
+    context: &Context,
+    target: &Target,
 ) -> bool {
-    match (content, admission.context.as_ref(), &admission.selection) {
+    match (content, context, &target.selection) {
         #[cfg(feature = "project-source")]
         (
             PreparedSceneContent::Source(snapshot),
@@ -785,10 +712,10 @@ pub(super) fn content_matches_admission(
                 && snapshot.lineage() == candidate.lineage()
                 && plan.lineage() == candidate.lineage()
                 && snapshot.content_closure().manifest_digest() == candidate.manifest_digest()
-                && match &admission.purpose {
-                    RequestPurpose::Travel => admission
-                        .context
-                        .declares_source_path(snapshot.selected_scene_path()),
+                && match &target.purpose {
+                    RequestPurpose::Travel => {
+                        context.declares_source_path(snapshot.selected_scene_path())
+                    }
                     RequestPurpose::AdditiveSource(path) => {
                         snapshot.selected_scene_product().is_some_and(|product| {
                             snapshot
@@ -809,10 +736,8 @@ pub(super) fn content_matches_admission(
         ) => {
             base.same_base(content.base())
                 && content.product() == *product
-                && match admission.purpose {
-                    RequestPurpose::Travel => {
-                        admission.context.admits_request(&admission.selection)
-                    }
+                && match target.purpose {
+                    RequestPurpose::Travel => context.admits_request(&target.selection),
                     RequestPurpose::AdditiveProcessed => true,
                     #[cfg(feature = "project-source")]
                     RequestPurpose::AdditiveSource(_) => false,

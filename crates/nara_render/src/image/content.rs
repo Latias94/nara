@@ -177,7 +177,7 @@ impl PartialEq for ImageContentSnapshot {
 
 impl Eq for ImageContentSnapshot {}
 
-fn catalog_matches(
+pub(super) fn catalog_matches(
     handle: Handle<ImageAsset>,
     product: AssetProductRef,
     server: &AssetServer,

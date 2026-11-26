@@ -3,8 +3,6 @@
 use nara_core::vfs::capabilities::{DirectoryCapability, RelativePath};
 
 use super::*;
-use nara_asset::pack::CapturedPack;
-
 impl RuntimeContentBase {
     pub(crate) fn capture_test_directory(
         directory: &DirectoryCapability,
@@ -28,21 +26,18 @@ impl RuntimeContentBase {
             catalog_limits,
         )?;
         let retained = admitted.retained_bytes(true)?;
-        let mut members = Vec::with_capacity(admitted.catalog.members().len());
-        for member in admitted.catalog.members() {
-            let path = RelativePath::new(member.path())
-                .expect("catalog admits portable relative member paths");
-            let bytes = directory
-                .open_file(&path)
-                .map_err(RuntimeContentError::Host)?
-                .read_to_end_bounded(member.digest().length())
-                .map_err(RuntimeContentError::Host)?;
-            if ContentDigest::of_bytes(&bytes) != member.digest() {
-                return Err(RuntimeContentError::MemberDigestMismatch);
-            }
-            members.push(bytes);
-        }
-        let pack = CapturedPack::new(catalog_bytes, members).map_err(backing::pack_error)?;
-        Ok(admitted.publish(EncodedBacking::Captured(pack), retained))
+        let members = admitted.catalog.members();
+        let backing = PackBacking::capture_from(
+            catalog_bytes,
+            members.iter().map(RuntimeContentMember::digest),
+            |index, digest| {
+                let path = RelativePath::new(members[index].path())
+                    .expect("catalog admits portable relative member paths");
+                directory
+                    .open_file(&path)?
+                    .read_to_end_bounded(digest.length())
+            },
+        )?;
+        Ok(admitted.publish(backing, retained))
     }
 }

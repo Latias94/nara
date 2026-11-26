@@ -755,7 +755,12 @@ fn charge(base: &RuntimeContentBase, kind: RuntimeContentBudgetKind) -> usize {
         }
         _ => unreachable!(),
     };
-    match base.inner.budget.reserve(retained, work) {
+    match base
+        .inner
+        .budget
+        .reserve(retained, work)
+        .map_err(RuntimeContentError::from)
+    {
         Ok(lease) => {
             drop(lease);
             0
@@ -789,14 +794,19 @@ fn retained_pack_releases_member_encoding_and_overlaps_exact_decode_work() {
     let pack = fixture.open_pack(&path, content_limits()).unwrap();
     let captured_charge = charge(&captured, RuntimeContentBudgetKind::RetainedBytes);
     let pack_charge = charge(&pack, RuntimeContentBudgetKind::RetainedBytes);
-    let super::super::EncodedBacking::Captured(captured_pack) = &captured.inner.backing else {
-        panic!("in-memory fixture must retain a captured pack");
-    };
-    let file_index =
-        nara_asset::pack::Pack::index_bytes(captured.catalog().members().len()).unwrap();
+    let members = captured.catalog().members();
+    let catalog_length = captured.catalog_digest().length() as usize;
+    let payload_length = catalog_length
+        + members
+            .iter()
+            .map(|member| member.digest().length() as usize)
+            .sum::<usize>();
+    let captured_bytes =
+        nara_asset::pack::CapturedPack::retained_bytes_for(payload_length, members.len()).unwrap();
+    let file_index = nara_asset::pack::Pack::index_bytes(members.len()).unwrap();
     assert_eq!(
         captured_charge - pack_charge,
-        captured_pack.retained_bytes() - captured_pack.catalog_bytes().len() - file_index,
+        captured_bytes - catalog_length - file_index,
     );
     let member = pack.member(product(Y)).unwrap();
     let exact = Y_WORK

@@ -2,9 +2,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use super::{RuntimeContentBudgetKind, RuntimeContentError, budget_error, check};
-
-pub(super) struct DecodeBudget {
+/// Shared admission for retained storage and concurrent work from the same content base.
+pub struct DecodeBudget {
     active: Mutex<Active>,
     retained_limit: usize,
     work_limit: usize,
@@ -15,14 +14,26 @@ struct Active {
     work: usize,
 }
 
-pub(super) struct DecodeLease {
+/// A reservation returned to its original budget when dropped.
+pub struct DecodeLease {
     owner: Arc<DecodeBudget>,
     retained: usize,
     work: usize,
 }
 
+/// The shared allowance or a pre-decode retained promise could not cover the required bytes.
+#[derive(Debug, thiserror::Error)]
+pub enum DecodeBudgetError {
+    #[error("retained bytes exceed the limit of {limit} (required {required})")]
+    RetainedBytes { required: usize, limit: usize },
+    #[error("work bytes exceed the limit of {limit} (required {required})")]
+    WorkBytes { required: usize, limit: usize },
+}
+
 impl DecodeBudget {
-    pub(super) fn new(retained: usize, retained_limit: usize, work_limit: usize) -> Arc<Self> {
+    /// Creates a budget with the caller's already admitted fixed base charge.
+    #[must_use]
+    pub fn new(retained: usize, retained_limit: usize, work_limit: usize) -> Arc<Self> {
         Arc::new(Self {
             active: Mutex::new(Active { retained, work: 0 }),
             retained_limit,
@@ -30,39 +41,38 @@ impl DecodeBudget {
         })
     }
 
-    pub(super) fn reserve(
+    /// Admits retained and work bytes together before their allocations.
+    pub fn reserve(
         self: &Arc<Self>,
         retained: usize,
         work: usize,
-    ) -> Result<DecodeLease, RuntimeContentError> {
+    ) -> Result<DecodeLease, DecodeBudgetError> {
         let mut active = self
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let next_retained = active.retained.checked_add(retained).ok_or_else(|| {
-            budget_error(
-                RuntimeContentBudgetKind::RetainedBytes,
-                usize::MAX,
-                self.retained_limit,
-            )
-        })?;
-        let next_work = active.work.checked_add(work).ok_or_else(|| {
-            budget_error(
-                RuntimeContentBudgetKind::WorkBytes,
-                usize::MAX,
-                self.work_limit,
-            )
-        })?;
-        check(
-            RuntimeContentBudgetKind::RetainedBytes,
-            next_retained,
-            self.retained_limit,
-        )?;
-        check(
-            RuntimeContentBudgetKind::WorkBytes,
-            next_work,
-            self.work_limit,
-        )?;
+        let retained_error = |required| DecodeBudgetError::RetainedBytes {
+            required,
+            limit: self.retained_limit,
+        };
+        let work_error = |required| DecodeBudgetError::WorkBytes {
+            required,
+            limit: self.work_limit,
+        };
+        let next_retained = active
+            .retained
+            .checked_add(retained)
+            .ok_or_else(|| retained_error(usize::MAX))?;
+        let next_work = active
+            .work
+            .checked_add(work)
+            .ok_or_else(|| work_error(usize::MAX))?;
+        if next_retained > self.retained_limit {
+            return Err(retained_error(next_retained));
+        }
+        if next_work > self.work_limit {
+            return Err(work_error(next_work));
+        }
         active.retained = next_retained;
         active.work = next_work;
         Ok(DecodeLease {
@@ -74,46 +84,40 @@ impl DecodeBudget {
 }
 
 impl DecodeLease {
-    pub(super) fn admit_work(&mut self, allocation: usize) -> Result<(), RuntimeContentError> {
+    /// Adds to this lease's work reservation before the allocation.
+    pub fn admit_work(&mut self, allocation: usize) -> Result<(), DecodeBudgetError> {
         let mut active = self
             .owner
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let required = active.work.checked_add(allocation).ok_or_else(|| {
-            budget_error(
-                RuntimeContentBudgetKind::WorkBytes,
-                usize::MAX,
-                self.owner.work_limit,
-            )
-        })?;
-        check(
-            RuntimeContentBudgetKind::WorkBytes,
-            required,
-            self.owner.work_limit,
-        )?;
-        self.work = self.work.checked_add(allocation).ok_or_else(|| {
-            budget_error(
-                RuntimeContentBudgetKind::WorkBytes,
-                usize::MAX,
-                self.owner.work_limit,
-            )
-        })?;
+        let limit = self.owner.work_limit;
+        let error = |required| DecodeBudgetError::WorkBytes { required, limit };
+        let required = active
+            .work
+            .checked_add(allocation)
+            .ok_or_else(|| error(usize::MAX))?;
+        if required > limit {
+            return Err(error(required));
+        }
+        self.work = self
+            .work
+            .checked_add(allocation)
+            .ok_or_else(|| error(usize::MAX))?;
         active.work = required;
         Ok(())
     }
 
     /// The decoder's original promise must cover the complete retained result. An underestimated
     /// promise cannot borrow unreserved capacity after the allocation has already happened.
-    pub(super) fn finish_decode(
-        &mut self,
-        actual_retained: usize,
-    ) -> Result<(), RuntimeContentError> {
-        check(
-            RuntimeContentBudgetKind::RetainedBytes,
-            actual_retained,
-            self.retained,
-        )?;
+    /// Releases work and reduces retained bytes to the checked actual result.
+    pub fn finish_decode(&mut self, actual_retained: usize) -> Result<(), DecodeBudgetError> {
+        if actual_retained > self.retained {
+            return Err(DecodeBudgetError::RetainedBytes {
+                required: actual_retained,
+                limit: self.retained,
+            });
+        }
         let mut active = self
             .owner
             .active

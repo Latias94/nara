@@ -3,7 +3,7 @@
 //! Asset values, storage, source data, and Runtime codecs are available without App or ECS
 //! dependencies. The `runtime` feature enables ECS resources, reload services, and App plugins.
 //! The independent `serde` feature enables source formats without runtime integration.
-//! The `pack` feature enables wire I/O for cooked delivery.
+//! The `pack` feature enables wire I/O and bounded member acquisition for cooked delivery.
 //! The `hot-reload` feature adds native source watching.
 //! `image-import` enables CPU image import and reload. `artifact-build` adds the local Cook cache.
 

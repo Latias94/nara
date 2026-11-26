@@ -7,7 +7,6 @@
 
 mod admission;
 mod backing;
-mod budget;
 #[cfg(all(
     test,
     not(feature = "runtime-input"),
@@ -41,7 +40,7 @@ use std::{
     error::Error,
     fmt,
     mem::size_of,
-    panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
+    panic::{AssertUnwindSafe, catch_unwind},
     sync::Arc,
 };
 
@@ -49,8 +48,9 @@ use crate::fs::{ContentDigest, FileCapability, FsError};
 #[cfg(feature = "project-workflow")]
 use nara_asset::pack::CapturedPack;
 use nara_asset::{
-    AssetDomain, AssetProductRef, AssetRef, AssetReferenceDemand, AssetRuntimeDecodeError,
-    AssetRuntimeError, RuntimeAssetCodec, decode_runtime_asset,
+    AssetDomain, AssetProductRef, AssetRef, AssetReferenceDemand, AssetRuntimeError,
+    RuntimeAssetCodec,
+    pack::{self, DecodeBudget, DecodeLease, PackBacking},
 };
 use nara_core::ByteLimit;
 use nara_reflect::{
@@ -73,8 +73,6 @@ use crate::{
     },
     startup_scene::SceneSource,
 };
-use backing::EncodedBacking;
-use budget::{DecodeBudget, DecodeLease};
 use dependencies::DependencyInventory;
 
 pub use nara_scene::runtime_catalog::{
@@ -348,7 +346,7 @@ struct RuntimeContentBaseInner {
     catalog_digest: ContentDigest,
     catalog: RuntimeContentCatalog,
     plan: RuntimeConfigurationPlan,
-    backing: EncodedBacking,
+    backing: PackBacking,
     budget: Arc<DecodeBudget>,
     limits: RuntimeContentLimits,
 }
@@ -395,17 +393,16 @@ impl RuntimeContentBase {
         if members.len() != admitted.catalog.members().len() {
             return Err(RuntimeContentError::ProductIdentityMismatch);
         }
-        for (bytes, member) in members.iter().zip(admitted.catalog.members()) {
-            if ContentDigest::of_bytes(bytes) != member.digest() {
-                return Err(RuntimeContentError::MemberDigestMismatch);
-            }
-        }
-        let pack = CapturedPack::new(catalog_bytes, members).map_err(backing::pack_error)?;
-        Ok((
-            admitted.publish(EncodedBacking::Captured(pack.clone()), retained),
-            pack,
-            retained,
-        ))
+        let (backing, pack) = PackBacking::capture(
+            catalog_bytes,
+            members,
+            admitted
+                .catalog
+                .members()
+                .iter()
+                .map(RuntimeContentMember::digest),
+        )?;
+        Ok((admitted.publish(backing, retained), pack, retained))
     }
 
     /// Admits one original local pack without retaining or decoding its member payloads.
@@ -420,7 +417,7 @@ impl RuntimeContentBase {
         limits: RuntimeContentLimits,
     ) -> Result<Self, RuntimeContentError> {
         let (length, catalog_limits) = admission::input_limits(expected, limits)?;
-        let catalog_bytes = backing::read_catalog(&file, length)?;
+        let catalog_bytes = pack::read_catalog(&file, length)?;
         let admitted = admission::AdmittedCatalog::new(
             &catalog_bytes,
             expected,
@@ -429,7 +426,15 @@ impl RuntimeContentBase {
             catalog_limits,
         )?;
         let retained = admitted.retained_bytes(false)?;
-        let backing = backing::open_pack(file, &admitted.catalog, catalog_bytes)?;
+        let backing = PackBacking::open(
+            file,
+            catalog_bytes,
+            admitted
+                .catalog
+                .members()
+                .iter()
+                .map(|member| member.digest().length()),
+        )?;
         Ok(admitted.publish(backing, retained))
     }
 
@@ -499,7 +504,7 @@ impl RuntimeContentBase {
             + 2 * crate::scene_retention::ARC_CONTROL_BLOCK_BYTES;
         let promised = checked_add(RuntimeContentBudgetKind::RetainedBytes, work, metadata)?;
         let mut lease = self.inner.budget.reserve(promised, work)?;
-        let encoded = self.encoded_member(index)?;
+        let encoded = self.packed_member(index).read()?;
         let candidate =
             RuntimeSceneDocumentCandidate::from_json_bytes(encoded.as_ref(), scene_limits)
                 .and_then(|candidate| {
@@ -557,58 +562,22 @@ impl RuntimeContentBase {
             .runtime_codecs()
             .selected_limits::<D, C>(member)?;
         catch_unwind(AssertUnwindSafe(|| {
-            check(
-                RuntimeContentBudgetKind::MemberEncodedBytes,
-                usize::try_from(member.digest().length())
-                    .expect("admitted member length fits the host"),
-                limits.encoded_bytes().get(),
-            )?;
-            check(
-                RuntimeContentBudgetKind::RetainedBytes,
-                size_of::<D::Product>(),
-                limits.retained_bytes().get(),
-            )?;
             // The codec accounts for the complete product. Only the enclosing wrapper and its
             // Arc control block are additional Host storage; do not count the inline value twice.
             let metadata = size_of::<RuntimeContentAssetInner<D::Product>>()
                 - size_of::<D::Product>()
                 + crate::scene_retention::ARC_CONTROL_BLOCK_BYTES;
-            let promised = checked_add(
-                RuntimeContentBudgetKind::RetainedBytes,
-                limits.retained_bytes().get(),
-                metadata,
-            )?;
-            let mut lease = self
-                .inner
-                .budget
-                .reserve(promised, limits.work_bytes().get())?;
-            let dependencies = DependencyInventory::new(self, member)?;
-            let encoded = self.encoded_member(index)?;
-            let (value, product_retained) = decode_runtime_asset::<D, C, _, _>(
-                encoded,
-                member.products(),
-                limits.retained_bytes(),
-                dependencies,
-                DependencyInventory::observe,
-                DependencyInventory::finish,
-            )
-            .map_err(|error| match error {
-                AssetRuntimeDecodeError::Codec(error) => RuntimeContentError::Asset(error),
-                AssetRuntimeDecodeError::ProductIdentityMismatch => {
-                    RuntimeContentError::ProductIdentityMismatch
-                }
-                AssetRuntimeDecodeError::Dependency(error) => error,
-                AssetRuntimeDecodeError::RetainedBytes { required, limit } => {
-                    budget_error(RuntimeContentBudgetKind::RetainedBytes, required, limit)
-                }
-                AssetRuntimeDecodeError::Panicked(payload) => resume_unwind(payload),
-            })?;
-            let retained = checked_add(
-                RuntimeContentBudgetKind::RetainedBytes,
-                product_retained,
-                metadata,
-            )?;
-            lease.finish_decode(retained)?;
+            let (value, lease, retained) = self
+                .packed_member(index)
+                .prepare_asset::<D, C, _, _>(
+                    member.products(),
+                    limits,
+                    metadata,
+                    || DependencyInventory::new(self, member),
+                    DependencyInventory::observe,
+                    DependencyInventory::finish,
+                )
+                .map_err(backing::asset_error)?;
             #[cfg(feature = "runtime-2d")]
             let mut value = value;
             #[cfg(feature = "runtime-2d")]
@@ -693,7 +662,7 @@ impl RuntimeContentBase {
                     AssetReferenceCollectionError::Reference(error) => {
                         RuntimeContentError::SceneReference(error)
                     }
-                    AssetReferenceCollectionError::Admission(error) => error,
+                    AssetReferenceCollectionError::Admission(error) => error.into(),
                 })?;
                 for reference in references {
                     let AssetRef::Product(product) = reference.asset_ref() else {

@@ -10,16 +10,16 @@ mod source_updates;
 #[cfg(feature = "project-source")]
 pub use api::ProjectSceneSourceUpdateStatus;
 pub use api::{
-    PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
-    ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
-    activate_prepared_project_scene, commit_prepared_project_scene,
+    PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestState,
+    ProjectSceneSelection, ProjectScenes, activate_prepared_project_scene,
+    commit_prepared_project_scene,
 };
 #[cfg(all(test, feature = "project-source", any(windows, target_os = "linux")))]
 mod tests;
 
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, Ordering},
 };
 
 use nara_app::tasks::TaskPools;
@@ -34,10 +34,11 @@ use nara_asset::AssetSourcePath;
 use nara_core::diagnostic::{
     DiagnosticCode, DiagnosticReport, ReportDiagnostic as Diagnostic, SafeSummary,
 };
-use nara_ecs::identity::SpawnedSceneInstance;
-use nara_ecs::{Res, ResMut, Resource, World, system::SystemParam};
+use nara_ecs::{Res, ResMut, Resource, World, bevy_ecs::system::SystemState, system::SystemParam};
 #[cfg(feature = "project-source")]
 use nara_project::ProjectPath;
+pub use nara_scene::current_scene::requests::SceneRequestId as ProjectSceneRequestId;
+use nara_scene::current_scene::requests::{SceneRequestError, SceneRequestSource, SceneRequests};
 use nara_scene::{
     CompiledSceneDocument, SceneSpawnReport,
     advanced::{SceneProductOverlayWriter, SceneProductRetirement, SceneProductTransactionLimits},
@@ -48,13 +49,10 @@ use super::{content::PreparedSceneContent, content_residency::ProjectSceneReside
 use crate::project_host::{
     ProjectContentErrorKind, ProjectContentLoader, ProjectSettingsCandidate, RuntimePlan,
 };
-use crate::{
-    runtime_content::{RuntimeContentBase, RuntimeContentMemberKind},
-    startup_scene::CurrentScene,
-};
+use crate::{runtime_content::RuntimeContentBase, startup_scene::CurrentScene};
+#[cfg(test)]
 use preparation::Preparation;
-
-static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
+use preparation::{PreparationFailure, start_preparation};
 
 enum Context {
     #[cfg(feature = "project-source")]
@@ -70,16 +68,6 @@ enum Context {
 }
 
 impl Context {
-    fn matches_current(&self, current: &CurrentScene) -> bool {
-        match self {
-            #[cfg(feature = "project-source")]
-            Self::Source { .. } => current.source_content_stamp().is_some(),
-            Self::Processed { base } => current
-                .retained_source()
-                .uses_hosted_catalog(base.catalog()),
-        }
-    }
-
     #[cfg(feature = "project-source")]
     fn declares_source_path(&self, path: &ProjectPath) -> bool {
         let Self::Source { candidate, .. } = self else {
@@ -101,10 +89,7 @@ impl Context {
             #[cfg(feature = "project-source")]
             (Self::Source { .. }, ProjectSceneSelection::Product(_)) => true,
             (Self::Processed { base }, ProjectSceneSelection::Product(product)) => {
-                base.catalog().scenes().contains(product)
-                    && base.member(*product).is_some_and(|member| {
-                        matches!(member.kind(), RuntimeContentMemberKind::Scene { .. })
-                    })
+                base.catalog().scenes().binary_search(product).is_ok()
             }
             #[cfg(feature = "project-source")]
             (Self::Processed { .. }, ProjectSceneSelection::Source(_)) => false,
@@ -112,10 +97,7 @@ impl Context {
     }
 }
 
-struct Admission {
-    context: Arc<Context>,
-    id: ProjectSceneRequestId,
-    expected: SpawnedSceneInstance,
+struct Target {
     selection: ProjectSceneSelection,
     purpose: RequestPurpose,
 }
@@ -134,183 +116,40 @@ impl RequestPurpose {
     }
 }
 
+impl SceneRequestSource for Context {
+    type Target = Target;
+    type Content = PreparedSceneContent;
+    type Error = ProjectSceneRequestError;
+    type Failure = PreparationFailure;
+
+    fn admits(&self, target: &Target) -> bool {
+        target.purpose.is_additive() || self.admits_request(&target.selection)
+    }
+
+    fn matches_current(&self, current: &CurrentScene) -> bool {
+        match self {
+            #[cfg(feature = "project-source")]
+            Self::Source { .. } => current.source_content_stamp().is_some(),
+            Self::Processed { base } => current
+                .retained_source()
+                .uses_hosted_catalog(base.catalog()),
+        }
+    }
+
+    fn matches_prepared(&self, target: &Target, content: &PreparedSceneContent) -> bool {
+        api::content_matches_admission(content, self, target)
+    }
+}
+
 #[derive(Resource)]
 struct RequestOwner {
-    context: Arc<Context>,
-    closing: Arc<AtomicBool>,
-    slot: Option<Slot>,
+    requests: SceneRequests<Context>,
     #[cfg(feature = "project-source")]
     source_updates: Option<source_updates::SourceUpdates>,
     #[cfg(all(feature = "project-source", feature = "asset-watch"))]
     input_reload: input_reload::InputReload,
     #[cfg(test)]
     gate: Option<preparation::TestGate>,
-}
-
-enum Slot {
-    Preparing {
-        admission: Admission,
-        preparation: Preparation,
-        discard: Option<ProjectSceneRequestState>,
-    },
-    Ready {
-        admission: Admission,
-        content: PreparedSceneContent,
-    },
-    Terminal {
-        id: ProjectSceneRequestId,
-        state: ProjectSceneRequestState,
-        diagnostics: DiagnosticReport,
-    },
-}
-
-impl Slot {
-    fn id(&self) -> ProjectSceneRequestId {
-        match self {
-            Self::Preparing { admission, .. } | Self::Ready { admission, .. } => admission.id,
-            Self::Terminal { id, .. } => *id,
-        }
-    }
-
-    fn admission(&self) -> Option<&Admission> {
-        match self {
-            Self::Preparing { admission, .. } | Self::Ready { admission, .. } => Some(admission),
-            Self::Terminal { .. } => None,
-        }
-    }
-
-    fn state(&self) -> ProjectSceneRequestState {
-        match self {
-            Self::Preparing {
-                discard: Some(_), ..
-            } => ProjectSceneRequestState::Cancelling,
-            Self::Preparing { .. } => ProjectSceneRequestState::Preparing,
-            Self::Ready { .. } => ProjectSceneRequestState::Ready,
-            Self::Terminal { state, .. } => *state,
-        }
-    }
-
-    fn terminal(id: ProjectSceneRequestId, state: ProjectSceneRequestState) -> Self {
-        let diagnostics = match state {
-            ProjectSceneRequestState::Rejected(error) => error_diagnostics(error),
-            _ => DiagnosticReport::default(),
-        };
-        Self::Terminal {
-            id,
-            state,
-            diagnostics,
-        }
-    }
-}
-
-impl RequestOwner {
-    fn request(
-        &mut self,
-        selection: ProjectSceneSelection,
-        purpose: RequestPurpose,
-        generation: RuntimeGeneration,
-        expected: &SpawnedSceneInstance,
-        pools: &TaskPools,
-    ) -> Result<ProjectSceneRequestId, ProjectSceneRequestError> {
-        if self.closing.load(Ordering::Acquire) {
-            return Err(ProjectSceneRequestError::Unavailable);
-        }
-        if self.slot.is_some() {
-            return Err(ProjectSceneRequestError::Busy);
-        }
-        if !purpose.is_additive() && !self.context.admits_request(&selection) {
-            return Err(ProjectSceneRequestError::UndeclaredScene);
-        }
-        let sequence = NEXT_REQUEST
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
-                next.checked_add(1)
-            })
-            .map_err(|_| ProjectSceneRequestError::IdExhausted)?;
-        let id = ProjectSceneRequestId {
-            generation,
-            sequence,
-        };
-        let preparation = Preparation::start(
-            Arc::clone(&self.context),
-            selection.clone(),
-            purpose.clone(),
-            pools,
-            #[cfg(test)]
-            self.gate.take(),
-        )?;
-        self.slot = Some(Slot::Preparing {
-            admission: Admission {
-                context: Arc::clone(&self.context),
-                id,
-                expected: expected.clone(),
-                selection,
-                purpose,
-            },
-            preparation,
-            discard: None,
-        });
-        Ok(id)
-    }
-
-    fn matches(
-        &self,
-        admission: &Admission,
-        generation: Option<RuntimeGeneration>,
-        current: Option<&CurrentScene>,
-    ) -> bool {
-        !self.closing.load(Ordering::Acquire)
-            && generation == Some(admission.id.generation)
-            && Arc::ptr_eq(&self.context, &admission.context)
-            && current.is_some_and(|current| {
-                current.receipt() == &admission.expected && self.context.matches_current(current)
-            })
-    }
-
-    fn cancel(&mut self, request: ProjectSceneRequestId) -> bool {
-        match self.slot.as_mut().filter(|slot| slot.id() == request) {
-            Some(Slot::Preparing {
-                preparation,
-                discard,
-                ..
-            }) => {
-                if discard.is_some() {
-                    return false;
-                }
-                *discard = Some(ProjectSceneRequestState::Cancelled);
-                preparation.cancel();
-                true
-            }
-            Some(Slot::Ready { .. }) => {
-                self.slot = Some(Slot::terminal(request, ProjectSceneRequestState::Cancelled));
-                true
-            }
-            _ => false,
-        }
-    }
-
-    fn reject_stale(&mut self, request: ProjectSceneRequestId) {
-        match self.slot.as_mut().filter(|slot| slot.id() == request) {
-            Some(Slot::Preparing {
-                preparation,
-                discard,
-                ..
-            }) => {
-                if discard.is_none() {
-                    *discard = Some(ProjectSceneRequestState::Rejected(
-                        ProjectSceneRequestError::Stale,
-                    ));
-                    preparation.cancel();
-                }
-            }
-            Some(Slot::Ready { .. }) => {
-                self.slot = Some(Slot::terminal(
-                    request,
-                    ProjectSceneRequestState::Rejected(ProjectSceneRequestError::Stale),
-                ));
-            }
-            _ => {}
-        }
-    }
 }
 
 /// Installs only the original Host authority. Call during unpublished runtime admission.
@@ -386,9 +225,7 @@ fn install_request_owner(
         None
     };
     world.insert_resource(RequestOwner {
-        context: Arc::new(context),
-        closing,
-        slot: None,
+        requests: SceneRequests::new(context, closing),
         #[cfg(feature = "project-source")]
         source_updates,
         #[cfg(all(feature = "project-source", feature = "asset-watch"))]
@@ -423,8 +260,8 @@ pub(crate) fn poll_project_scene_requests(world: &mut World) {
     #[cfg(feature = "project-source")]
     if !input_reload_pending
         && world.get_resource::<RequestOwner>().is_some_and(|owner| {
-            owner.slot.is_none()
-                && !owner.closing.load(Ordering::Acquire)
+            !owner.requests.is_occupied()
+                && !owner.requests.is_closing()
                 && owner
                     .source_updates
                     .as_ref()
@@ -434,78 +271,37 @@ pub(crate) fn poll_project_scene_requests(world: &mut World) {
     {
         ProjectScenes::scope(world, |scenes| scenes.start_source_update());
     }
-    let valid = {
-        let Some(owner) = world.get_resource::<RequestOwner>() else {
-            return;
-        };
-        owner
-            .slot
-            .as_ref()
-            .and_then(Slot::admission)
-            .is_none_or(|admission| {
-                owner.matches(
-                    admission,
-                    world.get_resource::<RuntimeGeneration>().copied(),
-                    world.get_resource::<CurrentScene>(),
-                )
-            })
-    };
-    // Poll changes only this owner's fields. Keep the resource in place, so observation never
-    // invokes remove/reinsert lifecycle effects or needs another resource's mutable borrow.
-    let mut owner = world.resource_mut::<RequestOwner>();
-    let Some(mut slot) = owner.slot.take() else {
+    if !world
+        .get_resource::<RequestOwner>()
+        .is_some_and(|owner| owner.requests.active_request().is_some())
+    {
+        return;
+    }
+    // Borrow the owner in place. Polling must never invoke resource lifecycle effects.
+    let mut access = SystemState::<(
+        Option<ResMut<RequestOwner>>,
+        Option<Res<CurrentScene>>,
+        Option<Res<RuntimeGeneration>>,
+    )>::new(world);
+    let (Some(owner), current, generation) = access
+        .get_mut(world)
+        .expect("Scene request resources do not conflict")
+    else {
         return;
     };
-    if let Slot::Preparing {
-        admission,
-        preparation,
-        discard,
-    } = &mut slot
-    {
-        if !valid && discard.is_none() {
-            *discard = Some(ProjectSceneRequestState::Rejected(
-                ProjectSceneRequestError::Stale,
-            ));
-            preparation.cancel();
-        }
-        if let Some(result) = preparation.poll() {
-            let state = discard.take();
-            let id = admission.id;
-            let content_valid = result
-                .as_ref()
-                .is_ok_and(|content| api::content_matches_admission(content, admission));
-            slot = match (state, result) {
-                (Some(state), _) => Slot::terminal(id, state),
-                (None, Ok(_)) if !content_valid => Slot::terminal(
-                    id,
-                    ProjectSceneRequestState::Rejected(ProjectSceneRequestError::Stale),
-                ),
-                (None, Ok(content)) => {
-                    let Slot::Preparing { admission, .. } = slot else {
-                        unreachable!()
-                    };
-                    Slot::Ready { admission, content }
-                }
-                (None, Err(failure)) => {
-                    #[cfg(feature = "project-source")]
-                    if let Some(updates) = &mut owner.source_updates {
-                        updates.failed(id, failure.error, failure.observations);
-                    }
-                    Slot::Terminal {
-                        id,
-                        state: ProjectSceneRequestState::Rejected(failure.error),
-                        diagnostics: failure.diagnostics,
-                    }
-                }
-            };
-        }
-    } else if !valid {
-        slot = Slot::terminal(
-            slot.id(),
-            ProjectSceneRequestState::Rejected(ProjectSceneRequestError::Stale),
-        );
-    }
-    owner.slot = Some(slot);
+    let owner = owner.into_inner();
+    owner.requests.poll(
+        generation.as_deref().copied(),
+        current.as_deref(),
+        PreparationFailure::unavailable,
+        |_id, failure| {
+            #[cfg(feature = "project-source")]
+            if let Some(updates) = &mut owner.source_updates {
+                updates.failed(_id, failure.error, failure.observations);
+            }
+            (failure.error, failure.diagnostics)
+        },
+    );
 }
 
 fn rejected(code: &'static str, summary: &'static str) -> SceneSpawnReport {
@@ -556,9 +352,7 @@ impl RuntimeCloseParticipant for CloseParticipant {
                 owner.input_reload.cancel();
                 owner
             };
-            if let Some(Slot::Preparing { preparation, .. }) = &owner.slot {
-                preparation.cancel();
-            }
+            owner.requests.close();
         }
         Ok(RuntimeCloseProgress::Complete)
     }

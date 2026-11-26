@@ -8,7 +8,7 @@ use nara_asset::{AssetId, AssetMutationBaseline};
 #[cfg(feature = "project-source")]
 use nara_asset::{AssetSourceKind, ImportedProductId};
 #[cfg(feature = "runtime-2d")]
-use nara_render::image::ImageAsset;
+use nara_render::image::{ImageAsset, ImagePublicationInput};
 #[cfg(feature = "project-source")]
 use nara_render::material::{Material2dAsset, Material2dDomain};
 #[cfg(feature = "runtime-2d")]
@@ -401,7 +401,8 @@ fn stock_metadata_bytes(
             size_of::<nara_asset::Handle<TileSet>>(),
         )?;
     }
-    let image_metadata = size_of::<images::ImagePublication>()
+    let image_metadata = 2 * size_of::<ImagePublicationInput>()
+        + size_of::<AssetMutationBaseline<ImageAsset>>()
         + size_of::<OwnedImage>()
         + size_of::<AssetProductRef>()
         + 3 * BTREE_ENTRY_OVERHEAD

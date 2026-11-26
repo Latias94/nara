@@ -11,7 +11,7 @@ use crate::{
     runtime_content::{
         RUNTIME_CONTENT_CATALOG_FILE, RuntimeContentCatalog, RuntimeContentCatalogDefinition,
         RuntimeContentCatalogLimits, RuntimeContentExpectation, RuntimeContentLimits,
-        RuntimeContentMember, RuntimeContentTarget,
+        RuntimeContentMember, RuntimeContentMemberKind, RuntimeContentTarget,
     },
     startup_scene::replace_current_scene_with_product,
 };
@@ -59,7 +59,7 @@ fn processed_scene_refuses_source_notifications_and_rescans_without_admitting_io
                     .retained_source()
                     .uses_hosted_catalog(base.catalog())
             );
-            assert!(world.resource::<RequestOwner>().slot.is_none());
+            assert!(!world.resource::<RequestOwner>().requests.is_occupied());
         },
     );
 }
@@ -109,7 +109,7 @@ fn processed_worker_uses_captured_bytes_and_original_definitions_without_source_
     .unwrap();
     let context = Arc::new(Context::Processed { base: base.clone() });
     let pools = pools();
-    let mut preparation = Preparation::start(
+    let mut preparation = start_preparation(
         context,
         later_product(),
         RequestPurpose::Travel,
@@ -212,27 +212,22 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
                 assert_eq!(view.expected_instance(), &expected);
                 assert_eq!(view.scene().roots(), [entity("later")]);
             });
-            let owner = world.resource::<RequestOwner>();
-            let Some(Slot::Ready { admission, content }) = owner.slot.as_ref() else {
-                panic!("the worker physically returned ready processed content")
-            };
-            assert!(api::content_matches_admission(content, admission));
+            let context = world.resource::<RequestOwner>().requests.source();
+            let (target, content) = prepared(world, request);
+            assert!(context.matches_prepared(target, content));
             let foreign = PreparedSceneContent::Processed(
                 other.prepare_scene_content(later_product()).unwrap(),
             );
-            assert!(!api::content_matches_admission(&foreign, admission));
+            assert!(!context.matches_prepared(target, &foreign));
             let wrong_product = PreparedSceneContent::Processed(
                 base.prepare_scene_content(startup_product()).unwrap(),
             );
-            assert!(!api::content_matches_admission(&wrong_product, admission));
-            let wrong_mode = Admission {
-                context: Arc::clone(&admission.context),
-                id: admission.id,
-                expected: admission.expected.clone(),
+            assert!(!context.matches_prepared(target, &wrong_product));
+            let wrong_mode = Target {
                 selection: selected().into(),
                 purpose: RequestPurpose::Travel,
             };
-            assert!(!api::content_matches_admission(content, &wrong_mode));
+            assert!(!context.matches_prepared(&wrong_mode, content));
             let current = CurrentScene::get(world).unwrap();
             assert_eq!(current.receipt(), &expected);
             assert_eq!(current.source().roots(), [entity("startup")]);
@@ -245,12 +240,121 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
                 assert!(scenes.acknowledge(request));
             });
             // Equal catalog bytes do not authorize another independently admitted base.
-            world.resource_mut::<RequestOwner>().context =
-                Arc::new(Context::Processed { base: other });
+            world
+                .resource_mut::<RequestOwner>()
+                .requests
+                .replace_source(Context::Processed { base: other });
             assert_eq!(
                 ProjectScenes::scope(world, |scenes| scenes.request(later_product())),
                 Err(ProjectSceneRequestError::Stale),
             );
+        },
+    );
+}
+
+#[test]
+fn ready_content_is_rechecked_before_inspection_and_commit() {
+    struct Source {
+        base: RuntimeContentBase,
+        allow_content: AtomicBool,
+    }
+
+    impl SceneRequestSource for Source {
+        type Target = AssetProductRef;
+        type Content = Arc<crate::runtime_content::ProcessedSceneContent>;
+        type Error = ();
+        type Failure = ();
+
+        fn admits(&self, target: &AssetProductRef) -> bool {
+            self.base.catalog().scenes().contains(target)
+        }
+
+        fn matches_current(&self, current: &CurrentScene) -> bool {
+            current
+                .retained_source()
+                .uses_hosted_catalog(self.base.catalog())
+        }
+
+        fn matches_prepared(&self, target: &AssetProductRef, content: &Self::Content) -> bool {
+            self.allow_content.load(Ordering::Acquire)
+                && content.product() == *target
+                && self.base.same_base(content.base())
+        }
+    }
+
+    let fixture = ProcessedFixture::new();
+    let base = fixture.open(RuntimeContentLimits::default());
+    let source = base.acquire_startup_scene().unwrap().hosted_scene_source();
+    with_context_world(
+        Arc::new(Context::Processed { base: base.clone() }),
+        source,
+        move |world| {
+            use nara_scene::current_scene::requests::{ScenePreparation, SceneRequestState};
+
+            world.insert_resource(pools());
+            let generation = *world.resource::<RuntimeGeneration>();
+            let current = CurrentScene::get(world).unwrap();
+            let expected = current.receipt().clone();
+            let mut requests = SceneRequests::new(
+                Source {
+                    base,
+                    allow_content: AtomicBool::new(true),
+                },
+                Arc::new(AtomicBool::new(false)),
+            );
+            let request = requests
+                .request(current, generation, later_product(), |source, &product| {
+                    ScenePreparation::spawn(world.resource::<TaskPools>(), move |_| {
+                        Some(source.base.prepare_scene_content(product).map_err(|_| ()))
+                    })
+                })
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while requests.state(request, Some(generation), Some(current))
+                == Some(SceneRequestState::Preparing)
+            {
+                assert!(Instant::now() < deadline, "worker did not return");
+                requests.poll(
+                    Some(generation),
+                    Some(current),
+                    || (),
+                    |_, ()| ((), DiagnosticReport::default()),
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(
+                requests
+                    .prepared(request, Some(generation), Some(current))
+                    .is_some()
+            );
+            requests
+                .source()
+                .allow_content
+                .store(false, Ordering::Release);
+            assert_eq!(
+                requests.state(request, Some(generation), Some(current)),
+                Some(SceneRequestState::Ready)
+            );
+            assert!(
+                requests
+                    .prepared(request, Some(generation), Some(current))
+                    .is_none()
+            );
+
+            let report = requests.commit(
+                world,
+                request,
+                |_| true,
+                |_, _, _| panic!("a rejected candidate must not reach publication"),
+            );
+            assert!(report.instance.is_none());
+            assert!(
+                report
+                    .diagnostics
+                    .iter()
+                    .any(|entry| entry.code().as_str() == "project.scene.prepared-input-mismatch")
+            );
+            assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
         },
     );
 }
@@ -296,7 +400,7 @@ fn processed_cancellation_keeps_slot_and_original_worker_captures_until_return()
     let context = Arc::new(Context::Processed { base });
     let captured = Arc::downgrade(&context);
     let (gate, control) = TestGate::new(TestPhase::AfterPreparation);
-    let mut preparation = Preparation::start(
+    let mut preparation = start_preparation(
         context,
         later_product(),
         RequestPurpose::Travel,
@@ -306,7 +410,7 @@ fn processed_cancellation_keeps_slot_and_original_worker_captures_until_return()
     .unwrap();
     assert!(control.wait_until_started());
     preparation.cancel();
-    assert!(preparation.poll().is_none());
+    assert!(preparation.poll(PreparationFailure::unavailable).is_none());
     assert!(captured.upgrade().is_some());
     control.release();
     assert!(
@@ -325,7 +429,7 @@ fn processed_failure_uses_runtime_content_error_and_safe_runtime_diagnostics() {
     );
     let context = Arc::new(Context::Processed { base });
     let pools = pools();
-    let mut preparation = Preparation::start(
+    let mut preparation = start_preparation(
         context,
         later_product(),
         RequestPurpose::Travel,

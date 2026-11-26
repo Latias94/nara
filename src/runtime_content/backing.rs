@@ -1,127 +1,104 @@
-//! Exact encoded ownership, independent of the original executable plan and decoded residency.
+//! Adapts admitted catalog members and pack failures to the Runtime content API.
 
-use std::{borrow::Cow, io::Write};
+use std::{io::Write, panic::resume_unwind};
 
-#[cfg(any(test, feature = "project-workflow"))]
-use nara_asset::pack::CapturedPack;
-use nara_asset::pack::{self, Pack, PackError};
+use nara_asset::{
+    AssetRuntimeDecodeError,
+    pack::{AssetPreparationError, DecodeBudgetError, PackBackingError, PackError, PackMember},
+};
 
-use crate::fs::{FileCapability, FsError, FsOperation};
-
-use super::{DecodeLease, RuntimeContentBase, RuntimeContentCatalog, RuntimeContentError};
-
-pub(super) enum EncodedBacking {
-    #[cfg(any(test, feature = "project-workflow"))]
-    Captured(CapturedPack),
-    File {
-        pack: Pack,
-        catalog: Vec<u8>,
-    },
-}
-
-pub(super) struct EncodedMember<'a> {
-    // Rust drops fields in declaration order. Release the bytes before their shared allowance.
-    bytes: Cow<'a, [u8]>,
-    _work: Option<DecodeLease>,
-}
-
-impl AsRef<[u8]> for EncodedMember<'_> {
-    fn as_ref(&self) -> &[u8] {
-        self.bytes.as_ref()
-    }
-}
+use super::{
+    RuntimeContentBase, RuntimeContentBudgetKind, RuntimeContentError, RuntimeContentMember,
+    budget_error,
+};
 
 impl RuntimeContentBase {
-    pub(super) fn encoded_member(
-        &self,
-        index: usize,
-    ) -> Result<EncodedMember<'_>, RuntimeContentError> {
-        match &self.inner.backing {
-            #[cfg(any(test, feature = "project-workflow"))]
-            EncodedBacking::Captured(pack) => Ok(EncodedMember {
-                bytes: Cow::Borrowed(
-                    pack.member(index)
-                        .ok_or(RuntimeContentError::PackExtentMismatch)?,
-                ),
-                _work: None,
-            }),
-            EncodedBacking::File { pack, .. } => {
-                let digest = self.inner.catalog.members()[index].digest();
-                // Catalogue admission already checked this conversion and the per-member cap.
-                let length =
-                    usize::try_from(digest.length()).expect("admitted member length fits the host");
-                let work = self.inner.budget.reserve(0, length)?;
-                let bytes = pack.read_member(index, digest).map_err(pack_error)?;
-                Ok(EncodedMember {
-                    bytes: Cow::Owned(bytes),
-                    _work: Some(work),
-                })
-            }
-        }
+    pub(super) fn packed_member(&self, index: usize) -> PackMember<'_> {
+        self.inner.backing.member(
+            &self.inner.budget,
+            index,
+            self.inner.catalog.members()[index].digest(),
+        )
     }
 
     /// Writes a version-1 local pack from this exact admitted base, without domain decoding.
     ///
     /// The stream starts at its current position. The caller owns fresh destination creation,
-    /// publication and durability; a failed write can leave partial bytes. Pack reads authenticate
-    /// each member again, and never fall back to a different file or content context.
+    /// publication and durability; a failed write can leave partial bytes. Held-file reads
+    /// authenticate each member again. Captured members reuse their original authentication.
     pub fn write_pack(
         &self,
         output: &mut (impl Write + ?Sized),
     ) -> Result<(), RuntimeContentError> {
-        let catalog = match &self.inner.backing {
-            #[cfg(any(test, feature = "project-workflow"))]
-            EncodedBacking::Captured(pack) => return pack.write(output).map_err(pack_error),
-            EncodedBacking::File { catalog, .. } => catalog,
-        };
-        pack::write_catalog(output, catalog).map_err(pack_error)?;
-        for index in 0..self.inner.catalog.members().len() {
-            let encoded = self.encoded_member(index)?;
-            output.write_all(encoded.as_ref()).map_err(|source| {
-                RuntimeContentError::Host(FsError::Io {
-                    operation: FsOperation::Write,
-                    source,
-                })
-            })?;
-        }
+        self.inner.backing.write(
+            output,
+            &self.inner.budget,
+            self.inner
+                .catalog
+                .members()
+                .iter()
+                .map(RuntimeContentMember::digest),
+        )?;
         Ok(())
     }
 }
 
-/// Reads only the independently bounded catalogue. No payload reaches a codec during open.
-pub(super) fn read_catalog(
-    file: &FileCapability,
-    expected_length: usize,
-) -> Result<Vec<u8>, RuntimeContentError> {
-    pack::read_catalog(file, expected_length).map_err(pack_error)
+impl From<PackError> for RuntimeContentError {
+    fn from(error: PackError) -> Self {
+        match error {
+            PackError::Io(error) => Self::Host(error),
+            PackError::InvalidHeader => Self::InvalidPackHeader,
+            PackError::ExtentMismatch => Self::PackExtentMismatch,
+            PackError::MemberDigestMismatch => Self::MemberDigestMismatch,
+        }
+    }
 }
 
-/// Called only after admission of the complete extent-index allocation.
-pub(super) fn open_pack(
-    file: FileCapability,
-    catalog: &RuntimeContentCatalog,
-    catalog_bytes: Vec<u8>,
-) -> Result<EncodedBacking, RuntimeContentError> {
-    Pack::open(
-        file,
-        catalog_bytes.len(),
-        catalog
-            .members()
-            .iter()
-            .map(|member| member.digest().length()),
-    )
-    .map(|pack| EncodedBacking::File {
-        pack,
-        catalog: catalog_bytes,
-    })
-    .map_err(pack_error)
+impl From<PackBackingError> for RuntimeContentError {
+    fn from(error: PackBackingError) -> Self {
+        match error {
+            PackBackingError::Pack(error) => error.into(),
+            PackBackingError::Budget(error) => error.into(),
+        }
+    }
 }
 
-pub(super) fn pack_error(error: PackError) -> RuntimeContentError {
+impl From<DecodeBudgetError> for RuntimeContentError {
+    fn from(error: DecodeBudgetError) -> Self {
+        match error {
+            DecodeBudgetError::RetainedBytes { required, limit } => {
+                budget_error(RuntimeContentBudgetKind::RetainedBytes, required, limit)
+            }
+            DecodeBudgetError::WorkBytes { required, limit } => {
+                budget_error(RuntimeContentBudgetKind::WorkBytes, required, limit)
+            }
+        }
+    }
+}
+
+pub(super) fn asset_error(
+    error: AssetPreparationError<RuntimeContentError>,
+) -> RuntimeContentError {
     match error {
-        PackError::Io(error) => RuntimeContentError::Host(error),
-        PackError::InvalidHeader => RuntimeContentError::InvalidPackHeader,
-        PackError::ExtentMismatch => RuntimeContentError::PackExtentMismatch,
-        PackError::MemberDigestMismatch => RuntimeContentError::MemberDigestMismatch,
+        AssetPreparationError::Backing(error) => error.into(),
+        AssetPreparationError::EncodedBytes { required, limit } => budget_error(
+            RuntimeContentBudgetKind::MemberEncodedBytes,
+            required,
+            limit,
+        ),
+        AssetPreparationError::RetainedBytesOverflow => RuntimeContentError::BudgetOverflow {
+            kind: RuntimeContentBudgetKind::RetainedBytes,
+        },
+        AssetPreparationError::Decode(error) => match error {
+            AssetRuntimeDecodeError::Codec(error) => RuntimeContentError::Asset(error),
+            AssetRuntimeDecodeError::ProductIdentityMismatch => {
+                RuntimeContentError::ProductIdentityMismatch
+            }
+            AssetRuntimeDecodeError::Dependency(error) => error,
+            AssetRuntimeDecodeError::RetainedBytes { required, limit } => {
+                budget_error(RuntimeContentBudgetKind::RetainedBytes, required, limit)
+            }
+            AssetRuntimeDecodeError::Panicked(payload) => resume_unwind(payload),
+        },
     }
 }
