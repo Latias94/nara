@@ -255,6 +255,23 @@ changes passed another 426 targeted checks. A fresh Cook and Export from Project
 same pack bytes as the preceding producer. The relocated Player traveled from Meadow to Cavern,
 shut down cleanly, and an Export to the existing destination left all three files intact.
 
+Scene now owns the request lifecycle for primary and additive Scene changes. It checks the active
+Scene receipt, runtime generation, and captured source before publication. A cancelled request
+holds its slot until the preparation task has physically returned. Asset owns held-file and
+captured member reads, the shared decode budget, and bounded typed asset preparation. Render owns
+the batch that validates and publishes Image changes. Project owns Cook member assembly, canonical
+catalog construction, and delivery closure checks. The executable still selects its schema,
+codecs, and product recipe for Cook admission and deep validation.
+
+The ownership cut passed 204 targeted tests and 23 reference-game tests on Windows. The workspace
+and Two-Level game passed their locked all-feature, all-target checks. Fresh Two-Level Player and
+Server builds each completed four Scene switches with their previous pack and with a new Export
+moved to another directory. The old, fresh Cook, and fresh Export pack bytes matched for each
+product. Cook rejected an existing destination. With one byte changed in the Cavern member, both
+products rejected travel while Meadow remained active and cleaned up on exit. The Player also
+retained its original Scene receipt and resident Images. These were the shipped headless
+verification modes.
+
 Windows passed the locked all-feature, all-target workspace and two-level game checks. The
 Scene startup, pack admission, Schema, and Project checks passed 461 tests on that build.
 Another 41 reference game tests covered first-wave play, desktop composition, and HUD behavior.
@@ -270,17 +287,18 @@ tests in 6 minutes 24 seconds. The Wasm check took 1 minute 29 seconds. Running 
 sequence took 21 minutes 45 seconds. CI now runs workspace checks and core tests in separate jobs.
 GitHub-hosted wall time, including runner setup, remains to be measured.
 
-The facade budget remains open. Root `src/` has about 68,000 Rust lines, including authored
-loading, Scene residency, pack decoding, and v0 Cook integration. `nara_project/src/` has about
-24,000 Rust lines, including native build, supervision, and packaging. The reference game's
-`src/` has about 8,300 lines. The simple VFS has 309 lines with its native adapter. The opt-in
-capability module has 10,524 lines of scoped publication and tests. The UI crate has 36,975 Rust
-lines in `src/`, above the package review threshold. The remaining ownership, size, and cold
-timing gates keep the Phase 3 exit open.
+The facade budget remains open. Root `src/` has 66,083 Rust lines including in-source tests,
+down from 67,908 before this cut. It still integrates authored loading, Scene residency, runtime
+content admission, and project Cook. `nara_project/src/` has 25,418 Rust lines, including native
+build, supervision, Cook, and packaging. The reference game's `src/` has about 8,300 lines. The
+simple VFS has 309 lines with its native adapter. The opt-in capability module has 10,524 lines
+of scoped publication and tests. The UI crate has 36,975 Rust lines in `src/`, above the package
+review threshold. The remaining ownership, size, and cold timing gates keep the Phase 3 exit open.
 
-Move the remaining hosted Scene travel and residency to the runtime owners, typed runtime asset
-loading into `nara_asset`, and the remaining Cook integration into `nara_project`. Verify both
-relocated shipping products as these integrations move.
+Move hosted content selection, Scene residency, and joint World publication to their runtime
+owners. Move project source discovery and the remaining Cook orchestration into `nara_project`
+through the production runtime validation path. Recheck both relocated shipping products as
+these integrations move.
 
 ## Phase 4 — Deliver the desktop editor workflow
 

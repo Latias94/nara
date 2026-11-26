@@ -29,7 +29,9 @@ inspector, prefab overrides, and future animation. Use compact `PackedU16`, `Pac
 - Let the game own its save snapshots separately from its cooked asset and scene formats. Migrate
   the shipped examples and starter at the format cutover and retire the v0 JSON readers.
 
-The Phase 3 `.pack` format uses `nara_asset::pack` for v1 archive I/O.
-`nara_scene::runtime_catalog` owns the catalog and canonical member order. The executable supplies
-the expected digest and target. Admission checks both before the runtime selects member codecs or
-starts the world.
+The Phase 3 `.pack` format uses `nara_asset::pack` for v1 archive I/O and bounded preparation of
+selected asset members. `nara_scene::runtime_catalog` owns the catalog and canonical member order.
+The executable supplies the expected digest and target. Admission checks both before the runtime
+selects member codecs or starts the world. Scene owns the deferred Scene request and checks the
+active Scene receipt again at commit. It holds a cancelled request until the preparation task
+returns. Render owns Image publication within that commit.
