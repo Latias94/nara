@@ -211,8 +211,9 @@ fn selected_directories_deliver_events_through_one_watcher() {
     let (app, lifecycle, source) = configured_app(&root);
     let baseline = lifecycle.stats();
     let mut queue = AssetWatchEventQueue::new();
+    let (events, native_events) = mpsc::channel();
     let mut watcher = lifecycle
-        .watch_paths(
+        .watch_paths_with_callback_for_test(
             &source,
             &[
                 AssetWatchPath::new(root.clone(), false),
@@ -221,6 +222,9 @@ fn selected_directories_deliver_events_through_one_watcher() {
                 AssetWatchPath::new(root.join("prefabs"), true),
             ],
             queue.sender(),
+            Box::new(move |event| {
+                let _ = events.send(format!("{event:?}"));
+            }),
         )
         .unwrap();
     assert_eq!(lifecycle.stats().started(), baseline.started() + 1);
@@ -234,7 +238,12 @@ fn selected_directories_deliver_events_through_one_watcher() {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let drained = queue.drain();
-        assert!(!drained.rescan_required());
+        assert!(
+            !drained.rescan_required(),
+            "native watch requested a rescan: {:?}; events: {:#?}",
+            queue.stats(),
+            native_events.try_iter().collect::<Vec<_>>()
+        );
         seen.extend(drained.into_events());
         if files.iter().all(|file| {
             seen.iter()

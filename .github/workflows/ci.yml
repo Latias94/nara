@@ -84,7 +84,7 @@ jobs:
           --lib --bin nara --test vfs --test filesystem_contract --test path_contract
           --test mock_audio --test fixed_physics
           --features nara_app/tasks,nara_asset/artifact-build,nara_asset/hot-reload,nara_asset/pack,nara_core/fs-capabilities,nara_input/serde,nara_project/player-package,nara_project/product-process,nara_scene/runtime-catalog
-          --no-tests fail
+          --no-tests fail --no-fail-fast
 
   reference-game:
     name: Reference game
