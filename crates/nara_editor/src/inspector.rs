@@ -94,6 +94,11 @@ pub(crate) struct InspectorPanel {
 }
 
 impl InspectorPanel {
+    #[cfg(all(test, windows))]
+    pub(crate) fn name_input(&self) -> Option<&Entity<TextInput>> {
+        self.name.as_ref().map(|edit| &edit.input)
+    }
+
     pub(crate) fn new(workspace: Entity<Workspace>, cx: &mut Context<Self>) -> Self {
         let selection = Rc::new(Selection::new(&workspace.read(cx).session));
         let subscription = cx.observe(&workspace, |panel, _, cx| {

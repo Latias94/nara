@@ -365,15 +365,16 @@ requested refresh. The separate two-window shared viewport submitted 121 retaine
 frames at 60.2 FPS on the current 60 Hz display, with zero Inspector submissions or Nara
 texture and buffer creations. Resize, paused refresh, and shared-queue completion passed.
 PIX captured 12 warmed-up shared-viewport presents with zero application texture copies
-and zero in-frame native resource creations. The editor-only PIX capture timed out. The editor's
-WGPU test verifies that GPUI imports the original Nara texture, and its native smoke measures
-Nara's allocations. [Native editor verification](../guides/native-editor.md)
+and zero in-frame native resource creations. The editor's WGPU test verifies that GPUI imports the
+original Nara texture, and its native smoke measures Nara's allocations.
+[Native editor verification](../guides/native-editor.md)
 
 The Phase 4 closeout protected unapplied Inspector drafts at close, required a pane in each
 restored peer window, and made a multi-selection transform one undoable gesture. Snapshot Play
 requires project opt-in. Night Relay repeated Schema refresh, layout restoration, and supervised
 snapshot Play with the modified scene. The generated starter remained running past the former
-30-second handshake deadline and stopped under process supervision.
+30-second handshake deadline and stopped under process supervision. The Windows editor tests
+exercise close prompts, Inspector drafts, and failed saves through the GPUI test platform.
 
 Viewport counters now update independently of workspace notifications. The single-window
 `--capture-frames` mode submitted 60 Nara frames with zero new textures or buffers on the RTX 4090

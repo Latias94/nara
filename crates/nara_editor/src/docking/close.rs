@@ -1,3 +1,6 @@
+#[cfg(all(test, windows))]
+mod tests;
+
 use std::{cell::Cell, path::PathBuf, rc::Rc};
 
 use anyhow::{Context as _, Result};
