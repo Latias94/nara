@@ -114,6 +114,29 @@ fn open_layout(path: &Path) -> io::Result<File> {
         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
         options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        #[cfg(target_os = "macos")]
+        const O_NOFOLLOW: i32 = 0x0100;
+        #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm")))]
+        const O_NOFOLLOW: i32 = 0o100_000;
+        #[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "x86")))]
+        const O_NOFOLLOW: i32 = 0o400_000;
+        #[cfg(any(
+            target_os = "macos",
+            all(
+                target_os = "linux",
+                any(
+                    target_arch = "x86_64",
+                    target_arch = "x86",
+                    target_arch = "aarch64",
+                    target_arch = "arm"
+                )
+            )
+        ))]
+        options.custom_flags(O_NOFOLLOW);
+    }
     options.open(path)
 }
 

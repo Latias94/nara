@@ -14,7 +14,7 @@ use nara_editor_core::{InspectorModel, value_draft::RootDraft};
 use nara_reflect::{ComponentSchema, ComponentSchemaVersion, ComponentTypeId};
 use open_gpui::{
     App, Context, Div, Entity, EntityId, FontWeight, IntoElement, Render, Rgba, StyleRefinement,
-    Subscription, Window, div, prelude::*, px, rgb,
+    Subscription, Window, WindowId, div, prelude::*, px, rgb,
 };
 use open_gpui_base::{Button, Menu, MenuEvent, MenuItem, Select, TextInput, TextInputEvent};
 
@@ -27,6 +27,7 @@ use self::{
 
 struct NameEdit {
     input: Entity<TextInput>,
+    window_id: Option<WindowId>,
     _subscription: Subscription,
     current: String,
     initial_text: String,
@@ -41,9 +42,12 @@ impl NameEdit {
         (value != self.initial_text).then(|| Draft::Text(value.to_owned()))
     }
 
-    fn reset_input(&mut self, cx: &mut App) {
-        self.input
-            .update(cx, |input, cx| input.set_value(self.current.clone(), cx));
+    fn reset_input(&mut self, window: Option<&mut Window>, cx: &mut App) {
+        let value = self.current.clone();
+        self.input.update(cx, |input, cx| match window {
+            Some(window) => input.set_value_in(value, window, cx),
+            None => input.set_value(value, cx),
+        });
         self.initial_text = self.input.read(cx).value().to_owned();
     }
 }
@@ -219,11 +223,18 @@ impl InspectorPanel {
             .flat_map(|section| section.fields)
             .collect();
         if rebound {
-            if let Some(name) = self.name.take().filter(|name| name.draft(cx).is_some()) {
+            let previous_live = previous.exists_in(&self.workspace.read(cx).session);
+            if let Some(name) = self
+                .name
+                .take()
+                .filter(|name| previous_live && name.draft(cx).is_some())
+            {
                 self.suspended_names.insert(previous.clone(), name);
             }
             for (key, view) in existing.drain() {
-                if view.update(cx, PropertyEditor::suspend) {
+                if view.update(cx, PropertyEditor::suspend)
+                    && previous.has_component(&self.workspace.read(cx).session, &key.component)
+                {
                     self.suspended_fields.insert((previous.clone(), key), view);
                 }
             }
@@ -249,9 +260,7 @@ impl InspectorPanel {
                             }
                             previous => {
                                 if let Some(view) = previous {
-                                    if view.update(cx, PropertyEditor::suspend) {
-                                        self.suspended_fields.insert(identity, view);
-                                    }
+                                    let _ = view.update(cx, PropertyEditor::suspend);
                                 }
                                 cx.new(|cx| {
                                     PropertyEditor::new(self.workspace.clone(), property, cx)
@@ -271,11 +280,20 @@ impl InspectorPanel {
             })
             .collect();
         for (key, view) in existing {
-            if view.update(cx, PropertyEditor::suspend) {
+            if view.update(cx, PropertyEditor::suspend)
+                && self
+                    .selection
+                    .has_component(&self.workspace.read(cx).session, &key.component)
+            {
                 self.suspended_fields
                     .insert((self.selection.clone(), key), view);
             }
         }
+        let session = &self.workspace.read(cx).session;
+        self.suspended_names
+            .retain(|selection, _| selection.exists_in(session));
+        self.suspended_fields
+            .retain(|(selection, key), _| selection.has_component(session, &key.component));
         self.refresh_add_menu(options, cx);
         true
     }
@@ -289,7 +307,7 @@ impl InspectorPanel {
             if edit.current != name {
                 edit.current = name;
                 if edit.expected.is_none() {
-                    edit.reset_input(cx);
+                    edit.reset_input(None, cx);
                 }
             }
             return;
@@ -299,6 +317,7 @@ impl InspectorPanel {
         self.name = Some(NameEdit {
             initial_text: input.read(cx).value().to_owned(),
             input,
+            window_id: None,
             _subscription: subscription,
             current: name,
             expected: None,
@@ -310,6 +329,26 @@ impl InspectorPanel {
         &mut self,
         input: Entity<TextInput>,
         event: &TextInputEvent,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_rename_event(input, event, None, cx);
+    }
+
+    fn rename_event_in(
+        &mut self,
+        input: &Entity<TextInput>,
+        event: &TextInputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_rename_event(input.clone(), event, Some(window), cx);
+    }
+
+    fn handle_rename_event(
+        &mut self,
+        input: Entity<TextInput>,
+        event: &TextInputEvent,
+        window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
         let Some(edit) = self
@@ -327,7 +366,7 @@ impl InspectorPanel {
             TextInputEvent::Cancel => {
                 edit.expected = None;
                 edit.error = None;
-                edit.reset_input(cx);
+                edit.reset_input(window, cx);
             }
             TextInputEvent::Submit(_) | TextInputEvent::Blur => {
                 let Some(expected) = edit.expected.as_ref() else {
@@ -507,7 +546,14 @@ impl InspectorPanel {
 }
 
 impl Render for InspectorPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let window_id = window.window_handle().window_id();
+        if let Some(edit) = &mut self.name
+            && edit.window_id != Some(window_id)
+        {
+            edit.window_id = Some(window_id);
+            edit._subscription = cx.subscribe_in(&edit.input, window, Self::rename_event_in);
+        }
         let mut content = div()
             .id("inspector-content")
             .min_h_0()

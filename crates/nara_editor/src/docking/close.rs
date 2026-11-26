@@ -98,6 +98,10 @@ fn show_redock_hint(dock: &DockSurface, surface: SurfaceId, cx: &mut App) {
     }
 }
 
+#[derive(Clone, Default, PartialEq, open_gpui::Action)]
+#[action(namespace = nara_editor, no_json, no_register)]
+pub(crate) struct QuitEditor;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum RootCloseState {
     Open,
@@ -117,23 +121,43 @@ pub(super) fn guard_editor_window(
     let close = RootClose {
         dock: dock.clone(),
         window,
-        workspace,
+        workspace: workspace.clone(),
         inspector,
         layout_path,
         state: state.clone(),
     };
+    let on_window_close = close.clone();
     window
         .update(cx, |_, window, cx| {
             window.on_window_should_close(cx, move |_, cx| {
-                if close.state.get() == RootCloseState::Open {
-                    close.state.set(RootCloseState::Pending);
-                    let close = close.clone();
-                    cx.defer(move |cx| close.request(cx));
-                }
+                on_window_close.trigger(cx);
                 false
             });
         })
         .context("Could not install the editor window close handler")?;
+    let on_quit_action = close.clone();
+    cx.on_action(move |_: &QuitEditor, cx| on_quit_action.trigger(cx));
+    #[cfg(target_os = "macos")]
+    {
+        use open_gpui::{KeyBinding, Menu, MenuItem};
+        cx.bind_keys([KeyBinding::new("cmd-q", QuitEditor, None)]);
+        cx.set_menus([
+            Menu::new("Nara Editor").items([MenuItem::action("Quit Nara Editor", QuitEditor)])
+        ]);
+    }
+    cx.on_app_quit(move |cx| {
+        let job = workspace
+            .update(cx, |workspace, cx| workspace.take_job(cx))
+            .ok()
+            .flatten();
+        let background = cx.background_executor().clone();
+        async move {
+            if let Some(job) = job {
+                background.spawn(async move { drop(job) }).await;
+            }
+        }
+    })
+    .detach();
     Ok(state)
 }
 
@@ -165,6 +189,14 @@ enum CloseAnswer {
 }
 
 impl RootClose {
+    fn trigger(&self, cx: &mut App) {
+        if self.state.get() == RootCloseState::Open {
+            self.state.set(RootCloseState::Pending);
+            let close = self.clone();
+            cx.defer(move |cx| close.request(cx));
+        }
+    }
+
     fn request(self, cx: &mut App) {
         let review = self.workspace.read_with(cx, |workspace, cx| {
             let document = workspace.session.document();
@@ -387,6 +419,25 @@ impl RootClose {
 
     fn shutdown(self, cx: &mut App) {
         self.state.set(RootCloseState::Closing);
+        let job = self
+            .workspace
+            .update(cx, |workspace, cx| workspace.take_job(cx))
+            .ok()
+            .flatten();
+        if let Some(job) = job {
+            cx.spawn(async move |cx| {
+                cx.background_executor()
+                    .spawn(async move { drop(job) })
+                    .await;
+                cx.update(|cx| self.begin_native_shutdown(cx));
+            })
+            .detach();
+            return;
+        }
+        self.begin_native_shutdown(cx);
+    }
+
+    fn begin_native_shutdown(self, cx: &mut App) {
         if let Err(error) = self.dock.begin_native_shutdown(cx) {
             self.state.set(RootCloseState::Open);
             warn(&self.workspace, format!("Editor close: {error:#}"), cx);

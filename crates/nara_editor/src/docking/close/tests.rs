@@ -10,7 +10,7 @@ use open_gpui::{
 };
 use open_gpui_docking::{DockPane, DockSurface, dockspace::policy::DockPolicy};
 
-use super::guard_editor_window;
+use super::{QuitEditor, guard_editor_window};
 use crate::{
     docking::{PANES, ROOT, default_session},
     inspector::InspectorPanel,
@@ -254,4 +254,76 @@ fn a_failed_layout_save_can_keep_the_editor_open_or_discard_the_layout() {
     assert!(!editor.is_open());
     let layout = editor.directory.path().join(".nara");
     assert_eq!(fs::read(layout).unwrap(), b"not a directory");
+}
+
+#[test]
+fn deleting_an_entity_or_opening_another_scene_evicts_unreachable_drafts() {
+    let mut editor = Editor::open(true, false);
+    let second_path = editor.scene_path("second.nara.scene.ron");
+    let second_scene = SceneDocument::new(DocumentId::try_from_uuid(uuid::Uuid::new_v4()).unwrap());
+    second_scene.write(&second_path).unwrap();
+
+    editor.edit_name("Draft before delete");
+    assert!(editor.has_drafts());
+    editor.workspace.update(&mut editor.cx, |workspace, cx| {
+        workspace.delete_selection(cx)
+    });
+    editor.cx.run_until_parked();
+    assert!(!editor.has_drafts());
+
+    editor
+        .workspace
+        .update(&mut editor.cx, |workspace, cx| workspace.undo(cx));
+    editor.cx.run_until_parked();
+    let entity = editor.workspace.read_with(&editor.cx, |workspace, _| {
+        workspace.session.document().scene().entities[0].id
+    });
+    editor.workspace.update(&mut editor.cx, |workspace, cx| {
+        workspace.select([entity], cx)
+    });
+    editor.cx.run_until_parked();
+
+    editor.edit_name("Draft before switching scene");
+    assert!(editor.has_drafts());
+    editor.workspace.update(&mut editor.cx, |workspace, cx| {
+        workspace.open_asset(
+            &nara_core::vfs::AssetPath::new("second.nara.scene.ron").unwrap(),
+            cx,
+        );
+    });
+    editor.cx.run_until_parked();
+    assert!(!editor.has_drafts());
+    editor.request_close();
+    assert!(!editor.is_open());
+}
+
+#[test]
+fn quit_action_routes_through_the_editor_close_guard() {
+    let editor = Editor::open(true, false);
+    editor.edit_name("Unsaved quit draft");
+    assert!(editor.has_drafts());
+    editor.cx.update(|cx| cx.dispatch_action(&QuitEditor));
+    editor.cx.run_until_parked();
+    editor.answer("Cancel");
+    assert!(editor.is_open() && editor.has_drafts());
+    editor.cx.update(|cx| cx.dispatch_action(&QuitEditor));
+    editor.cx.run_until_parked();
+    editor.answer("Discard Drafts and Continue");
+    assert!(!editor.is_open());
+}
+
+#[test]
+fn canceling_name_draft_with_escape_resets_text_and_clears_draft() {
+    let editor = Editor::open(true, false);
+    let mut visual = editor.edit_name("Temporary");
+    assert!(editor.has_drafts());
+    visual.simulate_keystrokes("escape");
+    editor.cx.run_until_parked();
+    assert!(!editor.has_drafts());
+    let text = editor.inspector.read_with(&editor.cx, |inspector, cx| {
+        inspector.name_input().unwrap().read(cx).value().to_owned()
+    });
+    assert_eq!(text, "Original");
+    editor.request_close();
+    assert!(!editor.is_open());
 }

@@ -12,7 +12,7 @@ use nara_reflect::{
 use nara_scene::authoring::SceneEntity;
 use open_gpui::{
     AnyElement, App, Context, Div, Entity, EntityId, IntoElement, Render, Subscription, Window,
-    div, prelude::*, px, rgb,
+    WindowId, div, prelude::*, px, rgb,
 };
 use open_gpui_base::{
     Checkbox, ColorPicker, MenuEvent, MenuItem, NumericEvent, NumericRange, NumericScrubber,
@@ -186,6 +186,7 @@ impl Property {
 
 struct Scalar {
     input: Entity<TextInput>,
+    window_id: Option<WindowId>,
     _subscription: Subscription,
     initial_text: String,
     expected: Option<Vec<Option<ComponentValue>>>,
@@ -280,6 +281,7 @@ impl PropertyEditor {
                     Control::Scalar(Scalar {
                         initial_text: input.read(cx).value().to_owned(),
                         input,
+                        window_id: None,
                         _subscription: subscription,
                         expected: None,
                         scrub: new_scrub(&property, cx),
@@ -408,6 +410,26 @@ impl PropertyEditor {
         event: &TextInputEvent,
         cx: &mut Context<Self>,
     ) {
+        self.handle_text_event(input, event, None, cx);
+    }
+
+    fn text_event_in(
+        &mut self,
+        input: &Entity<TextInput>,
+        event: &TextInputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_text_event(input.clone(), event, Some(window), cx);
+    }
+
+    fn handle_text_event(
+        &mut self,
+        input: Entity<TextInput>,
+        event: &TextInputEvent,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
         if !self.active {
             return;
         }
@@ -423,7 +445,9 @@ impl PropertyEditor {
             TextInputEvent::Cancel => {
                 text.expected = None;
                 self.error = None;
-                input.update(cx, |input, cx| sync_text(input, &self.property, cx));
+                input.update(cx, |input, cx| {
+                    sync_text_in(input, &self.property, window, cx)
+                });
                 text.initial_text = input.read(cx).value().to_owned();
             }
             TextInputEvent::Submit(_) | TextInputEvent::Blur => {
@@ -695,12 +719,7 @@ impl PropertyEditor {
         if terminal {
             scrub.rejected = false;
             if let Some(value) = selected_number(&self.property) {
-                if matches!(event, NumericEvent::Cancel(_))
-                    || self.error.is_some()
-                    || text.expected.is_some()
-                {
-                    control.update(cx, |control, cx| control.set_value(value, cx));
-                }
+                control.update(cx, |control, cx| control.set_value(value, cx));
             }
         } else if self.error.is_some() || text.expected.is_some() {
             scrub.rejected = true;
@@ -710,7 +729,14 @@ impl PropertyEditor {
 }
 
 impl Render for PropertyEditor {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let window_id = window.window_handle().window_id();
+        if let Control::Scalar(text) = &mut self.control
+            && text.window_id != Some(window_id)
+        {
+            text.window_id = Some(window_id);
+            text._subscription = cx.subscribe_in(&text.input, window, Self::text_event_in);
+        }
         let property = &self.property;
         let mut form_view = None;
         let (control, expected): (AnyElement, _) = match &mut self.control {
@@ -1014,8 +1040,21 @@ fn text_value(property: &Property) -> String {
 }
 
 fn sync_text(input: &mut TextInput, property: &Property, cx: &mut Context<TextInput>) {
+    sync_text_in(input, property, None, cx);
+}
+
+fn sync_text_in(
+    input: &mut TextInput,
+    property: &Property,
+    window: Option<&mut Window>,
+    cx: &mut Context<TextInput>,
+) {
     input.set_placeholder(display_state(&property.value), cx);
-    input.set_value(text_value(property), cx);
+    let value = text_value(property);
+    match window {
+        Some(window) => input.set_value_in(value, window, cx),
+        None => input.set_value(value, cx),
+    }
     input.set_invalid(false, cx);
 }
 

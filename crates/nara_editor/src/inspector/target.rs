@@ -30,6 +30,28 @@ impl Selection {
             && self.targets == session.selection().entities()
     }
 
+    pub fn exists_in(&self, session: &EditorSession) -> bool {
+        if self.document != session.document().scene().id || self.targets.is_empty() {
+            return false;
+        }
+        let rows = &session.document().scene().entities;
+        self.targets
+            .iter()
+            .all(|id| rows.binary_search_by_key(id, |row| row.id).is_ok())
+    }
+
+    pub fn has_component(&self, session: &EditorSession, component: &ComponentTypeId) -> bool {
+        if !self.exists_in(session) {
+            return false;
+        }
+        let rows = &session.document().scene().entities;
+        self.targets.iter().all(|id| {
+            rows.binary_search_by_key(id, |row| row.id)
+                .ok()
+                .is_some_and(|index| rows[index].components.contains_key(component))
+        })
+    }
+
     pub fn rows<'session>(
         &self,
         session: &'session EditorSession,

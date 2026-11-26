@@ -523,6 +523,15 @@ impl Workspace {
         }
     }
 
+    pub(crate) fn take_job(&mut self, cx: &mut Context<Self>) -> Option<Job> {
+        let job = self.job.take()?;
+        job.stop();
+        self.status = JobStatus::Stopping;
+        self.pending = None;
+        cx.notify();
+        Some(job)
+    }
+
     fn poll_job(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         for _ in 0..256 {
