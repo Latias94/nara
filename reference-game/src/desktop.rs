@@ -10,7 +10,7 @@ use nara::{
     ecs::{bevy_ecs::error::Result as SystemResult, schedule::IntoScheduleConfigs},
     input::{ActionContext, ActionPhase, InputSeatId, InputSet},
     prelude::*,
-    render_wgpu::WgpuRenderObservation,
+    render_wgpu::desktop::DesktopPresentation,
     window::WindowId,
 };
 
@@ -90,15 +90,15 @@ fn verify_present(app: &mut App) -> Result<(), Box<dyn Error>> {
     let receipt = Arc::clone(&presented);
     app.add_systems(
         Last,
-        move |observation: Res<WgpuRenderObservation>, mut exit: ResMut<AppExitRequests>| {
-            let stats = observation.frame_transaction_stats();
+        move |observation: Res<DesktopPresentation>, mut exit: ResMut<AppExitRequests>| {
             if Instant::now() >= deadline {
                 exit.request_exit();
-            } else if let Some(extent) = observation.configured_surface_extent(WindowId::PRIMARY)
-                && stats.direct_surface_presents() > 0
-                && stats.ui_glyph_primitives() > 0
+            } else if let Some(frame) = observation.latest()
+                && frame.window == WindowId::PRIMARY
+                && frame.direct_surface
+                && frame.hud_glyph_primitives > 0
             {
-                let _ = receipt.set((extent, stats.ui_glyph_primitives()));
+                let _ = receipt.set((frame.extent, frame.hud_glyph_primitives));
                 exit.request_success();
             }
         },

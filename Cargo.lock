@@ -2192,7 +2192,6 @@ dependencies = [
  "encase",
  "glam 0.33.12",
  "guillotiere",
- "image",
  "naga",
  "nara_app",
  "nara_asset",
@@ -2203,16 +2202,10 @@ dependencies = [
  "nara_scene",
  "nara_ui",
  "nara_window",
- "png",
  "pollster",
- "raw-window-handle",
- "ron",
  "serde",
- "serde_json",
  "thiserror 2.0.18",
- "tracing",
  "wgpu",
- "winit",
 ]
 
 [[package]]

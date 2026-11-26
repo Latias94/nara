@@ -6,10 +6,7 @@ use std::{cell::RefCell, env, rc::Rc, sync::Arc};
 
 use anyhow::{Context as _, Result, bail, ensure};
 use nara_render::Extent2d;
-use nara_render::gpu::{
-    GpuContext, GpuDeviceErrors, TextureAlpha, TextureInterpretation, TextureTransfer,
-    WgpuImageOutput, WgpuRenderHost, WgpuRenderHostError, WgpuRenderPolicy, WgpuStockPolicy,
-};
+use nara_render::gpu::{GpuContext, GpuDeviceErrors, Renderer, WgpuImageOutput};
 use open_gpui::{
     App, Bounds, ClickEvent, Context, DevicePixels, Entity, ImageTexture, ImageTextureAlpha,
     ImageTextureSampling, ImageTextureTransfer, Pixels, QuitMode, TargetedEvent, TitlebarOptions,
@@ -35,14 +32,14 @@ fn main() -> Result<()> {
     };
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let shared = pollster::block_on(create_shared_gpu())?;
-    let host = WgpuRenderHost::with_gpu_context(GpuContext::from_shared(
+    let renderer = Renderer::new(GpuContext::from_shared(
         shared.instance_handle().clone(),
         shared.adapter().clone(),
         shared.device().clone(),
         shared.queue().clone(),
         Arc::new(NaraDeviceErrors(Arc::clone(shared.errors()))),
-    ))?;
-    let scene = Scene::new(host)?;
+    ));
+    let scene = Scene::new(renderer)?;
     let application = open_gpui_platform::application_with_shared_wgpu(shared.clone())?;
 
     let failure = Failure::default();
@@ -113,14 +110,11 @@ async fn create_shared_gpu() -> Result<SharedWgpuContext> {
             (preference, info.backend != wgpu::Backend::Dx12)
         })
         .context("no native hardware WGPU adapter matched the backend and adapter filters")?;
-    let requirements = WgpuStockPolicy::new().device_requirements();
     let shared = SharedWgpuContext::request_device(
         instance,
         adapter,
         wgpu::DeviceDescriptor {
             label: Some("Nara + Open-GPUI Mode A"),
-            required_features: requirements.required_features(),
-            required_limits: requirements.required_limits().clone(),
             ..Default::default()
         },
     )
@@ -307,18 +301,9 @@ impl Viewport {
             return Ok(());
         }
 
-        let output = match self.scene.render(geometry.extent, geometry.scale) {
-            Ok(output) => output,
-            Err(error)
-                if error
-                    .downcast_ref::<WgpuRenderHostError>()
-                    .is_some_and(WgpuRenderHostError::is_deferred) =>
-            {
-                // Keep the last image visible until the shared queue releases enough storage.
-                self.refresh_requested = true;
-                return Ok(());
-            }
-            Err(error) => return Err(error),
+        let Some(output) = self.scene.render(geometry.extent)? else {
+            self.refresh_requested = refresh_requested || needs_image;
+            return Ok(());
         };
         let descriptor = import_descriptor(output)?;
         let atlas = WgpuAtlas::for_window(window).context("viewport has no native WGPU atlas")?;
@@ -388,15 +373,10 @@ fn import_descriptor(output: WgpuImageOutput) -> Result<WgpuImportedImageDescrip
         .native_texture()
         .context("Nara viewport texture retired")?;
     ensure!(
-        texture.format() == wgpu::TextureFormat::Rgba8UnormSrgb
+        texture.format() == WgpuImageOutput::FORMAT
             && texture.usage().contains(
                 wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            )
-            && owner.descriptor().interpretation
-                == (TextureInterpretation::Color {
-                    transfer: TextureTransfer::Srgb,
-                    alpha: TextureAlpha::Premultiplied,
-                }),
+            ),
         "Nara must export an sRGB premultiplied render target"
     );
     let extent = owner.extent();

@@ -1,6 +1,9 @@
 use nara_app::RuntimeGeneration;
 use nara_window::{Window, WindowId};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 static NEXT_RENDER_SOURCE: AtomicU64 = AtomicU64::new(1);
 
@@ -10,7 +13,7 @@ use crate::{
     WorldCanvas, WorldCanvasFrame,
 };
 
-/// Maximum serial views in one exclusive target transaction.
+/// Maximum number of world views in one frame for a target.
 pub const MAX_VIEWS_PER_TARGET: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -46,14 +49,14 @@ impl RenderFrameSourceGeneration {
     }
 }
 
-/// Captures one image transaction without a platform window or gameplay Runtime.
+/// Builds an offscreen frame from an explicit image target and extracted views.
 pub fn build_image_render_frame_packet(
     generation: RenderFrameSourceGeneration,
     frame_index: u64,
     views: &ExtractedViews,
     target: RenderImagePacket,
 ) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
-    let packet = build_render_frame_packet_for_source(
+    build_render_frame_packet_for_source(
         generation,
         frame_index,
         None,
@@ -61,14 +64,7 @@ pub fn build_image_render_frame_packet(
         views,
         Some(target),
         None,
-    )?;
-    if packet
-        .as_ref()
-        .is_some_and(|packet| !matches!(packet.target(), RenderFrameTarget::Image(_)))
-    {
-        return Err(RenderFramePacketError::ImageTargetMismatch);
-    }
-    Ok(packet)
+    )
 }
 
 impl From<RuntimeGeneration> for RenderFrameSourceGeneration {
@@ -77,18 +73,17 @@ impl From<RuntimeGeneration> for RenderFrameSourceGeneration {
     }
 }
 
-/// One exclusive destination transaction with bounded, ordered world views.
-/// A window overlay can present without world views.
-/// A fixed world canvas adds one owner-local image-to-window edge without changing target identity.
-/// Cloning preserves CPU facts only; target acquisition, execution and UI permissions have
-/// separate owners and cannot be duplicated by this packet.
+/// Immutable views, target geometry and time for one render frame.
+/// A fixed world canvas supplies the mapping from its raster to a window.
+/// A window overlay can have no world views.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderFramePacket {
     pub(crate) source_generation: RenderFrameSourceGeneration,
     frame_index: u64,
     pub(crate) target: RenderFrameTarget,
     logical_target: RenderTarget,
-    views: Vec<ExtractedView>,
+    adapted_from_window: Option<WindowId>,
+    views: Arc<[ExtractedView]>,
     world_canvas: Option<WorldCanvasFrame>,
     captured_time: Option<CapturedRenderTime>,
 }
@@ -111,9 +106,22 @@ impl RenderFramePacket {
     pub const fn logical_target(&self) -> RenderTarget {
         self.logical_target
     }
+
+    /// The resolved source window, including after adapting its frame to an image.
+    #[must_use]
+    pub const fn source_window(&self) -> Option<WindowId> {
+        match self.target {
+            RenderFrameTarget::Window(window) => Some(window.id),
+            RenderFrameTarget::Image(_) => self.adapted_from_window,
+        }
+    }
     #[must_use]
     pub fn views(&self) -> &[ExtractedView] {
         &self.views
+    }
+
+    pub(crate) fn shared_views(&self) -> Arc<[ExtractedView]> {
+        Arc::clone(&self.views)
     }
     #[must_use]
     pub const fn world_canvas(&self) -> Option<WorldCanvasFrame> {
@@ -129,12 +137,8 @@ impl RenderFramePacket {
         self.captured_time
     }
 
-    /// Copies this window transaction to an image execution target of the same physical extent.
-    ///
-    /// The source packet remains unchanged. Its source, frame index, logical view targets and
-    /// View lifetime identities and fixed world canvas are preserved, including the original
-    /// world-to-window mapping and captured time sample. Only the execution target changes;
-    /// this copies at most [`MAX_VIEWS_PER_TARGET`] captured views.
+    /// Clones this window frame for an image execution target of the same physical extent.
+    /// The copy retains the logical target, views, canvas and captured time.
     ///
     /// Returns an error if this packet does not target a window or the image extent differs from
     /// the captured physical window extent, even when a fixed world canvas has a smaller extent.
@@ -157,13 +161,9 @@ impl RenderFramePacket {
             });
         }
         Ok(Self {
-            source_generation: self.source_generation,
-            frame_index: self.frame_index,
             target: RenderFrameTarget::Image(target),
-            logical_target: self.logical_target,
-            views: self.views.to_vec(),
-            world_canvas: self.world_canvas,
-            captured_time: self.captured_time,
+            adapted_from_window: Some(window.id),
+            ..self.clone()
         })
     }
 }
@@ -184,14 +184,14 @@ pub fn build_window_overlay_frame_packet(
         frame_index,
         target: RenderFrameTarget::Window(window),
         logical_target: RenderTarget::Window(window.id),
-        views: Vec::new(),
+        adapted_from_window: None,
+        views: Arc::default(),
         world_canvas: None,
         captured_time,
     })
 }
 
-/// Captures the admitted desktop topology before any surface acquisition.
-/// Mixed targets remain unsupported; independent target transactions require an explicit owner.
+/// Builds a frame for one window from its ordered views.
 pub fn build_render_frame_packet<'a>(
     generation: RuntimeGeneration,
     frame_index: u64,
@@ -209,8 +209,8 @@ pub fn build_render_frame_packet<'a>(
     )
 }
 
-/// Captures one window transaction with optional fixed world raster geometry. Runtime UI continues
-/// to use the actual window target extent; only world viewports are validated against the canvas.
+/// Builds a window frame with an optional fixed world raster.
+/// World viewports use the raster extent and the overlay uses the native window extent.
 pub fn build_render_frame_packet_with_world_canvas<'a>(
     generation: RuntimeGeneration,
     frame_index: u64,
@@ -239,7 +239,9 @@ pub(crate) fn build_render_frame_packet_for_source<'a>(
     image_target: Option<RenderImagePacket>,
     world_canvas: Option<WorldCanvas>,
 ) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
-    let Some(first) = views.as_slice().first() else {
+    let captured_time = views.captured_time();
+    let views = views.as_slice();
+    let Some(first) = views.first() else {
         return Ok(None);
     };
     if views.len() > MAX_VIEWS_PER_TARGET {
@@ -248,22 +250,18 @@ pub(crate) fn build_render_frame_packet_for_source<'a>(
             maximum: MAX_VIEWS_PER_TARGET,
         });
     }
-    for (index, view) in views.as_slice().iter().enumerate() {
-        if views.as_slice()[..index]
-            .iter()
-            .any(|previous| previous.id == view.id)
-        {
+    for (index, view) in views.iter().enumerate() {
+        if views[..index].iter().any(|previous| previous.id == view.id) {
             return Err(RenderFramePacketError::DuplicateViewId { id: view.id });
         }
     }
     if views
-        .as_slice()
         .iter()
         .any(|view| !targets_match(first.target, view.target, primary_window_id))
     {
         return Err(RenderFramePacketError::MixedRenderTargets);
     }
-    if views.as_slice().windows(2).any(|pair| {
+    if views.windows(2).any(|pair| {
         (pair[0].order, pair[0].camera_entity.to_bits())
             > (pair[1].order, pair[1].camera_entity.to_bits())
     }) {
@@ -325,7 +323,7 @@ pub(crate) fn build_render_frame_packet_for_source<'a>(
         (None, _) => None,
     };
     let extent = world_canvas.map_or_else(|| target.extent(), |canvas| canvas.extent());
-    if views.as_slice().iter().any(|view| {
+    if views.iter().any(|view| {
         let viewport = view.viewport;
         viewport.extent().is_empty()
             || u64::from(viewport.physical_x) + u64::from(viewport.physical_width)
@@ -340,9 +338,10 @@ pub(crate) fn build_render_frame_packet_for_source<'a>(
         frame_index,
         target,
         logical_target: first.target,
-        views: views.as_slice().to_vec(),
+        adapted_from_window: None,
+        views: Arc::from(views),
         world_canvas,
-        captured_time: views.captured_time(),
+        captured_time,
     }))
 }
 

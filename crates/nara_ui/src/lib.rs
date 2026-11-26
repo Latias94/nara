@@ -42,10 +42,10 @@ pub use runtime::{
     ui_candidate_frame, ui_candidate_frames, ui_surface_slot_snapshots, update_ui_surface_slot,
 };
 
-/// Publication after the renderer accepts the exact frame it drew.
+/// Font and publication data for presenters of compiled frames.
 #[cfg(feature = "runtime")]
 pub mod presentation {
-    pub use crate::runtime::publish_presented_frame;
+    pub use crate::runtime::{clear_presented_ui_frame, publish_presented_frame, ui_font_face};
 }
 
 /// Components and styling for game HUDs.

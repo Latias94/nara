@@ -1,7 +1,35 @@
+use nara_app::{
+    App, CoreStage, Plugin, PluginError, RealTime, RenderTime, RuntimeTimeSettings, VirtualTime,
+};
+use nara_core::Mat3;
+use nara_ecs::{
+    DetectChanges, Entity, FromWorld, Mut, Query, QueryState, Ref, Res, ResMut, Resource,
+    SystemParam, SystemSet, World, bevy_ecs::entity::EntityHashMap,
+    bevy_ecs::entity_disabling::DefaultQueryFilters, bevy_ecs::error::BevyError,
+    bevy_ecs::system::SystemState, schedule::IntoScheduleConfigs,
+};
+use nara_scene::spatial::{
+    GlobalTransform2d, InheritedVisibility, SPATIAL_PLUGIN_ID, propagate_spatial,
+};
+use nara_window::{PrimaryWindowId, Window, WindowId};
+
 use crate::{
     Camera2d, CapturedRenderTime, Color, Extent2d, ExtractedView, ExtractedViews, RenderViewId,
     ViewLoadOp, ViewMapping2d, ViewportRect, WorldCanvas, frame, world_pointer,
 };
+
+/// Frame capture and presentation hooks for desktop and other renderer hosts.
+pub mod runtime_integration {
+    pub use super::RenderExtractSet;
+    pub use crate::frame::build_window_overlay_frame_packet;
+    pub use crate::world_pointer::{clear_presented_world_frame, publish_presented_world_frame};
+}
+
+/// Ordering for systems that consume camera views in [`CoreStage::Extract`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+pub enum RenderExtractSet {
+    Views,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Resource)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -13,45 +41,72 @@ impl Default for ClearColor {
     }
 }
 
-use nara_app::{
-    App, CoreStage, Plugin, PluginError, RealTime, RenderTime, RuntimeTimeSettings, VirtualTime,
-};
-#[cfg(test)]
-use nara_app::{FixedTime, RuntimeGeneration};
-#[cfg(test)]
-use nara_core::Vec2;
-use nara_ecs::{
-    DetectChanges, Entity, FromWorld, Mut, Query, QueryState, Ref, Res, ResMut, Resource, World,
-    bevy_ecs::entity::EntityHashMap, bevy_ecs::entity_disabling::DefaultQueryFilters,
-    bevy_ecs::error::BevyError, bevy_ecs::system::SystemState, schedule::IntoScheduleConfigs,
-};
-use nara_scene::spatial::{
-    GlobalTransform2d, InheritedVisibility, SPATIAL_PLUGIN_ID, propagate_spatial,
-};
-#[cfg(test)]
-use nara_scene::spatial::{SpatialPlugin, Transform2d};
-use nara_window::{PrimaryWindowId, Window, WindowId};
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RenderPlugin {
+    pub world_canvas: Option<WorldCanvas>,
+}
 
-#[doc(hidden)]
-pub mod runtime_integration {
-    pub use crate::frame::build_window_overlay_frame_packet;
-    pub use crate::world_pointer::{
-        PresentedWorldFrame, WorldPresentationGuard, WorldPresentationRevoker,
-        prepare_world_presentation,
-    };
-    use nara_ecs::SystemSet;
+/// Creates a repeatable Render plugin with an optional fixed world canvas.
+#[must_use]
+pub fn plugin(world_canvas: Option<WorldCanvas>) -> nara_app::PluginDefinition {
+    let mut bytes = b"nara.render.plugin-config.v1\0".to_vec();
+    if let Some(canvas) = world_canvas {
+        bytes.push(1);
+        bytes.extend_from_slice(&canvas.extent().width.to_le_bytes());
+        bytes.extend_from_slice(&canvas.extent().height.to_le_bytes());
+        let color = canvas.bar_color();
+        for value in [color.r, color.g, color.b, color.a] {
+            bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+        }
+    } else {
+        bytes.push(0);
+    }
+    nara_app::PluginDefinition::infallible::<RenderPlugin, _>(
+        nara_app::PluginDefinitionId::new("nara.render.configured", 1),
+        bytes,
+        move || RenderPlugin { world_canvas },
+    )
+}
 
-    /// Provisional first-party ordering boundary after camera extraction completes.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
-    pub enum RenderExtractSet {
-        Views,
+pub const RENDER_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.render");
+pub const RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(RENDER_PLUGIN_ID, nara_app::PluginCategory::Render)
+        .requires_plugins(&[SPATIAL_PLUGIN_ID]);
+
+impl Plugin for RenderPlugin {
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &RENDER_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        if let Some(canvas) = self.world_canvas {
+            app.insert_resource(canvas)?;
+        }
+        app.init_resource::<ClearColor>()?;
+        app.init_resource::<ExtractedViews>()?;
+        app.init_resource::<ExtractedViewScratch>()?;
+        app.init_resource::<CameraViewLifetimes>()?;
+        app.add_systems(
+            CoreStage::First,
+            world_pointer::invalidate_window_presentation
+                .after(nara_window::WindowSet::ApplyEvents),
+        )?;
+        app.add_systems(
+            CoreStage::Extract,
+            (
+                propagate_spatial,
+                extract_views.in_set(RenderExtractSet::Views),
+            )
+                .chain(),
+        )?;
+        Ok(())
     }
 }
 
 #[derive(Debug, Default, Resource)]
 struct ExtractedViewScratch(Vec<ExtractedView>);
 
-/// World-owned camera membership, independent of whether extraction can publish a View.
+/// Camera membership includes hidden and disabled entities, even when they yield no view.
 #[derive(Debug, Resource)]
 struct CameraViewLifetimes {
     ids: EntityHashMap<RenderViewId>,
@@ -60,8 +115,6 @@ struct CameraViewLifetimes {
 
 impl FromWorld for CameraViewLifetimes {
     fn from_world(world: &mut World) -> Self {
-        // Camera membership outlives query visibility, including built-in and custom disabling
-        // components. Only this private membership query bypasses the World's default filters.
         let cameras = world
             .try_resource_scope(|world, _: Mut<DefaultQueryFilters>| world.query())
             .unwrap_or_else(|| world.query());
@@ -75,8 +128,6 @@ impl FromWorld for CameraViewLifetimes {
 impl CameraViewLifetimes {
     fn observe(&mut self, world: &World) -> Result<(), RenderViewExtractionError> {
         let cameras = self.cameras.query(world);
-        // Invalidate all retired incarnations before any fallible allocation or projection.
-        // Ref::is_added also catches remove/readd between two observations of the same Entity.
         self.ids.retain(|entity, _| {
             cameras
                 .get(*entity)
@@ -93,10 +144,9 @@ impl CameraViewLifetimes {
     }
 }
 
-/// Failure to publish the world-space camera projection for one frame.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum RenderViewExtractionError {
-    #[error("camera entity {entity:?} has no available View lifetime identity")]
+#[derive(Debug, thiserror::Error)]
+enum RenderViewExtractionError {
+    #[error("camera entity {entity:?} has no available view identity")]
     IdentityUnavailable { entity: Entity },
     #[error("camera entity {entity:?} has no GlobalTransform2d")]
     MissingGlobalTransform { entity: Entity },
@@ -108,260 +158,8 @@ pub(crate) enum RenderViewExtractionError {
     InvalidProjection { entity: Entity },
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum RenderFrameState {
-    #[default]
-    Idle,
-    Extracting,
-    Rendering,
-    Submitted,
-    Skipped,
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
-pub struct RenderFrame {
-    pub index: u64,
-    pub state: RenderFrameState,
-}
-
-impl RenderFrame {
-    pub fn begin_extract(&mut self) {
-        self.index = self.index.saturating_add(1);
-        self.state = RenderFrameState::Extracting;
-    }
-
-    pub fn begin_render(&mut self) {
-        self.state = RenderFrameState::Rendering;
-    }
-
-    pub fn mark_submitted(&mut self) {
-        self.state = RenderFrameState::Submitted;
-    }
-
-    pub fn mark_skipped(&mut self) {
-        self.state = RenderFrameState::Skipped;
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Resource)]
-pub struct FrameStats {
-    pub draw_calls: u32,
-    pub sprites: u32,
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum RenderBackendState {
-    #[default]
-    Uninitialized,
-    Initializing,
-    Ready,
-    Unavailable,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RenderFrameSkipReason {
-    NoViews,
-    InvalidTopology,
-    NoRenderableTarget,
-    ContentRejected,
-    Deferred,
-    SurfaceUnavailable,
-    BackendError,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RenderFrameSkip {
-    frame_index: u64,
-    reason: RenderFrameSkipReason,
-    message: Option<String>,
-}
-
-impl RenderFrameSkip {
-    #[must_use]
-    pub const fn new(frame_index: u64, reason: RenderFrameSkipReason) -> Self {
-        Self {
-            frame_index,
-            reason,
-            message: None,
-        }
-    }
-
-    #[must_use]
-    pub fn with_message(
-        frame_index: u64,
-        reason: RenderFrameSkipReason,
-        message: impl Into<String>,
-    ) -> Self {
-        Self {
-            frame_index,
-            reason,
-            message: Some(message.into()),
-        }
-    }
-
-    #[must_use]
-    pub const fn frame_index(&self) -> u64 {
-        self.frame_index
-    }
-
-    #[must_use]
-    pub const fn reason(&self) -> RenderFrameSkipReason {
-        self.reason
-    }
-
-    #[must_use]
-    pub fn message(&self) -> Option<&str> {
-        self.message.as_deref()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Resource)]
-pub struct RenderBackendStatus {
-    backend: Option<&'static str>,
-    state: RenderBackendState,
-    last_error: Option<String>,
-    last_skip: Option<RenderFrameSkip>,
-}
-
-impl Default for RenderBackendStatus {
-    fn default() -> Self {
-        Self {
-            backend: None,
-            state: RenderBackendState::Uninitialized,
-            last_error: None,
-            last_skip: None,
-        }
-    }
-}
-
-impl RenderBackendStatus {
-    #[must_use]
-    pub fn backend(&self) -> Option<&'static str> {
-        self.backend
-    }
-
-    #[must_use]
-    pub const fn state(&self) -> RenderBackendState {
-        self.state
-    }
-
-    #[must_use]
-    pub fn last_error(&self) -> Option<&str> {
-        self.last_error.as_deref()
-    }
-
-    #[must_use]
-    pub const fn last_skip(&self) -> Option<&RenderFrameSkip> {
-        self.last_skip.as_ref()
-    }
-
-    pub fn mark_state(&mut self, backend: &'static str, state: RenderBackendState) {
-        self.backend = Some(backend);
-        self.state = state;
-        if state == RenderBackendState::Ready {
-            self.last_error = None;
-        }
-    }
-
-    pub fn mark_ready(&mut self, backend: &'static str) {
-        self.mark_state(backend, RenderBackendState::Ready);
-    }
-
-    pub fn mark_unavailable(&mut self, backend: &'static str, error: impl Into<String>) {
-        self.backend = Some(backend);
-        self.state = RenderBackendState::Unavailable;
-        self.last_error = Some(error.into());
-    }
-
-    pub fn mark_skipped(&mut self, frame_index: u64, reason: RenderFrameSkipReason) {
-        self.last_skip = Some(RenderFrameSkip::new(frame_index, reason));
-    }
-
-    pub fn mark_skipped_with_message(
-        &mut self,
-        frame_index: u64,
-        reason: RenderFrameSkipReason,
-        message: impl Into<String>,
-    ) {
-        self.last_skip = Some(RenderFrameSkip::with_message(frame_index, reason, message));
-    }
-
-    pub fn clear_skip(&mut self) {
-        self.last_skip = None;
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct RenderPlugin {
-    pub world_canvas: Option<WorldCanvas>,
-}
-
-/// Creates a repeatable Render plugin with an optional fixed world canvas.
-#[must_use]
-pub fn plugin(world_canvas: Option<WorldCanvas>) -> nara_app::PluginDefinition {
-    let mut bytes = b"nara.render.plugin-config.v1\0".to_vec();
-    match world_canvas {
-        None => bytes.push(0),
-        Some(canvas) => {
-            bytes.push(1);
-            bytes.extend_from_slice(&canvas.extent().width.to_le_bytes());
-            bytes.extend_from_slice(&canvas.extent().height.to_le_bytes());
-            let color = canvas.bar_color();
-            for value in [color.r, color.g, color.b, color.a] {
-                bytes.extend_from_slice(&value.to_bits().to_le_bytes());
-            }
-        }
-    }
-    nara_app::PluginDefinition::infallible::<RenderPlugin, _>(
-        nara_app::PluginDefinitionId::new("nara.render.configured", 1),
-        bytes,
-        move || RenderPlugin { world_canvas },
-    )
-}
-
-pub const RENDER_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.render");
-const RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[SPATIAL_PLUGIN_ID];
-pub const RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
-    nara_app::PluginDeclaration::new(RENDER_PLUGIN_ID, nara_app::PluginCategory::Render)
-        .requires_plugins(RENDER_PLUGIN_REQUIREMENTS);
-
-impl Plugin for RenderPlugin {
-    fn declaration() -> &'static nara_app::PluginDeclaration {
-        &RENDER_PLUGIN_DECLARATION
-    }
-
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        if let Some(canvas) = self.world_canvas {
-            app.insert_resource(canvas)?;
-        }
-        app.init_resource::<ClearColor>()?;
-        app.init_resource::<ExtractedViews>()?;
-        app.init_resource::<ExtractedViewScratch>()?;
-        app.init_resource::<CameraViewLifetimes>()?;
-        app.init_resource::<RenderFrame>()?;
-        app.init_resource::<FrameStats>()?;
-        app.init_resource::<RenderBackendStatus>()?;
-        app.add_systems(
-            CoreStage::First,
-            world_pointer::invalidate_window_presentation
-                .after(nara_window::WindowSet::ApplyEvents),
-        )?;
-        app.add_systems(
-            CoreStage::Extract,
-            (
-                propagate_spatial,
-                extract_views.in_set(runtime_integration::RenderExtractSet::Views),
-            )
-                .chain(),
-        )?;
-        app.add_systems(CoreStage::Render, begin_render_frame)?;
-        Ok(())
-    }
-}
-
-#[derive(nara_ecs::SystemParam)]
+#[derive(SystemParam)]
 struct ViewExtraction<'w, 's> {
-    frame: ResMut<'w, RenderFrame>,
     extracted_views: ResMut<'w, ExtractedViews>,
     scratch: ResMut<'w, ExtractedViewScratch>,
     lifetimes: Res<'w, CameraViewLifetimes>,
@@ -389,13 +187,10 @@ fn extract_views(
     world: &mut World,
     state: &mut SystemState<ViewExtraction<'static, 'static>>,
 ) -> Result<(), BevyError> {
-    // The cached Ref query uses this exclusive system's last-run baseline. Observation and
-    // capture share one exclusive call, so no system can replace a camera between them.
-    world.resource_scope(|world, mut lifetimes: Mut<CameraViewLifetimes>| {
-        lifetimes.observe(world).map_err(BevyError::error)
-    })?;
+    world
+        .resource_scope(|world, mut lifetimes: Mut<CameraViewLifetimes>| lifetimes.observe(world))
+        .map_err(BevyError::error)?;
     let ViewExtraction {
-        mut frame,
         mut extracted_views,
         mut scratch,
         lifetimes,
@@ -409,51 +204,34 @@ fn extract_views(
         canvas,
         cameras,
     } = state.get_mut(world).map_err(BevyError::error)?;
-    let captured_time =
-        CapturedRenderTime::new(*real_time, *virtual_time, *render_time, *time_settings);
+    let canvas = canvas.as_deref().copied();
+    let primary_window_id = primary_window_id.map(|resource| resource.0);
     scratch.0.clear();
 
-    let primary_window_id = primary_window_id.map(|resource| resource.0);
-
-    for (camera_entity, camera, global, visibility) in &cameras {
+    for (entity, camera, global, visibility) in &cameras {
         if visibility.is_some_and(|visibility| !visibility.get()) {
             continue;
         }
         let global = global
-            .ok_or(RenderViewExtractionError::MissingGlobalTransform {
-                entity: camera_entity,
-            })
+            .ok_or(RenderViewExtractionError::MissingGlobalTransform { entity })
             .map_err(BevyError::error)?;
         let id = lifetimes
             .ids
-            .get(&camera_entity)
+            .get(&entity)
             .copied()
-            .ok_or(RenderViewExtractionError::IdentityUnavailable {
-                entity: camera_entity,
-            })
+            .ok_or(RenderViewExtractionError::IdentityUnavailable { entity })
             .map_err(BevyError::error)?;
-        let Some(viewport) = viewport_for_camera(
-            camera,
-            primary_window_id,
-            &windows,
-            canvas.as_deref().copied(),
-        ) else {
+        let Some(viewport) = viewport_for_camera(camera, primary_window_id, &windows, canvas)
+        else {
             continue;
         };
-
-        let mapping = camera_mapping(
-            camera_entity,
-            global.matrix(),
-            camera.viewport_height,
-            viewport,
-        )
-        .map_err(BevyError::error)?;
         scratch.0.push(ExtractedView {
             id,
-            camera_entity,
+            camera_entity: entity,
             target: camera.target,
             viewport,
-            mapping,
+            mapping: camera_mapping(entity, global.matrix(), camera.viewport_height, viewport)
+                .map_err(BevyError::error)?,
             order: camera.order,
             load: camera
                 .clear_color
@@ -475,30 +253,25 @@ fn extract_views(
             view.load = ViewLoadOp::Clear(clear_color.0);
         }
     }
-    extracted_views.replace(&mut scratch.0, canvas.as_deref().copied(), captured_time);
-    frame.begin_extract();
+    let time = CapturedRenderTime::new(*real_time, *virtual_time, *render_time, *time_settings);
+    extracted_views.replace(&mut scratch.0, canvas, time);
     Ok(())
 }
 
 fn camera_mapping(
     entity: Entity,
-    matrix: nara_core::Mat3,
+    matrix: Mat3,
     viewport_height: f32,
     viewport: ViewportRect,
 ) -> Result<ViewMapping2d, RenderViewExtractionError> {
     if !matrix.is_finite() {
         return Err(RenderViewExtractionError::NonFiniteTransform { entity });
     }
-
     if matrix.determinant() == 0.0 {
         return Err(RenderViewExtractionError::SingularTransform { entity });
     }
     ViewMapping2d::orthographic(matrix, viewport_height, viewport)
         .ok_or(RenderViewExtractionError::InvalidProjection { entity })
-}
-
-pub fn begin_render_frame(mut frame: ResMut<RenderFrame>) {
-    frame.begin_render();
 }
 
 fn viewport_for_camera(
@@ -507,14 +280,13 @@ fn viewport_for_camera(
     windows: &Query<&Window>,
     canvas: Option<WorldCanvas>,
 ) -> Option<ViewportRect> {
-    let Some(window_id) = camera.target.window_id(primary_window_id) else {
-        return camera.viewport;
-    };
-    let Some(resolution) = windows
-        .iter()
-        .find(|window| window.id == window_id)
-        .map(|window| window.resolution)
-    else {
+    let resolution = camera.target.window_id(primary_window_id).and_then(|id| {
+        windows
+            .iter()
+            .find(|window| window.id == id)
+            .map(|window| window.resolution)
+    });
+    let Some(resolution) = resolution else {
         return camera.viewport;
     };
     if resolution.is_zero_sized() {
@@ -527,773 +299,20 @@ fn viewport_for_camera(
         },
         WorldCanvas::extent,
     );
-    let Some(authored) = camera.viewport else {
+    let Some(viewport) = camera.viewport else {
         return ViewportRect::from_extent(extent);
     };
     ViewportRect::new(
-        authored.physical_x,
-        authored.physical_y,
-        authored
+        viewport.physical_x,
+        viewport.physical_y,
+        viewport
             .physical_width
-            .min(extent.width.saturating_sub(authored.physical_x)),
-        authored
+            .min(extent.width.saturating_sub(viewport.physical_x)),
+        viewport
             .physical_height
-            .min(extent.height.saturating_sub(authored.physical_y)),
+            .min(extent.height.saturating_sub(viewport.physical_y)),
     )
 }
 
 #[cfg(test)]
-mod tests {
-    mod captured_time;
-    mod view_lifecycle;
-    mod world_canvas;
-    use super::*;
-    use crate::*;
-    use std::time::Duration;
-
-    use nara_app::{App, CoreStage, RuntimeCandidateRetirementState, RuntimeInstance};
-    use nara_ecs::{Entity, World, schedule::IntoScheduleConfigs};
-    use nara_scene::spatial::ChildOf;
-    use nara_window::WindowPlugin;
-
-    fn render_app(with_window: bool) -> App {
-        let mut app = App::new();
-        app.add_plugins(SpatialPlugin).unwrap();
-        if with_window {
-            app.add_plugin(WindowPlugin::default()).unwrap();
-        }
-        app.add_plugin(RenderPlugin::default()).unwrap();
-        app
-    }
-
-    fn place_parented(world: &mut World, child: Entity, parent: Entity) {
-        world.entity_mut(child).insert(ChildOf(parent));
-    }
-
-    fn start_runtime(app: App) -> RuntimeInstance {
-        RuntimeInstance::start(app).unwrap()
-    }
-
-    fn retire_runtime(runtime: RuntimeInstance) {
-        let mut retirement = runtime.begin_retirement();
-        while retirement.retirement_state() != RuntimeCandidateRetirementState::Retired {
-            retirement.drive_retirement();
-        }
-    }
-
-    #[test]
-    fn default_camera_targets_primary_window() {
-        let camera = Camera2d::default();
-
-        assert_eq!(camera.target, RenderTarget::PrimaryWindow);
-        assert_eq!(camera.viewport, None);
-        assert_eq!(camera.viewport_height, 720.0);
-        assert_eq!(camera.order, 0);
-    }
-
-    #[test]
-    fn frame_packet_admits_one_window_view() {
-        let generation = test_runtime_generation();
-        let window = Window::default();
-        let mut views = ExtractedViews::default();
-        let view = test_extracted_view();
-        views.push(view);
-
-        let packet =
-            build_render_frame_packet(generation, 9, Some(WindowId::PRIMARY), [&window], &views)
-                .unwrap()
-                .unwrap();
-
-        assert_eq!(
-            packet.source_generation().runtime_generation(),
-            Some(generation)
-        );
-        assert_eq!(packet.frame_index(), 9);
-        assert!(matches!(
-            packet.target(),
-            RenderFrameTarget::Window(window) if window.id == WindowId::PRIMARY
-        ));
-        assert_eq!(packet.views().first().unwrap(), &view);
-    }
-
-    #[test]
-    fn frame_packet_admits_two_ordered_split_views_on_one_window_target() {
-        let mut app = render_app(true);
-        let world = app.world_mut().unwrap();
-        let right = world
-            .spawn((
-                Camera2d {
-                    viewport: Some(ViewportRect::new(640, 0, 640, 720).unwrap()),
-                    order: 10,
-                    ..Camera2d::default()
-                },
-                Transform2d::default(),
-            ))
-            .id();
-        let left = world
-            .spawn((
-                Camera2d {
-                    viewport: Some(ViewportRect::new(0, 0, 640, 720).unwrap()),
-                    order: 0,
-                    ..Camera2d::default()
-                },
-                Transform2d::default(),
-            ))
-            .id();
-        let mut runtime = start_runtime(app);
-        runtime.drive(Duration::ZERO).unwrap();
-        let views = runtime.world().resource::<ExtractedViews>();
-        let ordered_cameras = views
-            .as_slice()
-            .iter()
-            .map(|view| view.camera_entity)
-            .collect::<Vec<_>>();
-        let window = Window::default();
-        let captured = build_render_frame_packet(
-            runtime.generation(),
-            runtime.world().resource::<RenderFrame>().index,
-            Some(WindowId::PRIMARY),
-            [&window],
-            views,
-        );
-        retire_runtime(runtime);
-
-        assert_eq!(ordered_cameras, [left, right]);
-        let packet = captured
-            .expect("two ordered split views on one target must be admitted")
-            .expect("two extracted views must produce a render frame packet");
-        assert!(matches!(
-            packet.target(),
-            RenderFrameTarget::Window(window) if window.id == WindowId::PRIMARY
-        ));
-    }
-
-    #[test]
-    fn frame_packet_image_adaptation_preserves_original_and_all_logical_views() {
-        let generation = test_runtime_generation();
-        let window = Window::default();
-        let mut views = ExtractedViews::default();
-        for index in 0..MAX_VIEWS_PER_TARGET {
-            views.push(ExtractedView {
-                camera_entity: Entity::from_raw_u32(index as u32 + 1).unwrap(),
-                order: index as i32,
-                target: if index % 2 == 0 {
-                    RenderTarget::PrimaryWindow
-                } else {
-                    RenderTarget::Window(WindowId::PRIMARY)
-                },
-                load: if index == 0 {
-                    ViewLoadOp::Clear(Color::BLACK)
-                } else {
-                    ViewLoadOp::Load
-                },
-                ..test_extracted_view()
-            });
-        }
-        let packet =
-            build_render_frame_packet(generation, 9, Some(WindowId::PRIMARY), [&window], &views)
-                .unwrap()
-                .unwrap();
-        let packet = std::sync::Arc::new(packet);
-        let original_target = packet.target();
-        let target = RenderImagePacket::new(
-            nara_asset::allocate_anonymous_handle().unwrap(),
-            original_target.extent(),
-        )
-        .unwrap();
-
-        let mapped = packet.with_image_target(target).unwrap();
-
-        assert_eq!(mapped.target(), RenderFrameTarget::Image(target));
-        assert_eq!(
-            mapped.source_generation().runtime_generation(),
-            Some(generation)
-        );
-        assert_eq!(mapped.frame_index(), 9);
-        assert_eq!(mapped.views(), views.as_slice());
-        assert_eq!(mapped.views().len(), MAX_VIEWS_PER_TARGET);
-        assert_eq!(mapped.world_canvas(), None);
-        assert_eq!(packet.target(), original_target);
-        assert!(matches!(original_target, RenderFrameTarget::Window(_)));
-        assert_eq!(packet.source_generation(), mapped.source_generation());
-        assert_eq!(packet.frame_index(), mapped.frame_index());
-        assert_eq!(packet.views(), mapped.views());
-    }
-
-    #[test]
-    fn frame_packet_image_adaptation_preserves_fixed_world_canvas() {
-        let generation = test_runtime_generation();
-        let mut window = Window::default();
-        window.resolution.scale_factor = 2.0;
-        let canvas = WorldCanvas::new(320, 180)
-            .unwrap()
-            .with_bar_color(Color::WHITE)
-            .unwrap();
-        let viewport = ViewportRect::from_extent(canvas.extent()).unwrap();
-        let mut views = ExtractedViews::default();
-        views.push(ExtractedView {
-            viewport,
-            mapping: ViewMapping2d::orthographic(nara_core::Mat3::IDENTITY, 180.0, viewport)
-                .unwrap(),
-            ..test_extracted_view()
-        });
-        let packet = build_render_frame_packet_with_world_canvas(
-            generation,
-            10,
-            Some(WindowId::PRIMARY),
-            [&window],
-            &views,
-            Some(canvas),
-        )
-        .unwrap()
-        .unwrap();
-        let captured_canvas = packet.world_canvas().unwrap();
-        let target = RenderImagePacket::new(
-            nara_asset::allocate_anonymous_handle().unwrap(),
-            packet.target().extent(),
-        )
-        .unwrap();
-
-        let mapped = packet.with_image_target(target).unwrap();
-
-        assert_eq!(mapped.target(), RenderFrameTarget::Image(target));
-        assert_ne!(target.extent(), canvas.extent());
-        assert_eq!(mapped.source_generation(), packet.source_generation());
-        assert_eq!(mapped.frame_index(), packet.frame_index());
-        assert_eq!(mapped.views(), packet.views());
-        assert_eq!(mapped.world_canvas(), Some(captured_canvas));
-        assert_eq!(
-            captured_canvas,
-            WorldCanvasFrame::new(canvas, window.resolution).unwrap()
-        );
-        let canvas_target = RenderImagePacket::new(target.image(), canvas.extent()).unwrap();
-        assert_eq!(
-            packet.with_image_target(canvas_target),
-            Err(RenderFramePacketError::ImageAdaptationExtentMismatch {
-                window: target.extent(),
-                image: canvas.extent(),
-            })
-        );
-        assert!(matches!(packet.target(), RenderFrameTarget::Window(_)));
-        assert_eq!(packet.world_canvas(), Some(captured_canvas));
-    }
-
-    #[test]
-    fn frame_packet_image_adaptation_rejects_wrong_extent() {
-        let generation = test_runtime_generation();
-        let window = Window::default();
-        let mut views = ExtractedViews::default();
-        views.push(test_extracted_view());
-        let packet =
-            build_render_frame_packet(generation, 11, Some(WindowId::PRIMARY), [&window], &views)
-                .unwrap()
-                .unwrap();
-        let extent = Extent2d::new(640, 360).unwrap();
-        let target =
-            RenderImagePacket::new(nara_asset::allocate_anonymous_handle().unwrap(), extent)
-                .unwrap();
-
-        assert_eq!(
-            packet.with_image_target(target),
-            Err(RenderFramePacketError::ImageAdaptationExtentMismatch {
-                window: packet.target().extent(),
-                image: extent,
-            })
-        );
-    }
-
-    #[test]
-    fn frame_packet_image_adaptation_rejects_nonwindow_source() {
-        let generation = RenderFrameSourceGeneration::try_acquire().unwrap();
-        let target = RenderImagePacket::new(
-            nara_asset::allocate_anonymous_handle().unwrap(),
-            Extent2d::new(1280, 720).unwrap(),
-        )
-        .unwrap();
-        let mut views = ExtractedViews::default();
-        views.push(ExtractedView {
-            target: RenderTarget::Image(target.image()),
-            ..test_extracted_view()
-        });
-        let packet = build_image_render_frame_packet(generation, 12, &views, target)
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(
-            packet.with_image_target(target),
-            Err(RenderFramePacketError::ImageAdaptationRequiresWindowTarget)
-        );
-        assert_eq!(packet.target(), RenderFrameTarget::Image(target));
-        assert_eq!(packet.views(), views.as_slice());
-    }
-
-    #[test]
-    fn frame_packet_rejects_mismatched_window_and_out_of_bounds_viewport() {
-        let generation = test_runtime_generation();
-        let window = Window::default();
-        let target_window = WindowId::new(2);
-        let mut mismatched = ExtractedViews::default();
-        mismatched.push(ExtractedView {
-            target: RenderTarget::Window(target_window),
-            ..test_extracted_view()
-        });
-        assert_eq!(
-            build_render_frame_packet(generation, 1, None, [&window], &mismatched),
-            Err(RenderFramePacketError::TargetWindowMismatch {
-                window_id: target_window,
-            })
-        );
-
-        let mut outside = ExtractedViews::default();
-        outside.push(ExtractedView {
-            viewport: ViewportRect::new(1_279, 719, 2, 2).unwrap(),
-            ..test_extracted_view()
-        });
-        assert_eq!(
-            build_render_frame_packet(generation, 1, None, [&window], &outside),
-            Err(RenderFramePacketError::ViewportOutsideTarget)
-        );
-    }
-
-    #[test]
-    fn captured_packet_retains_order_and_clear_once_load_next() {
-        let mut app = render_app(true);
-        for x in [0, 640] {
-            app.world_mut().unwrap().spawn((
-                Camera2d {
-                    viewport: Some(ViewportRect::new(x, 0, 640, 720).unwrap()),
-                    ..Default::default()
-                },
-                Transform2d::default(),
-            ));
-        }
-        let mut runtime = start_runtime(app);
-        runtime.drive(Duration::ZERO).unwrap();
-        let window = Window::default();
-        let mut first_views = runtime.world().resource::<ExtractedViews>().clone();
-        let captured = build_render_frame_packet(
-            runtime.generation(),
-            runtime.world().resource::<RenderFrame>().index,
-            None,
-            [&window],
-            &first_views,
-        );
-        runtime.drive(Duration::ZERO).unwrap();
-        let next_views = runtime.world().resource::<ExtractedViews>().clone();
-        let next = build_render_frame_packet(
-            runtime.generation(),
-            runtime.world().resource::<RenderFrame>().index,
-            None,
-            [&window],
-            &next_views,
-        );
-        first_views.clear();
-        retire_runtime(runtime);
-
-        let packet = captured.unwrap().unwrap();
-        let next = next.unwrap().unwrap();
-        assert!(first_views.is_empty());
-        assert_eq!(packet.views().len(), 2);
-        assert_eq!(packet.views(), next_views.as_slice());
-        assert_eq!(next.views(), packet.views());
-        assert_eq!(packet.views()[0].load, ViewLoadOp::Clear(Color::BLACK));
-        assert_eq!(packet.views()[1].load, ViewLoadOp::Load);
-    }
-
-    #[test]
-    fn split_image_uses_explicit_physical_extent_and_rejects_mixed_targets() {
-        let generation = test_runtime_generation();
-        let image = nara_asset::allocate_anonymous_handle().unwrap();
-        let target = RenderImagePacket::new(image, Extent2d::new(320, 180).unwrap()).unwrap();
-        let mut views = ExtractedViews::default();
-        views.push(ExtractedView {
-            target: RenderTarget::Image(image),
-            viewport: ViewportRect::new(0, 0, 160, 180).unwrap(),
-            ..test_extracted_view()
-        });
-        views.push(ExtractedView {
-            camera_entity: Entity::from_raw_u32(2).unwrap(),
-            target: RenderTarget::Image(image),
-            viewport: ViewportRect::new(160, 0, 160, 180).unwrap(),
-            order: 1,
-            load: ViewLoadOp::Load,
-            ..test_extracted_view()
-        });
-        let packet = crate::build_image_render_frame_packet(
-            crate::RenderFrameSourceGeneration::try_acquire().unwrap(),
-            1,
-            &views,
-            target,
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(packet.target(), RenderFrameTarget::Image(target));
-        assert_eq!(packet.views(), views.as_slice());
-        views.push(ExtractedView {
-            camera_entity: Entity::from_raw_u32(3).unwrap(),
-            ..test_extracted_view()
-        });
-        assert_eq!(
-            build_render_frame_packet(generation, 2, None, [&Window::default()], &views),
-            Err(RenderFramePacketError::MixedRenderTargets)
-        );
-    }
-
-    #[test]
-    fn packet_view_limit_order_and_initialization_are_explicit() {
-        let generation = test_runtime_generation();
-        let window = Window::default();
-        let mut views = ExtractedViews::default();
-        views.push(ExtractedView {
-            load: ViewLoadOp::Load,
-            ..test_extracted_view()
-        });
-        assert_eq!(
-            build_render_frame_packet(generation, 1, None, [&window], &views),
-            Err(RenderFramePacketError::UninitializedTarget)
-        );
-        views.clear();
-        for index in 0..=MAX_VIEWS_PER_TARGET {
-            views.push(ExtractedView {
-                camera_entity: Entity::from_raw_u32(index as u32 + 1).unwrap(),
-                ..test_extracted_view()
-            });
-        }
-        assert_eq!(
-            build_render_frame_packet(generation, 1, None, [&window], &views),
-            Err(RenderFramePacketError::TooManyViews {
-                actual: MAX_VIEWS_PER_TARGET + 1,
-                maximum: MAX_VIEWS_PER_TARGET
-            })
-        );
-        views.clear();
-        views.push(ExtractedView {
-            order: 1,
-            ..test_extracted_view()
-        });
-        views.push(ExtractedView {
-            camera_entity: Entity::from_raw_u32(2).unwrap(),
-            ..test_extracted_view()
-        });
-        assert_eq!(
-            build_render_frame_packet(generation, 1, None, [&window], &views),
-            Err(RenderFramePacketError::UnorderedViews)
-        );
-    }
-
-    #[test]
-    fn parented_affine_camera_shares_drawing_and_picking_mapping() {
-        let mut app = render_app(false);
-        let world = app.world_mut().unwrap();
-        let parent = world
-            .spawn(Transform2d {
-                translation: Vec2::new(4.0, -3.0),
-                scale: Vec2::new(2.0, 1.0),
-                ..Default::default()
-            })
-            .id();
-        let camera = world
-            .spawn((
-                Camera2d {
-                    target: RenderTarget::Image(nara_asset::allocate_anonymous_handle().unwrap()),
-                    viewport: Some(ViewportRect::new(40, 20, 320, 180).unwrap()),
-                    viewport_height: 180.0,
-                    ..Default::default()
-                },
-                Transform2d {
-                    rotation: std::f32::consts::FRAC_PI_4,
-                    ..Default::default()
-                },
-            ))
-            .id();
-        place_parented(world, camera, parent);
-        let mut runtime = start_runtime(app);
-        runtime.drive(Duration::ZERO).unwrap();
-        let view = runtime.world().resource::<ExtractedViews>().as_slice()[0];
-        let camera_matrix = runtime
-            .world()
-            .get::<GlobalTransform2d>(camera)
-            .unwrap()
-            .matrix();
-        let world_point = camera_matrix.transform_point2(Vec2::new(80.0, 45.0));
-        let physical = view.world_to_viewport(world_point);
-        let restored = view.viewport_to_world(physical).unwrap();
-        retire_runtime(runtime);
-        assert!(physical.abs_diff_eq(Vec2::new(280.0, 65.0), 1.0e-4));
-        assert!(restored.abs_diff_eq(world_point, 1.0e-4));
-    }
-
-    #[test]
-    fn singular_camera_faults_without_partial_publication() {
-        let mut app = render_app(false);
-        let prior = test_extracted_view();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ExtractedViews>()
-            .push(prior);
-        app.world_mut().unwrap().spawn((
-            Camera2d {
-                target: RenderTarget::Image(nara_asset::allocate_anonymous_handle().unwrap()),
-                viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
-                ..Default::default()
-            },
-            Transform2d {
-                scale: Vec2::ZERO,
-                ..Default::default()
-            },
-        ));
-        let mut runtime = start_runtime(app);
-        let result = runtime.drive(Duration::ZERO);
-        let retained = runtime.world().resource::<ExtractedViews>().clone();
-        retire_runtime(runtime);
-        assert!(result.is_err());
-        assert_eq!(retained.as_slice(), &[prior]);
-    }
-
-    #[test]
-    fn extracts_primary_window_camera_view() {
-        let mut app = render_app(true);
-        app.world_mut()
-            .expect("app should allow world mutation")
-            .spawn((Camera2d::default(), Transform2d::default()));
-
-        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
-        runtime.drive(Duration::ZERO).unwrap();
-
-        let views = runtime.world().resource::<ExtractedViews>();
-        assert_eq!(views.len(), 1);
-        assert_eq!(views.as_slice()[0].target, RenderTarget::PrimaryWindow);
-        assert_eq!(
-            views.as_slice()[0].mapping.clip_to_world(Vec2::ZERO),
-            Vec2::ZERO
-        );
-        assert!(
-            views.as_slice()[0]
-                .mapping
-                .world_to_clip(Vec2::new(0.0, 360.0))
-                .abs_diff_eq(Vec2::Y, 1.0e-5)
-        );
-        assert_eq!(
-            views.as_slice()[0].viewport,
-            ViewportRect::new(0, 0, 1280, 720).unwrap()
-        );
-        assert_eq!(views.as_slice()[0].load, ViewLoadOp::Clear(Color::BLACK));
-        runtime.finish().unwrap();
-    }
-
-    fn test_extracted_view() -> ExtractedView {
-        ExtractedView {
-            id: RenderViewId::try_acquire().unwrap(),
-            camera_entity: Entity::from_raw_u32(1).unwrap(),
-            target: RenderTarget::PrimaryWindow,
-            viewport: ViewportRect::new(0, 0, 1280, 720).unwrap(),
-            mapping: ViewMapping2d::orthographic(
-                nara_core::Mat3::IDENTITY,
-                720.0,
-                ViewportRect::new(0, 0, 1280, 720).unwrap(),
-            )
-            .unwrap(),
-            order: 0,
-            load: ViewLoadOp::Clear(Color::BLACK),
-        }
-    }
-
-    fn test_runtime_generation() -> RuntimeGeneration {
-        let runtime = start_runtime(App::new());
-        let generation = runtime.generation();
-        let mut retirement = runtime.begin_retirement();
-        while retirement.retirement_state() != RuntimeCandidateRetirementState::Retired {
-            retirement.drive_retirement();
-        }
-        generation
-    }
-
-    #[test]
-    fn extracts_explicit_image_target_view_without_window() {
-        let mut app = render_app(false);
-        app.world_mut()
-            .expect("app should allow world mutation")
-            .spawn((
-                Camera2d {
-                    target: RenderTarget::Image(nara_asset::allocate_anonymous_handle().unwrap()),
-                    viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
-                    clear_color: Some(Color::WHITE),
-                    ..Camera2d::default()
-                },
-                Transform2d::default(),
-            ));
-
-        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
-        runtime.drive(Duration::ZERO).unwrap();
-
-        let views = runtime.world().resource::<ExtractedViews>();
-        assert_eq!(views.len(), 1);
-        assert_eq!(
-            views.as_slice()[0].viewport,
-            ViewportRect::new(0, 0, 320, 180).unwrap()
-        );
-        assert_eq!(views.as_slice()[0].load, ViewLoadOp::Clear(Color::WHITE));
-        let captured_time = views.captured_time().unwrap();
-        assert_eq!(
-            captured_time.real(),
-            *runtime.world().resource::<RealTime>()
-        );
-        let RenderTarget::Image(image) = views.as_slice()[0].target else {
-            panic!("the extracted camera must retain its image target");
-        };
-        let packet = build_image_render_frame_packet(
-            runtime.generation().into(),
-            runtime.world().resource::<RenderFrame>().index,
-            views,
-            RenderImagePacket::new(image, Extent2d::new(320, 180).unwrap()).unwrap(),
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(packet.captured_time(), Some(captured_time));
-        runtime.finish().unwrap();
-    }
-
-    #[test]
-    fn extraction_clears_stale_views_when_camera_or_window_is_missing() {
-        let mut app = render_app(false);
-        app.world_mut()
-            .expect("app should allow world mutation")
-            .resource_mut::<ExtractedViews>()
-            .push(ExtractedView {
-                id: RenderViewId::try_acquire().unwrap(),
-                camera_entity: Entity::PLACEHOLDER,
-                target: RenderTarget::PrimaryWindow,
-                viewport: ViewportRect::new(0, 0, 1, 1).unwrap(),
-                mapping: ViewMapping2d::orthographic(
-                    nara_core::Mat3::IDENTITY,
-                    1.0,
-                    ViewportRect::new(0, 0, 1, 1).unwrap(),
-                )
-                .unwrap(),
-                order: 0,
-                load: ViewLoadOp::Clear(Color::WHITE),
-            });
-
-        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
-        runtime.drive(Duration::ZERO).unwrap();
-
-        assert!(runtime.world().resource::<ExtractedViews>().is_empty());
-        runtime.finish().unwrap();
-    }
-
-    #[test]
-    fn parented_camera_extracts_completed_world_translation() {
-        let mut app = render_app(false);
-        let world = app.world_mut().unwrap();
-        let root = world
-            .spawn(Transform2d::from_translation(Vec2::new(100.0, 40.0)))
-            .id();
-        let camera = world
-            .spawn((
-                Camera2d {
-                    target: RenderTarget::Image(nara_asset::allocate_anonymous_handle().unwrap()),
-                    viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
-                    ..Camera2d::default()
-                },
-                Transform2d::from_translation(Vec2::new(10.0, -5.0)),
-            ))
-            .id();
-        place_parented(world, camera, root);
-
-        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
-        runtime.drive(Duration::ZERO).unwrap();
-
-        let views = runtime.world().resource::<ExtractedViews>();
-        assert_eq!(views.len(), 1);
-        assert_eq!(
-            views.as_slice()[0].mapping.clip_to_world(Vec2::ZERO),
-            Vec2::new(110.0, 35.0)
-        );
-        runtime.finish().unwrap();
-    }
-
-    #[test]
-    fn missing_camera_transform_faults_without_replacing_prior_views() {
-        let mut app = render_app(false);
-        let prior = test_extracted_view();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ExtractedViews>()
-            .push(prior);
-        app.world_mut().unwrap().spawn(Camera2d {
-            target: RenderTarget::Image(nara_asset::allocate_anonymous_handle().unwrap()),
-            viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
-            ..Camera2d::default()
-        });
-
-        let mut runtime = start_runtime(app);
-        runtime
-            .drive(Duration::ZERO)
-            .expect_err("world-space cameras require a global transform");
-
-        assert_eq!(
-            runtime.world().resource::<ExtractedViews>().as_slice(),
-            &[prior]
-        );
-        retire_runtime(runtime);
-    }
-
-    #[test]
-    fn deferred_camera_spawn_in_post_update_is_visible_in_the_same_frame() {
-        let mut app = render_app(true);
-        app.add_systems(CoreStage::PostUpdate, |mut commands: nara_ecs::Commands| {
-            commands.spawn((Camera2d::default(), Transform2d::from_xy(32.0, 16.0)));
-        })
-        .unwrap();
-
-        let mut runtime = start_runtime(app);
-        runtime.drive(Duration::ZERO).unwrap();
-        let views = runtime.world().resource::<ExtractedViews>();
-        assert_eq!(views.len(), 1);
-        assert_eq!(
-            views.as_slice()[0].mapping.clip_to_world(Vec2::ZERO),
-            Vec2::new(32.0, 16.0)
-        );
-        runtime.finish().unwrap();
-    }
-
-    #[test]
-    fn render_frame_lifecycle_advances() {
-        let mut frame = RenderFrame::default();
-
-        frame.begin_extract();
-        assert_eq!(frame.index, 1);
-        assert_eq!(frame.state, RenderFrameState::Extracting);
-
-        frame.begin_render();
-        assert_eq!(frame.state, RenderFrameState::Rendering);
-
-        frame.mark_submitted();
-        assert_eq!(frame.state, RenderFrameState::Submitted);
-    }
-
-    #[test]
-    fn backend_status_records_state_errors_and_skipped_frames() {
-        let mut status = RenderBackendStatus::default();
-
-        status.mark_state("mock", RenderBackendState::Initializing);
-        assert_eq!(status.backend(), Some("mock"));
-        assert_eq!(status.state(), RenderBackendState::Initializing);
-
-        status.mark_unavailable("mock", "device lost");
-        status.mark_skipped_with_message(7, RenderFrameSkipReason::BackendError, "device lost");
-
-        assert_eq!(status.state(), RenderBackendState::Unavailable);
-        assert_eq!(status.last_error(), Some("device lost"));
-        let skip = status.last_skip().unwrap();
-        assert_eq!(skip.frame_index(), 7);
-        assert_eq!(skip.reason(), RenderFrameSkipReason::BackendError);
-        assert_eq!(skip.message(), Some("device lost"));
-
-        status.mark_ready("mock");
-        status.clear_skip();
-        assert_eq!(status.state(), RenderBackendState::Ready);
-        assert_eq!(status.last_error(), None);
-        assert_eq!(status.last_skip(), None);
-    }
-}
+mod tests;

@@ -251,9 +251,24 @@ to the last job completion. The workflow used Windows and Ubuntu runners without
 The [Phase 3B run](https://github.com/Latias94/nara/actions/runs/45775718470) includes the restored
 all-target workspace checks and Linux gamepad build coverage.
 
+### Phase 3C — Replace the hosted renderer with direct passes
+
+Use one `Renderer` for swapchain attachments and leased offscreen images. Retire the old GPU
+host, policy, program, and graph. Draw ordered sprite and tilemap views, then load the same color
+attachment for the HUD. Let the editor install an overlay after the HUD through `RenderPass`.
+Keep the fixed-resolution canvas path, dirty tile chunks, custom materials, frame uploads, and
+the shared-queue texture lease. Publish picking and HUD geometry after the matching surface
+image presents.
+
+The exit gate is at most 28,000 Rust lines in `nara_render` including its tests and examples.
+Run the desktop and headless Night Relay, the 98-line `first_game`, and the two-window shared
+viewport on Windows. Verify warmed-up allocation and texture copies with the [shared viewport
+procedure](../../examples/shared-viewport/README.md). Verify resize, paused refresh, and GPU
+completion. Run the locked workspace checks and hosted CI.
+
 ## Phase 4 — Deliver the desktop editor workflow
 
-**Entry.** Phase 3 passes and RFC-3 defines the editor and supervised Play behavior.
+**Entry.** Phase 3C passes and RFC-3 defines the editor and supervised Play behavior.
 
 - Build the unstyled `gpui_base` controls and thin GPUI docking adapter. Keep library primitives,
   document state, and appearance independent of the editor shell.

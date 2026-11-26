@@ -4,7 +4,8 @@
 
 Consolidate the WGPU backend, materials, images, sprites, sprite animation, and tilemaps under
 `nara_render`, with a separate material derive crate. Keep Naga validation, `encase`, and immutable
-extracted frames. Declare `RenderPass` attachments so a future graph can order them by dependency.
+extracted frames. A `RenderPass` declares its attachment reads and writes and records into the
+frame's WGPU encoder.
 
 ## Device and frames
 
@@ -16,14 +17,16 @@ extracted frames. Declare `RenderPass` attachments so a future graph can order t
 - Reuse transient render targets with `TextureCache` and frame buffers with `FrameRingBuffer`.
   Rebuild `DirtyTileChunk` GPU data only for affected chunks. Keep synchronous pipeline validation
   out of frame submission and return device failures through the normal surface lifecycle.
-- Draw the game scene directly into its swapchain image. Clear it in the scene pass and use
-  `LoadOp::Load` for the game UI. Present after both passes, with zero full-screen copies or blits.
-  An explicit virtual-resolution `WorldCanvas` or a custom policy may require an intermediate
-  image. The stock surface path requires a clear followed by an optional in-place HUD pass.
-- Render editor viewports offscreen with the `EditorOverlayPass` in the same frame. Submit Nara's
-  work before GPUI's sampling pass on the same queue. Pass the pooled target lease through
-  `WgpuAtlas::import_image` as `owner: Arc<_>` and release it after the last GPU submission using it
-  completes via `on_submitted_work_done`.
+- The window and offscreen targets use the same renderer. `SpriteTilePass` clears and draws the
+  scene. `HudPass` loads that attachment in place. The window driver publishes HUD hit geometry
+  after presenting the matching swapchain image. An explicit virtual-resolution `WorldCanvas`
+  adds a pooled intermediate with a nearest-sampled composite before the HUD.
+- `Renderer::set_editor_overlay` accepts the Phase 4 `EditorOverlayPass` after the scene and HUD.
+  The overlay loads and writes the final color attachment before submission. Submit Nara's work
+  before GPUI's sampling pass on the same queue. Pass the pooled `WgpuImageOutput` through
+  `WgpuAtlas::import_image` as `owner: Arc<_>`. The producer and the sampler keep the image alive
+  through their respective `on_submitted_work_done` callbacks. When all pooled targets are in use,
+  the viewport keeps its current image and retries when it can render another frame.
 - Reuse the imported image while the viewport is unchanged. When only the image changes, replay
   retained UI geometry with the updated texture view. Schedule real-time viewports independently
   of otherwise idle editor chrome.

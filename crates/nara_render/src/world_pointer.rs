@@ -1,26 +1,15 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicU8, Ordering},
-};
+use std::sync::Arc;
 
-use nara_app::RuntimeGeneration;
 use nara_core::{Mat3, Vec2};
-use nara_ecs::{Entity, Query, Res, Resource, system::SystemParam};
+use nara_ecs::{Commands, Entity, Query, Res, Resource, SystemParam, World};
 use nara_window::{Window, WindowEvent, WindowEvents};
 
 use crate::{
-    DisplayMapping2d, DisplayRect, DisplayScale, ExtractedView, RenderFramePacket,
-    RenderFrameSourceGeneration, RenderFrameTarget, RenderViewId, RenderWindowPacket, WorldCanvas,
+    ExtractedView, RenderFramePacket, RenderFrameTarget, RenderViewId, RenderWindowPacket,
+    WorldCanvas, WorldCanvasFrame,
 };
 
-const PREPARED: u8 = 0;
-const PRESENTED: u8 = 1;
-const REVOKED: u8 = 2;
-
 /// A frozen affine inverse from final-target physical pixels to original-target physical pixels.
-///
-/// Policies declare this value with their original capture. Identity explicitly preserves pixel
-/// coordinates; successful rendering alone does not establish an input mapping.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WorldInputMapping2d {
     final_to_source_physical: Mat3,
@@ -34,8 +23,7 @@ impl WorldInputMapping2d {
         }
     }
 
-    /// Accepts only finite, invertible affine matrices with an exact bottom row of `[0, 0, 1]`.
-    /// The inverse must also be finite; no approximate singularity threshold is applied.
+    /// Accepts finite affine matrices with a finite inverse and a bottom row of `[0, 0, 1]`.
     #[must_use]
     pub fn affine(final_to_source_physical: Mat3) -> Option<Self> {
         if !final_to_source_physical.is_finite()
@@ -60,24 +48,19 @@ impl WorldInputMapping2d {
     }
 }
 
-/// Read-only world picking through the last successfully presented camera and display mapping.
+/// Read-only world picking through the last successfully presented view.
 ///
-/// Positions are native-window logical points, as supplied by the input timeline. Bars and maximum
-/// edges are excluded. A resize, canvas change, backend retirement or runtime replacement revokes
-/// conversion until the matching new frame is presented. This parameter does not consume input or
-/// override UI routing; gameplay still respects the input route's disposition.
+/// Input coordinates are native-window logical points. Canvas bars and maximum edges are
+/// excluded. Resizing or retiring the target clears the mapping until the next present.
 #[derive(SystemParam)]
 pub struct WorldPointer<'w, 's> {
     presented: Option<Res<'w, PresentedWorldFrame>>,
     windows: Query<'w, 's, &'static Window>,
     canvas: Option<Res<'w, WorldCanvas>>,
-    generation: Option<Res<'w, RuntimeGeneration>>,
 }
 
 impl WorldPointer<'_, '_> {
     /// Picks the first presented subview of `camera` that contains the point.
-    ///
-    /// Use [`Self::window_to_world_in_view`] to select a particular subview when they overlap.
     #[must_use]
     pub fn window_to_world(&self, camera: Entity, logical_position: Vec2) -> Option<Vec2> {
         self.presented()?
@@ -96,74 +79,29 @@ impl WorldPointer<'_, '_> {
     }
 
     fn presented(&self) -> Option<&PresentedWorldFrame> {
-        let presented = self.presented.as_deref()?;
-        if presented.live.load(Ordering::Acquire) != PRESENTED {
-            return None;
-        }
-        if presented.source_generation.runtime_generation() != self.generation.as_deref().copied()
-            || presented.canvas != self.canvas.as_deref().copied()
-            || !self.windows.iter().any(|window| {
-                window.id == presented.window.id
-                    && window.resolution == presented.window.resolution
-                    && !window.resolution.is_zero_sized()
-            })
-        {
-            presented.live.store(REVOKED, Ordering::Release);
-            return None;
-        }
-        Some(presented)
+        let frame = self.presented.as_deref()?;
+        frame
+            .matches_geometry(&self.windows, self.canvas.as_deref().copied())
+            .then_some(frame)
     }
 }
 
-/// Platform events carry lifecycle changes even when the final component geometry returns to its
-/// old value within one batch. Revoke before ordinary Update systems can observe that old image.
-pub(crate) fn invalidate_window_presentation(
-    events: Option<Res<WindowEvents>>,
-    presented: Option<Res<PresentedWorldFrame>>,
-) {
-    if let (Some(events), Some(presented)) = (events, presented)
-        && events.as_slice().iter().any(|event| {
-            event.window_id() == presented.window.id
-                && matches!(
-                    event,
-                    WindowEvent::Resized { .. }
-                        | WindowEvent::ScaleFactorChanged { .. }
-                        | WindowEvent::Closed { .. }
-                )
-        })
-    {
-        presented.live.store(REVOKED, Ordering::Release);
-    }
-}
-
-/// Backend-integration state. Construction alone confers no presented-frame authority.
-#[doc(hidden)]
 #[derive(Debug, Resource)]
-pub struct PresentedWorldFrame {
+pub(crate) struct PresentedWorldFrame {
     window: RenderWindowPacket,
-    source_generation: RenderFrameSourceGeneration,
-    frame_index: u64,
-    canvas: Option<WorldCanvas>,
-    display_mapping: DisplayMapping2d,
+    canvas: Option<WorldCanvasFrame>,
     input_mapping: WorldInputMapping2d,
-    views: Vec<ExtractedView>,
-    live: Arc<AtomicU8>,
+    views: Arc<[ExtractedView]>,
 }
 
 impl PresentedWorldFrame {
-    #[must_use]
-    pub const fn window(&self) -> RenderWindowPacket {
-        self.window
-    }
-
-    #[must_use]
-    pub const fn source_generation(&self) -> RenderFrameSourceGeneration {
-        self.source_generation
-    }
-
-    #[must_use]
-    pub const fn frame_index(&self) -> u64 {
-        self.frame_index
+    fn matches_geometry(&self, windows: &Query<&Window>, canvas: Option<WorldCanvas>) -> bool {
+        self.canvas.map(WorldCanvasFrame::canvas) == canvas
+            && windows.iter().any(|window| {
+                window.id == self.window.id
+                    && window.resolution == self.window.resolution
+                    && !window.resolution.is_zero_sized()
+            })
     }
 
     fn window_to_world(
@@ -172,148 +110,110 @@ impl PresentedWorldFrame {
         matches_view: impl Fn(&ExtractedView) -> bool,
     ) -> Option<Vec2> {
         let resolution = self.window.resolution;
-        let contains_target = |point: Vec2| {
-            point.is_finite()
-                && point.x >= 0.0
-                && point.y >= 0.0
-                && point.x < resolution.physical_width as f32
-                && point.y < resolution.physical_height as f32
-        };
-        let final_physical = position * resolution.scale_factor as f32;
-        if !contains_target(final_physical) {
+        let scale = resolution.scale_factor as f32;
+        if !scale.is_finite() || scale <= 0.0 {
+            return None;
+        }
+        let extent = Vec2::new(
+            resolution.physical_width as f32,
+            resolution.physical_height as f32,
+        );
+        let final_physical = position * scale;
+        if !contains(final_physical, Vec2::ZERO, extent) {
             return None;
         }
         let source_physical = self
             .input_mapping
             .final_to_source_physical()
             .transform_point2(final_physical);
-        if !contains_target(source_physical) {
+        if !contains(source_physical, Vec2::ZERO, extent) {
             return None;
         }
-        let point = if self.canvas.is_some() {
-            let source_logical = source_physical / self.display_mapping.pixels_per_point();
-            let rect = self.display_mapping.content_rect();
-            if source_logical.x < rect.min[0]
-                || source_logical.y < rect.min[1]
-                || source_logical.x >= rect.max[0]
-                || source_logical.y >= rect.max[1]
-            {
+        let raster_point = if let Some(canvas) = self.canvas {
+            let mapping = canvas.mapping();
+            let logical = source_physical / mapping.pixels_per_point();
+            let rect = mapping.content_rect();
+            if !contains(
+                logical,
+                Vec2::from_array(rect.min),
+                Vec2::from_array(rect.max),
+            ) {
                 return None;
             }
-            Vec2::from_array(
-                self.display_mapping
-                    .panel_to_target(source_logical.to_array())?,
-            )
+            Vec2::from_array(mapping.panel_to_target(logical.to_array())?)
         } else {
             source_physical
         };
         let view = self.views.iter().find(|view| {
             let viewport = view.viewport;
-            matches_view(view)
-                && point.x >= viewport.physical_x as f32
-                && point.y >= viewport.physical_y as f32
-                && point.x
-                    < (u64::from(viewport.physical_x) + u64::from(viewport.physical_width)) as f32
-                && point.y
-                    < (u64::from(viewport.physical_y) + u64::from(viewport.physical_height)) as f32
+            let min = Vec2::new(viewport.physical_x as f32, viewport.physical_y as f32);
+            let max = Vec2::new(
+                (u64::from(viewport.physical_x) + u64::from(viewport.physical_width)) as f32,
+                (u64::from(viewport.physical_y) + u64::from(viewport.physical_height)) as f32,
+            );
+            matches_view(view) && contains(raster_point, min, max)
         })?;
-        view.viewport_to_world(point)
-            .filter(|world| world.is_finite())
+        view.viewport_to_world(raster_point)
+            .filter(|point| point.is_finite())
     }
 }
 
-/// The execution owner retains this guard for exactly the displayed backend/window lifetime.
+fn contains(point: Vec2, min: Vec2, max: Vec2) -> bool {
+    point.cmpge(min).all() && point.cmplt(max).all()
+}
+
+/// Publishes the camera mapping after the host successfully presents this window packet.
 ///
-/// Activate only after the matching surface present (or exact Editor composite) succeeds. Drop or
-/// invalidate it on target retirement, suspension, namespace loss or replacement. A retained
-/// `PresentedWorldFrame` cannot reactivate itself after this owner releases the guard.
-#[doc(hidden)]
-#[derive(Debug)]
-pub struct WorldPresentationGuard {
-    live: Arc<AtomicU8>,
-}
-
-impl WorldPresentationGuard {
-    pub fn mark_presented(&self) {
-        let _ =
-            self.live
-                .compare_exchange(PREPARED, PRESENTED, Ordering::AcqRel, Ordering::Acquire);
-    }
-
-    pub fn invalidate(&self) {
-        self.live.store(REVOKED, Ordering::Release);
-    }
-
-    #[must_use]
-    pub fn revoker(&self) -> WorldPresentationRevoker {
-        WorldPresentationRevoker {
-            live: Arc::clone(&self.live),
-        }
-    }
-}
-
-/// Backend callback access that can revoke a presentation but cannot activate or retain its owner.
-#[doc(hidden)]
-#[derive(Debug, Clone)]
-pub struct WorldPresentationRevoker {
-    live: Arc<AtomicU8>,
-}
-
-impl WorldPresentationRevoker {
-    pub fn invalidate(&self) {
-        self.live.store(REVOKED, Ordering::Release);
-    }
-}
-
-impl Drop for WorldPresentationGuard {
-    fn drop(&mut self) {
-        self.invalidate();
-    }
-}
-
-/// Captures bounded camera facts before execution; publish and activate only after actual present.
-#[doc(hidden)]
-#[must_use]
-pub fn prepare_world_presentation(
+/// Pass `None` when the rendered output has no declared inverse mapping. This and a successful
+/// overlay with no world views clear picking. Offscreen image packets leave window picking alone.
+pub fn publish_presented_world_frame(
+    world: &mut World,
     packet: &RenderFramePacket,
-    mapping: WorldInputMapping2d,
-) -> Option<(PresentedWorldFrame, WorldPresentationGuard)> {
+    mapping: Option<WorldInputMapping2d>,
+) {
     let RenderFrameTarget::Window(window) = packet.target() else {
-        return None;
+        return;
     };
-    let canvas = packet.world_canvas();
-    let display_mapping = match canvas {
-        Some(canvas) => canvas.mapping(),
-        None => {
-            let pixels_per_point = window.resolution.scale_factor as f32;
-            DisplayMapping2d::fit(
-                packet.target().extent(),
-                DisplayRect {
-                    min: [0.0, 0.0],
-                    max: [
-                        window.resolution.physical_width as f32 / pixels_per_point,
-                        window.resolution.physical_height as f32 / pixels_per_point,
-                    ],
-                },
-                pixels_per_point,
-                DisplayScale::Fit,
-            )?
-        }
-    };
-    let live = Arc::new(AtomicU8::new(PREPARED));
-    Some((
-        PresentedWorldFrame {
+    if let Some(input_mapping) = mapping.filter(|_| !packet.views().is_empty()) {
+        world.insert_resource(PresentedWorldFrame {
             window,
-            source_generation: packet.source_generation(),
-            frame_index: packet.frame_index(),
-            canvas: canvas.map(|canvas| canvas.canvas()),
-            display_mapping,
-            input_mapping: mapping,
-            views: packet.views().to_vec(),
-            live: Arc::clone(&live),
-        },
-        WorldPresentationGuard { live },
-    ))
+            canvas: packet.world_canvas(),
+            input_mapping,
+            views: packet.shared_views(),
+        });
+    } else {
+        clear_presented_world_frame(world);
+    }
+}
+
+/// Clears picking when the host suspends, closes, or otherwise retires the displayed target.
+pub fn clear_presented_world_frame(world: &mut World) {
+    world.remove_resource::<PresentedWorldFrame>();
+}
+
+pub(crate) fn invalidate_window_presentation(
+    events: Option<Res<WindowEvents>>,
+    presented: Option<Res<PresentedWorldFrame>>,
+    windows: Query<&Window>,
+    canvas: Option<Res<WorldCanvas>>,
+    mut commands: Commands,
+) {
+    if let Some(frame) = presented
+        && (!frame.matches_geometry(&windows, canvas.as_deref().copied())
+            || events.is_some_and(|events| {
+                events.as_slice().iter().any(|event| {
+                    event.window_id() == frame.window.id
+                        && matches!(
+                            event,
+                            WindowEvent::Resized { .. }
+                                | WindowEvent::ScaleFactorChanged { .. }
+                                | WindowEvent::Closed { .. }
+                        )
+                })
+            }))
+    {
+        commands.remove_resource::<PresentedWorldFrame>();
+    }
 }
 
 #[cfg(test)]

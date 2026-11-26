@@ -1,440 +1,195 @@
-use std::{cell::Cell, rc::Rc};
+use nara_scene::spatial::{SpatialPlugin, Transform2d};
+use nara_window::{WindowPlugin, WindowResolution};
 
-use crate::{FrameStats, RenderFrame, RenderFrameState};
-use nara_app::{App, RuntimeCandidateRetirementState};
+use crate::{Camera2d, RenderFrameTarget, RenderPlugin, WorldCanvas};
 
 use super::*;
 
-mod observer_deadlines;
-
-fn live_runtime() -> RuntimeInstance {
-    RuntimeInstance::start(App::new()).unwrap()
-}
-
-fn render_runtime() -> RuntimeInstance {
+fn desktop_runtime(world_canvas: Option<WorldCanvas>, camera: bool) -> RuntimeInstance {
     let mut app = App::new();
     app.add_plugins((
-        nara_scene::spatial::SpatialPlugin,
-        crate::RenderPlugin::default(),
-        crate::gpu::WgpuCapturePlugin,
-        crate::gpu::WgpuStockCapturePlugin,
-        crate::gpu::WgpuStockPolicyPlugin,
+        SpatialPlugin,
+        WindowPlugin {
+            primary_window: Some(Window::new(
+                "Desktop test",
+                WindowResolution::new(1152, 768),
+            )),
+        },
+        RenderPlugin { world_canvas },
+        DesktopPresentationPlugin,
     ))
     .unwrap();
-    app.add_plugins(crate::gpu::WgpuWindowPresentationPlugin)
-        .unwrap();
+    if camera {
+        app.world_mut()
+            .unwrap()
+            .spawn((Camera2d::default(), Transform2d::default()));
+    }
     RuntimeInstance::start(app).unwrap()
 }
 
-fn swap_frame_stats(
-    runtime: &mut RuntimeInstance,
-    stats: Option<FrameStats>,
-) -> Option<FrameStats> {
-    let outcome = runtime
+#[test]
+fn capture_keeps_world_canvas_and_surface_at_distinct_extents() {
+    let canvas = WorldCanvas::new(320, 180).unwrap();
+    let mut runtime = desktop_runtime(Some(canvas), true);
+    runtime.drive(Duration::from_millis(16)).unwrap();
+    let world = runtime.world();
+    let window = world
+        .iter_entities()
+        .find_map(|entity| entity.get::<Window>())
+        .unwrap();
+    let packet = capture_window_packet(world, runtime.generation(), 1, window)
+        .unwrap()
+        .unwrap();
+
+    assert!(matches!(packet.target(), RenderFrameTarget::Window(target) if target.id == window.id));
+    assert_eq!(packet.target().extent(), Extent2d::new(1152, 768).unwrap());
+    assert_eq!(packet.world_canvas().unwrap().extent(), canvas.extent());
+    assert_eq!(packet.views()[0].viewport.extent(), canvas.extent());
+}
+
+#[test]
+fn camera_free_capture_uses_window_space_only_for_hud() {
+    let mut runtime = desktop_runtime(None, false);
+    runtime.drive(Duration::from_millis(16)).unwrap();
+    let world = runtime.world();
+    let window = world
+        .iter_entities()
+        .find_map(|entity| entity.get::<Window>())
+        .unwrap();
+    let packet = capture_window_packet(world, runtime.generation(), 1, window).unwrap();
+
+    assert_eq!(packet.is_some(), cfg!(feature = "hud-runtime"));
+    if let Some(packet) = packet {
+        assert!(packet.views().is_empty());
+        assert_eq!(packet.target().extent(), Extent2d::new(1152, 768).unwrap());
+    }
+}
+
+#[test]
+fn maintenance_without_a_native_surface_cannot_publish_a_frame() {
+    let mut runtime = desktop_runtime(None, true);
+    let mut driver = DesktopPresentationDriver::default();
+    let handles = BackendWindowHandles::default();
+    runtime.drive(Duration::from_millis(16)).unwrap();
+
+    let now = Instant::now();
+    assert_eq!(
+        driver.maintain(&mut runtime, &handles, now).unwrap(),
+        Default::default()
+    );
+    assert_eq!(
+        runtime.world().resource::<DesktopPresentation>().latest(),
+        None
+    );
+    assert!(
+        driver
+            .retire(&mut runtime, &handles, &[WindowId::PRIMARY], now)
+            .unwrap()
+    );
+}
+
+#[test]
+fn surface_retry_waits_through_earlier_callbacks_and_new_frames() {
+    let mut runtime = desktop_runtime(None, true);
+    let now = Instant::now();
+    let retry_at = now + SURFACE_RETRY_INTERVAL;
+    let mut driver = DesktopPresentationDriver {
+        retry_at: Some(retry_at),
+        ..Default::default()
+    };
+    let handles = BackendWindowHandles::default();
+
+    for check_at in [now, retry_at - Duration::from_millis(1)] {
+        runtime.drive(Duration::from_millis(16)).unwrap();
+        let progress = driver.maintain(&mut runtime, &handles, check_at).unwrap();
+        assert_eq!(progress.next_wake, Some(retry_at));
+        assert_eq!(driver.last_frame, None);
+    }
+    let progress = driver.maintain(&mut runtime, &handles, retry_at).unwrap();
+    assert_eq!(progress, Default::default());
+    assert!(driver.last_frame.is_some());
+    assert!(driver.retry_at.is_none());
+}
+
+#[test]
+#[ignore = "requires a native WGPU adapter"]
+fn a_lost_device_reports_once_and_releases_the_renderer_on_close() {
+    let mut runtime = desktop_runtime(None, true);
+    let context = GpuContext::request(wgpu::Instance::default(), None).unwrap();
+    context.device().destroy();
+    let mut driver = DesktopPresentationDriver {
+        renderer: Some(Renderer::new(context)),
+        ..Default::default()
+    };
+    let handles = BackendWindowHandles::default();
+    let now = Instant::now();
+
+    let error = driver.maintain(&mut runtime, &handles, now).unwrap_err();
+    assert!(error.to_string().contains("device was lost"));
+    assert!(
+        driver
+            .retire(&mut runtime, &handles, &[WindowId::PRIMARY], now)
+            .unwrap()
+    );
+    assert!(driver.renderer.is_none());
+}
+
+#[cfg(feature = "hud-runtime")]
+#[test]
+fn clearing_a_display_withdraws_hud_hits_and_keeps_the_candidate_for_retry() {
+    use nara_ui::{
+        UiNode, UiPrimarySurfaceMetrics, UiRoot, UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot,
+        UiText, install_ui_surface, latest_presented_ui_frame, ui_candidate_frame,
+    };
+
+    let surface = UiSurfaceId::new(1).unwrap();
+    let endpoint = UiSurfaceEndpoint::new(
+        nara_input::InputWindowId::PRIMARY,
+        nara_input::InputSeatId::PRIMARY,
+        nara_input::InputPointerId::PRIMARY,
+    );
+    let transform = UiPrimarySurfaceMetrics::new(surface, 320, 180, [0; 4])
+        .direct_transform()
+        .unwrap();
+    let mut app = App::new();
+    app.add_plugins((nara_input::InputPlugin, nara_ui::UiPlugin::default()))
+        .unwrap();
+    let world = app.world_mut().unwrap();
+    install_ui_surface(
+        world,
+        UiSurfaceSlot::new(surface, endpoint, transform).unwrap(),
+    )
+    .unwrap();
+    world.spawn((
+        UiRoot::default(),
+        UiNode::default(),
+        UiText::new("Retry", 18.0).unwrap(),
+    ));
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::from_millis(16)).unwrap();
+
+    runtime
         .with_driver_scope(|scope| {
             scope.with_world_mut(|world| {
-                let original = world.remove_resource::<FrameStats>();
-                if let Some(stats) = stats {
-                    world.insert_resource(stats);
-                }
-                original
+                let candidate = ui_candidate_frame(world, surface).unwrap().unwrap();
+                let hud = crate::hud::HudPresentation {
+                    frame: candidate.clone(),
+                    glyph_count: 5,
+                };
+                let mut driver = DesktopPresentationDriver::default();
+
+                assert_eq!(driver.publish_hud(world, Some(&hud), 1).unwrap(), 5);
+                assert!(latest_presented_ui_frame(world, surface).is_some());
+                driver.clear_display(world);
+                assert!(latest_presented_ui_frame(world, surface).is_none());
+                assert!(std::sync::Arc::ptr_eq(
+                    &candidate,
+                    &ui_candidate_frame(world, surface).unwrap().unwrap()
+                ));
+                assert_eq!(driver.publish_hud(world, Some(&hud), 2).unwrap(), 5);
+                assert_eq!(driver.publish_hud(world, None, 3).unwrap(), 0);
+                assert!(latest_presented_ui_frame(world, surface).is_none());
             })
         })
         .unwrap();
-    assert!(outcome.post_operation_fault.is_none());
-    outcome.output
-}
-
-fn retire(runtime: RuntimeInstance) {
-    let mut retirement = runtime.begin_retirement();
-    for _ in 0..8 {
-        if retirement.retirement_state() == RuntimeCandidateRetirementState::Retired {
-            return;
-        }
-        retirement.drive_retirement();
-    }
-    assert_eq!(
-        retirement.retirement_state(),
-        RuntimeCandidateRetirementState::Retired
-    );
-}
-
-fn sealed_reports() -> DesktopPresentationReports {
-    // Native sealing is upstream of this CPU control test. Inject its immutable final report,
-    // then exercise the actual observer invocation and exit reconciliation used by maintenance.
-    DesktopPresentationReports(
-        Rc::new(RefCell::new(DesktopPresentationReportState {
-            telemetry_seal: Some(DesktopTelemetrySealReport {
-                outcome: DesktopTelemetrySealOutcome::Complete,
-                observation: WgpuRenderObservation::default(),
-                completion: WgpuFrameCompletionStats::default(),
-                resources: WgpuGpuResourceStats::default(),
-                samples: Vec::new(),
-                instance_id: 1,
-                device_epoch: 1,
-                adapter: None,
-            }),
-            exit: None,
-            first_presentation_observed: false,
-        })),
-        false,
-    )
-}
-
-#[test]
-fn lazy_producer_failure_reconciles_or_retains_the_original_capture_result() {
-    for refuse_completion in [false, true] {
-        let mut runtime = render_runtime();
-        let handles = BackendWindowHandles::default();
-        let mut driver = DesktopPresentationDriver::new(
-            &runtime,
-            DesktopPresentationOptions::default(),
-            DesktopPresentationReports::default(),
-        );
-        driver
-            .maintain(&mut runtime, &handles, Instant::now())
-            .unwrap();
-        assert!(driver.producer.is_none());
-        assert_eq!(driver.host.runtime_facts().device_epoch, 0);
-
-        // An already closed CPU-only Host makes the first actual producer admission fail.
-        assert!(driver.host.poll_runtime_retirement(&[]).unwrap());
-        runtime.drive(Duration::ZERO).unwrap();
-        let original_stats =
-            refuse_completion.then(|| swap_frame_stats(&mut runtime, None).unwrap());
-        let error = driver
-            .maintain(&mut runtime, &handles, Instant::now())
-            .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("WGPU Runtime producer creation failed")
-        );
-        assert!(driver.producer.is_none());
-        assert_eq!(driver.last_observation.instance_id(), 0);
-        if let Some(original_stats) = original_stats {
-            assert!(matches!(error, AppRunError::RunnerTeardown { .. }));
-            let identity = driver.pending_result.as_ref().unwrap().identity();
-            assert_eq!(identity.runtime_generation(), runtime.generation());
-            assert_eq!(identity.sequence(), 1);
-            assert!(driver.complete_pending(&mut runtime).is_err());
-            assert_eq!(driver.pending_result.as_ref().unwrap().identity(), identity);
-            assert!(swap_frame_stats(&mut runtime, Some(original_stats)).is_none());
-            assert!(driver.complete_pending(&mut runtime).unwrap().is_none());
-        }
-        assert!(driver.pending_result.is_none());
-        assert_eq!(
-            runtime.world().resource::<RenderFrame>().state,
-            RenderFrameState::Skipped
-        );
-        assert_eq!(
-            runtime
-                .world()
-                .resource::<WgpuRenderObservation>()
-                .instance_id(),
-            0
-        );
-
-        // Publishing the next capture proves that the original in-flight barrier was released.
-        runtime.drive(Duration::ZERO).unwrap();
-        let capture = take_runtime_frame(&mut runtime).unwrap().output.unwrap();
-        assert_eq!(capture.identity().sequence(), 2);
-        let completion =
-            complete_runtime_frame(&mut runtime, cancel_runtime_frame(capture)).unwrap();
-        assert!(completion.post_operation_fault.is_none());
-        drop(driver);
-        retire(runtime);
-    }
-}
-
-#[test]
-fn retirement_retains_original_result_and_seals_host_facts_before_native_close() {
-    let mut runtime = render_runtime();
-    let handles = BackendWindowHandles::default();
-    let reports = DesktopPresentationReports::default();
-    let mut driver = DesktopPresentationDriver::new(
-        &runtime,
-        DesktopPresentationOptions {
-            telemetry: Some(WgpuBackendTelemetryConfig::default()),
-            observer: None,
-        },
-        reports.clone(),
-    );
-    driver.producer = Some(driver.host.create_producer().unwrap());
-    let facts = driver.host.runtime_facts();
-    assert_ne!(facts.backend_instance_id, 0);
-    assert_eq!(facts.device_epoch, 0);
-    let deliveries = Rc::new(Cell::new(0));
-    let observed_deliveries = Rc::clone(&deliveries);
-    driver.observer = Some(Box::new(move |observation| {
-        let report = observation.telemetry_seal().unwrap();
-        assert_eq!(report.backend_instance_id(), facts.backend_instance_id);
-        assert_eq!(report.device_epoch(), facts.device_epoch);
-        assert_eq!(
-            report.outcome(),
-            DesktopTelemetrySealOutcome::TrackingUnavailable
-        );
-        assert_eq!(
-            report.frame_completion_stats(),
-            observation.frame_completion_stats()
-        );
-        assert_eq!(
-            report.gpu_resource_stats(),
-            observation.gpu_resource_stats()
-        );
-        observed_deliveries.set(observed_deliveries.get() + 1);
-        DesktopPresentationControl::Exit(AppExit::Requested)
-    }));
-    runtime.drive(Duration::ZERO).unwrap();
-    let capture = take_runtime_frame(&mut runtime).unwrap().output.unwrap();
-    let identity = capture.identity();
-    driver.pending_result = Some(cancel_runtime_frame(capture));
-    let original_stats = swap_frame_stats(&mut runtime, None).unwrap();
-    assert!(
-        driver
-            .retire(&mut runtime, &handles, &[], Instant::now())
-            .is_err()
-    );
-    assert_eq!(driver.pending_result.as_ref().unwrap().identity(), identity);
-    assert_eq!(deliveries.get(), 1);
-    assert_eq!(reports.reconcile_exit(AppExit::Success), AppExit::Requested);
-    // Refused original results still own admission; whole-Host close has not started.
-    let probe = driver.host.create_producer().unwrap();
-    drop(probe);
-    assert!(swap_frame_stats(&mut runtime, Some(original_stats)).is_none());
-    assert!(
-        driver
-            .retire(&mut runtime, &handles, &[], Instant::now())
-            .unwrap()
-    );
-    assert!(driver.pending_result.is_none());
-    assert!(driver.host.create_producer().is_err());
-    assert_eq!(deliveries.get(), 1);
-    assert_eq!(
-        reports.telemetry_seal().unwrap().backend_instance_id(),
-        facts.backend_instance_id
-    );
-    drop(driver);
-    retire(runtime);
-}
-
-#[test]
-fn final_observer_evidence_failure_vetoes_seal_success_and_is_delivered_once() {
-    let runtime = live_runtime();
-    let deliveries = Rc::new(Cell::new(0));
-    let observed_deliveries = Rc::clone(&deliveries);
-    let options = DesktopPresentationOptions {
-        telemetry: None,
-        observer: Some(Box::new(move |observation| {
-            assert_eq!(
-                observation.telemetry_seal().unwrap().outcome(),
-                DesktopTelemetrySealOutcome::Complete
-            );
-            observed_deliveries.set(observed_deliveries.get() + 1);
-            let publish_evidence: Result<(), &str> = Err("test.final-evidence-write-rejected");
-            match publish_evidence {
-                Ok(()) => DesktopPresentationControl::Continue,
-                Err(_) => DesktopPresentationControl::Exit(AppExit::Requested),
-            }
-        })),
-    };
-    let reports = sealed_reports();
-    let mut driver = DesktopPresentationDriver::new(&runtime, options, reports.clone());
-    let final_progress = driver.observe_consumer(
-        &runtime,
-        None,
-        Instant::now(),
-        &[],
-        WinitPresentationProgress {
-            exit: Some(AppExit::Success),
-            next_wake: None,
-        },
-    );
-    assert_eq!(final_progress.exit, Some(AppExit::Requested));
-    assert_eq!(final_progress.next_wake, None);
-    assert_eq!(reports.reconcile_exit(AppExit::Success), AppExit::Requested);
-    let later_progress = driver.observe_consumer(
-        &runtime,
-        None,
-        Instant::now(),
-        &[],
-        WinitPresentationProgress {
-            exit: None,
-            next_wake: None,
-        },
-    );
-    assert_eq!(later_progress.exit, None);
-    assert_eq!(later_progress.next_wake, None);
-    assert_eq!(deliveries.get(), 1);
-    drop(driver);
-    retire(runtime);
-}
-
-#[test]
-fn final_observer_success_cannot_override_a_required_exit() {
-    let runtime = live_runtime();
-    let options = DesktopPresentationOptions {
-        telemetry: None,
-        observer: Some(Box::new(|observation| {
-            assert!(observation.telemetry_seal().is_some());
-            DesktopPresentationControl::Exit(AppExit::Success)
-        })),
-    };
-    let mut driver = DesktopPresentationDriver::new(&runtime, options, sealed_reports());
-    let progress = driver.observe_consumer(
-        &runtime,
-        None,
-        Instant::now(),
-        &[],
-        WinitPresentationProgress {
-            exit: Some(AppExit::Requested),
-            next_wake: None,
-        },
-    );
-    assert_eq!(progress.exit, Some(AppExit::Requested));
-    drop(driver);
-    retire(runtime);
-}
-
-#[test]
-fn final_observer_veto_during_target_retirement_survives_native_success() {
-    let mut runtime = live_runtime();
-    let reports = sealed_reports();
-    let options = DesktopPresentationOptions {
-        telemetry: None,
-        observer: Some(Box::new(|observation| {
-            assert!(observation.telemetry_seal().is_some());
-            DesktopPresentationControl::Exit(AppExit::Requested)
-        })),
-    };
-    let mut driver = DesktopPresentationDriver::new(&runtime, options, reports.clone());
-    assert!(
-        driver
-            .retire(
-                &mut runtime,
-                &BackendWindowHandles::default(),
-                &[],
-                Instant::now()
-            )
-            .unwrap()
-    );
-    assert_eq!(reports.reconcile_exit(AppExit::Success), AppExit::Requested);
-    drop(driver);
-    retire(runtime);
-}
-
-#[test]
-fn repeated_active_seal_request_preserves_veto_without_resetting_deadline() {
-    let runtime = live_runtime();
-    let now = Instant::now();
-    let original_deadline = now + Duration::from_secs(1);
-    let repeated_deadline = now + Duration::from_secs(30);
-    let deliveries = Rc::new(Cell::new(0));
-    let observed_deliveries = Rc::clone(&deliveries);
-    let options = DesktopPresentationOptions {
-        telemetry: None,
-        observer: Some(Box::new(move |observation| {
-            assert!(observation.telemetry_seal().is_none());
-            let first = observed_deliveries.get() == 0;
-            observed_deliveries.set(observed_deliveries.get() + 1);
-            DesktopPresentationControl::SealTelemetryAndExit {
-                exit: if first {
-                    AppExit::Success
-                } else {
-                    AppExit::Requested
-                },
-                deadline: if first {
-                    original_deadline
-                } else {
-                    repeated_deadline
-                },
-            }
-        })),
-    };
-    let mut driver =
-        DesktopPresentationDriver::new(&runtime, options, DesktopPresentationReports::default());
-    let first = driver.observe_consumer(
-        &runtime,
-        None,
-        now,
-        &[],
-        WinitPresentationProgress {
-            exit: None,
-            next_wake: None,
-        },
-    );
-    assert_eq!(
-        first.exit, None,
-        "an active seal drains before returning its exit"
-    );
-    assert_eq!(driver.seal.as_ref().unwrap().exit, Some(AppExit::Success));
-    assert_eq!(first.next_wake, Some(now + MAINTENANCE_POLL_INTERVAL));
-    let repeated = driver.observe_consumer(
-        &runtime,
-        None,
-        now,
-        &[],
-        WinitPresentationProgress {
-            exit: None,
-            next_wake: None,
-        },
-    );
-    assert_eq!(repeated.exit, None);
-    assert_eq!(repeated.next_wake, Some(now + MAINTENANCE_POLL_INTERVAL));
-    assert_eq!(driver.seal.as_ref().unwrap().exit, Some(AppExit::Requested));
-    assert_eq!(driver.seal.as_ref().unwrap().deadline, original_deadline);
-    assert_eq!(deliveries.get(), 2);
-    drop(driver);
-    retire(runtime);
-}
-
-#[test]
-fn final_report_seal_request_vetoes_success_without_restarting_or_redelivery() {
-    let runtime = live_runtime();
-    let reports = sealed_reports();
-    let deliveries = Rc::new(Cell::new(0));
-    let observed_deliveries = Rc::clone(&deliveries);
-    let options = DesktopPresentationOptions {
-        telemetry: None,
-        observer: Some(Box::new(move |observation| {
-            assert_eq!(
-                observation.telemetry_seal().unwrap().outcome(),
-                DesktopTelemetrySealOutcome::Complete
-            );
-            observed_deliveries.set(observed_deliveries.get() + 1);
-            DesktopPresentationControl::SealTelemetryAndExit {
-                exit: AppExit::Requested,
-                deadline: observation.now() + Duration::from_secs(30),
-            }
-        })),
-    };
-    let mut driver = DesktopPresentationDriver::new(&runtime, options, reports.clone());
-    let final_progress = driver.observe_consumer(
-        &runtime,
-        None,
-        Instant::now(),
-        &[],
-        WinitPresentationProgress {
-            exit: Some(AppExit::Success),
-            next_wake: None,
-        },
-    );
-    assert_eq!(final_progress.exit, Some(AppExit::Requested));
-    assert_eq!(reports.reconcile_exit(AppExit::Success), AppExit::Requested);
-    assert!(driver.seal.is_none());
-    let later = driver.observe_consumer(
-        &runtime,
-        None,
-        Instant::now(),
-        &[],
-        WinitPresentationProgress {
-            exit: None,
-            next_wake: None,
-        },
-    );
-    assert_eq!(later.exit, None);
-    assert!(driver.seal.is_none());
-    assert_eq!(deliveries.get(), 1);
-    drop(driver);
-    retire(runtime);
 }

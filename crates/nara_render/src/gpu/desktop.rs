@@ -1,646 +1,360 @@
-//! Stock WGPU presentation for a retained native Winit session.
-//!
-//! The `desktop-winit` feature enables both the WGPU backend and Winit integration.
+//! Direct WGPU presentation for a native Winit session.
 
 use std::{
-    cell::RefCell,
-    fmt,
-    rc::Rc,
+    fmt::Display,
     time::{Duration, Instant},
 };
 
-use nara_app::{AppExit, AppRunError, RuntimeGeneration, RuntimeInstance, RuntimeState};
-use nara_ecs::World;
-use nara_window::winit::{WinitPresentationDriver, WinitPresentationProgress};
-use nara_window::{WindowId, backend::BackendWindowHandles};
+use nara_app::{
+    App, AppExit, AppRunError, FrameExecutionStart, Plugin, PluginCategory, PluginDeclaration,
+    PluginError, PluginId, RuntimeGeneration, RuntimeInstance, RuntimeState,
+};
+use nara_ecs::{QueryState, Resource, World};
+use nara_window::{
+    PrimaryWindowId, WINDOW_PLUGIN_ID, Window, WindowId,
+    backend::{BackendWindowHandles, WindowPresentationRequirement},
+    winit::{WinitPresentationDriver, WinitPresentationProgress, WinitRunner},
+};
 
-use super::{
-    WgpuAdapterSummary, WgpuBackendTelemetryConfig, WgpuFrameCompletionSample,
-    WgpuFrameCompletionStats, WgpuGpuResourceStats, WgpuRenderHost, WgpuRenderObservation,
-    WgpuRenderProducer,
-    execution::{
-        WgpuPresentedFrameReceipt, WgpuRuntimeExchangeError, WgpuRuntimeResult,
-        cancel_runtime_frame, complete_runtime_frame, take_runtime_frame,
+use crate::{
+    Extent2d, ExtractedViews, RENDER_PLUGIN_ID, RenderFramePacket, RenderFramePacketError,
+    RenderWindowPacket, WorldInputMapping2d, build_render_frame_packet_with_world_canvas,
+    runtime_integration::{
+        build_window_overlay_frame_packet, clear_presented_world_frame,
+        publish_presented_world_frame,
     },
 };
 
-const MAINTENANCE_POLL_INTERVAL: Duration = Duration::from_millis(2);
-const DEFAULT_TELEMETRY_SEAL_TIMEOUT: Duration = Duration::from_secs(5);
+use super::{
+    GpuContext, RenderInput, RenderTargetView, Renderer, WgpuNativeWorkStats, WgpuRenderError,
+    surface::{DesktopSurface, SurfaceAcquisition},
+};
 
-/// Finite decisions available to a CPU-only desktop presentation observer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DesktopPresentationControl {
-    /// Keeps observing at future native/frame/owner boundaries without requesting a timer.
-    Continue,
-    /// Requests maintenance by this absolute time without requesting an App frame.
-    ///
-    /// Other original owners may deliver an earlier observation. Return the current deadline
-    /// on each pending callback; Continue withdraws only this observer's request.
-    WakeAt(Instant),
-    /// Requests exit; `Requested` vetoes `Success`, including an automatic seal success.
-    Exit(AppExit),
-    /// Stops native submissions immediately, drains the original telemetry, then exits.
-    SealTelemetryAndExit { exit: AppExit, deadline: Instant },
+const GPU_POLL_INTERVAL: Duration = Duration::from_millis(2);
+const SURFACE_RETRY_INTERVAL: Duration = Duration::from_millis(16);
+
+/// Facts published after the rendered surface texture is handed to WGPU for presentation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopPresentedFrame {
+    pub window: WindowId,
+    pub frame_index: u64,
+    pub surface_generation: u64,
+    pub extent: Extent2d,
+    pub present_mode: wgpu::PresentMode,
+    pub direct_surface: bool,
+    pub hud_glyph_primitives: u64,
+    pub work: WgpuNativeWorkStats,
 }
 
-/// Read-only facts at the actual post-Host boundary, including maintenance without a frame.
-///
-/// `world()` is available only while Runtime is Running or Paused. Completion samples are drained
-/// once from the original local Host and belong to this callback invocation; their exact App,
-/// render and device identities are retained. The final telemetry seal is delivered once, before
-/// epoch cleanup; it remains available in the run report. No native GPU handle is exposed.
-pub struct DesktopPresentationObservation<'a> {
-    generation: RuntimeGeneration,
-    now: Instant,
-    world: Option<&'a World>,
-    wgpu: &'a WgpuRenderObservation,
-    presented: Option<WgpuPresentedFrameReceipt>,
-    completion_samples: &'a [WgpuFrameCompletionSample],
-    telemetry_seal: Option<&'a DesktopTelemetrySealReport>,
-    adapter: Option<WgpuAdapterSummary>,
-    completion: WgpuFrameCompletionStats,
-    resources: WgpuGpuResourceStats,
+/// The last completed native presentation. A skipped frame leaves this observation intact.
+#[derive(Debug, Default, Resource)]
+pub struct DesktopPresentation {
+    latest: Option<DesktopPresentedFrame>,
+    last_error: Option<String>,
 }
 
-impl<'a> DesktopPresentationObservation<'a> {
-    #[must_use]
-    pub const fn runtime_generation(&self) -> RuntimeGeneration {
-        self.generation
+impl DesktopPresentation {
+    pub const fn latest(&self) -> Option<DesktopPresentedFrame> {
+        self.latest
     }
 
-    #[must_use]
-    pub const fn now(&self) -> Instant {
-        self.now
-    }
-
-    #[must_use]
-    pub const fn world(&self) -> Option<&'a World> {
-        self.world
-    }
-
-    #[must_use]
-    pub const fn wgpu(&self) -> &'a WgpuRenderObservation {
-        self.wgpu
-    }
-
-    #[must_use]
-    pub const fn presented_frame(&self) -> Option<WgpuPresentedFrameReceipt> {
-        self.presented
-    }
-
-    #[must_use]
-    pub const fn completion_samples(&self) -> &'a [WgpuFrameCompletionSample] {
-        self.completion_samples
-    }
-
-    #[must_use]
-    pub const fn telemetry_seal(&self) -> Option<&'a DesktopTelemetrySealReport> {
-        self.telemetry_seal
-    }
-
-    #[must_use]
-    pub fn adapter_summary(&self) -> Option<&WgpuAdapterSummary> {
-        self.adapter.as_ref()
-    }
-
-    #[must_use]
-    pub const fn frame_completion_stats(&self) -> WgpuFrameCompletionStats {
-        self.completion
-    }
-
-    #[must_use]
-    pub const fn gpu_resource_stats(&self) -> WgpuGpuResourceStats {
-        self.resources
+    pub fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DesktopTelemetrySealOutcome {
-    Complete,
-    DeadlineExceeded,
-    LostEvidence,
-    PollFailed,
-    EpochChanged,
-    TrackingUnavailable,
-}
+/// Installs the direct WGPU desktop runner and its presentation observation.
+#[derive(Debug, Default)]
+pub struct DesktopPresentationPlugin;
 
-/// Final CPU evidence captured before native retirement can clear the original device epoch.
-#[derive(Clone, Debug)]
-pub struct DesktopTelemetrySealReport {
-    outcome: DesktopTelemetrySealOutcome,
-    observation: WgpuRenderObservation,
-    completion: WgpuFrameCompletionStats,
-    resources: WgpuGpuResourceStats,
-    samples: Vec<WgpuFrameCompletionSample>,
-    instance_id: u64,
-    device_epoch: u64,
-    adapter: Option<WgpuAdapterSummary>,
-}
+const ID: PluginId = PluginId::new("nara.winit-runner");
+const DECLARATION: PluginDeclaration = PluginDeclaration::new(ID, PluginCategory::Platform)
+    .requires_plugins(&[WINDOW_PLUGIN_ID, RENDER_PLUGIN_ID]);
 
-impl DesktopTelemetrySealReport {
-    #[must_use]
-    pub const fn outcome(&self) -> DesktopTelemetrySealOutcome {
-        self.outcome
+impl Plugin for DesktopPresentationPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &DECLARATION
     }
 
-    #[must_use]
-    pub const fn observation(&self) -> &WgpuRenderObservation {
-        &self.observation
-    }
-
-    #[must_use]
-    pub const fn frame_completion_stats(&self) -> WgpuFrameCompletionStats {
-        self.completion
-    }
-
-    #[must_use]
-    pub const fn gpu_resource_stats(&self) -> WgpuGpuResourceStats {
-        self.resources
-    }
-
-    /// Samples drained after submission admission closed, without unbounded run-long retention.
-    /// This cumulative audit snapshot overlaps observer batches; do not replay it into the same
-    /// incremental measurement collector.
-    #[must_use]
-    pub fn completion_samples(&self) -> &[WgpuFrameCompletionSample] {
-        &self.samples
-    }
-
-    #[must_use]
-    pub const fn backend_instance_id(&self) -> u64 {
-        self.instance_id
-    }
-
-    #[must_use]
-    pub const fn device_epoch(&self) -> u64 {
-        self.device_epoch
-    }
-
-    #[must_use]
-    pub fn adapter_summary(&self) -> Option<&WgpuAdapterSummary> {
-        self.adapter.as_ref()
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        if let Some(owner) = app.world().get_resource::<WindowPresentationRequirement>() {
+            return Err(PluginError::SetupFailed {
+                plugin: ID,
+                message: format!("{} already owns window presentation", owner.backend()),
+            });
+        }
+        app.insert_resource(WindowPresentationRequirement::new("wgpu"))?;
+        app.init_resource::<DesktopPresentation>()?;
+        app.set_runner(run);
+        Ok(())
     }
 }
 
-type DesktopPresentationObserver =
-    Box<dyn FnMut(DesktopPresentationObservation<'_>) -> DesktopPresentationControl>;
+fn run(app: App) -> Result<AppExit, AppRunError> {
+    let runtime = RuntimeInstance::start(app)?;
+    let mut session = WinitRunner::default().start_with_presentation_on(
+        runtime,
+        Box::new(DesktopPresentationDriver::default()),
+        Duration::from_secs(5),
+        None,
+    );
+    session.execute();
+    session
+        .into_retired()
+        .map_err(|_| AppRunError::runner("could not finish retiring the desktop window"))?
+        .result
+}
 
-type DesktopFrameProgressObserver = Box<
-    dyn FnMut(
-        RuntimeGeneration,
-        Option<WgpuPresentedFrameReceipt>,
-        Instant,
-    ) -> WinitPresentationProgress,
->;
-
-/// Configures telemetry and post-host observation for a local desktop driver.
+/// Owns the GPU context and the surface lease for one Winit session.
 #[derive(Default)]
-pub struct DesktopPresentationOptions {
-    telemetry: Option<WgpuBackendTelemetryConfig>,
-    observer: Option<DesktopPresentationObserver>,
-}
-
-impl DesktopPresentationOptions {
-    #[must_use]
-    pub fn with_telemetry(mut self, config: WgpuBackendTelemetryConfig) -> Self {
-        self.telemetry = Some(config);
-        self
-    }
-
-    #[must_use]
-    pub fn with_observer(
-        mut self,
-        observer: impl FnMut(DesktopPresentationObservation<'_>) -> DesktopPresentationControl + 'static,
-    ) -> Self {
-        self.observer = Some(Box::new(observer));
-        self
-    }
-}
-
-impl fmt::Debug for DesktopPresentationOptions {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("DesktopPresentationOptions")
-            .field("telemetry", &self.telemetry)
-            .field("observer_installed", &self.observer.is_some())
-            .finish()
-    }
-}
-
-/// This shared value holds CPU diagnostics only. WinitSession alone owns the live Host.
-#[derive(Clone, Default)]
-pub struct DesktopPresentationReports(Rc<RefCell<DesktopPresentationReportState>>, bool);
-
-#[derive(Default)]
-struct DesktopPresentationReportState {
-    telemetry_seal: Option<DesktopTelemetrySealReport>,
-    exit: Option<AppExit>,
-    first_presentation_observed: bool,
-}
-
-impl DesktopPresentationReports {
-    #[must_use]
-    pub fn with_startup_observation(enabled: bool) -> Self {
-        Self(
-            Rc::new(RefCell::new(DesktopPresentationReportState::default())),
-            enabled,
-        )
-    }
-
-    /// Reports the first native presentation when startup observation was enabled.
-    #[must_use]
-    pub fn has_presented(&self) -> bool {
-        self.0.borrow().first_presentation_observed
-    }
-
-    #[must_use]
-    pub fn telemetry_seal(&self) -> Option<DesktopTelemetrySealReport> {
-        self.0.borrow().telemetry_seal.clone()
-    }
-
-    /// Applies exits recorded during presentation maintenance and native retirement.
-    #[must_use]
-    pub fn reconcile_exit(&self, native_exit: AppExit) -> AppExit {
-        // Target retirement returns only a bool to Winit. Preserve a final observer veto even
-        // when it arrives through that path rather than a normal maintain progress value.
-        merge_exit(Some(native_exit), self.0.borrow().exit).unwrap_or(native_exit)
-    }
-}
-
-struct TelemetrySeal {
-    deadline: Instant,
-    exit: Option<AppExit>,
-    instance_id: u64,
-    epoch: u64,
-    samples: Vec<WgpuFrameCompletionSample>,
-}
-
-/// Owns the stock WGPU host and its outstanding work for one Winit session.
 pub struct DesktopPresentationDriver {
-    host: WgpuRenderHost,
-    producer: Option<WgpuRenderProducer>,
-    pending_result: Option<WgpuRuntimeResult>,
-    frame_progress: Option<DesktopFrameProgressObserver>,
-    observer: Option<DesktopPresentationObserver>,
-    reports: DesktopPresentationReports,
-    seal: Option<TelemetrySeal>,
-    telemetry_enabled: bool,
+    surface: Option<DesktopSurface>,
+    renderer: Option<Renderer>,
+    windows: Option<QueryState<&'static Window>>,
+    last_frame: Option<u64>,
+    retry_at: Option<Instant>,
     retiring: bool,
-    attachment_failure: Option<AppRunError>,
-    last_observation: WgpuRenderObservation,
-    seal_report_delivered: bool,
-    #[cfg(feature = "hud-presentation")]
-    ui: Option<crate::hud::UiPostHostConnection>,
+    device_loss_reported: bool,
+    #[cfg(feature = "hud-runtime")]
+    hud_surface: Option<nara_ui::UiSurfaceId>,
+}
+
+enum FrameProgress {
+    Presented,
+    Retry,
+    Skipped,
 }
 
 impl DesktopPresentationDriver {
-    #[must_use]
-    pub fn new(
-        runtime: &RuntimeInstance,
-        options: DesktopPresentationOptions,
-        reports: DesktopPresentationReports,
-    ) -> Self {
-        let mut host = WgpuRenderHost::offscreen();
-        let telemetry = options.telemetry;
-        if let Some(config) = telemetry {
-            host.configure_telemetry(config);
-        }
-        #[cfg(feature = "hud-presentation")]
-        let (ui, attachment_failure) = match crate::hud::UiPostHostConnection::capture(runtime) {
-            Ok(ui) => (ui, None),
-            Err(error) => (None, Some(error)),
-        };
-        #[cfg(not(feature = "hud-presentation"))]
-        let _ = runtime;
-        #[cfg(not(feature = "hud-presentation"))]
-        let attachment_failure = None;
-        Self {
-            host,
-            producer: None,
-            pending_result: None,
-            frame_progress: None,
-            observer: options.observer,
-            reports,
-            seal: None,
-            telemetry_enabled: telemetry.is_some(),
-            retiring: false,
-            attachment_failure,
-            last_observation: WgpuRenderObservation::default(),
-            seal_report_delivered: false,
-            #[cfg(feature = "hud-presentation")]
-            ui,
-        }
-    }
-
-    /// Observes frame progress before telemetry polling on every maintenance and retirement call.
-    ///
-    /// The callback receives the runtime generation, the optional receipt for this call's native
-    /// submit and present operation, and the boundary time. The driver merges its exit and
-    /// absolute wake requests with telemetry and post-host observer progress.
-    #[must_use]
-    pub fn with_frame_progress_observer(
-        mut self,
-        observe: impl FnMut(
-            RuntimeGeneration,
-            Option<WgpuPresentedFrameReceipt>,
-            Instant,
-        ) -> WinitPresentationProgress
-        + 'static,
-    ) -> Self {
-        self.frame_progress = Some(Box::new(observe));
-        self
-    }
-
-    fn complete_pending(
+    fn maintain_frame(
         &mut self,
-        runtime: &mut RuntimeInstance,
-    ) -> Result<Option<WgpuPresentedFrameReceipt>, AppRunError> {
-        let Some(result) = self.pending_result.take() else {
-            return Ok(None);
-        };
-        let observation = result.observation().cloned();
-        match complete_runtime_frame(runtime, result) {
-            Ok(outcome) => {
-                // Output has consumed the original result. Never put it back after a postfault.
-                let completion = outcome.output;
-                if !completion.retired
-                    && let Some(observation) = observation
-                {
-                    self.last_observation = observation;
-                }
-                if let Some(fault) = outcome.post_operation_fault {
-                    return Err(AppRunError::managed_runtime_fault(&fault));
-                }
-                if !is_live(runtime) || completion.retired {
-                    return Ok(None);
-                }
-                #[cfg(feature = "hud-presentation")]
-                if let Some(ui) = &self.ui {
-                    ui.complete(runtime)?;
-                }
-                Ok(completion.presented)
-            }
-            Err(failure) => {
-                // Scope refusal is before consumption and retains that exact result.
-                self.pending_result = Some(failure.result);
-                Err(exchange_failure(
-                    "the original WGPU Runtime result was refused",
-                    failure.error,
-                    failure.post_operation_fault,
-                ))
-            }
-        }
-    }
-
-    fn service_frame(
-        &mut self,
-        runtime: &mut RuntimeInstance,
+        world: &mut World,
         handles: &BackendWindowHandles,
-    ) -> Result<Option<WgpuPresentedFrameReceipt>, AppRunError> {
-        if let Some(error) = self.attachment_failure.take() {
-            self.retiring = true;
-            return Err(error);
-        }
-        if self.pending_result.is_some() {
-            return self.complete_pending(runtime);
-        }
-        if self.retiring
-            || self.seal.is_some()
-            || self.reports.0.borrow().telemetry_seal.is_some()
-            || !is_live(runtime)
-        {
-            return Ok(None);
-        }
-        let outcome = take_runtime_frame(runtime).map_err(|failure| {
-            exchange_failure(
-                "WGPU Runtime capture failed",
-                failure.error,
-                failure.post_operation_fault,
-            )
-        })?;
-        let fault = outcome.post_operation_fault;
-        if let Some(capture) = outcome.output {
-            if fault.is_some() {
-                self.pending_result = Some(cancel_runtime_frame(capture));
-            } else {
-                if self.producer.is_none() {
-                    match self.host.create_producer() {
-                        Ok(producer) => self.producer = Some(producer),
-                        Err(error) => {
-                            // Return the original capture's obligations before reporting failure.
-                            self.pending_result = Some(cancel_runtime_frame(capture));
-                            let completion = self.complete_pending(runtime);
-                            let error = AppRunError::runner(format!(
-                                "WGPU Runtime producer creation failed: {error}"
-                            ));
-                            return Err(match completion {
-                                Ok(_) => error,
-                                Err(completion_error) => {
-                                    AppRunError::runner_teardown(error, completion_error)
-                                }
-                            });
-                        }
-                    }
-                }
-                self.pending_result = Some(
-                    self.host.execute_runtime_frame(
-                        self.producer
-                            .as_ref()
-                            .expect("the original Runtime producer was just admitted"),
-                        handles,
-                        capture,
-                    ),
-                );
-            }
-        }
-        let completion = self.complete_pending(runtime);
-        if let Some(fault) = fault {
-            // Reconcile the returned capture/result before delivering its scope fault once.
-            return Err(match completion {
-                Ok(_) => AppRunError::managed_runtime_fault(&fault),
-                Err(error) => with_postfault(error, Some(fault)),
-            });
-        }
-        completion
-    }
-
-    fn begin_seal(&mut self, deadline: Instant, exit: Option<AppExit>) {
-        if self.seal.is_some() || self.reports.0.borrow().telemetry_seal.is_some() {
-            return;
-        }
-        let facts = self.host.runtime_facts();
-        self.seal = Some(TelemetrySeal {
-            deadline,
-            exit,
-            instance_id: facts.backend_instance_id,
-            epoch: facts.device_epoch,
-            samples: Vec::new(),
-        });
-    }
-
-    fn poll_seal(
-        &mut self,
+        generation: RuntimeGeneration,
         now: Instant,
-        poll_failed: bool,
-        samples: &[WgpuFrameCompletionSample],
-    ) -> Option<AppExit> {
-        let seal = self.seal.as_mut()?;
-        seal.samples.extend_from_slice(samples);
-        let facts = self.host.runtime_facts();
-        let completion = facts.completion;
-        let resources = facts.resources;
-        let outcome = if poll_failed {
-            Some(DesktopTelemetrySealOutcome::PollFailed)
-        } else if facts.backend_instance_id != seal.instance_id
-            || facts.device_epoch != seal.epoch
-            || completion.device_epoch() != seal.epoch
-            || resources.device_epoch() != seal.epoch
+    ) -> Result<WinitPresentationProgress, AppRunError> {
+        if let Some(index) = world
+            .get_resource::<FrameExecutionStart>()
+            .map(|start| start.frame())
+            && self.last_frame != Some(index)
+            && self.retry_at.is_none_or(|deadline| now >= deadline)
         {
-            Some(DesktopTelemetrySealOutcome::EpochChanged)
-        } else if !completion.enabled() || !resources.tracking_enabled() || seal.epoch == 0 {
-            Some(DesktopTelemetrySealOutcome::TrackingUnavailable)
-        } else if completion.lost_samples() != 0 || resources.lost_retirements() != 0 {
-            Some(DesktopTelemetrySealOutcome::LostEvidence)
-        } else if now >= seal.deadline {
-            Some(DesktopTelemetrySealOutcome::DeadlineExceeded)
-        } else if completion.pending_samples() == 0
-            && completion.buffered_samples() == 0
-            && resources.pending_retirements() == 0
-        {
-            Some(DesktopTelemetrySealOutcome::Complete)
-        } else {
-            None
-        };
-        let outcome = outcome?;
-        let seal = self
-            .seal
-            .take()
-            .expect("a completed telemetry seal retains its original input");
-        self.reports.0.borrow_mut().telemetry_seal = Some(DesktopTelemetrySealReport {
-            outcome,
-            observation: self.last_observation.clone(),
-            completion,
-            resources,
-            samples: seal.samples,
-            instance_id: facts.backend_instance_id,
-            device_epoch: facts.device_epoch,
-            adapter: facts.adapter,
-        });
-        seal.exit.map(|exit| {
-            if outcome == DesktopTelemetrySealOutcome::Complete {
-                exit
-            } else {
-                AppExit::Requested
+            self.retry_at = None;
+            match self.draw_frame(world, handles, generation, index)? {
+                FrameProgress::Presented => {
+                    self.last_frame = Some(index);
+                    return Ok(WinitPresentationProgress {
+                        next_wake: now.checked_add(GPU_POLL_INTERVAL),
+                        ..Default::default()
+                    });
+                }
+                FrameProgress::Retry => self.retry_at = now.checked_add(SURFACE_RETRY_INTERVAL),
+                FrameProgress::Skipped => self.last_frame = Some(index),
             }
+        }
+        let mut next_wake = self.retry_at;
+        if let Some(renderer) = &mut self.renderer
+            && !renderer.poll_gpu().map_err(desktop_error)?.is_queue_empty()
+            && let Some(poll) = now.checked_add(GPU_POLL_INTERVAL)
+        {
+            next_wake = Some(next_wake.map_or(poll, |retry| retry.min(poll)));
+        }
+        Ok(WinitPresentationProgress {
+            next_wake,
+            ..Default::default()
         })
     }
 
-    fn observe(
+    fn draw_frame(
         &mut self,
-        runtime: &mut RuntimeInstance,
-        presented: Option<WgpuPresentedFrameReceipt>,
-        now: Instant,
-    ) -> Result<WinitPresentationProgress, AppRunError> {
-        if self.reports.1 && presented.is_some() {
-            self.reports.0.borrow_mut().first_presentation_observed = true;
-            self.reports.1 = false;
+        world: &mut World,
+        handles: &BackendWindowHandles,
+        generation: RuntimeGeneration,
+        index: u64,
+    ) -> Result<FrameProgress, AppRunError> {
+        let windows = self.windows.get_or_insert_with(|| world.query());
+        let window = windows.single(world).map_err(desktop_error)?;
+        let id = window.id;
+        if !handles.is_surface_target_active(id) {
+            self.discard_surface(world)?;
+            return Ok(FrameProgress::Skipped);
         }
-        let mut progress = self
-            .frame_progress
-            .as_mut()
-            .map_or_else(WinitPresentationProgress::default, |observe| {
-                observe(runtime.generation(), presented, now)
-            });
+        if window.resolution.is_zero_sized() {
+            self.clear_display(world);
+            return Ok(FrameProgress::Skipped);
+        }
+        let requested_mode = window.present_mode;
+        let Some(packet) =
+            capture_window_packet(world, generation, index, window).map_err(desktop_error)?
+        else {
+            return Ok(FrameProgress::Skipped);
+        };
+        let extent = packet.target().extent();
 
-        let maintenance = self.host.poll_runtime_maintenance();
-        let samples = maintenance.samples;
-        let now = Instant::now().max(now);
-        if maintenance.needs_poll || self.pending_result.is_some() {
-            progress.next_wake = earlier(
-                progress.next_wake,
-                now.checked_add(MAINTENANCE_POLL_INTERVAL),
+        if self
+            .surface
+            .as_ref()
+            .is_some_and(|surface| surface.window != id)
+        {
+            self.discard_surface(world)?;
+        }
+        if self.surface.is_none() {
+            let instance = self.renderer.as_ref().map_or_else(
+                || {
+                    wgpu::Instance::new(
+                        wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
+                    )
+                },
+                |renderer| renderer.context().instance().clone(),
             );
+            let surface = match DesktopSurface::new(&instance, handles, id) {
+                Ok(surface) => surface,
+                Err(error) => {
+                    record_error(world, error);
+                    return Ok(FrameProgress::Skipped);
+                }
+            };
+            if self.renderer.is_none() {
+                let context =
+                    GpuContext::request(instance, Some(&surface.handle)).map_err(desktop_error)?;
+                self.renderer = Some(Renderer::new(context));
+            }
+            self.surface = Some(surface);
         }
-        progress.exit = merge_exit(
-            progress.exit,
-            self.poll_seal(now, maintenance.error.is_some(), &samples),
-        );
-        let progress = self.observe_consumer(runtime, presented, now, &samples, progress);
-        if let Some(error) = maintenance.error {
-            return Err(AppRunError::runner(format!(
-                "WGPU telemetry polling failed: {error}"
-            )));
+
+        let (Some(surface), Some(renderer)) = (&mut self.surface, &mut self.renderer) else {
+            return Err(desktop_error(
+                "desktop surface or renderer was not initialized",
+            ));
+        };
+        match surface.configure(renderer.context(), extent, requested_mode) {
+            Ok(true) => renderer.check_errors().map_err(desktop_error)?,
+            Ok(false) => {}
+            Err(error) => {
+                record_error(world, error);
+                self.discard_surface(world)?;
+                return Ok(FrameProgress::Skipped);
+            }
         }
-        Ok(progress)
+        let acquired = match surface.acquire() {
+            Ok(SurfaceAcquisition::Ready(acquired)) => acquired,
+            Ok(SurfaceAcquisition::Retry) => return Ok(FrameProgress::Retry),
+            Ok(SurfaceAcquisition::Occluded) => return Ok(FrameProgress::Skipped),
+            Ok(SurfaceAcquisition::Reconfigure) => {
+                self.clear_display(world);
+                return Ok(FrameProgress::Retry);
+            }
+            Ok(SurfaceAcquisition::Lost) => {
+                self.discard_surface(world)?;
+                return Ok(FrameProgress::Retry);
+            }
+            Err(error) => {
+                renderer.check_errors().map_err(desktop_error)?;
+                record_error(world, error);
+                self.discard_surface(world)?;
+                return Ok(FrameProgress::Retry);
+            }
+        };
+        let size = acquired.texture.texture.size();
+        if size.width != extent.width || size.height != extent.height {
+            surface.invalidate();
+            self.clear_display(world);
+            return Ok(FrameProgress::Retry);
+        }
+        let format = acquired.format();
+        let present_mode = acquired.present_mode();
+        let surface_generation = surface.generation();
+        let input = RenderInput::capture(world, packet);
+        let view = acquired
+            .texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor {
+                format: Some(format),
+                ..Default::default()
+            });
+        let report = match renderer.render_to_view(
+            &input,
+            RenderTargetView {
+                view: &view,
+                format,
+                extent,
+            },
+        ) {
+            Ok(report) => report,
+            Err(WgpuRenderError::TargetsBusy) => return Ok(FrameProgress::Retry),
+            Err(error @ (WgpuRenderError::Device(_) | WgpuRenderError::DeviceLost)) => {
+                return Err(desktop_error(error));
+            }
+            Err(error) => {
+                record_error(world, error);
+                return Ok(FrameProgress::Skipped);
+            }
+        };
+        drop(view);
+        renderer.context().queue().present(acquired.texture);
+        renderer.check_errors().map_err(desktop_error)?;
+
+        #[cfg(feature = "hud-runtime")]
+        let (hud_glyph_primitives, hud_error) = {
+            let hud = report.hud.as_ref().ok().and_then(Option::as_ref);
+            let count = self.publish_hud(world, hud, index)?;
+            (count, report.hud.err().map(|error| error.to_string()))
+        };
+        #[cfg(not(feature = "hud-runtime"))]
+        let (hud_glyph_primitives, hud_error) = (0, None);
+        publish_presented_world_frame(world, input.packet(), Some(WorldInputMapping2d::identity()));
+        let mut observation = world.get_resource_or_init::<DesktopPresentation>();
+        observation.last_error = hud_error;
+        observation.latest = Some(DesktopPresentedFrame {
+            window: id,
+            frame_index: index,
+            surface_generation,
+            extent,
+            present_mode,
+            direct_surface: input.packet().world_canvas().is_none(),
+            hud_glyph_primitives,
+            work: report.work,
+        });
+        Ok(FrameProgress::Presented)
     }
 
-    /// Delivers CPU facts and applies the consumer's final veto before returning an exit.
-    fn observe_consumer(
+    #[cfg(feature = "hud-runtime")]
+    fn publish_hud(
         &mut self,
-        runtime: &RuntimeInstance,
-        presented: Option<WgpuPresentedFrameReceipt>,
-        now: Instant,
-        samples: &[WgpuFrameCompletionSample],
-        mut progress: WinitPresentationProgress,
-    ) -> WinitPresentationProgress {
-        let report = self.reports.telemetry_seal();
-        let live = is_live(runtime);
-        let facts = self.host.runtime_facts();
-        if (report.is_none() || !self.seal_report_delivered)
-            && let Some(observer) = &mut self.observer
-        {
-            let control = observer(DesktopPresentationObservation {
-                generation: runtime.generation(),
-                now,
-                world: live.then(|| runtime.world()),
-                wgpu: &self.last_observation,
-                presented: presented.filter(|_| live),
-                completion_samples: samples,
-                telemetry_seal: report.as_ref(),
-                adapter: facts.adapter,
-                completion: facts.completion,
-                resources: facts.resources,
-            });
-            match control {
-                DesktopPresentationControl::Continue => {}
-                DesktopPresentationControl::WakeAt(deadline) => {
-                    progress.next_wake = earlier(progress.next_wake, Some(deadline));
-                }
-                DesktopPresentationControl::Exit(request) => {
-                    progress.exit = merge_exit(progress.exit, Some(request));
-                }
-                DesktopPresentationControl::SealTelemetryAndExit {
-                    exit: request,
-                    deadline,
-                } => {
-                    // The exit decision is authoritative even when sealing already started or
-                    // completed. Repeated requests retain the original seal and its deadline.
-                    progress.exit = merge_exit(progress.exit, Some(request));
-                    if report.is_none() {
-                        self.begin_seal(deadline, None);
-                    }
-                }
-            }
-            self.seal_report_delivered = report.is_some();
+        world: &mut World,
+        hud: Option<&crate::hud::HudPresentation>,
+        index: u64,
+    ) -> Result<u64, AppRunError> {
+        let next = hud.map(|hud| hud.frame.environment().surface_id());
+        if self.hud_surface != next {
+            self.clear_hud(world);
         }
-        if let Some(seal) = &self.seal {
-            let wake = now
-                .checked_add(MAINTENANCE_POLL_INTERVAL)
-                .unwrap_or(now)
-                .min(seal.deadline);
-            progress.next_wake = earlier(progress.next_wake, Some(wake));
-            // No exit can bypass an already admitted finite telemetry seal.
-            if let Some(request) = progress.exit.take() {
-                let seal = self
-                    .seal
-                    .as_mut()
-                    .expect("the active seal was just observed");
-                seal.exit = merge_exit(seal.exit, Some(request));
-            }
+        let Some(hud) = hud else { return Ok(0) };
+        let receipt = nara_ui::presentation::publish_presented_frame(world, &hud.frame, index)
+            .map_err(desktop_error)?;
+        self.hud_surface = Some(receipt.surface_id());
+        Ok(hud.glyph_count)
+    }
+
+    #[cfg(feature = "hud-runtime")]
+    fn clear_hud(&mut self, world: &mut World) {
+        if let Some(surface) = self.hud_surface.take() {
+            nara_ui::presentation::clear_presented_ui_frame(world, surface);
         }
-        let mut reports = self.reports.0.borrow_mut();
-        reports.exit = merge_exit(reports.exit, progress.exit);
-        progress
+    }
+
+    fn clear_display(&mut self, world: &mut World) {
+        clear_presented_world_frame(world);
+        #[cfg(feature = "hud-runtime")]
+        self.clear_hud(world);
+    }
+
+    fn discard_surface(&mut self, world: &mut World) -> Result<(), AppRunError> {
+        self.clear_display(world);
+        if let Some(surface) = self.surface.take() {
+            surface.release().map_err(desktop_error)?;
+        }
+        Ok(())
     }
 }
 
@@ -651,22 +365,43 @@ impl WinitPresentationDriver for DesktopPresentationDriver {
         handles: &BackendWindowHandles,
         now: Instant,
     ) -> Result<WinitPresentationProgress, AppRunError> {
-        let frame = self.service_frame(runtime, handles);
-        if frame.is_err() {
-            self.retiring = true;
+        if self.retiring || runtime.state() == RuntimeState::Stopped {
+            return Ok(WinitPresentationProgress::default());
         }
-        // Presentation deadlines advance even when capture or completion was refused.
-        let progress = self.observe(
-            runtime,
-            frame.as_ref().ok().copied().flatten(),
-            Instant::now().max(now),
-        );
-        match (frame, progress) {
-            (Ok(_), progress) => progress,
-            (Err(error), Ok(_)) => Err(error),
-            (Err(error), Err(observation_error)) => {
-                Err(AppRunError::runner_teardown(error, observation_error))
-            }
+        let generation = runtime.generation();
+        let outcome = runtime
+            .with_driver_scope(|scope| {
+                let live = matches!(scope.state(), RuntimeState::Running | RuntimeState::Paused);
+                scope.with_world_mut(|world| {
+                    let progress = if live {
+                        self.maintain_frame(world, handles, generation, now)
+                    } else {
+                        Ok(WinitPresentationProgress::default())
+                    };
+                    if !live || progress.is_err() {
+                        self.retiring = true;
+                        self.device_loss_reported = progress.is_err()
+                            && self
+                                .renderer
+                                .as_ref()
+                                .is_some_and(|renderer| renderer.context().is_lost());
+                        self.clear_display(world);
+                    }
+                    progress
+                })
+            })
+            .map_err(|error| {
+                error
+                    .fault()
+                    .map_or_else(|| desktop_error(&error), AppRunError::managed_runtime_fault)
+            })?;
+        match (outcome.output, outcome.post_operation_fault) {
+            (progress, None) => progress,
+            (Ok(_), Some(fault)) => Err(AppRunError::managed_runtime_fault(&fault)),
+            (Err(error), Some(fault)) => Err(AppRunError::runner_teardown(
+                error,
+                AppRunError::managed_runtime_fault(&fault),
+            )),
         }
     }
 
@@ -674,98 +409,89 @@ impl WinitPresentationDriver for DesktopPresentationDriver {
         &mut self,
         runtime: &mut RuntimeInstance,
         _handles: &BackendWindowHandles,
-        window_ids: &[WindowId],
-        now: Instant,
+        _window_ids: &[WindowId],
+        _now: Instant,
     ) -> Result<bool, AppRunError> {
         self.retiring = true;
-        let completion = self.complete_pending(runtime);
-        if self.telemetry_enabled
-            && self.seal.is_none()
-            && self.reports.0.borrow().telemetry_seal.is_none()
-        {
-            self.begin_seal(
-                now.checked_add(DEFAULT_TELEMETRY_SEAL_TIMEOUT)
-                    .unwrap_or(now),
-                None,
-            );
+        let mut completion = Ok(());
+        if let Some(renderer) = &mut self.renderer {
+            if !renderer.context().is_lost() {
+                match renderer.context().device().poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: Some(GPU_POLL_INTERVAL),
+                }) {
+                    Ok(_) => {}
+                    Err(wgpu::PollError::Timeout) => {
+                        if !renderer.context().is_lost() {
+                            return Ok(false);
+                        }
+                    }
+                    Err(error) => completion = Err(desktop_error(error)),
+                }
+            }
+            match renderer.check_errors() {
+                Ok(()) => {}
+                Err(WgpuRenderError::DeviceLost) if self.device_loss_reported => {}
+                Err(error) => completion = completion.and(Err(desktop_error(error))),
+            }
         }
-        let observed = self.observe(runtime, None, now);
-        // Settle original results and observe the seal before whole-Host producer/native close.
-        let native = if self.seal.is_some() || self.pending_result.is_some() {
-            Ok(false)
-        } else {
-            self.host
-                .poll_runtime_retirement(window_ids)
-                .map_err(|error| {
-                    AppRunError::runner(format!("WGPU native retirement failed: {error}"))
-                })
-        };
-        completion?;
-        observed?;
-        Ok(native? && self.pending_result.is_none())
-    }
-}
-
-fn is_live(runtime: &RuntimeInstance) -> bool {
-    matches!(
-        runtime.state(),
-        RuntimeState::Running | RuntimeState::Paused
-    ) && runtime.fault().is_none()
-}
-
-fn earlier(left: Option<Instant>, right: Option<Instant>) -> Option<Instant> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(left.min(right)),
-        (left, right) => left.or(right),
-    }
-}
-
-/// A consumer veto or mandatory failed verification must survive any successful completion.
-fn merge_exit(current: Option<AppExit>, incoming: Option<AppExit>) -> Option<AppExit> {
-    match (current, incoming) {
-        (Some(AppExit::Requested), _) | (_, Some(AppExit::Requested)) => Some(AppExit::Requested),
-        (Some(AppExit::Success), _) | (_, Some(AppExit::Success)) => Some(AppExit::Success),
-        (None, None) => None,
-    }
-}
-
-fn with_postfault(error: AppRunError, fault: Option<nara_app::RuntimeFault>) -> AppRunError {
-    match fault {
-        Some(fault) if !contains_fault(&error, &fault) => {
-            AppRunError::runner_teardown(error, AppRunError::managed_runtime_fault(&fault))
+        if runtime.state() != RuntimeState::Stopped {
+            let withdrawn = runtime
+                .with_driver_scope(|scope| scope.with_world_mut(|world| self.clear_display(world)))
+                .map_err(desktop_error)
+                .and_then(|outcome| match outcome.post_operation_fault {
+                    Some(fault) => Err(AppRunError::managed_runtime_fault(&fault)),
+                    None => Ok(()),
+                });
+            completion = completion.and(withdrawn);
         }
-        Some(_) | None => error,
+        let retired = self.surface.take().map(DesktopSurface::release).transpose();
+        self.renderer = None;
+        completion.and(retired.map_err(desktop_error)).map(|_| true)
     }
 }
 
-fn contains_fault(error: &AppRunError, fault: &nara_app::RuntimeFault) -> bool {
-    match error {
-        AppRunError::ManagedRuntime {
-            kind,
-            fault_source,
-            detail,
-        } => *kind == fault.kind() && *fault_source == fault.source() && *detail == fault.detail(),
-        AppRunError::RunnerTeardown { prior, teardown } => {
-            contains_fault(prior, fault) || contains_fault(teardown, fault)
-        }
-        _ => false,
-    }
-}
-
-fn exchange_failure(
-    context: &'static str,
-    error: WgpuRuntimeExchangeError,
-    postfault: Option<nara_app::RuntimeFault>,
-) -> AppRunError {
-    let error = match &error {
-        WgpuRuntimeExchangeError::Scope(error) if error.fault().is_some() => {
-            AppRunError::managed_runtime_fault(
-                error.fault().expect("the scope fault was just observed"),
-            )
-        }
-        _ => AppRunError::runner(format!("{context}: {error}")),
+fn capture_window_packet(
+    world: &World,
+    generation: RuntimeGeneration,
+    index: u64,
+    window: &Window,
+) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
+    let Some(views) = world.get_resource::<ExtractedViews>() else {
+        return Ok(None);
     };
-    with_postfault(error, postfault)
+    if cfg!(feature = "hud-runtime") && views.is_empty() {
+        return Ok(build_window_overlay_frame_packet(
+            generation,
+            index,
+            RenderWindowPacket {
+                id: window.id,
+                resolution: window.resolution,
+                present_mode: window.present_mode,
+            },
+            views.captured_time(),
+        ));
+    }
+    build_render_frame_packet_with_world_canvas(
+        generation,
+        index,
+        world
+            .get_resource::<PrimaryWindowId>()
+            .map(|primary| primary.0),
+        [window],
+        views,
+        views.world_canvas(),
+    )
+}
+
+fn desktop_error(error: impl Display) -> AppRunError {
+    AppRunError::runner(format!("WGPU desktop presentation failed: {error}"))
+}
+
+fn record_error(world: &mut World, error: impl Display) {
+    world
+        .get_resource_or_init::<DesktopPresentation>()
+        .last_error = Some(error.to_string());
 }
 
 #[cfg(test)]

@@ -140,7 +140,7 @@ runtime-2d = [
 ]
 presentation-2d = ["runtime-2d", "nara_render/sprite-render"]
 runtime-ui = ["runtime-input", "runtime-window", "dep:nara_ui"]
-presentation-ui = ["runtime-ui", "dep:nara_render", "nara_render/hud-presentation"]
+presentation-ui = ["runtime-ui", "dep:nara_render", "nara_render/hud-runtime"]
 asset-watch = ["runtime-core", "nara_asset/hot-reload"]
 desktop-winit = ["runtime-input", "runtime-window", "nara_window/winit", "nara_render?/winit"]
 audio = ["runtime-core", "dep:nara_audio"]

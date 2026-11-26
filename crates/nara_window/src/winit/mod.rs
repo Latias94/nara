@@ -1603,6 +1603,7 @@ impl WinitApp {
             WinitShutdownState::Retiring => return self.poll_native_shutdown_transition(now),
             WinitShutdownState::Running => {
                 self.shutdown = WinitShutdownState::Retiring;
+                self.presentation_next_wake = None;
                 self.retirement_deadline = Some(
                     now.checked_add(self.native_retirement_budget)
                         .unwrap_or(now),

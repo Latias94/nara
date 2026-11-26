@@ -2979,11 +2979,9 @@ dependencies = [
  "nara_ecs",
  "nara_render",
  "nara_scene",
- "nara_window",
  "open-gpui",
  "open-gpui-platform",
  "open-gpui-wgpu",
- "parking_lot",
  "pollster 0.4.0",
  "wgpu",
 ]

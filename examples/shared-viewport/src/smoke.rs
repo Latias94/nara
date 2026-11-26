@@ -134,10 +134,9 @@ async fn run(
         "the inspector lost its native presentation"
     );
     ensure!(
-        after.scene.textures.created == before.scene.textures.created
-            && after.scene.created_buffers == before.scene.created_buffers
-            && after.scene.texture_copies == before.scene.texture_copies,
-        "steady-state Nara rendering allocated or copied GPU resources: {before:?} -> {after:?}"
+        after.scene.created_textures == before.scene.created_textures
+            && after.scene.created_buffers == before.scene.created_buffers,
+        "steady-state Nara rendering allocated GPU resources: {before:?} -> {after:?}"
     );
     println!(
         "Native windows: viewport_revision={} inspector_revision={}",
@@ -232,17 +231,16 @@ fn print_steady_state(
          viewport_fps={:.1} display_refresh_hz={refresh_hz} \
          retained_submissions={} inspector_submissions={inspector_submissions} \
          sprites={} tile_cells={} nara_textures_created={} nara_textures_reused={} \
-         nara_textures_idle={} nara_buffers_created={} nara_texture_copy_commands={}",
+         nara_textures_idle={} nara_buffers_created={}",
         after.scene.frames - before.scene.frames,
         submissions as f64 / elapsed,
         after.retained - before.retained,
         after.scene.extraction.extracted_sprites,
         after.scene.extraction.extracted_tile_cells,
-        after.scene.textures.created - before.scene.textures.created,
+        after.scene.created_textures - before.scene.created_textures,
         after.scene.textures.reused - before.scene.textures.reused,
         after.scene.textures.idle,
         after.scene.created_buffers - before.scene.created_buffers,
-        after.scene.texture_copies - before.scene.texture_copies,
     );
 }
 

@@ -76,18 +76,28 @@ jobs:
         with:
           tool: nextest@0.9.138
           fallback: none
-      - name: Install Linux gamepad dependencies
+      - name: Install Linux gamepad and software Vulkan dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends libudev-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends libudev-dev mesa-vulkan-drivers pkg-config
       - name: Test core engine crates
         run: >-
           cargo nextest run --locked -p nara_app -p nara_asset -p nara_editor_core
           -p nara_input -p nara_scene -p nara_core -p nara_audio -p nara_physics2d -p nara_project
-          -p nara_reflect -p nara_ui --lib --bin nara --test vfs --test mock_audio
+          -p nara_reflect -p nara_render -p nara_ui --lib --bin nara --test vfs --test mock_audio
           --test fixed_physics --test lifecycle --test code_first_images --test direct_input
-          --test schema_registration --test kernel --test text
-          --features nara_app/tasks,nara_asset/image-import,nara_asset/hot-reload,nara_input/gamepad,nara_project/workflow,nara_reflect/serde,nara_ui/runtime
+          --test schema_registration --test kernel --test text --test clip --test generation_workflow
+          --test spatial_presentation
+          --features nara_app/tasks,nara_asset/image-import,nara_asset/hot-reload,nara_input/gamepad,nara_project/workflow,nara_reflect/serde,nara_render/animation,nara_render/sprite-render,nara_ui/runtime
           --no-tests fail --no-fail-fast
+      - name: Test offscreen WGPU passes on software Vulkan
+        if: runner.os == 'Linux'
+        env:
+          WGPU_BACKEND: vulkan
+          NARA_WGPU_FORCE_FALLBACK: "1"
+        run: >-
+          cargo nextest run --locked -p nara_render --lib --test ordered_hierarchy
+          --features wgpu,sprite-render,hud-runtime --run-ignored only
+          --no-tests fail --no-fail-fast --test-threads 1
 
   reference-game:
     name: Reference game

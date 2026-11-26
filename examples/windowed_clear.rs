@@ -1,30 +1,37 @@
-use std::error::Error;
+use std::{
+    error::Error,
+    time::{Duration, Instant},
+};
 
-use nara::{prelude::*, render_wgpu::WgpuRenderObservation, window::WindowId};
+use nara::{prelude::*, render_wgpu::desktop::DesktopPresentation, window::WindowId};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins::new("Nara windowed clear"))?
         .add_systems(Startup, setup_scene)?;
     if std::env::args_os().any(|argument| argument == "--verify-first-present") {
-        app.add_systems(Last, exit_after_present)?;
+        let deadline = Instant::now() + Duration::from_secs(15);
+        app.add_systems(
+            Last,
+            move |observation: Res<DesktopPresentation>, mut exit: ResMut<AppExitRequests>| {
+                if observation
+                    .latest()
+                    .is_some_and(|frame| frame.window == WindowId::PRIMARY)
+                {
+                    exit.request_success();
+                } else if Instant::now() >= deadline {
+                    exit.request_exit();
+                }
+            },
+        )?;
         if app.run()? != AppExit::Success {
-            return Err("the window closed before its first presentation".into());
+            return Err("the window closed or timed out before its first presentation".into());
         }
         println!("First window frame presented");
     } else {
         app.run()?;
     }
     Ok(())
-}
-
-fn exit_after_present(observation: Res<WgpuRenderObservation>, mut exit: ResMut<AppExitRequests>) {
-    if observation
-        .configured_surface_extent(WindowId::PRIMARY)
-        .is_some()
-    {
-        exit.request_success();
-    }
 }
 
 fn setup_scene(mut commands: Commands) {

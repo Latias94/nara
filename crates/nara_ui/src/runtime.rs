@@ -401,6 +401,12 @@ pub fn ui_candidate_frames(world: &World) -> Result<Vec<Arc<UiFrame>>, UiAdapter
         .collect())
 }
 
+/// Returns the font used by the runtime's surface compilers.
+#[must_use]
+pub fn ui_font_face(world: &World) -> Option<&FontFace> {
+    Some(&state(world).ok()?.font)
+}
+
 /// Returns the single accepted layout used to route this surface's input.
 pub fn latest_presented_ui_frame(
     world: &World,
@@ -439,6 +445,17 @@ pub fn publish_presented_frame(
     surface.interaction.reconcile(frame);
     surface.presented = Some((receipt, Arc::clone(frame)));
     Ok(receipt)
+}
+
+/// Invalidates hit geometry when the presenter loses or replaces a display target.
+/// The compiled candidate remains available for the next presentation.
+pub fn clear_presented_ui_frame(world: &mut World, id: UiSurfaceId) {
+    if let Ok(mut runtime) = state_mut(world)
+        && let Ok(surface) = runtime.surface_mut(id)
+    {
+        surface.presented = None;
+        surface.interaction = SurfaceInteraction::default();
+    }
 }
 
 fn state(world: &World) -> Result<&UiRuntimeState, UiAdapterError> {

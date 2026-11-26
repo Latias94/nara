@@ -252,6 +252,45 @@ fn ordered_pointer_input_uses_the_accepted_layout_and_consumes_the_gameplay_pres
 }
 
 #[test]
+fn losing_the_display_clears_hits_until_the_candidate_is_presented_again() {
+    let mut app = default_app();
+    let world = app.world_mut().unwrap();
+    let root = world.spawn(UiRoot::default()).id();
+    let target = button(world, root, 12.0);
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let presented = frame(&runtime);
+    submit(&mut runtime, &presented, 1);
+    let mut cursor = runtime
+        .world()
+        .resource::<Messages<UiActionEvent>>()
+        .get_cursor();
+    in_world(&mut runtime, |world| {
+        clear_presented_ui_frame(world, surface());
+        assert!(latest_presented_ui_frame(world, surface()).is_none());
+        assert!(Arc::ptr_eq(
+            &ui_candidate_frame(world, surface()).unwrap().unwrap(),
+            &presented
+        ));
+    });
+    input(&mut runtime, WINDOW, click([30.0, 48.0]));
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(cursor.read(runtime.world().resource()).count(), 0);
+    submit(&mut runtime, &presented, 2);
+    input(&mut runtime, WINDOW, click([30.0, 48.0]));
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        cursor
+            .read(runtime.world().resource())
+            .next()
+            .unwrap()
+            .target(),
+        target
+    );
+    runtime.finish().unwrap();
+}
+
+#[test]
 fn discontinuities_and_entity_replacement_cancel_pointer_activation() {
     let mut app = default_app();
     let world = app.world_mut().unwrap();

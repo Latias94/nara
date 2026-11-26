@@ -1,9 +1,9 @@
 # Nara + Open-GPUI shared viewport
 
-This Phase 2 example opens two peer native windows through Open-GPUI Mode A. **Nara Scene View**
+This example opens two peer native windows through Open-GPUI Mode A. **Nara Scene View**
 shows the Nara stock renderer's animated sprites over a tilemap. **Nara Inspector** exercises native
-CJK composition and controls the viewport's refresh. Nara's capture uses a logical window extent
-for camera extraction. Both actual desktop windows and their swapchains belong to Open-GPUI.
+CJK composition and controls the viewport's refresh. The Nara camera targets an offscreen image
+at the viewport's physical extent. Both desktop swapchains belong to Open-GPUI.
 
 The app requests one WGPU device from the combined renderer requirements. It passes the same
 device, queue, and device-error state to Nara and Open-GPUI. Nara submits an `Rgba8UnormSrgb`
@@ -14,7 +14,7 @@ a new image and repaints the viewport.
 
 ## Run on Windows
 
-Use Rust 1.95 and the Phase 2 Nara and Open-GPUI checkouts as siblings. The example has its own
+Use Rust 1.95 and compatible sibling Nara and Open-GPUI v2 checkouts. The example has its own
 Cargo workspace and takes local Open-GPUI path dependencies. The commands below start at the
 Nara repository root.
 
@@ -22,8 +22,8 @@ Nara repository root.
 $env:CARGO_BUILD_JOBS = '1'
 $env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
 $manifest = 'examples/shared-viewport/Cargo.toml'
-cargo tree --manifest-path $manifest -d -p wgpu
-cargo run --manifest-path $manifest --release
+cargo tree --manifest-path $manifest --locked --invert wgpu --depth 1
+cargo run --manifest-path $manifest --locked --release
 ```
 
 Confirm a single `wgpu 30.0.0` package at revision `cddb2f5d80dc0009b2ef6767635140cacf90a007`.
@@ -34,7 +34,7 @@ adapter's name. Each native window checks the selected adapter against its own s
 ## Native smoke
 
 ```powershell
-cargo run --manifest-path $manifest --release -- --smoke | Tee-Object -Variable smokeOutput
+cargo run --manifest-path $manifest --locked --release -- --smoke | Tee-Object -Variable smokeOutput
 if ($LASTEXITCODE -ne 0 -or $smokeOutput -notcontains 'SHARED_VIEWPORT_SMOKE_OK') {
     throw 'Shared viewport smoke failed'
 }
@@ -66,9 +66,8 @@ exit code because the Windows GPUI event loop uses zero for ordinary shutdown.
    moving the inspector across displays. Record mixed-DPI drag and IME results from these manual
    checks. The automated smoke exercises programmatic resize on its current display.
 
-The smoke checks Nara's transient texture creation, native buffer creation and encoded texture copy
-commands during its fixed-size sample. It also reports texture cache reuse. These are Nara-side
-counters. To qualify the full Phase 2 GPU budget, capture steady-state frames in PIX on DX12 or
-RenderDoc on Vulkan. Check both renderers for transient texture and buffer creation and full-screen
-copies. Use a CPU trace to check the frame path for synchronous GPU waits. Record native Linux and
-macOS results separately.
+The smoke checks Nara's transient texture and buffer creation during its fixed-size sample. It also
+reports texture cache reuse. Capture warmed-up frames in PIX on DX12 or RenderDoc on Vulkan to
+inspect both renderers for native texture and buffer creation and full-screen copies. Use a CPU
+trace to check the frame path for synchronous GPU waits. Record native Linux and macOS results
+separately.

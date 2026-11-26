@@ -123,17 +123,8 @@ impl PluginGroup for DefaultPlugins {
     not(target_family = "wasm")
 ))]
 mod desktop {
-    use nara_app::{
-        App, AppExit, AppRunError, Plugin, PluginCategory, PluginDeclaration, PluginError,
-        PluginGroupBuilder, PluginId, RuntimeInstance,
-    };
-    use nara_render::gpu::{
-        WgpuCapturePlugin, WgpuStockCapturePlugin, WgpuStockPolicyPlugin,
-        WgpuWindowPresentationPlugin,
-        desktop::{
-            DesktopPresentationDriver, DesktopPresentationOptions, DesktopPresentationReports,
-        },
-    };
+    use nara_app::PluginGroupBuilder;
+    use nara_render::gpu::desktop::DesktopPresentationPlugin;
 
     pub(super) fn plugins(
         plugins: PluginGroupBuilder,
@@ -148,69 +139,24 @@ mod desktop {
         let plugins = plugins
             .add_definition(nara_window::plugin(Some(window)))
             .add_default::<nara_render::RenderPlugin>()
-            .add_default::<WgpuCapturePlugin>()
-            .add_default::<WgpuStockCapturePlugin>()
-            .add_default::<WgpuStockPolicyPlugin>()
-            .add_default::<WgpuWindowPresentationPlugin>();
-        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-        let plugins = plugins.add_default::<nara_render::image::ImagePreparePlugin>();
+            .add_default::<DesktopPresentationPlugin>();
         #[cfg(feature = "presentation-2d")]
         let plugins = plugins
-            .add_default::<nara_render::sprite_render::SpriteRenderPlugin>()
-            .add_default::<nara_render::gpu::WgpuStockSpritePlugin>();
+            .add_default::<nara_render::image::ImagePreparePlugin>()
+            .add_default::<nara_render::sprite_render::SpriteRenderPlugin>();
         #[cfg(feature = "presentation-ui")]
-        let plugins = plugins
-            .add_definition(primary_ui)
-            .add_default::<nara_render::hud::UiRenderPlugin>()
-            .add_default::<nara_render::hud::UiPresentationBridgePlugin>()
-            .add_default::<nara_render::gpu::WgpuStockUiPlugin>();
-        plugins.add_default::<DesktopRunner>()
-    }
-
-    #[derive(Default)]
-    struct DesktopRunner;
-
-    const RUNNER_DECLARATION: PluginDeclaration =
-        PluginDeclaration::new(PluginId::new("nara.winit-runner"), PluginCategory::Platform);
-
-    impl Plugin for DesktopRunner {
-        fn declaration() -> &'static PluginDeclaration {
-            &RUNNER_DECLARATION
-        }
-
-        fn build(&self, app: &mut App) -> Result<(), PluginError> {
-            app.set_runner(run);
-            Ok(())
-        }
-    }
-
-    fn run(app: App) -> Result<AppExit, AppRunError> {
-        let runtime = RuntimeInstance::start(app)?;
-        let presentation = DesktopPresentationDriver::new(
-            &runtime,
-            DesktopPresentationOptions::default(),
-            DesktopPresentationReports::default(),
-        );
-        let mut session = nara_window::winit::WinitRunner::default().start_with_presentation_on(
-            runtime,
-            Box::new(presentation),
-            std::time::Duration::from_secs(5),
-            None,
-        );
-        session.execute();
-        session
-            .into_retired()
-            .map_err(|_| AppRunError::runner("could not finish retiring the desktop window"))?
-            .result
+        let plugins = plugins.add_definition(primary_ui);
+        plugins
     }
 
     #[cfg(feature = "presentation-ui")]
     mod primary_ui {
         use nara_app::{
-            App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
-            PluginError, PluginId,
+            App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
+            PluginDefinitionId, PluginError, PluginId,
         };
-        use nara_input::{InputPointerId, InputSeatId, InputWindowId};
+        use nara_ecs::schedule::IntoScheduleConfigs;
+        use nara_input::{InputPointerId, InputSeatId, InputSet, InputWindowId};
         use nara_ui::{
             UiPrimarySurfaceMetrics, UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot,
             install_ui_surface,
@@ -218,7 +164,7 @@ mod desktop {
 
         const ID: PluginId = PluginId::new("nara.primary-ui-surface");
         const DECLARATION: PluginDeclaration = PluginDeclaration::new(ID, PluginCategory::Runtime)
-            .requires_plugins(&[nara_ui::UI_PLUGIN_ID]);
+            .requires_plugins(&[nara_ui::UI_PLUGIN_ID, nara_window::WINDOW_PLUGIN_ID]);
         struct PrimaryUi(UiPrimarySurfaceMetrics);
 
         impl Plugin for PrimaryUi {
@@ -239,7 +185,14 @@ mod desktop {
                 let slot = UiSurfaceSlot::new(self.0.surface_id(), endpoint, transform)
                     .map_err(setup_error)?;
                 app.insert_resource(self.0)?;
-                install_ui_surface(app.world_mut()?, slot).map_err(setup_error)
+                install_ui_surface(app.world_mut()?, slot).map_err(setup_error)?;
+                app.add_systems(
+                    CoreStage::First,
+                    nara_render::hud::sync_surface_metrics
+                        .after(nara_window::WindowSet::ApplyEvents)
+                        .before(InputSet::RouteUi),
+                )?;
+                Ok(())
             }
         }
 

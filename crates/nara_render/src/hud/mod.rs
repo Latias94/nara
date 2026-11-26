@@ -1,189 +1,92 @@
-//! Resource-complete backend-neutral paint packets for immutable UI frames.
-//!
-//! CPU planning, captured Image resources and the surface presenter need no App/ECS installation.
-//! `hud-runtime` adds the renderer plugin and World exchange. `hud-presentation` joins the UI
-//! runtime to that exchange and commits exact backend acceptances to presented input.
+//! Immutable game HUD input and direct rendering into the frame's color attachment.
 
-mod atlas;
-mod backend;
-#[cfg(feature = "hud-presentation")]
-mod bridge;
+use std::{collections::HashMap, sync::Arc};
+
+use nara_asset::image::ImageAsset;
+use nara_ui::{
+    FontFace,
+    kernel::{UiFrame, UiImageId},
+};
+
+#[cfg(all(feature = "hud-runtime", feature = "wgpu"))]
+pub(crate) mod atlas;
 #[cfg(feature = "hud-runtime")]
-mod integration;
-mod limits;
-mod packet;
-mod planner;
-
-pub use backend::UiPresentationIntegrationError;
-#[cfg(all(feature = "hud-presentation", feature = "wgpu"))]
-pub use bridge::UiPostHostConnection;
-#[cfg(feature = "hud-presentation")]
-pub use bridge::{
-    UI_PRESENTATION_BRIDGE_PLUGIN_DECLARATION, UI_PRESENTATION_BRIDGE_PLUGIN_ID,
-    UiPresentationBridgePlugin,
-};
+mod capture;
+#[cfg(all(feature = "hud-runtime", feature = "wgpu"))]
+pub(crate) mod paint;
 #[cfg(feature = "hud-runtime")]
-pub use integration::{
-    UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiPaintCompileStats, UiRenderPlugin,
-    compile_ui_paint_packets, drain_ui_presentation_outcomes, plugin,
-};
-pub use limits::{UiPresentationLimits, UiPresentationLimitsError};
-pub use packet::{
-    OneShotPresentationCommit, UiBackendSubmissionIdentity, UiGlyphAtlasPageKey,
-    UiGlyphAtlasPageSnapshot, UiPacketBorder, UiPacketFill, UiPacketImage, UiPacketMesh,
-    UiPacketMeshVertex, UiPacketPrimitive, UiPacketRect, UiPacketUv, UiPaintPacket,
-    UiPaintPacketIdentity, UiPresentationAttemptId, UiPresentationAttemptIdentity,
-    UiPresentationBackendFaultDomain, UiPresentationBackendGeneration,
-    UiPresentationCapabilityGeneration, UiPresentationEpoch, UiPresentationOutcome,
-    UiPresentationRetryIdentity, UiPresentationRuntimeGeneration,
-};
-pub use planner::{
-    UiPreparedImages, UiPresentationContentError, UiPresentationPlanner,
-    UiPresentationPlannerCreateError, UiPresentationWorkStats,
-};
+mod surface;
 
-#[doc(hidden)]
-pub mod presentation {
-    use std::sync::Arc;
+#[cfg(all(feature = "hud-runtime", feature = "wgpu"))]
+pub use crate::gpu::HudPass;
+#[cfg(all(feature = "hud-runtime", feature = "wgpu"))]
+pub(crate) use capture::capture;
+#[cfg(feature = "hud-runtime")]
+pub use surface::sync_surface_metrics;
 
-    pub use crate::hud::backend::{
-        UiBackendOutcomePermit, UiBackendOutcomeReceiver, UiBackendPresentationFrame,
-        UiBackendSubmission, UiBackendSubmissionBatchBindError, UiCompletedBackendOutcome,
-        UiPresentationOutcomes, UiSubmittedBackendSubmission, bind_backend_submission_batch,
-        discard_ui_backend_acceptance,
-    };
-    #[cfg(feature = "hud-runtime")]
-    pub use crate::hud::integration::{
-        UiBackendSubmissionReader, UiPaintPacketSnapshots, UiPresentationPlannerClaim,
-        UiPresentationRoute, UiPresentationRouteError, abort_ui_planned_packet,
-        backend_outcome_receiver, commit_ui_backend_outcome, commit_ui_backend_outcomes,
-        commit_ui_backend_presentation, presentation_planner_claim, replace_ui_backend_frame,
-        replace_ui_presentation_routes, snapshot_ui_paint_packets,
-        take_ui_backend_presentation_frame,
-    };
-    pub use crate::hud::planner::UiPlannedPacketAbortOutcome;
+/// The UI compiler's exact frame and the immutable images referenced by its paint.
+#[derive(Clone, Debug)]
+pub struct HudFrame {
+    frame: Arc<UiFrame>,
+    images: HashMap<UiImageId, ImageAsset>,
+    fonts: Vec<FontFace>,
+}
 
-    pub use crate::hud::packet::{
-        UiAcceptedBackendPresentation, UiDeferredBackendPresentation, UiPreparedBackendSubmission,
-        UiSubmittedBackendPresentation,
-    };
-
-    use crate::hud::{
-        UiBackendSubmissionIdentity, UiPaintPacket, UiPresentationAttemptId,
-        UiPresentationAttemptIdentity, UiPresentationCapabilityGeneration, UiPresentationEpoch,
-        UiPresentationOutcome, UiPresentationRuntimeGeneration,
-    };
-
+impl HudFrame {
     #[must_use]
-    pub fn presentation_attempt(packet: &UiPaintPacket) -> UiPresentationAttemptIdentity {
-        UiPresentationAttemptIdentity::routed(packet.identity(), packet.target())
-    }
-
-    #[must_use]
-    pub fn prepare_backend_submission(
-        admission_id: UiPresentationAttemptId,
-        packet: Arc<UiPaintPacket>,
-        presentation_epoch: UiPresentationEpoch,
-        runtime_generation: UiPresentationRuntimeGeneration,
-        capability_generation: UiPresentationCapabilityGeneration,
-    ) -> UiPreparedBackendSubmission {
-        UiPreparedBackendSubmission::new(
-            admission_id,
-            packet,
-            presentation_epoch,
-            runtime_generation,
-            capability_generation,
-        )
-    }
-
-    #[must_use]
-    pub const fn prepared_attempt(
-        submission: &UiPreparedBackendSubmission,
-    ) -> UiPresentationAttemptIdentity {
-        UiPresentationAttemptIdentity::backend(submission.identity())
-    }
-
-    #[must_use]
-    pub const fn submitted_attempt(
-        identity: UiBackendSubmissionIdentity,
-    ) -> UiPresentationAttemptIdentity {
-        UiPresentationAttemptIdentity::backend(identity)
-    }
-
-    #[must_use]
-    pub fn retry_deferred(deferred: UiDeferredBackendPresentation) -> UiPreparedBackendSubmission {
-        deferred.into_retry()
-    }
-
-    #[must_use]
-    pub fn discard_prepared(
-        submission: UiPreparedBackendSubmission,
-    ) -> UiPresentationAttemptIdentity {
-        submission.into_attempt()
-    }
-
-    #[must_use]
-    pub fn abort_prepared(
-        submission: UiPreparedBackendSubmission,
-        message: String,
-    ) -> UiPresentationOutcome {
-        UiPresentationOutcome::Aborted {
-            attempt: submission.into_attempt(),
-            message,
+    pub fn new(
+        frame: Arc<UiFrame>,
+        images: impl IntoIterator<Item = (UiImageId, ImageAsset)>,
+    ) -> Self {
+        Self {
+            frame,
+            images: images.into_iter().collect(),
+            fonts: Vec::new(),
         }
     }
 
+    /// Supplies the font used by the compiler for frames captured outside the runtime.
     #[must_use]
-    pub fn supersede_prepared(
-        submission: UiPreparedBackendSubmission,
-        successor: &UiPreparedBackendSubmission,
-        message: String,
-    ) -> UiPresentationOutcome {
-        UiPresentationOutcome::Superseded {
-            attempt: submission.into_attempt(),
-            successor: prepared_attempt(successor),
-            message,
-        }
+    pub fn with_font(self, font: FontFace) -> Self {
+        self.with_fonts(vec![font])
+    }
+
+    /// Supplies the compiler's ordered primary and fallback faces for an external frame.
+    #[must_use]
+    pub fn with_fonts(mut self, fonts: Vec<FontFace>) -> Self {
+        self.fonts = fonts;
+        self
+    }
+
+    #[must_use]
+    pub fn frame(&self) -> &Arc<UiFrame> {
+        &self.frame
+    }
+
+    #[must_use]
+    pub fn image(&self, id: &UiImageId) -> Option<&ImageAsset> {
+        self.images.get(id)
+    }
+
+    #[must_use]
+    pub fn fonts(&self) -> &[FontFace] {
+        &self.fonts
     }
 }
 
-pub mod prelude {
-    #[cfg(feature = "hud-runtime")]
-    pub use crate::hud::UiRenderPlugin;
+/// HUD data drawn into the submitted target. A native presenter publishes it after presenting
+/// that same target, using the presenter's monotonically increasing presentation epoch.
+#[derive(Clone, Debug)]
+pub struct HudPresentation {
+    pub frame: Arc<UiFrame>,
+    pub glyph_count: u64,
 }
 
-/// Explicit Host/backend integration surface kept out of ordinary gameplay imports.
-///
-/// Neutral surface consumers retain the original move-only submissions and completions. With
-/// `runtime`, World collectors use `UiBackendSubmissionReader` only after destination admission,
-/// then return their original one-shot outcomes through `commit_ui_backend_outcomes`.
-pub mod advanced {
-    pub use crate::hud::backend::{
-        UiBackendPresentationFrame, UiBackendSubmission, UiBackendSubmissionBatchBindError,
-        UiCompletedBackendOutcome, UiSubmittedBackendSubmission, bind_backend_submission_batch,
-    };
-    #[cfg(feature = "hud-runtime")]
-    pub use crate::hud::integration::{
-        UiBackendSubmissionReader, commit_ui_backend_outcome, commit_ui_backend_outcomes,
-        take_ui_backend_presentation_frame,
-    };
-    pub use crate::hud::packet::{UiPreparedBackendSubmission, UiSubmittedBackendPresentation};
-    pub use crate::hud::{
-        OneShotPresentationCommit, UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot, UiPacketBorder,
-        UiPacketFill, UiPacketImage, UiPacketMesh, UiPacketMeshVertex, UiPacketPrimitive,
-        UiPacketRect, UiPacketUv, UiPaintPacket, UiPaintPacketIdentity, UiPreparedImages,
-        UiPresentationAttemptId, UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
-        UiPresentationBackendGeneration, UiPresentationCapabilityGeneration,
-        UiPresentationContentError, UiPresentationEpoch, UiPresentationIntegrationError,
-        UiPresentationLimits, UiPresentationLimitsError, UiPresentationOutcome,
-        UiPresentationPlanner, UiPresentationPlannerCreateError, UiPresentationRetryIdentity,
-        UiPresentationRuntimeGeneration, UiPresentationWorkStats,
-    };
-    #[cfg(feature = "hud-runtime")]
-    pub use crate::hud::{
-        UiPaintCompileStats, compile_ui_paint_packets, drain_ui_presentation_outcomes,
-    };
+/// A HUD candidate rejected before drawing. The scene may still present.
+#[derive(Debug, thiserror::Error)]
+pub enum HudDrawError {
+    #[error("HUD layout extent differs from the render attachment")]
+    ExtentMismatch,
+    #[error("could not draw HUD: {0}")]
+    Paint(String),
 }
-
-#[cfg(test)]
-mod packet_tests;
