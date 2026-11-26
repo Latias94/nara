@@ -8,13 +8,15 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
+use crate::fs::{
+    CapabilityRights, ContentDigest, DirectoryCapability, HostCapabilityOptions, TrustMode,
+};
 use nara_app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
 use nara_asset::{
     AssetPathScope, AssetRecord, AssetSourceKind, AssetSourcePath, ImportedProductId,
     ProjectAssetDatabase, StableAssetId,
 };
-use nara_core::Vec2;
+use nara_core::{FormatKind, FormatVersion, Vec2};
 use nara_ecs::identity::SceneEntityId;
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMapBuilder, ActionMapLimits, KeyCode,
@@ -29,7 +31,11 @@ use nara_render::image::{
     ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec,
 };
 use nara_render::tilemap::TileAtlasLayout;
-use nara_scene::runtime_configuration::{ProductCapability, RuntimePreset};
+use nara_scene::runtime_catalog::{
+    RuntimeContentCatalog, RuntimeContentCatalogDefinition, RuntimeContentDependencyRole,
+    RuntimeContentMember, RuntimeContentTarget,
+};
+use nara_scene::runtime_configuration::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
     RuntimeSceneLimits, SceneComponentRecord, SceneDocument, SceneEntityRecord, SourceDocumentKey,
     SourceDocumentKind,
@@ -341,31 +347,60 @@ fn group(
         .into_group()
 }
 
-fn replace_scene_bytes(
-    builder: &mut CookedContentBuilder,
+fn capture_with_scene_bytes(
+    prepared: &PreparedRuntimeContent,
     tag: u8,
     bytes: &[u8],
     update_digest: bool,
-) {
-    let pending = builder
-        .members
-        .iter_mut()
-        .find(|member| member.member.products() == [product(tag)])
+) -> Result<RuntimeContentBase, RuntimeContentError> {
+    let catalog = prepared.base().catalog();
+    let index = catalog.member_index(product(tag)).unwrap();
+    let mut captured: Vec<_> = (0..catalog.members().len())
+        .map(|index| prepared.pack().member(index).unwrap().to_vec())
+        .collect();
+    captured[index] = bytes.to_vec();
+    let runtime = limits().runtime;
+    let (encoded, expected) = if update_digest {
+        let mut members = catalog.members().to_vec();
+        let old = &members[index];
+        members[index] = RuntimeContentMember::new(
+            old.path(),
+            ContentDigest::of_bytes(bytes),
+            old.kind().clone(),
+            old.products().to_vec(),
+            old.dependencies().to_vec(),
+        )
         .unwrap();
-    let old = &pending.member;
-    pending.member = RuntimeContentMember::new(
-        old.path(),
-        if update_digest {
-            ContentDigest::of_bytes(bytes)
-        } else {
-            old.digest()
-        },
-        old.kind().clone(),
-        old.products().to_vec(),
-        old.dependencies().to_vec(),
-    )
-    .unwrap();
-    pending.bytes = MemberBytes::Owned(bytes.to_vec());
+        let changed = RuntimeContentCatalog::new(
+            RuntimeContentCatalogDefinition {
+                target: catalog.target().clone(),
+                configuration: catalog.configuration().clone(),
+                plugin_plan_fingerprint: catalog.plugin_plan_fingerprint(),
+                schema_fingerprint: catalog.schema_fingerprint(),
+                runtime_codecs_fingerprint: catalog.runtime_codecs_fingerprint(),
+                startup_scene: catalog.startup_scene(),
+                scenes: catalog.scenes().to_vec(),
+                addressable_roots: catalog.addressable_roots().to_vec(),
+                members,
+            },
+            runtime.catalog(),
+        )
+        .unwrap();
+        let encoded = changed.to_json_bytes().unwrap();
+        let expected = RuntimeContentExpectation::new(
+            ContentDigest::of_bytes(&encoded),
+            changed.target().clone(),
+        );
+        (encoded, expected)
+    } else {
+        (
+            prepared.pack().catalog_bytes().to_vec(),
+            prepared.expectation().clone(),
+        )
+    };
+    let (base, _, _) =
+        RuntimeContentBase::capture_members(encoded, captured, &expected, recipe(), runtime)?;
+    Ok(base)
 }
 
 #[test]
@@ -473,10 +508,29 @@ fn corrupt_deferred_payload_is_decoded_even_when_its_digest_agrees() {
     let mut builder = CookedContentBuilder::new(request(), recipe(), limits()).unwrap();
     add_scene(&mut builder, 1, Some(&[]));
     add_scene(&mut builder, FUTURE, None);
-    replace_scene_bytes(&mut builder, FUTURE, b"not a Runtime Scene", true);
+    let prepared = builder.finish().unwrap();
+    let base = capture_with_scene_bytes(&prepared, FUTURE, b"not a Runtime Scene", true).unwrap();
+    assert!(matches!(
+        base.validate_deep(),
+        Err(RuntimeContentError::Scene(_))
+    ));
+
+    let store_root = StoreRoot::new();
+    let store = store_root.open();
+    let invalid = group(
+        &store,
+        b"malformed ActionMap",
+        product(INPUT),
+        ActionMapRuntimeCodec::RUNTIME_KIND,
+        vec![],
+    );
+    let mut builder = CookedContentBuilder::new(request(), recipe(), limits()).unwrap();
+    add_scene(&mut builder, 1, Some(&[]));
+    add_scene(&mut builder, FUTURE, Some(&[product(INPUT)]));
+    builder.add_group(&invalid).unwrap();
     assert!(matches!(
         builder.finish(),
-        Err(CookedContentError::Runtime(RuntimeContentError::Scene(_)))
+        Err(CookedContentError::Runtime(RuntimeContentError::Asset(_)))
     ));
 }
 
@@ -487,10 +541,12 @@ fn surplus_members_are_explicitly_refused_instead_of_escaping_deep_validation() 
     add_scene(&mut builder, 2, None);
     assert!(matches!(
         builder.finish(),
-        Err(CookedContentError::UnreachableMembers {
-            reachable: 1,
-            total: 2
-        })
+        Err(CookedContentError::Assembly(
+            CookedContentAssemblyError::UnreachableMembers {
+                reachable: 1,
+                total: 2
+            }
+        ))
     ));
 }
 
@@ -507,15 +563,15 @@ fn missing_global_input_and_unselected_input_codec_are_explicit_errors() {
         )))
     ));
     let mut unselected = CookedContentBuilder::new(request(), scene_recipe(), limits()).unwrap();
-    let retained = unselected.retained_bytes;
+    let retained = unselected.assembly.retained_bytes();
     assert!(matches!(
         unselected.add_input(&input()),
         Err(CookedContentError::Runtime(
             RuntimeContentError::CodecNotSelected
         ))
     ));
-    assert_eq!(unselected.retained_bytes, retained);
-    assert!(unselected.members.is_empty());
+    assert_eq!(unselected.assembly.retained_bytes(), retained);
+    assert!(unselected.pending_dependencies(0).is_none());
     add_scene(&mut unselected, 1, None);
     unselected.finish().unwrap();
 }
@@ -526,7 +582,7 @@ fn failed_scene_cook_preserves_the_source_and_prior_builder_members() {
     request.scenes.push(product(2));
     let mut builder = CookedContentBuilder::new(request, recipe(), limits()).unwrap();
     add_scene(&mut builder, 1, None);
-    let retained = builder.retained_bytes;
+    let retained = builder.assembly.retained_bytes();
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
         SceneEntityId::new("unknown-component").unwrap(),
     )
@@ -600,8 +656,9 @@ fn failed_scene_cook_preserves_the_source_and_prior_builder_members() {
             .value(),
         &ComponentValue::Bool(true),
     );
-    assert_eq!(builder.retained_bytes, retained);
-    assert_eq!(builder.members.len(), 1);
+    assert_eq!(builder.assembly.retained_bytes(), retained);
+    assert!(builder.pending_dependencies(0).is_some());
+    assert!(builder.pending_dependencies(1).is_none());
     add_scene(&mut builder, 2, None);
     assert_eq!(
         builder.finish().unwrap().base().catalog().members().len(),
@@ -626,13 +683,11 @@ fn group_retains_actual_bytes_across_cache_removal_and_duplicate_add_is_transact
     let mut builder = CookedContentBuilder::new(request, recipe(), limits()).unwrap();
     add_scene(&mut builder, 1, None);
     builder.add_group(&group).unwrap();
-    assert_eq!(builder.groups.len(), 1);
-    let retained = builder.retained_bytes;
+    let retained = builder.assembly.retained_bytes();
     assert!(
-        matches!(builder.add_group(&group), Err(CookedContentError::DuplicateProduct(duplicate)) if duplicate == product(INPUT))
+        matches!(builder.add_group(&group), Err(CookedContentError::Assembly(CookedContentAssemblyError::DuplicateProduct(duplicate))) if duplicate == product(INPUT))
     );
-    assert_eq!(builder.groups.len(), 1);
-    assert_eq!(builder.retained_bytes, retained);
+    assert_eq!(builder.assembly.retained_bytes(), retained);
     drop(group);
     drop(store);
     root.remove();
@@ -701,13 +756,13 @@ fn a_multi_member_group_cannot_partially_add_before_a_later_duplicate() {
     let mut builder = CookedContentBuilder::new(selected.clone(), recipe(), limits()).unwrap();
     add_scene(&mut builder, 1, None);
     builder.add_input(&input()).unwrap();
-    let retained = builder.retained_bytes;
+    let retained = builder.assembly.retained_bytes();
     assert!(
-        matches!(builder.add_group(&group), Err(CookedContentError::DuplicateProduct(duplicate)) if duplicate == product(INPUT))
+        matches!(builder.add_group(&group), Err(CookedContentError::Assembly(CookedContentAssemblyError::DuplicateProduct(duplicate))) if duplicate == product(INPUT))
     );
-    assert_eq!(builder.retained_bytes, retained);
-    assert_eq!(builder.members.len(), 2);
-    assert!(builder.groups.is_empty());
+    assert_eq!(builder.assembly.retained_bytes(), retained);
+    assert!(builder.pending_dependencies(1).is_some());
+    assert!(builder.pending_dependencies(2).is_none());
     builder.add_input(&input_for(11)).unwrap();
     builder.finish().unwrap();
 
@@ -788,25 +843,33 @@ fn group_retention_exact_and_one_short_preserve_the_builder_for_retry() {
     );
     let mut probe = CookedContentBuilder::new(request(), recipe(), limits()).unwrap();
     add_scene(&mut probe, 1, None);
-    let before = probe.retained_bytes;
+    let before = probe.assembly.retained_bytes();
     probe.add_group(&group).unwrap();
-    let exact = probe.retained_bytes;
+    let exact = probe.assembly.retained_bytes();
     assert!(exact >= before + group.retained_bytes());
 
-    let mut builder = CookedContentBuilder::new(request(), recipe(), limits()).unwrap();
+    let mut builder = CookedContentBuilder::new(
+        request(),
+        recipe(),
+        CookedContentLimits {
+            retained_bytes: ByteLimit::new(exact).unwrap(),
+            ..limits()
+        },
+    )
+    .unwrap();
     add_scene(&mut builder, 1, None);
-    builder.limits.retained_bytes = ByteLimit::new(exact - 1).unwrap();
+    builder.reserve_consumer_metadata(1).unwrap();
     assert!(
-        matches!(builder.add_group(&group), Err(CookedContentError::Budget {
+        matches!(builder.add_group(&group), Err(CookedContentError::Assembly(CookedContentAssemblyError::Budget {
         kind: "retained-bytes", required, limit,
-    }) if required == exact && limit == exact - 1)
+        })) if required == exact + 1 && limit == exact)
     );
-    assert_eq!(builder.retained_bytes, before);
-    assert!(builder.groups.is_empty());
-    assert_eq!(builder.members.len(), 1);
-    builder.limits.retained_bytes = ByteLimit::new(exact).unwrap();
+    assert_eq!(builder.assembly.retained_bytes(), before + 1);
+    assert!(builder.pending_dependencies(0).is_some());
+    assert!(builder.pending_dependencies(1).is_none());
+    builder.release_consumer_metadata(1);
     builder.add_group(&group).unwrap();
-    assert_eq!(builder.retained_bytes, exact);
+    assert_eq!(builder.assembly.retained_bytes(), exact);
 }
 
 #[test]
@@ -830,7 +893,7 @@ fn finish_admits_original_group_base_and_decoder_promises_at_exact_work_limit() 
         + size_of::<VerifiedArtifactGroup>()
         + group.retained_bytes();
     let exact = outside + model.runtime.retained_bytes().get() + model.runtime.work_bytes().get();
-    for allowance in [exact - 1, exact] {
+    for (work, allowance) in [(0, exact - 1), (0, exact), (1, exact), (1, exact + 1)] {
         let mut builder = CookedContentBuilder::new(
             selected.clone(),
             recipe(),
@@ -842,21 +905,26 @@ fn finish_admits_original_group_base_and_decoder_promises_at_exact_work_limit() 
         .unwrap();
         add_scene(&mut builder, 1, None);
         builder.add_group(&group).unwrap();
-        let retained_before_index = builder.retained_bytes;
+        let retained_before_index = builder.assembly.retained_bytes();
         builder.reserve_consumer_metadata(4096).unwrap();
-        assert_eq!(builder.retained_bytes, retained_before_index + 4096);
+        assert_eq!(
+            builder.assembly.retained_bytes(),
+            retained_before_index + 4096
+        );
         builder.release_consumer_metadata(4096);
-        assert_eq!(builder.retained_bytes, retained_before_index);
+        assert_eq!(builder.assembly.retained_bytes(), retained_before_index);
+        builder.reserve_consumer_work(work).unwrap();
+        let required_work = exact + work;
         match builder.finish() {
-            Err(CookedContentError::Budget {
+            Err(CookedContentError::Assembly(CookedContentAssemblyError::Budget {
                 kind: "work-bytes",
                 required,
                 limit,
-            }) if allowance == exact - 1 => {
-                assert_eq!(required, exact);
-                assert_eq!(limit, exact - 1);
+            })) if allowance < required_work => {
+                assert_eq!(required, required_work);
+                assert_eq!(limit, allowance);
             }
-            Ok(content) if allowance == exact => {
+            Ok(content) if allowance == required_work => {
                 assert_eq!(content.base().catalog().members().len(), 2)
             }
             result => panic!("unexpected work-bound result: {result:?}"),
@@ -866,19 +934,13 @@ fn finish_admits_original_group_base_and_decoder_promises_at_exact_work_limit() 
 
 #[test]
 fn memory_capture_checks_exact_member_bytes_and_complete_table() {
-    let mut corrupt = CookedContentBuilder::new(request(), recipe(), limits()).unwrap();
-    add_scene(&mut corrupt, 1, None);
-    replace_scene_bytes(&mut corrupt, 1, b"replaced after cooking", false);
-    assert!(matches!(
-        corrupt.finish(),
-        Err(CookedContentError::Runtime(
-            RuntimeContentError::MemberDigestMismatch
-        ))
-    ));
-
     let mut valid = CookedContentBuilder::new(request(), recipe(), limits()).unwrap();
     add_scene(&mut valid, 1, None);
     let prepared = valid.finish().unwrap();
+    assert!(matches!(
+        capture_with_scene_bytes(&prepared, 1, b"replaced after cooking", false),
+        Err(RuntimeContentError::MemberDigestMismatch)
+    ));
     let encoded = prepared.pack().catalog_bytes().to_vec();
     assert!(matches!(
         RuntimeContentBase::capture_members(

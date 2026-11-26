@@ -225,6 +225,7 @@ project-source = [
 ]
 project-workflow = [
     "project-source",
+    "nara_project/cook",
     "dep:getrandom",
     "dep:uuid",
     "dep:toml",

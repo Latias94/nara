@@ -24,9 +24,9 @@ impl Limit {
             Self::Work => "work-bytes",
         };
         assert!(
-            matches!(error, ProjectCookError::Content(CookedContentError::Budget {
+            matches!(error, ProjectCookError::Content(CookedContentError::Assembly(CookedContentAssemblyError::Budget {
                 kind: actual, required, limit,
-            }) if actual == kind && required == expected && limit == bound),
+            })) if actual == kind && required == expected && limit == bound),
             "expected {kind}: required={expected}, limit={bound}; got {error:?}",
         );
     }
@@ -36,11 +36,11 @@ impl Limit {
 fn consumer_tables_admit_exact_metadata_and_refuse_one_byte_short_before_mutation_or_build() {
     let fixture = Fixture::<4>::new(None);
     let baseline = match fixture.builder(Limit::Retained.limits(1)).unwrap_err() {
-        CookedContentError::Budget {
+        CookedContentError::Assembly(CookedContentAssemblyError::Budget {
             kind: "retained-bytes",
             required,
             limit: 1,
-        } => required,
+        }) => required,
         error => panic!("expected the original builder's initial retention bound, got {error:?}"),
     };
     let raw_bytes =

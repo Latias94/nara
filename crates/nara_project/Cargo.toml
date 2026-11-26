@@ -12,6 +12,7 @@ nara_app = { workspace = true, features = ["tasks"] }
 nara_asset = { workspace = true, optional = true, features = ["pack"] }
 nara_core = { workspace = true, features = ["serde"] }
 nara_ecs.workspace = true
+nara_reflect = { workspace = true, optional = true, features = ["serde"] }
 nara_scene = { workspace = true, features = ["runtime-configuration"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -24,7 +25,6 @@ tempfile = "3.27"
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
 ctrlc = { version = "3.5", optional = true }
 nara_input = { workspace = true, optional = true, features = ["serde"] }
-nara_reflect = { workspace = true, optional = true, features = ["serde"] }
 uuid = { workspace = true, optional = true, features = ["v4"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
@@ -47,6 +47,7 @@ default = ["workflow"]
 manifest-source = ["nara_core/fs-capabilities"]
 cargo-build = ["cargo-facts", "dep:blake3"]
 cargo-facts = ["manifest-source"]
+cook = ["dep:nara_asset", "nara_asset/artifact-build", "dep:nara_reflect", "nara_scene/runtime-catalog"]
 player-package = ["cargo-build", "dep:getrandom", "dep:nara_asset", "nara_scene/runtime-catalog"]
 product-process = [
     "dep:rustix",

@@ -15,6 +15,8 @@ mod authoring;
 #[cfg(feature = "cargo-facts")]
 pub mod cargo;
 mod content;
+#[cfg(feature = "cook")]
+pub mod cook;
 mod defaults;
 pub mod delivery;
 mod effective;

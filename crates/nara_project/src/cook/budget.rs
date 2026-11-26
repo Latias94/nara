@@ -2,28 +2,31 @@
 
 use std::mem::size_of;
 
-use crate::runtime_content::{
+use nara_asset::AssetProductRef;
+use nara_scene::runtime_catalog::{
     RuntimeContentDependency, RuntimeContentMember, RuntimeContentMemberKind,
 };
-use nara_asset::AssetProductRef;
 
-use super::{CookedContentError, CookedContentRequest};
+use super::{CookedContentAssemblyError, CookedContentRequest};
 
-pub(super) fn add(left: usize, right: usize) -> Result<usize, CookedContentError> {
-    left.checked_add(right).ok_or(CookedContentError::Overflow)
+pub(super) fn add(left: usize, right: usize) -> Result<usize, CookedContentAssemblyError> {
+    left.checked_add(right)
+        .ok_or(CookedContentAssemblyError::Overflow)
 }
 
-pub(super) fn mul(count: usize, bytes: usize) -> Result<usize, CookedContentError> {
-    count.checked_mul(bytes).ok_or(CookedContentError::Overflow)
+pub(super) fn mul(count: usize, bytes: usize) -> Result<usize, CookedContentAssemblyError> {
+    count
+        .checked_mul(bytes)
+        .ok_or(CookedContentAssemblyError::Overflow)
 }
 
 pub(super) fn check(
     kind: &'static str,
     required: usize,
     limit: usize,
-) -> Result<(), CookedContentError> {
+) -> Result<(), CookedContentAssemblyError> {
     if required > limit {
-        Err(CookedContentError::Budget {
+        Err(CookedContentAssemblyError::Budget {
             kind,
             required,
             limit,
@@ -35,7 +38,7 @@ pub(super) fn check(
 
 pub(super) fn request_heap_bytes(
     request: &CookedContentRequest,
-) -> Result<usize, CookedContentError> {
+) -> Result<usize, CookedContentAssemblyError> {
     let mut total = add(
         request.target.triple().len(),
         request.target.profile().len(),
@@ -59,7 +62,7 @@ pub(super) fn request_heap_bytes(
 
 pub(super) fn member_heap_bytes(
     member: &RuntimeContentMember,
-) -> Result<usize, CookedContentError> {
+) -> Result<usize, CookedContentAssemblyError> {
     let mut total = add(
         member.path().len(),
         mul(member.products().len(), size_of::<AssetProductRef>())?,
@@ -77,7 +80,7 @@ pub(super) fn member_heap_bytes(
             RuntimeContentMemberKind::Scene { source } => source
                 .retained_bytes()
                 .checked_sub(size_of::<nara_scene::SourceDocumentKey>())
-                .ok_or(CookedContentError::Overflow)?,
+                .ok_or(CookedContentAssemblyError::Overflow)?,
             RuntimeContentMemberKind::Asset { format, .. } => format.as_str().len(),
         },
     )

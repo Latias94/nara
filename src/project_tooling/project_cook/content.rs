@@ -27,7 +27,9 @@ use crate::{
         ProjectContentSnapshot, ProjectSceneContentStamp, ProjectTileSetContent, RuntimePlan,
         resolve_product_recipe,
     },
-    project_workflow::cooked_content::{CookedContentBuilder, CookedContentRequest},
+    project_workflow::cooked_content::{
+        CookedContentAssemblyError, CookedContentBuilder, CookedContentError, CookedContentRequest,
+    },
     reflect::ComponentTypeId,
     runtime_content::RuntimeContentDependencyRole,
     scene::CompiledSceneCandidate,
@@ -215,7 +217,7 @@ impl Observations {
 }
 
 fn overflow() -> ProjectCookError {
-    crate::project_workflow::cooked_content::CookedContentError::Overflow.into()
+    CookedContentError::from(CookedContentAssemblyError::Overflow).into()
 }
 
 fn metadata_bytes<T>(strings: usize) -> Result<usize, ProjectCookError> {
