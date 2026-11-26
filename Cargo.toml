@@ -78,7 +78,7 @@ naga = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767
 parley = { version = "=0.11.0", default-features = false, features = ["std", "complex-scripts"] }
 taffy = { version = "=0.10.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
 raw-window-handle = "0.6"
-ron = "0.8"
+ron = "0.12.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 swash = "=0.2.6"
@@ -134,6 +134,7 @@ runtime-core = [
 parallel-executor = ["runtime-core", "nara_app/parallel-executor"]
 runtime-input = ["runtime-core", "dep:nara_input"]
 runtime-window = ["runtime-core", "dep:nara_window"]
+scene-authoring = ["runtime-core", "nara_scene/authoring"]
 runtime-2d = [
     "runtime-input",
     "runtime-window",
@@ -146,6 +147,7 @@ runtime-2d = [
 presentation-2d = ["runtime-2d", "nara_render/sprite-render"]
 runtime-ui = ["runtime-input", "runtime-window", "dep:nara_ui"]
 presentation-ui = ["runtime-ui", "dep:nara_render", "nara_render/hud-runtime"]
+asset-authoring = ["runtime-core", "nara_asset/authoring"]
 asset-watch = ["runtime-core", "nara_asset/hot-reload"]
 desktop-winit = ["runtime-input", "runtime-window", "nara_window/winit", "nara_render?/winit"]
 audio = ["runtime-core", "dep:nara_audio"]

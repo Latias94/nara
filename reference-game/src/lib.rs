@@ -1,25 +1,21 @@
 //! Night Relay, a 2D game built on Nara's public runtime and scene authoring APIs.
 
-use nara::prelude::{Component, PersistentComponent};
+use nara::{
+    prelude::{App, Component, RegisterSchema, Schema},
+    reflect::SchemaRegistrationError,
+};
 
 pub const TITLE: &str = "Night Relay";
 pub const WINDOW_SIZE: (u32, u32) = (1152, 768);
-pub const DEFAULT_SCENE_PATH: &str = "assets/night-relay.nara.scene.ron";
 
-#[derive(Clone, Copy, Debug, Component, PersistentComponent)]
-#[nara(
-    id = "night-relay.RunRules",
-    version = 1,
-    alias = "Run Rules",
-    component_capabilities(scene, inspect, edit),
-    field_capabilities(scene, inspect, edit)
-)]
+#[derive(Clone, Copy, Debug, Component, Schema)]
+#[schema(id = "night-relay.RunRules", version = 2, default, alias = "Run Rules")]
 pub struct RunRules {
-    #[nara(id = "time-limit-seconds", alias = "Time limit (seconds)")]
+    #[schema(alias = "Time limit (seconds)", range = 1..=180)]
     pub time_limit_seconds: u32,
-    #[nara(id = "move-speed", alias = "Flight speed")]
+    #[schema(alias = "Flight speed", range = 40.0..=300.0)]
     pub move_speed: f32,
-    #[nara(id = "shield-charges", alias = "Shield charges")]
+    #[schema(alias = "Shield charges", range = 1..=5)]
     pub shield_charges: u32,
 }
 
@@ -44,6 +40,58 @@ impl Default for RunRules {
             shield_charges: 3,
         }
     }
+}
+
+#[derive(Component, Default, Schema)]
+#[schema(id = "night-relay.Pilot", version = 1, default, alias = "Pilot")]
+struct Pilot;
+
+#[derive(Component, Schema)]
+#[schema(
+    id = "night-relay.PowerCell",
+    version = 1,
+    authoring_initial,
+    alias = "Power Cell"
+)]
+struct PowerCell {
+    #[schema(alias = "Order", range = 1..=3, initial = 1)]
+    order: u32,
+}
+
+#[derive(Component, Schema)]
+#[schema(
+    id = "night-relay.PatrolDrone",
+    version = 1,
+    default,
+    alias = "Patrol Drone"
+)]
+struct PatrolDrone {
+    #[schema(alias = "Order", range = 1..=3)]
+    order: u32,
+}
+
+impl Default for PatrolDrone {
+    fn default() -> Self {
+        Self { order: 1 }
+    }
+}
+
+#[derive(Component, Default, Schema)]
+#[schema(
+    id = "night-relay.ExtractionGate",
+    version = 1,
+    default,
+    alias = "Extraction Gate"
+)]
+struct ExtractionGate;
+
+pub fn register_game_schema(app: &mut App) -> Result<(), SchemaRegistrationError> {
+    app.register_schema::<RunRules>()?
+        .register_schema::<Pilot>()?
+        .register_schema::<PowerCell>()?
+        .register_schema::<PatrolDrone>()?
+        .register_schema::<ExtractionGate>()?;
+    Ok(())
 }
 
 #[cfg(feature = "simulation")]

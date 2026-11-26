@@ -3,8 +3,8 @@ use std::{f32::consts::FRAC_PI_2, time::Duration};
 use nara::{
     ecs::{Single, bevy_ecs::error::Result as SystemResult, schedule::IntoScheduleConfigs},
     prelude::*,
+    scene::authoring::SceneDocument,
 };
-use nara_scene::authoring::SceneDocument;
 
 use crate::{
     RunRules,
@@ -17,16 +17,17 @@ const PLUGIN: PluginId = PluginId::new("night-relay.game");
 const DECLARATION: PluginDeclaration = PluginDeclaration::new(PLUGIN, PluginCategory::Runtime);
 
 /// Installs the shared arena and fixed simulation after Nara's `DefaultPlugins`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct GamePlugin {
-    scene: Option<SceneDocument>,
+    scene: SceneDocument,
     rules_override: Option<RunRules>,
 }
 
 impl GamePlugin {
+    /// Uses a source scene whose prefab instances have already been expanded.
     pub fn from_scene(scene: SceneDocument) -> Self {
         Self {
-            scene: Some(scene),
+            scene,
             rules_override: None,
         }
     }
@@ -43,14 +44,7 @@ impl Plugin for GamePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        let bundled;
-        let scene = if let Some(scene) = &self.scene {
-            scene
-        } else {
-            bundled = arena::bundled_scene().map_err(|error| setup_error(error.to_string()))?;
-            &bundled
-        };
-        let (arena, rules) = arena::spawn_scene(app.world_mut()?, scene, self.rules_override)
+        let (arena, rules) = arena::spawn_scene(app.world_mut()?, &self.scene, self.rules_override)
             .map_err(setup_error)?;
         let round = Round::new(rules, arena.pilot.pose);
         app.init_resource::<PilotInput>()?

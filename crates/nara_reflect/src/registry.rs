@@ -28,6 +28,11 @@ pub enum ComponentRegistryError {
         field_id: Option<ComponentFieldId>,
         source: AliasError,
     },
+    #[error("invalid Schema group in component '{component_id}': {source}")]
+    InvalidGroup {
+        component_id: ComponentTypeId,
+        source: AliasError,
+    },
     #[error("duplicate alias '{alias}' in component '{component_id}', field {field_id:?}")]
     DuplicateAlias {
         component_id: ComponentTypeId,
@@ -97,6 +102,11 @@ pub enum ComponentRegistryError {
     },
     #[error("field '{field_id}' of '{component_id}' requires unique nonempty string choices")]
     InvalidFieldChoices {
+        component_id: ComponentTypeId,
+        field_id: ComponentFieldId,
+    },
+    #[error("field '{field_id}' of '{component_id}' requires a positive numeric step")]
+    InvalidFieldStep {
         component_id: ComponentTypeId,
         field_id: ComponentFieldId,
     },
@@ -172,6 +182,12 @@ fn validate_schema(schema: &ComponentSchema) -> Result<(), ComponentRegistryErro
         });
     }
     validate_aliases(&schema.id, None, &schema.aliases)?;
+    if let Some(group) = schema.group() {
+        validate_alias(group).map_err(|source| ComponentRegistryError::InvalidGroup {
+            component_id: schema.id.clone(),
+            source,
+        })?;
+    }
     for capability in [
         ComponentCapability::AssetRef,
         ComponentCapability::EntityRef,
@@ -293,17 +309,39 @@ fn validate_field(
     validate_aliases(&schema.id, Some(&field.id), &field.aliases)?;
     if !field.choices().is_empty() {
         let mut seen = BTreeSet::new();
-        if !field.shape.contains_kind(ComponentValueKind::String)
-            || field
-                .choices()
-                .iter()
-                .any(|choice| choice.trim().is_empty() || !seen.insert(choice))
+        let mut shape = field.shape();
+        if let ComponentValueShape::Optional { value } = shape {
+            shape = value;
+        }
+        if !matches!(
+            shape,
+            ComponentValueShape::Scalar {
+                kind: ComponentValueKind::String,
+                ..
+            }
+        ) || field
+            .choices()
+            .iter()
+            .any(|choice| choice.trim().is_empty() || !seen.insert(choice))
         {
             return Err(ComponentRegistryError::InvalidFieldChoices {
                 component_id: schema.id.clone(),
                 field_id: field.id.clone(),
             });
         }
+    }
+    if let Some(step) = field.step()
+        && (step <= 0.0
+            || !matches!(
+                field.value_kind(),
+                ComponentValueKind::I64 | ComponentValueKind::U64 | ComponentValueKind::F64
+            )
+            || (field.value_kind() != ComponentValueKind::F64 && step.fract() != 0.0))
+    {
+        return Err(ComponentRegistryError::InvalidFieldStep {
+            component_id: schema.id.clone(),
+            field_id: field.id.clone(),
+        });
     }
     if let Some(hint @ ComponentFieldEditorHint::LinearRgba) = field.editor_hint()
         && !matches!(field.shape(), ComponentValueShape::Record { members }
@@ -344,7 +382,7 @@ fn validate_field(
     }
     if let Some(default) = &field.default_value {
         validate_component_value_budget(default)
-            .and_then(|()| field.shape.validate_value(default))
+            .and_then(|()| field.validate_value(default))
             .map_err(
                 |source| ComponentRegistryError::InvalidComponentFieldDefault {
                     component_id: schema.id.clone(),
@@ -402,7 +440,7 @@ fn validate_value(
     }
     for field in &schema.fields {
         match value.get_path(&field.path) {
-            Ok(value) => field.shape.validate_value(value).map_err(|error| {
+            Ok(value) => field.validate_value(value).map_err(|error| {
                 let path = ComponentFieldPath::new(
                     field
                         .path
@@ -423,7 +461,7 @@ fn validate_value(
             ) => {
                 return Err(ComponentCodecError::missing_field(field.path.to_string()));
             }
-            Err(error) => return Err(ComponentCodecError::Message(error.to_string())),
+            Err(error) => return Err(error.into()),
         }
     }
     validate_coverage(paths, value, &mut Vec::new())

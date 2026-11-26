@@ -20,5 +20,8 @@ thiserror.workspace = true
 nara_project = { workspace = true, features = ["workflow"] }
 tempfile = "3.27"
 
+[target.'cfg(any(unix, windows))'.dependencies]
+nara_asset = { workspace = true, features = ["authoring"] }
+
 [dev-dependencies]
 tempfile = "3.27"

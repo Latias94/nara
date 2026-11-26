@@ -1,8 +1,8 @@
 use nara_ecs::Component;
-use nara_reflect::PersistentComponent;
+use nara_reflect::Schema;
 
-#[derive(Component, PersistentComponent)]
-#[nara(
+#[derive(Component, Schema)]
+#[schema(
     id = "nara.test.UnsupportedPointerSized",
     version = 1,
     alias = "Unsupported pointer sized",
@@ -10,7 +10,7 @@ use nara_reflect::PersistentComponent;
     field_capabilities(scene)
 )]
 struct UnsupportedPointerSized {
-    #[nara(id = "value", alias = "Value")]
+    #[schema(id = "value", alias = "Value")]
     value: usize,
 }
 

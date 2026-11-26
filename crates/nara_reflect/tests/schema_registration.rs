@@ -4,7 +4,7 @@ use nara_ecs::{
     bevy_ecs::{lifecycle::HookContext, world::DeferredWorld},
 };
 use nara_reflect::{
-    ComponentRegistryError, ComponentRegistryPlugin, PersistentComponent, RegisterSchema,
+    ComponentRegistryError, ComponentRegistryPlugin, RegisterSchema, Schema,
     SchemaRegistrationError, component_registry,
 };
 
@@ -14,10 +14,10 @@ struct DerivedRuntimeState;
 #[derive(Default, Resource)]
 struct Added(usize);
 
-#[derive(Component, PersistentComponent)]
+#[derive(Component, Schema)]
 #[require(DerivedRuntimeState)]
 #[component(on_add = count_on_add)]
-#[nara(
+#[schema(
     id = "game.Rules",
     version = 1,
     alias = "Rules",
@@ -25,7 +25,7 @@ struct Added(usize);
     field_capabilities(inspect, edit)
 )]
 struct Rules {
-    #[nara(id = "score", alias = "Score")]
+    #[schema(id = "score", alias = "Score")]
     score: u32,
 }
 

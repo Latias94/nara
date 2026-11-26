@@ -22,8 +22,16 @@ enum Payload {
     Float(ComponentFloat),
     Text(String),
     List(Vec<ComponentValue>),
+    Numbers(Vec<PackedNumber>),
     Map(std::collections::BTreeMap<String, ComponentValue>),
     Unit(()),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PackedNumber {
+    Integer(i64),
+    Float(ComponentFloat),
 }
 
 enum Field {
@@ -142,13 +150,59 @@ fn decode_value<E: de::Error>(kind: &str, value: Option<Payload>) -> Result<Comp
         ("string", Some(Payload::Text(value))) => Ok(ComponentValue::String(value)),
         ("list", Some(Payload::List(value))) => Ok(ComponentValue::List(value)),
         ("map", Some(Payload::Map(value))) => Ok(ComponentValue::Map(value)),
+        ("asset_ref", Some(Payload::Text(value))) => value
+            .parse()
+            .map(ComponentValue::AssetReference)
+            .map_err(de::Error::custom),
         ("entity_ref", Some(Payload::Text(value))) => value
             .parse()
             .map(ComponentValue::EntityReference)
             .map_err(de::Error::custom),
+        (kind @ ("packed_u16" | "packed_u32" | "packed_i32" | "packed_f32" | "bytes"), value) => {
+            match value {
+                Some(Payload::Numbers(values)) => decode_packed(kind, values),
+                Some(Payload::List(values)) if values.is_empty() => decode_packed(kind, Vec::new()),
+                _ => Err(E::custom("packed field requires a numeric sequence")),
+            }
+        }
         _ => Err(serde::de::Error::custom(
             "component value payload does not match its type",
         )),
+    }
+}
+
+fn decode_packed<E: de::Error>(kind: &str, values: Vec<PackedNumber>) -> Result<ComponentValue, E> {
+    fn integers<T: TryFrom<i64>, E: de::Error>(values: Vec<PackedNumber>) -> Result<Vec<T>, E> {
+        values
+            .into_iter()
+            .map(|value| match value {
+                PackedNumber::Integer(value) => T::try_from(value)
+                    .map_err(|_| E::custom("packed integer is outside its type's range")),
+                PackedNumber::Float(_) => Err(E::custom("packed integer field requires integers")),
+            })
+            .collect()
+    }
+    match kind {
+        "packed_u16" => integers(values).map(ComponentValue::PackedU16),
+        "packed_u32" => integers(values).map(ComponentValue::PackedU32),
+        "packed_i32" => integers(values).map(ComponentValue::PackedI32),
+        "bytes" => integers(values).map(ComponentValue::Bytes),
+        "packed_f32" => values
+            .into_iter()
+            .map(|value| {
+                let value = match value {
+                    PackedNumber::Integer(value) => value as f32,
+                    PackedNumber::Float(value) => value.get() as f32,
+                };
+                if value.is_finite() {
+                    Ok(value)
+                } else {
+                    Err(E::custom("packed float requires finite f32 values"))
+                }
+            })
+            .collect::<Result<_, _>>()
+            .map(ComponentValue::PackedF32),
+        _ => Err(E::custom("unknown packed field type")),
     }
 }
 
@@ -161,8 +215,11 @@ impl<'de> DeserializeSeed<'de> for PayloadSeed<'_> {
         match self.0 {
             Some("list") => deserializer.deserialize_any(ListVisitor).map(Payload::List),
             Some("map") => deserializer.deserialize_any(MapVisitor).map(Payload::Map),
-            Some("bool" | "i64" | "u64" | "f64" | "string" | "entity_ref") => {
+            Some("bool" | "i64" | "u64" | "f64" | "string" | "asset_ref" | "entity_ref") => {
                 deserializer.deserialize_any(ScalarPayloadVisitor)
+            }
+            Some("packed_u16" | "packed_u32" | "packed_i32" | "packed_f32" | "bytes") => {
+                Vec::deserialize(deserializer).map(Payload::Numbers)
             }
             _ => Payload::deserialize(deserializer),
         }
@@ -317,7 +374,13 @@ impl Serialize for ComponentValue {
             Self::String(_) => "string",
             Self::List(_) => "list",
             Self::Map(_) => "map",
+            Self::AssetReference(_) => "asset_ref",
             Self::EntityReference(_) => "entity_ref",
+            Self::PackedU16(_) => "packed_u16",
+            Self::PackedU32(_) => "packed_u32",
+            Self::PackedI32(_) => "packed_i32",
+            Self::PackedF32(_) => "packed_f32",
+            Self::Bytes(_) => "bytes",
         };
         let mut wire = serializer.serialize_struct(
             "ComponentValue",
@@ -333,7 +396,20 @@ impl Serialize for ComponentValue {
             Self::String(value) => wire.serialize_field("value", value)?,
             Self::List(value) => wire.serialize_field("value", value)?,
             Self::Map(value) => wire.serialize_field("value", value)?,
+            Self::AssetReference(value) => wire.serialize_field("value", &value.to_string())?,
             Self::EntityReference(value) => wire.serialize_field("value", &value.to_string())?,
+            Self::PackedU16(value) => wire.serialize_field("value", value)?,
+            Self::PackedU32(value) => wire.serialize_field("value", value)?,
+            Self::PackedI32(value) => wire.serialize_field("value", value)?,
+            Self::PackedF32(value) => {
+                if value.iter().any(|value| !value.is_finite()) {
+                    return Err(serde::ser::Error::custom(
+                        "packed float requires finite f32 values",
+                    ));
+                }
+                wire.serialize_field("value", value)?;
+            }
+            Self::Bytes(value) => wire.serialize_field("value", value)?,
         }
         wire.end()
     }

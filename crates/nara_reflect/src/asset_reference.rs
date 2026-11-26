@@ -1,4 +1,5 @@
 use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
+use nara_core::AssetId;
 
 use crate::{ComponentCodecError, ComponentValue, ComponentValueRef};
 
@@ -8,8 +9,11 @@ pub fn decode_asset_reference_value<'a>(
 ) -> Result<AssetRef, ComponentCodecError> {
     let invalid =
         || ComponentCodecError::invalid_field("<asset-ref>", "a canonical asset reference");
+    let value = value.into();
+    if let Some(stable) = value.as_asset_reference() {
+        return Ok(AssetRef::StableId((*stable).into()));
+    }
     let fields = value
-        .into()
         .as_map()
         .filter(|map| map.len() == 2)
         .ok_or_else(invalid)?;
@@ -20,9 +24,6 @@ pub fn decode_asset_reference_value<'a>(
     let value = fields.get("value").ok_or_else(invalid)?;
     match kind {
         "path" => AssetRef::path(value.as_str().ok_or_else(invalid)?).map_err(|_| invalid()),
-        "stable_id" => {
-            AssetRef::stable_id(value.as_str().ok_or_else(invalid)?).map_err(|_| invalid())
-        }
         "product" => decode_product(value).map_err(|_| invalid()),
         _ => Err(invalid()),
     }
@@ -58,12 +59,20 @@ fn decode_product(value: ComponentValueRef<'_>) -> Result<AssetRef, ()> {
         .map_err(|_| ())
 }
 
-/// Encodes a reference without resolving its target.
-#[must_use]
-pub fn encode_asset_reference_value(reference: &AssetRef) -> ComponentValue {
+/// Encodes a reference without resolving its target. Exact stable IDs use the same value as
+/// `AssetId` fields. Path and product selections remain available to native locator callers.
+pub fn encode_asset_reference_value(
+    reference: &AssetRef,
+) -> Result<ComponentValue, ComponentCodecError> {
     let (kind, value) = match reference {
         AssetRef::Path(path) => ("path", ComponentValue::String(path.as_str().to_owned())),
-        AssetRef::StableId(id) => ("stable_id", ComponentValue::String(id.to_string())),
+        AssetRef::StableId(id) => {
+            return AssetId::try_from(*id)
+                .map(ComponentValue::AssetReference)
+                .map_err(|_| {
+                    ComponentCodecError::invalid_field("<asset-ref>", "non-nil asset UUID")
+                });
+        }
         AssetRef::Product(reference) => {
             let product = match reference.product().as_subproduct() {
                 None => {
@@ -86,8 +95,8 @@ pub fn encode_asset_reference_value(reference: &AssetRef) -> ComponentValue {
             )
         }
     };
-    ComponentValue::map([
+    Ok(ComponentValue::map([
         ("kind", ComponentValue::String(kind.to_owned())),
         ("value", value),
-    ])
+    ]))
 }

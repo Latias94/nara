@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use nara_asset::{AssetScanError, AssetScanMode, AssetSourcePath, ProjectAssetDatabase};
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -29,12 +30,19 @@ pub enum ProjectCheckError {
         #[source]
         source: toml::de::Error,
     },
+    #[error("invalid project asset directory '{0}'")]
+    AssetDirectory(String),
+    #[error(transparent)]
+    Assets(#[from] AssetScanError),
 }
 
-/// Reads `nara.toml` and the local Cargo package declaration without running Cargo.
+/// Validates the project manifests and discovers asset sidecars without running project code.
 pub fn check_project(project_dir: &Path) -> Result<ProjectManifest, ProjectCheckError> {
     let manifest = read_project_manifest(project_dir)?;
     CargoPackage::read(project_dir)?;
+    let root = AssetSourcePath::new(manifest.paths.assets.as_str())
+        .map_err(|_| ProjectCheckError::AssetDirectory(manifest.paths.assets.clone()))?;
+    ProjectAssetDatabase::scan(project_dir, &[root], AssetScanMode::Discover)?;
     Ok(manifest)
 }
 

@@ -15,6 +15,7 @@ tempfile = "3.27"
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
 ctrlc = { version = "3.5", optional = true }
+nara_asset = { workspace = true, optional = true, features = ["authoring"] }
 nara_reflect = { workspace = true, optional = true, features = ["serde"] }
 serde_json = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
@@ -36,6 +37,7 @@ default = ["workflow"]
 workflow = [
     "dep:ctrlc",
     "dep:libc",
+    "dep:nara_asset",
     "dep:nara_reflect",
     "dep:serde_json",
     "dep:thiserror",

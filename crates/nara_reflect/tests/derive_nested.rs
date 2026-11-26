@@ -6,12 +6,11 @@ use nara_ecs::Component;
 use nara_reflect::{
     AssetReferenceDemand, ComponentCapability, ComponentFieldPath, ComponentNumericDomain,
     ComponentRegistryError, ComponentSchemaCatalog, ComponentValue, ComponentValueKind,
-    ComponentValueShape, PersistentComponent, PersistentComponentProvider,
-    validate_component_value,
+    ComponentValueShape, Schema, validate_component_value,
 };
 
-#[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
-#[nara(
+#[derive(Component, Schema, Debug, Clone, PartialEq)]
+#[schema(
     id = "nara.test.NestedReferenceProbe",
     version = 1,
     alias = "Nested reference probe",
@@ -19,21 +18,21 @@ use nara_reflect::{
     field_capabilities(scene, inspect, edit)
 )]
 struct NestedReferenceProbe {
-    #[nara(
+    #[schema(
         id = "targets",
         alias = "Targets",
         capabilities(scene, inspect, edit, entity_ref)
     )]
     targets: Vec<Option<EntityUuid>>,
-    #[nara(
+    #[schema(
         id = "assets",
         alias = "Assets",
         capabilities(scene, inspect, edit, asset_ref)
     )]
     assets: BTreeMap<String, Vec<Option<AssetRef>>>,
-    #[nara(id = "weights", alias = "Weights")]
+    #[schema(id = "weights", alias = "Weights")]
     weights: Vec<u8>,
-    #[nara(id = "fallback", alias = "Fallback")]
+    #[schema(id = "fallback", alias = "Fallback")]
     fallback: Option<i64>,
 }
 
@@ -73,10 +72,9 @@ fn nested_probe() -> NestedReferenceProbe {
 
 #[test]
 fn generated_nested_reference_codecs_round_trip() {
-    let catalog = ComponentSchemaCatalog::from_components([
-        NestedReferenceProbe::persistent_component_schema(),
-    ])
-    .unwrap();
+    let catalog =
+        ComponentSchemaCatalog::from_components([NestedReferenceProbe::type_schema().unwrap()])
+            .unwrap();
     let schema = &catalog.components()[0];
     assert!(schema.fields().iter().all(|field| field.is_required()));
     assert_eq!(
@@ -115,7 +113,7 @@ fn generated_nested_reference_codecs_round_trip() {
     );
 
     let expected = nested_probe();
-    let encoded = expected.encode_persistent_component().unwrap();
+    let encoded = expected.encode_component().unwrap();
     assert_eq!(encoded.field("fallback").unwrap(), &ComponentValue::Null);
     assert_eq!(
         encoded.field("targets").unwrap(),
@@ -124,24 +122,30 @@ fn generated_nested_reference_codecs_round_trip() {
             ComponentValue::Null,
         ])
     );
+    assert_eq!(
+        encoded
+            .read_path(&r#"assets["portraits"][2]"#.parse().unwrap())
+            .unwrap(),
+        ComponentValue::AssetReference("3c2d4005-63bd-4e2a-9792-bb2f48a12821".parse().unwrap()),
+    );
     validate_component_value(schema, &encoded).unwrap();
 
     assert_eq!(
-        NestedReferenceProbe::decode_persistent_component((&encoded).into()).unwrap(),
+        NestedReferenceProbe::decode_component((&encoded).into()).unwrap(),
         expected,
     );
 }
 
 #[test]
-fn generated_nested_codecs_keep_required_presence_and_leaf_validation() {
-    let schema = NestedReferenceProbe::persistent_component_schema();
+fn generated_nested_codecs_restore_optional_defaults_and_validate_leaves() {
+    let schema = NestedReferenceProbe::type_schema().unwrap();
     let empty = NestedReferenceProbe {
         targets: Vec::new(),
         assets: BTreeMap::new(),
         weights: Vec::new(),
         fallback: Some(7),
     };
-    let empty_encoded = empty.encode_persistent_component().unwrap();
+    let empty_encoded = empty.encode_component().unwrap();
     assert_eq!(
         empty_encoded.field("fallback").unwrap(),
         &ComponentValue::I64(7)
@@ -156,17 +160,22 @@ fn generated_nested_codecs_keep_required_presence_and_leaf_validation() {
     );
     validate_component_value(&schema, &empty_encoded).unwrap();
     assert_eq!(
-        NestedReferenceProbe::decode_persistent_component((&empty_encoded).into()).unwrap(),
+        NestedReferenceProbe::decode_component((&empty_encoded).into()).unwrap(),
         empty
     );
-    let original = nested_probe().encode_persistent_component().unwrap();
+    let original = nested_probe().encode_component().unwrap();
     let ComponentValue::Map(mut missing) = original.clone() else {
         panic!("generated component must encode a map");
     };
     missing.remove("fallback");
     let missing = ComponentValue::Map(missing);
-    assert!(validate_component_value(&schema, &missing).is_err());
-    assert!(NestedReferenceProbe::decode_persistent_component((&missing).into()).is_err());
+    validate_component_value(&schema, &missing).unwrap();
+    assert!(
+        NestedReferenceProbe::decode_component((&missing).into())
+            .unwrap()
+            .fallback
+            .is_none()
+    );
 
     for (field, invalid) in [
         (
@@ -189,14 +198,14 @@ fn generated_nested_codecs_keep_required_presence_and_leaf_validation() {
             "schema accepted invalid nested field {field}"
         );
         assert!(
-            NestedReferenceProbe::decode_persistent_component((&candidate).into()).is_err(),
+            NestedReferenceProbe::decode_component((&candidate).into()).is_err(),
             "native codec accepted invalid nested field {field}"
         );
     }
 }
 
-#[derive(Component, PersistentComponent)]
-#[nara(
+#[derive(Component, Schema)]
+#[schema(
     id = "nara.test.AmbiguousOptionalProbe",
     version = 1,
     alias = "Ambiguous optional probe",
@@ -204,24 +213,22 @@ fn generated_nested_codecs_keep_required_presence_and_leaf_validation() {
     field_capabilities(scene)
 )]
 struct AmbiguousOptionalProbe {
-    #[nara(id = "value", alias = "Value")]
+    #[schema(id = "value", alias = "Value")]
     value: Option<Option<i64>>,
 }
 
 #[test]
 fn generated_ambiguous_optional_shape_is_rejected() {
     assert!(
-        ComponentSchemaCatalog::from_components([
-            AmbiguousOptionalProbe::persistent_component_schema()
-        ])
-        .is_err()
+        ComponentSchemaCatalog::from_components([AmbiguousOptionalProbe::type_schema().unwrap()])
+            .is_err()
     );
 }
 
 #[test]
 fn generated_nested_reference_markers_are_checked_against_actual_shape() {
     for field_id in ["targets", "assets", "weights"] {
-        let mut schema = NestedReferenceProbe::persistent_component_schema();
+        let mut schema = NestedReferenceProbe::type_schema().unwrap();
         let field = schema
             .fields
             .iter_mut()
@@ -245,8 +252,8 @@ fn generated_nested_reference_markers_are_checked_against_actual_shape() {
     }
 }
 
-#[derive(Component, PersistentComponent, Debug, PartialEq)]
-#[nara(
+#[derive(Component, Schema, Debug, PartialEq)]
+#[schema(
     id = "nara.test.NestedMath",
     version = 1,
     alias = "Nested math",
@@ -254,7 +261,7 @@ fn generated_nested_reference_markers_are_checked_against_actual_shape() {
     field_capabilities(scene, inspect, edit)
 )]
 struct NestedMath {
-    #[nara(id = "vectors", alias = "Vectors")]
+    #[schema(id = "vectors", alias = "Vectors")]
     vectors: BTreeMap<String, Vec<Option<Vec2>>>,
 }
 
@@ -263,11 +270,11 @@ fn generated_nested_math_composes_closed_axes_through_maps_lists_and_optional() 
     let expected = NestedMath {
         vectors: BTreeMap::from([("route".into(), vec![Some(Vec2::new(0.5, -2.0)), None])]),
     };
-    let schema = NestedMath::persistent_component_schema();
-    let value = expected.encode_persistent_component().unwrap();
+    let schema = NestedMath::type_schema().unwrap();
+    let value = expected.encode_component().unwrap();
     validate_component_value(&schema, &value).unwrap();
     assert_eq!(
-        NestedMath::decode_persistent_component((&value).into()).unwrap(),
+        NestedMath::decode_component((&value).into()).unwrap(),
         expected
     );
     let ComponentValueShape::Map { value: list } = schema.fields()[0].shape() else {
@@ -307,5 +314,5 @@ fn generated_nested_math_composes_closed_axes_through_maps_lists_and_optional() 
         )]),
     )]);
     assert!(validate_component_value(&schema, &invalid).is_err());
-    assert!(NestedMath::decode_persistent_component((&invalid).into()).is_err());
+    assert!(NestedMath::decode_component((&invalid).into()).is_err());
 }

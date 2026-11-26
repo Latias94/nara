@@ -1,4 +1,5 @@
-use nara_core::{Color, DocumentId, EntityUuid, Vec2};
+use anyhow::Context as _;
+use nara_core::{Color, DocumentId, EntityUuid, Vec2, vfs::DirAssetSource};
 use nara_editor_core::{
     EditorGesture, SelectionMode,
     actions::{ActionContext, EditorAction, EditorKeymap},
@@ -128,14 +129,24 @@ impl ViewportPanel {
         let workspace = self.workspace.read(cx);
         let revision = workspace.preview_revision();
         if self.scene_revision != revision {
-            let assets = workspace.project.asset_source().ok();
-            let scene = workspace.session.document().scene();
-            let result = self.preview.set_scene(scene, assets.as_ref());
+            let scene = workspace.session.preview_scene();
+            let result = DirAssetSource::new(workspace.project.directory())
+                .with_context(|| {
+                    format!(
+                        "could not open project directory '{}'",
+                        workspace.project.directory().display()
+                    )
+                })
+                .and_then(|source| {
+                    self.preview
+                        .set_scene(scene, Some((&source, workspace.project.asset_database())))
+                        .map_err(anyhow::Error::from)
+                });
             self.scene_revision = revision;
             self.scene_ready = result.is_ok();
             if let Err(error) = result {
                 self.dirty = false;
-                self.report(error.to_string(), cx);
+                self.report(format!("{error:#}"), cx);
                 return;
             }
             if self.camera_document != Some(scene.id) {
@@ -789,10 +800,9 @@ impl Render for ViewportPanel {
                     if let Some(point) = point
                         && view.displayed_scene_revision == revision
                     {
-                        let path = drop.value().0.clone();
-                        view.workspace.update(cx, |workspace, cx| {
-                            workspace.create(point.0, Some(path), None, cx)
-                        });
+                        let id = drop.value().id;
+                        view.workspace
+                            .update(cx, |workspace, cx| workspace.create_image(point.0, id, cx));
                     }
                     view.drop_preview = None;
                     view.dirty = true;

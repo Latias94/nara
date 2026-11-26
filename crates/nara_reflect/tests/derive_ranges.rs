@@ -1,13 +1,13 @@
 use nara_ecs::Component;
 use nara_reflect::{
     ComponentNumericBound as Bound, ComponentNumericInterval, ComponentSchemaCatalog,
-    ComponentValue, PersistentComponent, PersistentComponentProvider, validate_component_value,
+    ComponentValue, Schema, validate_component_value,
 };
 
 type Seconds = f32;
 
-#[derive(Component, PersistentComponent)]
-#[nara(
+#[derive(Component, Schema)]
+#[schema(
     id = "test.Cooldown",
     version = 1,
     alias = "Cooldown",
@@ -16,17 +16,17 @@ type Seconds = f32;
     authoring_initial
 )]
 struct Cooldown {
-    #[nara(
+    #[schema(
         id = "seconds",
         alias = "Seconds",
         initial = 0.5_f32,
         range(min_inclusive = 0.0_f32, max_inclusive = 30.0_f32)
     )]
     seconds: Seconds,
-    #[nara(id = "offset", alias = "Offset", initial = -2_i16,
+    #[schema(id = "offset", alias = "Offset", initial = -2_i16,
         range(min_exclusive = -10_i16, max_inclusive = 10_i16))]
     offset: i16,
-    #[nara(
+    #[schema(
         id = "count",
         alias = "Count",
         initial = 1_u64,
@@ -37,7 +37,7 @@ struct Cooldown {
 
 #[test]
 fn typed_range_literals_and_aliases_reach_shared_validation() {
-    let schema = Cooldown::persistent_component_schema();
+    let schema = Cooldown::type_schema().unwrap();
     let seconds = schema
         .fields
         .iter()
@@ -74,9 +74,9 @@ fn typed_range_literals_and_aliases_reach_shared_validation() {
 
 #[test]
 fn initial_values_use_the_declared_scalar_types() {
-    let schema = Cooldown::persistent_component_schema();
+    let schema = Cooldown::type_schema().unwrap();
     let initial = schema.authoring_initial_value().unwrap();
-    let value = Cooldown::decode_persistent_component(initial.into()).unwrap();
+    let value = Cooldown::decode_component(initial.into()).unwrap();
     assert_eq!(value.seconds, 0.5);
     assert_eq!(value.offset, -2);
     assert_eq!(value.count, 1);

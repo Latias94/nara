@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use nara_ecs::Component;
-use nara_reflect::PersistentComponent;
+use nara_reflect::Schema;
 
-#[derive(Component, PersistentComponent)]
-#[nara(
+#[derive(Component, Schema)]
+#[schema(
     id = "nara.test.AssetDemandScalarContainer",
     version = 1,
     alias = "Asset demand scalar container",
@@ -12,9 +12,9 @@ use nara_reflect::PersistentComponent;
     field_capabilities(scene)
 )]
 struct AssetDemandScalarContainer {
-    #[nara(id = "values", alias = "Values", asset_demand = deferred)]
+    #[schema(id = "values", alias = "Values", asset_demand = deferred)]
     values: Option<Vec<u32>>,
-    #[nara(id = "labels", alias = "Labels", asset_demand = immediate)]
+    #[schema(id = "labels", alias = "Labels", asset_demand = immediate)]
     labels: BTreeMap<String, Option<String>>,
 }
 

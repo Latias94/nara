@@ -1,6 +1,6 @@
-use std::rc::Rc;
+use std::{collections::BTreeMap, rc::Rc};
 
-use nara_core::{Color, DocumentId, EntityUuid};
+use nara_core::{AssetId, Color, DocumentId, EntityUuid};
 use nara_editor_core::{
     EditorCommand, EditorDocument, EditorRegistry, EditorSession, InspectorValue, field_draft,
     value_draft,
@@ -9,10 +9,11 @@ use nara_reflect::{
     ComponentCapability, ComponentFieldEditorHint, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    ComponentValueShape, PersistentComponentProvider,
+    ComponentValueShape, Schema,
 };
 use nara_scene::authoring::{
-    SceneComponent, SceneDocument, SceneEntity, SpriteSource, builtin_component_schemas,
+    RawRon, SceneComponent, SceneDocument, SceneEntity, SpriteSource, UnknownComponent,
+    builtin_component_schemas,
 };
 use open_gpui::Rgba;
 
@@ -22,14 +23,26 @@ use super::target::{
     field_value, project,
 };
 
-const NIGHT_RELAY: &str =
-    include_str!("../../../../reference-game/assets/night-relay.nara.scene.ron");
+const NIGHT_RELAY: &str = include_str!("../../../../reference-game/assets/night-relay.scene.ron");
+const POWER_CELL: &str = include_str!("../../../../reference-game/assets/power-cell.prefab.ron");
+
+fn relay_prefabs(scene: &SceneDocument) -> BTreeMap<AssetId, SceneDocument> {
+    [(
+        scene.assets["power_cell"].id,
+        SceneDocument::parse(POWER_CELL).unwrap(),
+    )]
+    .into()
+}
 
 fn relay_session() -> EditorSession {
-    let document = EditorDocument::new(SceneDocument::parse(NIGHT_RELAY).unwrap()).unwrap();
+    let scene = SceneDocument::parse(NIGHT_RELAY).unwrap();
+    let prefabs = relay_prefabs(&scene);
+    let document = EditorDocument::new(scene).unwrap();
     let registry =
         EditorRegistry::new(builtin_component_schemas().unwrap(), Default::default()).unwrap();
-    EditorSession::new(document, registry)
+    let mut session = EditorSession::new(document, registry);
+    session.set_prefabs(prefabs).unwrap();
+    session
 }
 
 fn bind(
@@ -91,8 +104,7 @@ fn select_relay(session: &mut EditorSession, names: &[&str]) -> Vec<EntityUuid> 
         .iter()
         .map(|name| {
             session
-                .document()
-                .scene()
+                .preview_scene()
                 .entities
                 .iter()
                 .find(|row| &row.name == name)
@@ -107,7 +119,7 @@ fn select_relay(session: &mut EditorSession, names: &[&str]) -> Vec<EntityUuid> 
 #[test]
 fn night_relay_tints_decode_with_the_catalog_color_hint() {
     let session = relay_session();
-    let schema = SpriteSource::persistent_component_schema();
+    let schema = SpriteSource::type_schema().unwrap();
     let tint = schema
         .fields()
         .iter()
@@ -137,8 +149,7 @@ fn night_relay_tints_decode_with_the_catalog_color_hint() {
     );
 
     let sprites: Vec<_> = session
-        .document()
-        .scene()
+        .preview_scene()
         .entities
         .iter()
         .filter_map(|row| {
@@ -186,7 +197,7 @@ fn srgb_picker_preserves_unedited_channels_and_excludes_hdr() {
         ..Default::default()
     };
     let value = sprite
-        .encode_persistent_component()
+        .encode_component()
         .unwrap()
         .get("tint")
         .unwrap()
@@ -212,7 +223,9 @@ fn srgb_picker_preserves_unedited_channels_and_excludes_hdr() {
     );
     entity.set(&hdr).unwrap();
     assert_eq!(entity.typed::<SpriteSource>().unwrap(), Some(hdr));
-    let authored = &entity.components[&ComponentTypeId::new(SpriteSource::COMPONENT_ID)].value;
+    let authored = entity.components[&ComponentTypeId::new(SpriteSource::COMPONENT_ID)]
+        .value()
+        .unwrap();
     assert!(ColorSeed::admit(&[authored.get("tint").cloned()], authored.get("tint")).is_none());
 }
 
@@ -321,8 +334,9 @@ fn a_rename_keeps_committed_cjk_text_and_stays_bound_to_the_original_document() 
 
     let mut other = session.document().scene().clone();
     other.id = "681a78dc-b6ab-4f3a-8eb6-4742d2ced238".parse().unwrap();
+    let prefabs = relay_prefabs(&other);
     session
-        .open_document(EditorDocument::new(other).unwrap())
+        .open_document_with_prefabs(EditorDocument::new(other).unwrap(), prefabs)
         .unwrap();
     session.selection_mut().replace(selected);
     assert_eq!(
@@ -338,10 +352,10 @@ fn add_component_uses_schema_initial_values_for_missing_targets_only() {
     let mut session = relay_session();
     let selected = select_relay(&mut session, &["Courier", "Power cell C"]);
     let component = ComponentTypeId::new("nara.Visibility");
-    let authored = SceneComponent {
-        version: ComponentSchemaVersion::ONE,
-        value: ComponentValue::map([("mode", ComponentValue::String("hidden".into()))]),
-    };
+    let authored = SceneComponent::known(
+        ComponentSchemaVersion::ONE,
+        ComponentValue::map([("mode", ComponentValue::String("hidden".into()))]),
+    );
     let set = EditorCommand::SetComponent {
         entities: vec![selected[0]],
         component: component.clone(),
@@ -360,13 +374,12 @@ fn add_component_uses_schema_initial_values_for_missing_targets_only() {
     let rows = selection.rows(&session).unwrap();
     assert_eq!(rows[0].components[&component], authored);
     assert_eq!(
-        rows[1].components[&component].value,
-        *session
+        rows[1].components[&component].value(),
+        session
             .registry()
             .schema(&component)
             .unwrap()
             .authoring_initial_value()
-            .unwrap()
     );
     assert!(option.command(&session, &selection).is_none());
 }
@@ -378,10 +391,11 @@ fn removing_an_opaque_component_uses_its_bound_entities_and_undo_restores_the_pa
     let mut session = relay_session();
     let selected = select_relay(&mut session, &["Courier", "Power cell C"]);
     let id = ComponentTypeId::new("project.Unavailable");
-    let record = SceneComponent {
+    let record = SceneComponent::Unknown(UnknownComponent {
+        type_id: id.clone(),
         version: ComponentSchemaVersion::ONE,
-        value: ComponentValue::map([("unknown", ComponentValue::String("夜航".into()))]),
-    };
+        raw: RawRon::from_ron(r#"(unknown: "夜航", extra: Some([1,  2]))"#).unwrap(),
+    });
     let mut scene = session.document().scene().clone();
     scene
         .entities
@@ -390,17 +404,18 @@ fn removing_an_opaque_component_uses_its_bound_entities_and_undo_restores_the_pa
         .unwrap()
         .components
         .insert(id.clone(), record.clone());
+    let prefabs = relay_prefabs(&scene);
     session
-        .open_document(EditorDocument::new(scene).unwrap())
+        .open_document_with_prefabs(EditorDocument::new(scene).unwrap(), prefabs)
         .unwrap();
     session.selection_mut().replace(selected.iter().copied());
     let selection = Selection::new(&session);
-    let removal = ComponentRemoval::new(id.clone(), vec![(selected[0], record.version)]);
+    let removal = ComponentRemoval::new(id.clone(), vec![(selected[0], record.version())]);
 
     session.selection_mut().replace([selected[1]]);
     assert!(removal.command(&session, &selection).is_none());
     session.selection_mut().replace(selected.iter().copied());
-    let stale = ComponentRemoval::new(id.clone(), vec![(selected[1], record.version)]);
+    let stale = ComponentRemoval::new(id.clone(), vec![(selected[1], record.version())]);
     assert!(stale.command(&session, &selection).is_none());
 
     let command = removal.command(&session, &selection).unwrap();
@@ -473,13 +488,13 @@ fn a_project_schema_can_commit_full_width_integers_without_float_conversion() {
     let mut row = SceneEntity::new(entity, "Counter");
     row.components.insert(
         id,
-        SceneComponent {
-            version: ComponentSchemaVersion::ONE,
-            value: ComponentValue::map([
+        SceneComponent::known(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([
                 ("unsigned", ComponentValue::U64(1)),
                 ("signed", ComponentValue::I64(1)),
             ]),
-        },
+        ),
     );
     scene.entities.push(row);
     let registry = EditorRegistry::new(

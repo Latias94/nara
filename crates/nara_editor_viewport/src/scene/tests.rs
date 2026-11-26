@@ -1,7 +1,8 @@
 use std::fs;
 
-use nara_core::DocumentId;
+use nara_asset::AssetScanMode;
 use nara_editor_core::viewport::{PanelPoint, PanelSize, WorldPoint};
+use nara_scene::authoring::SceneAsset;
 
 use super::*;
 
@@ -19,26 +20,53 @@ fn entity_id(suffix: u16) -> EntityUuid {
         .unwrap()
 }
 
-fn document(entities: Vec<SceneEntity>) -> SceneDocument {
-    SceneDocument {
-        id: "3a66a71f-f13a-4d5b-8c0c-b561f7838373"
-            .parse::<DocumentId>()
-            .unwrap(),
-        entities,
-    }
+fn asset_id(suffix: u16) -> AssetId {
+    format!("0193a100-1111-7000-8000-00000000{suffix:04x}")
+        .parse()
+        .unwrap()
 }
 
-fn sprite_entity(id: EntityUuid, layer: i32, image: Option<&str>) -> SceneEntity {
+fn document(entities: Vec<SceneEntity>) -> SceneDocument {
+    let mut document = SceneDocument::new("3a66a71f-f13a-4d5b-8c0c-b561f7838373".parse().unwrap());
+    document.entities = entities;
+    document
+}
+
+fn sprite_entity(id: EntityUuid, layer: i32, image: Option<AssetId>) -> SceneEntity {
     let mut entity = SceneEntity::new(id, "Sprite");
     entity
         .set(&SpriteSource {
             size: Vec2::splat(20.0),
             layer,
-            image: image.map(str::to_owned),
+            image,
             ..SpriteSource::default()
         })
         .unwrap();
     entity
+}
+
+fn write_sidecar(root: &Path, path: &str, id: AssetId, importer: &str) {
+    fs::write(
+        root.join(format!("{path}.meta")),
+        format!(r#"AssetMeta(id:"{id}",importer:"{importer}",settings:())"#),
+    )
+    .unwrap();
+}
+
+fn write_image(root: &Path, path: &str, id: AssetId, bytes: &[u8]) {
+    let image = root.join(path);
+    fs::create_dir_all(image.parent().unwrap()).unwrap();
+    fs::write(image, bytes).unwrap();
+    write_sidecar(root, path, id, "nara.image");
+}
+
+fn scan(root: &Path) -> ProjectAssetDatabase {
+    ProjectAssetDatabase::scan(
+        root,
+        &[AssetSourcePath::new("assets").unwrap()],
+        AssetScanMode::ReadOnly,
+    )
+    .unwrap()
 }
 
 #[test]
@@ -147,63 +175,85 @@ fn picks_follow_the_renderer_and_reparenting_preserves_surviving_entities() {
 }
 
 #[test]
-fn png_paths_share_residency_and_bad_edits_leave_the_preview_intact() {
+fn image_ids_share_residency_and_bad_edits_leave_the_preview_intact() {
     let directory = tempfile::tempdir().unwrap();
-    fs::write(directory.path().join("sprite.png"), PNG).unwrap();
-    fs::write(directory.path().join("invalid.png"), b"not a PNG").unwrap();
+    let first_image = asset_id(1);
+    let other_image = asset_id(2);
+    let missing_image = asset_id(3);
+    write_image(directory.path(), "assets/sprite.png", first_image, PNG);
+    write_image(
+        directory.path(),
+        "assets/invalid.png",
+        other_image,
+        b"not a PNG",
+    );
     let source = DirAssetSource::new(directory.path()).unwrap();
-    let path = AssetPath::new("sprite.png").unwrap();
+    let database = scan(directory.path());
+    let assets = Some((&source, &database));
     let first_id = entity_id(1);
     let second_id = entity_id(2);
     let mut document = document(vec![
-        sprite_entity(first_id, 0, Some("sprite.png")),
-        sprite_entity(second_id, 0, Some("sprite.png")),
+        sprite_entity(first_id, 0, Some(first_image)),
+        sprite_entity(second_id, 0, Some(first_image)),
     ]);
-    let mut scene = PreviewScene::new().unwrap();
-    scene.set_document(&document, Some(&source)).unwrap();
-    let handle = scene.images[&path];
-    let images = scene.runtime.world().resource::<Assets<ImageAsset>>();
-    assert_eq!(images.get(handle).unwrap().pixels(), [128, 64, 32, 255]);
-    assert_eq!(scene.images.len(), 1);
-    let initial_frame = scene.runtime.world().resource::<RealTime>().frame;
-    scene.set_document(&document, Some(&source)).unwrap();
-    assert_eq!(
-        scene.runtime.world().resource::<RealTime>().frame,
-        initial_frame
+    document.assets.insert(
+        "unregistered".into(),
+        SceneAsset {
+            id: missing_image,
+            hint: AssetPath::new("sprite.png").unwrap(),
+        },
     );
+    let mut scene = PreviewScene::new().unwrap();
+    scene.set_document(&document, assets).unwrap();
+    let handle = scene.images[&first_image].handle;
+    assert_eq!(scene.images.len(), 1);
+    let world = scene.runtime.world();
+    for id in [first_id, second_id] {
+        let sprite = world.get::<Sprite>(scene.entities[&id]).unwrap();
+        assert_eq!(sprite.material.image, Some(handle));
+    }
+    let initial_frame = world.resource::<RealTime>().frame;
 
     document.entities[0]
         .set(&Transform2d::from_xy(4.0, 7.0))
         .unwrap();
-    scene.set_document(&document, Some(&source)).unwrap();
-    assert_eq!(scene.images[&path], handle);
-    document.entities[1] = sprite_entity(second_id, 0, Some("invalid.png"));
+    document.entities[1] = sprite_entity(second_id, 0, Some(missing_image));
     assert!(matches!(
-        scene.set_document(&document, Some(&source)),
-        Err(ViewportError::DecodeImage { .. })
+        scene.set_document(&document, assets),
+        Err(ViewportError::MissingImageAsset { id }) if id == missing_image
     ));
-    assert_eq!(scene.images[&path], handle);
+    document.entities[1] = sprite_entity(second_id, 0, Some(other_image));
+    assert!(matches!(
+        scene.set_document(&document, assets),
+        Err(ViewportError::DecodeImage { path, .. }) if path == "assets/invalid.png"
+    ));
+    assert_eq!(scene.images[&first_image].handle, handle);
     assert_eq!(
-        scene.world_affine(first_id).unwrap().translation,
-        Vec2::new(4.0, 7.0)
+        scene.runtime.world().resource::<RealTime>().frame,
+        initial_frame
     );
+    assert_eq!(scene.world_affine(first_id), Some(Affine2::IDENTITY));
     assert!(scene.selection_quad(second_id).is_some());
 
-    fs::write(directory.path().join("invalid.png"), PNG).unwrap();
-    scene.set_document(&document, Some(&source)).unwrap();
-    assert!(
-        scene
-            .images
-            .contains_key(&AssetPath::new("invalid.png").unwrap())
-    );
-    assert_eq!(scene.images[&path], handle);
+    fs::write(directory.path().join("assets/invalid.png"), PNG).unwrap();
+    scene.set_document(&document, assets).unwrap();
+    assert_ne!(scene.images[&other_image].handle, handle);
+    assert_eq!(scene.images[&first_image].handle, handle);
 
     let other_directory = tempfile::tempdir().unwrap();
-    fs::write(other_directory.path().join("sprite.png"), PNG).unwrap();
+    write_image(
+        other_directory.path(),
+        "assets/sprite.png",
+        first_image,
+        PNG,
+    );
     let other_source = DirAssetSource::new(other_directory.path()).unwrap();
+    let other_database = scan(other_directory.path());
     document.entities.pop();
-    scene.set_document(&document, Some(&other_source)).unwrap();
-    assert_ne!(scene.images[&path], handle);
+    scene
+        .set_document(&document, Some((&other_source, &other_database)))
+        .unwrap();
+    assert_ne!(scene.images[&first_image].handle, handle);
     assert!(
         scene
             .runtime
@@ -212,6 +262,75 @@ fn png_paths_share_residency_and_bad_edits_leave_the_preview_intact() {
             .get(handle)
             .is_none()
     );
+}
+
+#[test]
+fn an_unchanged_scene_tracks_a_moved_image_without_losing_the_last_good_preview() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let id = asset_id(1);
+    let old_path = "assets/original.png";
+    let new_path = "assets/sprites/moved.png";
+    write_image(root, old_path, id, PNG);
+    let mut document = document(vec![sprite_entity(entity_id(1), 0, Some(id))]);
+    document.assets.insert(
+        "sprite".into(),
+        SceneAsset {
+            id,
+            hint: AssetPath::new("original.png").unwrap(),
+        },
+    );
+    let source = DirAssetSource::new(root).unwrap();
+    let mut scene = PreviewScene::new().unwrap();
+    scene
+        .set_document(&document, Some((&source, &scan(root))))
+        .unwrap();
+    let handle = scene.images[&id].handle;
+    let frame = scene.runtime.world().resource::<RealTime>().frame;
+
+    fs::create_dir(root.join("assets/sprites")).unwrap();
+    fs::rename(root.join(old_path), root.join(new_path)).unwrap();
+    fs::rename(
+        root.join(format!("{old_path}.meta")),
+        root.join(format!("{new_path}.meta")),
+    )
+    .unwrap();
+    let moved = scan(root);
+    assert_eq!(
+        moved
+            .record_for_stable_id(id.into())
+            .unwrap()
+            .path()
+            .as_str(),
+        new_path
+    );
+    fs::write(root.join(new_path), b"broken at its new location").unwrap();
+    assert!(matches!(
+        scene.set_document(&document, Some((&source, &moved))),
+        Err(ViewportError::DecodeImage { path, .. }) if path == new_path
+    ));
+    assert_eq!(scene.images[&id].path.as_str(), old_path);
+    assert_eq!(scene.images[&id].handle, handle);
+    let installed = scene.runtime.world().resource::<Assets<ImageAsset>>();
+    assert_eq!(installed.get(handle).unwrap().pixels(), [128, 64, 32, 255]);
+
+    fs::write(root.join(new_path), PNG).unwrap();
+    scene
+        .set_document(&document, Some((&source, &moved)))
+        .unwrap();
+    assert_eq!(scene.images[&id].path.as_str(), new_path);
+    assert_eq!(scene.images[&id].handle, handle);
+    assert_eq!(scene.runtime.world().resource::<RealTime>().frame, frame);
+
+    write_sidecar(root, new_path, id, "nara.raw");
+    let wrong_kind = scan(root);
+    assert!(matches!(
+        scene.set_document(&document, Some((&source, &wrong_kind))),
+        Err(ViewportError::InvalidImageAssetKind { id: actual, path, .. })
+            if actual == id && path == new_path
+    ));
+    assert_eq!(scene.images[&id].handle, handle);
+    assert_eq!(scene.runtime.world().resource::<RealTime>().frame, frame);
 }
 
 #[test]

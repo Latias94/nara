@@ -1,11 +1,11 @@
 error: duplicate persistent field ID
-  --> tests/ui/duplicate_field_id.rs:15:17
+  --> tests/ui/duplicate_field_id.rs:15:19
    |
-15 |     #[nara(id = "value", alias = "Second")]
-   |                 ^^^^^^^
+15 |     #[schema(id = "value", alias = "Second")]
+   |                   ^^^^^^^
 
 error: first declared here
-  --> tests/ui/duplicate_field_id.rs:13:17
+  --> tests/ui/duplicate_field_id.rs:13:19
    |
-13 |     #[nara(id = "value", alias = "First")]
-   |                 ^^^^^^^
+13 |     #[schema(id = "value", alias = "First")]
+   |                   ^^^^^^^

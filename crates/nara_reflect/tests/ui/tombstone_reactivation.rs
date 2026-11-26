@@ -1,8 +1,8 @@
 use nara_ecs::Component;
-use nara_reflect::PersistentComponent;
+use nara_reflect::Schema;
 
-#[derive(Component, PersistentComponent)]
-#[nara(
+#[derive(Component, Schema)]
+#[schema(
     id = "nara.test.TombstoneReactivation",
     version = 1,
     alias = "Tombstone reactivation",
@@ -11,7 +11,7 @@ use nara_reflect::PersistentComponent;
     tombstone = "value"
 )]
 struct TombstoneReactivation {
-    #[nara(id = "value", alias = "Value")]
+    #[schema(id = "value", alias = "Value")]
     value: i64,
 }
 

@@ -1,10 +1,10 @@
 #![allow(overflowing_literals)]
 
 use nara_ecs::Component;
-use nara_reflect::PersistentComponent;
+use nara_reflect::Schema;
 
-#[derive(Component, PersistentComponent)]
-#[nara(
+#[derive(Component, Schema)]
+#[schema(
     id = "nara.test.RangeIntegerFloatSuffix",
     version = 1,
     alias = "Range integer float suffix",
@@ -12,7 +12,7 @@ use nara_reflect::PersistentComponent;
     field_capabilities(scene)
 )]
 struct RangeIntegerFloatSuffix {
-    #[nara(id = "value", alias = "Value", range(max_inclusive = 1000000000000000000000000000000000000000f32))]
+    #[schema(id = "value", alias = "Value", range(max_inclusive = 1000000000000000000000000000000000000000f32))]
     value: f32,
 }
 

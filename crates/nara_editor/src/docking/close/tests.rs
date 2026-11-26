@@ -1,7 +1,6 @@
 use std::{fs, path::PathBuf};
 
 use nara_core::{DocumentId, EntityUuid, Vec2};
-use nara_editor_core::EditorDocument;
 use nara_project::workflow::ProjectTrust;
 use nara_scene::authoring::{SceneDocument, SceneEntity};
 use open_gpui::{
@@ -18,7 +17,7 @@ use crate::{
     workspace::Workspace,
 };
 
-const SCENE: &str = "initial.nara.scene.ron";
+const SCENE: &str = "initial.scene.ron";
 
 struct EmptyPane;
 
@@ -48,19 +47,14 @@ impl Editor {
             "[project]\nname = 'Close Fixture'\nversion = '0.1.0'\n[paths]\nassets = 'assets'\n",
         )
         .unwrap();
-        let mut workspace = Workspace::open(root, ProjectTrust::Untrusted).unwrap();
         if named {
             let id = DocumentId::try_from_uuid(uuid::Uuid::new_v4()).unwrap();
             let entity = EntityUuid::try_from_uuid(uuid::Uuid::new_v4()).unwrap();
             let mut scene = SceneDocument::new(id);
             scene.entities.push(SceneEntity::new(entity, "Original"));
-            let path = assets.join(SCENE);
-            scene.write(&path).unwrap();
-            workspace
-                .session
-                .open_document(EditorDocument::open(path).unwrap())
-                .unwrap();
+            scene.write(assets.join(SCENE)).unwrap();
         }
+        let workspace = Workspace::open(root, ProjectTrust::Untrusted).unwrap();
         let layout = invalid_layout.then(|| {
             let path = root.join(".nara");
             fs::write(&path, "not a directory").unwrap();
@@ -182,7 +176,7 @@ fn cancel_and_review_keep_the_draft_open_then_allow_applying_and_saving_it() {
 #[test]
 fn first_save_close_keeps_existing_files_and_retries_with_an_exact_new_name() {
     let editor = Editor::open(false, false);
-    let occupied = editor.scene_path("taken.nara.scene.ron");
+    let occupied = editor.scene_path("taken.scene.ron");
     for path in [
         None,
         Some(editor.scene_path("taken")),
@@ -200,7 +194,7 @@ fn first_save_close_keeps_existing_files_and_retries_with_an_exact_new_name() {
     }
     editor.request_close();
     editor.answer("Save and Close");
-    let path = editor.scene_path("confirmed.nara.scene.ron");
+    let path = editor.scene_path("confirmed.scene.ron");
     editor.choose_path(Some(path.clone()));
     assert!(!editor.is_open());
     assert_eq!(SceneDocument::read(path).unwrap().entities.len(), 1);
@@ -212,7 +206,7 @@ fn a_draft_created_during_save_as_requires_a_new_close_decision() {
     editor.request_close();
     editor.answer("Save and Close");
     editor.edit_name("Late edit");
-    let path = editor.scene_path("new.nara.scene.ron");
+    let path = editor.scene_path("new.scene.ron");
     editor.choose_path(Some(path.clone()));
     assert!(editor.is_open() && editor.has_drafts());
     assert!(!path.exists());
@@ -259,7 +253,8 @@ fn a_failed_layout_save_can_keep_the_editor_open_or_discard_the_layout() {
 #[test]
 fn deleting_an_entity_or_opening_another_scene_evicts_unreachable_drafts() {
     let mut editor = Editor::open(true, false);
-    let second_path = editor.scene_path("second.nara.scene.ron");
+    let second = nara_core::vfs::AssetPath::new("second.scene.ron").unwrap();
+    let second_path = editor.scene_path(second.as_str());
     let second_scene = SceneDocument::new(DocumentId::try_from_uuid(uuid::Uuid::new_v4()).unwrap());
     second_scene.write(&second_path).unwrap();
 
@@ -286,10 +281,8 @@ fn deleting_an_entity_or_opening_another_scene_evicts_unreachable_drafts() {
     editor.edit_name("Draft before switching scene");
     assert!(editor.has_drafts());
     editor.workspace.update(&mut editor.cx, |workspace, cx| {
-        workspace.open_asset(
-            &nara_core::vfs::AssetPath::new("second.nara.scene.ron").unwrap(),
-            cx,
-        );
+        workspace.refresh_assets(cx);
+        workspace.open_asset(&second, cx);
     });
     editor.cx.run_until_parked();
     assert!(!editor.has_drafts());

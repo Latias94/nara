@@ -1,4 +1,4 @@
-use nara_core::{DiagnosticSeverity, EntityUuid, Vec2, vfs::AssetPath};
+use nara_core::{AssetId, DiagnosticSeverity, EntityUuid, Vec2};
 use nara_editor_core::{AssetKind, EditorCommand};
 use nara_editor_viewport::ViewportStats;
 use nara_scene::spatial::Visibility;
@@ -62,8 +62,7 @@ impl HierarchyPanel {
                         } else {
                             workspace
                                 .session
-                                .document()
-                                .scene()
+                                .preview_scene()
                                 .entities
                                 .iter()
                                 .find(|row| row.id == request.target)
@@ -104,8 +103,7 @@ impl HierarchyPanel {
         let rows = refresh.then(|| {
             workspace
                 .session
-                .document()
-                .scene()
+                .preview_scene()
                 .entities
                 .iter()
                 .map(|row| TreeRow::new(row.id, row.parent, row.name.clone()))
@@ -142,7 +140,13 @@ impl Render for HierarchyPanel {
         let session = &self.workspace.read(cx).session;
         let locked = session.gesture_active();
         let has_selection = !session.selection().entities().is_empty();
-        let can_edit_selection = has_selection && !locked;
+        let can_edit_selection = has_selection
+            && !locked
+            && !session
+                .selection()
+                .entities()
+                .iter()
+                .any(|id| session.is_inherited_entity(*id));
         theme::panel()
             .child(
                 theme::toolbar()
@@ -205,7 +209,10 @@ impl Render for HierarchyPanel {
 }
 
 #[derive(Clone)]
-pub struct ImageDrag(pub AssetPath);
+pub struct ImageDrag {
+    pub id: AssetId,
+    label: String,
+}
 
 struct ImageDragLabel(String);
 
@@ -265,9 +272,13 @@ impl Render for AssetPanel {
                     div()
                         .id(label.clone())
                         .when(kind == AssetKind::Image, |div| {
-                            div.on_drag(ImageDrag(path), |drag, _, _, cx| {
-                                cx.new(|_| ImageDragLabel(drag.0.to_string()))
-                            })
+                            div.on_drag(
+                                ImageDrag {
+                                    id: entry.id,
+                                    label: label.clone(),
+                                },
+                                |drag, _, _, cx| cx.new(|_| ImageDragLabel(drag.label.clone())),
+                            )
                         })
                         .child(
                             Row::new(

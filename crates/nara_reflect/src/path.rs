@@ -3,7 +3,10 @@
 use std::{
     error::Error,
     fmt::{self, Display, Formatter},
+    str::{Chars, FromStr},
 };
+
+use crate::ComponentTypeId;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -44,6 +47,26 @@ impl ComponentFieldPath {
     pub fn into_segments(self) -> Vec<ComponentFieldPathSegment> {
         self.segments
     }
+
+    /// Parses a qualified path after matching the already known component ID.
+    pub fn parse_for(
+        component: &ComponentTypeId,
+        qualified: &str,
+    ) -> Result<Self, ComponentFieldPathParseError> {
+        let prefix_len = component.as_str().len() + 1;
+        let relative = qualified
+            .strip_prefix(component.as_str())
+            .and_then(|suffix| suffix.strip_prefix('.'))
+            .ok_or_else(|| ComponentFieldPathParseError::ComponentPrefix(component.clone()))?;
+        relative.parse().map_err(|error| match error {
+            ComponentFieldPathParseError::Syntax { offset } => {
+                ComponentFieldPathParseError::Syntax {
+                    offset: prefix_len + offset,
+                }
+            }
+            error => error,
+        })
+    }
 }
 
 impl FromIterator<ComponentFieldPathSegment> for ComponentFieldPath {
@@ -60,12 +83,13 @@ impl Display for ComponentFieldPath {
 
         for (index, segment) in self.segments.iter().enumerate() {
             match segment {
-                ComponentFieldPathSegment::Field(field) => {
+                ComponentFieldPathSegment::Field(field) if bare_field(field) => {
                     if index > 0 {
                         formatter.write_str(".")?;
                     }
                     formatter.write_str(field)?;
                 }
+                ComponentFieldPathSegment::Field(field) => write!(formatter, "[{field:?}]")?,
                 ComponentFieldPathSegment::Index(list_index) => {
                     write!(formatter, "[{list_index}]")?;
                 }
@@ -74,6 +98,162 @@ impl Display for ComponentFieldPath {
 
         Ok(())
     }
+}
+
+impl FromStr for ComponentFieldPath {
+    type Err = ComponentFieldPathParseError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let mut parser = FieldPathParser {
+            text,
+            chars: text.chars(),
+        };
+        let first = if parser.peek() == Some('[') {
+            let segment = parser.bracket()?;
+            if !matches!(segment, ComponentFieldPathSegment::Field(_)) {
+                return Err(ComponentFieldPathParseError::Syntax { offset: 0 });
+            }
+            segment
+        } else {
+            ComponentFieldPathSegment::Field(parser.field()?)
+        };
+        let mut path = Self {
+            segments: vec![first],
+        };
+        while let Some(next) = parser.peek() {
+            let segment = match next {
+                '.' => {
+                    parser.chars.next();
+                    ComponentFieldPathSegment::Field(parser.field()?)
+                }
+                '[' => parser.bracket()?,
+                _ => return Err(parser.error()),
+            };
+            path.segments.push(segment);
+        }
+        Ok(path)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ComponentFieldPathParseError {
+    #[error("invalid component field path syntax at byte {offset}")]
+    Syntax { offset: usize },
+    #[error("expected component field path prefixed by '{0}.'")]
+    ComponentPrefix(ComponentTypeId),
+}
+
+struct FieldPathParser<'a> {
+    text: &'a str,
+    chars: Chars<'a>,
+}
+
+impl FieldPathParser<'_> {
+    fn peek(&self) -> Option<char> {
+        self.chars.clone().next()
+    }
+
+    fn offset(&self) -> usize {
+        self.text.len() - self.chars.as_str().len()
+    }
+
+    fn error(&self) -> ComponentFieldPathParseError {
+        ComponentFieldPathParseError::Syntax {
+            offset: self.offset(),
+        }
+    }
+
+    fn consume(&mut self, expected: char) -> Result<(), ComponentFieldPathParseError> {
+        if self.peek() == Some(expected) {
+            self.chars.next();
+            Ok(())
+        } else {
+            Err(self.error())
+        }
+    }
+
+    fn token(
+        &mut self,
+        accepts: impl Fn(char) -> bool,
+    ) -> Result<&str, ComponentFieldPathParseError> {
+        let start = self.offset();
+        while self.peek().is_some_and(&accepts) {
+            self.chars.next();
+        }
+        let end = self.offset();
+        if start == end {
+            return Err(self.error());
+        }
+        Ok(&self.text[start..end])
+    }
+
+    fn field(&mut self) -> Result<String, ComponentFieldPathParseError> {
+        self.token(bare_field_char).map(str::to_owned)
+    }
+
+    fn bracket(&mut self) -> Result<ComponentFieldPathSegment, ComponentFieldPathParseError> {
+        self.consume('[')?;
+        let segment = if self.peek() == Some('"') {
+            self.chars.next();
+            ComponentFieldPathSegment::Field(self.quoted_field()?)
+        } else {
+            let start = self.offset();
+            let index = self
+                .token(|character| character.is_ascii_digit())?
+                .parse::<u32>()
+                .map_err(|_| ComponentFieldPathParseError::Syntax { offset: start })?;
+            ComponentFieldPathSegment::Index(index)
+        };
+        self.consume(']')?;
+        Ok(segment)
+    }
+
+    fn quoted_field(&mut self) -> Result<String, ComponentFieldPathParseError> {
+        let mut name = String::new();
+        while let Some(character) = self.chars.next() {
+            match character {
+                '"' => return Ok(name),
+                '\\' => {
+                    let escaped = match self.chars.next() {
+                        Some('\\') => '\\',
+                        Some('"') => '"',
+                        Some('\'') => '\'',
+                        Some('n') => '\n',
+                        Some('r') => '\r',
+                        Some('t') => '\t',
+                        Some('0') => '\0',
+                        Some('u') => self.unicode_escape()?,
+                        _ => return Err(self.error()),
+                    };
+                    name.push(escaped);
+                }
+                character if !character.is_control() => name.push(character),
+                _ => return Err(self.error()),
+            }
+        }
+        Err(self.error())
+    }
+
+    fn unicode_escape(&mut self) -> Result<char, ComponentFieldPathParseError> {
+        self.consume('{')?;
+        let start = self.offset();
+        let digits = self.token(|character| character.is_ascii_hexdigit())?;
+        let character = (digits.len() <= 6)
+            .then(|| u32::from_str_radix(digits, 16).ok())
+            .flatten()
+            .and_then(char::from_u32)
+            .ok_or(ComponentFieldPathParseError::Syntax { offset: start })?;
+        self.consume('}')?;
+        Ok(character)
+    }
+}
+
+fn bare_field(field: &str) -> bool {
+    !field.is_empty() && field.chars().all(bare_field_char)
+}
+
+fn bare_field_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -172,6 +352,9 @@ pub enum ComponentFieldPathError {
         index: u32,
         len: usize,
     },
+    InvalidPackedElement {
+        path: ComponentFieldPath,
+    },
 }
 
 impl Display for ComponentFieldPathError {
@@ -194,6 +377,12 @@ impl Display for ComponentFieldPathError {
                 write!(
                     formatter,
                     "component field path '{path}' index {index} is out of bounds for list length {len}"
+                )
+            }
+            Self::InvalidPackedElement { path } => {
+                write!(
+                    formatter,
+                    "invalid packed element at component field path '{path}'"
                 )
             }
         }

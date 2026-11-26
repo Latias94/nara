@@ -1,10 +1,13 @@
 //! Deterministic exercises driven through the same plugin and fixed schedule as desktop play.
 
-use std::{error::Error, time::Duration};
+use std::{error::Error, path::Path, time::Duration};
 
 use nara::prelude::*;
 
-use crate::{Failure, GamePlugin, PilotInput, Round, RoundStatus, RunRules, arena::CELL_COUNT};
+use crate::{
+    Failure, GamePlugin, PilotInput, Round, RoundStatus, RunRules,
+    arena::{CELL_COUNT, source},
+};
 
 type GameResult<T> = Result<T, Box<dyn Error>>;
 const STEP: Duration = FixedTime::DEFAULT_TIMESTEP;
@@ -24,10 +27,16 @@ pub struct StressReport {
 }
 
 pub fn run_stress(rounds: u32) -> GameResult<StressReport> {
+    run_stress_in(source::development_root(), rounds)
+}
+
+fn run_stress_in(project_root: &Path, rounds: u32) -> GameResult<StressReport> {
     if !(1..=MAX_ROUNDS).contains(&rounds) {
         return Err(format!("choose 1–{MAX_ROUNDS} stress rounds").into());
     }
-    let mut app = new_app(GamePlugin::default())?;
+    let mut app = headless_app()?;
+    let (scene, _) = source::load(&mut app, project_root, None)?;
+    app.add_plugins(GamePlugin::from_scene(scene))?;
     let baseline = exercise_round(&mut app)?;
     for _ in 1..rounds {
         if exercise_round(&mut app)? != baseline {
@@ -45,11 +54,9 @@ pub fn run_stress(rounds: u32) -> GameResult<StressReport> {
     Ok(report)
 }
 
-fn new_app(game: GamePlugin) -> GameResult<App> {
+fn headless_app() -> GameResult<App> {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins::headless())?
-        .register_schema::<RunRules>()?
-        .add_plugins(game)?;
+    app.add_plugins(DefaultPlugins::headless())?;
     Ok(app)
 }
 
@@ -150,23 +157,45 @@ fn follow(app: &mut App, route: &[(usize, usize)]) -> GameResult<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
+    use crate::{Pilot, PowerCell, arena, register_game_schema};
+    use nara::{
+        reflect::{ComponentTypeId, component_registry},
+        scene::authoring::{SceneDocument, SpriteSource},
+    };
+
+    fn scene_fixture() -> GameResult<SceneDocument> {
+        let mut app = headless_app()?;
+        let (scene, _) = source::load(&mut app, source::development_root(), None)?;
+        Ok(scene)
+    }
+
+    fn new_app(game: GamePlugin) -> GameResult<App> {
+        let mut app = headless_app()?;
+        app.add_plugins(game)?;
+        Ok(app)
+    }
 
     #[test]
     fn fixed_replay_checks_collision_shield_loss_restart_and_escape() -> GameResult<()> {
         let report = run_stress(2)?;
         assert_eq!(report.rounds, 2);
-        assert!(report.wall_contacts_per_round > 0);
+        assert_eq!(report.fixed_ticks, 2_330);
+        assert_eq!(report.wall_contacts_per_round, 28);
         assert!(report.escape_time < Duration::from_secs(38));
         Ok(())
     }
 
     #[test]
     fn time_expiry_freezes_the_round_until_restart() -> GameResult<()> {
-        let mut app = new_app(GamePlugin::default().with_rules(RunRules {
-            time_limit_seconds: 1,
-            ..Default::default()
-        }))?;
+        let mut app = new_app(
+            GamePlugin::from_scene(scene_fixture()?).with_rules(RunRules {
+                time_limit_seconds: 1,
+                ..Default::default()
+            }),
+        )?;
         for _ in 0..60 {
             step(&mut app, Vec2::ZERO)?;
         }
@@ -184,7 +213,7 @@ mod tests {
 
     #[test]
     fn reaching_an_unpowered_gate_keeps_the_round_running() -> GameResult<()> {
-        let mut app = new_app(GamePlugin::default())?;
+        let mut app = new_app(GamePlugin::from_scene(scene_fixture()?))?;
         follow(
             &mut app,
             &[(2, 5), (8, 5), (8, 4), (19, 4), (19, 9), (17, 9), (17, 8)],
@@ -198,7 +227,7 @@ mod tests {
 
     #[test]
     fn authored_rules_and_positions_drive_the_fixed_simulation() -> GameResult<()> {
-        let mut scene = crate::arena::bundled_scene()?;
+        let mut scene = scene_fixture()?;
         let spawn = Vec2::new(-256.0, 128.0);
         for entity in &mut scene.entities {
             match entity.name.as_str() {
@@ -227,6 +256,172 @@ mod tests {
         let round = app.world().resource::<Round>();
         assert!(round.wall_contacts() > 0);
         assert!((-263.0..-261.0).contains(&round.position().x));
+        Ok(())
+    }
+
+    #[test]
+    fn authored_order_survives_renames_and_reordering() -> GameResult<()> {
+        let mut scene = scene_fixture()?;
+        scene.entities.reverse();
+        for (index, entity) in scene.entities.iter_mut().enumerate() {
+            entity.id = format!("a9cf0ab5-1435-4be1-b235-{index:012x}").parse()?;
+            entity.name = format!("Renamed {index}");
+        }
+        let mut app = new_app(GamePlugin::from_scene(scene))?;
+        let arena = app.world().resource::<arena::Arena>();
+        assert_eq!(arena.pilot.pose.translation, START);
+        assert_eq!(
+            arena.cells.map(|marker| marker.pose.translation),
+            [at(9, 2), at(17, 2), at(3, 8)],
+        );
+        assert_eq!(
+            arena.patrols.map(|patrol| patrol.position(0.0)),
+            [
+                Vec2::new(-32.0, 64.0),
+                Vec2::new(-67.2, -64.0),
+                Vec2::new(256.0, -28.8)
+            ],
+        );
+        restart(&mut app)?;
+        Ok(())
+    }
+
+    #[test]
+    fn power_cell_roles_belong_to_the_instances_and_keep_their_ids() -> GameResult<()> {
+        let mut app = headless_app()?;
+        register_game_schema(&mut app)?;
+        let schemas = component_registry(app.world())
+            .ok_or("missing game schema")?
+            .components();
+        let root = source::development_root().join("assets");
+        let authored = SceneDocument::read_with(root.join("night-relay.scene.ron"), schemas)?;
+        let prefab = SceneDocument::read_with(root.join("power-cell.prefab.ron"), schemas)?;
+        assert!(prefab.entities[0].typed::<PowerCell>()?.is_none());
+        let role = ComponentTypeId::try_new(PowerCell::COMPONENT_ID)?;
+        let saved = authored.to_ron_with(schemas)?;
+        assert!(saved.contains("\"night-relay.PowerCell\": (order: 1)"));
+        let scene = scene_fixture()?;
+        let texture = "01a219be-557a-739e-81a5-2a8c6e88aee5".parse()?;
+        for order in 1..=3 {
+            let id = format!("4f99b200-2a5e-4872-8d3d-{suffix:012}", suffix = order + 1).parse()?;
+            let instance = authored
+                .entities
+                .iter()
+                .find(|entity| entity.id == id)
+                .and_then(|entity| entity.prefab.as_ref())
+                .ok_or("missing authored power cell instance")?;
+            assert_eq!(
+                instance
+                    .overrides
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                ["nara.Transform2d.translation"]
+            );
+            assert_eq!(
+                instance.added_components[&role].typed::<PowerCell>()?.order,
+                order
+            );
+            let cell = scene
+                .entities
+                .iter()
+                .find(|entity| entity.id == id)
+                .ok_or("the prefab root lost its authored ID")?;
+            assert!(cell.prefab.is_none());
+            assert_eq!(cell.typed::<PowerCell>()?.unwrap().order, order);
+            let sprite = cell.typed::<SpriteSource>()?.unwrap();
+            assert_eq!(sprite.image, Some(texture));
+            assert_eq!(sprite.size, Vec2::splat(15.0));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn moved_scene_prefab_and_texture_keep_replay_and_snapshot_working() -> GameResult<()> {
+        let project = tempfile::tempdir()?;
+        let files = project.path().join("assets/relocated");
+        fs::create_dir_all(&files)?;
+        let original = source::development_root().join("assets");
+        for (old, new) in [
+            ("night-relay.scene.ron", "arena.scene.ron"),
+            ("power-cell.prefab.ron", "cell.prefab.ron"),
+            ("power-cell.png", "cell.png"),
+        ] {
+            for suffix in ["", ".meta"] {
+                fs::copy(
+                    original.join(format!("{old}{suffix}")),
+                    files.join(format!("{new}{suffix}")),
+                )?;
+            }
+        }
+        assert_eq!(run_stress_in(project.path(), 2)?, run_stress(2)?);
+
+        let snapshots = tempfile::tempdir()?;
+        let snapshot = snapshots.path().join("play.scene.ron");
+        let entry = files.join("arena.scene.ron");
+        let authored = fs::read_to_string(&entry)?;
+        fs::write(
+            &snapshot,
+            authored.replace(
+                "\"night-relay.RunRules\": ()",
+                "\"night-relay.RunRules\": (shield_charges: 4)",
+            ),
+        )?;
+        let mut app = headless_app()?;
+        let (edited, textures) = source::load(&mut app, project.path(), Some(&snapshot))?;
+        app.add_plugins(GamePlugin::from_scene(edited))?;
+        assert_eq!(app.world().resource::<Round>().shields(), 4);
+        assert_eq!(textures.len(), 1);
+        assert_eq!(fs::read_to_string(entry)?, authored);
+
+        fs::write(files.join("cell.png"), b"not a PNG")?;
+        let error = run_stress_in(project.path(), 1)
+            .expect_err("headless should load the relocated texture");
+        assert!(
+            error.to_string().contains("assets/relocated/cell.png"),
+            "{error}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_ambiguous_or_missing_role_bindings_before_spawning() -> GameResult<()> {
+        let mut scene = scene_fixture()?;
+        let cell = scene
+            .entities
+            .iter_mut()
+            .find(|entity| entity.name == "Power cell B")
+            .ok_or("missing cell B in the fixture")?;
+        cell.set(&PowerCell { order: 1 })?;
+        let mut world = World::new();
+        let initial_entities = world.entity_count();
+        let error = arena::spawn_scene(&mut world, &scene, None)
+            .err()
+            .ok_or("duplicate cell role was accepted")?;
+        assert!(error.contains("both bind the power cell 1 role"), "{error}");
+        assert_eq!(world.entity_count(), initial_entities);
+
+        let mut scene = scene_fixture()?;
+        scene
+            .entities
+            .retain(|entity| entity.name != "Extraction gate");
+        let error = arena::spawn_scene(&mut world, &scene, None)
+            .err()
+            .ok_or("missing gate was accepted")?;
+        assert!(error.contains("missing its extraction gate"), "{error}");
+        assert_eq!(world.entity_count(), initial_entities);
+
+        let cell = scene
+            .entities
+            .iter_mut()
+            .find(|entity| entity.name == "Power cell A")
+            .ok_or("missing cell A in the fixture")?;
+        cell.set(&Pilot)?;
+        let error = arena::spawn_scene(&mut world, &scene, None)
+            .err()
+            .ok_or("conflicting roles were accepted")?;
+        assert!(error.contains("multiple arena roles"), "{error}");
+        assert_eq!(world.entity_count(), initial_entities);
         Ok(())
     }
 }

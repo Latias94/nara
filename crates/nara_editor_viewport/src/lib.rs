@@ -7,8 +7,10 @@ mod tests;
 use std::{io, sync::Arc};
 
 use nara_app::{AddPluginsError, AppRunError, PluginError, RuntimeDriveError, RuntimeScopeError};
-use nara_asset::{AssetError, AssetStateError, image::ImageDecodeError};
-use nara_core::{Affine2, EntityUuid, Vec2, vfs::DirAssetSource};
+use nara_asset::{
+    AssetError, AssetSourceKind, AssetStateError, ProjectAssetDatabase, image::ImageDecodeError,
+};
+use nara_core::{Affine2, AssetId, EntityUuid, Vec2, vfs::DirAssetSource};
 use nara_editor_core::viewport::{PickCandidate2D, ViewportCamera2D};
 use nara_editor_gizmo::{EditorOverlayPass, OverlayFrame, OverlayState, OverlayStroke};
 use nara_render::{
@@ -38,6 +40,14 @@ pub enum ViewportError {
         component: &'static str,
         #[source]
         source: SceneComponentError,
+    },
+    #[error("preview image {id} is not registered in the project asset database")]
+    MissingImageAsset { id: AssetId },
+    #[error("preview image {id} at '{path}' is registered as {kind}, expected an image")]
+    InvalidImageAssetKind {
+        id: AssetId,
+        path: String,
+        kind: AssetSourceKind,
     },
     #[error("could not read preview PNG '{path}': {source}")]
     ReadImage {
@@ -143,12 +153,13 @@ impl EditorViewport {
     }
 
     /// Applies an authored edit and updates world geometry for the shell's next overlay frame.
-    /// Without a project asset source, textured sprites preview as their solid tint.
-    /// An invalid document or unreadable PNG leaves the current preview in place.
+    /// Image IDs resolve through the database relative to the project directory source.
+    /// Without the source and database, textured sprites preview as their solid tint.
+    /// An invalid document or failed image load leaves the current preview in place.
     pub fn set_scene(
         &mut self,
         document: &SceneDocument,
-        assets: Option<&DirAssetSource>,
+        assets: Option<(&DirAssetSource, &ProjectAssetDatabase)>,
     ) -> Result<(), ViewportError> {
         self.scene.set_document(document, assets)
     }

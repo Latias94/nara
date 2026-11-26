@@ -6,7 +6,7 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use nara_core::EntityUuid;
+use nara_core::{AssetId, EntityUuid};
 
 use crate::{
     codec::ComponentCodecError,
@@ -68,7 +68,13 @@ pub enum ComponentValue {
     String(String),
     List(Vec<ComponentValue>),
     Map(BTreeMap<String, ComponentValue>),
+    AssetReference(AssetId),
     EntityReference(EntityUuid),
+    PackedU16(Vec<u16>),
+    PackedU32(Vec<u32>),
+    PackedI32(Vec<i32>),
+    PackedF32(Vec<f32>),
+    Bytes(Vec<u8>),
 }
 
 impl ComponentValue {
@@ -110,7 +116,13 @@ impl ComponentValue {
             Self::String(_) => ComponentValueKind::String,
             Self::List(_) => ComponentValueKind::List,
             Self::Map(_) => ComponentValueKind::Map,
+            Self::AssetReference(_) => ComponentValueKind::AssetRef,
             Self::EntityReference(_) => ComponentValueKind::EntityRef,
+            Self::PackedU16(_) => ComponentValueKind::PackedU16,
+            Self::PackedU32(_) => ComponentValueKind::PackedU32,
+            Self::PackedI32(_) => ComponentValueKind::PackedI32,
+            Self::PackedF32(_) => ComponentValueKind::PackedF32,
+            Self::Bytes(_) => ComponentValueKind::Bytes,
         }
     }
 
@@ -169,6 +181,32 @@ impl ComponentValue {
         self.get_path_mut_segments(path.segments())
     }
 
+    /// Reads an owned field value, including a scalar addressed inside a packed block.
+    pub fn read_path(&self, path: &ComponentFieldPath) -> Result<Self, ComponentFieldPathError> {
+        if let Some((ComponentFieldPathSegment::Index(index), parent)) =
+            path.segments().split_last()
+        {
+            let parent = ComponentFieldPath::new(parent.iter().cloned());
+            let value = self.get_path(&parent)?;
+            if let Some(len) = value.packed_len() {
+                let item = packed_index(path, *index, len)?;
+                match value {
+                    Self::PackedU16(items) => return Ok(Self::U64(items[item].into())),
+                    Self::PackedU32(items) => return Ok(Self::U64(items[item].into())),
+                    Self::PackedI32(items) => return Ok(Self::I64(items[item].into())),
+                    Self::PackedF32(items) => {
+                        return Self::f64(items[item].into()).map_err(|_| {
+                            ComponentFieldPathError::InvalidPackedElement { path: path.clone() }
+                        });
+                    }
+                    Self::Bytes(items) => return Ok(Self::U64(items[item].into())),
+                    _ => {}
+                }
+            }
+        }
+        self.get_path(path).cloned()
+    }
+
     pub fn set_path(
         &mut self,
         path: &ComponentFieldPath,
@@ -192,6 +230,9 @@ impl ComponentValue {
                 Ok(fields.insert(field.clone(), value))
             }
             ComponentFieldPathSegment::Index(index) => {
+                if let Some(result) = parent.replace_packed(path, *index, &value) {
+                    return result.map(Some);
+                }
                 let ComponentValue::List(items) = parent else {
                     return Err(ComponentFieldPathError::ExpectedList { path: parent_path });
                 };
@@ -242,6 +283,9 @@ impl ComponentValue {
                     .expect("field presence checked before replacement"))
             }
             ComponentFieldPathSegment::Index(index) => {
+                if let Some(result) = parent.replace_packed(path, *index, &value) {
+                    return result;
+                }
                 let ComponentValue::List(items) = parent else {
                     return Err(ComponentFieldPathError::ExpectedList { path: parent_path });
                 };
@@ -351,6 +395,57 @@ impl ComponentValue {
         Ok(current)
     }
 
+    fn packed_len(&self) -> Option<usize> {
+        match self {
+            Self::PackedU16(items) => Some(items.len()),
+            Self::PackedU32(items) => Some(items.len()),
+            Self::PackedI32(items) => Some(items.len()),
+            Self::PackedF32(items) => Some(items.len()),
+            Self::Bytes(items) => Some(items.len()),
+            _ => None,
+        }
+    }
+
+    fn replace_packed(
+        &mut self,
+        path: &ComponentFieldPath,
+        index: u32,
+        value: &Self,
+    ) -> Option<Result<Self, ComponentFieldPathError>> {
+        let len = self.packed_len()?;
+        let item = match packed_index(path, index, len) {
+            Ok(item) => item,
+            Err(error) => return Some(Err(error)),
+        };
+        let invalid = || ComponentFieldPathError::InvalidPackedElement { path: path.clone() };
+        macro_rules! replace_integer {
+            ($items:expr, $read:ident, $kind:ident, $native:ty) => {
+                value
+                    .$read()
+                    .and_then(|value| <$native>::try_from(value).ok())
+                    .ok_or_else(invalid)
+                    .map(|value| Self::$kind(std::mem::replace(&mut $items[item], value).into()))
+            };
+        }
+        Some(match self {
+            Self::PackedU16(items) => replace_integer!(items, as_u64, U64, u16),
+            Self::PackedU32(items) => replace_integer!(items, as_u64, U64, u32),
+            Self::PackedI32(items) => replace_integer!(items, as_i64, I64, i32),
+            Self::PackedF32(items) => value
+                .as_f64()
+                .map(|value| value as f32)
+                .filter(|value| value.is_finite())
+                .and_then(|value| {
+                    let old = Self::f64(items[item].into()).ok()?;
+                    items[item] = value;
+                    Some(old)
+                })
+                .ok_or_else(invalid),
+            Self::Bytes(items) => replace_integer!(items, as_u64, U64, u8),
+            _ => return None,
+        })
+    }
+
     #[must_use]
     pub fn as_bool(&self) -> Option<bool> {
         match self {
@@ -433,6 +528,29 @@ impl ComponentValue {
             Self::EntityReference(reference) => Some(reference),
             _ => None,
         }
+    }
+
+    #[must_use]
+    pub const fn as_asset_reference(&self) -> Option<&AssetId> {
+        match self {
+            Self::AssetReference(reference) => Some(reference),
+            _ => None,
+        }
+    }
+}
+
+fn packed_index(
+    path: &ComponentFieldPath,
+    index: u32,
+    len: usize,
+) -> Result<usize, ComponentFieldPathError> {
+    match usize::try_from(index) {
+        Ok(index) if index < len => Ok(index),
+        _ => Err(ComponentFieldPathError::IndexOutOfBounds {
+            path: path.clone(),
+            index,
+            len,
+        }),
     }
 }
 

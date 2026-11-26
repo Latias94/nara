@@ -1,19 +1,22 @@
 use std::{path::Path, sync::mpsc::TryRecvError, time::Duration};
 
 use anyhow::{Context as _, Result};
-use nara_core::{DiagnosticSeverity, DocumentId, EntityUuid, Vec2, vfs::AssetPath};
+use nara_core::{AssetId, DiagnosticSeverity, DocumentId, EntityUuid, Vec2, vfs::AssetPath};
 use nara_editor_core::{
     AssetBrowserModel, AssetKind, ConsoleModel, EditorCommand, EditorDocument, EditorGesture,
-    EditorProject, EditorRegistry, EditorSession,
+    EditorProject, EditorRegistry, EditorSession, PrefabFieldOverride,
     play::{PlayControl, PlayState},
 };
 use nara_project::{
     EditorPlayMode,
     workflow::{ProjectTrust, read_schema_cache},
 };
-use nara_reflect::{ComponentSchemaCatalog, ComponentTypeId, PersistentComponentProvider};
+use nara_reflect::{ComponentSchemaCatalog, ComponentTypeId, Schema};
 use nara_scene::{
-    authoring::{SceneDocument, SceneEntity, SpriteSource, builtin_component_schemas},
+    authoring::{
+        SceneAsset, SceneComponent, SceneDocument, SceneEntity, SpriteSource,
+        builtin_component_schemas,
+    },
     spatial::{Transform2d, Visibility},
 };
 use open_gpui::Context;
@@ -60,6 +63,7 @@ pub(crate) struct Workspace {
     pub project: EditorProject,
     pub assets: AssetBrowserModel,
     pub selected_asset: Option<AssetPath>,
+    opened_asset: Option<AssetId>,
     pub console: ConsoleModel,
     pending: Option<PendingPlayControl>,
     pub(crate) steps: u64,
@@ -71,22 +75,28 @@ pub(crate) struct Workspace {
 impl Workspace {
     pub fn open(directory: &Path, trust: ProjectTrust) -> Result<Self> {
         let project = EditorProject::open(directory)?;
-        let assets = project.assets()?;
-        let initial_scene = project.entry_scene().or_else(|| {
-            assets
-                .entries()
-                .iter()
-                .find(|entry| entry.kind == AssetKind::Scene)
-                .map(|entry| &entry.path)
-        });
-        let document = match initial_scene {
-            Some(path) => project.open_document(path)?,
-            None => EditorDocument::new(SceneDocument::new(DocumentId::try_from_uuid(
-                uuid::Uuid::new_v4(),
-            )?))?,
-        };
+        let assets = project.assets();
+        let saved_entry = project.entry_scene();
+        let initial_scene = saved_entry
+            .filter(|path| assets.entries().iter().any(|entry| entry.path == **path))
+            .or_else(|| {
+                assets
+                    .entries()
+                    .iter()
+                    .find(|entry| entry.kind == AssetKind::Scene)
+                    .map(|entry| &entry.path)
+            });
         let selected_asset = initial_scene.cloned();
+        let opened_asset = initial_scene
+            .and_then(|path| project.asset_reference(path))
+            .map(|asset| asset.id);
         let mut console = ConsoleModel::default();
+        if let Some(path) = saved_entry.filter(|path| Some(*path) != initial_scene) {
+            console.line(
+                DiagnosticSeverity::Warning,
+                format!("Saved entry scene '{path}' is unavailable"),
+            );
+        }
         let project_catalog = match read_schema_cache(project.directory()) {
             Ok(Some(catalog)) => {
                 console.line(
@@ -102,17 +112,28 @@ impl Workspace {
             }
         };
         let registry = EditorRegistry::new(builtin_component_schemas()?, project_catalog)?;
+        let schemas = registry.catalog().components();
+        let document = match initial_scene {
+            Some(path) => project.open_document_with(path, schemas)?,
+            None => EditorDocument::new(SceneDocument::new(DocumentId::try_from_uuid(
+                uuid::Uuid::new_v4(),
+            )?))?,
+        };
+        let prefabs = project.load_prefabs(document.scene(), schemas)?;
+        let mut session = EditorSession::new(document, registry);
+        session.set_prefabs(prefabs)?;
         console.line(
             DiagnosticSeverity::Info,
             format!("Opened {}", project.manifest().project.name),
         );
         Ok(Self {
-            session: EditorSession::new(document, registry),
+            session,
             revision: 1,
             asset_scan_revision: 0,
             project,
             assets,
             selected_asset,
+            opened_asset,
             console,
             status: JobStatus::Idle,
             pending: None,
@@ -210,27 +231,59 @@ impl Workspace {
         parent: Option<EntityUuid>,
         cx: &mut Context<Self>,
     ) {
+        let image = if let Some(path) = image {
+            let Some(asset) = self.project.asset_reference(&path) else {
+                self.warn(
+                    format!("Image '{path}' is missing from the asset index"),
+                    cx,
+                );
+                return;
+            };
+            Some(asset)
+        } else {
+            None
+        };
+        self.create_entity(center, image, parent, cx);
+    }
+
+    pub(crate) fn create_image(&mut self, center: Vec2, id: AssetId, cx: &mut Context<Self>) {
+        let Some(hint) = self.project.asset_hint(id) else {
+            self.warn(format!("Image {id} is missing from the asset index"), cx);
+            return;
+        };
+        self.create_entity(center, Some(SceneAsset { id, hint }), None, cx);
+    }
+
+    fn create_entity(
+        &mut self,
+        center: Vec2,
+        image: Option<SceneAsset>,
+        parent: Option<EntityUuid>,
+        cx: &mut Context<Self>,
+    ) {
         let result = (|| -> Result<_> {
             let id = EntityUuid::try_from_uuid(uuid::Uuid::new_v4())?;
-            let name = image.as_ref().map_or("New Entity", |path| {
-                path.as_str().rsplit('/').next().unwrap_or("Sprite")
+            let name = image.as_ref().map_or("New Entity", |asset| {
+                asset.hint.as_str().rsplit('/').next().unwrap_or("Sprite")
             });
             let mut entity = SceneEntity::new(id, name);
             entity.parent = parent;
             entity.set(&Transform2d::from_translation(center))?;
-            if let Some(path) = image {
+            let mut commands = Vec::new();
+            if let Some(asset) = image {
                 entity.set(&SpriteSource {
                     size: Vec2::splat(32.0),
-                    image: Some(path.to_string()),
+                    image: Some(asset.id),
                     ..Default::default()
                 })?;
+                commands.push(EditorCommand::DeclareAsset(asset));
             }
-            Ok(entity)
+            commands.push(EditorCommand::Create(entity));
+            Ok((id, EditorCommand::Batch(commands)))
         })();
         match result {
-            Ok(entity) => {
-                let id = entity.id;
-                if self.apply(EditorCommand::Create(entity), cx) {
+            Ok((id, command)) => {
+                if self.apply(command, cx) {
                     self.select([id], cx);
                 }
             }
@@ -247,16 +300,18 @@ impl Workspace {
 
     pub fn set_visibility(&mut self, visibility: Visibility, cx: &mut Context<Self>) {
         let id = ComponentTypeId::new(Visibility::COMPONENT_ID);
-        let value = visibility.encode_persistent_component();
+        let value = Visibility::type_schema().and_then(|schema| {
+            Ok(SceneComponent::known(
+                schema.version(),
+                visibility.encode_component()?,
+            ))
+        });
         match value {
             Ok(value) => self.apply(
                 EditorCommand::SetComponent {
                     entities: self.session.selection().entities().to_vec(),
                     component: id,
-                    value: nara_scene::authoring::SceneComponent {
-                        version: Visibility::persistent_component_schema().version(),
-                        value,
-                    },
+                    value,
                 },
                 cx,
             ),
@@ -280,19 +335,22 @@ impl Workspace {
                 self.warn("Save the current document before opening another one", cx);
                 return;
             }
-            let result = self
-                .project
-                .open_document(path)
-                .map_err(anyhow::Error::from)
-                .and_then(|document| {
-                    self.session
-                        .open_document(document)
-                        .map_err(anyhow::Error::from)
-                });
+            let result = (|| -> Result<()> {
+                if self.project.asset_reference(path).is_none() {
+                    self.project.refresh_assets()?;
+                    self.assets = self.project.assets();
+                }
+                let schemas = self.session.registry().catalog().components();
+                let document = self.project.open_document_with(path, schemas)?;
+                let prefabs = self.project.load_prefabs(document.scene(), schemas)?;
+                self.session.open_document_with_prefabs(document, prefabs)?;
+                Ok(())
+            })();
             if let Err(error) = result {
                 self.warn(error.to_string(), cx);
                 return;
             }
+            self.opened_asset = self.project.asset_reference(path).map(|asset| asset.id);
             self.revision = self.revision.wrapping_add(1);
         }
         cx.notify();
@@ -303,12 +361,56 @@ impl Workspace {
     }
 
     pub(crate) fn refresh_assets(&mut self, cx: &mut Context<Self>) {
-        match self.project.assets() {
-            Ok(assets) => {
-                self.assets = assets;
-                self.asset_scan_revision = self.asset_scan_revision.wrapping_add(1);
+        let selected = self.selected_asset_id();
+        if let Err(error) = self.project.refresh_assets() {
+            self.warn(error.to_string(), cx);
+            return;
+        }
+        self.update_asset_browser(selected);
+        let refreshed = (|| -> Result<()> {
+            let prefabs = self.project.load_prefabs(
+                self.session.document().scene(),
+                self.session.registry().catalog().components(),
+            )?;
+            self.session.set_prefabs(prefabs)?;
+            Ok(())
+        })();
+        match refreshed {
+            Ok(()) => self.revision = self.revision.wrapping_add(1),
+            Err(error) => self.warn(error.to_string(), cx),
+        }
+        cx.notify();
+    }
+
+    fn selected_asset_id(&self) -> Option<AssetId> {
+        self.selected_asset
+            .as_ref()
+            .and_then(|path| self.project.asset_reference(path))
+            .map(|asset| asset.id)
+    }
+
+    fn update_asset_browser(&mut self, selected: Option<AssetId>) {
+        self.assets = self.project.assets();
+        self.selected_asset = selected.and_then(|id| self.project.asset_hint(id));
+        self.asset_scan_revision = self.asset_scan_revision.wrapping_add(1);
+    }
+
+    pub(crate) fn apply_to_prefab(&mut self, edit: &PrefabFieldOverride, cx: &mut Context<Self>) {
+        let catalog = self.session.registry().catalog().clone();
+        let expected = self.session.prefab_sources().clone();
+        let project = &self.project;
+        match self.session.apply_to_prefab(edit, |id, _, after| {
+            project.write_prefab(id, after, &expected, &catalog)
+        }) {
+            Ok(true) => {
+                self.revision = self.revision.wrapping_add(1);
+                self.console.line(
+                    DiagnosticSeverity::Info,
+                    "Prefab saved. Save the scene to keep the cleared override.",
+                );
                 cx.notify();
             }
+            Ok(false) => {}
             Err(error) => self.warn(error.to_string(), cx),
         }
     }
@@ -329,7 +431,19 @@ impl Workspace {
             return;
         }
         if self.session.document().path().is_some() {
-            let result = before_write(self, cx).and_then(|()| Ok(self.session.save()?));
+            let result = before_write(self, cx).and_then(|()| {
+                let asset = self
+                    .opened_asset
+                    .context("Reopen this scene from Assets to restore its file identity")?;
+                let selected = self.selected_asset_id();
+                let path = self
+                    .project
+                    .document_save_path(asset, self.session.document().scene().id)?;
+                self.update_asset_browser(selected);
+                self.session
+                    .refresh_asset_hints(|id| self.project.asset_hint(id));
+                Ok(self.session.save_as(path)?)
+            });
             complete(self.saved(result, cx), cx);
             return;
         }
@@ -340,13 +454,13 @@ impl Workspace {
         };
         let document_id = self.session.document().scene().id;
         let root = source.root().to_path_buf();
-        let picker = cx.prompt_for_new_path(&root, Some("untitled.nara.scene.ron"));
+        let picker = cx.prompt_for_new_path(&root, Some("untitled.scene.ron"));
         cx.spawn(async move |workspace, cx| {
             let result = picker.await;
             let _ = workspace.update(cx, |workspace, cx| {
                 let saved = match result {
                     Ok(Ok(Some(path))) => {
-                        let result = (|| -> Result<()> {
+                        let result = (|| -> Result<AssetPath> {
                             let document = workspace.session.document();
                             anyhow::ensure!(
                                 document.scene().id == document_id && document.path().is_none(),
@@ -364,8 +478,8 @@ impl Workspace {
                                 .context("Use a portable scene filename")?;
                             AssetPath::new(name).context("Use a portable scene filename")?;
                             anyhow::ensure!(
-                                name.ends_with(".nara.scene.ron"),
-                                "Include .nara.scene.ron in the filename and save again"
+                                name.ends_with(".scene.ron"),
+                                "Include .scene.ron in the filename and save again"
                             );
                             let parent = path
                                 .parent()
@@ -376,6 +490,10 @@ impl Workspace {
                                 "Save the scene inside the project's asset directory"
                             );
                             let destination = parent.join(name);
+                            let path = workspace.project.relative_document_path(&destination)?;
+                            workspace
+                                .session
+                                .refresh_asset_hints(|id| workspace.project.asset_hint(id));
                             match workspace.session.save_new(&destination) {
                                 Err(nara_editor_core::EditorError::Scene(
                                     nara_scene::authoring::SceneDocumentError::Io {
@@ -389,13 +507,19 @@ impl Workspace {
                                 }
                                 result => result?,
                             }
-                            Ok(())
+                            Ok(path)
                         })();
-                        let saved = workspace.saved(result, cx);
-                        if saved {
-                            workspace.refresh_assets(cx);
+                        match result {
+                            Ok(path) => {
+                                workspace.refresh_assets(cx);
+                                workspace.opened_asset = workspace
+                                    .project
+                                    .asset_reference(&path)
+                                    .map(|asset| asset.id);
+                                workspace.saved(Ok(()), cx)
+                            }
+                            Err(error) => workspace.saved(Err(error), cx),
                         }
-                        saved
                     }
                     Ok(Err(error)) => {
                         workspace.warn(error.to_string(), cx);
@@ -449,10 +573,12 @@ impl Workspace {
             return;
         }
         let scene = self.session.document().scene().clone();
+        let prefabs = self.session.prefab_sources().clone();
+        let schemas = self.session.registry().catalog().clone();
         self.steps = 0;
         self.start_job(
             JobStatus::Building,
-            |project, trust| Job::play(project.to_path_buf(), scene, trust),
+            |project, trust| Job::play(project.to_path_buf(), scene, prefabs, schemas, trust),
             cx,
         );
     }
@@ -558,15 +684,20 @@ impl Workspace {
         match message {
             Message::Log(diagnostic) => self.console.push(diagnostic),
             Message::Schema(catalog) => {
-                let result = (|| -> Result<()> {
+                let result = (|| -> Result<_> {
                     let registry = EditorRegistry::new(builtin_component_schemas()?, catalog)?;
-                    self.session.set_registry(registry)?;
-                    Ok(())
+                    Ok(self.session.set_registry(registry)?)
                 })();
                 match result {
-                    Ok(()) => self
-                        .console
-                        .line(DiagnosticSeverity::Info, "Schema refreshed"),
+                    Ok(diagnostics) => {
+                        self.revision = self.revision.wrapping_add(1);
+                        self.console
+                            .line(DiagnosticSeverity::Info, "Schema refreshed");
+                        for error in diagnostics {
+                            self.console
+                                .line(DiagnosticSeverity::Warning, error.to_string());
+                        }
+                    }
                     Err(error) => self
                         .console
                         .line(DiagnosticSeverity::Warning, error.to_string()),

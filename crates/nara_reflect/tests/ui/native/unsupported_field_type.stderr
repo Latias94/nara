@@ -1,5 +1,5 @@
 error[E0277]: the trait bound `HashMap<std::string::String, i64>: nara_reflect::__macro_support::PersistentFieldCodec` is not satisfied
-  --> tests/ui/unsupported_field_type.rs:16:13
+  --> tests/ui/native/unsupported_field_type.rs:16:13
    |
 16 |     values: HashMap<String, i64>,
    |             ^^^^^^^^^^^^^^^^^^^^ the trait `nara_reflect::__macro_support::PersistentFieldCodec` is not implemented for `HashMap<std::string::String, i64>`
@@ -11,12 +11,12 @@ error[E0277]: the trait bound `HashMap<std::string::String, i64>: nara_reflect::
              bool
              f32
              f64
+             glam::f32::sse2::vec4::Vec4
              glam::f32::vec2::Vec2
-             i16
            and $N others
 
 error[E0277]: the trait bound `HashMap<std::string::String, i64>: nara_reflect::__macro_support::PersistentFieldCodec` is not satisfied
-  --> tests/ui/unsupported_field_type.rs:16:13
+  --> tests/ui/native/unsupported_field_type.rs:16:13
    |
 16 |     values: HashMap<String, i64>,
    |             ^^^^^^^^^^^^^^^^^^^^ the trait `nara_reflect::__macro_support::PersistentFieldCodec` is not implemented for `HashMap<std::string::String, i64>`
@@ -28,8 +28,8 @@ error[E0277]: the trait bound `HashMap<std::string::String, i64>: nara_reflect::
              bool
              f32
              f64
+             glam::f32::sse2::vec4::Vec4
              glam::f32::vec2::Vec2
-             i16
            and $N others
 note: required by a bound in `nara_reflect::__macro_support::decode_persistent_field`
   --> src/authoring.rs
@@ -41,10 +41,10 @@ note: required by a bound in `nara_reflect::__macro_support::decode_persistent_f
    |        ^^^^^^^^^^^^^^^^^^^^ required by this bound in `decode_persistent_field`
 
 error[E0277]: the trait bound `HashMap<std::string::String, i64>: nara_reflect::__macro_support::PersistentFieldCodec` is not satisfied
- --> tests/ui/unsupported_field_type.rs:6:21
+ --> tests/ui/native/unsupported_field_type.rs:6:21
   |
-6 | #[derive(Component, PersistentComponent)]
-  |                     ^^^^^^^^^^^^^^^^^^^ the trait `nara_reflect::__macro_support::PersistentFieldCodec` is not implemented for `HashMap<std::string::String, i64>`
+6 | #[derive(Component, Schema)]
+  |                     ^^^^^^ the trait `nara_reflect::__macro_support::PersistentFieldCodec` is not implemented for `HashMap<std::string::String, i64>`
   |
   = help: the following other types implement trait `nara_reflect::__macro_support::PersistentFieldCodec`:
             BTreeMap<std::string::String, T>
@@ -53,8 +53,8 @@ error[E0277]: the trait bound `HashMap<std::string::String, i64>: nara_reflect::
             bool
             f32
             f64
+            glam::f32::sse2::vec4::Vec4
             glam::f32::vec2::Vec2
-            i16
           and $N others
 note: required by a bound in `nara_reflect::__macro_support::encode_persistent_field`
  --> src/authoring.rs
@@ -64,4 +64,27 @@ note: required by a bound in `nara_reflect::__macro_support::encode_persistent_f
   | where
   |     T: PersistentFieldCodec,
   |        ^^^^^^^^^^^^^^^^^^^^ required by this bound in `encode_persistent_field`
-  = note: this error originates in the derive macro `PersistentComponent` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the derive macro `Schema` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `HashMap<std::string::String, i64>: nara_reflect::__macro_support::PersistentFieldCodec` is not satisfied
+ --> tests/ui/native/unsupported_field_type.rs:6:21
+  |
+6 | #[derive(Component, Schema)]
+  |                     ^^^^^^ the trait `nara_reflect::__macro_support::PersistentFieldCodec` is not implemented for `HashMap<std::string::String, i64>`
+  |
+  = help: the following other types implement trait `nara_reflect::__macro_support::PersistentFieldCodec`:
+            BTreeMap<std::string::String, T>
+            Option<T>
+            Vec<T>
+            bool
+            f32
+            f64
+            glam::f32::sse2::vec4::Vec4
+            glam::f32::vec2::Vec2
+          and $N others
+note: required by a bound in `nara_reflect::__macro_support::update_schema_field`
+ --> src/authoring.rs
+  |
+  | pub fn update_schema_field<T: PersistentFieldCodec>(
+  |                               ^^^^^^^^^^^^^^^^^^^^ required by this bound in `update_schema_field`
+  = note: this error originates in the derive macro `Schema` (in Nightly builds, run with -Z macro-backtrace for more info)

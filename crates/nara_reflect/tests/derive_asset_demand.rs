@@ -3,8 +3,7 @@ use std::collections::BTreeMap;
 use nara_asset::{AssetRef, AssetReferenceDemand};
 use nara_ecs::Component;
 use nara_reflect::{
-    ComponentSchemaCatalog, ComponentValue, ComponentValueShape, PersistentComponent,
-    PersistentComponentProvider, validate_component_value,
+    ComponentSchemaCatalog, ComponentValue, ComponentValueShape, Schema, validate_component_value,
 };
 
 type AssetAlias = AssetRef;
@@ -15,8 +14,8 @@ trait ReferenceTypes {
     type Reference;
 }
 
-#[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
-#[nara(
+#[derive(Component, Schema, Debug, Clone, PartialEq)]
+#[schema(
     id = "nara.test.AssetDemandProbe",
     version = 1,
     alias = "Asset demand probe",
@@ -24,17 +23,17 @@ trait ReferenceTypes {
     field_capabilities(scene, inspect, edit, asset_ref)
 )]
 struct AssetDemandProbe {
-    #[nara(id = "future", alias = "Future", asset_demand = deferred)]
+    #[schema(id = "future", alias = "Future", asset_demand = deferred)]
     future: Option<Vec<AssetRef>>,
-    #[nara(id = "alias", alias = "Alias", asset_demand = deferred)]
+    #[schema(id = "alias", alias = "Alias", asset_demand = deferred)]
     aliased: OptionalAssets,
-    #[nara(id = "groups", alias = "Groups", asset_demand = deferred)]
+    #[schema(id = "groups", alias = "Groups", asset_demand = deferred)]
     groups: AssetGroups,
-    #[nara(id = "associated", alias = "Associated", asset_demand = deferred)]
+    #[schema(id = "associated", alias = "Associated", asset_demand = deferred)]
     associated: <Self as ReferenceTypes>::Reference,
-    #[nara(id = "immediate", alias = "Immediate", asset_demand = immediate)]
+    #[schema(id = "immediate", alias = "Immediate", asset_demand = immediate)]
     immediate: AssetRef,
-    #[nara(id = "implicit", alias = "Implicit")]
+    #[schema(id = "implicit", alias = "Implicit")]
     implicit: OptionalAssets,
 }
 
@@ -46,7 +45,7 @@ impl ReferenceTypes for AssetDemandProbe {
 fn field_demand_overrides_recursive_shapes_including_aliases_and_associated_types() {
     use AssetReferenceDemand::{Deferred, Immediate};
 
-    let schema = AssetDemandProbe::persistent_component_schema();
+    let schema = AssetDemandProbe::type_schema().unwrap();
     for (id, expected) in [
         (
             "future",
@@ -93,7 +92,7 @@ fn field_demand_overrides_recursive_shapes_including_aliases_and_associated_type
 #[test]
 fn asset_codecs_round_trip_nested_empty_and_absent_values() {
     let catalog =
-        ComponentSchemaCatalog::from_components([AssetDemandProbe::persistent_component_schema()])
+        ComponentSchemaCatalog::from_components([AssetDemandProbe::type_schema().unwrap()])
             .unwrap();
     let schema = &catalog.components()[0];
     let shared = AssetRef::path("scenes/shared.scene").unwrap();
@@ -124,7 +123,7 @@ fn asset_codecs_round_trip_nested_empty_and_absent_values() {
             immediate: shared.clone(),
             implicit: Some(vec![shared.clone()]),
         };
-        let encoded = expected.encode_persistent_component().unwrap();
+        let encoded = expected.encode_component().unwrap();
         validate_component_value(schema, &encoded).unwrap();
         assert_eq!(
             encoded.field("future").unwrap(),
@@ -140,7 +139,7 @@ fn asset_codecs_round_trip_nested_empty_and_absent_values() {
         }
 
         assert_eq!(
-            AssetDemandProbe::decode_persistent_component((&encoded).into()).unwrap(),
+            AssetDemandProbe::decode_component((&encoded).into()).unwrap(),
             expected,
         );
     }

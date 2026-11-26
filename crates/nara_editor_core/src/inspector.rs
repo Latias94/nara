@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use nara_core::EntityUuid;
 use nara_reflect::{
     ComponentCapability, ComponentFieldSchema, ComponentRegistryError, ComponentSchema,
@@ -10,8 +12,7 @@ use crate::{EditorError, EditorSession, value_draft};
 /// Owns the engine and last successfully discovered project schemas.
 #[derive(Default)]
 pub struct EditorRegistry {
-    engine: ComponentSchemaCatalog,
-    project: ComponentSchemaCatalog,
+    catalog: ComponentSchemaCatalog,
 }
 
 impl EditorRegistry {
@@ -20,29 +21,39 @@ impl EditorRegistry {
         project: ComponentSchemaCatalog,
     ) -> Result<Self, ComponentRegistryError> {
         let engine = ComponentSchemaCatalog::from_components(engine)?;
+        let mut schemas: BTreeMap<_, _> = engine
+            .components()
+            .iter()
+            .map(|schema| (schema.id().clone(), schema.clone()))
+            .collect();
         for schema in project.components() {
-            if let Some(built_in) = find(&engine, schema.id())
-                && built_in != schema
-            {
-                return Err(ComponentRegistryError::DuplicateComponentId(
-                    schema.id().clone(),
-                ));
+            match schemas.get(schema.id()) {
+                Some(built_in) if built_in != schema => {
+                    return Err(ComponentRegistryError::DuplicateComponentId(
+                        schema.id().clone(),
+                    ));
+                }
+                Some(_) => {}
+                None => {
+                    schemas.insert(schema.id().clone(), schema.clone());
+                }
             }
         }
-        Ok(Self { engine, project })
+        Ok(Self {
+            catalog: ComponentSchemaCatalog::from_components(schemas.into_values())?,
+        })
     }
 
     pub fn schema(&self, id: &ComponentTypeId) -> Option<&ComponentSchema> {
-        find(&self.engine, id).or_else(|| find(&self.project, id))
+        find(&self.catalog, id)
     }
 
     pub fn schemas(&self) -> impl Iterator<Item = &ComponentSchema> {
-        self.engine.components().iter().chain(
-            self.project
-                .components()
-                .iter()
-                .filter(|schema| find(&self.engine, schema.id()).is_none()),
-        )
+        self.catalog.components().iter()
+    }
+
+    pub fn catalog(&self) -> &ComponentSchemaCatalog {
+        &self.catalog
     }
 
     pub(crate) fn editable(&self, id: &ComponentTypeId) -> Result<&ComponentSchema, EditorError> {
@@ -95,7 +106,7 @@ pub struct InspectorModel {
 impl InspectorModel {
     pub fn for_session(session: &EditorSession) -> Self {
         Self::new(
-            session.document().scene(),
+            session.preview_scene(),
             session.selection().entities(),
             session.registry(),
         )
@@ -121,7 +132,9 @@ impl InspectorModel {
             if let Some(values) = shared {
                 let schema = registry.schema(id).filter(|schema| {
                     schema.has_capability(ComponentCapability::Inspect)
-                        && values.iter().all(|value| value.version == schema.version())
+                        && values.iter().all(|value| {
+                            value.version() == schema.version() && value.value().is_some()
+                        })
                 });
                 model
                     .components
@@ -140,12 +153,21 @@ fn component(
 ) -> InspectorComponent {
     let mut component = InspectorComponent {
         id: id.clone(),
-        version: record.version,
+        version: record.version(),
         fields: Vec::new(),
         opaque: None,
     };
     let Some(schema) = schema else {
-        component.opaque = Some(summarize(values.iter().map(|record| Some(&record.value))));
+        let raw_values: Vec<_> = values
+            .iter()
+            .map(|record| match record {
+                SceneComponent::Unknown(unknown) => {
+                    Some(ComponentValue::String(unknown.raw.as_ron().to_owned()))
+                }
+                SceneComponent::Known { .. } => None,
+            })
+            .collect();
+        component.opaque = Some(summarize(raw_values.iter().map(Option::as_ref)));
         return component;
     };
     for field in schema.fields() {
@@ -156,9 +178,8 @@ fn component(
             schema: field.clone(),
             value: summarize(values.iter().map(|record| {
                 record
-                    .value
-                    .get_path(field.path())
-                    .ok()
+                    .value()
+                    .and_then(|value| value.get_path(field.path()).ok())
                     .or_else(|| field.default_value())
             })),
             editable: schema.has_capability(ComponentCapability::Edit)

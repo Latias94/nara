@@ -1,23 +1,23 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    fmt::{self, Display, Formatter},
+};
 
-use nara::{core::EntityUuid, prelude::*, reflect::PersistentComponentProvider};
-use nara_scene::authoring::{ColliderSource, SceneDocument, SceneEntity, SpriteSource};
+use nara::{
+    prelude::*,
+    scene::authoring::{ColliderSource, SceneDocument, SceneEntity, SpriteSource},
+};
 
-use crate::RunRules;
+use crate::{ExtractionGate, PatrolDrone, Pilot, PowerCell, RunRules};
 
-const PILOT_ID: u128 = 0x4f99_b200_2a5e_4872_8d3d_0000_0000_0001;
-const CELL_IDS: [u128; 3] = [PILOT_ID + 1, PILOT_ID + 2, PILOT_ID + 3];
-const DRONE_IDS: [u128; 3] = [PILOT_ID + 4, PILOT_ID + 5, PILOT_ID + 6];
-const GATE_ID: u128 = PILOT_ID + 7;
-pub(crate) const CELL_COUNT: usize = CELL_IDS.len();
+pub(crate) mod source;
+
+pub(crate) const CELL_COUNT: usize = 3;
+const DRONE_COUNT: usize = 3;
 #[cfg(feature = "desktop")]
 pub(crate) const WIDTH: f32 = 672.0;
 
-pub(crate) fn bundled_scene() -> Result<SceneDocument, nara_scene::authoring::SceneDocumentError> {
-    SceneDocument::parse(include_str!("../assets/night-relay.nara.scene.ron"))
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Actor {
     Pilot,
     Cell(usize),
@@ -25,22 +25,13 @@ pub(crate) enum Actor {
     Gate,
 }
 
-impl Actor {
-    fn from_id(id: EntityUuid) -> Option<Self> {
-        let id = id.as_uuid().as_u128();
-        match id {
-            PILOT_ID => Some(Self::Pilot),
-            GATE_ID => Some(Self::Gate),
-            _ => CELL_IDS
-                .iter()
-                .position(|&known| known == id)
-                .map(Self::Cell)
-                .or_else(|| {
-                    DRONE_IDS
-                        .iter()
-                        .position(|&known| known == id)
-                        .map(Self::Drone)
-                }),
+impl Display for Actor {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Pilot => formatter.write_str("pilot"),
+            Self::Cell(index) => write!(formatter, "power cell {}", index + 1),
+            Self::Drone(index) => write!(formatter, "patrol drone {}", index + 1),
+            Self::Gate => formatter.write_str("extraction gate"),
         }
     }
 }
@@ -63,7 +54,7 @@ pub(crate) struct Arena {
     pub(crate) pilot: Marker,
     pub(crate) cells: [Marker; CELL_COUNT],
     pub(crate) gate: Marker,
-    pub(crate) patrols: [Patrol; DRONE_IDS.len()],
+    pub(crate) patrols: [Patrol; DRONE_COUNT],
 }
 
 struct Spawn<'a> {
@@ -77,9 +68,7 @@ struct Spawn<'a> {
 }
 
 impl Spawn<'_> {
-    fn component<T: PersistentComponentProvider>(
-        source: &SceneEntity,
-    ) -> Result<Option<T>, String> {
+    fn component<T: Schema>(source: &SceneEntity) -> Result<Option<T>, String> {
         source.typed::<T>().map_err(|error| {
             format!(
                 "{} ({}) {}: {error}",
@@ -90,8 +79,31 @@ impl Spawn<'_> {
         })
     }
 
+    fn role(source: &SceneEntity) -> Result<Option<Actor>, String> {
+        let mut roles = [
+            Self::component::<Pilot>(source)?.map(|_| Actor::Pilot),
+            Self::component::<PowerCell>(source)?
+                .map(|cell| role_index(source, cell.order, CELL_COUNT).map(Actor::Cell))
+                .transpose()?,
+            Self::component::<PatrolDrone>(source)?
+                .map(|drone| role_index(source, drone.order, DRONE_COUNT).map(Actor::Drone))
+                .transpose()?,
+            Self::component::<ExtractionGate>(source)?.map(|_| Actor::Gate),
+        ]
+        .into_iter()
+        .flatten();
+        let role = roles.next();
+        if roles.next().is_some() {
+            return Err(format!("{} has multiple arena roles", source.name));
+        }
+        Ok(role)
+    }
+
     fn read(source: &SceneEntity) -> Result<Spawn<'_>, String> {
-        let actor = Actor::from_id(source.id);
+        if source.prefab.is_some() {
+            return Err(format!("{} is an unresolved prefab instance", source.name));
+        }
+        let actor = Self::role(source)?;
         let pose = Self::component::<Transform2d>(source)?;
         let collider = Self::component::<ColliderSource>(source)?;
         if actor.is_some() && pose.is_none() {
@@ -133,6 +145,14 @@ impl Spawn<'_> {
     }
 }
 
+fn role_index(source: &SceneEntity, order: u32, count: usize) -> Result<usize, String> {
+    usize::try_from(order)
+        .ok()
+        .and_then(|order| order.checked_sub(1))
+        .filter(|&index| index < count)
+        .ok_or_else(|| format!("{} needs an arena role order in 1–{count}", source.name))
+}
+
 pub(crate) fn spawn_scene(
     world: &mut World,
     scene: &SceneDocument,
@@ -149,11 +169,21 @@ pub(crate) fn spawn_scene(
         (Some(rules), None) => rules_override.unwrap_or(rules).checked()?,
         _ => return Err("Night Relay requires exactly one Run Rules component".into()),
     };
+    let mut actors = HashMap::with_capacity(2 + CELL_COUNT + DRONE_COUNT);
+    for spawn in &spawns {
+        if let Some(role) = spawn.actor
+            && let Some(previous) = actors.insert(role, spawn)
+        {
+            return Err(format!(
+                "{} and {} both bind the {role} role",
+                previous.source.name, spawn.source.name
+            ));
+        }
+    }
     let marker = |actor| -> Result<Marker, String> {
-        let spawn = spawns
-            .iter()
-            .find(|spawn| spawn.actor == Some(actor))
-            .ok_or_else(|| format!("Night Relay is missing its {actor:?} entity"))?;
+        let spawn = actors
+            .get(&actor)
+            .ok_or_else(|| format!("Night Relay is missing its {actor} entity"))?;
         let Some(Collider2d::Circle { radius }) = spawn.collider else {
             return Err(format!(
                 "{} requires a circular collider",

@@ -1,5 +1,5 @@
 error: duplicate `asset_demand` attribute
-  --> tests/ui/asset_demand_duplicate.rs:15:12
+  --> tests/ui/asset_demand_duplicate.rs:15:14
    |
-15 |     #[nara(asset_demand = deferred)]
-   |            ^^^^^^^^^^^^
+15 |     #[schema(asset_demand = deferred)]
+   |              ^^^^^^^^^^^^

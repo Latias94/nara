@@ -21,8 +21,8 @@ fn first_scene_save_keeps_the_existing_file_and_preserves_undo_on_retry() {
     use nara_scene::authoring::{SceneDocument, SceneEntity};
 
     let directory = tempfile::tempdir().unwrap();
-    let occupied = directory.path().join("existing.nara.scene.ron");
-    let available = directory.path().join("new.nara.scene.ron");
+    let occupied = directory.path().join("existing.scene.ron");
+    let available = directory.path().join("new.scene.ron");
     let original = b"another writer already owns this file";
     fs::write(&occupied, original).unwrap();
 

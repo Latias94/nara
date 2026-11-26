@@ -38,6 +38,8 @@ pub struct AssetRecord {
     stable_id: StableAssetId,
     path: AssetSourcePath,
     source_kind: AssetSourceKind,
+    #[cfg(feature = "authoring")]
+    meta: Option<crate::AssetMeta>,
 }
 
 impl AssetRecord {
@@ -51,7 +53,26 @@ impl AssetRecord {
             stable_id,
             path,
             source_kind,
+            #[cfg(feature = "authoring")]
+            meta: None,
         }
+    }
+
+    #[cfg(all(feature = "authoring", any(unix, windows)))]
+    pub(crate) fn from_meta(path: AssetSourcePath, meta: crate::AssetMeta) -> Self {
+        Self {
+            stable_id: meta.id(),
+            path,
+            source_kind: meta.source_kind(),
+            meta: Some(meta),
+        }
+    }
+
+    /// Returns the sidecar of a scanned record. Manually registered records have no sidecar.
+    #[cfg(feature = "authoring")]
+    #[must_use]
+    pub const fn meta(&self) -> Option<&crate::AssetMeta> {
+        self.meta.as_ref()
     }
 
     #[must_use]

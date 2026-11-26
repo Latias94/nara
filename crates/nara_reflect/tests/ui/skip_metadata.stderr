@@ -1,0 +1,5 @@
+error: skip cannot be combined with authored field metadata
+ --> tests/ui/skip_metadata.rs:7:14
+  |
+7 |     #[schema(skip, read_only)]
+  |              ^^^^

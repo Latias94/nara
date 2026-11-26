@@ -5,19 +5,26 @@ use std::{
     sync::Arc,
 };
 
-use nara_core::EntityUuid;
+use nara_core::{AssetId, EntityUuid, vfs::AssetPath};
 use nara_reflect::{
-    ComponentCapability, ComponentCodecError, ComponentFieldPath, ComponentFieldPathError,
+    ComponentCodecError, ComponentFieldPath, ComponentFieldPathError, ComponentSchema,
     ComponentTypeId, ComponentValue, validate_component_value,
 };
-use nara_scene::authoring::{SceneComponent, SceneDocument, SceneDocumentError, SceneEntity};
+use nara_scene::authoring::{
+    SceneAsset, SceneComponent, SceneDocument, SceneDocumentError, SceneEntity, SceneSchemaRebind,
+    prefab::{ExpandedScene, PrefabError, PrefabOverrideError},
+};
 use thiserror::Error;
 
 use crate::{EditorRegistry, SelectionState};
 
+mod prefabs;
+pub use prefabs::PrefabFieldOverride;
+
 /// Typed changes to an authored scene or prefab. A batch is admitted as a single edit.
 #[derive(Debug, Clone)]
 pub enum EditorCommand {
+    DeclareAsset(SceneAsset),
     Create(SceneEntity),
     Delete(Vec<EntityUuid>),
     Rename {
@@ -43,6 +50,7 @@ pub enum EditorCommand {
         entities: Vec<EntityUuid>,
         component: ComponentTypeId,
     },
+    RevertPrefabOverride(PrefabFieldOverride),
     Batch(Vec<Self>),
 }
 
@@ -50,6 +58,26 @@ pub enum EditorCommand {
 pub enum EditorError {
     #[error(transparent)]
     Scene(#[from] SceneDocumentError),
+    #[error(transparent)]
+    Prefab(#[from] PrefabError),
+    #[error(transparent)]
+    PrefabOverride(#[from] PrefabOverrideError),
+    #[error("prefab asset {0} is not available")]
+    MissingPrefab(AssetId),
+    #[error("entity {0} is not an editable prefab instance")]
+    NotPrefabInstance(EntityUuid),
+    #[error("the prefab override changed; try again from the Inspector")]
+    StalePrefabOverride,
+    #[error("this edit is not available on an inherited prefab child")]
+    InheritedPrefabChild,
+    #[error("entity reference {0} cannot be represented in the upstream prefab")]
+    PrefabReferenceScope(EntityUuid),
+    #[error("the field would resolve to a different value after applying it to the prefab")]
+    PrefabApplyChangedValue,
+    #[error("applying the override would invalidate an undo state: {0}")]
+    PrefabHistoryWouldBreak(#[source] Box<Self>),
+    #[error("could not publish prefab {asset}: {message}")]
+    PublishPrefab { asset: AssetId, message: String },
     #[error(transparent)]
     Codec(#[from] ComponentCodecError),
     #[error(transparent)]
@@ -97,8 +125,16 @@ impl EditorDocument {
 
     #[cfg(any(unix, windows))]
     pub fn open(path: impl AsRef<Path>) -> Result<Self, EditorError> {
+        Self::open_with(path, &[])
+    }
+
+    #[cfg(any(unix, windows))]
+    pub fn open_with(
+        path: impl AsRef<Path>,
+        schemas: &[ComponentSchema],
+    ) -> Result<Self, EditorError> {
         let path = path.as_ref();
-        let mut document = Self::new(SceneDocument::read(path)?)?;
+        let mut document = Self::new(read_editor_source(path, schemas)?)?;
         document.path = Some(path.to_path_buf());
         Ok(document)
     }
@@ -113,9 +149,23 @@ impl EditorDocument {
     }
 }
 
+#[cfg(any(unix, windows))]
+pub(crate) fn read_editor_source(
+    path: &Path,
+    schemas: &[ComponentSchema],
+) -> Result<SceneDocument, SceneDocumentError> {
+    let mut scene = SceneDocument::read(path)?;
+    // Cached project schema may lag the file while the project does not compile.
+    // Keep undecodable project records opaque. Built-ins are checked by `read`.
+    scene.resolve_unknown_components(schemas)?;
+    Ok(scene)
+}
+
 /// Synchronous scene editing. History owns just the rows changed by completed edits.
 pub struct EditorSession {
     document: EditorDocument,
+    prefabs: BTreeMap<AssetId, SceneDocument>,
+    expanded: Option<Arc<ExpandedScene>>,
     registry: EditorRegistry,
     selection: SelectionState,
     history: CommandHistory,
@@ -130,6 +180,7 @@ pub struct EditorGesture(Arc<()>);
 struct ActiveGesture {
     owner: EditorGesture,
     before: SceneDocument,
+    expanded_before: Option<Arc<ExpandedScene>>,
 }
 
 impl EditorSession {
@@ -140,6 +191,8 @@ impl EditorSession {
         let saved_revision = None;
         Self {
             document,
+            prefabs: BTreeMap::new(),
+            expanded: None,
             registry,
             selection: SelectionState::default(),
             history: CommandHistory::default(),
@@ -152,20 +205,72 @@ impl EditorSession {
         &self.document
     }
 
+    /// The current scene projected through its prefab instances for selection and preview.
+    pub fn preview_scene(&self) -> &SceneDocument {
+        self.expanded
+            .as_ref()
+            .map_or(&self.document.scene, |expanded| &expanded.document)
+    }
+
     pub fn registry(&self) -> &EditorRegistry {
         &self.registry
     }
 
-    pub fn set_registry(&mut self, registry: EditorRegistry) -> Result<(), EditorError> {
+    pub fn set_registry(
+        &mut self,
+        registry: EditorRegistry,
+    ) -> Result<Vec<SceneDocumentError>, EditorError> {
         self.require_idle()?;
+        let rebind = SceneSchemaRebind::new(
+            self.registry.catalog().components(),
+            registry.catalog().components(),
+        )?;
+        let mut scene = self.document.scene.clone();
+        scene.validate()?;
+        let mut diagnostics = rebind.rebind_rows(&mut scene.entities, &scene.assets)?;
+        let mut prefabs = self.prefabs.clone();
+        for prefab in prefabs.values_mut() {
+            prefab.validate()?;
+            diagnostics.extend(rebind.rebind_rows(&mut prefab.entities, &prefab.assets)?);
+        }
+        let mut history = self.history.clone();
+        history.rebind(&rebind, &scene.assets)?;
+        let expanded = prefabs::expand(&scene, &prefabs, &registry)?;
+        self.expanded = expanded;
+        self.document.scene = scene;
+        self.prefabs = prefabs;
+        self.history = history;
         self.registry = registry;
+        self.prune_selection();
+        Ok(diagnostics)
+    }
+
+    pub fn set_prefabs(
+        &mut self,
+        prefabs: BTreeMap<AssetId, SceneDocument>,
+    ) -> Result<(), EditorError> {
+        self.require_idle()?;
+        self.expanded = prefabs::expand(&self.document.scene, &prefabs, &self.registry)?;
+        self.prefabs = prefabs;
+        self.prune_selection();
         Ok(())
     }
 
     pub fn open_document(&mut self, document: EditorDocument) -> Result<(), EditorError> {
+        self.open_document_with_prefabs(document, BTreeMap::new())
+    }
+
+    pub fn open_document_with_prefabs(
+        &mut self,
+        document: EditorDocument,
+        prefabs: BTreeMap<AssetId, SceneDocument>,
+    ) -> Result<(), EditorError> {
         self.require_idle()?;
+        let expanded = prefabs::expand(&document.scene, &prefabs, &self.registry)?;
         let registry = std::mem::take(&mut self.registry);
         *self = Self::new(document, registry);
+        self.prefabs = prefabs;
+        self.expanded = expanded;
         Ok(())
     }
 
@@ -182,7 +287,7 @@ impl EditorSession {
             || self
                 .gesture
                 .as_ref()
-                .is_some_and(|gesture| gesture.before.entities != self.document.scene.entities)
+                .is_some_and(|gesture| gesture.before != self.document.scene)
     }
 
     pub fn can_undo(&self) -> bool {
@@ -222,16 +327,28 @@ impl EditorSession {
     fn apply_edit(&mut self, command: EditorCommand) -> Result<bool, EditorError> {
         let before = &self.document.scene;
         let mut after = before.clone();
-        apply_command(&mut after, &self.registry, command)?;
+        let mut projection = EditProjection {
+            initial: self.expanded.as_ref(),
+            changed: BTreeSet::new(),
+        };
+        apply_command(
+            &mut after,
+            &self.registry,
+            &self.prefabs,
+            &mut projection,
+            command,
+        )?;
         after.entities.sort_unstable_by_key(|row| row.id);
-        if before.entities == after.entities {
+        if *before == after {
             return Ok(false);
         }
         after.validate()?;
+        let expanded = prefabs::expand(&after, &self.prefabs, &self.registry)?;
         if self.gesture.is_none() {
             self.history.push(ScenePatch::between(before, &after));
         }
         self.document.scene = after;
+        self.expanded = expanded;
         self.prune_selection();
         Ok(true)
     }
@@ -242,6 +359,7 @@ impl EditorSession {
         self.gesture = Some(ActiveGesture {
             owner: owner.clone(),
             before: self.document.scene.clone(),
+            expanded_before: self.expanded.clone(),
         });
         Ok(owner)
     }
@@ -264,6 +382,7 @@ impl EditorSession {
             return false;
         };
         self.document.scene = gesture.before;
+        self.expanded = gesture.expanded_before;
         self.prune_selection();
         true
     }
@@ -273,10 +392,12 @@ impl EditorSession {
         if self.history.cursor == 0 {
             return Ok(false);
         }
-        self.history.cursor -= 1;
-        self.history.entries[self.history.cursor]
-            .patch
-            .apply(&mut self.document.scene, false);
+        let cursor = self.history.cursor - 1;
+        let mut scene = self.document.scene.clone();
+        self.history.entries[cursor].patch.apply(&mut scene, false);
+        self.expanded = prefabs::expand(&scene, &self.prefabs, &self.registry)?;
+        self.document.scene = scene;
+        self.history.cursor = cursor;
         self.prune_selection();
         Ok(true)
     }
@@ -286,7 +407,10 @@ impl EditorSession {
         let Some(entry) = self.history.entries.get(self.history.cursor) else {
             return Ok(false);
         };
-        entry.patch.apply(&mut self.document.scene, true);
+        let mut scene = self.document.scene.clone();
+        entry.patch.apply(&mut scene, true);
+        self.expanded = prefabs::expand(&scene, &self.prefabs, &self.registry)?;
+        self.document.scene = scene;
         self.history.cursor += 1;
         self.prune_selection();
         Ok(true)
@@ -301,7 +425,9 @@ impl EditorSession {
     #[cfg(any(unix, windows))]
     pub fn save_as(&mut self, path: impl AsRef<Path>) -> Result<(), EditorError> {
         self.require_idle()?;
-        self.document.scene.write(path.as_ref())?;
+        self.document
+            .scene
+            .write_with(path.as_ref(), self.registry.catalog().components())?;
         self.document.path = Some(path.as_ref().to_path_buf());
         self.saved_revision = Some(self.history.revision());
         Ok(())
@@ -313,7 +439,10 @@ impl EditorSession {
         use std::io::{self, Write as _};
 
         self.require_idle()?;
-        let source = self.document.scene.to_ron()?;
+        let source = self
+            .document
+            .scene
+            .to_ron_with(self.registry.catalog().components())?;
         (|| -> io::Result<()> {
             let parent = path
                 .parent()
@@ -344,10 +473,26 @@ impl EditorSession {
         }
     }
 
+    /// Refreshes informational paths using the asset index that admitted their IDs.
+    pub fn refresh_asset_hints(&mut self, hint: impl Fn(AssetId) -> Option<AssetPath>) {
+        let scene = &mut self.document.scene;
+        for asset in scene.assets.values_mut() {
+            if let Some(path) = hint(asset.id) {
+                asset.hint = path;
+            }
+        }
+        let mut referenced = BTreeSet::new();
+        prefabs::collect_authored_assets(scene, &self.registry, &mut referenced);
+        for id in referenced {
+            if let Some(path) = hint(id) {
+                prefabs::declare_asset(scene, SceneAsset { id, hint: path });
+            }
+        }
+    }
+
     fn prune_selection(&mut self) {
         let entities = self
-            .document
-            .scene
+            .preview_scene()
             .entities
             .iter()
             .map(|row| row.id)
@@ -356,25 +501,44 @@ impl EditorSession {
     }
 }
 
+struct EditProjection<'a> {
+    initial: Option<&'a Arc<ExpandedScene>>,
+    changed: BTreeSet<EntityUuid>,
+}
+
+impl<'a> EditProjection<'a> {
+    fn before_edit(&mut self, entity: EntityUuid) -> Option<&'a Arc<ExpandedScene>> {
+        self.initial.filter(|_| self.changed.insert(entity))
+    }
+}
+
 fn apply_command(
     scene: &mut SceneDocument,
     registry: &EditorRegistry,
+    prefabs: &BTreeMap<AssetId, SceneDocument>,
+    projection: &mut EditProjection<'_>,
     command: EditorCommand,
 ) -> Result<(), EditorError> {
     match command {
+        EditorCommand::DeclareAsset(asset) => prefabs::declare_asset(scene, asset),
         EditorCommand::Create(entity) => {
+            projection.initial = None;
             if scene.entities.iter().any(|row| row.id == entity.id) {
                 return Err(EditorError::DuplicateEntity(entity.id));
             }
             check_name(&entity.name)?;
             scene.entities.push(entity);
         }
-        EditorCommand::Delete(entities) => delete_subtrees(scene, entities)?,
+        EditorCommand::Delete(entities) => {
+            projection.initial = None;
+            delete_subtrees(scene, entities)?;
+        }
         EditorCommand::Rename { entity, name } => {
             check_name(&name)?;
             row_mut(scene, entity)?.name = name;
         }
         EditorCommand::Reparent { entities, parent } => {
+            projection.initial = None;
             for entity in entities {
                 row_mut(scene, entity)?.parent = parent;
             }
@@ -386,24 +550,12 @@ fn apply_command(
             value,
         } => {
             let schema = registry.editable(&component)?;
-            if !schema.fields().iter().any(|field| {
-                field.path() == &path && field.has_capability(ComponentCapability::Edit)
-            }) {
-                return Err(EditorError::ReadOnlyField(path));
-            }
+            prefabs::check_editable_field(schema, &path)?;
             for entity in entities {
-                let record = row_mut(scene, entity)?
-                    .components
-                    .get_mut(&component)
-                    .ok_or_else(|| EditorError::MissingComponent {
-                        entity,
-                        component: component.clone(),
-                    })?;
-                if record.version != schema.version() {
-                    return Err(EditorError::ReadOnlyComponent(component));
-                }
-                record.value.set_path(&path, value.clone())?;
-                validate_component_value(schema, &record.value)?;
+                let view = projection.before_edit(entity);
+                prefabs::set_field(
+                    scene, prefabs, registry, view, entity, &component, &path, &value,
+                )?;
             }
         }
         EditorCommand::SetComponent {
@@ -412,39 +564,29 @@ fn apply_command(
             value,
         } => {
             let schema = registry.editable(&component)?;
-            if value.version != schema.version() {
-                return Err(EditorError::ReadOnlyComponent(component));
-            }
-            validate_component_value(schema, &value.value)?;
+            let payload = prefabs::known(&component, &value, schema)?;
+            validate_component_value(schema, payload)?;
             for entity in entities {
-                let components = &mut row_mut(scene, entity)?.components;
-                if let Some(current) = components.get(&component) {
-                    if current.version != value.version {
-                        return Err(EditorError::ReadOnlyComponent(component));
-                    }
-                    for field in schema.fields() {
-                        if !field.has_capability(ComponentCapability::Edit)
-                            && current.value.get_path(field.path()).ok()
-                                != value.value.get_path(field.path()).ok()
-                        {
-                            return Err(EditorError::ReadOnlyField(field.path().clone()));
-                        }
-                    }
-                }
-                components.insert(component.clone(), value.clone());
+                let view = projection.before_edit(entity);
+                prefabs::set_component(scene, prefabs, registry, view, entity, &component, &value)?;
             }
         }
         EditorCommand::RemoveComponent {
             entities,
             component,
         } => {
+            projection.initial = None;
             for entity in entities {
-                row_mut(scene, entity)?.components.remove(&component);
+                prefabs::remove_component(scene, prefabs, registry, entity, &component)?;
             }
+        }
+        EditorCommand::RevertPrefabOverride(edit) => {
+            projection.initial = None;
+            prefabs::revert(scene, &edit)?;
         }
         EditorCommand::Batch(commands) => {
             for command in commands {
-                apply_command(scene, registry, command)?;
+                apply_command(scene, registry, prefabs, projection, command)?;
             }
         }
     }
@@ -493,13 +635,14 @@ fn delete_subtrees(
     Ok(())
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct CommandHistory {
     entries: Vec<HistoryEntry>,
     cursor: usize,
     next_revision: u64,
 }
 
+#[derive(Clone)]
 struct HistoryEntry {
     patch: ScenePatch,
     revision: u64,
@@ -513,7 +656,7 @@ impl CommandHistory {
     }
 
     fn push(&mut self, patch: ScenePatch) -> bool {
-        if patch.entities.is_empty() {
+        if patch.entities.is_empty() && patch.assets.is_none() {
             return false;
         }
         self.entries.truncate(self.cursor);
@@ -525,13 +668,49 @@ impl CommandHistory {
         self.cursor += 1;
         true
     }
+
+    fn rebind(
+        &mut self,
+        rebind: &SceneSchemaRebind<'_>,
+        assets: &BTreeMap<String, SceneAsset>,
+    ) -> Result<(), SceneDocumentError> {
+        let (undo, redo) = self.entries.split_at_mut(self.cursor);
+        rebind_history_rows(undo.iter_mut().rev(), rebind, assets, false)?;
+        rebind_history_rows(redo.iter_mut(), rebind, assets, true)
+    }
 }
 
-#[derive(Default)]
+fn rebind_history_rows<'a>(
+    entries: impl Iterator<Item = &'a mut HistoryEntry>,
+    rebind: &SceneSchemaRebind<'_>,
+    mut assets: &'a BTreeMap<String, SceneAsset>,
+    forward: bool,
+) -> Result<(), SceneDocumentError> {
+    for entry in entries {
+        let patch = &mut entry.patch;
+        let (before, after) = patch
+            .assets
+            .as_ref()
+            .map_or((assets, assets), |patch| (&patch.before, &patch.after));
+        rebind.rebind_rows(&mut patch.before, before)?;
+        rebind.rebind_rows(&mut patch.after, after)?;
+        assets = if forward { after } else { before };
+    }
+    Ok(())
+}
+
+#[derive(Clone, Default)]
 struct ScenePatch {
     entities: BTreeSet<EntityUuid>,
     before: Vec<SceneEntity>,
     after: Vec<SceneEntity>,
+    assets: Option<AssetPatch>,
+}
+
+#[derive(Clone)]
+struct AssetPatch {
+    before: BTreeMap<String, SceneAsset>,
+    after: BTreeMap<String, SceneAsset>,
 }
 
 impl ScenePatch {
@@ -551,6 +730,12 @@ impl ScenePatch {
                 patch.after.push(row.clone());
             }
         }
+        if before.assets != after.assets {
+            patch.assets = Some(AssetPatch {
+                before: before.assets.clone(),
+                after: after.assets.clone(),
+            });
+        }
         patch
     }
 
@@ -561,5 +746,13 @@ impl ScenePatch {
             .retain(|row| !self.entities.contains(&row.id));
         scene.entities.extend(rows.iter().cloned());
         scene.entities.sort_unstable_by_key(|row| row.id);
+        if let Some(assets) = &self.assets {
+            scene.assets = if forward {
+                &assets.after
+            } else {
+                &assets.before
+            }
+            .clone();
+        }
     }
 }

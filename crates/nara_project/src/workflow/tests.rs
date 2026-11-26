@@ -1,5 +1,7 @@
 use std::{fs, path::Path, process::ExitStatus};
 
+use nara_asset::{AssetScanMode, AssetSourceKind, AssetSourcePath, ProjectAssetDatabase};
+use nara_core::AssetId;
 use nara_reflect::ComponentSchemaCatalog;
 
 use super::{
@@ -54,6 +56,13 @@ fn starter_uses_the_checkout_patch_sources_and_a_code_first_manifest() {
     );
     assert_eq!(patches["wgpu"]["rev"].as_str(), Some("pinned-revision"));
     assert_eq!(cargo["dependencies"].as_table().unwrap().len(), 1);
+    assert!(
+        cargo["features"]["desktop"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|feature| feature.as_str() == Some("nara/asset-authoring"))
+    );
     assert!(project.join("src/bin/nara_schema.rs").is_file());
 
     let manifest = super::check_project(&project).unwrap();
@@ -62,6 +71,50 @@ fn starter_uses_the_checkout_patch_sources_and_a_code_first_manifest() {
     assert_eq!(manifest.paths.assets, "assets");
     assert!(manifest.window.is_none());
     assert_eq!(manifest.editor.play, EditorPlayMode::External);
+}
+
+#[test]
+fn starter_generates_the_scene_prefab_and_png_with_resolvable_sidecars() {
+    let temp = tempfile::tempdir().unwrap();
+    let checkout = temp.path().join("engine");
+    let project = temp.path().join("my-game");
+    local_checkout(&checkout);
+    create_project(&project, "my-game", &checkout).unwrap();
+
+    let assets = ProjectAssetDatabase::scan(
+        &project,
+        &[AssetSourcePath::new("assets").unwrap()],
+        AssetScanMode::ReadOnly,
+    )
+    .unwrap();
+    for (id, path, kind) in [
+        (
+            "01a219c4-2965-7784-9173-9c9863ec5284",
+            "assets/main.scene.ron",
+            AssetSourceKind::Scene,
+        ),
+        (
+            "01a21a01-f10a-732f-ba5d-e3982408ff21",
+            "assets/sprite.prefab.ron",
+            AssetSourceKind::Prefab,
+        ),
+        (
+            "01a21a01-f10c-7004-9c91-91ef868ff334",
+            "assets/white.png",
+            AssetSourceKind::Image,
+        ),
+    ] {
+        let id = id.parse::<AssetId>().unwrap();
+        let record = assets.record_for_stable_id(id.into()).unwrap();
+        assert_eq!(record.path().as_str(), path);
+        assert_eq!(record.source_kind(), &kind);
+        assert!(project.join(format!("{path}.meta")).is_file());
+    }
+    assert!(
+        fs::read(project.join("assets/white.png"))
+            .unwrap()
+            .starts_with(b"\x89PNG\r\n\x1a\n")
+    );
 }
 
 #[test]
@@ -118,7 +171,7 @@ fn snapshot_play_requires_explicit_project_opt_in() {
 }
 
 #[test]
-fn check_validates_only_the_two_project_manifests() {
+fn check_validates_manifests_before_discovering_assets() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path();
     let source = "[project]\nname = 'My Game'\nversion = '0.1.0'\n";
@@ -157,6 +210,26 @@ fn check_validates_only_the_two_project_manifests() {
         super::check_project(project),
         Err(super::ProjectCheckError::Parse { path, .. }) if path == cargo_manifest
     ));
+}
+
+#[test]
+fn check_discovers_and_reuses_asset_sidecars() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path();
+    fs::write(
+        project.join("nara.toml"),
+        "[project]\nname = 'My Game'\nversion = '0.1.0'\n[paths]\nassets = 'content'\n",
+    )
+    .unwrap();
+    fs::write(project.join("Cargo.toml"), "[package]\nname = 'my-game'\n").unwrap();
+    fs::create_dir(project.join("content")).unwrap();
+    fs::write(project.join("content/player.png"), []).unwrap();
+
+    super::check_project(project).unwrap();
+    let meta = project.join("content/player.png.meta");
+    let admitted = fs::read(&meta).unwrap();
+    super::check_project(project).unwrap();
+    assert_eq!(fs::read(meta).unwrap(), admitted);
 }
 
 #[test]

@@ -2,7 +2,7 @@
 
 use std::{
     error::Error,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
@@ -12,13 +12,11 @@ use nara::{
     ecs::{bevy_ecs::error::Result as SystemResult, schedule::IntoScheduleConfigs},
     input::{ActionContext, ActionPhase, InputSeatId},
     prelude::*,
-    render::image::ImageSourceDirectory,
     render_wgpu::desktop::{DesktopPresentation, DesktopPresentedFrame},
     window::{WindowId, WindowSet},
 };
-use nara_scene::authoring::SceneDocument;
 
-use crate::{DEFAULT_SCENE_PATH, GamePlugin, PilotInput, RunRules, TITLE, WINDOW_SIZE};
+use crate::{GamePlugin, PilotInput, TITLE, WINDOW_SIZE, arena::source};
 
 mod editor_play;
 mod hud;
@@ -26,8 +24,11 @@ mod world;
 
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(15);
 
+#[derive(Resource)]
+struct SceneTextures(source::TextureHandles);
+
 pub fn run(verify_first_present: bool) -> Result<(), Box<dyn Error>> {
-    let mut app = desktop_app(&project_path(DEFAULT_SCENE_PATH))?;
+    let mut app = desktop_app(None)?;
     if verify_first_present {
         verify_present(&mut app)?;
     } else {
@@ -37,20 +38,14 @@ pub fn run(verify_first_present: bool) -> Result<(), Box<dyn Error>> {
 }
 
 pub fn run_editor_play(scene_path: &Path) -> Result<(), Box<dyn Error>> {
-    editor_play::run(desktop_app(scene_path)?)
+    editor_play::run(desktop_app(Some(scene_path))?)
 }
 
-fn project_path(relative: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
-}
-
-fn desktop_app(scene_path: &Path) -> Result<App, Box<dyn Error>> {
-    let scene = SceneDocument::read(scene_path)
-        .map_err(|error| format!("could not load {}: {error}", scene_path.display()))?;
+fn desktop_app(snapshot: Option<&Path>) -> Result<App, Box<dyn Error>> {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins::new(TITLE).with_window_size(WINDOW_SIZE.0, WINDOW_SIZE.1))?
-        .register_schema::<RunRules>()?
-        .insert_resource(ImageSourceDirectory::new(project_path("assets"))?)?
+    app.add_plugins(DefaultPlugins::new(TITLE).with_window_size(WINDOW_SIZE.0, WINDOW_SIZE.1))?;
+    let (scene, textures) = source::load(&mut app, source::development_root(), snapshot)?;
+    app.insert_resource(SceneTextures(textures))?
         .add_plugins(GamePlugin::from_scene(scene))?
         .add_systems(
             Startup,

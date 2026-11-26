@@ -1,8 +1,8 @@
 use nara_ecs::Component;
-use nara_reflect::PersistentComponent;
+use nara_reflect::Schema;
 
-#[derive(Component, PersistentComponent)]
-#[nara(
+#[derive(Component, Schema)]
+#[schema(
     id = "nara.test.InitialWithoutOptIn",
     version = 1,
     alias = "Initial without opt-in",
@@ -10,7 +10,7 @@ use nara_reflect::PersistentComponent;
     field_capabilities(scene)
 )]
 struct InitialWithoutOptIn {
-    #[nara(id = "value", alias = "Value", initial = 1)]
+    #[schema(id = "value", alias = "Value", initial = 1)]
     value: i64,
 }
 

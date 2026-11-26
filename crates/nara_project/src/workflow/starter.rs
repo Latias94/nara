@@ -12,6 +12,14 @@ use super::SCHEMA_BINARY;
 pub const GAME_BINARY: &str = "game";
 pub const DESKTOP_FEATURE: &str = "desktop";
 
+const STARTER_IMAGE: &[u8] = &[
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0x0f, 0x04, 0x00,
+    0x09, 0xfb, 0x03, 0xfd, 0xfb, 0x5e, 0x6b, 0x2b, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+    0xae, 0x42, 0x60, 0x82,
+];
+
 #[derive(Debug, Error)]
 pub enum StarterError {
     #[error("invalid starter package name {0:?}")]
@@ -52,16 +60,37 @@ pub fn create_project(
         name = toml_string(package),
     );
     let files = [
-        (".gitignore", "/target/\n/.nara/\n"),
-        ("README.md", include_str!("template/README.md")),
-        ("nara.toml", &project_manifest),
-        ("src/lib.rs", include_str!("template/lib.rs")),
-        ("src/main.rs", include_str!("template/main.rs")),
+        (".gitignore", "/target/\n/.nara/\n".as_bytes()),
+        ("README.md", include_bytes!("template/README.md").as_slice()),
+        ("nara.toml", project_manifest.as_bytes()),
+        (
+            "assets/main.scene.ron",
+            include_bytes!("template/main.scene.ron"),
+        ),
+        (
+            "assets/main.scene.ron.meta",
+            include_bytes!("template/main.scene.ron.meta"),
+        ),
+        (
+            "assets/sprite.prefab.ron",
+            include_bytes!("template/sprite.prefab.ron"),
+        ),
+        (
+            "assets/sprite.prefab.ron.meta",
+            include_bytes!("template/sprite.prefab.ron.meta"),
+        ),
+        ("assets/white.png", STARTER_IMAGE),
+        (
+            "assets/white.png.meta",
+            include_bytes!("template/white.png.meta"),
+        ),
+        ("src/lib.rs", include_bytes!("template/lib.rs")),
+        ("src/main.rs", include_bytes!("template/main.rs")),
         (
             "src/bin/nara_schema.rs",
-            include_str!("template/nara_schema.rs"),
+            include_bytes!("template/nara_schema.rs"),
         ),
-        ("Cargo.toml", &cargo_manifest),
+        ("Cargo.toml", cargo_manifest.as_bytes()),
     ];
 
     write_project(destination, &files).map_err(|source| StarterError::Create {
@@ -127,7 +156,7 @@ fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_owned()).to_string()
 }
 
-fn write_project(destination: &Path, files: &[(&str, &str)]) -> io::Result<()> {
+fn write_project(destination: &Path, files: &[(&str, &[u8])]) -> io::Result<()> {
     fs::create_dir(destination)?;
     let mut directories = Vec::new();
     let mut written = Vec::new();
@@ -141,7 +170,7 @@ fn write_project(destination: &Path, files: &[(&str, &str)]) -> io::Result<()> {
             let path = destination.join(name);
             let mut file = File::create_new(&path)?;
             written.push(path);
-            file.write_all(contents.as_bytes())?;
+            file.write_all(contents)?;
         }
         Ok(())
     })();

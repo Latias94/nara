@@ -1,4 +1,4 @@
-use crate::ComponentValueError;
+use crate::{ComponentFieldPathError, ComponentValueError};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ComponentCodecError {
@@ -8,6 +8,13 @@ pub enum ComponentCodecError {
     InvalidField { field: String, expected: String },
     #[error(transparent)]
     Value(#[from] ComponentValueError),
+    #[error(transparent)]
+    FieldPath(#[from] ComponentFieldPathError),
+    #[error("component field '{field}' is read-only")]
+    ReadOnlyField { field: String },
+    #[cfg(feature = "postcard")]
+    #[error("this component does not have a typed Postcard codec")]
+    PostcardUnavailable,
     #[error("{0}")]
     Message(String),
 }

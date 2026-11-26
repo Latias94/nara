@@ -1,14 +1,8 @@
-use nara::prelude::{Component, PersistentComponent};
+use nara::prelude::{Component, Schema};
 
-#[derive(Component, PersistentComponent)]
-#[nara(
-    id = "game.Spin",
-    version = 1,
-    alias = "Spin",
-    component_capabilities(scene, inspect, edit),
-    field_capabilities(scene, inspect, edit)
-)]
+#[derive(Component, Default, Schema)]
+#[schema(id = "game.Spin", version = 2, default, alias = "Spin")]
 pub struct Spin {
-    #[nara(id = "radians-per-second", alias = "Radians per second")]
+    #[schema(alias = "Radians per second")]
     pub radians_per_second: f32,
 }

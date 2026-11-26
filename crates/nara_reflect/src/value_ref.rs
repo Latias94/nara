@@ -3,7 +3,7 @@ use std::{
     slice,
 };
 
-use nara_core::EntityUuid;
+use nara_core::{AssetId, EntityUuid};
 
 use crate::{
     ComponentCodecError, ComponentFieldPath, ComponentFieldPathError, ComponentValue,
@@ -72,6 +72,11 @@ impl<'a> ComponentValueRef<'a> {
     #[must_use]
     pub fn as_entity_reference(self) -> Option<&'a EntityUuid> {
         self.0.as_entity_reference()
+    }
+
+    #[must_use]
+    pub fn as_asset_reference(self) -> Option<&'a AssetId> {
+        self.0.as_asset_reference()
     }
 
     #[must_use]

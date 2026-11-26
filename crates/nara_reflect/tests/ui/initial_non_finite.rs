@@ -1,8 +1,8 @@
 use nara_ecs::Component;
-use nara_reflect::PersistentComponent;
+use nara_reflect::Schema;
 
-#[derive(Component, PersistentComponent)]
-#[nara(
+#[derive(Component, Schema)]
+#[schema(
     id = "nara.test.InitialNonFinite",
     version = 1,
     alias = "Initial non-finite",
@@ -11,7 +11,7 @@ use nara_reflect::PersistentComponent;
     authoring_initial
 )]
 struct InitialNonFinite {
-    #[nara(id = "value", alias = "Value", initial = 1e100)]
+    #[schema(id = "value", alias = "Value", initial = 1e100)]
     value: f32,
 }
 

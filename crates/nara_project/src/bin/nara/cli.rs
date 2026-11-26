@@ -38,8 +38,8 @@ Usage:
   nara schema <project> [--trusted]
   nara play <project> --trusted [--bin <name>] [--features <list>] [--release] [-- <game args>]
 
-Check validates nara.toml and the local Cargo package declaration. Schema reads
-the last cache by default. With --trusted it builds and runs the exporter.
+Check validates the project manifests and creates missing asset sidecars. Schema
+reads the last cache by default. With --trusted it builds and runs the exporter.
 Play builds and runs Cargo's default-run target or game, with the target's
 declared required features. Trusted commands can execute project code.
 ";
@@ -76,7 +76,7 @@ fn execute(command: Command) -> Result<ExitCode, Box<dyn Error>> {
             check_project(&project)?;
             writeln!(
                 io::stdout().lock(),
-                "Checked nara.toml and the Cargo package declaration."
+                "Checked the project manifests and asset sidecars."
             )?;
         }
         Command::Schema { project, refresh } => {

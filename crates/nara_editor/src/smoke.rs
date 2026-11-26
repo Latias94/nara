@@ -127,7 +127,7 @@ async fn exercise(editor: &OpenEditor, cx: &mut AsyncApp) -> Result<()> {
 
     cx.update(|cx| editor.workspace.update(cx, Workspace::refresh_schema));
     let component = ComponentTypeId::new("night-relay.RunRules");
-    let field = ComponentFieldId::new("shield-charges");
+    let field = ComponentFieldId::new("shield_charges");
     wait(cx, BUILD, "refresh the Night Relay Schema", |cx| {
         let workspace = editor.workspace.read(cx);
         (workspace.status == JobStatus::Idle).then(|| {
@@ -147,7 +147,7 @@ async fn exercise(editor: &OpenEditor, cx: &mut AsyncApp) -> Result<()> {
     .with_context(|| recent_console(editor, cx))?;
 
     let scratch = tempfile::tempdir()?;
-    let authored_copy = scratch.path().join("verified.nara.scene.ron");
+    let authored_copy = scratch.path().join("verified.scene.ron");
     let edited_shields = cx.update(|cx| {
         editor.workspace.update(cx, |workspace, cx| -> Result<u64> {
             let (entity, previous) = workspace
@@ -159,7 +159,7 @@ async fn exercise(editor: &OpenEditor, cx: &mut AsyncApp) -> Result<()> {
                 .find_map(|row| {
                     row.components
                         .get(&component)
-                        .map(|record| (row.id, record.value.clone()))
+                        .and_then(|record| record.value().cloned().map(|value| (row.id, value)))
                 })
                 .context("Night Relay has no editable rules entity")?;
             let path = workspace
@@ -204,8 +204,8 @@ async fn exercise(editor: &OpenEditor, cx: &mut AsyncApp) -> Result<()> {
                     .find(|row| row.id == entity)
                     .unwrap()
                     .components[&component]
-                    .value
-                    == previous,
+                    .value()
+                    == Some(&previous),
                 "Undo did not restore the original Rust component"
             );
             workspace.redo(cx);
@@ -226,7 +226,10 @@ async fn exercise(editor: &OpenEditor, cx: &mut AsyncApp) -> Result<()> {
                 "Redo did not update the Inspector"
             );
             workspace.session.save_as(&authored_copy)?;
-            let reopened = EditorDocument::open(&authored_copy)?;
+            let reopened = EditorDocument::open_with(
+                &authored_copy,
+                workspace.session.registry().catalog().components(),
+            )?;
             ensure!(
                 reopened.scene() == workspace.session.document().scene(),
                 "Scene round trip changed the document"

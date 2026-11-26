@@ -2,7 +2,7 @@ use nara_app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, Plug
 use nara_ecs::{Resource, World};
 
 use crate::{
-    ComponentRegistryError, ComponentSchemaCatalog, ComponentTypeId, PersistentComponentProvider,
+    ComponentCodecError, ComponentRegistryError, ComponentSchemaCatalog, ComponentTypeId, Schema,
 };
 
 pub const COMPONENT_REGISTRY_PLUGIN_ID: PluginId = PluginId::new("nara.reflect.registry");
@@ -36,20 +36,16 @@ pub fn component_registry(world: &World) -> Option<&ComponentSchemaCatalog> {
 
 pub trait RegisterSchema {
     /// Registers a component's Schema in an app with [`ComponentRegistryPlugin`] installed.
-    fn register_schema<T: PersistentComponentProvider>(
-        &mut self,
-    ) -> Result<&mut Self, SchemaRegistrationError>;
+    fn register_schema<T: Schema>(&mut self) -> Result<&mut Self, SchemaRegistrationError>;
 }
 
 impl RegisterSchema for App {
-    fn register_schema<T: PersistentComponentProvider>(
-        &mut self,
-    ) -> Result<&mut Self, SchemaRegistrationError> {
+    fn register_schema<T: Schema>(&mut self) -> Result<&mut Self, SchemaRegistrationError> {
         let mut registry = self
             .world_mut()?
             .get_resource_mut::<RegisteredSchemas>()
             .ok_or(SchemaRegistrationError::MissingRegistry)?;
-        let schema = T::persistent_component_schema();
+        let schema = T::type_schema()?;
         if schema.id().as_str() != T::COMPONENT_ID {
             return Err(SchemaRegistrationError::ComponentIdMismatch {
                 expected: T::COMPONENT_ID,
@@ -72,6 +68,8 @@ pub enum SchemaRegistrationError {
     },
     #[error(transparent)]
     App(#[from] PluginError),
+    #[error(transparent)]
+    Codec(#[from] ComponentCodecError),
     #[error(transparent)]
     Catalog(#[from] ComponentRegistryError),
 }

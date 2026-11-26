@@ -1,8 +1,8 @@
 use nara_ecs::Component;
-use nara_reflect::PersistentComponent;
+use nara_reflect::Schema;
 
-#[derive(Component, PersistentComponent)]
-#[nara(
+#[derive(Component, Schema)]
+#[schema(
     id = "nara.test.DuplicateFieldId",
     version = 1,
     alias = "Duplicate field ID",
@@ -10,9 +10,9 @@ use nara_reflect::PersistentComponent;
     field_capabilities(scene)
 )]
 struct DuplicateFieldId {
-    #[nara(id = "value", alias = "First")]
+    #[schema(id = "value", alias = "First")]
     first: i64,
-    #[nara(id = "value", alias = "Second")]
+    #[schema(id = "value", alias = "Second")]
     second: i64,
 }
 

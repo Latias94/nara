@@ -1,23 +1,23 @@
 error[E0080]: evaluation panicked: asset_demand requires at least one AssetRef leaf in the field type
-  --> tests/ui/asset_demand_scalar_container.rs:15:60
+  --> tests/ui/asset_demand_scalar_container.rs:15:62
    |
-15 |     #[nara(id = "values", alias = "Values", asset_demand = deferred)]
-   |                                                            ^^^^^^^^ evaluation of `<AssetDemandScalarContainer as _::__NaraAssetDemandCheck>::VALID` failed here
+15 |     #[schema(id = "values", alias = "Values", asset_demand = deferred)]
+   |                                                              ^^^^^^^^ evaluation of `<AssetDemandScalarContainer as _::__NaraAssetDemandCheck>::VALID` failed here
 
 note: erroneous constant encountered
-  --> tests/ui/asset_demand_scalar_container.rs:15:60
+  --> tests/ui/asset_demand_scalar_container.rs:15:62
    |
-15 |     #[nara(id = "values", alias = "Values", asset_demand = deferred)]
-   |                                                            ^^^^^^^^
+15 |     #[schema(id = "values", alias = "Values", asset_demand = deferred)]
+   |                                                              ^^^^^^^^
 
 error[E0080]: evaluation panicked: asset_demand requires at least one AssetRef leaf in the field type
-  --> tests/ui/asset_demand_scalar_container.rs:17:60
+  --> tests/ui/asset_demand_scalar_container.rs:17:62
    |
-17 |     #[nara(id = "labels", alias = "Labels", asset_demand = immediate)]
-   |                                                            ^^^^^^^^^ evaluation of `<AssetDemandScalarContainer as _::__NaraAssetDemandCheck>::VALID` failed here
+17 |     #[schema(id = "labels", alias = "Labels", asset_demand = immediate)]
+   |                                                              ^^^^^^^^^ evaluation of `<AssetDemandScalarContainer as _::__NaraAssetDemandCheck>::VALID` failed here
 
 note: erroneous constant encountered
-  --> tests/ui/asset_demand_scalar_container.rs:17:60
+  --> tests/ui/asset_demand_scalar_container.rs:17:62
    |
-17 |     #[nara(id = "labels", alias = "Labels", asset_demand = immediate)]
-   |                                                            ^^^^^^^^^
+17 |     #[schema(id = "labels", alias = "Labels", asset_demand = immediate)]
+   |                                                              ^^^^^^^^^

@@ -1,15 +1,15 @@
 use nara_ecs::Component;
-use nara_reflect::PersistentComponent;
+use nara_reflect::Schema;
 
-#[derive(Component, PersistentComponent)]
-#[nara(
+#[derive(Component, Schema)]
+#[schema(
     version = 1,
     alias = "Missing ID",
     component_capabilities(scene),
     field_capabilities(scene)
 )]
 struct MissingComponentId {
-    #[nara(id = "value", alias = "Value")]
+    #[schema(id = "value", alias = "Value")]
     value: i64,
 }
 

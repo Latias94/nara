@@ -2,12 +2,11 @@ use nara_core::Vec2;
 use nara_ecs::Component;
 use nara_reflect::{
     ComponentFieldPath, ComponentNumericDomain, ComponentValue, ComponentValueKind,
-    ComponentValueShape, PersistentComponent, PersistentComponentProvider,
-    validate_component_value,
+    ComponentValueShape, Schema, validate_component_value,
 };
 
-#[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
-#[nara(
+#[derive(Component, Schema, Debug, Clone, PartialEq)]
+#[schema(
     id = "math.MotionPath",
     version = 1,
     alias = "Motion path",
@@ -15,11 +14,11 @@ use nara_reflect::{
     field_capabilities(scene, inspect, edit)
 )]
 struct MotionPath {
-    #[nara(id = "position", alias = "Position")]
+    #[schema(id = "position", alias = "Position")]
     position: Vec2,
-    #[nara(id = "speed", alias = "Speed")]
+    #[schema(id = "speed", alias = "Speed")]
     speed: f32,
-    #[nara(id = "waypoints", alias = "Waypoints")]
+    #[schema(id = "waypoints", alias = "Waypoints")]
     waypoints: Vec<Vec2>,
 }
 
@@ -33,7 +32,7 @@ fn motion_path() -> MotionPath {
 
 #[test]
 fn persistent_vec2_declares_one_closed_numeric_shape_and_keeps_xy_wire_encoding() {
-    let schema = MotionPath::persistent_component_schema();
+    let schema = MotionPath::type_schema().unwrap();
     let axis = ComponentValueShape::scalar(ComponentValueKind::F64)
         .with_numeric_domain(ComponentNumericDomain::F32);
     let vector =
@@ -50,7 +49,7 @@ fn persistent_vec2_declares_one_closed_numeric_shape_and_keeps_xy_wire_encoding(
     assert_eq!(shape("waypoints"), &ComponentValueShape::list(vector));
 
     let expected = motion_path();
-    let encoded = expected.encode_persistent_component().unwrap();
+    let encoded = expected.encode_component().unwrap();
     assert_eq!(
         encoded.field("position").unwrap(),
         &ComponentValue::map([
@@ -60,15 +59,15 @@ fn persistent_vec2_declares_one_closed_numeric_shape_and_keeps_xy_wire_encoding(
     );
     validate_component_value(&schema, &encoded).unwrap();
     assert_eq!(
-        MotionPath::decode_persistent_component((&encoded).into()).unwrap(),
+        MotionPath::decode_component((&encoded).into()).unwrap(),
         expected
     );
 }
 
 #[test]
 fn persistent_vec2_and_vector_items_reject_missing_extra_and_out_of_domain_members() {
-    let schema = MotionPath::persistent_component_schema();
-    let original = motion_path().encode_persistent_component().unwrap();
+    let schema = MotionPath::type_schema().unwrap();
+    let original = motion_path().encode_component().unwrap();
     for invalid in [
         ComponentValue::map([("x", ComponentValue::f64(1.0).unwrap())]),
         ComponentValue::map([
@@ -96,7 +95,7 @@ fn persistent_vec2_and_vector_items_reject_missing_extra_and_out_of_domain_membe
                 .replace_path(&ComponentFieldPath::from_fields([field]), replacement)
                 .unwrap();
             assert!(validate_component_value(&schema, &candidate).is_err());
-            assert!(MotionPath::decode_persistent_component((&candidate).into()).is_err());
+            assert!(MotionPath::decode_component((&candidate).into()).is_err());
         }
     }
 }

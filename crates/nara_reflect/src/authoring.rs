@@ -1,30 +1,67 @@
-//! Persistent Rust component authoring support.
+//! Native component and field codecs.
 
 use std::collections::BTreeMap;
 
 use nara_asset::AssetRef;
-use nara_core::{Color, EntityUuid, Vec2};
+use nara_core::{AssetId, Color, EntityUuid, Vec2, Vec3, Vec4};
 use nara_ecs::Component;
 
 use crate::{
-    AssetReferenceDemand, ComponentCodecError, ComponentFieldEditorHint, ComponentNumericDomain,
-    ComponentSchema, ComponentValue, ComponentValueKind, ComponentValueRef, ComponentValueShape,
+    AssetReferenceDemand, Bytes, ComponentCodecError, ComponentFieldEditorHint, ComponentFieldPath,
+    ComponentFieldPathError, ComponentFieldSchema, ComponentNumericDomain, ComponentValue,
+    ComponentValueError, ComponentValueKind, ComponentValueRef, ComponentValueShape, PackedF32,
+    PackedI32, PackedU16, PackedU32, TypeSchema, validate_component_value,
 };
 
-pub trait PersistentComponentProvider: Component + Sized + 'static {
+pub trait Schema: Component + Sized + 'static {
     /// The stable schema identifier also used to register this type with an app.
     const COMPONENT_ID: &'static str;
 
-    fn persistent_component_schema() -> ComponentSchema;
+    fn type_schema() -> Result<TypeSchema, ComponentCodecError>;
 
     /// Decodes the current component's stored fields without applying them to a world.
     /// Resolve the record's schema version before calling this codec.
-    fn decode_persistent_component(
-        value: ComponentValueRef<'_>,
-    ) -> Result<Self, ComponentCodecError>;
+    fn decode_component(value: ComponentValueRef<'_>) -> Result<Self, ComponentCodecError>;
 
-    /// Encodes the current component's persisted fields.
-    fn encode_persistent_component(&self) -> Result<ComponentValue, ComponentCodecError>;
+    /// Encodes the current component's authored fields.
+    fn encode_component(&self) -> Result<ComponentValue, ComponentCodecError>;
+
+    /// Reads a field by its path relative to this component.
+    fn get_field(&self, path: &ComponentFieldPath) -> Result<ComponentValue, ComponentCodecError> {
+        Ok(self.encode_component()?.read_path(path)?)
+    }
+
+    /// Replaces an editable field by its path relative to this component.
+    fn set_field(
+        &mut self,
+        path: &ComponentFieldPath,
+        value: ComponentValue,
+    ) -> Result<(), ComponentCodecError> {
+        let schema = Self::type_schema()?;
+        let field = schema
+            .fields()
+            .iter()
+            .find(|field| path.segments().starts_with(field.path().segments()))
+            .ok_or_else(|| ComponentCodecError::missing_field(path.to_string()))?;
+        ensure_editable(field, path)?;
+        let mut encoded = self.encode_component()?;
+        encoded.replace_path(path, value)?;
+        validate_component_value(&schema, &encoded)?;
+        *self = Self::decode_component((&encoded).into())?;
+        Ok(())
+    }
+
+    /// Encodes one complete component payload in declaration order, without field names.
+    #[cfg(feature = "postcard")]
+    fn encode_postcard(&self) -> Result<Vec<u8>, ComponentCodecError> {
+        Err(ComponentCodecError::PostcardUnavailable)
+    }
+
+    /// Decodes exactly one complete component payload. The enclosing format checks the schema hash.
+    #[cfg(feature = "postcard")]
+    fn decode_postcard(_bytes: &[u8]) -> Result<Self, ComponentCodecError> {
+        Err(ComponentCodecError::PostcardUnavailable)
+    }
 }
 
 #[doc(hidden)]
@@ -32,6 +69,12 @@ pub trait PersistentFieldCodec: private::Sealed + Sized + 'static {
     /// Whether this codec's actual recursive shape declares any asset reference leaves.
     const HAS_ASSET_REFERENCES: bool;
     const EDITOR_HINT: Option<ComponentFieldEditorHint> = None;
+    const IS_OPTION: bool = false;
+    const HAS_NESTED_OPTION: bool = false;
+
+    fn default_value() -> Option<ComponentValue> {
+        None
+    }
 
     fn value_shape() -> ComponentValueShape;
 
@@ -84,12 +127,24 @@ numeric_interval_codec!(F64, |value| crate::ComponentFloat::new(f64::from(value)
 #[doc(hidden)]
 pub fn decode_persistent_field<T>(
     value: ComponentValueRef<'_>,
-    field: &str,
+    field: &ComponentFieldSchema,
 ) -> Result<T, ComponentCodecError>
 where
     T: PersistentFieldCodec,
 {
-    T::decode(value.field(field)?, field)
+    let field_id = field.id().as_str();
+    check_optional_nesting::<T>()?;
+    if let Some(value) = value.get(field_id) {
+        T::decode(value, field_id)
+    } else {
+        let default = field
+            .default_value()
+            .ok_or_else(|| ComponentCodecError::missing_field(field_id))?;
+        field
+            .validate_value(default)
+            .map_err(|error| ComponentCodecError::invalid_field(field_id, error.to_string()))?;
+        T::decode(default.into(), field_id)
+    }
 }
 
 #[doc(hidden)]
@@ -97,7 +152,67 @@ pub fn encode_persistent_field<T>(value: &T) -> Result<ComponentValue, Component
 where
     T: PersistentFieldCodec,
 {
+    check_optional_nesting::<T>()?;
     value.encode()
+}
+
+fn check_optional_nesting<T: PersistentFieldCodec>() -> Result<(), ComponentCodecError> {
+    if T::HAS_NESTED_OPTION {
+        return Err(ComponentCodecError::Message(
+            "nested Option is not supported in reflected fields".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[doc(hidden)]
+pub fn update_schema_field<T: PersistentFieldCodec>(
+    native: &mut T,
+    path: &ComponentFieldPath,
+    value: ComponentValue,
+    field: &ComponentFieldSchema,
+) -> Result<(), ComponentCodecError> {
+    ensure_editable(field, field.path())?;
+    check_optional_nesting::<T>()?;
+    let value = if path.is_empty() {
+        value
+    } else {
+        let mut current = native.encode()?;
+        current.replace_path(path, value)?;
+        current
+    };
+    let field_id = field.id().as_str();
+    field
+        .validate_value(&value)
+        .map_err(|error| ComponentCodecError::invalid_field(field_id, error.to_string()))?;
+    *native = T::decode((&value).into(), field_id)?;
+    Ok(())
+}
+
+fn ensure_editable(
+    field: &ComponentFieldSchema,
+    path: &ComponentFieldPath,
+) -> Result<(), ComponentCodecError> {
+    if field.is_read_only() {
+        let field = if path.is_empty() { field.path() } else { path };
+        return Err(ComponentCodecError::ReadOnlyField {
+            field: field.to_string(),
+        });
+    }
+    Ok(())
+}
+
+#[doc(hidden)]
+pub fn split_field_path(
+    path: &ComponentFieldPath,
+) -> Result<(&str, ComponentFieldPath), ComponentCodecError> {
+    use crate::ComponentFieldPathSegment;
+    match path.segments().split_first() {
+        Some((ComponentFieldPathSegment::Field(id), rest)) => {
+            Ok((id, ComponentFieldPath::new(rest.iter().cloned())))
+        }
+        _ => Err(ComponentFieldPathError::EmptyPath.into()),
+    }
 }
 
 impl PersistentFieldCodec for bool {
@@ -246,33 +361,35 @@ impl PersistentFieldCodec for u64 {
     }
 }
 
-impl PersistentFieldCodec for Vec2 {
-    const HAS_ASSET_REFERENCES: bool = false;
+macro_rules! vector_codec {
+    ($native:ty, $($axis:ident),+) => {
+        impl PersistentFieldCodec for $native {
+            const HAS_ASSET_REFERENCES: bool = false;
 
-    fn value_shape() -> ComponentValueShape {
-        let axis = <f32 as PersistentFieldCodec>::value_shape();
-        ComponentValueShape::record([("x".to_owned(), axis.clone()), ("y".to_owned(), axis)])
-    }
+            fn value_shape() -> ComponentValueShape {
+                ComponentValueShape::record([
+                    $((stringify!($axis).to_owned(), f32::value_shape())),+
+                ])
+            }
 
-    fn decode(value: ComponentValueRef<'_>, field: &str) -> Result<Self, ComponentCodecError> {
-        if !value.as_map().is_some_and(|members| members.len() == 2) {
-            return Err(ComponentCodecError::invalid_field(
-                field,
-                "a closed x/y record of finite f32 values",
-            ));
+            fn decode(value: ComponentValueRef<'_>, field: &str) -> Result<Self, ComponentCodecError> {
+                let axes = [$(stringify!($axis)),+];
+                if !value.as_map().is_some_and(|members| members.len() == axes.len()) {
+                    return Err(ComponentCodecError::invalid_field(field, "a closed vector record"));
+                }
+                Ok(Self::new($(decode_f32_component(value, field, stringify!($axis))?),+))
+            }
+
+            fn encode(&self) -> Result<ComponentValue, ComponentCodecError> {
+                Ok(ComponentValue::map([$((stringify!($axis), self.$axis.encode()?)),+]))
+            }
         }
-        let x = decode_f32_component(value, field, "x")?;
-        let y = decode_f32_component(value, field, "y")?;
-        Ok(Self::new(x, y))
-    }
-
-    fn encode(&self) -> Result<ComponentValue, ComponentCodecError> {
-        Ok(ComponentValue::map([
-            ("x", ComponentValue::f64(f64::from(self.x))?),
-            ("y", ComponentValue::f64(f64::from(self.y))?),
-        ]))
-    }
+    };
 }
+
+vector_codec!(Vec2, x, y);
+vector_codec!(Vec3, x, y, z);
+vector_codec!(Vec4, x, y, z, w);
 
 impl PersistentFieldCodec for Color {
     const HAS_ASSET_REFERENCES: bool = false;
@@ -329,6 +446,25 @@ impl PersistentFieldCodec for EntityUuid {
     }
 }
 
+impl PersistentFieldCodec for AssetId {
+    const HAS_ASSET_REFERENCES: bool = true;
+
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::stable_asset_ref(AssetReferenceDemand::Immediate)
+    }
+
+    fn decode(value: ComponentValueRef<'_>, field: &str) -> Result<Self, ComponentCodecError> {
+        value
+            .as_asset_reference()
+            .copied()
+            .ok_or_else(|| ComponentCodecError::invalid_field(field, "stable asset UUID"))
+    }
+
+    fn encode(&self) -> Result<ComponentValue, ComponentCodecError> {
+        Ok(ComponentValue::AssetReference(*self))
+    }
+}
+
 impl PersistentFieldCodec for AssetRef {
     const HAS_ASSET_REFERENCES: bool = true;
 
@@ -342,12 +478,13 @@ impl PersistentFieldCodec for AssetRef {
     }
 
     fn encode(&self) -> Result<ComponentValue, ComponentCodecError> {
-        Ok(crate::encode_asset_reference_value(self))
+        crate::encode_asset_reference_value(self)
     }
 }
 
 impl<T: PersistentFieldCodec> PersistentFieldCodec for Vec<T> {
     const HAS_ASSET_REFERENCES: bool = T::HAS_ASSET_REFERENCES;
+    const HAS_NESTED_OPTION: bool = T::HAS_NESTED_OPTION;
 
     fn value_shape() -> ComponentValueShape {
         ComponentValueShape::list(T::value_shape())
@@ -374,6 +511,7 @@ impl<T: PersistentFieldCodec> PersistentFieldCodec for Vec<T> {
 
 impl<T: PersistentFieldCodec> PersistentFieldCodec for BTreeMap<String, T> {
     const HAS_ASSET_REFERENCES: bool = T::HAS_ASSET_REFERENCES;
+    const HAS_NESTED_OPTION: bool = T::HAS_NESTED_OPTION;
 
     fn value_shape() -> ComponentValueShape {
         ComponentValueShape::map(T::value_shape())
@@ -402,6 +540,12 @@ impl<T: PersistentFieldCodec> PersistentFieldCodec for BTreeMap<String, T> {
 
 impl<T: PersistentFieldCodec> PersistentFieldCodec for Option<T> {
     const HAS_ASSET_REFERENCES: bool = T::HAS_ASSET_REFERENCES;
+    const IS_OPTION: bool = true;
+    const HAS_NESTED_OPTION: bool = T::IS_OPTION || T::HAS_NESTED_OPTION;
+
+    fn default_value() -> Option<ComponentValue> {
+        Some(ComponentValue::Null)
+    }
 
     fn value_shape() -> ComponentValueShape {
         ComponentValueShape::Optional {
@@ -424,6 +568,45 @@ impl<T: PersistentFieldCodec> PersistentFieldCodec for Option<T> {
     }
 }
 
+macro_rules! packed_codec {
+    ($kind:ident, $is_valid:expr) => {
+        impl PersistentFieldCodec for $kind {
+            const HAS_ASSET_REFERENCES: bool = false;
+
+            fn value_shape() -> ComponentValueShape {
+                ComponentValueShape::scalar(ComponentValueKind::$kind)
+            }
+
+            fn decode(
+                value: ComponentValueRef<'_>,
+                field: &str,
+            ) -> Result<Self, ComponentCodecError> {
+                match value.as_value() {
+                    ComponentValue::$kind(values) if ($is_valid)(values.as_slice()) => {
+                        Ok(Self(values.clone()))
+                    }
+                    _ => Err(ComponentCodecError::invalid_field(field, stringify!($kind))),
+                }
+            }
+
+            fn encode(&self) -> Result<ComponentValue, ComponentCodecError> {
+                if !($is_valid)(self.0.as_slice()) {
+                    return Err(ComponentValueError::NonFiniteFloat.into());
+                }
+                Ok(ComponentValue::$kind(self.0.clone()))
+            }
+        }
+    };
+}
+
+packed_codec!(PackedU16, |_| true);
+packed_codec!(PackedU32, |_| true);
+packed_codec!(PackedI32, |_| true);
+packed_codec!(PackedF32, |values: &[f32]| values
+    .iter()
+    .all(|value| value.is_finite()));
+packed_codec!(Bytes, |_| true);
+
 fn decode_f32_component(
     value: ComponentValueRef<'_>,
     field: &str,
@@ -437,7 +620,9 @@ mod private {
     use std::collections::BTreeMap;
 
     use nara_asset::AssetRef;
-    use nara_core::{Color, EntityUuid, Vec2};
+    use nara_core::{AssetId, Color, EntityUuid, Vec2, Vec3, Vec4};
+
+    use crate::{Bytes, PackedF32, PackedI32, PackedU16, PackedU32};
 
     pub trait Sealed {}
 
@@ -454,9 +639,17 @@ mod private {
     impl Sealed for u32 {}
     impl Sealed for u64 {}
     impl Sealed for Vec2 {}
+    impl Sealed for Vec3 {}
+    impl Sealed for Vec4 {}
     impl Sealed for Color {}
     impl Sealed for EntityUuid {}
+    impl Sealed for AssetId {}
     impl Sealed for AssetRef {}
+    impl Sealed for PackedU16 {}
+    impl Sealed for PackedU32 {}
+    impl Sealed for PackedI32 {}
+    impl Sealed for PackedF32 {}
+    impl Sealed for Bytes {}
     impl<T: super::PersistentFieldCodec> Sealed for Vec<T> {}
     impl<T: super::PersistentFieldCodec> Sealed for BTreeMap<String, T> {}
     impl<T: super::PersistentFieldCodec> Sealed for Option<T> {}

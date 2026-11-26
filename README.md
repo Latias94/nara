@@ -12,7 +12,7 @@ See the [strategy](STRATEGY.md), [architecture](docs/architecture/overview.md), 
 
 - `App`, `DefaultPlugins`, deterministic fixed stepping, and a native Winit runner;
 - ECS hierarchy, transform propagation, typed input, 2D physics, and audio;
-- code-first scenes, typed asset handles, PNG loading, and project Schema discovery;
+- code-first worlds, compact RON scenes and prefabs, and typed assets with UUID sidecars;
 - a headless project CLI for project creation, validation, Schema discovery, and supervised Play;
 - a deterministic 2D reference game with sprites, input, HUD, and headless and desktop entry points;
 - a native editor with a shared WGPU Scene View, dockable panels, Schema editing, and external Play.

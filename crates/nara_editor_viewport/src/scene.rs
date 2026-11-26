@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Entry},
     io::Read,
     path::{Path, PathBuf},
     time::Duration,
@@ -7,16 +7,17 @@ use std::{
 
 use nara_app::{App, RealTime, RuntimeInstance};
 use nara_asset::{
-    AssetEvents, AssetPlugin, AssetStates, Assets, Handle, allocate_anonymous_handle,
+    AssetEvents, AssetPlugin, AssetSourceKind, AssetSourcePath, AssetStates, Assets, Handle,
+    ProjectAssetDatabase, allocate_anonymous_handle,
 };
 use nara_core::{
-    Affine2, Color, EntityUuid, Vec2,
+    Affine2, AssetId, Color, EntityUuid, Vec2,
     vfs::{AssetPath, DirAssetSource},
 };
 use nara_ecs::{Component, Entity, EntityWorldMut, Mut, World};
 use nara_editor_core::viewport::{LocalBounds2D, PickCandidate2D, ViewportCamera2D};
 use nara_editor_gizmo::{OverlayFrame, OverlayPrimitive, OverlayStroke};
-use nara_reflect::PersistentComponentProvider;
+use nara_reflect::Schema;
 use nara_render::{
     Camera2d, Extent2d, ExtractedViews, RenderImage2d, RenderImagePacket, RenderPlugin,
     RenderTarget, ViewMapping2d, ViewportRect, build_image_render_frame_packet,
@@ -51,7 +52,12 @@ pub(crate) struct PreviewScene {
     document: Option<SceneDocument>,
     asset_root: Option<PathBuf>,
     entities: HashMap<EntityUuid, Entity>,
-    images: HashMap<AssetPath, Handle<ImageAsset>>,
+    images: HashMap<AssetId, PreviewImage>,
+}
+
+struct PreviewImage {
+    path: AssetSourcePath,
+    handle: Handle<ImageAsset>,
 }
 
 impl PreviewScene {
@@ -91,14 +97,14 @@ impl PreviewScene {
     pub(crate) fn set_document(
         &mut self,
         document: &SceneDocument,
-        source: Option<&DirAssetSource>,
+        assets: Option<(&DirAssetSource, &ProjectAssetDatabase)>,
     ) -> Result<(), ViewportError> {
-        let root = source.map(DirAssetSource::root);
+        let root = assets.map(|(source, _)| source.root());
         let same_root = self.asset_root.as_deref() == root;
-        if same_root && self.document.as_ref() == Some(document) {
-            return Ok(());
+        let same_document = self.document.as_ref() == Some(document);
+        if !same_document {
+            document.validate()?;
         }
-        document.validate()?;
         let rows = document
             .entities
             .iter()
@@ -107,42 +113,66 @@ impl PreviewScene {
 
         let mut images = HashMap::new();
         let mut pending = Vec::new();
-        if let Some(source) = source {
-            for path in rows.iter().filter_map(|row| row.image.as_ref()) {
-                if images.contains_key(path) {
+        if let Some((source, database)) = assets {
+            let installed = self.runtime.world().resource::<Assets<ImageAsset>>();
+            for id in rows.iter().filter_map(SceneRow::image) {
+                let Entry::Vacant(entry) = images.entry(id) else {
                     continue;
-                }
-                let handle = if let Some(handle) = self.images.get(path).filter(|_| same_root) {
-                    *handle
+                };
+                let path = image_path(database, id)?;
+                let cached = self.images.get(&id).filter(|_| same_root);
+                let handle = if let Some(cached) = cached.filter(|image| &image.path == path) {
+                    cached.handle
                 } else {
                     let image = read_png(source, path)?;
-                    let handle = allocate_anonymous_handle()?;
-                    pending.push((handle, image));
+                    let handle = match cached {
+                        Some(cached) => cached.handle,
+                        None => allocate_anonymous_handle()?,
+                    };
+                    if installed
+                        .get(handle)
+                        .is_none_or(|previous| previous.content_hash() != image.content_hash())
+                    {
+                        pending.push((handle, image));
+                    }
                     handle
                 };
-                images.insert(path.clone(), handle);
+                entry.insert(PreviewImage {
+                    path: path.clone(),
+                    handle,
+                });
             }
         }
         let retired = self
             .images
             .iter()
-            .filter(|(path, handle)| images.get(*path) != Some(*handle))
-            .map(|(_, handle)| *handle)
+            .filter_map(|(id, previous)| {
+                images
+                    .get(id)
+                    .is_none_or(|image| image.handle != previous.handle)
+                    .then_some(previous.handle)
+            })
             .collect::<Vec<_>>();
 
-        self.runtime
-            .with_driver_scope(|scope| {
-                scope.with_world_mut(|world| {
-                    publish_images(world, pending, retired)?;
-                    apply_rows(world, &mut self.entities, rows, &images);
-                    Ok::<(), ViewportError>(())
-                })
-            })?
-            .output?;
+        if !same_document || !pending.is_empty() || !retired.is_empty() {
+            self.runtime
+                .with_driver_scope(|scope| {
+                    scope.with_world_mut(|world| {
+                        publish_images(world, pending, retired)?;
+                        apply_rows(world, &mut self.entities, rows, &images);
+                        Ok::<(), ViewportError>(())
+                    })
+                })?
+                .output?;
+            self.runtime.drive(Duration::ZERO)?;
+        }
         self.images = images;
-        self.asset_root = root.map(Path::to_path_buf);
-        self.document = Some(document.clone());
-        self.runtime.drive(Duration::ZERO)?;
+        if !same_root {
+            self.asset_root = root.map(Path::to_path_buf);
+        }
+        if !same_document {
+            self.document = Some(document.clone());
+        }
         Ok(())
     }
 
@@ -254,49 +284,42 @@ struct SceneRow {
     transform: Transform2d,
     visibility: Visibility,
     sprite: Option<SpriteSource>,
-    image: Option<AssetPath>,
     collider: Option<ColliderSource>,
 }
 
 impl SceneRow {
     fn read(entity: &SceneEntity) -> Result<Self, ViewportError> {
-        let sprite = typed::<SpriteSource>(entity)?;
-        let image = sprite
-            .as_ref()
-            .map(SpriteSource::image_asset_path)
-            .transpose()
-            .map_err(|source| ViewportError::Component {
-                entity: entity.id,
-                component: SpriteSource::COMPONENT_ID,
-                source: source.into(),
-            })?
-            .flatten();
         Ok(Self {
             id: entity.id,
             parent: entity.parent,
             transform: typed::<Transform2d>(entity)?.unwrap_or_default(),
             visibility: typed::<Visibility>(entity)?.unwrap_or_default(),
-            sprite,
-            image,
+            sprite: typed::<SpriteSource>(entity)?,
             collider: typed::<ColliderSource>(entity)?,
         })
     }
 
-    fn renderer_sprite(&self, images: &HashMap<AssetPath, Handle<ImageAsset>>) -> Option<Sprite> {
+    fn image(&self) -> Option<AssetId> {
+        self.sprite.as_ref()?.image
+    }
+
+    fn renderer_sprite(&self, images: &HashMap<AssetId, PreviewImage>) -> Option<Sprite> {
         let source = self.sprite.as_ref()?;
-        let image = self.image.as_ref().and_then(|path| images.get(path));
+        let image = source.image.and_then(|id| images.get(&id));
         Some(
             image
                 .map_or_else(
                     || Sprite::from_color(source.size, source.tint()),
-                    |&handle| Sprite::from_texture(handle, source.size).with_tint(source.tint()),
+                    |image| {
+                        Sprite::from_texture(image.handle, source.size).with_tint(source.tint())
+                    },
                 )
                 .with_layer(source.layer),
         )
     }
 }
 
-fn typed<T: PersistentComponentProvider>(entity: &SceneEntity) -> Result<Option<T>, ViewportError> {
+fn typed<T: Schema>(entity: &SceneEntity) -> Result<Option<T>, ViewportError> {
     entity
         .typed::<T>()
         .map_err(|source| ViewportError::Component {
@@ -310,7 +333,7 @@ fn apply_rows(
     world: &mut World,
     entities: &mut HashMap<EntityUuid, Entity>,
     rows: Vec<SceneRow>,
-    images: &HashMap<AssetPath, Handle<ImageAsset>>,
+    images: &HashMap<AssetId, PreviewImage>,
 ) {
     let mut live = HashSet::with_capacity(rows.len());
     for row in &rows {
@@ -368,10 +391,27 @@ fn set_optional<T: Component + PartialEq>(entity: &mut EntityWorldMut<'_>, value
     }
 }
 
-fn read_png(source: &DirAssetSource, path: &AssetPath) -> Result<ImageAsset, ViewportError> {
+fn image_path(
+    database: &ProjectAssetDatabase,
+    id: AssetId,
+) -> Result<&AssetSourcePath, ViewportError> {
+    let record = database
+        .record_for_stable_id(id.into())
+        .ok_or(ViewportError::MissingImageAsset { id })?;
+    if record.source_kind() != &AssetSourceKind::Image {
+        return Err(ViewportError::InvalidImageAssetKind {
+            id,
+            path: record.path().to_string(),
+            kind: record.source_kind().clone(),
+        });
+    }
+    Ok(record.path())
+}
+
+fn read_png(source: &DirAssetSource, path: &AssetSourcePath) -> Result<ImageAsset, ViewportError> {
     let mut bytes = Vec::new();
-    source
-        .open(path)
+    AssetPath::new(path.as_str())
+        .and_then(|path| source.open(&path))
         .and_then(|file| file.take(MAX_PNG_READ).read_to_end(&mut bytes))
         .map_err(|source| ViewportError::ReadImage {
             path: path.to_string(),

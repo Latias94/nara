@@ -203,12 +203,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "base64"
-version = "0.21.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
-
-[[package]]
 name = "bevy_ecs"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1841,7 +1835,8 @@ name = "nara-reference-game"
 version = "0.1.0"
 dependencies = [
  "nara",
- "nara_scene",
+ "nara_asset",
+ "tempfile",
 ]
 
 [[package]]
@@ -1861,11 +1856,14 @@ name = "nara_asset"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "getrandom 0.3.4",
  "image",
  "nara_app",
  "nara_core",
  "nara_ecs",
+ "ron",
  "serde",
+ "tempfile",
  "thiserror 2.0.18",
  "uuid",
 ]
@@ -2010,6 +2008,7 @@ dependencies = [
  "ron",
  "serde",
  "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]
@@ -2928,14 +2927,15 @@ checksum = "4e27ee8bb91ca0adcf0ecb116293afa12d393f9c2b9b9cd54d33e8078fe19839"
 
 [[package]]
 name = "ron"
-version = "0.8.1"
+version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
+checksum = "97b3fe97c18ff24299ea56f802c5693eb34266fb0bc8317f4e101debc8a3ceaf"
 dependencies = [
- "base64",
  "bitflags 2.13.1",
  "serde",
  "serde_derive",
+ "typeid",
+ "unicode-ident",
 ]
 
 [[package]]
@@ -3094,6 +3094,12 @@ dependencies = [
  "serde_core",
  "zmij",
 ]
+
+[[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
 
 [[package]]
 name = "shlex"
@@ -3672,6 +3678,7 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

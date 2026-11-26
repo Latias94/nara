@@ -11,12 +11,15 @@ image = { workspace = true, optional = true }
 nara_app = { workspace = true, optional = true }
 nara_core.workspace = true
 nara_ecs = { workspace = true, optional = true }
+ron = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 thiserror.workspace = true
 uuid.workspace = true
 
 [target.'cfg(any(unix, windows))'.dependencies]
+getrandom = { workspace = true, optional = true }
 notify = { workspace = true, optional = true }
+tempfile = { version = "3.27", optional = true }
 
 [dev-dependencies]
 ron.workspace = true
@@ -27,6 +30,7 @@ tempfile = "3.27"
 
 [features]
 default = []
+authoring = ["serde", "dep:getrandom", "dep:ron", "dep:tempfile"]
 hot-reload = ["image-import", "dep:notify"]
 image-import = ["runtime", "dep:image"]
 runtime = ["dep:nara_app", "dep:nara_ecs"]

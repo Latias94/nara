@@ -33,12 +33,20 @@ optional `.nara.ron` selects an entry scene relative to the project's asset dire
    The editor accepts layout files up to 1 MiB and restores a floating window only when it contains
    an editor pane.
 
+Select **Power cell B** to inspect a prefab instance. Edits to inherited fields become overrides.
+Use **Revert** to inherit the prefab's current value again. **Apply to Prefab…** asks for
+confirmation before saving the value to the shared prefab and clearing the instance override.
+Save the scene to retain the cleared override. Scene Undo can restore the local override.
+
+Keep assets and their `.meta` files together when renaming or moving them. Refresh **Assets** to
+update the index. On the next scene save, the asset aliases keep their UUIDs and gain current paths.
+
 Drag a panel tab to split or group panes. Drag outside the editor to float a pane where the native
 platform supports peer windows. Closing a newly floated window docks its panes back. For a floating
 window restored from a saved layout, drag its tabs into the main editor. The Inspector's name field
 accepts the platform's IME. Closing the main window with unsaved edits prompts you to save,
 discard, or cancel. Unapplied Inspector drafts prompt you to review or discard them first. For an
-untitled scene, choose a new filename ending in `.nara.scene.ron` inside the asset directory.
+untitled scene, choose a new filename ending in `.scene.ron` inside the asset directory.
 
 ## Play the current edit
 

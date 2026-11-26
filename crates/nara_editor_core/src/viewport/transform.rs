@@ -1,9 +1,7 @@
 use std::collections::HashSet;
 
 use nara_core::{Affine2, EntityUuid, Vec2};
-use nara_reflect::{
-    ComponentCodecError, ComponentSchemaVersion, ComponentTypeId, PersistentComponentProvider,
-};
+use nara_reflect::{ComponentCodecError, ComponentSchemaVersion, ComponentTypeId, Schema};
 use nara_scene::{
     authoring::{SceneComponent, SceneComponentError},
     spatial::Transform2d,
@@ -35,7 +33,7 @@ impl GizmoSelection2D {
         gizmo: Gizmo2D,
         parent_affine: impl Fn(EntityUuid) -> Option<Affine2>,
     ) -> Result<Option<Self>, SceneComponentError> {
-        let scene = session.document().scene();
+        let scene = session.preview_scene();
         let selection = session.selection().entities();
         let selected: HashSet<_> = selection.iter().copied().collect();
         let find = |id| {
@@ -81,10 +79,11 @@ impl GizmoSelection2D {
                 offset,
             });
         }
+        let version = Transform2d::type_schema()?.version();
         Ok((!targets.is_empty()).then(|| Self {
             gizmo,
             targets,
-            version: Transform2d::persistent_component_schema().version(),
+            version,
         }))
     }
 
@@ -135,10 +134,7 @@ impl GizmoSelection2D {
                 EditorCommand::SetComponent {
                     entities,
                     component: component.clone(),
-                    value: SceneComponent {
-                        version: self.version,
-                        value: transform.encode_persistent_component()?,
-                    },
+                    value: SceneComponent::known(self.version, transform.encode_component()?),
                 }
             });
         }

@@ -1,12 +1,12 @@
 use nara_ecs::Component;
-use nara_reflect::PersistentComponent;
+use nara_reflect::Schema;
 
 mod numeric_alias {
     pub type AssetRef = u32;
 }
 
-#[derive(Component, PersistentComponent)]
-#[nara(
+#[derive(Component, Schema)]
+#[schema(
     id = "nara.test.AssetDemandScalarAlias",
     version = 1,
     alias = "Asset demand scalar alias",
@@ -14,7 +14,7 @@ mod numeric_alias {
     field_capabilities(scene)
 )]
 struct AssetDemandScalarAlias {
-    #[nara(id = "value", alias = "Value", asset_demand = immediate)]
+    #[schema(id = "value", alias = "Value", asset_demand = immediate)]
     value: numeric_alias::AssetRef,
 }
 

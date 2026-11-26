@@ -1,0 +1,206 @@
+Scene(
+    version: 1,
+    id: "681a78dc-b6ab-4f3a-8eb6-4742d2ced237",
+    assets: {
+        "power_cell": (id: "01a219be-557a-7c47-82c3-84a2b7f7894c", hint: "power-cell.prefab.ron"),
+    },
+    entities: [
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000001",
+            name: "Courier",
+            components: {
+                "nara.ColliderSource": (radius: 10.0),
+                "nara.SpriteSource": (size: (32.0, 32.0), tint: (0.65, 0.9, 1.0, 1.0), layer: 5),
+                "nara.Transform2d": (translation: (-256.0, 96.0)),
+                "night-relay.Pilot": (),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000002",
+            name: "Power cell A",
+            prefab: "@power_cell",
+            overrides: {
+                "nara.Transform2d.translation": (-32.0, 96.0),
+            },
+            added_components: {
+                "night-relay.PowerCell": (order: 1),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000003",
+            name: "Power cell B",
+            prefab: "@power_cell",
+            overrides: {
+                "nara.Transform2d.translation": (224.0, 96.0),
+            },
+            added_components: {
+                "night-relay.PowerCell": (order: 2),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000004",
+            name: "Power cell C",
+            prefab: "@power_cell",
+            overrides: {
+                "nara.Transform2d.translation": (-224.0, -96.0),
+            },
+            added_components: {
+                "night-relay.PowerCell": (order: 3),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000005",
+            name: "North patrol",
+            components: {
+                "nara.ColliderSource": (radius: 11.0),
+                "nara.SpriteSource": (size: (18.15, 18.15), tint: (0.82, 0.11, 0.19, 1.0), layer: 2),
+                "nara.Transform2d": (translation: (-32.0, 64.0)),
+                "night-relay.PatrolDrone": (),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000006",
+            name: "South patrol",
+            components: {
+                "nara.ColliderSource": (radius: 11.0),
+                "nara.SpriteSource": (size: (18.15, 18.15), tint: (0.82, 0.11, 0.19, 1.0), layer: 2),
+                "nara.Transform2d": (translation: (-67.2, -64.0)),
+                "night-relay.PatrolDrone": (order: 2),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000007",
+            name: "East patrol",
+            components: {
+                "nara.ColliderSource": (radius: 11.0),
+                "nara.SpriteSource": (size: (18.15, 18.15), tint: (0.82, 0.11, 0.19, 1.0), layer: 2),
+                "nara.Transform2d": (translation: (256.0, -28.8)),
+                "night-relay.PatrolDrone": (order: 3),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000008",
+            name: "Extraction gate",
+            components: {
+                "nara.ColliderSource": (radius: 17.0),
+                "nara.SpriteSource": (size: (28.0, 28.0), tint: (0.2, 0.3, 0.42, 1.0), layer: 1),
+                "nara.Transform2d": (translation: (224.0, -96.0)),
+                "night-relay.ExtractionGate": (),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000009",
+            name: "Round rules",
+            component_versions: {"night-relay.RunRules": 2},
+            components: {
+                "night-relay.RunRules": (),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000010",
+            name: "Arena rim",
+            components: {
+                "nara.SpriteSource": (size: (679.0, 359.0), tint: (0.052, 0.24, 0.26, 1.0), layer: -11),
+                "nara.Transform2d": (),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000011",
+            name: "Arena deck",
+            components: {
+                "nara.SpriteSource": (size: (672.0, 352.0), tint: (0.02, 0.039, 0.061, 1.0), layer: -10),
+                "nara.Transform2d": (),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000012",
+            name: "North bulkhead",
+            components: {
+                "nara.ColliderSource": (half_extents: (336.0, 16.0)),
+                "nara.SpriteSource": (size: (672.0, 32.0), tint: (0.087, 0.156, 0.19, 1.0), layer: -9),
+                "nara.Transform2d": (translation: (0.0, 160.0)),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000013",
+            name: "South bulkhead",
+            components: {
+                "nara.ColliderSource": (half_extents: (336.0, 16.0)),
+                "nara.SpriteSource": (size: (672.0, 32.0), tint: (0.087, 0.156, 0.19, 1.0), layer: -9),
+                "nara.Transform2d": (translation: (0.0, -160.0)),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000014",
+            name: "West bulkhead",
+            components: {
+                "nara.ColliderSource": (half_extents: (16.0, 144.0)),
+                "nara.SpriteSource": (size: (32.0, 288.0), tint: (0.087, 0.156, 0.19, 1.0), layer: -9),
+                "nara.Transform2d": (translation: (-320.0, 0.0)),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000015",
+            name: "East bulkhead",
+            components: {
+                "nara.ColliderSource": (half_extents: (16.0, 144.0)),
+                "nara.SpriteSource": (size: (32.0, 288.0), tint: (0.087, 0.156, 0.19, 1.0), layer: -9),
+                "nara.Transform2d": (translation: (320.0, 0.0)),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000016",
+            name: "Northwest partition",
+            components: {
+                "nara.ColliderSource": (half_extents: (16.0, 64.0)),
+                "nara.SpriteSource": (size: (32.0, 128.0), tint: (0.087, 0.156, 0.19, 1.0), layer: -9),
+                "nara.Transform2d": (translation: (-128.0, 80.0)),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000017",
+            name: "Northeast partition",
+            components: {
+                "nara.ColliderSource": (half_extents: (16.0, 48.0)),
+                "nara.SpriteSource": (size: (32.0, 96.0), tint: (0.087, 0.156, 0.19, 1.0), layer: -9),
+                "nara.Transform2d": (translation: (128.0, 96.0)),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000018",
+            name: "Central relay bank",
+            components: {
+                "nara.ColliderSource": (half_extents: (48.0, 16.0)),
+                "nara.SpriteSource": (size: (96.0, 32.0), tint: (0.087, 0.156, 0.19, 1.0), layer: -9),
+                "nara.Transform2d": (translation: (32.0, 0.0)),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000019",
+            name: "East relay bank",
+            components: {
+                "nara.ColliderSource": (half_extents: (16.0, 32.0)),
+                "nara.SpriteSource": (size: (32.0, 64.0), tint: (0.087, 0.156, 0.19, 1.0), layer: -9),
+                "nara.Transform2d": (translation: (192.0, -16.0)),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000020",
+            name: "Southwest relay bank",
+            components: {
+                "nara.ColliderSource": (half_extents: (64.0, 16.0)),
+                "nara.SpriteSource": (size: (128.0, 32.0), tint: (0.087, 0.156, 0.19, 1.0), layer: -9),
+                "nara.Transform2d": (translation: (-176.0, -32.0)),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000021",
+            name: "Southeast relay bank",
+            components: {
+                "nara.ColliderSource": (half_extents: (16.0, 32.0)),
+                "nara.SpriteSource": (size: (32.0, 64.0), tint: (0.087, 0.156, 0.19, 1.0), layer: -9),
+                "nara.Transform2d": (translation: (64.0, -80.0)),
+            },
+        ),
+    ],
+)

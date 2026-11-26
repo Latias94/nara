@@ -1,6 +1,7 @@
 //! Supervised external Play, with an isolated authoring snapshot for opt-in games.
 
 use std::{
+    collections::BTreeMap,
     ffi::OsString,
     io,
     path::Path,
@@ -8,6 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use nara_core::AssetId;
 use nara_project::{
     EditorPlayMode,
     play::{
@@ -16,7 +18,11 @@ use nara_project::{
     },
     workflow::{CargoPackage, ProjectCheckError, ProjectTrust, read_project_manifest},
 };
-use nara_scene::authoring::{SceneDocument, SceneDocumentError};
+use nara_reflect::{ComponentSchema, ComponentSchemaCatalog};
+use nara_scene::authoring::{
+    SceneComponent, SceneDocument, SceneDocumentError,
+    prefab::{PrefabError, expand_prefabs_for_editor},
+};
 use tempfile::TempDir;
 use thiserror::Error;
 
@@ -41,6 +47,8 @@ pub enum PlayError {
     #[error(transparent)]
     Scene(#[from] SceneDocumentError),
     #[error(transparent)]
+    Prefab(#[from] PrefabError),
+    #[error(transparent)]
     Io(#[from] io::Error),
     #[error("launching a game requires a trusted project")]
     Untrusted,
@@ -52,6 +60,48 @@ pub enum PlayError {
     ControlUnavailable(PlayControl, PlayState),
     #[error("the game did not acknowledge the editor control")]
     NoAcknowledgment,
+}
+
+/// Flattens the captured authoring inputs so a later prefab edit cannot change this Play launch.
+///
+/// `None` means that prefab-local opaque values still need a project Schema before their
+/// expanded forms can be serialized with a single asset table.
+pub fn flatten_snapshot(
+    captured: &SceneDocument,
+    prefabs: &BTreeMap<AssetId, SceneDocument>,
+    catalog: &ComponentSchemaCatalog,
+) -> Result<Option<SceneDocument>, PlayError> {
+    if !captured
+        .entities
+        .iter()
+        .any(|entity| entity.prefab.is_some())
+    {
+        return Ok(Some(captured.clone()));
+    }
+    let mut source = captured.clone();
+    source.resolve_unknown_components(catalog.components())?;
+    let expanded = expand_prefabs_for_editor(&source, catalog, |id| {
+        let mut source = prefabs
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| format!("prefab {id} was not captured"))?;
+        source
+            .resolve_unknown_components(catalog.components())
+            .map_err(|error| error.to_string())?;
+        Ok::<_, String>(source)
+    })?;
+    if !expanded.deferred_overrides.is_empty()
+        || expanded.document.entities.iter().any(|row| {
+            expanded.provenance.contains_key(&row.id)
+                && row
+                    .components
+                    .values()
+                    .any(|component| matches!(component, SceneComponent::Unknown(_)))
+        })
+    {
+        return Ok(None);
+    }
+    Ok(Some(expanded.document))
 }
 
 /// Owns a supervised game and any temporary authoring snapshot it opens.
@@ -81,6 +131,7 @@ impl PlayModeSession {
     pub fn start(
         project: &Path,
         scene: &SceneDocument,
+        schemas: &[ComponentSchema],
         trust: ProjectTrust,
         mut cancel: impl FnMut() -> bool,
         emit: impl FnMut(BuildEvent),
@@ -107,13 +158,14 @@ impl PlayModeSession {
         if cancel() {
             return Err(PlayError::Cancelled);
         }
-        Self::launch(project, &executable, scene, trust, mode)
+        Self::launch(project, &executable, scene, schemas, trust, mode)
     }
 
     fn launch(
         project: &Path,
         executable: &Path,
         scene: &SceneDocument,
+        schemas: &[ComponentSchema],
         trust: ProjectTrust,
         mode: EditorPlayMode,
     ) -> Result<Self, PlayError> {
@@ -126,8 +178,8 @@ impl PlayModeSession {
                 let snapshot = tempfile::Builder::new()
                     .prefix("nara-editor-play-")
                     .tempdir()?;
-                let path = snapshot.path().join("play.nara.scene.ron");
-                scene.write(&path)?;
+                let path = snapshot.path().join("play.scene.ron");
+                scene.write_with(&path, schemas)?;
                 let arguments = [OsString::from("--editor-play"), path.into_os_string()];
                 let process =
                     PlayProcess::launch_controlled(project, executable, &arguments, trust)?;
@@ -274,6 +326,52 @@ mod tests {
     const CONTINUE_PAUSE: &str = "continue-pause";
 
     #[test]
+    fn snapshot_resolves_prefabs_from_the_captured_source_cut() {
+        use nara_scene::{
+            authoring::{PrefabInstance, builtin_component_schemas},
+            spatial::Transform2d,
+        };
+
+        let catalog =
+            ComponentSchemaCatalog::from_components(builtin_component_schemas().unwrap()).unwrap();
+        let asset = "01951a29-2e18-7000-9000-000000000003".parse().unwrap();
+        let instance = "e66193e0-2e80-4a44-934a-08330b93cb75".parse().unwrap();
+        let mut scene = SceneDocument::new("97270f99-fd97-483f-a605-a1e7acaea745".parse().unwrap());
+        let mut root = SceneEntity::new(instance, "Instance");
+        root.prefab = Some(PrefabInstance::new(asset));
+        scene.entities.push(root);
+
+        let mut prefab =
+            SceneDocument::new("981296f8-b92f-4868-a674-ec7b643f9953".parse().unwrap());
+        let mut row = SceneEntity::new(
+            "a6086d96-7d01-4142-8129-2afa8585b463".parse().unwrap(),
+            "Prefab",
+        );
+        row.set(&Transform2d::from_xy(20.0, 0.0)).unwrap();
+        prefab.entities.push(row);
+        let captured = BTreeMap::from([(asset, prefab)]);
+        let mut live = captured.clone();
+        live.get_mut(&asset).unwrap().entities[0]
+            .set(&Transform2d::from_xy(90.0, 0.0))
+            .unwrap();
+
+        let snapshot = flatten_snapshot(&scene, &captured, &catalog)
+            .unwrap()
+            .unwrap();
+        let saved = snapshot.to_ron_with(catalog.components()).unwrap();
+        let roundtrip = SceneDocument::parse_with(&saved, catalog.components()).unwrap();
+        assert_eq!(roundtrip.entities[0].id, instance);
+        assert!(roundtrip.entities[0].prefab.is_none());
+        let pose = roundtrip.entities[0]
+            .typed::<Transform2d>()
+            .unwrap()
+            .unwrap();
+        assert_eq!(pose.translation.x, 20.0);
+        let changed = flatten_snapshot(&scene, &live, &catalog).unwrap().unwrap();
+        assert_ne!(snapshot, changed);
+    }
+
+    #[test]
     fn external_play_streams_output_without_waiting_for_a_handshake() {
         let project = tempfile::tempdir().unwrap();
         let process = PlayProcess::launch(
@@ -374,7 +472,7 @@ mod tests {
 
     fn launch_snapshot_helper(source: &SceneDocument) -> (PlayModeSession, std::path::PathBuf) {
         let snapshot = tempfile::tempdir().unwrap();
-        let path = snapshot.path().join("play.nara.scene.ron");
+        let path = snapshot.path().join("play.scene.ron");
         source.write(&path).unwrap();
         let process = PlayProcess::launch_controlled(
             snapshot.path(),
@@ -434,7 +532,7 @@ mod tests {
     #[test]
     #[ignore = "launched as a contained subprocess by the editor Play test"]
     fn snapshot_game_helper() {
-        let path = Path::new("play.nara.scene.ron");
+        let path = Path::new("play.scene.ron");
         let mut simulated = SceneDocument::read(path).unwrap();
         let mut stdout = io::stdout().lock();
         writeln!(stdout, "NARA_EDITOR ready").unwrap();

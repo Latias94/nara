@@ -398,6 +398,27 @@ under 2 ms. The editor UI thread takes under 0.5 ms per frame with static panels
 viewport. The exported game runs on a clean machine. Aim for 120,000–180,000 lines of Nara source
 and 120,000–160,000 lines of Open-GPUI source with the final workspace boundaries in place.
 
+### Phase 5A verification
+
+- **Tile data size.** The [`nara_scene` authoring gate](../../crates/nara_scene/tests/authoring.rs)
+  writes 10,000 `PackedU16` cells with repeating values `0..31`. The complete compact RON document
+  is 27,155 bytes. The equivalent cell array alone takes 436,872 bytes with v0-style pretty JSON
+  and per-cell `u32` tags, a 16.09× reduction. The historical `meadow.scene.json` file at
+  `legacy/v0-imgui-reference` is 35,792 bytes and does not carry that tile grid. The test compares
+  the same 10,000 cell values and checks exact decode and stable reserialization.
+- **Night Relay on Windows.** The headless replay completed eight rounds across 9,320 fixed ticks.
+  Each round kept 28 wall contacts and exercised shield loss, restart, and escape. Desktop
+  first-present reported a 1152 × 768 frame with 110 HUD glyphs. The authored scene keeps all
+  21 entity UUIDs; three of the entities share one prefab with sparse local overrides.
+- **Native editor on Windows.** `--verify` rendered the 20 authored sprites, edited and reopened
+  a scene, reused its viewport texture across 60 frames, and moved the Inspector to a peer window.
+  The supervised game saw the edited four-shield snapshot and acknowledged Pause, Step, and
+  Resume. Stop reaped the game, and the original scene bytes stayed unchanged. The separate
+  60-frame capture recorded zero new textures or buffers on the RTX 4090 DX12 adapter.
+- **Remaining editor I/O.** Asset refresh and confirmed prefab publication still perform disk
+  work on the UI thread. The data reload work will move these operations to background jobs and
+  check the active document before publishing a result.
+
 ## Open-GPUI target
 
 | Package | Responsibility |

@@ -33,10 +33,12 @@ world and schedule `spatial::propagate_spatial` after local writes and deferred 
 
 ## Source documents
 
-Enable `nara_scene/authoring` to work with `.nara.scene.ron` and `.nara.prefab.ron`. Both use a
-flat `SceneDocument` with a UUID, entity rows, and versioned component records. Each row has its
-own UUID, a name, and an optional parent UUID in the same document. A component value uses the
-tagged Reflect wire format. Unknown component IDs and versions retain their values across saves.
+Enable `nara_scene/authoring` to work with `.scene.ron` and `.prefab.ron`. A version 1 document
+holds a document UUID, an optional asset alias table, and a flat entity table. Each row has its own
+UUID, a name, and an optional parent UUID from the same document. Known component payloads use
+plain RON fields with schema defaults omitted. Vectors and colors use coordinate tuples, while
+packed fields use plain typed arrays. Non-default component schema versions are stored in
+`component_versions` or `added_component_versions` beside their payload maps.
 
 ```rust
 use nara_scene::{authoring::{SceneDocument, SceneEntity}, spatial::Transform2d};
@@ -46,16 +48,25 @@ fn save() -> Result<(), Box<dyn std::error::Error>> {
     let mut lamp = SceneEntity::new("916da482-3796-4722-a414-98a0cf318a28".parse()?, "Lamp");
     lamp.set(&Transform2d::from_xy(10.0, 2.0))?;
     document.entities.push(lamp);
-    document.write("relay.nara.scene.ron")?;
+    document.write("relay.scene.ron")?;
     Ok(())
 }
 ```
 
-Use `SceneEntity::typed::<T>()` to read values via a `PersistentComponentProvider`. The built-in
-schemas for transforms, visibility, sprites, and colliders come with creation values from
-`authoring::builtin_component_schemas()`. Combine these with the game's component catalog for an
-inspector. `SpriteSource::image_asset_path()` validates the optional project-relative PNG path.
+Use `SceneEntity::typed::<T>()` to read values through `Schema`. The built-in schemas cover
+transforms, visibility, sprites, and colliders. To read and save known game components, pass the
+game's schemas to `parse_with`, `read_with`, `to_ron_with`, or `write_with`. An unregistered ID or
+unavailable schema version retains its original RON payload, including enum names and comments.
+`resolve_unknown_components` can decode these records after a schema refresh and reports records
+that remain opaque because decoding failed.
+
+An asset alias combines a stable UUID with a portable path hint relative to the asset root. A
+reference such as `"@lamp_texture"` resolves to the alias UUID. A reference can also use a UUID
+string directly. Prefab rows use `prefab` for that reference and may also have `overrides`,
+`added_components`, and `removed_components` fields.
 
 `SceneDocument::parse` and `to_ron` work in memory. Native `read` and `write` use UTF-8 files.
 Saving validates the document and atomically replaces the file in its existing parent directory.
-The resulting RON uses UUID order for the entity table and key order within component maps.
+The writer orders entities by UUID, aliases and component IDs lexicographically, and known fields
+by their schema declaration order. Native writes use `Prefab(...)` for `.prefab.ron` paths and
+`Scene(...)` for scene paths.

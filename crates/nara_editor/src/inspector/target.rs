@@ -34,7 +34,7 @@ impl Selection {
         if self.document != session.document().scene().id || self.targets.is_empty() {
             return false;
         }
-        let rows = &session.document().scene().entities;
+        let rows = &session.preview_scene().entities;
         self.targets
             .iter()
             .all(|id| rows.binary_search_by_key(id, |row| row.id).is_ok())
@@ -44,7 +44,7 @@ impl Selection {
         if !self.exists_in(session) {
             return false;
         }
-        let rows = &session.document().scene().entities;
+        let rows = &session.preview_scene().entities;
         self.targets.iter().all(|id| {
             rows.binary_search_by_key(id, |row| row.id)
                 .ok()
@@ -59,7 +59,7 @@ impl Selection {
         if !self.matches(session) {
             return None;
         }
-        let rows = &session.document().scene().entities;
+        let rows = &session.preview_scene().entities;
         self.targets
             .iter()
             .map(|id| rows.iter().find(|row| row.id == *id))
@@ -131,7 +131,8 @@ impl FieldTarget {
             .iter()
             .map(|row| {
                 let record = row.components.get(&self.key.component)?;
-                (record.version == self.version).then(|| field_value(record, field))
+                (record.version() == self.version && record.value().is_some())
+                    .then(|| field_value(record, field))
             })
             .collect::<Option<Vec<_>>>()
             .ok_or(CHANGED)?;
@@ -148,22 +149,20 @@ impl FieldTarget {
         {
             return Ok(None);
         }
-        let set = |entities, value| EditorCommand::SetField {
-            entities,
+        let path = ComponentFieldPath::new(
+            self.key
+                .path
+                .segments()
+                .iter()
+                .chain(self.key.member.segments())
+                .cloned(),
+        );
+        Ok(Some(EditorCommand::SetField {
+            entities: self.selection.targets.clone(),
             component: self.key.component.clone(),
-            path: self.key.path.clone(),
+            path,
             value,
-        };
-        if self.key.member.is_empty() {
-            return Ok(Some(set(self.selection.targets.clone(), value)));
-        }
-        let edits = self.selection.targets.iter().zip(roots).map(|(id, root)| {
-            let mut root = root.cloned().ok_or(CHANGED)?;
-            root.set_path(&self.key.member, value.clone())
-                .map_err(|error| error.to_string())?;
-            Ok::<_, String>(set(vec![*id], root))
-        });
-        Ok(Some(EditorCommand::Batch(edits.collect::<Result<_, _>>()?)))
+        }))
     }
 }
 
@@ -172,7 +171,7 @@ pub(super) fn field_value<'record>(
     field: &'record ComponentFieldSchema,
 ) -> Option<&'record ComponentValue> {
     record
-        .value
+        .value()?
         .get_path(field.path())
         .ok()
         .or_else(|| field.default_value())
@@ -205,10 +204,13 @@ impl ComponentRemoval {
 
     pub fn command(&self, session: &EditorSession, selection: &Selection) -> Option<EditorCommand> {
         let rows = selection.rows(session)?;
-        let present = rows.iter().filter_map(|row| {
-            let record = row.components.get(&self.id)?;
-            Some((row.id, record.version))
-        });
+        let present = rows
+            .iter()
+            .filter(|row| !session.is_inherited_entity(row.id))
+            .filter_map(|row| {
+                let record = row.components.get(&self.id)?;
+                Some((row.id, record.version()))
+            });
         if self.present.is_empty() || !present.eq(self.present.iter().copied()) {
             return None;
         }
@@ -238,7 +240,10 @@ impl AddComponent {
                 let initial = schema.authoring_initial_value()?;
                 let missing: Vec<_> = rows
                     .iter()
-                    .filter(|row| !row.components.contains_key(schema.id()))
+                    .filter(|row| {
+                        !session.is_inherited_entity(row.id)
+                            && !row.components.contains_key(schema.id())
+                    })
                     .map(|row| row.id)
                     .collect();
                 if missing.is_empty() {
@@ -271,7 +276,9 @@ impl AddComponent {
         let schema = session.registry().schema(&self.id)?;
         let missing = rows
             .iter()
-            .filter(|row| !row.components.contains_key(&self.id))
+            .filter(|row| {
+                !session.is_inherited_entity(row.id) && !row.components.contains_key(&self.id)
+            })
             .map(|row| row.id);
         if schema.version() != self.version
             || !schema.has_capability(ComponentCapability::Edit)
@@ -283,10 +290,7 @@ impl AddComponent {
         Some(EditorCommand::SetComponent {
             entities: self.missing.clone(),
             component: self.id.clone(),
-            value: SceneComponent {
-                version: self.version,
-                value: self.initial.clone(),
-            },
+            value: SceneComponent::known(self.version, self.initial.clone()),
         })
     }
 }

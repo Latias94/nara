@@ -1,8 +1,8 @@
 use nara_ecs::Component;
-use nara_reflect::PersistentComponent;
+use nara_reflect::Schema;
 
-#[derive(Component, PersistentComponent)]
-#[nara(
+#[derive(Component, Schema)]
+#[schema(
     id = "nara.test.InitialExpression",
     version = 1,
     alias = "Initial expression",
@@ -11,7 +11,7 @@ use nara_reflect::PersistentComponent;
     authoring_initial
 )]
 struct InitialExpression {
-    #[nara(id = "value", alias = "Value", initial = default_value())]
+    #[schema(id = "value", alias = "Value", initial = default_value())]
     value: i64,
 }
 

@@ -4,15 +4,15 @@ use std::{
 };
 
 use nara::{
-    prelude::{App, MinimalPlugins, RegisterSchema},
+    prelude::{App, MinimalPlugins},
     reflect::schema_json,
 };
-use nara_reference_game::RunRules;
+use nara_reference_game::register_game_schema;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins)?
-        .register_schema::<RunRules>()?;
+    app.add_plugins(MinimalPlugins)?;
+    register_game_schema(&mut app)?;
     writeln!(io::stdout().lock(), "{}", schema_json(&app)?)?;
     Ok(())
 }

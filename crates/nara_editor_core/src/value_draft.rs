@@ -3,11 +3,9 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
-use nara_core::EntityUuid;
+use nara_core::{AssetId, EntityUuid};
 use nara_reflect::{
     ComponentValue, ComponentValueKind, ComponentValueShape, decode_asset_reference_value,
-    encode_asset_reference_value,
 };
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -129,7 +127,8 @@ impl ValueDraft {
             } => Self::Bool(source.and_then(ComponentValue::as_bool)),
             ComponentValueShape::EntityRef
             | ComponentValueShape::Scalar { .. }
-            | ComponentValueShape::AssetRef { .. } => Self::Text {
+            | ComponentValueShape::AssetRef { .. }
+            | ComponentValueShape::StableAssetRef { .. } => Self::Text {
                 text: source.map_or_else(String::new, |value| scalar_text(shape, value)),
                 entered: source.is_some(),
             },
@@ -296,7 +295,15 @@ pub fn supported(shape: &ComponentValueShape) -> bool {
     match shape {
         ComponentValueShape::Scalar { .. }
         | ComponentValueShape::EntityRef
-        | ComponentValueShape::AssetRef { .. } => true,
+        | ComponentValueShape::AssetRef { .. }
+        | ComponentValueShape::StableAssetRef { .. } => !matches!(
+            shape.value_kind(),
+            ComponentValueKind::PackedU16
+                | ComponentValueKind::PackedU32
+                | ComponentValueKind::PackedI32
+                | ComponentValueKind::PackedF32
+                | ComponentValueKind::Bytes
+        ),
         ComponentValueShape::Optional { value } => supported(value),
         ComponentValueShape::Record { members } => {
             members.iter().all(|member| supported(&member.shape))
@@ -312,13 +319,17 @@ fn scalar_item(shape: &ComponentValueShape) -> bool {
     match shape {
         ComponentValueShape::Scalar { .. }
         | ComponentValueShape::EntityRef
-        | ComponentValueShape::AssetRef { .. } => true,
+        | ComponentValueShape::AssetRef { .. }
+        | ComponentValueShape::StableAssetRef { .. } => supported(shape),
         ComponentValueShape::Optional { value } => scalar_item(value),
         _ => false,
     }
 }
 
 fn scalar_text(shape: &ComponentValueShape, value: &ComponentValue) -> String {
+    if let ComponentValue::AssetReference(id) = value {
+        return id.to_string();
+    }
     if matches!(shape, ComponentValueShape::AssetRef { .. }) {
         return decode_asset_reference_value(value)
             .map(|reference| reference.to_string())
@@ -340,26 +351,15 @@ fn scalar_text(shape: &ComponentValueShape, value: &ComponentValue) -> String {
 }
 
 pub fn parse_scalar(shape: &ComponentValueShape, text: &str) -> Result<ComponentValue, String> {
-    if matches!(shape, ComponentValueShape::AssetRef { .. }) {
-        let reference = if let Some(product) = text.strip_prefix("product:") {
-            let (source, product) = product
-                .split_once('/')
-                .ok_or("Expected product:<source>/<primary-or-product-id>")?;
-            let source = StableAssetId::parse_str(source).map_err(|error| error.to_string())?;
-            let product = if product == "primary" {
-                ImportedProductId::PRIMARY
-            } else {
-                ImportedProductId::parse_subproduct(product).map_err(|error| error.to_string())?
-            };
-            AssetRef::Product(
-                AssetProductRef::new(source, product).map_err(|error| error.to_string())?,
-            )
-        } else if let Some(id) = text.strip_prefix("stable_id:") {
-            AssetRef::stable_id(id).map_err(|error| error.to_string())?
-        } else {
-            AssetRef::path(text).map_err(|error| error.to_string())?
-        };
-        return Ok(encode_asset_reference_value(&reference));
+    if matches!(
+        shape,
+        ComponentValueShape::AssetRef { .. } | ComponentValueShape::StableAssetRef { .. }
+    ) {
+        return text
+            .trim()
+            .parse::<AssetId>()
+            .map(ComponentValue::AssetReference)
+            .map_err(|_| "Expected a non-nil asset UUID".to_owned());
     }
     if matches!(shape, ComponentValueShape::EntityRef) {
         return text
@@ -484,33 +484,26 @@ mod tests {
     }
 
     #[test]
-    fn asset_reference_drafts_preserve_complete_product_selection() {
-        let source = StableAssetId::parse_str("cc91a0c8-e2b4-42ae-9d78-3481b9f34d65").unwrap();
-        let shape = ComponentValueShape::from(ComponentValueKind::AssetRef);
-        for reference in [
-            AssetRef::path("bundle.json").unwrap(),
-            AssetRef::StableId(source),
-            AssetRef::Product(AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap()),
-            AssetRef::Product(
-                AssetProductRef::new(
-                    source,
-                    ImportedProductId::parse_subproduct("10a5c635-e71b-478d-86c4-ef933956a425")
-                        .unwrap(),
-                )
-                .unwrap(),
-            ),
+    fn asset_reference_drafts_round_trip_only_exact_ids() {
+        use nara_reflect::AssetReferenceDemand::Immediate;
+
+        let source = "cc91a0c8-e2b4-42ae-9d78-3481b9f34d65";
+        let value = ComponentValue::AssetReference(source.parse().unwrap());
+        for shape in [
+            ComponentValueShape::asset_ref(Immediate),
+            ComponentValueShape::stable_asset_ref(Immediate),
         ] {
-            let value = encode_asset_reference_value(&reference);
-            let text = scalar_text(&shape, &value);
-            assert_eq!(text, reference.to_string());
-            assert_eq!(parse_scalar(&shape, &text).unwrap(), value);
-        }
-        for text in [
-            "product:cc91a0c8-e2b4-42ae-9d78-3481b9f34d65",
-            "product:00000000-0000-0000-0000-000000000000/primary",
-            "product:cc91a0c8-e2b4-42ae-9d78-3481b9f34d65/unknown",
-        ] {
-            assert!(parse_scalar(&shape, text).is_err());
+            let draft = ValueDraft::from_value(&shape, Some(&value));
+            assert_eq!(draft.copy_text(), source);
+            assert_eq!(draft.value(&shape).unwrap(), value);
+            assert_eq!(parse_scalar(&shape, &format!(" {source} ")).unwrap(), value);
+            for text in [
+                "bundle.json",
+                "product:cc91a0c8-e2b4-42ae-9d78-3481b9f34d65/primary",
+                "00000000-0000-0000-0000-000000000000",
+            ] {
+                assert!(parse_scalar(&shape, text).is_err(), "{text}");
+            }
         }
     }
 }

@@ -1,4 +1,4 @@
-//! Project creation, read-only checks, and Schema discovery for the CLI and editor.
+//! Project creation, data checks, and Schema discovery for the CLI and editor.
 
 mod check;
 mod schema;

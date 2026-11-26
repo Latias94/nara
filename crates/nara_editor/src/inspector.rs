@@ -10,11 +10,14 @@ use std::{
     rc::Rc,
 };
 
-use nara_editor_core::{InspectorModel, value_draft::RootDraft};
+use nara_editor_core::{
+    EditorCommand, InspectorModel, InspectorValue, PrefabFieldOverride, value_draft::RootDraft,
+};
 use nara_reflect::{ComponentSchema, ComponentSchemaVersion, ComponentTypeId};
 use open_gpui::{
-    App, Context, Div, Entity, EntityId, FontWeight, IntoElement, Render, Rgba, StyleRefinement,
-    Subscription, Window, WindowId, div, prelude::*, px, rgb,
+    App, ClipboardItem, Context, Div, Entity, EntityId, FontWeight, IntoElement, PromptButton,
+    PromptLevel, Render, Rgba, Stateful, StyleRefinement, Subscription, Window, WindowId, div,
+    prelude::*, px, rgb,
 };
 use open_gpui_base::{Button, Menu, MenuEvent, MenuItem, Select, TextInput, TextInputEvent};
 
@@ -71,7 +74,7 @@ impl InspectorDrafts {
 struct ComponentSection {
     id: ComponentTypeId,
     title: String,
-    opaque: Option<ComponentSchemaVersion>,
+    opaque: Option<(ComponentSchemaVersion, InspectorValue)>,
     fields: Vec<(FieldKey, Entity<PropertyEditor>)>,
     removal: Option<Rc<ComponentRemoval>>,
 }
@@ -163,7 +166,7 @@ impl InspectorPanel {
         let model = InspectorModel::for_session(session);
         let rows = selection.rows(session).unwrap_or_default();
         let name = match rows.as_slice() {
-            [row] => Some(row.name.clone()),
+            [row] if !session.is_inherited_entity(row.id) => Some(row.name.clone()),
             _ => None,
         };
         let label = |id: &ComponentTypeId| {
@@ -174,12 +177,15 @@ impl InspectorPanel {
                 .unwrap_or_else(|| id.as_str().to_owned())
         };
         let mut placements = BTreeMap::<_, Vec<_>>::new();
-        for row in &rows {
+        for row in rows
+            .iter()
+            .filter(|row| !session.is_inherited_entity(row.id))
+        {
             for (id, record) in &row.components {
                 placements
                     .entry(id)
                     .or_default()
-                    .push((row.id, record.version));
+                    .push((row.id, record.version()));
             }
         }
         let projected: Vec<_> = model
@@ -187,7 +193,10 @@ impl InspectorPanel {
             .iter()
             .map(|component| {
                 let properties = Property::for_component(&selection, &rows, component);
-                let opaque = component.opaque.as_ref().map(|_| component.version);
+                let opaque = component
+                    .opaque
+                    .clone()
+                    .map(|value| (component.version, value));
                 let removal = placements
                     .remove(&component.id)
                     .map(|present| Rc::new(ComponentRemoval::new(component.id.clone(), present)));
@@ -213,6 +222,11 @@ impl InspectorPanel {
             })
             .collect();
         let options = AddComponent::options(session, &rows);
+        for (id, _, opaque, _, _) in &projected {
+            if opaque.is_some() && !self.sections.iter().any(|section| &section.id == id) {
+                self.collapsed.insert(id.clone());
+            }
+        }
         let previous = std::mem::replace(&mut self.selection, selection);
         self.revision = Some(revision);
         self.partial = partial;
@@ -523,11 +537,28 @@ impl InspectorPanel {
                     ),
             );
         if !collapsed {
-            if let Some(version) = section.opaque {
+            if let Some((version, opaque)) = &section.opaque {
                 container = container.child(note(format!(
-                    "Read only · Schema unavailable for version {}",
+                    "Read only · Cannot read version {} with the current Schema",
                     version.get()
                 )));
+                if let InspectorValue::Shared(value) = opaque
+                    && let Some(raw) = value.as_str()
+                {
+                    let mut preview = raw.chars();
+                    let mut snippet = preview.by_ref().take(180).collect::<String>();
+                    if preview.next().is_some() {
+                        snippet.push('…');
+                    }
+                    let raw = raw.to_owned();
+                    container = container.child(note(snippet)).child(
+                        theme::button("copy-opaque", "Copy raw RON").on_click(move |_, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(raw.clone()));
+                        }),
+                    );
+                } else if *opaque == InspectorValue::Mixed {
+                    container = container.child(note("Selected entities have different payloads."));
+                }
             } else if section.fields.is_empty() {
                 container = container.child(note("No inspectable fields"));
             } else {
@@ -542,6 +573,72 @@ impl InspectorPanel {
             }
         }
         container
+    }
+
+    fn render_prefab_override(
+        &self,
+        index: usize,
+        edit: PrefabFieldOverride,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let session = &self.workspace.read(cx).session;
+        let locked = session.gesture_active();
+        let can_apply = session.can_apply_to_prefab(&edit);
+        let revert = edit.clone();
+        let apply_selection = self.selection.clone();
+        let revert_selection = self.selection.clone();
+        div()
+            .id(format!("prefab-override-{index}"))
+            .flex()
+            .flex_col()
+            .min_w_0()
+            .child(note(edit.address.clone()))
+            .child(
+                div()
+                    .flex()
+                    .gap_1()
+                    .child(theme::button("revert-prefab", "Revert").disabled(locked).on_click(
+                        cx.listener(move |panel, _, _, cx| {
+                            panel.workspace.update(cx, |workspace, cx| {
+                                if revert_selection.matches(&workspace.session) {
+                                    workspace.apply(EditorCommand::RevertPrefabOverride(revert.clone()), cx);
+                                }
+                            });
+                        }),
+                    ))
+                    .child(theme::button("apply-prefab", "Apply to Prefab…").disabled(!can_apply).on_click(
+                        cx.listener(move |panel, _, window, cx| {
+                            let selection = apply_selection.clone();
+                            if window.has_active_prompt() || !selection.matches(&panel.workspace.read(cx).session) {
+                                return;
+                            }
+                            let edit = edit.clone();
+                            if cfg!(target_os = "macos") {
+                                cx.set_prompt_builder(open_gpui::fallback_prompt_renderer);
+                            }
+                            let answer = window.prompt(
+                                PromptLevel::Warning,
+                                "Apply override to prefab?",
+                                Some("This saves the field to the prefab for all instances. Undo in this scene only restores its local override."),
+                                &[PromptButton::ok("Apply to Prefab"), PromptButton::cancel("Cancel")],
+                                cx,
+                            );
+                            if cfg!(target_os = "macos") {
+                                cx.reset_prompt_builder();
+                            }
+                            let workspace = panel.workspace.clone();
+                            cx.spawn(async move |_, cx| {
+                                if answer.await.ok() == Some(0) {
+                                    let _ = workspace.update(cx, |workspace, cx| {
+                                        if selection.matches(&workspace.session) {
+                                            workspace.apply_to_prefab(&edit, cx);
+                                        }
+                                    });
+                                }
+                            }).detach();
+                        }),
+                    )),
+            )
     }
 }
 
@@ -581,7 +678,35 @@ impl Render for InspectorPanel {
                 content = content.child(note(error.to_owned()).text_color(rgb(theme::ERROR)));
             }
         } else {
-            content = content.child(note(format!("{count} entities selected")));
+            let inherited = match self.selection.targets.as_slice() {
+                [entity] => self
+                    .workspace
+                    .read(cx)
+                    .session
+                    .preview_scene()
+                    .entities
+                    .iter()
+                    .find(|row| row.id == *entity)
+                    .map(|row| format!("{} · Inherited from prefab", row.name)),
+                _ => None,
+            };
+            content = content.child(note(
+                inherited.unwrap_or_else(|| format!("{count} entities selected")),
+            ));
+        }
+        let overrides = match self.selection.targets.as_slice() {
+            [entity] => self.workspace.read(cx).session.prefab_overrides(*entity),
+            _ => Vec::new(),
+        };
+        if !overrides.is_empty() {
+            content = content
+                .child(note("Prefab overrides").font_weight(FontWeight::SEMIBOLD))
+                .children(
+                    overrides
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, edit)| self.render_prefab_override(index, edit, cx)),
+                );
         }
         content = content
             .children(

@@ -536,12 +536,6 @@ dependencies = [
 
 [[package]]
 name = "base64"
-version = "0.21.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
-
-[[package]]
-name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
@@ -2769,11 +2763,14 @@ name = "nara_asset"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "getrandom 0.3.4",
  "image",
  "nara_app",
  "nara_core",
  "nara_ecs",
+ "ron",
  "serde",
+ "tempfile",
  "thiserror 2.0.21",
  "uuid",
 ]
@@ -2897,6 +2894,7 @@ version = "0.1.0"
 dependencies = [
  "ctrlc",
  "libc",
+ "nara_asset",
  "nara_core",
  "nara_reflect",
  "serde",
@@ -2963,6 +2961,7 @@ dependencies = [
  "ron",
  "serde",
  "thiserror 2.0.21",
+ "uuid",
 ]
 
 [[package]]
@@ -4302,14 +4301,15 @@ dependencies = [
 
 [[package]]
 name = "ron"
-version = "0.8.1"
+version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
+checksum = "97b3fe97c18ff24299ea56f802c5693eb34266fb0bc8317f4e101debc8a3ceaf"
 dependencies = [
- "base64 0.21.7",
  "bitflags 2.13.2",
  "serde",
  "serde_derive",
+ "typeid",
+ "unicode-ident",
 ]
 
 [[package]]
@@ -4946,7 +4946,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.6",
  "windows-sys 0.61.2",
@@ -5301,7 +5301,7 @@ version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e419dff010bb12512b0ae9e3d2f318dfbdf0167fde7eb05465134d4e8756076f"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "data-url",
  "flate2",
  "fontdb",

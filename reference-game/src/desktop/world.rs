@@ -9,12 +9,13 @@ use nara::{
     prelude::*,
     render::{
         animation::{Clip, Frame, PlaybackMode},
-        image::load_image,
         material::SamplerDescriptor,
     },
+    scene::authoring::SpriteSource,
     window::{PrimaryWindow, Window},
 };
-use nara_scene::authoring::SpriteSource;
+
+use super::SceneTextures;
 
 use crate::{
     Round, RoundStatus,
@@ -32,6 +33,9 @@ pub(super) struct AnimatedPilot;
 pub(super) struct PilotAnimation(Clip);
 
 pub(super) fn setup(world: &mut World) -> SystemResult {
+    let textures = world
+        .remove_resource::<SceneTextures>()
+        .ok_or("Night Relay scene textures were not loaded")?;
     world.spawn((
         Name::new("Arena camera"),
         Transform2d::default(),
@@ -63,8 +67,13 @@ pub(super) fn setup(world: &mut World) -> SystemResult {
         })
         .collect::<Vec<_>>();
     for (entity, source, pose, role) in sources {
-        let sprite = if let Some(path) = &source.image {
-            Sprite::from_texture(load_image(world, path)?, source.size)
+        let sprite = if let Some(id) = source.image {
+            let texture = textures
+                .0
+                .get(&id)
+                .copied()
+                .ok_or_else(|| format!("Night Relay scene texture {id} was not loaded"))?;
+            Sprite::from_texture(texture, source.size)
                 .with_sampler(SamplerDescriptor::NEAREST_CLAMP)
         } else if role == Some(Actor::Pilot) {
             let texture = add_asset(world, make_pilot_texture()?)?;

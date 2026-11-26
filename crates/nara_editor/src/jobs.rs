@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     io,
     path::PathBuf,
     sync::{
@@ -10,17 +11,21 @@ use std::{
     time::Duration,
 };
 
-use nara_core::{Diagnostic, DiagnosticSeverity};
-use nara_editor_core::play::{PlayControl, PlayError, PlayModeSession, PlayState};
+use nara_core::{AssetId, Diagnostic, DiagnosticSeverity};
+use nara_editor_core::{
+    EditorRegistry,
+    play::{PlayControl, PlayError, PlayModeSession, PlayState, flatten_snapshot},
+};
 use nara_project::{
     EditorPlayMode,
     play::{BuildError, BuildEvent, BuildRequest, OutputLine, OutputStream},
     workflow::{
-        CargoPackage, ProjectTrust, SCHEMA_BINARY, SchemaCacheError, refresh_schema_interruptible,
+        CargoPackage, ProjectTrust, SCHEMA_BINARY, SchemaCacheError, read_project_manifest,
+        refresh_schema_interruptible,
     },
 };
 use nara_reflect::ComponentSchemaCatalog;
-use nara_scene::authoring::SceneDocument;
+use nara_scene::authoring::{SceneDocument, builtin_component_schemas};
 
 #[derive(Debug)]
 pub enum Message {
@@ -49,29 +54,9 @@ pub struct Job {
 impl Job {
     pub fn refresh(project: PathBuf, trust: ProjectTrust) -> io::Result<Self> {
         Self::spawn(move |cancel, _, messages| {
-            let package = CargoPackage::read(&project)?;
-            let features = package
-                .required_features(SCHEMA_BINARY)
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>();
-            let request = BuildRequest {
-                features: &features,
-                ..BuildRequest::new(&project, package.name(), SCHEMA_BINARY)
-            };
-            let schema = match refresh_schema_interruptible(
-                &request,
-                trust,
-                || cancel.load(Ordering::Relaxed),
-                |event| build_message(messages, event),
-            ) {
-                Err(
-                    SchemaCacheError::Interrupted
-                    | SchemaCacheError::Build(BuildError::Interrupted),
-                ) => return Ok(()),
-                result => result?,
-            };
-            let _ = messages.send(Message::Schema(schema));
+            if let Some(schema) = discover_schema(&project, trust, cancel, messages)? {
+                let _ = messages.send(Message::Schema(schema));
+            }
             Ok(())
         })
     }
@@ -79,12 +64,40 @@ impl Job {
     pub fn play(
         project: PathBuf,
         document: SceneDocument,
+        prefabs: BTreeMap<AssetId, SceneDocument>,
+        mut schemas: ComponentSchemaCatalog,
         trust: ProjectTrust,
     ) -> io::Result<Self> {
         Self::spawn(move |cancel, controls, messages| {
+            let document = if read_project_manifest(&project)?.editor.play
+                == EditorPlayMode::Snapshot
+            {
+                match flatten_snapshot(&document, &prefabs, &schemas)? {
+                    Some(snapshot) => snapshot,
+                    None => {
+                        let Some(project_schemas) =
+                            discover_schema(&project, trust, cancel, messages)?
+                        else {
+                            return Ok(());
+                        };
+                        let registry = EditorRegistry::new(
+                            builtin_component_schemas()?,
+                            project_schemas.clone(),
+                        )?;
+                        schemas = registry.catalog().clone();
+                        let snapshot = flatten_snapshot(&document, &prefabs, &schemas)?
+                            .ok_or_else(|| anyhow::anyhow!("The captured prefab instances contain components the project Schema cannot decode"))?;
+                        let _ = messages.send(Message::Schema(project_schemas));
+                        snapshot
+                    }
+                }
+            } else {
+                document
+            };
             let mut play = match PlayModeSession::start(
                 &project,
                 &document,
+                schemas.components(),
                 trust,
                 || cancel.load(Ordering::Relaxed),
                 |event| build_message(messages, event),
@@ -161,6 +174,35 @@ impl Job {
         self.controls
             .send(control)
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "the Play worker has stopped"))
+    }
+}
+
+fn discover_schema(
+    project: &std::path::Path,
+    trust: ProjectTrust,
+    cancel: &AtomicBool,
+    messages: &Sender<Message>,
+) -> anyhow::Result<Option<ComponentSchemaCatalog>> {
+    let package = CargoPackage::read(project)?;
+    let features = package
+        .required_features(SCHEMA_BINARY)
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let request = BuildRequest {
+        features: &features,
+        ..BuildRequest::new(project, package.name(), SCHEMA_BINARY)
+    };
+    match refresh_schema_interruptible(
+        &request,
+        trust,
+        || cancel.load(Ordering::Relaxed),
+        |event| build_message(messages, event),
+    ) {
+        Err(SchemaCacheError::Interrupted | SchemaCacheError::Build(BuildError::Interrupted)) => {
+            Ok(None)
+        }
+        result => Ok(Some(result?)),
     }
 }
 

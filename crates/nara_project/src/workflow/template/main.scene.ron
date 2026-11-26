@@ -1,0 +1,18 @@
+Scene(
+    version: 1,
+    id: "62f1fec4-6c80-4ca5-94b6-b37039f8c482",
+    assets: {
+        "sprite": (id: "01a21a01-f10a-732f-ba5d-e3982408ff21", hint: "sprite.prefab.ron"),
+    },
+    entities: [
+        (
+            id: "3667b4bf-e8f1-438d-9c85-1e2a83c4ed9e",
+            name: "Spinning sprite",
+            prefab: "@sprite",
+            component_versions: {"game.Spin": 2},
+            components: {
+                "game.Spin": (radians_per_second: 0.8),
+            },
+        ),
+    ],
+)

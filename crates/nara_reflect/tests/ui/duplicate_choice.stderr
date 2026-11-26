@@ -1,0 +1,5 @@
+error: choices must contain unique nonempty string literals
+ --> tests/ui/duplicate_choice.rs:7:14
+  |
+7 |     #[schema(choices = ["walk", "walk"])]
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^

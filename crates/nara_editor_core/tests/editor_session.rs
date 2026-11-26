@@ -2,19 +2,22 @@
 
 use std::fs;
 
-use nara_core::{Affine2, DocumentId, EntityUuid, Vec2, vfs::AssetPath};
+use nara_core::{Affine2, AssetId, DocumentId, EntityUuid, Vec2, vfs::AssetPath};
 use nara_editor_core::{
     EditorCommand, EditorDocument, EditorError, EditorProject, EditorRegistry, EditorSession,
-    HierarchyModel, InspectorModel, InspectorValue,
+    HierarchyModel, InspectorModel, InspectorValue, PrefabFieldOverride,
     viewport::{Gizmo2D, GizmoDelta2D, GizmoSelection2D, WorldPoint},
 };
 use nara_reflect::{
-    ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind,
+    AssetReferenceDemand, ComponentCapability, ComponentFieldId, ComponentFieldPath,
+    ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
 };
 use nara_scene::{
-    authoring::{SceneComponent, SceneDocument, SceneEntity, builtin_component_schemas},
+    authoring::{
+        PrefabInstance, RawRon, SceneAsset, SceneComponent, SceneDocument, SceneEntity,
+        SpriteSource, UnknownComponent, builtin_component_schemas, prefab::PrefabError,
+    },
     spatial::Transform2d,
 };
 
@@ -30,6 +33,23 @@ fn document() -> SceneDocument {
     )
 }
 
+fn prefab_asset(number: u64, hint: &str) -> SceneAsset {
+    SceneAsset {
+        id: AssetId::try_from_uuid(id(number).as_uuid()).unwrap(),
+        hint: AssetPath::new(hint).unwrap(),
+    }
+}
+
+fn prefab_mount(number: u64, asset: AssetId) -> SceneEntity {
+    let mut row = SceneEntity::new(id(number), format!("Instance {number}"));
+    row.prefab = Some(PrefabInstance::new(asset));
+    row
+}
+
+fn scene_row(scene: &SceneDocument, entity: EntityUuid) -> &SceneEntity {
+    scene.entities.iter().find(|row| row.id == entity).unwrap()
+}
+
 fn component() -> ComponentTypeId {
     ComponentTypeId::new("night_relay.RunRules")
 }
@@ -39,15 +59,25 @@ fn field() -> ComponentFieldPath {
 }
 
 fn registry() -> EditorRegistry {
-    let schema = ComponentSchema::new(component(), "Run Rules", ComponentSchemaVersion::ONE)
+    registry_with(rules_schema(
+        ComponentSchemaVersion::ONE,
+        ComponentValueKind::U64,
+    ))
+}
+
+fn rules_schema(version: ComponentSchemaVersion, kind: ComponentValueKind) -> ComponentSchema {
+    ComponentSchema::new(component(), "Run Rules", version)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
         .with_fields([ComponentFieldSchema::required(
             ComponentFieldId::new("shield"),
             "Shield",
             field(),
-            ComponentValueKind::U64,
+            kind,
         )
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)])
+}
+
+fn registry_with(schema: ComponentSchema) -> EditorRegistry {
     EditorRegistry::new(
         builtin_component_schemas().unwrap(),
         ComponentSchemaCatalog::from_components([schema]).unwrap(),
@@ -59,10 +89,10 @@ fn actor(n: u64, value: u64) -> SceneEntity {
     let mut row = SceneEntity::new(id(n), format!("Actor {n}"));
     row.components.insert(
         component(),
-        SceneComponent {
-            version: ComponentSchemaVersion::ONE,
-            value: ComponentValue::map([("shield", ComponentValue::U64(value))]),
-        },
+        SceneComponent::known(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([("shield", ComponentValue::U64(value))]),
+        ),
     );
     row.set(&Transform2d::from_translation(Vec2::new(n as f32, 0.0)))
         .unwrap();
@@ -124,8 +154,7 @@ fn gizmo_applies_one_world_space_edit_across_selected_roots() {
     .unwrap();
     let transform = |session: &EditorSession, entity| {
         session
-            .document()
-            .scene()
+            .preview_scene()
             .entities
             .iter()
             .find(|row| row.id == entity)
@@ -196,19 +225,24 @@ fn gizmo_applies_one_world_space_edit_across_selected_roots() {
 #[test]
 fn mixed_fields_gestures_and_unknown_components_survive_save_and_reopen() {
     let unknown = ComponentTypeId::new("third_party.CustomComponent");
-    let staying = SceneComponent {
+    let payload = r#"(message: "保留原值", items: [1,  /* keep spacing */ 2])"#;
+    let staying = SceneComponent::Unknown(UnknownComponent {
+        type_id: unknown.clone(),
         version: ComponentSchemaVersion(27),
-        value: ComponentValue::String("保留原值".into()),
-    };
+        raw: RawRon::from_ron(payload).unwrap(),
+    });
     let mut original = document();
     let mut first = actor(1, 2);
     first.components.insert(unknown.clone(), staying.clone());
     original.entities = vec![actor(2, 3), first];
 
     let project = tempfile::tempdir().unwrap();
-    let path = project.path().join("night-relay.nara.scene.ron");
-    original.write(&path).unwrap();
-    let mut session = EditorSession::new(EditorDocument::open(&path).unwrap(), registry());
+    let path = project.path().join("night-relay.scene.ron");
+    let registry = registry();
+    let schemas = registry.catalog().components();
+    original.write_with(&path, schemas).unwrap();
+    let mut session =
+        EditorSession::new(EditorDocument::open_with(&path, schemas).unwrap(), registry);
     session.selection_mut().replace([id(1), id(2)]);
     assert_eq!(value(&session), InspectorValue::Mixed);
     assert!(!session.is_dirty());
@@ -247,11 +281,13 @@ fn mixed_fields_gestures_and_unknown_components_survive_save_and_reopen() {
     session.save().unwrap();
     assert!(!session.is_dirty());
 
-    let loaded = EditorDocument::open(&path).unwrap();
-    assert_eq!(loaded.scene(), session.document().scene());
-    assert_eq!(loaded.scene().entities[0].components[&unknown], staying);
+    let loaded =
+        SceneDocument::read_with(&path, session.registry().catalog().components()).unwrap();
+    assert_eq!(&loaded, session.document().scene());
+    assert_eq!(loaded.entities[0].components[&unknown], staying);
+    assert!(fs::read_to_string(&path).unwrap().contains(payload));
     assert_eq!(
-        loaded.scene().entities[0]
+        loaded.entities[0]
             .typed::<Transform2d>()
             .unwrap()
             .unwrap()
@@ -314,6 +350,400 @@ fn hierarchy_reparent_delete_and_undo_are_atomic() {
 }
 
 #[test]
+fn inherited_root_and_nested_field_edits_revert_and_undo_as_sparse_overrides() {
+    let outer = prefab_asset(101, "outer.prefab.ron");
+    let inner = prefab_asset(102, "inner.prefab.ron");
+    let mut inner_doc = SceneDocument::new(DocumentId::try_from_uuid(id(201).as_uuid()).unwrap());
+    let mut leaf = actor(22, 6);
+    leaf.parent = Some(id(21));
+    inner_doc.entities = vec![actor(21, 4), leaf];
+    let mut outer_doc = SceneDocument::new(DocumentId::try_from_uuid(id(202).as_uuid()).unwrap());
+    let mut nested = prefab_mount(12, inner.id);
+    nested.parent = Some(id(11));
+    outer_doc.entities = vec![actor(11, 2), nested];
+    outer_doc.assets.insert("inner".into(), inner.clone());
+
+    let mut scene = document();
+    scene.entities.push(prefab_mount(1, outer.id));
+    scene.assets.insert("outer".into(), outer.clone());
+    let mut session = EditorSession::new(EditorDocument::new(scene).unwrap(), registry());
+    session
+        .set_prefabs([(outer.id, outer_doc), (inner.id, inner_doc)].into())
+        .unwrap();
+    let root = id(1);
+    let child = session
+        .preview_scene()
+        .entities
+        .iter()
+        .find(|row| row.name == "Actor 22")
+        .unwrap()
+        .id;
+    let shield = |session: &EditorSession, entity| {
+        scene_row(session.preview_scene(), entity).components[&component()]
+            .value()
+            .unwrap()
+            .get_path(&field())
+            .unwrap()
+            .as_u64()
+            .unwrap()
+    };
+    assert_eq!([shield(&session, root), shield(&session, child)], [2, 6]);
+
+    assert!(
+        session
+            .apply(EditorCommand::SetField {
+                entities: vec![root, child],
+                component: component(),
+                path: field(),
+                value: ComponentValue::U64(9),
+            })
+            .unwrap()
+    );
+    let authored = session.document().scene().clone();
+    assert_eq!(authored.entities.len(), 1);
+    assert!(authored.entities[0].components.is_empty());
+    let [root_edit]: [PrefabFieldOverride; 1] = session.prefab_overrides(root).try_into().unwrap();
+    let [child_edit]: [PrefabFieldOverride; 1] =
+        session.prefab_overrides(child).try_into().unwrap();
+    assert_eq!(root_edit.address, "night_relay.RunRules.shield");
+    assert_eq!(
+        child_edit.address,
+        format!("child:{}/{}/night_relay.RunRules.shield", id(12), id(22))
+    );
+    assert_eq!([shield(&session, root), shield(&session, child)], [9, 9]);
+
+    assert!(
+        session
+            .apply(EditorCommand::Batch(vec![
+                EditorCommand::RevertPrefabOverride(root_edit),
+                EditorCommand::RevertPrefabOverride(child_edit),
+            ]))
+            .unwrap()
+    );
+    assert!(session.prefab_overrides(root).is_empty());
+    assert!(session.prefab_overrides(child).is_empty());
+    assert_eq!([shield(&session, root), shield(&session, child)], [2, 6]);
+    assert!(session.undo().unwrap());
+    assert_eq!(session.document().scene(), &authored);
+    assert_eq!([shield(&session, root), shield(&session, child)], [9, 9]);
+    assert!(session.undo().unwrap());
+    assert_eq!([shield(&session, root), shield(&session, child)], [2, 6]);
+    assert!(!session.can_undo());
+}
+
+#[test]
+fn applying_an_override_validates_every_instance_before_publishing() {
+    let component = ComponentTypeId::new("example.Inventory");
+    let field = ComponentFieldPath::from_fields(["slots"]);
+    let capabilities = ComponentCapability::SCENE_AUTHORING;
+    let schema = ComponentSchema::new(component.clone(), "Inventory", ComponentSchemaVersion::ONE)
+        .with_capabilities(capabilities)
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("slots"),
+            "Slots",
+            field.clone(),
+            ComponentValueShape::list(ComponentValueKind::U64.into()),
+        )
+        .with_capabilities(capabilities)]);
+    let registry = EditorRegistry::new(
+        [],
+        ComponentSchemaCatalog::from_components([schema]).unwrap(),
+    )
+    .unwrap();
+    let slots = |values: &[u64]| {
+        ComponentValue::List(values.iter().copied().map(ComponentValue::U64).collect())
+    };
+    let asset = prefab_asset(103, "inventory.prefab.ron");
+    let mut source = SceneDocument::new(DocumentId::try_from_uuid(id(203).as_uuid()).unwrap());
+    let mut root = SceneEntity::new(id(11), "Inventory");
+    root.components.insert(
+        component.clone(),
+        SceneComponent::known(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([("slots", slots(&[1, 2]))]),
+        ),
+    );
+    source.entities.push(root);
+    let mut other = prefab_mount(2, asset.id);
+    let other_address = "example.Inventory.slots[1]";
+    other
+        .prefab
+        .as_mut()
+        .unwrap()
+        .overrides
+        .insert(other_address.into(), RawRon::from_ron("20").unwrap());
+    let mut scene = document();
+    scene.entities = vec![prefab_mount(1, asset.id), other];
+    scene.assets.insert("inventory".into(), asset.clone());
+    let mut session = EditorSession::new(EditorDocument::new(scene).unwrap(), registry);
+    session
+        .set_prefabs([(asset.id, source.clone())].into())
+        .unwrap();
+
+    let replace_first = |values: &[u64]| EditorCommand::SetField {
+        entities: vec![id(1)],
+        component: component.clone(),
+        path: field.clone(),
+        value: slots(values),
+    };
+    let read_slots = |scene: &SceneDocument, entity| {
+        scene_row(scene, entity).components[&component]
+            .value()
+            .unwrap()
+            .get_path(&field)
+            .unwrap()
+            .clone()
+    };
+    assert!(session.apply(replace_first(&[10])).unwrap());
+    let too_short = session.document().scene().clone();
+    let projection = session.preview_scene().clone();
+    let [edit]: [PrefabFieldOverride; 1] = session.prefab_overrides(id(1)).try_into().unwrap();
+    assert!(matches!(
+        session.apply_to_prefab(&edit, |_, _, _| -> Result<(), &str> { panic!("invalid projection reached publisher") }),
+        Err(EditorError::Prefab(PrefabError::Override { instance, address, .. }))
+            if instance == id(2) && address == other_address
+    ));
+    assert_eq!(session.document().scene(), &too_short);
+    assert_eq!(session.preview_scene(), &projection);
+
+    assert!(session.apply(replace_first(&[10, 11])).unwrap());
+    let before = session.document().scene().clone();
+    let projection = session.preview_scene().clone();
+    let [edit]: [PrefabFieldOverride; 1] = session.prefab_overrides(id(1)).try_into().unwrap();
+    let check_publication = |published, expected: &SceneDocument, updated: &SceneDocument| {
+        assert_eq!(published, asset.id);
+        assert_eq!(expected, &source);
+        assert_eq!(read_slots(updated, id(11)), slots(&[10, 11]));
+    };
+    assert!(matches!(
+        session.apply_to_prefab(&edit, |id, expected, updated| {
+            check_publication(id, expected, updated);
+            Err("fixture write failed")
+        }),
+        Err(EditorError::PublishPrefab { asset: failed, .. }) if failed == asset.id
+    ));
+    assert_eq!(session.document().scene(), &before);
+    assert_eq!(session.preview_scene(), &projection);
+
+    assert!(
+        session
+            .apply_to_prefab(&edit, |id, expected, updated| {
+                check_publication(id, expected, updated);
+                Ok::<_, &str>(())
+            })
+            .unwrap()
+    );
+    assert!(session.prefab_overrides(id(1)).is_empty());
+    assert_eq!(session.prefab_overrides(id(2))[0].address, other_address);
+    assert_eq!(read_slots(session.preview_scene(), id(1)), slots(&[10, 11]));
+    assert_eq!(read_slots(session.preview_scene(), id(2)), slots(&[10, 20]));
+    assert!(session.undo().unwrap());
+    assert_eq!(session.document().scene(), &before);
+    assert!(session.undo().unwrap());
+    assert_eq!(session.document().scene(), &too_short);
+}
+
+#[test]
+fn an_incompatible_cached_schema_does_not_block_opening_or_saving() {
+    let work = tempfile::tempdir().unwrap();
+    let path = work.path().join("mismatch.scene.ron");
+    let payload = r#"(shield: /* unreleased type */ "unknown")"#;
+    let text = format!(
+        "Scene(version: 1, id: \"{}\", entities: [(id: \"{}\", name: \"Actor\", components: {{\"{}\": {payload}}})])",
+        document().id,
+        id(1),
+        component()
+    );
+    fs::write(&path, text).unwrap();
+    let registry = registry();
+    let schemas = registry.catalog().components();
+    assert!(SceneDocument::read_with(&path, schemas).is_err());
+    let loaded = EditorDocument::open_with(&path, schemas).unwrap();
+    assert!(matches!(
+        &loaded.scene().entities[0].components[&component()],
+        SceneComponent::Unknown(unknown) if unknown.raw.as_ron() == payload
+    ));
+    let mut session = EditorSession::new(loaded, registry);
+    session
+        .apply(EditorCommand::Rename {
+            entity: id(1),
+            name: "Edited name".to_owned(),
+        })
+        .unwrap();
+    session.save().unwrap();
+    assert!(fs::read_to_string(path).unwrap().contains(payload));
+}
+
+#[test]
+fn schema_refresh_preserves_an_edited_previous_version_and_its_history() {
+    let original_registry = registry();
+    let schemas = original_registry.catalog().components();
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("refresh.scene.ron");
+    let future = ComponentTypeId::new("third_party.CustomComponent");
+    let payload = "/* retain bytes */ Future(0x0a, [1,  2])";
+    let mut original = document();
+    original.entities = vec![actor(1, 1), actor(2, 2)];
+    original.entities[0].components.insert(
+        future.clone(),
+        SceneComponent::Unknown(UnknownComponent {
+            type_id: future.clone(),
+            version: ComponentSchemaVersion(27),
+            raw: RawRon::from_ron(payload).unwrap(),
+        }),
+    );
+    original.write_with(&path, schemas).unwrap();
+    let mut session = EditorSession::new(
+        EditorDocument::open_with(&path, schemas).unwrap(),
+        original_registry,
+    );
+    assert!(session.apply(edit(3)).unwrap());
+    assert!(session.apply(edit(4)).unwrap());
+    assert!(session.undo().unwrap());
+
+    let upgraded = registry_with(rules_schema(
+        ComponentSchemaVersion(2),
+        ComponentValueKind::String,
+    ));
+    assert!(session.set_registry(upgraded).unwrap().is_empty());
+    assert!(session.can_undo() && session.can_redo() && session.is_dirty());
+    let assert_payload = |scene: &SceneDocument, shield| {
+        let row = scene_row(scene, id(1));
+        assert!(matches!(
+            &row.components[&component()],
+            SceneComponent::Unknown(unknown)
+                if unknown.version == ComponentSchemaVersion::ONE
+                    && unknown.raw.as_ron() == format!("(shield: {shield})")
+        ));
+        assert_eq!(
+            row.components[&future],
+            original.entities[0].components[&future]
+        );
+    };
+    assert_payload(session.document().scene(), 3);
+    assert!(session.redo().unwrap());
+    assert_payload(session.document().scene(), 4);
+    assert!(
+        session
+            .apply(EditorCommand::Rename {
+                entity: id(2),
+                name: "Renamed actor".into(),
+            })
+            .unwrap()
+    );
+    session.save().unwrap();
+    let reopened =
+        SceneDocument::read_with(&path, session.registry().catalog().components()).unwrap();
+    assert_eq!(scene_row(&reopened, id(2)).name, "Renamed actor");
+    assert_payload(&reopened, 4);
+    assert!(session.undo().unwrap());
+    assert!(session.undo().unwrap());
+    assert_payload(session.document().scene(), 3);
+    session.save().unwrap();
+    assert_payload(&SceneDocument::read(&path).unwrap(), 3);
+
+    assert!(session.set_registry(registry()).unwrap().is_empty());
+    session.selection_mut().replace([id(1), id(2)]);
+    assert_eq!(
+        value(&session),
+        InspectorValue::Shared(ComponentValue::U64(3))
+    );
+    assert!(!session.is_dirty());
+    assert!(session.undo().unwrap());
+    assert_eq!(value(&session), InspectorValue::Mixed);
+    assert!(session.redo().unwrap());
+    assert!(session.redo().unwrap());
+    assert_eq!(
+        value(&session),
+        InspectorValue::Shared(ComponentValue::U64(4))
+    );
+}
+
+#[test]
+fn same_version_refresh_preserves_old_defaults_and_historical_asset_aliases() {
+    let version = ComponentSchemaVersion::ONE;
+    let mut old = rules_schema(version, ComponentValueKind::U64);
+    old.fields[0].default_value = Some(ComponentValue::U64(1));
+    let image_field = ComponentFieldPath::from_fields(["image"]);
+    old = old.with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("image"),
+        "Image",
+        image_field.clone(),
+        ComponentValueShape::stable_asset_ref(AssetReferenceDemand::Immediate),
+    )
+    .with_reference_capabilities()]);
+    let image = prefab_asset(87, "cell.png");
+    let mut row = actor(1, 1);
+    row.components
+        .get_mut(&component())
+        .unwrap()
+        .value_mut()
+        .unwrap()
+        .set_path(&image_field, ComponentValue::AssetReference(image.id))
+        .unwrap();
+    let mut scene = document();
+    scene.entities.push(row);
+    let mut session = EditorSession::new(
+        EditorDocument::new(scene).unwrap(),
+        registry_with(old.clone()),
+    );
+    assert!(
+        session
+            .apply(EditorCommand::Batch(vec![
+                EditorCommand::DeclareAsset(image.clone()),
+                EditorCommand::Rename {
+                    entity: id(1),
+                    name: "Actor with an alias".into()
+                },
+            ]))
+            .unwrap()
+    );
+    assert!(session.undo().unwrap());
+
+    let mut next = rules_schema(version, ComponentValueKind::String);
+    next.fields[0].default_value = Some(ComponentValue::String("new default".into()));
+    assert_eq!(session.set_registry(registry_with(next)).unwrap().len(), 1);
+    let assert_payload = |session: &EditorSession, image: &str| {
+        let SceneComponent::Unknown(unknown) =
+            &scene_row(session.document().scene(), id(1)).components[&component()]
+        else {
+            panic!("the incompatible component should be opaque");
+        };
+        assert_eq!(unknown.version, version);
+        assert_eq!(
+            unknown.raw.as_ron(),
+            format!(r#"(shield: 1, image: "{image}")"#)
+        );
+    };
+    assert_payload(&session, &image.id.to_string());
+    assert!(session.redo().unwrap());
+    assert_payload(&session, "@cell");
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("shape-change.scene.ron");
+    session.save_as(&path).unwrap();
+    let reopened =
+        EditorDocument::open_with(&path, session.registry().catalog().components()).unwrap();
+    assert_eq!(reopened.scene(), session.document().scene());
+    assert!(session.undo().unwrap());
+    assert_payload(&session, &image.id.to_string());
+
+    assert!(session.set_registry(registry_with(old)).unwrap().is_empty());
+    let assert_known = |session: &EditorSession| {
+        let value = scene_row(session.document().scene(), id(1)).components[&component()]
+            .value()
+            .unwrap();
+        assert_eq!(value.get_path(&field()).unwrap(), &ComponentValue::U64(1));
+        assert_eq!(
+            value.get_path(&image_field).unwrap(),
+            &ComponentValue::AssetReference(image.id)
+        );
+    };
+    assert_known(&session);
+    assert!(session.redo().unwrap());
+    assert_known(&session);
+}
+
+#[test]
 fn project_settings_and_asset_documents_round_trip_on_the_same_mount() {
     let project = tempfile::tempdir().unwrap();
     let root = project.path();
@@ -323,15 +753,81 @@ fn project_settings_and_asset_documents_round_trip_on_the_same_mount() {
     )
     .unwrap();
     fs::create_dir(root.join("assets")).unwrap();
-    let path = AssetPath::new("night-relay.nara.scene.ron").unwrap();
+    let path = AssetPath::new("night-relay.scene.ron").unwrap();
     document()
         .write(root.join("assets").join(path.as_str()))
         .unwrap();
 
     let mut project = EditorProject::open(root).unwrap();
-    assert_eq!(project.assets().unwrap().entries()[0].path, path);
+    assert_eq!(project.assets().entries()[0].path, path);
     project.set_entry_scene(Some(path.clone())).unwrap();
     let reopened = EditorProject::open(root).unwrap();
     assert_eq!(reopened.entry_scene(), Some(&path));
     assert_eq!(reopened.open_document(&path).unwrap().scene(), &document());
+}
+
+#[test]
+fn saving_after_moving_a_png_and_its_sidecar_updates_the_hint_and_keeps_the_id() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    fs::write(
+        root.join("nara.toml"),
+        "[project]\nname = 'Asset Move'\nversion = '0.1'\n",
+    )
+    .unwrap();
+    let assets = root.join("assets");
+    fs::create_dir_all(assets.join("sprites")).unwrap();
+    let old = AssetPath::new("power-cell.png").unwrap();
+    let new = AssetPath::new("sprites/charge.png").unwrap();
+    fs::write(
+        assets.join(old.as_str()),
+        include_bytes!("../../../reference-game/assets/power-cell.png"),
+    )
+    .unwrap();
+    let mut project = EditorProject::open(root).unwrap();
+    let image = project.asset_reference(&old).unwrap();
+    let old_meta = assets.join("power-cell.png.meta");
+    let new_meta = assets.join("sprites/charge.png.meta");
+    let sidecar = fs::read(&old_meta).unwrap();
+
+    let mut scene = document();
+    scene.assets.insert("cell".into(), image.clone());
+    let mut sprite = SceneEntity::new(id(1), "Charge");
+    sprite
+        .set(&SpriteSource {
+            image: Some(image.id),
+            ..Default::default()
+        })
+        .unwrap();
+    scene.entities.push(sprite);
+    let mut session = EditorSession::new(EditorDocument::new(scene).unwrap(), registry());
+    let path = assets.join("charge.scene.ron");
+    session.save_as(&path).unwrap();
+
+    fs::rename(assets.join(old.as_str()), assets.join(new.as_str())).unwrap();
+    fs::rename(old_meta, &new_meta).unwrap();
+    project.refresh_assets().unwrap();
+    assert_eq!(project.asset_reference(&old), None);
+    assert_eq!(project.asset_reference(&new).unwrap().id, image.id);
+    assert_eq!(project.asset_hint(image.id).as_ref(), Some(&new));
+    assert_eq!(fs::read(new_meta).unwrap(), sidecar);
+
+    session.refresh_asset_hints(|id| project.asset_hint(id));
+    session.save().unwrap();
+    let saved = SceneDocument::read_with(&path, session.registry().catalog().components()).unwrap();
+    assert_eq!(
+        saved.assets["cell"],
+        SceneAsset {
+            id: image.id,
+            hint: new
+        }
+    );
+    assert_eq!(
+        saved.entities[0]
+            .typed::<SpriteSource>()
+            .unwrap()
+            .unwrap()
+            .image,
+        Some(image.id)
+    );
 }

@@ -7,8 +7,9 @@ use std::{
 };
 
 use crate::{
-    AssetReferenceDemand, ComponentFieldPath, ComponentFieldPathSegment, ComponentNumericInterval,
-    ComponentValue, ComponentValueRef,
+    AssetReferenceDemand, ComponentCodecError, ComponentFieldPath, ComponentFieldPathError,
+    ComponentFieldPathSegment, ComponentFloat, ComponentNumericInterval, ComponentValue,
+    ComponentValueRef, validate_component_value,
 };
 
 const MAX_ALIAS_BYTES: usize = 128;
@@ -233,6 +234,11 @@ pub struct ComponentSchema {
     pub id: ComponentTypeId,
     pub aliases: Vec<String>,
     pub version: ComponentSchemaVersion,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub group: Option<String>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub capabilities: BTreeSet<ComponentCapability>,
     pub fields: Vec<ComponentFieldSchema>,
@@ -247,6 +253,9 @@ pub struct ComponentSchema {
     pub authoring_initial_value: Option<ComponentValue>,
 }
 
+/// Metadata exported by a native [`crate::Schema`] implementation.
+pub type TypeSchema = ComponentSchema;
+
 impl ComponentSchema {
     #[must_use]
     pub fn new(
@@ -258,6 +267,7 @@ impl ComponentSchema {
             id,
             aliases: vec![alias.into()],
             version,
+            group: None,
             capabilities: BTreeSet::new(),
             fields: Vec::new(),
             field_tombstones: Vec::new(),
@@ -269,6 +279,17 @@ impl ComponentSchema {
     pub fn with_aliases(mut self, aliases: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.aliases.extend(aliases.into_iter().map(Into::into));
         self
+    }
+
+    #[must_use]
+    pub fn with_group(mut self, group: impl Into<String>) -> Self {
+        self.group = Some(group.into());
+        self
+    }
+
+    #[must_use]
+    pub fn group(&self) -> Option<&str> {
+        self.group.as_deref()
     }
 
     #[must_use]
@@ -337,16 +358,66 @@ impl ComponentSchema {
         self.capabilities.contains(&capability)
     }
 
+    /// Fills omitted fields from the exported schema, then validates the component.
+    /// Explicit nulls are values and are never replaced with a default.
+    pub fn with_defaults(
+        &self,
+        mut value: ComponentValue,
+    ) -> Result<ComponentValue, ComponentCodecError> {
+        for field in &self.fields {
+            if let Some(default) = field.default_value()
+                && matches!(
+                    value.get_path(field.path()),
+                    Err(ComponentFieldPathError::MissingField { .. })
+                )
+            {
+                insert_field_default(&mut value, field.path(), default)?;
+            }
+        }
+        validate_component_value(self, &value)?;
+        Ok(value)
+    }
+
+    /// Hashes this type, including declaration order and wire shape.
+    #[must_use]
+    pub fn schema_hash(&self) -> SchemaHash {
+        let mut hasher = blake3::Hasher::new();
+        feed_bytes(&mut hasher, b"nara.type-schema");
+        feed_schema(&mut hasher, self);
+        CatalogFingerprint(*hasher.finalize().as_bytes())
+    }
+
     pub(crate) fn canonicalize(&mut self) {
         self.aliases.sort();
-        self.fields.sort_by(|left, right| left.id.cmp(&right.id));
         self.field_tombstones.sort();
         for field in &mut self.fields {
             field.aliases.sort();
             field.member_tombstones.sort();
-            field.shape.canonicalize();
         }
     }
+}
+
+fn insert_field_default(
+    value: &mut ComponentValue,
+    path: &ComponentFieldPath,
+    default: &ComponentValue,
+) -> Result<(), ComponentCodecError> {
+    for (index, segment) in path.segments().iter().enumerate() {
+        let prefix = ComponentFieldPath::new(path.segments()[..=index].iter().cloned());
+        if matches!(
+            value.get_path(&prefix),
+            Err(ComponentFieldPathError::MissingField { .. })
+        ) && matches!(segment, ComponentFieldPathSegment::Field(_))
+        {
+            let inserted = if index + 1 == path.segments().len() {
+                default.clone()
+            } else {
+                ComponentValue::Map(Default::default())
+            };
+            value.set_path(&prefix, inserted)?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -498,7 +569,16 @@ pub enum ComponentValueShape {
         numeric_interval: Option<ComponentNumericInterval>,
     },
     EntityRef,
+    /// A native locator. Compact scenes accept only its exact stable UUID form.
     AssetRef {
+        #[cfg_attr(
+            feature = "serde",
+            serde(serialize_with = "serialize_asset_reference_demand")
+        )]
+        demand: AssetReferenceDemand,
+    },
+    /// A stable source UUID, without a path or product selector.
+    StableAssetRef {
         #[cfg_attr(
             feature = "serde",
             serde(serialize_with = "serialize_asset_reference_demand")
@@ -527,8 +607,7 @@ pub enum ComponentValueShape {
     },
 }
 
-// RON 0.8 buffers fields of internally tagged enums through deserialize_any, which discards
-// bare unit-variant names. Emit a string here; the shared demand enum remains the decoder.
+// A string preserves the demand name when Serde buffers an internally tagged shape.
 #[cfg(feature = "serde")]
 fn serialize_asset_reference_demand<S: serde::Serializer>(
     demand: &AssetReferenceDemand,
@@ -630,6 +709,8 @@ pub enum ComponentShapeErrorKind {
     },
     NumericDomain(ComponentNumericDomain),
     NumericInterval,
+    NonFinitePackedFloat,
+    UndeclaredChoice(String),
     MissingMember(String),
     UndeclaredMember(String),
 }
@@ -710,6 +791,11 @@ impl ComponentValueShape {
     #[must_use]
     pub const fn asset_ref(demand: AssetReferenceDemand) -> Self {
         Self::AssetRef { demand }
+    }
+
+    #[must_use]
+    pub const fn stable_asset_ref(demand: AssetReferenceDemand) -> Self {
+        Self::StableAssetRef { demand }
     }
 
     #[must_use]
@@ -799,7 +885,7 @@ impl ComponentValueShape {
 
     fn replace_asset_reference_demand(&mut self, replacement: AssetReferenceDemand) -> bool {
         match self {
-            Self::AssetRef { demand } => {
+            Self::AssetRef { demand } | Self::StableAssetRef { demand } => {
                 *demand = replacement;
                 true
             }
@@ -891,7 +977,9 @@ impl ComponentValueShape {
             match current {
                 Self::Scalar { kind, .. } | Self::Opaque { kind } => return *kind,
                 Self::EntityRef => return ComponentValueKind::EntityRef,
-                Self::AssetRef { .. } => return ComponentValueKind::AssetRef,
+                Self::AssetRef { .. } | Self::StableAssetRef { .. } => {
+                    return ComponentValueKind::AssetRef;
+                }
                 Self::Record { .. } | Self::Map { .. } => return ComponentValueKind::Map,
                 Self::List { .. } | Self::KeyedList { .. } => return ComponentValueKind::List,
                 Self::Optional { value } => current = value,
@@ -1095,6 +1183,14 @@ impl ComponentValueShape {
                 },
                 actual,
             ) if actual == *kind => {
+                if let ComponentValue::PackedF32(values) = value.as_value()
+                    && values.iter().any(|value| !value.is_finite())
+                {
+                    return Err(shape_error(
+                        path,
+                        ComponentShapeErrorKind::NonFinitePackedFloat,
+                    ));
+                }
                 if let Some(domain) = numeric_domain
                     && !domain.accepts_value(value)
                 {
@@ -1111,6 +1207,7 @@ impl ComponentValueShape {
                 Ok(())
             }
             (Self::EntityRef, ComponentValueKind::EntityRef) => Ok(()),
+            (Self::StableAssetRef { .. }, ComponentValueKind::AssetRef) => Ok(()),
             (Self::AssetRef { .. }, _) if crate::decode_asset_reference_value(value).is_ok() => {
                 Ok(())
             }
@@ -1195,20 +1292,6 @@ impl ComponentValueShape {
             )),
         }
     }
-
-    pub(crate) fn canonicalize(&mut self) {
-        match self {
-            Self::Record { members } => {
-                members.sort_by(|left, right| left.name.cmp(&right.name));
-                for member in members {
-                    member.shape.canonicalize();
-                }
-            }
-            Self::List { item } | Self::KeyedList { item, .. } => item.canonicalize(),
-            Self::Map { value } | Self::Optional { value } => value.canonicalize(),
-            _ => {}
-        }
-    }
 }
 
 pub(crate) fn keyed_list_member<'a>(
@@ -1275,12 +1358,17 @@ fn validate_value_budget(
     budget: &mut ShapeBudget,
     path: &mut Vec<ComponentFieldPathSegment>,
 ) -> Result<(), ComponentShapeError> {
-    let (nodes, bytes) = match value.kind() {
-        ComponentValueKind::String => (1, value.as_str().expect("String kind checked").len()),
-        ComponentValueKind::EntityRef => (1, 16),
-        _ => (1, 8),
+    let bytes = match value.as_value() {
+        ComponentValue::String(value) => value.len(),
+        ComponentValue::AssetReference(_) | ComponentValue::EntityReference(_) => 16,
+        ComponentValue::PackedU16(values) => std::mem::size_of_val(values.as_slice()),
+        ComponentValue::PackedU32(values) => std::mem::size_of_val(values.as_slice()),
+        ComponentValue::PackedI32(values) => std::mem::size_of_val(values.as_slice()),
+        ComponentValue::PackedF32(values) => std::mem::size_of_val(values.as_slice()),
+        ComponentValue::Bytes(values) => values.len(),
+        _ => 8,
     };
-    budget.observe_cost(depth, nodes, bytes, path)?;
+    budget.observe_cost(depth, 1, bytes, path)?;
     match value.kind() {
         ComponentValueKind::Map => {
             for (name, value) in value.as_map().expect("Map kind checked").iter() {
@@ -1392,12 +1480,27 @@ pub struct ComponentFieldSchema {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub default_value: Option<ComponentValue>,
-    /// Ordered string choices displayed by a generic Inspector.
+    /// Ordered, allowed string choices displayed by a generic Inspector.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Vec::is_empty")
     )]
     pub choices: Vec<String>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub step: Option<ComponentFloat>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub unit: Option<String>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub tooltip: Option<String>,
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
@@ -1428,6 +1531,9 @@ impl ComponentFieldSchema {
             capabilities: BTreeSet::new(),
             default_value: None,
             choices: Vec::new(),
+            step: None,
+            unit: None,
+            tooltip: None,
             editor_hint: None,
             member_tombstones: Vec::new(),
         }
@@ -1440,18 +1546,10 @@ impl ComponentFieldSchema {
         path: ComponentFieldPath,
         shape: impl Into<ComponentValueShape>,
     ) -> Self {
-        Self {
-            id,
-            aliases: vec![alias.into()],
-            path,
-            shape: ComponentValueShape::optional(shape.into()),
-            required: false,
-            capabilities: BTreeSet::new(),
-            default_value: None,
-            choices: Vec::new(),
-            editor_hint: None,
-            member_tombstones: Vec::new(),
-        }
+        let mut field =
+            Self::required(id, alias, path, ComponentValueShape::optional(shape.into()));
+        field.required = false;
+        field
     }
 
     #[must_use]
@@ -1462,18 +1560,7 @@ impl ComponentFieldSchema {
         shape: impl Into<ComponentValueShape>,
         default_value: ComponentValue,
     ) -> Self {
-        Self {
-            id,
-            aliases: vec![alias.into()],
-            path,
-            shape: ComponentValueShape::optional(shape.into()),
-            required: false,
-            capabilities: BTreeSet::new(),
-            default_value: Some(default_value),
-            choices: Vec::new(),
-            editor_hint: None,
-            member_tombstones: Vec::new(),
-        }
+        Self::optional(id, alias, path, shape).with_default_value(default_value)
     }
 
     #[must_use]
@@ -1482,7 +1569,7 @@ impl ComponentFieldSchema {
         self
     }
 
-    /// Sets an ordered list of proposals for a string field.
+    /// Sets the accepted values of a string field.
     #[must_use]
     pub fn with_choices(mut self, choices: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.choices = choices.into_iter().map(Into::into).collect();
@@ -1492,6 +1579,62 @@ impl ComponentFieldSchema {
     #[must_use]
     pub fn choices(&self) -> &[String] {
         &self.choices
+    }
+
+    #[must_use]
+    pub fn with_default_value(mut self, value: ComponentValue) -> Self {
+        self.default_value = Some(value);
+        self
+    }
+
+    #[must_use]
+    pub fn with_step(mut self, step: ComponentFloat) -> Self {
+        self.step = Some(step);
+        self
+    }
+
+    #[must_use]
+    pub fn step(&self) -> Option<f64> {
+        self.step.map(ComponentFloat::get)
+    }
+
+    #[must_use]
+    pub fn with_unit(mut self, unit: impl Into<String>) -> Self {
+        self.unit = Some(unit.into());
+        self
+    }
+
+    #[must_use]
+    pub fn unit(&self) -> Option<&str> {
+        self.unit.as_deref()
+    }
+
+    #[must_use]
+    pub fn with_tooltip(mut self, tooltip: impl Into<String>) -> Self {
+        self.tooltip = Some(tooltip.into());
+        self
+    }
+
+    #[must_use]
+    pub fn tooltip(&self) -> Option<&str> {
+        self.tooltip.as_deref()
+    }
+
+    #[must_use]
+    pub fn is_read_only(&self) -> bool {
+        !self.has_capability(ComponentCapability::Edit)
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_reference_capabilities(mut self) -> Self {
+        if self.shape.declares_kind(ComponentValueKind::AssetRef) {
+            self.capabilities.insert(ComponentCapability::AssetRef);
+        }
+        if self.shape.declares_kind(ComponentValueKind::EntityRef) {
+            self.capabilities.insert(ComponentCapability::EntityRef);
+        }
+        self
     }
 
     #[must_use]
@@ -1594,7 +1737,25 @@ impl ComponentFieldSchema {
     /// component-specific invariants that are not represented by this schema.
     #[must_use]
     pub fn accepts_value<'a>(&self, value: impl Into<ComponentValueRef<'a>>) -> bool {
-        self.shape.accepts_value(value)
+        self.validate_value(value).is_ok()
+    }
+
+    pub fn validate_value<'a>(
+        &self,
+        value: impl Into<ComponentValueRef<'a>>,
+    ) -> Result<(), ComponentShapeError> {
+        let value = value.into();
+        self.shape.validate_value(value)?;
+        if !self.choices.is_empty()
+            && let Some(text) = value.as_str()
+            && !self.choices.iter().any(|choice| choice == text)
+        {
+            return Err(shape_error(
+                &[],
+                ComponentShapeErrorKind::UndeclaredChoice(text.into()),
+            ));
+        }
+        Ok(())
     }
 
     #[must_use]
@@ -1603,6 +1764,7 @@ impl ComponentFieldSchema {
     }
 
     #[must_use]
+    /// The canonical field value restored when the field is absent from an authored record.
     pub const fn default_value(&self) -> Option<&ComponentValue> {
         self.default_value.as_ref()
     }
@@ -1640,6 +1802,11 @@ pub enum ComponentValueKind {
     Map,
     AssetRef,
     EntityRef,
+    PackedU16,
+    PackedU32,
+    PackedI32,
+    PackedF32,
+    Bytes,
 }
 
 #[cfg(feature = "serde")]
@@ -1656,6 +1823,11 @@ impl serde::Serialize for ComponentValueKind {
             Self::Map => "map",
             Self::AssetRef => "asset_ref",
             Self::EntityRef => "entity_ref",
+            Self::PackedU16 => "packed_u16",
+            Self::PackedU32 => "packed_u32",
+            Self::PackedI32 => "packed_i32",
+            Self::PackedF32 => "packed_f32",
+            Self::Bytes => "bytes",
         })
     }
 }
@@ -1674,6 +1846,11 @@ impl<'de> serde::Deserialize<'de> for ComponentValueKind {
             "map" => Ok(Self::Map),
             "asset_ref" => Ok(Self::AssetRef),
             "entity_ref" => Ok(Self::EntityRef),
+            "packed_u16" => Ok(Self::PackedU16),
+            "packed_u32" => Ok(Self::PackedU32),
+            "packed_i32" => Ok(Self::PackedI32),
+            "packed_f32" => Ok(Self::PackedF32),
+            "bytes" => Ok(Self::Bytes),
             _ => Err(serde::de::Error::custom("unknown component value kind")),
         }
     }
@@ -1779,6 +1956,9 @@ impl ComponentNumericDomain {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CatalogFingerprint([u8; 32]);
 
+/// Stable fingerprint of a single component schema.
+pub type SchemaHash = CatalogFingerprint;
+
 impl CatalogFingerprint {
     pub const HEX_LENGTH: usize = 64;
 
@@ -1848,14 +2028,16 @@ fn feed_schema(hasher: &mut blake3::Hasher, schema: &ComponentSchema) {
         feed_str(hasher, alias);
     }
     feed_bytes(hasher, &schema.version.get().to_le_bytes());
+    if let Some(group) = &schema.group {
+        feed_bytes(hasher, b"group");
+        feed_str(hasher, group);
+    }
     feed_len(hasher, schema.capabilities.len());
     for capability in &schema.capabilities {
         feed_bytes(hasher, &[component_capability_tag(*capability)]);
     }
     feed_len(hasher, schema.fields.len());
-    let mut fields = schema.fields.iter().collect::<Vec<_>>();
-    fields.sort_by(|left, right| left.id.cmp(&right.id));
-    for field in fields {
+    for field in &schema.fields {
         feed_bytes(hasher, b"field");
         feed_str(hasher, field.id.as_str());
         feed_len(hasher, field.aliases.len());
@@ -1901,6 +2083,19 @@ fn feed_schema(hasher: &mut blake3::Hasher, schema: &ComponentSchema) {
                 feed_str(hasher, choice);
             }
         }
+        if let Some(step) = field.step {
+            feed_bytes(hasher, b"field-step");
+            feed_bytes(hasher, &step.get().to_le_bytes());
+        }
+        for (tag, text) in [
+            (b"field-unit".as_slice(), &field.unit),
+            (b"field-tooltip", &field.tooltip),
+        ] {
+            if let Some(text) = text {
+                feed_bytes(hasher, tag);
+                feed_str(hasher, text);
+            }
+        }
         match field.editor_hint {
             Some(ComponentFieldEditorHint::LinearRgba) => feed_bytes(hasher, b"editor-linear-rgba"),
             None => {}
@@ -1939,18 +2134,22 @@ fn feed_shape(hasher: &mut blake3::Hasher, shape: &ComponentValueShape) {
             }
         }
         ComponentValueShape::EntityRef => feed_bytes(hasher, &[1]),
-        ComponentValueShape::AssetRef { demand } => {
+        ComponentValueShape::AssetRef { demand }
+        | ComponentValueShape::StableAssetRef { demand } => {
             let demand = match demand {
                 AssetReferenceDemand::Immediate => 0,
                 AssetReferenceDemand::Deferred => 1,
             };
-            feed_bytes(hasher, &[2, demand]);
+            let tag = if matches!(shape, ComponentValueShape::StableAssetRef { .. }) {
+                9
+            } else {
+                2
+            };
+            feed_bytes(hasher, &[tag, demand]);
         }
         ComponentValueShape::Record { members } => {
             feed_bytes(hasher, &[3]);
             feed_len(hasher, members.len());
-            let mut members = members.iter().collect::<Vec<_>>();
-            members.sort_by(|left, right| left.name.cmp(&right.name));
             for member in members {
                 feed_str(hasher, &member.name);
                 match &member.id {
@@ -2029,6 +2228,29 @@ fn feed_value(hasher: &mut blake3::Hasher, value: &ComponentValue) {
             }
         }
         ComponentValue::EntityReference(uuid) => feed_bytes(hasher, uuid.as_uuid().as_bytes()),
+        ComponentValue::AssetReference(uuid) => feed_bytes(hasher, uuid.as_uuid().as_bytes()),
+        ComponentValue::PackedU16(values) => feed_packed(hasher, values, u16::to_le_bytes),
+        ComponentValue::PackedU32(values) => feed_packed(hasher, values, u32::to_le_bytes),
+        ComponentValue::PackedI32(values) => feed_packed(hasher, values, i32::to_le_bytes),
+        ComponentValue::PackedF32(values) => feed_packed(hasher, values, |value| {
+            if value == 0.0 {
+                0_f32.to_le_bytes()
+            } else {
+                value.to_le_bytes()
+            }
+        }),
+        ComponentValue::Bytes(values) => feed_bytes(hasher, values),
+    }
+}
+
+fn feed_packed<T: Copy, const WIDTH: usize>(
+    hasher: &mut blake3::Hasher,
+    values: &[T],
+    to_bytes: impl Fn(T) -> [u8; WIDTH],
+) {
+    feed_len(hasher, values.len());
+    for value in values {
+        hasher.update(&to_bytes(*value));
     }
 }
 
@@ -2054,6 +2276,11 @@ const fn component_value_kind_tag(kind: ComponentValueKind) -> u8 {
         ComponentValueKind::Map => 7,
         ComponentValueKind::AssetRef => 8,
         ComponentValueKind::EntityRef => 9,
+        ComponentValueKind::PackedU16 => 10,
+        ComponentValueKind::PackedU32 => 11,
+        ComponentValueKind::PackedI32 => 12,
+        ComponentValueKind::PackedF32 => 13,
+        ComponentValueKind::Bytes => 14,
     }
 }
 

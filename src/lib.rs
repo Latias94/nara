@@ -72,7 +72,7 @@ pub mod prelude {
         Collider2d, CollisionEvent, Physics2dPlugin, Physics2dSet, PhysicsPose2d, PhysicsWorld2d,
         RigidBody2d, Sensor2d, Teleport2d, TopDownCharacter,
     };
-    pub use nara_reflect::{PersistentComponent, RegisterSchema};
+    pub use nara_reflect::{RegisterSchema, Schema};
     #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
     pub use nara_render::image::{
         ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin,

@@ -54,46 +54,18 @@ fn numeric_scalar_dispatch_matches_value_first_fallback() {
 }
 
 #[test]
-fn ron_scalar_suffixes_options_newtypes_and_chars_remain_rejected() {
+fn ron_scalar_wrappers_and_character_literals_remain_rejected() {
     let cases: &[(&str, &[&str])] = &[
         ("bool", &["Some(true)", "None", "Wrapped(true)"]),
-        (
-            "i64",
-            &[
-                "Some(1)",
-                "None",
-                "Wrapped(1)",
-                "1i8",
-                "1i16",
-                "1i32",
-                "1i64",
-                "1i128",
-            ],
-        ),
-        (
-            "u64",
-            &[
-                "Some(1)",
-                "None",
-                "Wrapped(1)",
-                "1u8",
-                "1u16",
-                "1u32",
-                "1u64",
-                "1u128",
-            ],
-        ),
-        (
-            "f64",
-            &["Some(1.0)", "None", "Wrapped(1.0)", "1.0f32", "1.0f64"],
-        ),
+        ("i64", &["Some(1)", "None", "Wrapped(1)"]),
+        ("u64", &["Some(1)", "None", "Wrapped(1)"]),
+        ("f64", &["Some(1.0)", "None", "Wrapped(1.0)"]),
         (
             "string",
             &[
                 r#"Some("text")"#,
                 "None",
                 r#"Wrapped("text")"#,
-                r#"b"text""#,
                 "'a'",
                 "'雪'",
             ],
@@ -107,6 +79,38 @@ fn ron_scalar_suffixes_options_newtypes_and_chars_remain_rejected() {
             ] {
                 assert!(ron::from_str::<ComponentValue>(&wire).is_err(), "{wire}");
             }
+        }
+    }
+}
+
+#[test]
+fn ron_byte_string_payloads_decode_as_utf8() {
+    super::assert_decodes_in_both_orders(
+        "string",
+        r#""text""#,
+        r#"b"text""#,
+        &ComponentValue::String("text".into()),
+    );
+}
+
+#[test]
+fn ron_numeric_suffixes_follow_the_tagged_value_domain() {
+    for (kind, payload, expected) in [
+        ("i64", "1i8", Some(ComponentValue::I64(1))),
+        ("u64", "1u32", Some(ComponentValue::U64(1))),
+        ("f64", "1.0f32", Some(ComponentValue::f64(1.0).unwrap())),
+        ("i64", "1.0f64", None),
+        ("u64", "-1i8", None),
+    ] {
+        for wire in [
+            format!(r#"(type:"{kind}",value:{payload})"#),
+            format!(r#"(value:{payload},type:"{kind}")"#),
+        ] {
+            assert_eq!(
+                ron::from_str::<ComponentValue>(&wire).ok(),
+                expected,
+                "{wire}"
+            );
         }
     }
 }

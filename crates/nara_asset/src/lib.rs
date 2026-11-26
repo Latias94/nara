@@ -5,11 +5,15 @@ mod database;
 mod identity;
 pub mod image;
 mod load_state;
+#[cfg(feature = "authoring")]
+mod meta;
 #[cfg(feature = "runtime")]
 mod plugin;
 mod product_identity;
 mod reference;
 mod revision;
+#[cfg(all(feature = "authoring", any(unix, windows)))]
+mod scan;
 mod server;
 #[cfg(all(feature = "hot-reload", any(unix, windows)))]
 pub mod watch;
@@ -28,6 +32,8 @@ pub use load_state::{
     AssetEvent, AssetEventKind, AssetEvents, AssetState, AssetStateError, AssetStates,
     AssetVersion, LoadState,
 };
+#[cfg(feature = "authoring")]
+pub use meta::{AssetMeta, AssetMetaError};
 pub use nara_core::source::{
     AssetPathError, AssetSourcePath, StableAssetId, StableAssetIdError,
     StableAssetIdGenerationError,
@@ -38,6 +44,8 @@ pub use plugin::{
 };
 pub use product_identity::{AssetProductIdentityError, AssetProductRef, ImportedProductId};
 pub use reference::AssetReferenceDemand;
+#[cfg(all(feature = "authoring", any(unix, windows)))]
+pub use scan::{AssetScanError, AssetScanMode};
 pub use server::{AssetError, AssetServer};
 
 /// Selects the export form for source-bound primary products.

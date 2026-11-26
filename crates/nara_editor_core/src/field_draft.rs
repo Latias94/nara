@@ -706,7 +706,9 @@ fn text_shape(shape: &ComponentValueShape) -> bool {
         ComponentValueShape::Scalar { kind, .. } => {
             !matches!(kind, ComponentValueKind::Null | ComponentValueKind::Bool)
         }
-        ComponentValueShape::EntityRef | ComponentValueShape::AssetRef { .. } => true,
+        ComponentValueShape::EntityRef
+        | ComponentValueShape::AssetRef { .. }
+        | ComponentValueShape::StableAssetRef { .. } => true,
         _ => false,
     }
 }

@@ -1,7 +1,7 @@
 use nara::{prelude::*, reflect::schema_json};
 
-#[derive(Component, PersistentComponent)]
-#[nara(
+#[derive(Component, Schema)]
+#[schema(
     id = "example.Speed",
     version = 1,
     alias = "Speed",
@@ -9,7 +9,7 @@ use nara::{prelude::*, reflect::schema_json};
     field_capabilities(scene, inspect, edit)
 )]
 struct Speed {
-    #[nara(id = "units-per-second", alias = "Units per second")]
+    #[schema(alias = "Units per second", unit = "units/s")]
     units_per_second: f32,
 }
 

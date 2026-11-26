@@ -10,7 +10,7 @@ workspace = "../nara_editor"
 [dependencies]
 anyhow = "1"
 nara_app = { path = "../nara_app" }
-nara_asset = { path = "../nara_asset", features = ["image-import"] }
+nara_asset = { path = "../nara_asset", features = ["authoring", "image-import"] }
 nara_core = { path = "../nara_core" }
 nara_ecs = { path = "../nara_ecs" }
 nara_editor_core = { path = "../nara_editor_core" }

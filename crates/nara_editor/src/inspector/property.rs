@@ -268,7 +268,8 @@ impl PropertyEditor {
                 } => Control::ReadOnly,
                 ComponentValueShape::Scalar { .. }
                 | ComponentValueShape::EntityRef
-                | ComponentValueShape::AssetRef { .. } => {
+                | ComponentValueShape::AssetRef { .. }
+                | ComponentValueShape::StableAssetRef { .. } => {
                     let input = cx.new(|cx| {
                         native_text(
                             text_value(&property),
@@ -1023,6 +1024,12 @@ fn display_value(property: &Property) -> String {
         Some(ComponentValue::String(value)) if value.is_empty() => "\"\"".into(),
         Some(ComponentValue::String(value)) => value.clone(),
         Some(ComponentValue::EntityReference(value)) => value.to_string(),
+        Some(ComponentValue::AssetReference(value)) => value.to_string(),
+        Some(ComponentValue::PackedU16(values)) => format!("{} values", values.len()),
+        Some(ComponentValue::PackedU32(values)) => format!("{} values", values.len()),
+        Some(ComponentValue::PackedI32(values)) => format!("{} values", values.len()),
+        Some(ComponentValue::PackedF32(values)) => format!("{} values", values.len()),
+        Some(ComponentValue::Bytes(values)) => format!("{} bytes", values.len()),
         Some(ComponentValue::Map(values)) => format!("{} entries", values.len()),
         Some(ComponentValue::List(values)) => format!("{} items", values.len()),
         None => display_state(&property.value).into(),
