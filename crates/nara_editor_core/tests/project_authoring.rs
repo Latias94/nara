@@ -3,7 +3,10 @@
 use std::{collections::BTreeMap, fs, path::Path};
 
 use nara_core::{AssetId, DocumentId, EntityUuid, vfs::AssetPath};
-use nara_editor_core::{EditorCommand, EditorProject, EditorRegistry, EditorSession, ProjectError};
+use nara_editor_core::{
+    EditorCommand, EditorError, EditorProject, EditorRegistry, EditorSession, ProjectError,
+    SelectionMode,
+};
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
@@ -95,6 +98,122 @@ fn saving_a_moved_document_resolves_its_sidecar_again() {
         reopened.entry_scene().map(AssetPath::as_str),
         Some("moved.scene.ron")
     );
+}
+
+#[test]
+fn external_scene_write_is_undoable_and_preserves_existing_history() {
+    let directory = project();
+    let path = AssetPath::new("scene.scene.ron").unwrap();
+    let native = directory.path().join("assets").join(path.as_str());
+    let mut scene = document(1);
+    let entity = scene.entities[0].id;
+    scene.write(&native).unwrap();
+    let project = EditorProject::open(directory.path()).unwrap();
+    let id = project.asset_reference(&path).unwrap().id;
+    let mut session = EditorSession::new(
+        project.open_document(&path).unwrap(),
+        EditorRegistry::default(),
+    );
+    session
+        .selection_mut()
+        .select(entity, SelectionMode::Replace, &[entity]);
+    session
+        .apply(EditorCommand::Rename {
+            entity,
+            name: "Saved edit".into(),
+        })
+        .unwrap();
+    session.save().unwrap();
+    session
+        .apply(EditorCommand::Rename {
+            entity,
+            name: "Redo edit".into(),
+        })
+        .unwrap();
+    session.undo().unwrap();
+    assert!(!session.is_dirty());
+
+    scene.entities[0].name = "External edit".into();
+    scene.write(&native).unwrap();
+    let disk = project.reload_document(id, &[]).unwrap();
+    assert!(session.reload_sources(Some(disk), BTreeMap::new()).unwrap());
+    assert_eq!(session.document().scene(), &scene);
+    assert_eq!(session.selection().entities(), &[entity]);
+    assert!(!session.is_dirty());
+    assert!(session.can_undo() && session.can_redo());
+    session.redo().unwrap();
+    assert_eq!(session.document().scene().entities[0].name, "Redo edit");
+    session.undo().unwrap();
+    assert_eq!(session.document().scene(), &scene);
+    session.undo().unwrap();
+    assert_eq!(session.document().scene().entities[0].name, "Saved edit");
+    session.undo().unwrap();
+    assert_eq!(session.document().scene().entities[0].name, "Root");
+}
+
+#[test]
+fn reload_recognizes_a_moved_scene_without_disturbing_a_dirty_edit_or_gesture() {
+    let directory = project();
+    let assets = directory.path().join("assets");
+    let path = AssetPath::new("original.scene.ron").unwrap();
+    let mut scene = document(1);
+    let entity = scene.entities[0].id;
+    scene.write(assets.join(path.as_str())).unwrap();
+    let mut project = EditorProject::open(directory.path()).unwrap();
+    let id = project.asset_reference(&path).unwrap().id;
+    let mut session = EditorSession::new(
+        project.open_document(&path).unwrap(),
+        EditorRegistry::default(),
+    );
+    session
+        .apply(EditorCommand::Rename {
+            entity,
+            name: "Local unsaved".into(),
+        })
+        .unwrap();
+    let gesture = session.begin_gesture().unwrap();
+    session
+        .apply_gesture(
+            &gesture,
+            EditorCommand::Rename {
+                entity,
+                name: "Local gesture".into(),
+            },
+        )
+        .unwrap();
+
+    let renamed = assets.join("moved.scene.ron");
+    fs::rename(assets.join(path.as_str()), &renamed).unwrap();
+    fs::rename(
+        assets.join("original.scene.ron.meta"),
+        assets.join("moved.scene.ron.meta"),
+    )
+    .unwrap();
+    scene.entities[0].name = "External edit".into();
+    scene.write(&renamed).unwrap();
+    project.rescan_assets().unwrap();
+    assert!(matches!(
+        session.snapshot_for_background(),
+        Err(EditorError::GestureActive)
+    ));
+    let disk = project.reload_document(id, &[]).unwrap();
+    assert!(matches!(
+        session.reload_sources(Some(disk.clone()), BTreeMap::new()),
+        Err(EditorError::GestureActive)
+    ));
+    assert!(session.owns_gesture(&gesture));
+    assert_eq!(session.document().scene().entities[0].name, "Local gesture");
+    session.cancel_gesture(&gesture);
+
+    assert!(!session.reload_sources(Some(disk), BTreeMap::new()).unwrap());
+    assert_eq!(
+        session.document().path(),
+        Some(renamed.canonicalize().unwrap().as_path())
+    );
+    assert_eq!(session.document().scene().entities[0].name, "Local unsaved");
+    assert!(session.is_dirty());
+    session.undo().unwrap();
+    assert_eq!(session.document().scene().entities[0].name, "Root");
 }
 
 #[test]

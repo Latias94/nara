@@ -22,6 +22,7 @@ fn main() -> Result<()> {
     let mut trust = ProjectTrust::Untrusted;
     let mut verify = false;
     let mut capture_frames = None;
+    let mut measure_hot_reload = None;
     let mut arguments = std::env::args_os().skip(1);
     while let Some(argument) = arguments.next() {
         if argument == "--trusted" {
@@ -35,9 +36,17 @@ fn main() -> Result<()> {
                     .and_then(|count| count.to_str()?.parse::<NonZeroU32>().ok())
                     .context("--capture-frames requires a positive frame count")?,
             );
+        } else if argument == "--measure-hot-reload" && measure_hot_reload.is_none() {
+            measure_hot_reload = Some(
+                arguments
+                    .next()
+                    .and_then(|count| count.to_str()?.parse::<u32>().ok())
+                    .filter(|count| (1..=100).contains(count))
+                    .context("--measure-hot-reload requires a sample count from 1 to 100")?,
+            );
         } else if argument == "--help" || argument == "-h" {
             println!(
-                "Usage: nara_editor [--project DIRECTORY] [--trusted] [--verify | --capture-frames N]"
+                "Usage: nara_editor [--project DIRECTORY] [--trusted] [--verify | --capture-frames N | --measure-hot-reload N]"
             );
             return Ok(());
         } else if argument == "--project" && project.is_none() {
@@ -59,6 +68,18 @@ fn main() -> Result<()> {
         capture_frames.is_none() || (project.is_some() && !verify),
         "--capture-frames requires --project and is separate from --verify"
     );
+    ensure!(
+        measure_hot_reload.is_none() || (project.is_some() && !verify && capture_frames.is_none()),
+        "--measure-hot-reload requires a Night Relay --project and is separate from other probes"
+    );
+    let measurement_copy = if measure_hot_reload.is_some() {
+        let original = project.as_deref().context("Missing Night Relay project")?;
+        let copy = smoke::hot_reload::copy_fixture(original)?;
+        project = Some(copy.path().to_path_buf());
+        Some(copy)
+    } else {
+        None
+    };
     let shared = pollster::block_on(create_shared_gpu())?;
     let failure = Rc::new(RefCell::new(None));
     let on_open_failure = failure.clone();
@@ -66,13 +87,17 @@ fn main() -> Result<()> {
         let result = if let Some(directory) = project {
             workspace::Workspace::open(&directory, trust)
                 .and_then(|workspace| {
-                    docking::open(workspace, &shared, !verify && capture_frames.is_none(), cx)
+                    let persist =
+                        !verify && capture_frames.is_none() && measure_hot_reload.is_none();
+                    docking::open(workspace, &shared, persist, cx)
                 })
                 .map(|editor| {
                     if verify {
                         smoke::start(editor, on_open_failure.clone(), cx);
                     } else if let Some(frames) = capture_frames {
                         smoke::capture_frames(editor, frames.get(), on_open_failure.clone(), cx);
+                    } else if let Some(samples) = measure_hot_reload {
+                        smoke::hot_reload::start(editor, samples, on_open_failure.clone(), cx);
                     }
                 })
         } else {
@@ -84,6 +109,7 @@ fn main() -> Result<()> {
             cx.quit();
         }
     });
+    drop(measurement_copy);
     failure.borrow_mut().take().map_or(Ok(()), Err)
 }
 

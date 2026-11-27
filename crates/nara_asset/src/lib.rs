@@ -1,6 +1,10 @@
 //! Typed asset handles and stores, code-first loading, and authored asset references.
 
 mod assets;
+#[cfg(feature = "cook")]
+pub mod cook;
+#[cfg(feature = "cooked")]
+pub mod cooked;
 mod database;
 mod identity;
 pub mod image;
@@ -15,6 +19,7 @@ mod revision;
 #[cfg(all(feature = "authoring", any(unix, windows)))]
 mod scan;
 mod server;
+pub mod source;
 #[cfg(all(feature = "hot-reload", any(unix, windows)))]
 pub mod watch;
 

@@ -1,5 +1,6 @@
-use anyhow::Context as _;
-use nara_core::{Color, DocumentId, EntityUuid, Vec2, vfs::DirAssetSource};
+use std::time::Instant;
+
+use nara_core::{Color, DocumentId, EntityUuid, Vec2};
 use nara_editor_core::{
     EditorGesture, SelectionMode,
     actions::{ActionContext, EditorAction, EditorKeymap},
@@ -10,7 +11,7 @@ use nara_editor_core::{
     },
 };
 use nara_editor_gizmo::{OverlayFrame, OverlayGrid, OverlayPrimitive, OverlayStroke};
-use nara_editor_viewport::{EditorViewport, RenderOutcome, ViewportStats};
+use nara_editor_viewport::{EditorViewport, RenderOutcome, ViewportError, ViewportStats};
 use nara_project::workflow::ProjectTrust;
 use open_gpui::{
     Bounds, Context, Div, Entity, FocusHandle, HitboxTag, IntoElement, KeyDownEvent, MouseButton,
@@ -40,6 +41,7 @@ pub struct ViewportPanel {
     scene_revision: (u64, u64),
     scene_ready: bool,
     displayed_scene_revision: (u64, u64),
+    presented_preview: Option<((u64, u64), Instant)>,
     selection: Vec<EntityUuid>,
     tool: ToolMode,
     keys: EditorKeymap,
@@ -89,6 +91,7 @@ impl ViewportPanel {
             scene_revision: (0, 0),
             scene_ready: false,
             displayed_scene_revision: (0, 0),
+            presented_preview: None,
             selection: Vec::new(),
             tool: ToolMode::Select,
             keys: EditorKeymap::default(),
@@ -119,6 +122,10 @@ impl ViewportPanel {
         &self.stats
     }
 
+    pub(crate) fn presented_preview(&self) -> Option<((u64, u64), Instant)> {
+        self.presented_preview
+    }
+
     fn frame(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(size) = PanelSize::new(
             bounds.size.width.to_f64() as f32,
@@ -130,23 +137,18 @@ impl ViewportPanel {
         let revision = workspace.preview_revision();
         if self.scene_revision != revision {
             let scene = workspace.session.preview_scene();
-            let result = DirAssetSource::new(workspace.project.directory())
-                .with_context(|| {
-                    format!(
-                        "could not open project directory '{}'",
-                        workspace.project.directory().display()
-                    )
-                })
-                .and_then(|source| {
-                    self.preview
-                        .set_scene(scene, Some((&source, workspace.project.asset_database())))
-                        .map_err(anyhow::Error::from)
-                });
+            let result = self
+                .preview
+                .set_prepared_scene(scene, workspace.preview_assets());
             self.scene_revision = revision;
             self.scene_ready = result.is_ok();
             if let Err(error) = result {
                 self.dirty = false;
-                self.report(format!("{error:#}"), cx);
+                if matches!(error, ViewportError::UnpreparedAsset(_)) {
+                    workspace.request_preview_assets();
+                } else {
+                    self.report(format!("{error:#}"), cx);
+                }
                 return;
             }
             if self.camera_document != Some(scene.id) {
@@ -172,6 +174,7 @@ impl ViewportPanel {
         let gizmo = self.active_gizmo();
         let hover = self.hover_at(&camera, self.cursor, gizmo);
         let overlay = self.overlay(&camera, gizmo, hover);
+        let submissions = window.present_submission_count();
         match self.preview.render(window, &camera, &overlay) {
             Ok(RenderOutcome::TargetsBusy) => {
                 cx.on_next_frame(window, move |view, window, cx| {
@@ -192,19 +195,43 @@ impl ViewportPanel {
                     });
                     return;
                 }
-                cx.on_next_frame(window, |view, window, cx| {
-                    view.preview.observe_presentation(window);
-                    let stats = view.preview.stats();
-                    view.stats.update(cx, |previous, cx| {
-                        if *previous != stats {
-                            *previous = stats;
-                            cx.notify();
-                        }
-                    });
+                cx.on_next_frame(window, move |view, window, cx| {
+                    view.observe_presented_preview(revision, submissions, 4, window, cx);
                 });
             }
             Err(error) => self.report(error.to_string(), cx),
         }
+    }
+
+    fn observe_presented_preview(
+        &mut self,
+        revision: (u64, u64),
+        submissions: u64,
+        retries: u8,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.preview.observe_presentation(window);
+        if self.displayed_scene_revision == revision
+            && self
+                .presented_preview
+                .is_none_or(|(previous, _)| previous != revision)
+        {
+            if window.present_submission_count() > submissions {
+                self.presented_preview = Some((revision, Instant::now()));
+            } else if retries != 0 {
+                cx.on_next_frame(window, move |view, window, cx| {
+                    view.observe_presented_preview(revision, submissions, retries - 1, window, cx);
+                });
+            }
+        }
+        let stats = self.preview.stats();
+        self.stats.update(cx, |previous, cx| {
+            if *previous != stats {
+                *previous = stats;
+                cx.notify();
+            }
+        });
     }
 
     fn fit(&self, size: PanelSize, selection_only: bool) -> ViewportCamera2D {

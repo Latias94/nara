@@ -13,10 +13,19 @@ resolver = "3"
 name = "game_components"
 
 [features]
-desktop = ["nara/asset-authoring", "nara/presentation-2d", "nara/desktop-winit", "nara/render-wgpu"]
+default = ["source", "schema"]
+source = ["nara/asset-authoring", "nara/asset-image-import", "nara/scene-authoring"]
+schema = ["nara/serde"]
+desktop = [
+    "nara/asset-cooked",
+    "nara/scene-cooked",
+    "nara/presentation-2d",
+    "nara/desktop-winit",
+    "nara/render-wgpu",
+]
 
 [dependencies]
-nara = {{ path = {checkout}, default-features = false, features = ["runtime-2d", "scene-authoring", "serde"] }}
+nara = {{ path = {checkout}, default-features = false, features = ["runtime-core"] }}
 
 [[bin]]
 name = {game_binary}
@@ -26,6 +35,7 @@ required-features = [{desktop_feature}]
 [[bin]]
 name = {schema_binary}
 path = "src/bin/nara_schema.rs"
+required-features = ["schema"]
 
 [patch.crates-io]
 wgpu = {{ git = {wgpu_git}, rev = {wgpu_rev} }}

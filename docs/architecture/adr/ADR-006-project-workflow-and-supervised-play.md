@@ -24,5 +24,8 @@ workflow. Leave project orchestration outside the shipping game graph.
   `--editor-play PATH`. The game owns its executable world and acknowledges Pause, Resume, and
   Step once applied. Stop belongs to process supervision. Editing history and the original scene
   stay in the editor.
-- Export a self-contained executable and `.npak` with no source or editor dependencies. Verify the
-  packaged game from a clean directory before claiming standalone delivery.
+- List the stable IDs of the entry scenes under `[delivery]` in `nara.toml`. Cook uses that list to
+  write `.nara/game.npak`. Export builds the selected game target for the current host and places
+  the executable and `game.npak` in a new directory. The build uses the target's required features
+  and `[delivery].features` with Cargo defaults disabled. Verify the packaged game from a clean
+  directory before claiming standalone delivery.

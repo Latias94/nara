@@ -103,9 +103,14 @@ pub enum EditorError {
     StaleGesture,
     #[error("save requires a document path")]
     NoPath,
+    #[error("the external file has a different document ID")]
+    ReloadedDocumentId,
+    #[error("reloading changed sources would invalidate an undo or redo state: {0}")]
+    ReloadHistoryConflict(#[source] Box<Self>),
 }
 
 /// An authored document and its optional native save location.
+#[derive(Clone)]
 pub struct EditorDocument {
     scene: SceneDocument,
     #[cfg(any(unix, windows))]
@@ -136,6 +141,16 @@ impl EditorDocument {
         let path = path.as_ref();
         let mut document = Self::new(read_editor_source(path, schemas)?)?;
         document.path = Some(path.to_path_buf());
+        Ok(document)
+    }
+
+    #[cfg(any(unix, windows))]
+    pub(crate) fn open_for_reload(
+        path: PathBuf,
+        schemas: &[ComponentSchema],
+    ) -> Result<Self, EditorError> {
+        let mut document = Self::new(SceneDocument::read_with(&path, schemas)?)?;
+        document.path = Some(path);
         Ok(document)
     }
 
@@ -254,6 +269,93 @@ impl EditorSession {
         self.prefabs = prefabs;
         self.prune_selection();
         Ok(())
+    }
+
+    /// Captures the edit state for a background preparation. Publish only against the same
+    /// local edit state, keeping the current selection when it is published.
+    pub fn snapshot_for_background(&self) -> Result<Self, EditorError> {
+        self.require_idle()?;
+        Ok(Self {
+            document: self.document.clone(),
+            prefabs: self.prefabs.clone(),
+            expanded: self.expanded.clone(),
+            registry: self.registry.clone(),
+            selection: self.selection.clone(),
+            history: self.history.clone(),
+            gesture: None,
+            saved_revision: self.saved_revision,
+        })
+    }
+
+    /// Installs externally prepared sources without clearing the local Undo history. A changed
+    /// clean scene adds an Undo step. Dirty scenes keep their authored rows and can still pick up
+    /// a moved save location or updated prefab dependencies.
+    #[cfg(any(unix, windows))]
+    pub fn reload_sources(
+        &mut self,
+        disk: Option<EditorDocument>,
+        replacements: BTreeMap<AssetId, SceneDocument>,
+    ) -> Result<bool, EditorError> {
+        self.require_idle()?;
+        let changed_scene = match &disk {
+            Some(disk) if disk.scene.id != self.document.scene.id => {
+                return Err(EditorError::ReloadedDocumentId);
+            }
+            Some(disk) if !self.is_dirty() && self.document.scene != disk.scene => {
+                Some(&disk.scene)
+            }
+            _ => None,
+        };
+        let scene = changed_scene.unwrap_or(&self.document.scene);
+        let mut library = self.prefabs.clone();
+        library.extend(replacements);
+        let changed = changed_scene.is_some() || self.prefabs != library;
+        if changed {
+            let expanded = prefabs::expand(scene, &library, &self.registry)?;
+            let mut history = self.history.clone();
+            if let Some(scene) = changed_scene {
+                history.insert_external(ScenePatch::between(&self.document.scene, scene));
+            }
+            let (undo, redo) = history.entries.split_at_mut(history.cursor);
+            let validate = |scene: &SceneDocument| -> Result<(), EditorError> {
+                scene.validate()?;
+                prefabs::expand(scene, &library, &self.registry)?;
+                Ok(())
+            };
+            let history_error = |error| EditorError::ReloadHistoryConflict(Box::new(error));
+            let mut past = scene.clone();
+            for entry in undo.iter().rev() {
+                entry.patch.apply(&mut past, false);
+                validate(&past).map_err(history_error)?;
+            }
+            let mut future = scene.clone();
+            for entry in redo {
+                let before = future.clone();
+                entry.patch.apply(&mut future, true);
+                validate(&future).map_err(history_error)?;
+                if changed_scene.is_some() {
+                    entry.patch = ScenePatch::between(&before, &future);
+                }
+            }
+            self.expanded = expanded;
+            self.prefabs = library;
+            self.history = history;
+            if let Some(scene) = changed_scene {
+                self.document.scene = scene.clone();
+                self.saved_revision = Some(self.history.revision());
+            }
+            self.prune_selection();
+        }
+        if let Some(disk) = disk {
+            self.document.path = disk.path;
+        }
+        Ok(changed)
+    }
+
+    /// Preserves a live selection when an asynchronously prepared session is published.
+    pub fn keep_selection_from(&mut self, current: &Self) {
+        self.selection.clone_from(&current.selection);
+        self.prune_selection();
     }
 
     pub fn open_document(&mut self, document: EditorDocument) -> Result<(), EditorError> {
@@ -667,6 +769,19 @@ impl CommandHistory {
         });
         self.cursor += 1;
         true
+    }
+
+    #[cfg(any(unix, windows))]
+    fn insert_external(&mut self, patch: ScenePatch) {
+        self.next_revision += 1;
+        self.entries.insert(
+            self.cursor,
+            HistoryEntry {
+                patch,
+                revision: self.next_revision,
+            },
+        );
+        self.cursor += 1;
     }
 
     fn rebind(

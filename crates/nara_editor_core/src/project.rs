@@ -71,6 +71,7 @@ pub enum ProjectError {
 }
 
 /// An opened project's tooling manifest, asset root, and saved editor entry scene.
+#[derive(Clone)]
 pub struct EditorProject {
     directory: PathBuf,
     assets: PathBuf,
@@ -146,12 +147,24 @@ impl EditorProject {
         Ok(source)
     }
 
+    /// Asset observation uses the configured project-relative root, including when it is empty.
+    pub fn asset_directory(&self) -> &Path {
+        &self.assets
+    }
+
     pub fn asset_database(&self) -> &ProjectAssetDatabase {
         &self.database
     }
 
     pub fn refresh_assets(&mut self) -> Result<(), ProjectError> {
         self.database = self.scan(AssetScanMode::Discover)?;
+        self.update_entry_scene();
+        Ok(())
+    }
+
+    /// Rescans external changes without creating sidecars while another tool is moving files.
+    pub fn rescan_assets(&mut self) -> Result<(), ProjectError> {
+        self.database = self.scan(AssetScanMode::ReadOnly)?;
         self.update_entry_scene();
         Ok(())
     }
@@ -240,6 +253,18 @@ impl EditorProject {
         )?)
     }
 
+    /// Reopens the exact sidecar identity, checking known component payloads strictly.
+    pub fn reload_document(
+        &self,
+        id: AssetId,
+        schemas: &[ComponentSchema],
+    ) -> Result<EditorDocument, ProjectError> {
+        Ok(EditorDocument::open_for_reload(
+            self.indexed_document_path(&self.database, id)?,
+            schemas,
+        )?)
+    }
+
     fn document_path(&self, path: &AssetPath) -> Result<PathBuf, ProjectError> {
         let root = self.asset_source()?;
         let physical = fs::canonicalize(root.root().join(path.as_str()))?;
@@ -280,21 +305,30 @@ impl EditorProject {
         scene: &SceneDocument,
         schemas: &[ComponentSchema],
     ) -> Result<BTreeMap<AssetId, SceneDocument>, ProjectError> {
-        self.load_prefabs_in(&self.database, scene, schemas)
+        self.load_prefabs_using(scene, |path| read_editor_source(path, schemas))
     }
 
-    fn load_prefabs_in(
+    /// Parses changed prefab sources strictly against the same schema as the preview.
+    pub fn reload_prefabs(
         &self,
-        index: &ProjectAssetDatabase,
         scene: &SceneDocument,
         schemas: &[ComponentSchema],
+    ) -> Result<BTreeMap<AssetId, SceneDocument>, ProjectError> {
+        self.load_prefabs_using(scene, |path| SceneDocument::read_with(path, schemas))
+    }
+
+    fn load_prefabs_using(
+        &self,
+        scene: &SceneDocument,
+        read: impl Fn(&Path) -> Result<SceneDocument, SceneDocumentError>,
     ) -> Result<BTreeMap<AssetId, SceneDocument>, ProjectError> {
         let mut pending = prefab_references(scene).collect::<Vec<_>>();
         let mut prefabs = BTreeMap::new();
         while let Some(id) = pending.pop() {
             if let std::collections::btree_map::Entry::Vacant(entry) = prefabs.entry(id) {
-                let path = self.prefab_path(index, id)?;
-                let prefab = read_editor_source(&path, schemas)?;
+                let path = self.prefab_path(&self.database, id)?;
+                let prefab = read(&path)
+                    .map_err(|source| ProjectError::AuthoredDocument { path, source })?;
                 pending.extend(prefab_references(&prefab));
                 entry.insert(prefab);
             }

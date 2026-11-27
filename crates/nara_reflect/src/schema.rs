@@ -244,6 +244,12 @@ pub struct ComponentSchema {
     pub fields: Vec<ComponentFieldSchema>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub field_tombstones: Vec<ComponentFieldId>,
+    /// The native component supports the Postcard layout described by this schema.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "std::ops::Not::not")
+    )]
+    pub supports_postcard: bool,
     /// Complete data copied by an explicit authoring creation transaction.
     /// This does not supply missing fields when decoding stored components.
     #[cfg_attr(
@@ -271,6 +277,7 @@ impl ComponentSchema {
             capabilities: BTreeSet::new(),
             fields: Vec::new(),
             field_tombstones: Vec::new(),
+            supports_postcard: false,
             authoring_initial_value: None,
         }
     }
@@ -314,6 +321,22 @@ impl ComponentSchema {
     ) -> Self {
         self.field_tombstones.extend(tombstones);
         self
+    }
+
+    /// Declares a native Postcard codec that matches this schema's field order and types.
+    ///
+    /// A handwritten [`crate::Schema`] must implement `encode_postcard` and `decode_postcard`
+    /// with the `postcard` feature enabled, plus `visit_postcard_references` when the schema
+    /// has asset or entity reference fields. Declare support in metadata-only builds as well.
+    #[must_use]
+    pub const fn with_postcard_codec(mut self) -> Self {
+        self.supports_postcard = true;
+        self
+    }
+
+    #[must_use]
+    pub const fn supports_postcard(&self) -> bool {
+        self.supports_postcard
     }
 
     /// Declares a complete creation template, validated when the catalog is admitted.
@@ -383,7 +406,17 @@ impl ComponentSchema {
     pub fn schema_hash(&self) -> SchemaHash {
         let mut hasher = blake3::Hasher::new();
         feed_bytes(&mut hasher, b"nara.type-schema");
-        feed_schema(&mut hasher, self);
+        feed_schema(&mut hasher, self, true);
+        CatalogFingerprint(*hasher.finalize().as_bytes())
+    }
+
+    /// Hashes the Postcard schema for column compatibility.
+    #[cfg(feature = "postcard")]
+    #[must_use]
+    pub fn postcard_schema_hash(&self) -> SchemaHash {
+        let mut hasher = blake3::Hasher::new();
+        feed_bytes(&mut hasher, b"nara.postcard-schema.v1");
+        feed_schema(&mut hasher, self, false);
         CatalogFingerprint(*hasher.finalize().as_bytes())
     }
 
@@ -446,7 +479,7 @@ impl ComponentSchemaCatalog {
         feed_bytes(&mut hasher, b"nara.schema-catalog");
         feed_len(&mut hasher, self.components.len());
         for schema in &self.components {
-            feed_schema(&mut hasher, schema);
+            feed_schema(&mut hasher, schema, true);
         }
         CatalogFingerprint(*hasher.finalize().as_bytes())
     }
@@ -1962,6 +1995,11 @@ pub type SchemaHash = CatalogFingerprint;
 impl CatalogFingerprint {
     pub const HEX_LENGTH: usize = 64;
 
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
     pub fn from_hex(value: &str) -> Result<Self, CatalogFingerprintParseError> {
         if value.len() != Self::HEX_LENGTH
             || !value
@@ -2018,7 +2056,7 @@ impl<'de> serde::Deserialize<'de> for CatalogFingerprint {
     }
 }
 
-fn feed_schema(hasher: &mut blake3::Hasher, schema: &ComponentSchema) {
+fn feed_schema(hasher: &mut blake3::Hasher, schema: &ComponentSchema, include_metadata: bool) {
     feed_bytes(hasher, b"component");
     feed_str(hasher, schema.id.as_str());
     feed_len(hasher, schema.aliases.len());
@@ -2108,8 +2146,11 @@ fn feed_schema(hasher: &mut blake3::Hasher, schema: &ComponentSchema) {
         feed_bytes(hasher, b"field-tombstone");
         feed_str(hasher, tombstone.as_str());
     }
+    if include_metadata && schema.supports_postcard() {
+        feed_bytes(hasher, b"supports-postcard");
+    }
     // Creation metadata changes authoring identity, while absent metadata preserves v1 hashes.
-    if let Some(value) = &schema.authoring_initial_value {
+    if include_metadata && let Some(value) = &schema.authoring_initial_value {
         feed_bytes(hasher, b"authoring-initial-value");
         feed_value(hasher, value);
     }

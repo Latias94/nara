@@ -17,9 +17,12 @@ use nara_core::{Affine2, Mat3, Vec2};
 /// The required components are derived values. An omitted local [`Visibility`] inherits from its
 /// parent, or is visible on a root.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
-#[cfg_attr(feature = "authoring", derive(nara_reflect::Schema))]
 #[cfg_attr(
-    feature = "authoring",
+    any(feature = "authoring", feature = "cooked"),
+    derive(nara_reflect::Schema)
+)]
+#[cfg_attr(
+    any(feature = "authoring", feature = "cooked"),
     schema(
         crate = "nara_reflect",
         id = "nara.Transform2d",
@@ -33,15 +36,27 @@ use nara_core::{Affine2, Mat3, Vec2};
 #[component(summary_tick)]
 #[require(GlobalTransform2d, InheritedVisibility)]
 pub struct Transform2d {
-    #[cfg_attr(feature = "authoring", schema(alias = "Translation"))]
+    #[cfg_attr(
+        any(feature = "authoring", feature = "cooked"),
+        schema(alias = "Translation")
+    )]
     pub translation: Vec2,
     /// Counterclockwise rotation in radians.
-    #[cfg_attr(feature = "authoring", schema(alias = "Rotation", unit = "rad"))]
+    #[cfg_attr(
+        any(feature = "authoring", feature = "cooked"),
+        schema(alias = "Rotation", unit = "rad")
+    )]
     pub rotation: f32,
-    #[cfg_attr(feature = "authoring", schema(alias = "Scale"))]
+    #[cfg_attr(
+        any(feature = "authoring", feature = "cooked"),
+        schema(alias = "Scale")
+    )]
     pub scale: Vec2,
     /// Draw depth relative to the parent. This has no effect on planar positions.
-    #[cfg_attr(feature = "authoring", schema(alias = "Depth"))]
+    #[cfg_attr(
+        any(feature = "authoring", feature = "cooked"),
+        schema(alias = "Depth")
+    )]
     pub z: f32,
 }
 

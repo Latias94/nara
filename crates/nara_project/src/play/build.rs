@@ -23,6 +23,9 @@ pub struct BuildRequest<'paths> {
     pub binary: &'paths str,
     pub features: &'paths [&'paths str],
     pub release: bool,
+    pub no_default_features: bool,
+    /// Optional operation-owned directory for final artifacts. Cargo's build cache stays in place.
+    pub artifact_directory: Option<&'paths Path>,
 }
 
 impl<'paths> BuildRequest<'paths> {
@@ -34,6 +37,8 @@ impl<'paths> BuildRequest<'paths> {
             binary,
             features: &[],
             release: false,
+            no_default_features: false,
+            artifact_directory: None,
         }
     }
 }
@@ -125,6 +130,12 @@ pub enum BuildError {
     AmbiguousExecutable(String),
     #[error("Cargo reported a relative executable path: {0}")]
     RelativeExecutable(PathBuf),
+    #[error("Cargo metadata failed ({0})")]
+    MetadataFailed(ExitStatus),
+    #[error("could not read Cargo build directory: {0}")]
+    Metadata(#[from] serde_json::Error),
+    #[error("Cargo produced an executable outside the operation's artifact directory: {0}")]
+    ArtifactOutsideDirectory(PathBuf),
 }
 
 /// Runs Cargo in the project directory and delivers diagnostics and text as they arrive. Returns
@@ -170,8 +181,30 @@ pub fn build_interruptible(
     if request.release {
         arguments.push("--release".into());
     }
+    if request.no_default_features {
+        arguments.push("--no-default-features".into());
+    }
     if !request.features.is_empty() {
         arguments.push(format!("--features={}", request.features.join(",")).into());
+    }
+    let artifact_directory = request
+        .artifact_directory
+        .map(Path::canonicalize)
+        .transpose()?;
+    if let Some(artifacts) = &artifact_directory {
+        let build_dir = cargo_build_directory(&directory, &manifest, &cargo, &mut stop, &mut emit)?;
+        let build_dir = build_dir.to_str().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Cargo build directory is not UTF-8",
+            )
+        })?;
+        let setting = toml::Value::String(build_dir.to_owned());
+        arguments.push(format!("--config=build.build-dir={setting}").into());
+        arguments.extend([
+            OsString::from("--target-dir"),
+            artifacts.as_os_str().to_owned(),
+        ]);
     }
 
     let mut messages = BuildMessages::new(&manifest, request.binary);
@@ -184,10 +217,61 @@ pub fn build_interruptible(
         &mut |line| messages.push(line, &mut emit),
     )?;
     if interrupted {
-        Err(BuildError::Interrupted)
-    } else {
-        messages.finish(status)
+        return Err(BuildError::Interrupted);
     }
+    let executable = messages.finish(status)?;
+    if let Some(artifacts) = artifact_directory
+        && !executable.canonicalize()?.starts_with(artifacts)
+    {
+        return Err(BuildError::ArtifactOutsideDirectory(executable));
+    }
+    Ok(executable)
+}
+
+fn cargo_build_directory(
+    directory: &Path,
+    manifest: &Path,
+    cargo: &Path,
+    stop: &mut impl FnMut() -> bool,
+    emit: &mut impl FnMut(BuildEvent),
+) -> Result<PathBuf, BuildError> {
+    #[derive(Deserialize)]
+    struct CargoDirectories {
+        build_directory: Option<PathBuf>,
+        target_directory: PathBuf,
+    }
+
+    let mut arguments = [
+        "metadata",
+        "--format-version=1",
+        "--no-deps",
+        "--manifest-path",
+    ]
+    .map(OsString::from)
+    .to_vec();
+    arguments.push(manifest.as_os_str().to_owned());
+    let mut interrupted = false;
+    let (status, output) = super::capture_stdout(
+        directory,
+        cargo,
+        &arguments,
+        8 * 1024 * 1024,
+        || {
+            interrupted = interrupted || stop();
+            interrupted
+        },
+        |line| emit(BuildEvent::Output(line)),
+    )?;
+    if interrupted || stop() {
+        return Err(BuildError::Interrupted);
+    }
+    if !status.success() {
+        return Err(BuildError::MetadataFailed(status));
+    }
+    let directories: CargoDirectories = serde_json::from_slice(&output)?;
+    Ok(directories
+        .build_directory
+        .unwrap_or(directories.target_directory))
 }
 
 #[derive(Deserialize)]

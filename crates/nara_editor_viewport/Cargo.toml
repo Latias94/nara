@@ -16,7 +16,7 @@ nara_ecs = { path = "../nara_ecs" }
 nara_editor_core = { path = "../nara_editor_core" }
 nara_editor_gizmo = { path = "../nara_editor_gizmo" }
 nara_reflect = { path = "../nara_reflect" }
-nara_render = { path = "../nara_render", features = ["wgpu", "sprite-render"] }
+nara_render = { path = "../nara_render", features = ["wgpu", "sprite-render", "material-authoring"] }
 nara_scene = { path = "../nara_scene", features = ["authoring"] }
 open_gpui = { package = "open-gpui", path = "../../../open-gpui/crates/gpui", default-features = false }
 open_gpui_wgpu = { package = "open-gpui-wgpu", path = "../../../open-gpui/crates/gpui_wgpu" }

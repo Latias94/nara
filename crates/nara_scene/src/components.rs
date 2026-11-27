@@ -1,3 +1,5 @@
+//! Authored 2D components with typed runtime codecs.
+
 use bevy_ecs::component::Component;
 use nara_core::{AssetId, Color, Vec2};
 use nara_reflect::{
@@ -6,9 +8,9 @@ use nara_reflect::{
     ComponentValueKind, ComponentValueRef, Schema,
 };
 
-use crate::spatial::{Transform2d, Visibility};
+pub use crate::spatial::{Transform2d, Visibility};
 
-/// A source quad with linear tint and an optional stable image ID.
+/// A source quad with linear tint and optional stable image and material IDs.
 #[derive(Component, Schema, Debug, Clone, PartialEq)]
 #[schema(
     crate = "nara_reflect",
@@ -28,6 +30,8 @@ pub struct SpriteSource {
     pub layer: i32,
     #[schema(alias = "PNG Image")]
     pub image: Option<AssetId>,
+    #[schema(alias = "Material")]
+    pub material: Option<AssetId>,
 }
 
 impl SpriteSource {
@@ -44,6 +48,7 @@ impl Default for SpriteSource {
             tint: Color::WHITE,
             layer: 0,
             image: None,
+            material: None,
         }
     }
 }
@@ -86,6 +91,7 @@ impl Schema for Visibility {
             "Visibility",
             ComponentSchemaVersion::ONE,
         )
+        .with_postcard_codec()
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
         .with_fields([ComponentFieldSchema::optional_with_default(
             ComponentFieldId::new("mode"),
@@ -99,27 +105,61 @@ impl Schema for Visibility {
     }
 
     fn decode_component(value: ComponentValueRef<'_>) -> Result<Self, ComponentCodecError> {
-        match value.field("mode")?.as_str() {
-            Some("inherited") => Ok(Self::Inherited),
-            Some("visible") => Ok(Self::Visible),
-            Some("hidden") => Ok(Self::Hidden),
-            _ => Err(ComponentCodecError::invalid_field(
-                "mode",
-                "inherited, visible, or hidden",
-            )),
+        let fields = value.as_map().ok_or_else(Self::invalid_schema_mode)?;
+        match fields.get("mode") {
+            None => Ok(Self::Inherited),
+            Some(mode) if mode.kind() == ComponentValueKind::Null => Ok(Self::Inherited),
+            Some(mode) => {
+                Self::from_schema_mode(mode.as_str().ok_or_else(Self::invalid_schema_mode)?)
+            }
         }
     }
 
     fn encode_component(&self) -> Result<ComponentValue, ComponentCodecError> {
-        let mode = match self {
+        Ok(ComponentValue::map([(
+            "mode",
+            ComponentValue::String(self.schema_mode().into()),
+        )]))
+    }
+
+    nara_reflect::__schema_postcard_methods! {
+        fn encode_postcard(&self) -> Result<Vec<u8>, ComponentCodecError> {
+            let mut bytes = Vec::new();
+            nara_reflect::__macro_support::write_postcard_field(&mut bytes, &Some(self.schema_mode().to_owned()), "mode")?;
+            Ok(bytes)
+        }
+
+        fn decode_postcard(mut bytes: &[u8]) -> Result<Self, ComponentCodecError> {
+            let mode: Option<String> = nara_reflect::__macro_support::read_postcard_field(&mut bytes, "mode")?;
+            nara_reflect::__macro_support::finish_postcard(bytes)?;
+            match mode.as_deref() {
+                Some(mode) => Self::from_schema_mode(mode),
+                None => Ok(Self::Inherited),
+            }
+        }
+    }
+}
+
+impl Visibility {
+    const fn schema_mode(self) -> &'static str {
+        match self {
             Self::Inherited => "inherited",
             Self::Visible => "visible",
             Self::Hidden => "hidden",
-        };
-        Ok(ComponentValue::map([(
-            "mode",
-            ComponentValue::String(mode.into()),
-        )]))
+        }
+    }
+
+    fn from_schema_mode(mode: &str) -> Result<Self, ComponentCodecError> {
+        match mode {
+            "inherited" => Ok(Self::Inherited),
+            "visible" => Ok(Self::Visible),
+            "hidden" => Ok(Self::Hidden),
+            _ => Err(Self::invalid_schema_mode()),
+        }
+    }
+
+    fn invalid_schema_mode() -> ComponentCodecError {
+        ComponentCodecError::invalid_field("mode", "inherited, visible, or hidden")
     }
 }
 

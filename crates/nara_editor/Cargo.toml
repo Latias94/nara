@@ -12,11 +12,12 @@ members = ["../nara_editor_viewport"]
 
 [dependencies]
 anyhow = "1"
+nara_asset = { path = "../nara_asset", features = ["hot-reload"] }
 nara_core = { path = "../nara_core" }
 nara_editor_core = { path = "../nara_editor_core" }
 nara_editor_gizmo = { path = "../nara_editor_gizmo" }
 nara_editor_viewport = { path = "../nara_editor_viewport" }
-nara_project = { path = "../nara_project" }
+nara_project = { path = "../nara_project", default-features = false, features = ["workflow"] }
 nara_reflect = { path = "../nara_reflect" }
 nara_scene = { path = "../nara_scene", features = ["authoring"] }
 open_gpui = { package = "open-gpui", path = "../../../open-gpui/crates/gpui", default-features = false }

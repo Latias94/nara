@@ -3,7 +3,8 @@
 mod manifest;
 
 pub use manifest::{
-    EditorPlayMode, ProjectEditor, ProjectInfo, ProjectManifest, ProjectPaths, ProjectWindow,
+    EditorPlayMode, ProjectDelivery, ProjectEditor, ProjectInfo, ProjectManifest, ProjectPaths,
+    ProjectWindow,
 };
 
 #[cfg(all(

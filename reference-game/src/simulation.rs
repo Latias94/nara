@@ -1,14 +1,15 @@
 use std::{f32::consts::FRAC_PI_2, time::Duration};
 
+#[cfg(feature = "source")]
+use nara::scene::authoring::SceneDocument;
 use nara::{
     ecs::{Single, bevy_ecs::error::Result as SystemResult, schedule::IntoScheduleConfigs},
     prelude::*,
-    scene::authoring::SceneDocument,
 };
 
 use crate::{
     RunRules,
-    arena::{self, Actor, Arena, CELL_COUNT, SceneActor},
+    arena::{Actor, Arena, CELL_COUNT, SceneActor},
     audio::Sounds,
 };
 
@@ -19,15 +20,32 @@ const DECLARATION: PluginDeclaration = PluginDeclaration::new(PLUGIN, PluginCate
 /// Installs the shared arena and fixed simulation after Nara's `DefaultPlugins`.
 #[derive(Clone, Debug)]
 pub struct GamePlugin {
-    scene: SceneDocument,
+    scene: GameScene,
     rules_override: Option<RunRules>,
+}
+
+#[derive(Clone, Debug)]
+enum GameScene {
+    #[cfg(feature = "source")]
+    Source(SceneDocument),
+    #[cfg(feature = "desktop")]
+    Cooked(Vec<Entity>),
 }
 
 impl GamePlugin {
     /// Uses a source scene whose prefab instances have already been expanded.
+    #[cfg(feature = "source")]
     pub fn from_scene(scene: SceneDocument) -> Self {
         Self {
-            scene,
+            scene: GameScene::Source(scene),
+            rules_override: None,
+        }
+    }
+
+    #[cfg(feature = "desktop")]
+    pub(crate) fn from_cooked_entities(entities: Vec<Entity>) -> Self {
+        Self {
+            scene: GameScene::Cooked(entities),
             rules_override: None,
         }
     }
@@ -44,8 +62,31 @@ impl Plugin for GamePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        let (arena, rules) = arena::spawn_scene(app.world_mut()?, &self.scene, self.rules_override)
-            .map_err(setup_error)?;
+        let world = app.world_mut()?;
+        let (arena, rules, _entities) = match &self.scene {
+            #[cfg(feature = "source")]
+            GameScene::Source(scene) => {
+                crate::arena::source::SourceScene::prepare(scene, self.rules_override)
+                    .map_err(setup_error)?
+                    .spawn(world)
+            }
+            #[cfg(feature = "desktop")]
+            GameScene::Cooked(entities) => {
+                use crate::arena::{ArenaPlan, SceneRow};
+                let rows = entities.iter().map(|&id| {
+                    world
+                        .get_entity(id)
+                        .map(SceneRow::cooked)
+                        .map_err(|error| error.to_string())
+                });
+                let (arena, rules) = ArenaPlan::prepare(rows, self.rules_override)
+                    .map_err(setup_error)?
+                    .bind(world, entities);
+                (arena, rules, entities.clone())
+            }
+        };
+        #[cfg(all(feature = "desktop", feature = "hot-reload"))]
+        app.insert_resource(ArenaEntities(_entities))?;
         let round = Round::new(rules, arena.pilot.pose);
         app.init_resource::<PilotInput>()?
             .insert_resource(round)?
@@ -151,22 +192,30 @@ impl Round {
 }
 
 #[derive(Resource)]
-struct PilotCharacter(TopDownCharacter);
+pub(crate) struct PilotCharacter(TopDownCharacter);
+
+impl PilotCharacter {
+    pub(crate) fn new(radius: f32) -> Result<Self, nara::physics2d::PhysicsError> {
+        Ok(Self(TopDownCharacter::new(
+            Collider2d::Circle { radius },
+            0.1,
+        )?))
+    }
+}
+
+#[cfg(all(feature = "desktop", feature = "hot-reload"))]
+#[derive(Resource)]
+pub(crate) struct ArenaEntities(pub Vec<Entity>);
 
 fn setup_round(world: &mut World) -> SystemResult {
     let pilot_radius = world.resource::<Arena>().pilot.radius;
-    world.insert_resource(PilotCharacter(TopDownCharacter::new(
-        Collider2d::Circle {
-            radius: pilot_radius,
-        },
-        0.1,
-    )?));
+    world.insert_resource(PilotCharacter::new(pilot_radius)?);
     let sounds = Sounds::register(world)?;
     world.insert_resource(sounds);
     Ok(())
 }
 
-fn advance_round(
+pub(crate) fn advance_round(
     mut commands: Commands,
     mut round: ResMut<Round>,
     mut input: ResMut<PilotInput>,
@@ -245,7 +294,7 @@ fn advance_round(
     Ok(())
 }
 
-fn sync_actors(
+pub(crate) fn sync_actors(
     round: Res<Round>,
     arena: Res<Arena>,
     mut actors: Query<(&SceneActor, &mut Transform2d, &mut Visibility)>,

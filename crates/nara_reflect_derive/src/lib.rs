@@ -347,6 +347,7 @@ fn expand_schema(input: DeriveInput) -> Result<TokenStream2> {
                 )
                 #additional_aliases
                 #group
+                .with_postcard_codec()
                 .with_capabilities([#(#component_capability_tokens),*])
                 .with_fields([#(#field_schemas),*])
                 .with_field_tombstones([
@@ -441,6 +442,10 @@ fn postcard_methods(
         let id = &field.id;
         quote!(#ident: #support::read_postcard_field::<#ty>(&mut bytes, #id)?)
     });
+    let references = fields.iter().map(|field| {
+        let ident = &field.ident;
+        quote!(#support::visit_postcard_field_references(&self.#ident, _visit)?;)
+    });
     let constructed = if is_unit {
         quote!(Self)
     } else {
@@ -463,6 +468,14 @@ fn postcard_methods(
                 #support::finish_postcard(bytes)?;
                 #read_checks
                 ::core::result::Result::Ok(component)
+            }
+
+            fn visit_postcard_references(
+                &self,
+                _visit: &mut dyn ::core::ops::FnMut(#support::PostcardReference),
+            ) -> ::core::result::Result<(), #support::ComponentCodecError> {
+                #(#references)*
+                ::core::result::Result::Ok(())
             }
         }
     }

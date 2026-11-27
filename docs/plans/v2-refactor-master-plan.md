@@ -415,9 +415,54 @@ and 120,000–160,000 lines of Open-GPUI source with the final workspace boundar
   The supervised game saw the edited four-shield snapshot and acknowledged Pause, Step, and
   Resume. Stop reaped the game, and the original scene bytes stayed unchanged. The separate
   60-frame capture recorded zero new textures or buffers on the RTX 4090 DX12 adapter.
-- **Remaining editor I/O.** Asset refresh and confirmed prefab publication still perform disk
-  work on the UI thread. The data reload work will move these operations to background jobs and
-  check the active document before publishing a result.
+- **Editor I/O at the 5A cut.** Asset discovery and confirmed prefab publication performed disk
+  work on the UI thread. Phase 5B moves discovery and reload preparation to a background job and
+  checks the active document revision before publishing. Explicit prefab publication still runs
+  in the editor transaction that updates the document and its history.
+
+### Phase 5B verification
+
+- **Cooked loading.** On an Intel Core i9-13900KF running Windows, Rust 1.95.0 release
+  `cooked_scene_benchmark` parsed a 132,161-byte NSCN and instantiated 1,000 entities with
+  10,000 packed `u16` cells in **0.488 ms p50 / 0.579 ms p95** (101 timed runs). Each run
+  inserted into a fresh Bevy world and verified the packed cell checksum. Timing starts from
+  in-memory NSCN bytes and excludes the asset archive read and one-time native registry setup.
+- **Incremental Cook.** Night Relay's entry produced four assets in a 2,519-byte archive. Two
+  runs on the same source cut went from four misses to four hits and produced identical archive
+  bytes. A prefab supplies the flattened instances, and the archive carries their used image
+  plus the gate material and its shader.
+- **Native hot reload.** On the same Windows host, the editor and supervised Night Relay
+  alternated real source edits in disposable project copies, with 20 samples per input and per
+  process. Timing starts just before the save operation and ends at the matching accepted
+  viewport frame or receipt of the game's matching presentation record. The editor also resolved
+  a PNG after moving it together with its sidecar. Play started from a four-shield editor
+  snapshot and exited on control-pipe EOF.
+
+| Changed source | Editor p50 / p95 (ms) | Dev Play p50 / p95 (ms) |
+| --- | ---: | ---: |
+| PNG texture | 112.350 / 123.218 | 32.354 / 33.123 |
+| Scene | 113.786 / 128.825 | 31.956 / 33.431 |
+| Prefab | 120.986 / 131.517 | 32.440 / 33.024 |
+| Material | 113.824 / 124.082 | 32.411 / 32.706 |
+| WGSL shader | 110.687 / 123.817 | 32.368 / 32.768 |
+
+The final Cargo-built binaries also passed all five reload cases. During a concurrent Starter
+build, per-case p95 ranged from 136.688 to 172.667 ms in the editor and 36.203 to 63.312 ms in Play.
+
+- **Standalone Export on Windows.** A fresh trusted export produced a 20,063,744-byte executable
+  and the 2,519-byte archive. A copy containing only those two files ran from a new directory
+  outside the checkout with a system-only `PATH` and no Cargo, Rustup, or Nara environment
+  overrides. Both `--verify-first-present` and `--verify-gameplay` exited successfully. The
+  1152 × 768 window presented 110 HUD glyphs, then presented the updated HUD after collecting a
+  power cell. The shipping dependency graph excludes the editor, Open-GPUI, RON, PNG decoding,
+  and file watching.
+- **Editor regression on Windows.** The final editor and development game passed `--verify`.
+  It reopened the edited scene, preserved Undo and Redo, retained 60 viewport frames with zero
+  new textures or buffers, floated the Inspector, and drove the four-shield Play snapshot
+  through Pause, one fixed Step, Resume, and contained Stop.
+- **Regression suites.** The engine passed 509 tests with five configured skips. Night Relay
+  passed all 12 tests and the eight-round fixed-step replay. The root, editor, and shared viewport
+  all-target checks passed on Windows, as did the Wasm core check and the dependency boundary audit.
 
 ## Open-GPUI target
 

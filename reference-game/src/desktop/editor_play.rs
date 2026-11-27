@@ -73,6 +73,18 @@ pub(super) fn run(app: App) -> Result<(), Box<dyn Error>> {
             WinitRunProgress::Retiring => continue,
             WinitRunProgress::Retired | WinitRunProgress::Incomplete => break,
         }
+        #[cfg(feature = "hot-reload")]
+        {
+            use nara::app::RuntimeState;
+
+            let world = session.runtime().world();
+            if let Some(reload) = world.get_resource::<super::reload::Reload>() {
+                reload.observe(world.resource::<DesktopPresentation>());
+                if session.runtime().state() == RuntimeState::Paused && reload.notified() {
+                    session.request_paused_maintenance()?;
+                }
+            }
+        }
         if !ready {
             if !session
                 .runtime()
@@ -89,7 +101,7 @@ pub(super) fn run(app: App) -> Result<(), Box<dyn Error>> {
             report("ready")?;
             ready = true;
         }
-        if pending.is_none() {
+        if let (None, Some(commands)) = (pending, commands.as_ref()) {
             match commands.try_recv() {
                 Ok(command) => match session.request_control(command.control) {
                     RuntimeControlRequestResult::Accepted(ticket) => {
@@ -104,6 +116,7 @@ pub(super) fn run(app: App) -> Result<(), Box<dyn Error>> {
                 },
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
+                    session.request_close();
                     session.execute();
                     break;
                 }
@@ -123,19 +136,20 @@ fn report(event: &str) -> io::Result<()> {
     stdout.flush()
 }
 
-fn start_input_reader() -> io::Result<Receiver<EditorCommand>> {
-    let (sender, receiver) = mpsc::sync_channel(16);
+fn start_input_reader() -> io::Result<Option<Receiver<EditorCommand>>> {
     let stdin = io::stdin();
-    if !stdin.is_terminal() {
-        thread::Builder::new()
-            .name("editor-control-stdin".into())
-            .spawn(move || {
-                if let Err(error) = read_commands(stdin.lock(), sender) {
-                    eprintln!("could not read editor controls: {error}");
-                }
-            })?;
+    if stdin.is_terminal() {
+        return Ok(None);
     }
-    Ok(receiver)
+    let (sender, receiver) = mpsc::sync_channel(16);
+    thread::Builder::new()
+        .name("editor-control-stdin".into())
+        .spawn(move || {
+            if let Err(error) = read_commands(stdin.lock(), sender) {
+                eprintln!("could not read editor controls: {error}");
+            }
+        })?;
+    Ok(Some(receiver))
 }
 
 fn read_commands(mut input: impl BufRead, sender: SyncSender<EditorCommand>) -> io::Result<()> {

@@ -1,6 +1,8 @@
-//! Project creation, data checks, and Schema discovery for the CLI and editor.
+//! Project creation, data checks, Schema discovery, and standalone delivery.
 
 mod check;
+#[cfg(feature = "delivery")]
+pub mod delivery;
 mod schema;
 mod starter;
 

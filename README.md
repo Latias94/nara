@@ -13,7 +13,7 @@ See the [strategy](STRATEGY.md), [architecture](docs/architecture/overview.md), 
 - `App`, `DefaultPlugins`, deterministic fixed stepping, and a native Winit runner;
 - ECS hierarchy, transform propagation, typed input, 2D physics, and audio;
 - code-first worlds, compact RON scenes and prefabs, and typed assets with UUID sidecars;
-- a headless project CLI for project creation, validation, Schema discovery, and supervised Play;
+- a headless project CLI for project creation, Schema discovery, supervised Play, Cook, and Export;
 - a deterministic 2D reference game with sprites, input, HUD, and headless and desktop entry points;
 - a native editor with a shared WGPU Scene View, dockable panels, Schema editing, and external Play.
 
@@ -66,6 +66,7 @@ cargo run --locked -p nara_project --bin nara -- new ../my-game --package my-gam
 cargo run --locked -p nara_project --bin nara -- check ../my-game
 cargo run --locked -p nara_project --bin nara -- schema ../my-game --trusted
 cargo run --locked -p nara_project --bin nara -- play ../my-game --trusted
+cargo run --locked -p nara_project --bin nara -- export ../my-game --out ../my-game-dist --trusted
 ```
 
 Use `--trusted` for projects whose Rust and Cargo build code you trust to run. Follow the generated

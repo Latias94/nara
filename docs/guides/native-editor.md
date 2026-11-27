@@ -66,7 +66,7 @@ play = "snapshot"
 The game reads `--editor-play PATH` and prints `NARA_EDITOR ready` after its first frame. When the
 editor sends `pause`, `resume`, or `step` on stdin, the game replies `NARA_EDITOR paused`,
 `NARA_EDITOR running`, or `NARA_EDITOR stepped` after applying it. Step advances one fixed tick.
-Night Relay implements this protocol in its standalone game runner.
+Night Relay implements this protocol in its development desktop build.
 
 ## Verify the native workflow
 

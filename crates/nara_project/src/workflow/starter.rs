@@ -86,6 +86,7 @@ pub fn create_project(
         ),
         ("src/lib.rs", include_bytes!("template/lib.rs")),
         ("src/main.rs", include_bytes!("template/main.rs")),
+        ("src/source.rs", include_bytes!("template/source.rs")),
         (
             "src/bin/nara_schema.rs",
             include_bytes!("template/nara_schema.rs"),

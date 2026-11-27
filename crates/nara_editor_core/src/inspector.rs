@@ -10,7 +10,7 @@ use nara_scene::authoring::{SceneComponent, SceneDocument};
 use crate::{EditorError, EditorSession, value_draft};
 
 /// Owns the engine and last successfully discovered project schemas.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct EditorRegistry {
     catalog: ComponentSchemaCatalog,
 }

@@ -1,16 +1,35 @@
-//! Immutable CPU image values and the optional PNG loader.
+//! Immutable CPU image values, typed storage, and format-specific codecs.
 
 use std::{fmt, sync::Arc};
 
-#[cfg(feature = "image-import")]
+#[cfg(feature = "cooked")]
+mod cooked;
+#[cfg(any(feature = "image-import", feature = "cook"))]
 mod decode;
 #[cfg(all(feature = "image-import", any(unix, windows)))]
 mod load;
+#[cfg(feature = "runtime")]
+mod plugin;
+#[cfg(all(feature = "authoring", any(feature = "image-import", feature = "cook")))]
+mod source_import;
 
-#[cfg(feature = "image-import")]
-pub use decode::{IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID, ImageDecodeError, ImagePlugin};
+#[cfg(feature = "cooked")]
+pub use cooked::CookedImageError;
+#[cfg(any(feature = "image-import", feature = "cook"))]
+pub use decode::ImageDecodeError;
 #[cfg(all(feature = "image-import", any(unix, windows)))]
 pub use load::{ImageLoadError, ImageSourceDirectory, load_image};
+#[cfg(feature = "runtime")]
+pub use plugin::{IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID, ImagePlugin};
+#[cfg(all(feature = "authoring", any(feature = "image-import", feature = "cook")))]
+pub use source_import::{
+    ImageImportError, ImageImportFilter, ImageImportSettings, decode_png_source,
+};
+
+#[cfg(any(feature = "cooked", feature = "image-import"))]
+const MAX_IMPORT_DIMENSION: u32 = 16_384;
+#[cfg(any(feature = "cooked", feature = "image-import"))]
+const MAX_IMPORT_PIXELS: u64 = 16_777_216;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -107,14 +126,7 @@ impl ImageAsset {
         color_space: ImageColorSpace,
         pixels: Vec<u8>,
     ) -> Result<Self, ImageAssetCreateError> {
-        if extent.width == 0 || extent.height == 0 {
-            return Err(ImageAssetCreateError::ZeroExtent { extent });
-        }
-        let expected = match format {
-            ImageFormat::Rgba8 => extent.pixel_count().checked_mul(4),
-        }
-        .and_then(|bytes| usize::try_from(bytes).ok())
-        .ok_or(ImageAssetCreateError::ByteLengthOverflow { extent })?;
+        let expected = pixel_byte_len(extent, format)?;
         if pixels.len() != expected {
             return Err(ImageAssetCreateError::PixelLengthMismatch {
                 extent,
@@ -160,6 +172,20 @@ impl ImageAsset {
     pub fn shared_pixels(&self) -> ImagePixels {
         self.pixels.clone()
     }
+}
+
+fn pixel_byte_len(
+    extent: ImageExtent,
+    format: ImageFormat,
+) -> Result<usize, ImageAssetCreateError> {
+    if extent.width == 0 || extent.height == 0 {
+        return Err(ImageAssetCreateError::ZeroExtent { extent });
+    }
+    match format {
+        ImageFormat::Rgba8 => extent.pixel_count().checked_mul(4),
+    }
+    .and_then(|bytes| usize::try_from(bytes).ok())
+    .ok_or(ImageAssetCreateError::ByteLengthOverflow { extent })
 }
 
 impl fmt::Debug for ImageAsset {

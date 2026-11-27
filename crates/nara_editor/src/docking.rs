@@ -137,6 +137,9 @@ pub fn open(
         layout_path.clone(),
         cx,
     )?;
+    workspace.update(cx, |workspace, cx| {
+        workspace.watch_assets(inspector.downgrade(), cx);
+    });
     if let Some(path) = layout_path {
         persist_on_layout_changes(&dock, path, workspace.downgrade(), closing, cx)?;
     }

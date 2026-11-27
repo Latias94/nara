@@ -14,14 +14,19 @@ toml.workspace = true
 tempfile = "3.27"
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
+blake3 = { workspace = true, optional = true }
 ctrlc = { version = "3.5", optional = true }
 nara_asset = { workspace = true, optional = true, features = ["authoring"] }
 nara_reflect = { workspace = true, optional = true, features = ["serde"] }
+nara_render = { workspace = true, optional = true, features = ["material-authoring"] }
+nara_scene = { workspace = true, optional = true, features = ["cook"] }
 serde_json = { workspace = true, optional = true }
+tempfile = { version = "3.27", optional = true }
 thiserror = { workspace = true, optional = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc = { version = "0.2", optional = true }
+rustix = { version = "1.1", optional = true, default-features = false, features = ["fs", "std"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, optional = true, features = [
@@ -33,7 +38,17 @@ windows-sys = { workspace = true, optional = true, features = [
 ] }
 
 [features]
-default = ["workflow"]
+default = ["delivery"]
+delivery = [
+    "workflow",
+    "dep:blake3",
+    "dep:nara_render",
+    "dep:nara_scene",
+    "dep:rustix",
+    "dep:tempfile",
+    "nara_asset/cook",
+    "windows-sys/Win32_Storage_FileSystem",
+]
 workflow = [
     "dep:ctrlc",
     "dep:libc",

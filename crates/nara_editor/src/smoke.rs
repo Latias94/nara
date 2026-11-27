@@ -1,3 +1,5 @@
+pub(crate) mod hot_reload;
+
 use std::{
     cell::RefCell,
     rc::Rc,

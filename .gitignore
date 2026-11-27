@@ -4,6 +4,9 @@ repo-ref/
 .nara-supervised-play-canary-*/
 **/.nara/schema_cache.json
 **/.nara/editor-layout.json
+**/.nara/cache/
+**/.nara/game.npak
+**/.nara/delivery-schema-*.json
 __pycache__/
 docs/reviews/
 .codex-research/

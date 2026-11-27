@@ -2,6 +2,12 @@
 
 #[cfg(feature = "authoring")]
 pub mod authoring;
+#[cfg(any(feature = "authoring", feature = "cooked"))]
+pub mod components;
+#[cfg(feature = "cook")]
+pub mod cook;
+#[cfg(feature = "cooked")]
+pub mod cooked;
 pub mod spatial;
 
 pub use spatial::{SPATIAL_PLUGIN_ID, SpatialPlugin, SpatialSet, Visibility};

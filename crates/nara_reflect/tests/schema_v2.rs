@@ -99,6 +99,35 @@ impl Default for Motion {
 }
 
 #[test]
+fn derived_schema_advertises_postcard_in_metadata_only_builds() {
+    let schema = Motion::type_schema().unwrap();
+    assert!(schema.supports_postcard());
+
+    #[cfg(feature = "serde")]
+    {
+        let catalog = ComponentSchemaCatalog::from_components([schema.clone()]).unwrap();
+        let encoded = catalog.to_json_string().unwrap();
+        assert!(encoded.contains("\"supports_postcard\": true"));
+        let exported = ComponentSchemaCatalog::from_json_bytes(encoded.as_bytes()).unwrap();
+        assert!(exported.components()[0].supports_postcard());
+
+        let mut source_only = schema;
+        source_only.supports_postcard = false;
+        let source_only = ComponentSchemaCatalog::from_components([source_only]).unwrap();
+        let legacy = source_only.to_json_string().unwrap();
+        assert!(!legacy.contains("\"supports_postcard\""));
+        let legacy = ComponentSchemaCatalog::from_json_bytes(legacy.as_bytes()).unwrap();
+        assert!(!legacy.components()[0].supports_postcard());
+        assert_ne!(legacy.fingerprint(), exported.fingerprint());
+        #[cfg(feature = "postcard")]
+        assert_eq!(
+            legacy.components()[0].postcard_schema_hash(),
+            exported.components()[0].postcard_schema_hash()
+        );
+    }
+}
+
+#[test]
 fn exported_defaults_restore_sparse_values_without_overwriting_explicit_null() {
     let schema = Motion::type_schema().unwrap();
     assert_eq!(schema.group(), Some("Gameplay"));
@@ -404,6 +433,123 @@ fn postcard_reads_typed_components_and_rejects_bad_payloads() {
     let mut bad_choice = bytes;
     bad_choice[13..17].copy_from_slice(b"fly!");
     assert!(Motion::decode_postcard(&bad_choice).is_err());
+}
+
+#[cfg(feature = "postcard")]
+#[test]
+fn exported_schema_writes_the_same_postcard_as_the_native_codec() {
+    use nara_asset::AssetRef;
+    use nara_reflect::PostcardReference;
+
+    #[derive(Component, Schema, Debug, PartialEq)]
+    #[schema(id = "game.PostcardWidths", version = 1)]
+    struct Widths {
+        int8: i8,
+        uint8: u8,
+        int16: i16,
+        uint16: u16,
+        int32: i32,
+        uint32: u32,
+        int64: i64,
+        uint64: u64,
+        float32: f32,
+        float64: f64,
+        stable: Option<AssetId>,
+        legacy: BTreeMap<String, Vec<Option<AssetRef>>>,
+    }
+
+    let id = bulk().source;
+    let expected = Widths {
+        int8: -127,
+        uint8: 255,
+        int16: -18_000,
+        uint16: 42_000,
+        int32: -112_345,
+        uint32: 3_012_345_678,
+        int64: -4_012_345_678,
+        uint64: u64::MAX,
+        float32: 0.1,
+        float64: -0.01,
+        stable: Some(id),
+        legacy: BTreeMap::from([(
+            "parts".to_owned(),
+            vec![None, Some(AssetRef::StableId(id.into()))],
+        )]),
+    };
+    let schema = Widths::type_schema().unwrap();
+    let mut dynamic_refs = Vec::new();
+    let mut native_refs = Vec::new();
+    let encoded = schema
+        .encode_postcard_value_with_references(&expected.encode_component().unwrap(), |reference| {
+            dynamic_refs.push(reference)
+        })
+        .unwrap();
+    expected
+        .visit_postcard_references(&mut |reference| native_refs.push(reference))
+        .unwrap();
+    assert_eq!(dynamic_refs, [PostcardReference::Asset(id); 2]);
+    assert_eq!(dynamic_refs, native_refs);
+    assert_eq!(encoded, expected.encode_postcard().unwrap());
+    assert_eq!(Widths::decode_postcard(&encoded).unwrap(), expected);
+
+    let grounded = Widths {
+        legacy: BTreeMap::from([(
+            "parts".to_owned(),
+            vec![Some(AssetRef::path("tile.png").unwrap())],
+        )]),
+        ..expected
+    };
+    assert!(
+        schema
+            .encode_postcard_value(&grounded.encode_component().unwrap())
+            .is_err()
+    );
+    assert!(grounded.visit_postcard_references(&mut |_| {}).is_err());
+
+    let schema = Motion::type_schema().unwrap();
+    let sparse = ComponentValue::map([("guidance", ComponentValue::Null)]);
+    let expected = Motion {
+        guidance: None,
+        ..Motion::default()
+    };
+    let encoded = schema.encode_postcard_value(&sparse).unwrap();
+    assert_eq!(encoded, expected.encode_postcard().unwrap());
+    let template = schema
+        .clone()
+        .with_authoring_initial_value(expected.encode_component().unwrap());
+    assert_ne!(schema.schema_hash(), template.schema_hash());
+    assert_eq!(
+        schema.postcard_schema_hash(),
+        template.postcard_schema_hash()
+    );
+
+    let bulk = bulk();
+    assert_eq!(
+        Bulk::type_schema()
+            .unwrap()
+            .encode_postcard_value(&bulk.encode_component().unwrap())
+            .unwrap(),
+        bulk.encode_postcard().unwrap()
+    );
+}
+
+#[cfg(feature = "postcard")]
+#[test]
+fn native_postcard_map_rejects_unordered_or_duplicate_keys() {
+    #[derive(Component, Schema)]
+    #[schema(id = "game.PostcardMap", version = 1)]
+    struct MapComponent {
+        values: BTreeMap<String, u8>,
+    }
+
+    let sorted = [2, 1, b'a', 9, 1, b'b', 43];
+    assert_eq!(
+        MapComponent::decode_postcard(&sorted).unwrap().values.len(),
+        2
+    );
+    for invalid in [[2, 1, b'b', 9, 1, b'a', 43], [2, 1, b'a', 9, 1, b'a', 43]] {
+        assert!(MapComponent::decode_postcard(&invalid).is_err());
+    }
 }
 
 #[derive(Component, Schema)]

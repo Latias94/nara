@@ -12,7 +12,10 @@ use nara_core::vfs::{AssetPath as VfsPath, DirAssetSource};
 use crate::{
     AssetDatabaseError, AssetMeta, AssetMetaError, AssetRecord, AssetSourcePath,
     ProjectAssetDatabase, StableAssetId,
-    meta::{IMAGE_IMPORTER, MAX_META_BYTES, PREFAB_IMPORTER, RAW_IMPORTER, SCENE_IMPORTER},
+    meta::{
+        IMAGE_IMPORTER, MATERIAL_IMPORTER, MAX_META_BYTES, PREFAB_IMPORTER, RAW_IMPORTER,
+        SCENE_IMPORTER, SHADER_IMPORTER,
+    },
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -307,6 +310,10 @@ fn default_importer(path: &AssetSourcePath) -> &'static str {
         SCENE_IMPORTER
     } else if name.ends_with(".prefab.ron") {
         PREFAB_IMPORTER
+    } else if name.ends_with(".material.ron") {
+        MATERIAL_IMPORTER
+    } else if name.ends_with(".wgsl") {
+        SHADER_IMPORTER
     } else {
         RAW_IMPORTER
     }
@@ -382,12 +389,12 @@ fn is_regular_file(metadata: &fs::Metadata) -> bool {
 }
 
 #[cfg(unix)]
-fn is_link(metadata: &fs::Metadata) -> bool {
+pub(crate) fn is_link(metadata: &fs::Metadata) -> bool {
     metadata.file_type().is_symlink()
 }
 
 #[cfg(windows)]
-fn is_link(metadata: &fs::Metadata) -> bool {
+pub(crate) fn is_link(metadata: &fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt as _;
 
     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;

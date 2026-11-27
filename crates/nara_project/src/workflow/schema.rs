@@ -57,6 +57,16 @@ pub fn refresh_schema(
 pub fn refresh_schema_interruptible(
     request: &BuildRequest<'_>,
     trust: ProjectTrust,
+    interrupted: impl FnMut() -> bool,
+    emit: impl FnMut(BuildEvent),
+) -> Result<ComponentSchemaCatalog, SchemaCacheError> {
+    refresh_at(request, trust, SCHEMA_CACHE_PATH, interrupted, emit)
+}
+
+pub(super) fn refresh_at(
+    request: &BuildRequest<'_>,
+    trust: ProjectTrust,
+    cache: &str,
     mut interrupted: impl FnMut() -> bool,
     mut emit: impl FnMut(BuildEvent),
 ) -> Result<ComponentSchemaCatalog, SchemaCacheError> {
@@ -99,14 +109,23 @@ pub fn refresh_schema_interruptible(
             SchemaCacheError::ProducerIo(error)
         }
     })?;
-    finish_refresh(&project_dir, status, &stdout, || cancelled || interrupted())
+    finish_refresh_at(&project_dir, cache, status, &stdout, || {
+        cancelled || interrupted()
+    })
 }
 
 /// Loads the last successful cache without building or executing the project.
 pub fn read_schema_cache(
     project_dir: &Path,
 ) -> Result<Option<ComponentSchemaCatalog>, SchemaCacheError> {
-    let file = match open_cache(project_dir) {
+    read_at(project_dir, SCHEMA_CACHE_PATH)
+}
+
+pub(super) fn read_at(
+    project_dir: &Path,
+    cache: &str,
+) -> Result<Option<ComponentSchemaCatalog>, SchemaCacheError> {
+    let file = match open_cache(project_dir, cache) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
@@ -124,8 +143,19 @@ fn catalog_limit() -> usize {
     ComponentCatalogFileLimits::default().encoded_bytes().get()
 }
 
+#[cfg(test)]
 pub(super) fn finish_refresh(
     project_dir: &Path,
+    status: ExitStatus,
+    stdout: &[u8],
+    interrupted: impl FnMut() -> bool,
+) -> Result<ComponentSchemaCatalog, SchemaCacheError> {
+    finish_refresh_at(project_dir, SCHEMA_CACHE_PATH, status, stdout, interrupted)
+}
+
+fn finish_refresh_at(
+    project_dir: &Path,
+    cache: &str,
     status: ExitStatus,
     stdout: &[u8],
     mut interrupted: impl FnMut() -> bool,
@@ -137,7 +167,7 @@ pub(super) fn finish_refresh(
         return Err(SchemaCacheError::ProducerFailed(status));
     }
     let catalog = ComponentSchemaCatalog::from_json_bytes(stdout)?;
-    let path = cache_path(project_dir, true)?;
+    let path = cache_path(project_dir, cache, true)?;
     if interrupted() {
         return Err(SchemaCacheError::Interrupted);
     }
@@ -145,8 +175,8 @@ pub(super) fn finish_refresh(
     Ok(catalog)
 }
 
-fn open_cache(project_dir: &Path) -> io::Result<File> {
-    let path = cache_path(project_dir, false)?;
+fn open_cache(project_dir: &Path, cache: &str) -> io::Result<File> {
+    let path = cache_path(project_dir, cache, false)?;
     if !fs::symlink_metadata(&path)?.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -156,7 +186,7 @@ fn open_cache(project_dir: &Path) -> io::Result<File> {
     File::open(path)
 }
 
-fn cache_path(project_dir: &Path, create: bool) -> io::Result<PathBuf> {
+fn cache_path(project_dir: &Path, cache: &str, create: bool) -> io::Result<PathBuf> {
     let root = project_dir.canonicalize()?;
     let directory = root.join(".nara");
     if create {
@@ -174,5 +204,5 @@ fn cache_path(project_dir: &Path, create: bool) -> io::Result<PathBuf> {
             "the Schema cache directory must be a direct project directory",
         ));
     }
-    Ok(root.join(SCHEMA_CACHE_PATH))
+    Ok(root.join(cache))
 }

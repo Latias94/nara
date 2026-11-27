@@ -1,5 +1,6 @@
 //! Native editor viewport backed by Nara's scene renderer and Open-GPUI's imported images.
 
+mod assets;
 mod scene;
 #[cfg(test)]
 mod tests;
@@ -8,7 +9,7 @@ use std::{io, sync::Arc};
 
 use nara_app::{AddPluginsError, AppRunError, PluginError, RuntimeDriveError, RuntimeScopeError};
 use nara_asset::{
-    AssetError, AssetSourceKind, AssetStateError, ProjectAssetDatabase, image::ImageDecodeError,
+    AssetError, AssetSourceKind, AssetStateError, ProjectAssetDatabase, image::ImageImportError,
 };
 use nara_core::{Affine2, AssetId, EntityUuid, Vec2, vfs::DirAssetSource};
 use nara_editor_core::viewport::{PickCandidate2D, ViewportCamera2D};
@@ -19,6 +20,7 @@ use nara_render::{
         GpuContext, GpuDeviceErrors, Renderer, TextureCacheStats, WgpuImageOutput,
         WgpuNativeWorkStats, WgpuRenderError,
     },
+    material::SpriteMaterialAssetError,
     sprite_render::SpriteRenderStats,
 };
 use nara_scene::authoring::{SceneComponentError, SceneDocument, SceneDocumentError};
@@ -29,6 +31,8 @@ use open_gpui::{
 use open_gpui_wgpu::{DeviceErrorState, SharedWgpuContext, WgpuAtlas, WgpuImportedImageDescriptor};
 
 use scene::PreviewScene;
+
+pub use assets::PreviewAssets;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ViewportError {
@@ -59,8 +63,24 @@ pub enum ViewportError {
     DecodeImage {
         path: String,
         #[source]
-        source: ImageDecodeError,
+        source: ImageImportError,
     },
+    #[error("preview {importer} asset {id} is missing or has the wrong importer")]
+    MaterialSource { id: AssetId, importer: &'static str },
+    #[error("could not read preview source '{path}': {source}")]
+    ReadMaterial {
+        path: String,
+        #[source]
+        source: io::Error,
+    },
+    #[error("could not prepare preview material or shader '{path}': {source}")]
+    Material {
+        path: String,
+        #[source]
+        source: SpriteMaterialAssetError,
+    },
+    #[error("preview asset {0} has not been prepared")]
+    UnpreparedAsset(AssetId),
     #[error(transparent)]
     Asset(#[from] AssetError),
     #[error(transparent)]
@@ -162,6 +182,15 @@ impl EditorViewport {
         assets: Option<(&DirAssetSource, &ProjectAssetDatabase)>,
     ) -> Result<(), ViewportError> {
         self.scene.set_document(document, assets)
+    }
+
+    /// Applies a scene using assets prepared by a background job. This performs no source I/O.
+    pub fn set_prepared_scene(
+        &mut self,
+        document: &SceneDocument,
+        assets: &PreviewAssets,
+    ) -> Result<(), ViewportError> {
+        self.scene.install_document(document, Some(assets))
     }
 
     /// Submits the scene and overlay before the window samples the output on the shared queue.

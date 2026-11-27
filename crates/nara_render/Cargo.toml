@@ -21,8 +21,10 @@ nara_scene = { workspace = true, optional = true }
 nara_ui = { workspace = true, optional = true, default-features = false }
 nara_window.workspace = true
 pollster = { workspace = true, optional = true }
+ron = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 thiserror.workspace = true
+uuid = { workspace = true, optional = true }
 wgpu = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -44,9 +46,11 @@ serde = [
     "nara_window/serde",
 ]
 image = []
-image-runtime = ["image", "runtime", "nara_asset/image-import"]
+image-runtime = ["image", "runtime"]
+image-import = ["image-runtime", "nara_asset/image-import"]
 render-prepare = ["image"]
-material = ["image", "dep:encase", "dep:glam", "dep:naga", "dep:nara_ecs", "dep:nara_material_derive"]
+material = ["image", "dep:encase", "dep:glam", "dep:naga", "dep:nara_ecs", "dep:nara_material_derive", "dep:uuid"]
+material-authoring = ["material", "dep:ron", "dep:serde"]
 sprites = ["runtime", "image", "material"]
 tiles = ["runtime", "image", "material"]
 animation = ["sprites"]

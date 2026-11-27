@@ -6,7 +6,9 @@ use nara_asset::{
     AssetDatabaseError, AssetMeta, AssetMetaError, AssetPath, AssetPathScope, AssetRef,
     AssetScanError, AssetScanMode, AssetSourceKind, AssetSourcePath, ProjectAssetDatabase,
     StableAssetId,
+    source::{ProjectAssetSource, asset_id_path, read_asset},
 };
+use nara_core::vfs::{AssetPath as VfsPath, AssetSource, DirAssetSource};
 use serde::Deserialize;
 
 const FIXTURE_ID: &str = "0193a100-1111-7000-8000-000000000001";
@@ -48,6 +50,8 @@ fn discovery_indexes_project_paths_and_moving_the_sidecar_preserves_identity() {
         "assets/art/ship.PNG",
         "assets/levels/main.nara.scene.ron",
         "assets/levels/props.prefab.ron",
+        "assets/paint.material.ron",
+        "assets/program.WGSL",
         "shared/beep.ogg",
     ] {
         write(root, source, []);
@@ -101,6 +105,16 @@ fn discovery_indexes_project_paths_and_moving_the_sidecar_preserves_identity() {
                 AssetSourceKind::Prefab
             ),
             (
+                "assets/paint.material.ron",
+                "nara.material",
+                AssetSourceKind::Other("nara.material".into())
+            ),
+            (
+                "assets/program.WGSL",
+                "nara.shader",
+                AssetSourceKind::Other("nara.shader".into())
+            ),
+            (
                 "shared/beep.ogg",
                 "nara.raw",
                 AssetSourceKind::Other("nara.raw".into())
@@ -143,6 +157,37 @@ fn discovery_indexes_project_paths_and_moving_the_sidecar_preserves_identity() {
         resolver.resolve_ref(&AssetRef::StableId(id)).unwrap(),
         record
     );
+}
+
+#[test]
+fn directory_id_source_resolves_the_registered_file_in_its_virtual_namespace() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    write(root, "assets/ship.png", b"image-source");
+    write(root, "assets/ship.png.meta", fixture_meta("nara.image"));
+    let id = FIXTURE_ID.parse().unwrap();
+    let directory = DirAssetSource::new(root).unwrap();
+    let database = scan(root, AssetScanMode::ReadOnly).unwrap();
+    let source = ProjectAssetSource::new(&directory, &database);
+    assert_eq!(read_asset(&source, id).unwrap(), b"image-source");
+    assert_eq!(
+        source.list_dir(&VfsPath::ROOT).unwrap(),
+        [asset_id_path(id)]
+    );
+    assert!(!source.exists(&VfsPath::new("assets/ship.png").unwrap()));
+    assert!(!source.exists(&VfsPath::new(FIXTURE_ID.replace('-', "")).unwrap()));
+
+    for suffix in ["", ".meta"] {
+        fs::rename(
+            root.join(format!("assets/ship.png{suffix}")),
+            root.join(format!("assets/moved.png{suffix}")),
+        )
+        .unwrap();
+    }
+    assert!(!source.exists(&asset_id_path(id)));
+    let database = scan(root, AssetScanMode::ReadOnly).unwrap();
+    let source = ProjectAssetSource::new(&directory, &database);
+    assert_eq!(read_asset(&source, id).unwrap(), b"image-source");
 }
 
 #[test]

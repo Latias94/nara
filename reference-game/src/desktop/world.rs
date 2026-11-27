@@ -1,7 +1,8 @@
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use nara::{
-    asset::add_asset,
+    asset::{AddAssetError, add_asset},
+    core::AssetId,
     ecs::{
         Single,
         bevy_ecs::{error::Result as SystemResult, query::With},
@@ -9,13 +10,11 @@ use nara::{
     prelude::*,
     render::{
         animation::{Clip, Frame, PlaybackMode},
-        material::SamplerDescriptor,
+        material::{Material2dBinding, SamplerDescriptor},
     },
-    scene::authoring::SpriteSource,
+    scene::components::SpriteSource,
     window::{PrimaryWindow, Window},
 };
-
-use super::SceneTextures;
 
 use crate::{
     Round, RoundStatus,
@@ -30,12 +29,36 @@ const ARENA_HEIGHT: f32 = 484.0;
 pub(super) struct AnimatedPilot;
 
 #[derive(Resource)]
-pub(super) struct PilotAnimation(Clip);
+pub(super) struct PilotAnimation {
+    clip: Clip,
+    image: Handle<ImageAsset>,
+}
+
+#[derive(Component)]
+pub(super) struct SceneDecoration;
+
+#[derive(Resource, Default)]
+pub(super) struct SceneVisuals {
+    pub images: BTreeMap<AssetId, Handle<ImageAsset>>,
+    pub materials: BTreeMap<AssetId, Material2dBinding>,
+}
+
+impl SceneVisuals {
+    pub fn install(
+        world: &mut World,
+        images: BTreeMap<AssetId, ImageAsset>,
+        materials: BTreeMap<AssetId, Material2dBinding>,
+    ) -> Result<(), AddAssetError> {
+        let images = images
+            .into_iter()
+            .map(|(id, image)| add_asset(world, image).map(|handle| (id, handle)))
+            .collect::<Result<_, _>>()?;
+        world.insert_resource(Self { images, materials });
+        Ok(())
+    }
+}
 
 pub(super) fn setup(world: &mut World) -> SystemResult {
-    let textures = world
-        .remove_resource::<SceneTextures>()
-        .ok_or("Night Relay scene textures were not loaded")?;
     world.spawn((
         Name::new("Arena camera"),
         Transform2d::default(),
@@ -46,7 +69,7 @@ pub(super) fn setup(world: &mut World) -> SystemResult {
         },
     ));
     let size = Vec2::new(0.5, 1.0);
-    let animation = Clip::new(
+    let clip = Clip::new(
         PlaybackMode::Loop,
         [
             Frame::new(
@@ -59,6 +82,15 @@ pub(super) fn setup(world: &mut World) -> SystemResult {
             )?,
         ],
     )?;
+    let image = add_asset(world, make_pilot_texture()?)?;
+    world.insert_resource(PilotAnimation { clip, image });
+    Ok(install_sprites(world)?)
+}
+
+pub(super) fn install_sprites(world: &mut World) -> Result<(), String> {
+    let animation = world.resource::<PilotAnimation>();
+    let pilot_image = animation.image;
+    let initial_region = animation.clip.sample(Duration::ZERO).region;
     let sources = world
         .query::<(Entity, &SpriteSource, &Transform2d, Option<&SceneActor>)>()
         .iter(world)
@@ -68,19 +100,19 @@ pub(super) fn setup(world: &mut World) -> SystemResult {
         .collect::<Vec<_>>();
     for (entity, source, pose, role) in sources {
         let sprite = if let Some(id) = source.image {
-            let texture = textures
-                .0
+            let texture = world
+                .resource::<SceneVisuals>()
+                .images
                 .get(&id)
                 .copied()
                 .ok_or_else(|| format!("Night Relay scene texture {id} was not loaded"))?;
             Sprite::from_texture(texture, source.size)
                 .with_sampler(SamplerDescriptor::NEAREST_CLAMP)
         } else if role == Some(Actor::Pilot) {
-            let texture = add_asset(world, make_pilot_texture()?)?;
             world.entity_mut(entity).insert(AnimatedPilot);
-            Sprite::from_texture(texture, source.size)
+            Sprite::from_texture(pilot_image, source.size)
                 .with_sampler(SamplerDescriptor::NEAREST_CLAMP)
-                .with_texture_region(animation.sample(Duration::ZERO).region)
+                .with_texture_region(initial_region)
         } else {
             Sprite::from_color(source.size, source.tint())
         };
@@ -91,7 +123,27 @@ pub(super) fn setup(world: &mut World) -> SystemResult {
             decorate_actor(world, entity, &source, pose, role);
         }
     }
-    world.insert_resource(PilotAnimation(animation));
+    bind_materials(world)?;
+    Ok(())
+}
+
+pub(super) fn bind_materials(world: &mut World) -> Result<(), String> {
+    let sources = world
+        .query::<(Entity, &SpriteSource)>()
+        .iter(world)
+        .filter_map(|(entity, source)| source.material.map(|material| (entity, material)))
+        .collect::<Vec<_>>();
+    for (entity, material) in sources {
+        let binding = world
+            .resource::<SceneVisuals>()
+            .materials
+            .get(&material)
+            .ok_or_else(|| format!("Night Relay scene material {material} was not loaded"))?
+            .clone();
+        if world.get::<Material2dBinding>(entity) != Some(&binding) {
+            world.entity_mut(entity).insert(binding);
+        }
+    }
     Ok(())
 }
 
@@ -170,6 +222,7 @@ fn decorate_actor(
 
 fn quad(world: &mut World, position: Vec2, size: Vec2, color: Color, layer: i32) {
     world.spawn((
+        SceneDecoration,
         Transform2d::from_translation(position),
         Visibility::Inherited,
         Sprite::from_color(size, color).with_layer(layer),
@@ -219,7 +272,7 @@ pub(super) fn update_appearance(
                 } else {
                     Duration::ZERO
                 };
-                let region = Some(animation.0.sample(playback).region);
+                let region = Some(animation.clip.sample(playback).region);
                 if sprite.texture_region != region {
                     sprite.texture_region = region;
                 }

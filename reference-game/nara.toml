@@ -8,6 +8,9 @@ assets = "assets"
 [editor]
 play = "snapshot"
 
+[delivery]
+scenes = ["01a219c4-2965-7297-b503-da50fb749023"]
+
 [window]
 title = "Night Relay"
 width = 1152

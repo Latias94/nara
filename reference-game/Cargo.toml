@@ -12,20 +12,32 @@ publish = false
 resolver = "3"
 
 [features]
-default = []
-simulation = ["dep:nara_asset", "nara/scene-authoring", "nara/physics-2d", "nara/audio"]
+default = ["hot-reload", "schema"]
+schema = ["nara/serde"]
+source = [
+    "dep:nara_asset",
+    "nara/scene-authoring",
+    "nara/material-authoring",
+    "nara_asset/authoring",
+    "nara_asset/image-import",
+]
+hot-reload = ["source", "nara_asset/hot-reload"]
+simulation = ["nara/physics-2d", "nara/audio"]
 desktop = [
     "simulation",
+    "dep:nara_asset",
     "nara/audio-device",
     "nara/presentation-2d",
     "nara/presentation-ui",
     "nara/desktop-winit",
     "nara/render-wgpu",
+    "nara/scene-cooked",
+    "nara_asset/cooked",
 ]
 
 [dependencies]
-nara = { path = "..", default-features = false, features = ["runtime-core", "serde"] }
-nara_asset = { path = "../crates/nara_asset", features = ["authoring", "image-import"], optional = true }
+nara = { path = "..", default-features = false, features = ["runtime-core"] }
+nara_asset = { path = "../crates/nara_asset", default-features = false, optional = true }
 
 [dev-dependencies]
 tempfile = "3.27"
@@ -38,11 +50,16 @@ required-features = ["desktop"]
 [[bin]]
 name = "headless"
 path = "src/bin/headless.rs"
-required-features = ["simulation"]
+required-features = ["simulation", "source"]
 
 [[bin]]
 name = "nara_schema"
 path = "src/bin/nara_schema.rs"
+required-features = ["schema"]
+
+[[test]]
+name = "schema"
+required-features = ["schema"]
 
 [patch.crates-io]
 wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }

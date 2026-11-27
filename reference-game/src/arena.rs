@@ -3,13 +3,13 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use nara::{
-    prelude::*,
-    scene::authoring::{ColliderSource, SceneDocument, SceneEntity, SpriteSource},
-};
+use nara::{prelude::*, scene::components::ColliderSource};
 
-use crate::{ExtractionGate, PatrolDrone, Pilot, PowerCell, RunRules};
+use crate::RunRules;
+#[cfg(feature = "desktop")]
+use crate::{ExtractionGate, PatrolDrone, Pilot, PowerCell};
 
+#[cfg(feature = "source")]
 pub(crate) mod source;
 
 pub(crate) const CELL_COUNT: usize = 3;
@@ -57,66 +57,78 @@ pub(crate) struct Arena {
     pub(crate) patrols: [Patrol; DRONE_COUNT],
 }
 
-struct Spawn<'a> {
-    source: &'a SceneEntity,
-    pose: Transform2d,
-    visibility: Visibility,
-    sprite: Option<SpriteSource>,
-    collider: Option<Collider2d>,
-    actor: Option<Actor>,
-    rules: Option<RunRules>,
+pub(crate) struct SceneRow<'a> {
+    pub name: &'a str,
+    pub is_child: bool,
+    pub pose: Option<Transform2d>,
+    pub visibility: Option<Visibility>,
+    pub collider: Option<ColliderSource>,
+    pub pilot: bool,
+    pub cell_order: Option<u32>,
+    pub drone_order: Option<u32>,
+    pub gate: bool,
+    pub rules: Option<RunRules>,
 }
 
-impl Spawn<'_> {
-    fn component<T: Schema>(source: &SceneEntity) -> Result<Option<T>, String> {
-        source.typed::<T>().map_err(|error| {
-            format!(
-                "{} ({}) {}: {error}",
-                source.name,
-                source.id,
-                T::COMPONENT_ID
-            )
-        })
+struct BoundRow {
+    pose: Transform2d,
+    visibility: Visibility,
+    collider: Option<Collider2d>,
+    actor: Option<Actor>,
+    carries_rules: bool,
+}
+
+impl<'a> SceneRow<'a> {
+    #[cfg(feature = "desktop")]
+    pub(crate) fn cooked(entity: nara::ecs::bevy_ecs::world::EntityRef<'a>) -> Self {
+        Self {
+            name: entity.get::<Name>().map_or("cooked entity", Name::as_str),
+            is_child: entity.contains::<ChildOf>(),
+            pose: entity.get::<Transform2d>().copied(),
+            visibility: entity.get::<Visibility>().copied(),
+            collider: entity.get::<ColliderSource>().copied(),
+            pilot: entity.contains::<Pilot>(),
+            cell_order: entity.get::<PowerCell>().map(|cell| cell.order),
+            drone_order: entity.get::<PatrolDrone>().map(|drone| drone.order),
+            gate: entity.contains::<ExtractionGate>(),
+            rules: entity.get::<RunRules>().copied(),
+        }
     }
 
-    fn role(source: &SceneEntity) -> Result<Option<Actor>, String> {
+    fn role(&self) -> Result<Option<Actor>, String> {
         let mut roles = [
-            Self::component::<Pilot>(source)?.map(|_| Actor::Pilot),
-            Self::component::<PowerCell>(source)?
-                .map(|cell| role_index(source, cell.order, CELL_COUNT).map(Actor::Cell))
+            self.pilot.then_some(Actor::Pilot),
+            self.cell_order
+                .map(|order| role_index(self.name, order, CELL_COUNT).map(Actor::Cell))
                 .transpose()?,
-            Self::component::<PatrolDrone>(source)?
-                .map(|drone| role_index(source, drone.order, DRONE_COUNT).map(Actor::Drone))
+            self.drone_order
+                .map(|order| role_index(self.name, order, DRONE_COUNT).map(Actor::Drone))
                 .transpose()?,
-            Self::component::<ExtractionGate>(source)?.map(|_| Actor::Gate),
+            self.gate.then_some(Actor::Gate),
         ]
         .into_iter()
         .flatten();
         let role = roles.next();
         if roles.next().is_some() {
-            return Err(format!("{} has multiple arena roles", source.name));
+            return Err(format!("{} has multiple arena roles", self.name));
         }
         Ok(role)
     }
 
-    fn read(source: &SceneEntity) -> Result<Spawn<'_>, String> {
-        if source.prefab.is_some() {
-            return Err(format!("{} is an unresolved prefab instance", source.name));
+    fn bind(&self) -> Result<BoundRow, String> {
+        let actor = self.role()?;
+        if actor.is_some() && self.pose.is_none() {
+            return Err(format!("{} requires a Transform 2D", self.name));
         }
-        let actor = Self::role(source)?;
-        let pose = Self::component::<Transform2d>(source)?;
-        let collider = Self::component::<ColliderSource>(source)?;
-        if actor.is_some() && pose.is_none() {
-            return Err(format!("{} requires a Transform 2D", source.name));
-        }
-        if source.parent.is_some() && (actor.is_some() || collider.is_some()) {
+        if self.is_child && (actor.is_some() || self.collider.is_some()) {
             return Err(format!(
                 "{} must be a root to participate in gameplay",
-                source.name
+                self.name
             ));
         }
-        let pose = pose.unwrap_or_default();
-        let collider = collider
+        let pose = self.pose.unwrap_or_default();
+        let collider = self
+            .collider
             .map(|collider| {
                 let scale = pose.scale.abs();
                 if let Some(radius) = collider.radius {
@@ -130,118 +142,111 @@ impl Spawn<'_> {
                         return Ok(Collider2d::Box { half_extents });
                     }
                 }
-                Err(format!("{} has invalid collider dimensions", source.name))
+                Err(format!("{} has invalid collider dimensions", self.name))
             })
             .transpose()?;
-        Ok(Spawn {
-            source,
+        Ok(BoundRow {
             pose,
-            visibility: Self::component::<Visibility>(source)?.unwrap_or_default(),
-            sprite: Self::component::<SpriteSource>(source)?,
+            visibility: self.visibility.unwrap_or_default(),
             collider,
             actor,
-            rules: Self::component::<RunRules>(source)?,
+            carries_rules: self.rules.is_some(),
         })
     }
 }
 
-fn role_index(source: &SceneEntity, order: u32, count: usize) -> Result<usize, String> {
+fn role_index(name: &str, order: u32, count: usize) -> Result<usize, String> {
     usize::try_from(order)
         .ok()
         .and_then(|order| order.checked_sub(1))
         .filter(|&index| index < count)
-        .ok_or_else(|| format!("{} needs an arena role order in 1–{count}", source.name))
+        .ok_or_else(|| format!("{name} needs an arena role order in 1–{count}"))
 }
 
-pub(crate) fn spawn_scene(
-    world: &mut World,
-    scene: &SceneDocument,
-    rules_override: Option<RunRules>,
-) -> Result<(Arena, RunRules), String> {
-    scene.validate().map_err(|error| error.to_string())?;
-    let spawns = scene
-        .entities
-        .iter()
-        .map(Spawn::read)
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut rules = spawns.iter().filter_map(|spawn| spawn.rules);
-    let rules = match (rules.next(), rules.next()) {
-        (Some(rules), None) => rules_override.unwrap_or(rules).checked()?,
-        _ => return Err("Night Relay requires exactly one Run Rules component".into()),
-    };
-    let mut actors = HashMap::with_capacity(2 + CELL_COUNT + DRONE_COUNT);
-    for spawn in &spawns {
-        if let Some(role) = spawn.actor
-            && let Some(previous) = actors.insert(role, spawn)
-        {
-            return Err(format!(
-                "{} and {} both bind the {role} role",
-                previous.source.name, spawn.source.name
-            ));
-        }
-    }
-    let marker = |actor| -> Result<Marker, String> {
-        let spawn = actors
-            .get(&actor)
-            .ok_or_else(|| format!("Night Relay is missing its {actor} entity"))?;
-        let Some(Collider2d::Circle { radius }) = spawn.collider else {
-            return Err(format!(
-                "{} requires a circular collider",
-                spawn.source.name
-            ));
-        };
-        Ok(Marker {
-            pose: spawn.pose,
-            radius,
-        })
-    };
-    let arena = Arena {
-        pilot: marker(Actor::Pilot)?,
-        cells: [
-            marker(Actor::Cell(0))?,
-            marker(Actor::Cell(1))?,
-            marker(Actor::Cell(2))?,
-        ],
-        gate: marker(Actor::Gate)?,
-        patrols: [
-            Patrol::new(marker(Actor::Drone(0))?, Vec2::new(128.0, 0.0), 4.0, 0.0),
-            Patrol::new(marker(Actor::Drone(1))?, Vec2::new(224.0, 0.0), 6.0, 0.35),
-            Patrol::new(marker(Actor::Drone(2))?, Vec2::new(0.0, -96.0), 3.6, 0.85),
-        ],
-    };
+pub(crate) struct ArenaPlan {
+    pub arena: Arena,
+    pub rules: RunRules,
+    rows: Vec<BoundRow>,
+}
 
-    let mut entities = HashMap::with_capacity(spawns.len());
-    let mut children = Vec::new();
-    for spawn in spawns {
-        let mut entity = world.spawn((
-            Name::new(spawn.source.name.as_str()),
-            spawn.pose,
-            spawn.visibility,
-        ));
-        entities.insert(spawn.source.id, entity.id());
-        if let Some(parent) = spawn.source.parent {
-            children.push((entity.id(), parent));
+impl ArenaPlan {
+    pub fn prepare<'a>(
+        rows: impl IntoIterator<Item = Result<SceneRow<'a>, String>>,
+        rules_override: Option<RunRules>,
+    ) -> Result<Self, String> {
+        let mut actors = HashMap::with_capacity(2 + CELL_COUNT + DRONE_COUNT);
+        let mut bindings = Vec::new();
+        let mut rules = None;
+        for row in rows {
+            let row = row?;
+            if let Some(next) = row.rules
+                && rules.replace(next).is_some()
+            {
+                return Err("Night Relay requires exactly one Run Rules component".into());
+            }
+            let binding = row.bind()?;
+            if let Some(role) = binding.actor
+                && let Some((previous, _, _)) =
+                    actors.insert(role, (row.name, binding.pose, binding.collider))
+            {
+                return Err(format!(
+                    "{previous} and {} both bind the {role} role",
+                    row.name
+                ));
+            }
+            bindings.push(binding);
         }
-        if let Some(role) = spawn.actor {
-            entity.insert(SceneActor {
-                role,
-                rotation: spawn.pose.rotation,
-                visibility: spawn.visibility,
-            });
-        } else if let Some(collider) = spawn.collider {
-            entity.insert(collider);
-        }
-        if let Some(sprite) = spawn.sprite {
-            entity.insert(sprite);
-        }
-        if spawn.rules.is_some() {
-            entity.insert(rules);
-        }
+        let rules = rules.ok_or("Night Relay requires exactly one Run Rules component")?;
+        let rules = rules_override.unwrap_or(rules).checked()?;
+        let marker = |actor| -> Result<Marker, String> {
+            let &(name, pose, collider) = actors
+                .get(&actor)
+                .ok_or_else(|| format!("Night Relay is missing its {actor} entity"))?;
+            let Some(Collider2d::Circle { radius }) = collider else {
+                return Err(format!("{name} requires a circular collider"));
+            };
+            Ok(Marker { pose, radius })
+        };
+        let arena = Arena {
+            pilot: marker(Actor::Pilot)?,
+            cells: [
+                marker(Actor::Cell(0))?,
+                marker(Actor::Cell(1))?,
+                marker(Actor::Cell(2))?,
+            ],
+            gate: marker(Actor::Gate)?,
+            patrols: [
+                Patrol::new(marker(Actor::Drone(0))?, Vec2::new(128.0, 0.0), 4.0, 0.0),
+                Patrol::new(marker(Actor::Drone(1))?, Vec2::new(224.0, 0.0), 6.0, 0.35),
+                Patrol::new(marker(Actor::Drone(2))?, Vec2::new(0.0, -96.0), 3.6, 0.85),
+            ],
+        };
+        Ok(Self {
+            arena,
+            rules,
+            rows: bindings,
+        })
     }
-    for (child, parent) in children {
-        world.entity_mut(child).insert(ChildOf(entities[&parent]));
+
+    pub fn bind(self, world: &mut World, entities: &[Entity]) -> (Arena, RunRules) {
+        for (&entity, row) in entities.iter().zip(self.rows) {
+            let mut entity = world.entity_mut(entity);
+            entity.insert((row.pose, row.visibility));
+            if let Some(role) = row.actor {
+                entity.insert(SceneActor {
+                    role,
+                    rotation: row.pose.rotation,
+                    visibility: row.visibility,
+                });
+            } else if let Some(collider) = row.collider {
+                entity.insert(collider);
+            }
+            if row.carries_rules {
+                entity.insert(self.rules);
+            }
+        }
+        (self.arena, self.rules)
     }
-    Ok((arena, rules))
 }
 
 #[derive(Clone, Copy)]

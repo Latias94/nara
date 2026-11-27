@@ -33,6 +33,23 @@ The first command builds the exporter and updates `.nara/schema_cache.json`. The
 cache. Keep the generated `Cargo.lock` after the first build so later builds use the same dependency
 versions.
 
+## Cook and export
+
+The generated `nara.toml` lists the entry scene's `.meta` UUID under `[delivery]`. Cook expands its
+prefabs and imports its referenced assets into `.nara/game.npak`. Run with `--trusted` to refresh
+the release Schema before cooking. Cook without that flag reads the cached catalog for the
+delivery profile when available and otherwise uses the authoring Schema cache.
+
+```text
+cargo run --locked -p nara_project --bin nara -- cook ../my-game --trusted
+cargo run --locked -p nara_project --bin nara -- export ../my-game --out ../my-game-dist --trusted
+```
+
+Choose a new export directory. Export builds the release game with Cargo defaults disabled and the
+game target's required features enabled. It runs the Schema exporter with the same profile plus the
+exporter's required features. Keep the executable and `game.npak` together when moving or
+distributing the exported game. The development game continues reading project source assets.
+
 ## Bind a physical key
 
 Insert an `ActionMaps` resource before the game starts. Physical keys such as `KeyW`, `Space`,

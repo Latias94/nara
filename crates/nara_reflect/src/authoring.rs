@@ -17,6 +17,8 @@ pub trait Schema: Component + Sized + 'static {
     /// The stable schema identifier also used to register this type with an app.
     const COMPONENT_ID: &'static str;
 
+    /// Returns the component's metadata. Handwritten native Postcard codecs declare support
+    /// with [`TypeSchema::with_postcard_codec`] in every build.
     fn type_schema() -> Result<TypeSchema, ComponentCodecError>;
 
     /// Decodes the current component's stored fields without applying them to a world.
@@ -60,6 +62,16 @@ pub trait Schema: Component + Sized + 'static {
     /// Decodes exactly one complete component payload. The enclosing format checks the schema hash.
     #[cfg(feature = "postcard")]
     fn decode_postcard(_bytes: &[u8]) -> Result<Self, ComponentCodecError> {
+        Err(ComponentCodecError::PostcardUnavailable)
+    }
+
+    /// Visits the stable references in a decoded component without building an authored value.
+    /// A handwritten Postcard codec with reference fields must implement this method.
+    #[cfg(feature = "postcard")]
+    fn visit_postcard_references(
+        &self,
+        _visit: &mut dyn FnMut(crate::PostcardReference),
+    ) -> Result<(), ComponentCodecError> {
         Err(ComponentCodecError::PostcardUnavailable)
     }
 }

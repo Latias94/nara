@@ -1,5 +1,7 @@
 //! Typed Postcard adapters for the field types supported by Schema.
 
+mod dynamic;
+
 use std::collections::BTreeMap;
 
 use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
@@ -12,10 +14,26 @@ use uuid::Uuid;
 
 use crate::{Bytes, ComponentCodecError, PackedF32, PackedI32, PackedU16, PackedU32};
 
+/// An identity reference stored in a typed Postcard component payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostcardReference {
+    Asset(AssetId),
+    Entity(EntityUuid),
+}
+
 #[doc(hidden)]
 pub trait PostcardField: Sized {
+    const HAS_REFERENCES: bool = false;
+
     fn write<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error>;
     fn read<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error>;
+
+    fn visit_references(
+        &self,
+        _visit: &mut dyn FnMut(PostcardReference),
+    ) -> Result<(), ComponentCodecError> {
+        Ok(())
+    }
 }
 
 struct WriteField<'a, T>(&'a T);
@@ -63,6 +81,16 @@ pub fn finish_postcard(remaining: &[u8]) -> Result<(), ComponentCodecError> {
             "unexpected trailing bytes in component Postcard payload".into(),
         ))
     }
+}
+
+pub fn visit_postcard_field_references<T: PostcardField>(
+    value: &T,
+    visit: &mut dyn FnMut(PostcardReference),
+) -> Result<(), ComponentCodecError> {
+    if T::HAS_REFERENCES {
+        value.visit_references(visit)?;
+    }
+    Ok(())
 }
 
 fn binary_error(field: &str, error: postcard::Error) -> ComponentCodecError {
@@ -163,8 +191,10 @@ math_field!(Vec4, new, x, y, z, w);
 math_field!(Color, rgba, r, g, b, a);
 
 macro_rules! uuid_field {
-    ($($native:ty),+) => {$(
+    ($($native:ty => $reference:ident),+) => {$(
         impl PostcardField for $native {
+            const HAS_REFERENCES: bool = true;
+
             fn write<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
                 self.as_uuid().as_bytes().serialize(serializer)
             }
@@ -173,11 +203,19 @@ macro_rules! uuid_field {
                 let bytes = <[u8; 16]>::deserialize(deserializer)?;
                 Self::try_from_uuid(Uuid::from_bytes(bytes)).map_err(serde::de::Error::custom)
             }
+
+            fn visit_references(
+                &self,
+                visit: &mut dyn FnMut(PostcardReference),
+            ) -> Result<(), ComponentCodecError> {
+                visit(PostcardReference::$reference(*self));
+                Ok(())
+            }
         }
     )+};
 }
 
-uuid_field!(AssetId, EntityUuid);
+uuid_field!(AssetId => Asset, EntityUuid => Entity);
 
 #[derive(Deserialize, Serialize)]
 enum AssetLocator<'a> {
@@ -187,6 +225,8 @@ enum AssetLocator<'a> {
 }
 
 impl PostcardField for AssetRef {
+    const HAS_REFERENCES: bool = true;
+
     fn write<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let locator = match self {
             Self::Path(path) => AssetLocator::Path(path.as_str()),
@@ -220,9 +260,27 @@ impl PostcardField for AssetRef {
             }
         }
     }
+
+    fn visit_references(
+        &self,
+        visit: &mut dyn FnMut(PostcardReference),
+    ) -> Result<(), ComponentCodecError> {
+        if let Self::StableId(id) = self
+            && let Ok(id) = AssetId::try_from(*id)
+        {
+            visit(PostcardReference::Asset(id));
+            return Ok(());
+        }
+        Err(ComponentCodecError::invalid_field(
+            "<asset-ref>",
+            "a non-nil stable asset UUID",
+        ))
+    }
 }
 
 impl<T: PostcardField> PostcardField for Option<T> {
+    const HAS_REFERENCES: bool = T::HAS_REFERENCES;
+
     fn write<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.as_ref().map(WriteField).serialize(serializer)
     }
@@ -230,9 +288,21 @@ impl<T: PostcardField> PostcardField for Option<T> {
     fn read<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Ok(Option::<ReadField<T>>::deserialize(deserializer)?.map(|value| value.0))
     }
+
+    fn visit_references(
+        &self,
+        visit: &mut dyn FnMut(PostcardReference),
+    ) -> Result<(), ComponentCodecError> {
+        if let Some(value) = self {
+            value.visit_references(visit)?;
+        }
+        Ok(())
+    }
 }
 
 impl<T: PostcardField> PostcardField for Vec<T> {
+    const HAS_REFERENCES: bool = T::HAS_REFERENCES;
+
     fn write<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut sequence = serializer.serialize_seq(Some(self.len()))?;
         for value in self {
@@ -245,9 +315,21 @@ impl<T: PostcardField> PostcardField for Vec<T> {
         let values = Vec::<ReadField<T>>::deserialize(deserializer)?;
         Ok(values.into_iter().map(|value| value.0).collect())
     }
+
+    fn visit_references(
+        &self,
+        visit: &mut dyn FnMut(PostcardReference),
+    ) -> Result<(), ComponentCodecError> {
+        for value in self {
+            value.visit_references(visit)?;
+        }
+        Ok(())
+    }
 }
 
 impl<T: PostcardField> PostcardField for BTreeMap<String, T> {
+    const HAS_REFERENCES: bool = T::HAS_REFERENCES;
+
     fn write<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(Some(self.len()))?;
         for (name, value) in self {
@@ -257,11 +339,46 @@ impl<T: PostcardField> PostcardField for BTreeMap<String, T> {
     }
 
     fn read<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let wire = BTreeMap::<String, ReadField<T>>::deserialize(deserializer)?;
-        Ok(wire
-            .into_iter()
-            .map(|(key, value)| (key, value.0))
-            .collect())
+        struct ReadMap<T>(std::marker::PhantomData<T>);
+
+        impl<'de, T: PostcardField> serde::de::Visitor<'de> for ReadMap<T> {
+            type Value = BTreeMap<String, T>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a map with strictly ascending keys")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut source: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut values = BTreeMap::new();
+                while let Some((key, ReadField(value))) =
+                    source.next_entry::<String, ReadField<T>>()?
+                {
+                    if values
+                        .last_key_value()
+                        .is_some_and(|(previous, _)| previous >= &key)
+                    {
+                        return Err(serde::de::Error::custom("unordered or duplicate map key"));
+                    }
+                    values.insert(key, value);
+                }
+                Ok(values)
+            }
+        }
+
+        deserializer.deserialize_map(ReadMap(std::marker::PhantomData))
+    }
+
+    fn visit_references(
+        &self,
+        visit: &mut dyn FnMut(PostcardReference),
+    ) -> Result<(), ComponentCodecError> {
+        for value in self.values() {
+            value.visit_references(visit)?;
+        }
+        Ok(())
     }
 }
 

@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 blake3.workspace = true
 image = { workspace = true, optional = true }
+lz4_flex = { version = "0.13", default-features = false, features = ["std", "safe-encode", "safe-decode", "checked-decode"], optional = true }
 nara_app = { workspace = true, optional = true }
 nara_core.workspace = true
 nara_ecs = { workspace = true, optional = true }
@@ -31,6 +32,8 @@ tempfile = "3.27"
 [features]
 default = []
 authoring = ["serde", "dep:getrandom", "dep:ron", "dep:tempfile"]
+cook = ["authoring", "cooked", "dep:image"]
+cooked = ["dep:lz4_flex"]
 hot-reload = ["image-import", "dep:notify"]
 image-import = ["runtime", "dep:image"]
 runtime = ["dep:nara_app", "dep:nara_ecs"]

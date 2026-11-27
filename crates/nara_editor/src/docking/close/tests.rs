@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, time::Duration};
 
 use nara_core::{DocumentId, EntityUuid, Vec2};
 use nara_project::workflow::ProjectTrust;
@@ -319,4 +319,49 @@ fn canceling_name_draft_with_escape_resets_text_and_clears_draft() {
     assert_eq!(text, "Original");
     editor.request_close();
     assert!(!editor.is_open());
+}
+
+#[test]
+fn source_refresh_waits_for_an_inspector_draft_before_publishing() {
+    let mut editor = Editor::open(true, false);
+    let mut visual = editor.edit_name("Inspector draft");
+    let native = editor.scene_path(SCENE);
+    let mut changed = SceneDocument::read(&native).unwrap();
+    changed.entities[0].name = "External write".into();
+    changed.write(&native).unwrap();
+
+    let inspector = editor.inspector.downgrade();
+    editor.workspace.update(&mut editor.cx, |workspace, cx| {
+        workspace.watch_assets(inspector, cx);
+        workspace.refresh_assets(cx);
+    });
+    let settle = || {
+        for _ in 0..4 {
+            editor.cx.run_until_parked();
+            editor
+                .cx
+                .executor()
+                .advance_clock(Duration::from_millis(100));
+        }
+        editor.cx.run_until_parked();
+    };
+    let name = || {
+        editor.workspace.read_with(&editor.cx, |workspace, _| {
+            workspace.session.document().scene().entities[0]
+                .name
+                .clone()
+        })
+    };
+    settle();
+    assert_eq!(name(), "Original");
+    assert!(editor.has_drafts());
+
+    visual.simulate_keystrokes("escape");
+    settle();
+    assert_eq!(name(), "External write");
+    assert!(!editor.has_drafts());
+    editor.workspace.read_with(&editor.cx, |workspace, _| {
+        assert!(workspace.session.can_undo());
+        assert!(!workspace.session.is_dirty());
+    });
 }

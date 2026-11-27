@@ -7,13 +7,14 @@ license.workspace = true
 
 [dependencies]
 bevy_ecs.workspace = true
+blake3 = { workspace = true, optional = true }
 nara_app.workspace = true
 nara_core.workspace = true
-nara_reflect = { workspace = true, features = ["serde"], optional = true }
+nara_reflect = { workspace = true, optional = true }
 ron = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
-uuid = { workspace = true, features = ["v5"], optional = true }
+uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true
@@ -22,4 +23,10 @@ serde_json.workspace = true
 tempfile = "3.27"
 
 [features]
-authoring = ["dep:nara_reflect", "dep:ron", "dep:serde", "dep:thiserror", "dep:uuid"]
+authoring = ["dep:nara_reflect", "nara_reflect/serde", "dep:ron", "dep:serde", "dep:thiserror", "dep:uuid", "uuid/v5"]
+cooked = ["dep:blake3", "dep:nara_reflect", "nara_reflect/postcard", "dep:thiserror", "dep:uuid"]
+cook = ["authoring", "cooked"]
+
+[[example]]
+name = "cooked_scene_benchmark"
+required-features = ["cook"]

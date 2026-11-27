@@ -11,7 +11,8 @@ pub use nara_physics2d as physics2d;
 #[cfg(any(
     feature = "runtime-2d",
     feature = "presentation-ui",
-    feature = "render-wgpu"
+    feature = "render-wgpu",
+    feature = "material-authoring"
 ))]
 pub use nara_render as render;
 #[cfg(feature = "render-wgpu")]

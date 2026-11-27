@@ -1,6 +1,7 @@
 use std::fs;
 
-use nara_asset::AssetScanMode;
+use nara_asset::{AssetScanMode, AssetSourcePath};
+use nara_core::vfs::AssetPath;
 use nara_editor_core::viewport::{PanelPoint, PanelSize, WorldPoint};
 use nara_scene::authoring::SceneAsset;
 
@@ -265,6 +266,100 @@ fn image_ids_share_residency_and_bad_edits_leave_the_preview_intact() {
 }
 
 #[test]
+fn prepared_material_reloads_use_shader_identity_and_keep_the_last_good_binding() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let image_id = asset_id(1);
+    let material_id = asset_id(2);
+    let shader_id = asset_id(3);
+    let material = "assets/sprite.material.ron";
+    let shader = "assets/sprite.wgsl";
+    let shader_code = "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return sampled * tint * material_parameters.color; }";
+    write_image(root, "assets/sprite.png", image_id, PNG);
+    fs::write(
+        root.join(material),
+        format!("SpriteMaterial(shader: \"{shader_id}\")"),
+    )
+    .unwrap();
+    write_sidecar(root, material, material_id, "nara.material");
+    fs::write(root.join(shader), shader_code).unwrap();
+    write_sidecar(root, shader, shader_id, "nara.shader");
+
+    let id = entity_id(1);
+    let mut sprite = sprite_entity(id, 0, Some(image_id));
+    let mut sprite_source = sprite.typed::<SpriteSource>().unwrap().unwrap();
+    sprite_source.material = Some(material_id);
+    sprite.set(&sprite_source).unwrap();
+    let document = document(vec![sprite]);
+    let source = DirAssetSource::new(root).unwrap();
+    let empty = PreviewAssets::default();
+    let original = PreviewAssets::load(&document, &source, &scan(root), &empty).unwrap();
+    let mut scene = PreviewScene::new().unwrap();
+    scene.install_document(&document, Some(&original)).unwrap();
+    let entity = scene.entities[&id];
+    let handle = scene.images[&image_id].handle;
+    let binding = scene
+        .runtime
+        .world()
+        .get::<Material2dBinding>(entity)
+        .unwrap()
+        .clone();
+
+    fs::write(root.join(shader), "invalid WGSL").unwrap();
+    assert!(
+        matches!(PreviewAssets::load(&document, &source, &scan(root), &original),
+        Err(ViewportError::Material { path, .. }) if path == shader)
+    );
+    assert_eq!(
+        scene.runtime.world().get::<Material2dBinding>(entity),
+        Some(&binding)
+    );
+    assert_eq!(scene.images[&image_id].handle, handle);
+
+    let moved = "assets/moved.wgsl";
+    fs::rename(root.join(shader), root.join(moved)).unwrap();
+    fs::rename(
+        root.join(format!("{shader}.meta")),
+        root.join(format!("{moved}.meta")),
+    )
+    .unwrap();
+    fs::write(root.join(moved), shader_code).unwrap();
+    let unchanged = PreviewAssets::load(&document, &source, &scan(root), &original).unwrap();
+    assert!(original.same_content(&unchanged));
+
+    fs::write(
+        root.join(material),
+        format!("SpriteMaterial(shader: \"{shader_id}\", color: (0.4,1.0,1.0,1.0))"),
+    )
+    .unwrap();
+    fs::write(
+        root.join(moved),
+        shader_code.replace("sampled * tint", "sampled * tint * 0.8"),
+    )
+    .unwrap();
+    fs::write(
+        root.join("assets/sprite.png.meta"),
+        format!("AssetMeta(id: \"{image_id}\", importer: \"nara.image\", settings: (srgb: false))"),
+    )
+    .unwrap();
+    let updated = PreviewAssets::load(&document, &source, &scan(root), &unchanged).unwrap();
+    assert!(!original.same_content(&updated));
+    assert_ne!(original.image_hash(image_id), updated.image_hash(image_id));
+    scene.install_document(&document, Some(&updated)).unwrap();
+    let installed = scene
+        .runtime
+        .world()
+        .get::<Material2dBinding>(entity)
+        .unwrap();
+    assert_ne!(
+        installed.generation().shader().digest(),
+        binding.generation().shader().digest()
+    );
+    assert_eq!(&installed.uniform_bytes()[..4], &0.4_f32.to_le_bytes());
+    assert_eq!(scene.images[&image_id].handle, handle);
+}
+
+#[test]
 fn an_unchanged_scene_tracks_a_moved_image_without_losing_the_last_good_preview() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
@@ -309,7 +404,6 @@ fn an_unchanged_scene_tracks_a_moved_image_without_losing_the_last_good_preview(
         scene.set_document(&document, Some((&source, &moved))),
         Err(ViewportError::DecodeImage { path, .. }) if path == new_path
     ));
-    assert_eq!(scene.images[&id].path.as_str(), old_path);
     assert_eq!(scene.images[&id].handle, handle);
     let installed = scene.runtime.world().resource::<Assets<ImageAsset>>();
     assert_eq!(installed.get(handle).unwrap().pixels(), [128, 64, 32, 255]);
@@ -318,7 +412,6 @@ fn an_unchanged_scene_tracks_a_moved_image_without_losing_the_last_good_preview(
     scene
         .set_document(&document, Some((&source, &moved)))
         .unwrap();
-    assert_eq!(scene.images[&id].path.as_str(), new_path);
     assert_eq!(scene.images[&id].handle, handle);
     assert_eq!(scene.runtime.world().resource::<RealTime>().frame, frame);
 

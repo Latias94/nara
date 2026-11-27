@@ -94,6 +94,10 @@ if __name__ == "__main__":
         "nara-reference-game", shipping, "--manifest-path", "reference-game/Cargo.toml",
         "--features", "desktop",
     )
+    check_dependencies(
+        "nara-reference-game", re.compile(rf"{shipping.pattern}|^(?:notify|png|ron)$"),
+        "--manifest-path", "reference-game/Cargo.toml", "--no-default-features", "--features", "desktop",
+    )
     check_dependencies("nara_project", re.compile(rf"{editor}|^(?:wgpu|winit)$"), "--all-features")
     check_dependencies(
         "nara_editor_core",

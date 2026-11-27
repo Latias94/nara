@@ -1,4 +1,4 @@
-//! Night Relay, a 2D game built on Nara's public runtime and scene authoring APIs.
+//! Night Relay, a 2D game built on Nara's public runtime APIs.
 
 use nara::{
     prelude::{App, Component, RegisterSchema, Schema},
@@ -7,6 +7,8 @@ use nara::{
 
 pub const TITLE: &str = "Night Relay";
 pub const WINDOW_SIZE: (u32, u32) = (1152, 768);
+#[cfg(all(feature = "simulation", any(feature = "source", feature = "desktop")))]
+const ENTRY_SCENE_ID: &str = "01a219c4-2965-7297-b503-da50fb749023";
 
 #[derive(Clone, Copy, Debug, Component, Schema)]
 #[schema(id = "night-relay.RunRules", version = 2, default, alias = "Run Rules")]
@@ -19,7 +21,7 @@ pub struct RunRules {
     pub shield_charges: u32,
 }
 
-#[cfg(feature = "simulation")]
+#[cfg(all(feature = "simulation", any(feature = "source", feature = "desktop")))]
 impl RunRules {
     fn checked(self) -> Result<Self, &'static str> {
         if !(1..=180).contains(&self.time_limit_seconds)
@@ -94,16 +96,16 @@ pub fn register_game_schema(app: &mut App) -> Result<(), SchemaRegistrationError
     Ok(())
 }
 
-#[cfg(feature = "simulation")]
+#[cfg(all(feature = "simulation", any(feature = "source", feature = "desktop")))]
 mod arena;
-#[cfg(feature = "simulation")]
+#[cfg(all(feature = "simulation", any(feature = "source", feature = "desktop")))]
 mod audio;
 #[cfg(feature = "desktop")]
 pub mod desktop;
-#[cfg(feature = "simulation")]
+#[cfg(all(feature = "simulation", feature = "source"))]
 pub mod headless;
-#[cfg(feature = "simulation")]
+#[cfg(all(feature = "simulation", any(feature = "source", feature = "desktop")))]
 mod simulation;
 
-#[cfg(feature = "simulation")]
+#[cfg(all(feature = "simulation", any(feature = "source", feature = "desktop")))]
 pub use simulation::{Failure, GamePlugin, PilotInput, Round, RoundStatus};

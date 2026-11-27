@@ -27,7 +27,7 @@ pub struct StressReport {
 }
 
 pub fn run_stress(rounds: u32) -> GameResult<StressReport> {
-    run_stress_in(source::development_root(), rounds)
+    run_stress_in(&source::development_root()?, rounds)
 }
 
 fn run_stress_in(project_root: &Path, rounds: u32) -> GameResult<StressReport> {
@@ -35,8 +35,9 @@ fn run_stress_in(project_root: &Path, rounds: u32) -> GameResult<StressReport> {
         return Err(format!("choose 1–{MAX_ROUNDS} stress rounds").into());
     }
     let mut app = headless_app()?;
-    let (scene, _) = source::load(&mut app, project_root, None)?;
-    app.add_plugins(GamePlugin::from_scene(scene))?;
+    let project = source::SourceProject::new(&mut app, project_root)?;
+    let content = project.load(&project.assets()?, None)?;
+    app.add_plugins(GamePlugin::from_scene(content.scene))?;
     let baseline = exercise_round(&mut app)?;
     for _ in 1..rounds {
         if exercise_round(&mut app)? != baseline {
@@ -168,8 +169,8 @@ mod tests {
 
     fn scene_fixture() -> GameResult<SceneDocument> {
         let mut app = headless_app()?;
-        let (scene, _) = source::load(&mut app, source::development_root(), None)?;
-        Ok(scene)
+        let project = source::SourceProject::new(&mut app, source::test_root())?;
+        Ok(project.load(&project.assets()?, None)?.scene)
     }
 
     fn new_app(game: GamePlugin) -> GameResult<App> {
@@ -180,7 +181,7 @@ mod tests {
 
     #[test]
     fn fixed_replay_checks_collision_shield_loss_restart_and_escape() -> GameResult<()> {
-        let report = run_stress(2)?;
+        let report = run_stress_in(source::test_root(), 2)?;
         assert_eq!(report.rounds, 2);
         assert_eq!(report.fixed_ticks, 2_330);
         assert_eq!(report.wall_contacts_per_round, 28);
@@ -293,7 +294,7 @@ mod tests {
         let schemas = component_registry(app.world())
             .ok_or("missing game schema")?
             .components();
-        let root = source::development_root().join("assets");
+        let root = source::test_root().join("assets");
         let authored = SceneDocument::read_with(root.join("night-relay.scene.ron"), schemas)?;
         let prefab = SceneDocument::read_with(root.join("power-cell.prefab.ron"), schemas)?;
         assert!(prefab.entities[0].typed::<PowerCell>()?.is_none());
@@ -341,11 +342,13 @@ mod tests {
         let project = tempfile::tempdir()?;
         let files = project.path().join("assets/relocated");
         fs::create_dir_all(&files)?;
-        let original = source::development_root().join("assets");
+        let original = source::test_root().join("assets");
         for (old, new) in [
             ("night-relay.scene.ron", "arena.scene.ron"),
             ("power-cell.prefab.ron", "cell.prefab.ron"),
             ("power-cell.png", "cell.png"),
+            ("gate.material.ron", "gate.material.ron"),
+            ("gate.wgsl", "gate.wgsl"),
         ] {
             for suffix in ["", ".meta"] {
                 fs::copy(
@@ -354,7 +357,10 @@ mod tests {
                 )?;
             }
         }
-        assert_eq!(run_stress_in(project.path(), 2)?, run_stress(2)?);
+        assert_eq!(
+            run_stress_in(project.path(), 2)?,
+            run_stress_in(source::test_root(), 2)?
+        );
 
         let snapshots = tempfile::tempdir()?;
         let snapshot = snapshots.path().join("play.scene.ron");
@@ -368,10 +374,12 @@ mod tests {
             ),
         )?;
         let mut app = headless_app()?;
-        let (edited, textures) = source::load(&mut app, project.path(), Some(&snapshot))?;
-        app.add_plugins(GamePlugin::from_scene(edited))?;
+        let source = source::SourceProject::new(&mut app, project.path())?;
+        let edited = source.load(&source.assets()?, Some(&snapshot))?;
+        #[cfg(feature = "desktop")]
+        assert_eq!(edited.images.len(), 1);
+        app.add_plugins(GamePlugin::from_scene(edited.scene))?;
         assert_eq!(app.world().resource::<Round>().shields(), 4);
-        assert_eq!(textures.len(), 1);
         assert_eq!(fs::read_to_string(entry)?, authored);
 
         fs::write(files.join("cell.png"), b"not a PNG")?;
@@ -393,23 +401,15 @@ mod tests {
             .find(|entity| entity.name == "Power cell B")
             .ok_or("missing cell B in the fixture")?;
         cell.set(&PowerCell { order: 1 })?;
-        let mut world = World::new();
-        let initial_entities = world.entity_count();
-        let error = arena::spawn_scene(&mut world, &scene, None)
-            .err()
-            .ok_or("duplicate cell role was accepted")?;
+        let error = reject_scene(scene)?;
         assert!(error.contains("both bind the power cell 1 role"), "{error}");
-        assert_eq!(world.entity_count(), initial_entities);
 
         let mut scene = scene_fixture()?;
         scene
             .entities
             .retain(|entity| entity.name != "Extraction gate");
-        let error = arena::spawn_scene(&mut world, &scene, None)
-            .err()
-            .ok_or("missing gate was accepted")?;
+        let error = reject_scene(scene.clone())?;
         assert!(error.contains("missing its extraction gate"), "{error}");
-        assert_eq!(world.entity_count(), initial_entities);
 
         let cell = scene
             .entities
@@ -417,11 +417,19 @@ mod tests {
             .find(|entity| entity.name == "Power cell A")
             .ok_or("missing cell A in the fixture")?;
         cell.set(&Pilot)?;
-        let error = arena::spawn_scene(&mut world, &scene, None)
-            .err()
-            .ok_or("conflicting roles were accepted")?;
+        let error = reject_scene(scene)?;
         assert!(error.contains("multiple arena roles"), "{error}");
-        assert_eq!(world.entity_count(), initial_entities);
         Ok(())
+    }
+
+    fn reject_scene(scene: SceneDocument) -> GameResult<String> {
+        let mut app = headless_app()?;
+        let initial_entities = app.world().entity_count();
+        let error = app
+            .add_plugins(GamePlugin::from_scene(scene))
+            .err()
+            .ok_or("invalid scene accepted")?;
+        assert_eq!(app.world().entity_count(), initial_entities);
+        Ok(error.to_string())
     }
 }

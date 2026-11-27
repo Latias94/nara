@@ -78,6 +78,21 @@ impl CargoPackage {
             .find(|target| target.name == binary)
             .map_or(&[], |target| &target.required_features)
     }
+
+    #[cfg(feature = "delivery")]
+    pub(super) fn has_binary(&self, directory: &Path, binary: &str) -> bool {
+        self.targets.iter().any(|target| target.name == binary)
+            || (self.package.autobins.unwrap_or(true)
+                && (directory
+                    .join("src/bin")
+                    .join(format!("{binary}.rs"))
+                    .is_file()
+                    || directory
+                        .join("src/bin")
+                        .join(binary)
+                        .join("main.rs")
+                        .is_file()))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +105,8 @@ struct Package {
         deserialize_with = "optional_nonempty"
     )]
     default_run: Option<String>,
+    #[cfg(feature = "delivery")]
+    autobins: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

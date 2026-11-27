@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 
-use nara_core::vfs::AssetPath;
+use nara_core::{AssetId, vfs::AssetPath};
 use serde::{Deserialize, Deserializer, de::Error as _};
 
 /// The tooling metadata in `nara.toml`. Game settings are configured in Rust.
@@ -13,6 +13,7 @@ pub struct ProjectManifest {
     pub window: Option<ProjectWindow>,
     #[serde(default)]
     pub editor: ProjectEditor,
+    pub delivery: Option<ProjectDelivery>,
 }
 
 impl ProjectManifest {
@@ -70,6 +71,24 @@ pub enum EditorPlayMode {
     External,
     /// Pass `--editor-play PATH` and use the editor's control protocol.
     Snapshot,
+}
+
+/// Stable entry scenes and additional Cargo features for standalone export.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProjectDelivery {
+    /// Entry scene IDs from the corresponding `.scene.ron.meta` files.
+    #[serde(deserialize_with = "scene_ids")]
+    pub scenes: Vec<AssetId>,
+    /// Features added to the game target's required features with Cargo defaults disabled.
+    pub features: Vec<String>,
+}
+
+fn scene_ids<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<AssetId>, D::Error> {
+    Vec::<String>::deserialize(deserializer)?
+        .iter()
+        .map(|value| value.parse().map_err(D::Error::custom))
+        .collect()
 }
 
 pub(crate) fn nonempty<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {

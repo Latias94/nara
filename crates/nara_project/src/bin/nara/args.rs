@@ -22,6 +22,16 @@ pub(super) enum Command {
         options: PlayOptions,
         game_args: Vec<OsString>,
     },
+    #[cfg(feature = "delivery")]
+    Cook {
+        project: PathBuf,
+        trusted: bool,
+    },
+    #[cfg(feature = "delivery")]
+    Export {
+        project: PathBuf,
+        output: PathBuf,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -41,6 +51,8 @@ pub(super) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
         "-h" | "--help" | "help" if arguments.next().is_none() => return Ok(Command::Help),
         "-V" | "--version" if arguments.next().is_none() => return Ok(Command::Version),
         "new" | "check" | "schema" | "play" => {}
+        #[cfg(feature = "delivery")]
+        "cook" | "export" => {}
         _ => return Err(format!("unknown command {command:?}")),
     }
     let path = path_arg(
@@ -73,8 +85,46 @@ pub(super) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
             })
         }
         "play" => parse_play(path, arguments),
+        #[cfg(feature = "delivery")]
+        "cook" => {
+            let trusted = match arguments.next() {
+                Some(option) if option == "--trusted" => true,
+                Some(option) => return Err(unknown_option(&option)),
+                None => false,
+            };
+            require_end(arguments)?;
+            Ok(Command::Cook {
+                project: path,
+                trusted,
+            })
+        }
+        #[cfg(feature = "delivery")]
+        "export" => parse_export(path, arguments),
         _ => Err(format!("unknown command {command:?}")),
     }
+}
+
+#[cfg(feature = "delivery")]
+fn parse_export(
+    project: PathBuf,
+    mut arguments: impl Iterator<Item = OsString>,
+) -> Result<Command, String> {
+    let mut trusted = false;
+    let mut output = None;
+    while let Some(option) = arguments.next() {
+        match option.to_str() {
+            Some("--trusted") if !trusted => trusted = true,
+            Some("--out") if output.is_none() => output = Some(path_arg(&mut arguments, "--out")?),
+            _ => return Err(unknown_option(&option)),
+        }
+    }
+    if !trusted {
+        return Err("export requires --trusted to build the game".into());
+    }
+    Ok(Command::Export {
+        project,
+        output: output.ok_or("export requires --out <directory>")?,
+    })
 }
 
 fn parse_new(
@@ -188,6 +238,20 @@ mod tests {
         assert!(matches!(
             parse(["schema", ".", "--trusted"].map(Into::into)).unwrap(),
             Command::Schema { refresh: true, .. }
+        ));
+    }
+
+    #[cfg(feature = "delivery")]
+    #[test]
+    fn cooking_can_use_the_cache_and_export_requires_build_trust() {
+        assert!(matches!(
+            parse(["cook", "."].map(Into::into)).unwrap(),
+            Command::Cook { trusted: false, .. }
+        ));
+        assert!(parse(["export", ".", "--out", "dist"].map(Into::into)).is_err());
+        assert!(matches!(
+            parse(["export", ".", "--trusted", "--out", "dist"].map(Into::into)).unwrap(),
+            Command::Export { output, .. } if output.to_str() == Some("dist")
         ));
     }
 

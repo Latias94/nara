@@ -61,6 +61,8 @@ mod value_ref;
 
 pub use asset_reference::{decode_asset_reference_value, encode_asset_reference_value};
 pub use authoring::Schema;
+#[cfg(feature = "postcard")]
+pub use binary::PostcardReference;
 pub use codec::ComponentCodecError;
 #[cfg(feature = "serde")]
 pub use format::{ComponentCatalogFileError, ComponentCatalogFileLimits};
@@ -100,7 +102,8 @@ pub mod __macro_support {
     pub use crate::__schema_postcard_methods;
     #[cfg(feature = "postcard")]
     pub use crate::binary::{
-        check_postcard_choice, finish_postcard, read_postcard_field, write_postcard_field,
+        PostcardReference, check_postcard_choice, finish_postcard, read_postcard_field,
+        visit_postcard_field_references, write_postcard_field,
     };
     pub use crate::{
         AssetReferenceDemand, ComponentCapability, ComponentCodecError, ComponentFieldEditorHint,

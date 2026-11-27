@@ -8,6 +8,8 @@ mod library;
 mod parameters;
 #[cfg(feature = "material")]
 mod shader;
+#[cfg(feature = "material")]
+mod sprite_asset;
 
 #[cfg(feature = "material")]
 pub use declaration::{
@@ -33,6 +35,8 @@ pub use shader::{
     __STOCK_QUAD_SHADER_SOURCE, __STOCK_VIEW_UNIFORM_BYTES, MaterialShaderArtifact,
     MaterialShaderError,
 };
+#[cfg(feature = "material")]
+pub use sprite_asset::{SpriteMaterialAsset, SpriteMaterialAssetError};
 
 #[doc(hidden)]
 #[cfg(feature = "material")]

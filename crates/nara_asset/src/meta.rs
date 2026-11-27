@@ -9,6 +9,10 @@ pub(crate) const IMAGE_IMPORTER: &str = "nara.image";
 pub(crate) const SCENE_IMPORTER: &str = "nara.scene";
 pub(crate) const PREFAB_IMPORTER: &str = "nara.prefab";
 #[cfg(any(unix, windows))]
+pub(crate) const MATERIAL_IMPORTER: &str = "nara.material";
+#[cfg(any(unix, windows))]
+pub(crate) const SHADER_IMPORTER: &str = "nara.shader";
+#[cfg(any(unix, windows))]
 pub(crate) const RAW_IMPORTER: &str = "nara.raw";
 
 /// The stable identity and importer settings stored in a source file's `.meta` sidecar.

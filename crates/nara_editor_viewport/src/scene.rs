@@ -1,19 +1,15 @@
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
-    io::Read,
     path::{Path, PathBuf},
     time::Duration,
 };
 
 use nara_app::{App, RealTime, RuntimeInstance};
 use nara_asset::{
-    AssetEvents, AssetPlugin, AssetSourceKind, AssetSourcePath, AssetStates, Assets, Handle,
-    ProjectAssetDatabase, allocate_anonymous_handle,
+    AssetEvents, AssetPlugin, AssetStates, Assets, Handle, ProjectAssetDatabase,
+    allocate_anonymous_handle,
 };
-use nara_core::{
-    Affine2, AssetId, Color, EntityUuid, Vec2,
-    vfs::{AssetPath, DirAssetSource},
-};
+use nara_core::{Affine2, AssetId, Color, EntityUuid, Vec2, vfs::DirAssetSource};
 use nara_ecs::{Component, Entity, EntityWorldMut, Mut, World};
 use nara_editor_core::viewport::{LocalBounds2D, PickCandidate2D, ViewportCamera2D};
 use nara_editor_gizmo::{OverlayFrame, OverlayPrimitive, OverlayStroke};
@@ -22,7 +18,8 @@ use nara_render::{
     Camera2d, Extent2d, ExtractedViews, RenderImage2d, RenderImagePacket, RenderPlugin,
     RenderTarget, ViewMapping2d, ViewportRect, build_image_render_frame_packet,
     gpu::RenderInput,
-    image::{ImageAsset, ImageColorSpace, ImagePreparePlugin},
+    image::{ImageAsset, ImagePreparePlugin},
+    material::Material2dBinding,
     sprite::Sprite,
     sprite_render::{SpriteRenderPlugin, SpriteRenderStats, batching::QueuedSpriteItems},
 };
@@ -33,12 +30,11 @@ use nara_scene::{
     },
 };
 
-use crate::ViewportError;
+use crate::{PreviewAssets, ViewportError};
 
 #[cfg(test)]
 mod tests;
 
-const MAX_PNG_READ: u64 = 16 * 1024 * 1024 + 1;
 const CIRCLE_SEGMENTS: usize = 48;
 
 #[derive(Component)]
@@ -53,10 +49,11 @@ pub(crate) struct PreviewScene {
     asset_root: Option<PathBuf>,
     entities: HashMap<EntityUuid, Entity>,
     images: HashMap<AssetId, PreviewImage>,
+    materials: HashMap<AssetId, Material2dBinding>,
+    source_assets: PreviewAssets,
 }
 
 struct PreviewImage {
-    path: AssetSourcePath,
     handle: Handle<ImageAsset>,
 }
 
@@ -91,6 +88,8 @@ impl PreviewScene {
             asset_root: None,
             entities: HashMap::new(),
             images: HashMap::new(),
+            materials: HashMap::new(),
+            source_assets: PreviewAssets::default(),
         })
     }
 
@@ -99,7 +98,22 @@ impl PreviewScene {
         document: &SceneDocument,
         assets: Option<(&DirAssetSource, &ProjectAssetDatabase)>,
     ) -> Result<(), ViewportError> {
-        let root = assets.map(|(source, _)| source.root());
+        let prepared = assets
+            .map(|(source, database)| {
+                PreviewAssets::load(document, source, database, &self.source_assets)
+            })
+            .transpose()?;
+        self.install_document(document, prepared.as_ref())?;
+        self.source_assets = prepared.unwrap_or_default();
+        Ok(())
+    }
+
+    pub(crate) fn install_document(
+        &mut self,
+        document: &SceneDocument,
+        assets: Option<&PreviewAssets>,
+    ) -> Result<(), ViewportError> {
+        let root = assets.and_then(|assets| assets.root.as_deref());
         let same_root = self.asset_root.as_deref() == root;
         let same_document = self.document.as_ref() == Some(document);
         if !same_document {
@@ -112,35 +126,38 @@ impl PreviewScene {
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut images = HashMap::new();
+        let mut materials = HashMap::new();
         let mut pending = Vec::new();
-        if let Some((source, database)) = assets {
+        if let Some(assets) = assets {
             let installed = self.runtime.world().resource::<Assets<ImageAsset>>();
-            for id in rows.iter().filter_map(SceneRow::image) {
-                let Entry::Vacant(entry) = images.entry(id) else {
-                    continue;
-                };
-                let path = image_path(database, id)?;
-                let cached = self.images.get(&id).filter(|_| same_root);
-                let handle = if let Some(cached) = cached.filter(|image| &image.path == path) {
-                    cached.handle
-                } else {
-                    let image = read_png(source, path)?;
-                    let handle = match cached {
+            for sprite in rows.iter().filter_map(|row| row.sprite.as_ref()) {
+                if let Some(id) = sprite.image
+                    && let Entry::Vacant(entry) = images.entry(id)
+                {
+                    let prepared = assets
+                        .images
+                        .get(&id)
+                        .ok_or(ViewportError::UnpreparedAsset(id))?;
+                    let handle = match self.images.get(&id).filter(|_| same_root) {
                         Some(cached) => cached.handle,
                         None => allocate_anonymous_handle()?,
                     };
                     if installed
                         .get(handle)
-                        .is_none_or(|previous| previous.content_hash() != image.content_hash())
+                        .is_none_or(|previous| previous.content_hash() != prepared.content_hash())
                     {
-                        pending.push((handle, image));
+                        pending.push((handle, prepared.clone()));
                     }
-                    handle
-                };
-                entry.insert(PreviewImage {
-                    path: path.clone(),
-                    handle,
-                });
+                    entry.insert(PreviewImage { handle });
+                }
+                if let Some(id) = sprite.material
+                    && let Entry::Vacant(entry) = materials.entry(id)
+                {
+                    let binding = assets
+                        .material(id)
+                        .ok_or(ViewportError::UnpreparedAsset(id))?;
+                    entry.insert(binding.clone());
+                }
             }
         }
         let retired = self
@@ -154,12 +171,16 @@ impl PreviewScene {
             })
             .collect::<Vec<_>>();
 
-        if !same_document || !pending.is_empty() || !retired.is_empty() {
+        if !same_document
+            || !pending.is_empty()
+            || !retired.is_empty()
+            || self.materials != materials
+        {
             self.runtime
                 .with_driver_scope(|scope| {
                     scope.with_world_mut(|world| {
                         publish_images(world, pending, retired)?;
-                        apply_rows(world, &mut self.entities, rows, &images);
+                        apply_rows(world, &mut self.entities, rows, &images, &materials);
                         Ok::<(), ViewportError>(())
                     })
                 })?
@@ -167,6 +188,7 @@ impl PreviewScene {
             self.runtime.drive(Duration::ZERO)?;
         }
         self.images = images;
+        self.materials = materials;
         if !same_root {
             self.asset_root = root.map(Path::to_path_buf);
         }
@@ -299,10 +321,6 @@ impl SceneRow {
         })
     }
 
-    fn image(&self) -> Option<AssetId> {
-        self.sprite.as_ref()?.image
-    }
-
     fn renderer_sprite(&self, images: &HashMap<AssetId, PreviewImage>) -> Option<Sprite> {
         let source = self.sprite.as_ref()?;
         let image = source.image.and_then(|id| images.get(&id));
@@ -319,7 +337,7 @@ impl SceneRow {
     }
 }
 
-fn typed<T: Schema>(entity: &SceneEntity) -> Result<Option<T>, ViewportError> {
+pub(crate) fn typed<T: Schema>(entity: &SceneEntity) -> Result<Option<T>, ViewportError> {
     entity
         .typed::<T>()
         .map_err(|source| ViewportError::Component {
@@ -334,6 +352,7 @@ fn apply_rows(
     entities: &mut HashMap<EntityUuid, Entity>,
     rows: Vec<SceneRow>,
     images: &HashMap<AssetId, PreviewImage>,
+    materials: &HashMap<AssetId, Material2dBinding>,
 ) {
     let mut live = HashSet::with_capacity(rows.len());
     for row in &rows {
@@ -372,6 +391,11 @@ fn apply_rows(
             entity.insert(row.visibility);
         }
         set_optional(&mut entity, row.renderer_sprite(images));
+        let material = row.sprite.as_ref().and_then(|sprite| sprite.material);
+        set_optional(
+            &mut entity,
+            material.and_then(|id| materials.get(&id)).cloned(),
+        );
         set_optional(&mut entity, row.collider);
         if entity.get::<ChildOf>().is_none()
             && let Some(parent) = row.parent.and_then(|id| entities.get(&id).copied())
@@ -389,40 +413,6 @@ fn set_optional<T: Component + PartialEq>(entity: &mut EntityWorldMut<'_>, value
             entity.remove::<T>();
         }
     }
-}
-
-fn image_path(
-    database: &ProjectAssetDatabase,
-    id: AssetId,
-) -> Result<&AssetSourcePath, ViewportError> {
-    let record = database
-        .record_for_stable_id(id.into())
-        .ok_or(ViewportError::MissingImageAsset { id })?;
-    if record.source_kind() != &AssetSourceKind::Image {
-        return Err(ViewportError::InvalidImageAssetKind {
-            id,
-            path: record.path().to_string(),
-            kind: record.source_kind().clone(),
-        });
-    }
-    Ok(record.path())
-}
-
-fn read_png(source: &DirAssetSource, path: &AssetSourcePath) -> Result<ImageAsset, ViewportError> {
-    let mut bytes = Vec::new();
-    AssetPath::new(path.as_str())
-        .and_then(|path| source.open(&path))
-        .and_then(|file| file.take(MAX_PNG_READ).read_to_end(&mut bytes))
-        .map_err(|source| ViewportError::ReadImage {
-            path: path.to_string(),
-            source,
-        })?;
-    ImageAsset::from_png(&bytes, ImageColorSpace::Srgb).map_err(|source| {
-        ViewportError::DecodeImage {
-            path: path.to_string(),
-            source,
-        }
-    })
 }
 
 fn publish_images(

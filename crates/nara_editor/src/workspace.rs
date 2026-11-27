@@ -23,6 +23,9 @@ use open_gpui::Context;
 
 use crate::jobs::{Job, Message};
 
+mod hot_reload;
+use hot_reload::HotReload;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum JobStatus {
     Idle,
@@ -60,6 +63,7 @@ pub(crate) struct Workspace {
     pub(crate) session: EditorSession,
     pub(crate) revision: u64,
     asset_scan_revision: u64,
+    preview_assets_revision: u64,
     pub project: EditorProject,
     pub assets: AssetBrowserModel,
     pub selected_asset: Option<AssetPath>,
@@ -70,6 +74,7 @@ pub(crate) struct Workspace {
     pub(crate) status: JobStatus,
     trust: ProjectTrust,
     job: Option<Job>,
+    hot_reload: HotReload,
 }
 
 impl Workspace {
@@ -130,6 +135,7 @@ impl Workspace {
             session,
             revision: 1,
             asset_scan_revision: 0,
+            preview_assets_revision: 0,
             project,
             assets,
             selected_asset,
@@ -140,6 +146,7 @@ impl Workspace {
             steps: 0,
             trust,
             job: None,
+            hot_reload: HotReload::default(),
         })
     }
 
@@ -357,16 +364,16 @@ impl Workspace {
     }
 
     pub(crate) fn preview_revision(&self) -> (u64, u64) {
-        (self.revision, self.asset_scan_revision)
+        (self.revision, self.preview_assets_revision)
     }
 
     pub(crate) fn refresh_assets(&mut self, cx: &mut Context<Self>) {
-        let selected = self.selected_asset_id();
-        if let Err(error) = self.project.refresh_assets() {
-            self.warn(error.to_string(), cx);
+        if self.hot_reload.request_discovery() {
             return;
         }
-        self.update_asset_browser(selected);
+        if !self.discover_assets(cx) {
+            return;
+        }
         let refreshed = (|| -> Result<()> {
             let prefabs = self.project.load_prefabs(
                 self.session.document().scene(),
@@ -380,6 +387,17 @@ impl Workspace {
             Err(error) => self.warn(error.to_string(), cx),
         }
         cx.notify();
+    }
+
+    fn discover_assets(&mut self, cx: &mut Context<Self>) -> bool {
+        let selected = self.selected_asset_id();
+        if let Err(error) = self.project.refresh_assets() {
+            self.warn(error.to_string(), cx);
+            return false;
+        }
+        self.update_asset_browser(selected);
+        cx.notify();
+        true
     }
 
     fn selected_asset_id(&self) -> Option<AssetId> {
@@ -511,7 +529,7 @@ impl Workspace {
                         })();
                         match result {
                             Ok(path) => {
-                                workspace.refresh_assets(cx);
+                                workspace.discover_assets(cx);
                                 workspace.opened_asset = workspace
                                     .project
                                     .asset_reference(&path)

@@ -14,6 +14,10 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "delivery")]
+use nara_project::workflow::delivery::{
+    DeliveryError, DeliveryReport, cook_project, export_project,
+};
 use nara_project::{
     play::{
         BuildDiagnostic, BuildError, BuildEvent, BuildRequest, OutputLine, OutputStream,
@@ -44,6 +48,19 @@ Play builds and runs Cargo's default-run target or game, with the target's
 declared required features. Trusted commands can execute project code.
 ";
 
+#[cfg(feature = "delivery")]
+const DELIVERY_HELP: &str = "
+Delivery:
+  nara cook <project> [--trusted]
+  nara export <project> --out <new directory> --trusted
+
+Cook uses the last compatible Schema cache unless --trusted refreshes it.
+Export builds the release game with Cargo defaults disabled and packages it
+with game.npak.
+";
+#[cfg(not(feature = "delivery"))]
+const DELIVERY_HELP: &str = "";
+
 pub(super) fn run() -> ExitCode {
     match args::parse(env::args_os().skip(1)) {
         Ok(command) => match execute(command) {
@@ -54,7 +71,10 @@ pub(super) fn run() -> ExitCode {
             }
         },
         Err(error) => {
-            let _ = writeln!(io::stderr().lock(), "error: {error}\n\n{HELP}");
+            let _ = writeln!(
+                io::stderr().lock(),
+                "error: {error}\n\n{HELP}{DELIVERY_HELP}"
+            );
             ExitCode::from(2)
         }
     }
@@ -62,7 +82,7 @@ pub(super) fn run() -> ExitCode {
 
 fn execute(command: Command) -> Result<ExitCode, Box<dyn Error>> {
     match command {
-        Command::Help => write!(io::stdout().lock(), "{HELP}")?,
+        Command::Help => write!(io::stdout().lock(), "{HELP}{DELIVERY_HELP}")?,
         Command::Version => writeln!(io::stdout().lock(), "nara {}", env!("CARGO_PKG_VERSION"))?,
         Command::New {
             destination,
@@ -116,6 +136,54 @@ fn execute(command: Command) -> Result<ExitCode, Box<dyn Error>> {
             options,
             game_args,
         } => return play(&project, &options, &game_args),
+        #[cfg(feature = "delivery")]
+        Command::Cook { project, trusted } => {
+            let trust = if trusted {
+                ProjectTrust::Trusted
+            } else {
+                ProjectTrust::Untrusted
+            };
+            return deliver(|stop, emit| cook_project(&project, trust, stop, emit));
+        }
+        #[cfg(feature = "delivery")]
+        Command::Export { project, output } => {
+            return deliver(|stop, emit| {
+                export_project(&project, &output, ProjectTrust::Trusted, stop, emit)
+            });
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(feature = "delivery")]
+fn deliver(
+    run: impl FnOnce(
+        &mut dyn FnMut() -> bool,
+        &mut dyn FnMut(BuildEvent),
+    ) -> Result<DeliveryReport, DeliveryError>,
+) -> Result<ExitCode, Box<dyn Error>> {
+    let interrupted = watch_interrupt()?;
+    let console = WorkflowConsole::start()?;
+    let result = run(&mut || interrupted.load(Ordering::Relaxed), &mut |event| {
+        console.build(event)
+    });
+    console.finish(&interrupted);
+    let report = match result {
+        Err(error) if error.is_interrupted() => return Ok(ExitCode::from(130)),
+        result => result?,
+    };
+    let stdout = &mut io::stdout().lock();
+    writeln!(
+        stdout,
+        "Cooked {} assets into {} ({} bytes, {} cache hits, {} cache misses).",
+        report.assets,
+        report.archive.display(),
+        report.bytes,
+        report.cache_hits,
+        report.cache_misses,
+    )?;
+    if let Some(executable) = report.executable {
+        writeln!(stdout, "Exported {}.", executable.display())?;
     }
     Ok(ExitCode::SUCCESS)
 }

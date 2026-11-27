@@ -2818,7 +2818,6 @@ name = "nara_asset"
 version = "0.1.0"
 dependencies = [
  "blake3",
- "image",
  "nara_app",
  "nara_core",
  "nara_ecs",
@@ -2886,6 +2885,7 @@ dependencies = [
  "nara_window",
  "pollster 0.4.0",
  "thiserror 2.0.21",
+ "uuid",
  "wgpu",
 ]
 

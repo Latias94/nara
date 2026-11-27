@@ -1,11 +1,10 @@
 //! Compact RON source documents for scenes and prefabs.
 
-mod builtins;
 pub(crate) mod compact;
 pub mod prefab;
 mod wire;
 
-pub use builtins::{ColliderSource, SpriteSource, builtin_component_schemas};
+pub use crate::components::{ColliderSource, SpriteSource, builtin_component_schemas};
 pub use compact::CompactValueError;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};

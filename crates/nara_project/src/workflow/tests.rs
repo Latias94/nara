@@ -56,10 +56,20 @@ fn starter_uses_the_checkout_patch_sources_and_a_code_first_manifest() {
     );
     assert_eq!(patches["wgpu"]["rev"].as_str(), Some("pinned-revision"));
     assert_eq!(cargo["dependencies"].as_table().unwrap().len(), 1);
+    let desktop = cargo["features"]["desktop"].as_array().unwrap();
+    let source = cargo["features"]["source"].as_array().unwrap();
     assert!(
-        cargo["features"]["desktop"]
-            .as_array()
-            .unwrap()
+        desktop
+            .iter()
+            .any(|feature| feature.as_str() == Some("nara/scene-cooked"))
+    );
+    assert!(
+        desktop
+            .iter()
+            .any(|feature| feature.as_str() == Some("nara/asset-cooked"))
+    );
+    assert!(
+        source
             .iter()
             .any(|feature| feature.as_str() == Some("nara/asset-authoring"))
     );
@@ -71,6 +81,10 @@ fn starter_uses_the_checkout_patch_sources_and_a_code_first_manifest() {
     assert_eq!(manifest.paths.assets, "assets");
     assert!(manifest.window.is_none());
     assert_eq!(manifest.editor.play, EditorPlayMode::External);
+    assert_eq!(
+        manifest.delivery.unwrap().scenes,
+        ["01a219c4-2965-7784-9173-9c9863ec5284".parse().unwrap()]
+    );
 }
 
 #[test]
