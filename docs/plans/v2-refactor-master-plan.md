@@ -514,18 +514,22 @@ Explicit `Window::draw` rebuilds the root, preserving Dockspace's frame-local pu
 and direct consumers' drawing callbacks. A release shutdown regression also verified that
 closing the last window during critical cleanup completes the original quit generation.
 
-The Windows all-feature suites for Open-GPUI Core, Dockspace, and WGPU passed all 2,846 tests.
-The Windows platform library passed all 319 enabled tests. Its native accessibility inspection
-test drives paint callbacks for the observed HWND and checks the tree, draws, and submissions.
+The Windows review suites for Open-GPUI Core, Dockspace, and WGPU passed all 2,854 tests.
+The Windows platform package passed all 328 enabled tests with leak detection, with 12 native
+tests configured to run separately. The native accessibility inspection test drives paint
+callbacks for the observed HWND and checks the tree, draws, and submissions.
 Three native DX12 probes covered the owned host, deferred external delivery, and owned logical-root
 close. The Apple Silicon cross-check compiled all platform targets with all features. Nara's editor
-and viewport suite passed all 46 tests, including DX12 allocation reuse after warmup and resize.
+and viewport suite passed all 51 ordinary tests and the separate DX12 allocation reuse test
+after warmup and resize.
 The standalone 60-frame editor capture recorded 60 Nara renders, 61 GPUI presents, and zero new
 textures or buffers.
 The final native editor smoke edited and reopened Night Relay, floated the Inspector, and
 reaped the game after Pause, one Step, and Resume with an edited four-shield snapshot.
 The separate two-window shared-viewport smoke submitted 287 retained frames at 143.1 FPS,
-with zero Inspector submissions and zero new textures or buffers during steady state.
+with zero Inspector submissions and zero new textures or buffers during steady state. The
+review rerun submitted 60 retained frames at 29.9 FPS on the 30 Hz display with the same
+steady-state submission and allocation invariants.
 The locked all-feature, all-target checks completed without compiler warnings for both root
 workspaces, the Nara editor workspace, Night Relay, and the shared viewport. The portable Nara
 runtime core and the Open-GPUI core passed their `wasm32-unknown-unknown` checks. Every resolved
@@ -539,13 +543,13 @@ The Phase 1 counting rules include project tests and examples and count fixture 
 | Repository | Workspace packages | Packages under `crates/` | Project Rust lines | Fixture Rust lines |
 | --- | ---: | ---: | ---: | ---: |
 | Nara | 39 → 19 | 37 → 18 | 1,238,943 → 122,018 | 196,631 → 0 |
-| Open-GPUI | 47 → 13 | 38 → 6 | 1,051,969 → 501,581 | 12,227 → 9,527 |
+| Open-GPUI | 47 → 13 | 38 → 6 | 1,051,969 → 501,583 | 12,227 → 9,527 |
 
 Nara's largest crate is `nara_render` at 20,640 lines. The root facade has 321 lines, including its
 104-line library entry point. The project total includes 12,078 lines in the separate editor
 workspace.
 
-Open-GPUI keeps 273,480 lines in `gpui`, 125,391 in `gpui_platform`, 52,471 in `gpui_docking`,
+Open-GPUI keeps 273,482 lines in `gpui`, 125,391 in `gpui_platform`, 52,471 in `gpui_docking`,
 21,175 in `gpui_wgpu`, 5,414 in `gpui_base`, and 3,763 in `gpui_macros`, including their tests.
 These packages retain native windowing, input, focus, accessibility, and Dockspace integration.
 
@@ -565,7 +569,7 @@ macOS, including native Windows and GPU host jobs. Workflow wall time was 67 min
 consumer and workspace jobs restored Cargo caches, while the Windows Rust 1.95 docking and
 tooling job had a cache miss. These workflow and job times include setup and tests.
 [Earlier Verify](https://github.com/Latias94/open-gpui/actions/runs/46026905673) ·
-[Review Verify](https://github.com/Latias94/open-gpui/actions/runs/46042321487)
+[Review Verify](https://github.com/Latias94/open-gpui/actions/runs/46044324386)
 
 ## Open-GPUI packages
 
