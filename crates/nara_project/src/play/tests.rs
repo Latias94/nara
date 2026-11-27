@@ -119,8 +119,14 @@ fn dropping_the_owner_terminates_the_contained_tree() {
     let leader_probe = ProcessProbe::open(leader);
     let descendant = ProcessProbe::open(descendant);
     drop(process);
+    assert!(
+        !leader_probe.active(),
+        "drop returned before the leader exited"
+    );
+    #[cfg(windows)]
+    project.0.close().unwrap();
     let deadline = Instant::now() + TEST_TIMEOUT;
-    while leader_probe.active() || descendant.active() {
+    while descendant.active() {
         assert!(Instant::now() < deadline, "drop left an active process");
         thread::sleep(POLL_INTERVAL);
     }
@@ -169,6 +175,18 @@ fn oversized_stdout_stops_and_reaps_a_producer_tree() {
 fn tree_helper() {
     let Ok(mode) = fs::read_to_string(MODE_FILE) else {
         return;
+    };
+    #[cfg(windows)]
+    let _snapshot = {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .open("snapshot-lock")
+            .unwrap()
     };
     let descendant = Command::new(env::current_exe().unwrap())
         .args(helper_arguments("descendant_helper"))
@@ -307,7 +325,12 @@ impl ProcessProbe {
                 let (_, fields) = record.rsplit_once(") ").unwrap();
                 !fields.starts_with(['Z', 'X', 'x'])
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+            Err(error)
+                if error.kind() == io::ErrorKind::NotFound
+                    || error.raw_os_error() == Some(libc::ESRCH) =>
+            {
+                false
+            }
             Err(error) => panic!("could not inspect process: {error}"),
         }
     }

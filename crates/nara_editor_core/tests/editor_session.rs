@@ -223,6 +223,166 @@ fn gizmo_applies_one_world_space_edit_across_selected_roots() {
 }
 
 #[test]
+fn local_gizmo_ticks_keep_authored_and_preview_tables_and_roll_back_failed_batches() {
+    let asset = prefab_asset(104, "prop.prefab.ron");
+    let mut source = document();
+    source.entities.push(actor(11, 5));
+    let mut child = actor(2, 2);
+    child.parent = Some(id(1));
+    let mut scene = document();
+    scene.assets.insert("prop".into(), asset.clone());
+    scene.entities = vec![
+        actor(1, 1),
+        child,
+        SceneEntity::new(id(3), "No rules"),
+        prefab_mount(4, asset.id),
+    ];
+    let mut session = EditorSession::new(EditorDocument::new(scene.clone()).unwrap(), registry());
+    let rename = |name: &str| EditorCommand::Rename {
+        entity: id(2),
+        name: name.into(),
+    };
+    assert!(matches!(
+        session.apply(rename("Pending prefab")),
+        Err(EditorError::Prefab(PrefabError::Load { asset: missing, .. })) if missing == asset.id
+    ));
+    assert_eq!(session.document().scene(), &scene);
+    session.set_prefabs([(asset.id, source)].into()).unwrap();
+    let baseline = session.preview_scene().clone();
+    let storage = |session: &EditorSession| {
+        (
+            session.document().scene().entities.as_ptr(),
+            session.preview_scene().entities.as_ptr(),
+            scene_row(session.preview_scene(), id(4)).name.as_ptr(),
+        )
+    };
+    let before = storage(&session);
+    assert!(
+        !session
+            .apply(EditorCommand::Batch(vec![
+                rename("Temporary name"),
+                EditorCommand::Batch(vec![rename("Actor 2")]),
+            ]))
+            .unwrap()
+    );
+    assert!(!session.can_undo());
+
+    session.selection_mut().replace([id(2)]);
+    let gizmo = Gizmo2D::new(WorldPoint(Vec2::ZERO), 0.0).unwrap();
+    let selected = GizmoSelection2D::capture(&session, gizmo, |_| Some(Affine2::IDENTITY))
+        .unwrap()
+        .unwrap();
+    let gesture = session.begin_gesture().unwrap();
+    for distance in [1.0, 2.0, 3.0] {
+        let command = selected
+            .command(GizmoDelta2D::Translation(Vec2::X * distance))
+            .unwrap();
+        assert!(session.apply_gesture(&gesture, command).unwrap());
+        assert_eq!(storage(&session), before);
+    }
+    let committed_tick = session.preview_scene().clone();
+    assert!(matches!(
+        session.apply_gesture(&gesture, EditorCommand::SetField {
+            entities: vec![id(2), id(3)],
+            component: component(),
+            path: field(),
+            value: ComponentValue::U64(9),
+        }),
+        Err(EditorError::MissingComponent { entity, .. }) if entity == id(3)
+    ));
+    assert_eq!(session.preview_scene(), &committed_tick);
+    let authored = scene_row(session.document().scene(), id(2));
+    assert_eq!(authored, scene_row(&committed_tick, id(2)));
+    assert!(session.end_gesture(&gesture));
+    assert!(session.undo().unwrap());
+    assert!(!session.can_undo());
+    assert_eq!(session.preview_scene(), &baseline);
+    assert!(session.redo().unwrap());
+    assert_eq!(session.preview_scene(), &committed_tick);
+
+    let gesture = session.begin_gesture().unwrap();
+    assert!(session.apply_gesture(&gesture, rename("Rollback")).unwrap());
+    assert!(session.cancel_gesture(&gesture));
+    assert_eq!(session.preview_scene(), &committed_tick);
+}
+
+#[test]
+fn structural_gesture_edits_reenroll_rows_and_keep_one_rollback_boundary() {
+    let mut scene = document();
+    scene.entities = vec![actor(2, 2), actor(4, 4)];
+    let mut session = EditorSession::new(EditorDocument::new(scene.clone()).unwrap(), registry());
+    let rename = |entity, name: &str| EditorCommand::Rename {
+        entity,
+        name: name.into(),
+    };
+    for cancel in [true, false] {
+        let gesture = session.begin_gesture().unwrap();
+        assert!(
+            session
+                .apply_gesture(&gesture, rename(id(4), "First tick"))
+                .unwrap()
+        );
+        assert!(
+            session
+                .apply_gesture(
+                    &gesture,
+                    EditorCommand::Batch(vec![
+                        EditorCommand::Create(actor(1, 1)),
+                        EditorCommand::Reparent {
+                            entities: vec![id(2)],
+                            parent: Some(id(1))
+                        },
+                    ])
+                )
+                .unwrap()
+        );
+        let storage = session.document().scene().entities.as_ptr();
+        assert!(
+            session
+                .apply_gesture(&gesture, rename(id(1), "New parent"))
+                .unwrap()
+        );
+        assert_eq!(session.document().scene().entities.as_ptr(), storage);
+        assert!(matches!(
+            session.apply_gesture(
+                &gesture,
+                EditorCommand::Batch(vec![
+                    rename(id(1), "Uncommitted"),
+                    EditorCommand::Reparent {
+                        entities: vec![id(1)],
+                        parent: Some(id(2))
+                    },
+                ])
+            ),
+            Err(EditorError::Scene(
+                nara_scene::authoring::SceneDocumentError::HierarchyCycle { .. }
+            ))
+        ));
+        assert_eq!(
+            scene_row(session.document().scene(), id(1)).name,
+            "New parent"
+        );
+        if cancel {
+            assert!(session.cancel_gesture(&gesture));
+        } else {
+            assert!(session.end_gesture(&gesture));
+            assert!(session.undo().unwrap());
+        }
+        assert_eq!(session.document().scene(), &scene);
+        assert!(!session.can_undo());
+    }
+    assert!(session.redo().unwrap());
+    assert_eq!(
+        scene_row(session.document().scene(), id(2)).parent,
+        Some(id(1))
+    );
+    assert_eq!(
+        scene_row(session.document().scene(), id(4)).name,
+        "First tick"
+    );
+}
+
+#[test]
 fn mixed_fields_gestures_and_unknown_components_survive_save_and_reopen() {
     let unknown = ComponentTypeId::new("third_party.CustomComponent");
     let payload = r#"(message: "保留原值", items: [1,  /* keep spacing */ 2])"#;
@@ -246,6 +406,20 @@ fn mixed_fields_gestures_and_unknown_components_survive_save_and_reopen() {
     session.selection_mut().replace([id(1), id(2)]);
     assert_eq!(value(&session), InspectorValue::Mixed);
     assert!(!session.is_dirty());
+
+    let gesture = session.begin_gesture().unwrap();
+    let first_shield = |number| EditorCommand::SetField {
+        entities: vec![id(1)],
+        component: component(),
+        path: field(),
+        value: ComponentValue::U64(number),
+    };
+    assert!(session.apply_gesture(&gesture, first_shield(9)).unwrap());
+    assert!(session.is_dirty());
+    assert!(session.apply_gesture(&gesture, first_shield(2)).unwrap());
+    assert!(!session.is_dirty());
+    assert!(!session.end_gesture(&gesture));
+    assert!(!session.can_undo());
 
     let gesture = session.begin_gesture().unwrap();
     assert!(session.apply_gesture(&gesture, edit(10)).unwrap());

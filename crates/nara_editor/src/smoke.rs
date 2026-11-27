@@ -1,7 +1,11 @@
-pub(crate) mod hot_reload;
+mod hot_reload;
+mod performance;
 
 use std::{
     cell::RefCell,
+    ffi::{OsStr, OsString},
+    num::NonZeroU32,
+    path::PathBuf,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -11,6 +15,7 @@ use nara_core::{Vec2, vfs::AssetPath};
 use nara_editor_core::{
     EditorCommand, EditorDocument, InspectorModel, InspectorValue, play::PlayControl,
 };
+use nara_project::workflow::ProjectTrust;
 use nara_reflect::{ComponentFieldId, ComponentTypeId, ComponentValue};
 use open_gpui::{App, AsyncApp, px, size};
 use open_gpui_docking::{
@@ -26,7 +31,102 @@ use crate::{
 const NATIVE: Duration = Duration::from_secs(20);
 const BUILD: Duration = Duration::from_secs(240);
 
-pub(crate) fn start(editor: OpenEditor, failure: Rc<RefCell<Option<anyhow::Error>>>, cx: &mut App) {
+#[derive(Clone, Copy)]
+pub(crate) enum Probe {
+    Verify,
+    CaptureFrames(NonZeroU32),
+    MeasureHotReload(u32),
+    MeasureEditorPerformance(u32),
+}
+
+impl Probe {
+    pub(crate) const USAGE: &str =
+        "[--verify | --capture-frames N | --measure-hot-reload N | --measure-editor-performance N]";
+
+    pub(crate) fn parse(
+        argument: &OsStr,
+        arguments: &mut impl Iterator<Item = OsString>,
+    ) -> Result<Option<Self>> {
+        let probe = match argument.to_str() {
+            Some("--verify") => Self::Verify,
+            Some("--capture-frames") => Self::CaptureFrames(
+                arguments
+                    .next()
+                    .and_then(|count| count.to_str()?.parse().ok())
+                    .context("--capture-frames requires a positive frame count")?,
+            ),
+            Some("--measure-hot-reload") => Self::MeasureHotReload(
+                arguments
+                    .next()
+                    .and_then(|count| count.to_str()?.parse().ok())
+                    .filter(|count| (1..=100).contains(count))
+                    .context("--measure-hot-reload requires a sample count from 1 to 100")?,
+            ),
+            Some("--measure-editor-performance") => Self::MeasureEditorPerformance(
+                arguments
+                    .next()
+                    .and_then(|count| count.to_str()?.parse().ok())
+                    .filter(|count| (2..=600).contains(count))
+                    .context("--measure-editor-performance requires 2 to 600 frames per case")?,
+            ),
+            _ => return Ok(None),
+        };
+        Ok(Some(probe))
+    }
+
+    pub(crate) fn prepare(
+        self,
+        project: &mut Option<PathBuf>,
+        trust: ProjectTrust,
+    ) -> Result<Option<tempfile::TempDir>> {
+        match self {
+            Self::Verify => ensure!(
+                project.is_some() && trust == ProjectTrust::Trusted,
+                "--verify requires --project and --trusted"
+            ),
+            Self::CaptureFrames(_) => {
+                ensure!(project.is_some(), "--capture-frames requires --project")
+            }
+            Self::MeasureHotReload(_) => {
+                let original = project
+                    .as_deref()
+                    .context("--measure-hot-reload requires a Night Relay --project")?;
+                let copy = hot_reload::copy_fixture(original)?;
+                *project = Some(copy.path().to_path_buf());
+                return Ok(Some(copy));
+            }
+            Self::MeasureEditorPerformance(_) => {
+                ensure!(
+                    !cfg!(debug_assertions),
+                    "--measure-editor-performance requires a release build"
+                );
+                let original = project
+                    .as_deref()
+                    .context("--measure-editor-performance requires --project")?;
+                let copy = hot_reload::copy_fixture(original)?;
+                *project = Some(copy.path().to_path_buf());
+                return Ok(Some(copy));
+            }
+        }
+        Ok(None)
+    }
+
+    pub(crate) fn start(
+        self,
+        editor: OpenEditor,
+        failure: Rc<RefCell<Option<anyhow::Error>>>,
+        cx: &mut App,
+    ) {
+        match self {
+            Self::Verify => start(editor, failure, cx),
+            Self::CaptureFrames(count) => capture_frames(editor, count.get(), failure, cx),
+            Self::MeasureHotReload(count) => hot_reload::start(editor, count, failure, cx),
+            Self::MeasureEditorPerformance(count) => performance::start(editor, count, failure, cx),
+        }
+    }
+}
+
+fn start(editor: OpenEditor, failure: Rc<RefCell<Option<anyhow::Error>>>, cx: &mut App) {
     cx.spawn(async move |cx| {
         match exercise(&editor, cx).await {
             Ok(()) => println!("Night Relay editor verification passed"),
@@ -43,7 +143,7 @@ pub(crate) fn start(editor: OpenEditor, failure: Rc<RefCell<Option<anyhow::Error
     .detach();
 }
 
-pub(crate) fn capture_frames(
+fn capture_frames(
     editor: OpenEditor,
     count: u32,
     failure: Rc<RefCell<Option<anyhow::Error>>>,

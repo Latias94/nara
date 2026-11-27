@@ -194,7 +194,12 @@ fn group_has_active_members(group: pid_t) -> io::Result<bool> {
                     return Ok(true);
                 }
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error)
+                if error.kind() == io::ErrorKind::NotFound
+                    || error.raw_os_error() == Some(libc::ESRCH) =>
+            {
+                continue;
+            }
             Err(error) => return Err(error),
         }
     }

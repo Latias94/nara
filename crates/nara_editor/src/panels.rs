@@ -2,7 +2,7 @@ use nara_core::{AssetId, DiagnosticSeverity, EntityUuid, Vec2};
 use nara_editor_core::{AssetKind, EditorCommand};
 use nara_editor_viewport::ViewportStats;
 use nara_scene::spatial::Visibility;
-use open_gpui::{Context, Entity, IntoElement, Render, Window, div, prelude::*, px, rgb};
+use open_gpui::{Context, Entity, IntoElement, Render, Window, canvas, div, prelude::*, px, rgb};
 use open_gpui_base::{DropPlacement, Row, TreeRow, VirtualListEvent, VirtualTree};
 
 use crate::{theme, workspace::Workspace};
@@ -393,15 +393,32 @@ impl Render for ConsolePanel {
 struct ViewportStatus(Entity<ViewportStats>);
 
 impl Render for ViewportStatus {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let stats = self.0.read(cx);
-        div().flex_1().truncate().child(format!(
+        let text = format!(
             "{} frames · {} retained · {} sprites · {} textures / {} buffers last frame",
             stats.rendered_frames,
             stats.retained_presentations,
             stats.extraction.extracted_sprites,
             stats.last_work.created_texture_calls,
             stats.last_work.created_buffer_calls,
-        ))
+        );
+        // Keep text measurement out of the toolbar's flex layout.
+        canvas(
+            move |bounds, window, cx| {
+                let mut label = div()
+                    .w(bounds.size.width)
+                    .h(bounds.size.height)
+                    .truncate()
+                    .child(text)
+                    .into_any_element();
+                label.prepaint_as_root(bounds.origin, bounds.size.into(), window, cx);
+                label
+            },
+            |_, mut label, window, cx| label.paint(window, cx),
+        )
+        .flex_1()
+        .min_w_0()
+        .h(window.line_height())
     }
 }

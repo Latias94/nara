@@ -50,7 +50,38 @@ pub struct ViewportPanel {
     hover: Hover,
     drag: Option<Drag>,
     drop_preview: Option<WorldPoint>,
+    #[cfg(feature = "native-smoke")]
     requested_frames: u32,
+    #[cfg(feature = "native-smoke")]
+    performance: Option<PerformanceFrames>,
+}
+
+#[cfg(feature = "native-smoke")]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct PerformanceFrames {
+    pub(crate) first_submission: Option<Instant>,
+    pub(crate) last_submission: Option<Instant>,
+    pub(crate) submissions: u64,
+    pub(crate) status_updates: u64,
+    pub(crate) settled: Option<PerformanceBoundary>,
+    publish_status: bool,
+}
+
+#[cfg(feature = "native-smoke")]
+#[derive(Clone, Copy)]
+pub(crate) struct PerformanceBoundary {
+    pub(crate) at: Instant,
+    pub(crate) gpui_submissions: u64,
+}
+
+#[cfg(feature = "native-smoke")]
+impl PerformanceBoundary {
+    pub(crate) fn from_window(window: &Window) -> Self {
+        Self {
+            at: Instant::now(),
+            gpui_submissions: window.present_submission_count(),
+        }
+    }
 }
 
 enum Drag {
@@ -100,7 +131,10 @@ impl ViewportPanel {
             hover: Hover::default(),
             drag: None,
             drop_preview: None,
+            #[cfg(feature = "native-smoke")]
             requested_frames: 0,
+            #[cfg(feature = "native-smoke")]
+            performance: None,
         }
     }
 
@@ -108,12 +142,15 @@ impl ViewportPanel {
         self.receiver
     }
 
+    #[cfg(feature = "native-smoke")]
     pub(crate) fn request_frames(&mut self, frames: u32, cx: &mut Context<Self>) {
+        self.performance = None;
         self.requested_frames = frames;
         self.dirty = true;
         cx.notify();
     }
 
+    #[cfg(feature = "native-smoke")]
     pub(crate) fn stats(&self) -> ViewportStats {
         self.preview.stats()
     }
@@ -122,8 +159,38 @@ impl ViewportPanel {
         &self.stats
     }
 
+    #[cfg(feature = "native-smoke")]
     pub(crate) fn presented_preview(&self) -> Option<((u64, u64), Instant)> {
         self.presented_preview
+    }
+
+    #[cfg(feature = "native-smoke")]
+    pub(crate) fn request_performance_frames(
+        &mut self,
+        count: u32,
+        publish_status: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        use anyhow::Context as _;
+
+        let bounds = self.bounds.context("The viewport has no painted bounds")?;
+        anyhow::ensure!(self.requested_frames == 0, "A viewport capture is active");
+        self.requested_frames = count;
+        self.performance = Some(PerformanceFrames {
+            publish_status,
+            ..Default::default()
+        });
+        cx.on_next_frame(window, move |view, window, cx| {
+            view.frame(bounds, window, cx)
+        });
+        Ok(())
+    }
+
+    #[cfg(feature = "native-smoke")]
+    pub(crate) fn completed_performance_frames(&self) -> Option<PerformanceFrames> {
+        self.performance
+            .filter(|measurement| measurement.settled.is_some())
     }
 
     fn frame(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
@@ -188,12 +255,37 @@ impl ViewportPanel {
                 if outcome == RenderOutcome::Imported {
                     cx.notify();
                 }
-                self.requested_frames = self.requested_frames.saturating_sub(1);
-                if self.requested_frames > 0 {
-                    cx.on_next_frame(window, move |view, window, cx| {
-                        view.frame(bounds, window, cx)
+                #[cfg(feature = "native-smoke")]
+                if self.requested_frames != 0 {
+                    let performance = self.performance.as_mut().map(|sample| {
+                        let completed = Instant::now();
+                        sample.first_submission.get_or_insert(completed);
+                        sample.last_submission = Some(completed);
+                        sample.submissions += 1;
+                        sample.status_updates += u64::from(sample.publish_status);
+                        sample.publish_status
                     });
-                    return;
+                    if performance == Some(true) {
+                        self.publish_stats(cx);
+                    }
+                    self.requested_frames -= 1;
+                    if self.requested_frames > 0 {
+                        cx.on_next_frame(window, move |view, window, cx| {
+                            view.frame(bounds, window, cx)
+                        });
+                        return;
+                    }
+                    if performance.is_some() {
+                        cx.on_next_frame(window, |view, window, cx| {
+                            view.preview.observe_presentation(window);
+                            cx.on_next_frame(window, |view, window, _| {
+                                if let Some(sample) = &mut view.performance {
+                                    sample.settled = Some(PerformanceBoundary::from_window(window));
+                                }
+                            });
+                        });
+                        return;
+                    }
                 }
                 cx.on_next_frame(window, move |view, window, cx| {
                     view.observe_presented_preview(revision, submissions, 4, window, cx);
@@ -225,6 +317,10 @@ impl ViewportPanel {
                 });
             }
         }
+        self.publish_stats(cx);
+    }
+
+    fn publish_stats(&self, cx: &mut Context<Self>) {
         let stats = self.preview.stats();
         self.stats.update(cx, |previous, cx| {
             if *previous != stats {

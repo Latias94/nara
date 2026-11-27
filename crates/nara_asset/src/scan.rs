@@ -388,17 +388,8 @@ fn is_regular_file(metadata: &fs::Metadata) -> bool {
     metadata.is_file() && !is_link(metadata)
 }
 
-#[cfg(unix)]
 pub(crate) fn is_link(metadata: &fs::Metadata) -> bool {
     metadata.file_type().is_symlink()
-}
-
-#[cfg(windows)]
-pub(crate) fn is_link(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
-    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
 }
 
 #[cfg(test)]

@@ -14,8 +14,8 @@ use std::{
 
 use windows_sys::Win32::{
     Foundation::{
-        ERROR_BROKEN_PIPE, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, HANDLE, HANDLE_FLAG_INHERIT,
-        SetHandleInformation, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        ERROR_ACCESS_DENIED, ERROR_BROKEN_PIPE, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, HANDLE,
+        HANDLE_FLAG_INHERIT, SetHandleInformation, WAIT_OBJECT_0, WAIT_TIMEOUT,
     },
     System::{
         JobObjects::{
@@ -28,11 +28,11 @@ use windows_sys::Win32::{
         Pipes::PeekNamedPipe,
         Threading::{
             CREATE_NO_WINDOW, CreateProcessW, DeleteProcThreadAttributeList,
-            EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, InitializeProcThreadAttributeList,
-            OpenProcess, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST,
-            PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-            STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW, UpdateProcThreadAttribute,
-            WaitForSingleObject,
+            EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE,
+            InitializeProcThreadAttributeList, OpenProcess, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+            PROC_THREAD_ATTRIBUTE_JOB_LIST, PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+            PROCESS_SYNCHRONIZE, STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW,
+            UpdateProcThreadAttribute, WaitForSingleObject,
         },
     },
 };
@@ -40,24 +40,25 @@ use windows_sys::Win32::{
 use crate::windows_command_line::encode_command_line;
 
 pub(super) struct Process {
-    job: OwnedHandle,
+    job: Option<OwnedHandle>,
     leader: OwnedHandle,
     terminating_members: Vec<OwnedHandle>,
 }
 
 impl Process {
     pub(super) fn leader_exited(&mut self) -> io::Result<bool> {
-        exited(&self.leader)
+        wait_for_exit(&self.leader, 0)
     }
 
     pub(super) fn reap_if_idle(&mut self) -> io::Result<Option<ExitStatus>> {
-        if active_processes(&self.job)? > 0 {
+        let job = self.job.as_ref().ok_or(io::ErrorKind::NotConnected)?;
+        if active_processes(job)? > 0 {
             return Ok(None);
         }
         // Job accounting can reach zero while a terminating descendant's process handle is
         // still unsignaled. Wait for the members we observed before requesting termination.
         for member in &self.terminating_members {
-            if !exited(member)? {
+            if !wait_for_exit(member, 0)? {
                 return Ok(None);
             }
         }
@@ -68,21 +69,33 @@ impl Process {
     }
 
     pub(super) fn terminate(&mut self, _force: bool) -> io::Result<()> {
-        let members = member_handles(&self.job);
+        let job = self.job.as_ref().ok_or(io::ErrorKind::NotConnected)?;
+        let observation =
+            member_handles(job).map(|members| self.terminating_members.extend(members));
         // SAFETY: The non-inheritable Job handle is valid for the termination call.
-        let result = unsafe { TerminateJobObject(self.job.as_raw_handle(), 1) };
-        match check(result) {
-            Err(_) if active_processes(&self.job)? == 0 => {}
-            result => result?,
-        };
-        self.terminating_members.extend(members?);
-        Ok(())
+        check(unsafe { TerminateJobObject(job.as_raw_handle(), 1) })?;
+        observation
     }
 }
 
-fn exited(process: &OwnedHandle) -> io::Result<bool> {
-    // SAFETY: The owned handle is valid for the nonblocking wait.
-    match unsafe { WaitForSingleObject(process.as_raw_handle(), 0) } {
+impl Drop for Process {
+    fn drop(&mut self) {
+        if let Some(job) = self.job.take() {
+            if let Ok(members) = member_handles(&job) {
+                self.terminating_members.extend(members);
+            }
+            drop(job);
+        }
+        let _ = wait_for_exit(&self.leader, INFINITE);
+        for member in &self.terminating_members {
+            let _ = wait_for_exit(member, INFINITE);
+        }
+    }
+}
+
+fn wait_for_exit(process: &OwnedHandle, timeout: u32) -> io::Result<bool> {
+    // SAFETY: The owned process handle remains valid for the wait.
+    match unsafe { WaitForSingleObject(process.as_raw_handle(), timeout) } {
         WAIT_OBJECT_0 => Ok(true),
         WAIT_TIMEOUT => Ok(false),
         _ => Err(io::Error::last_os_error()),
@@ -135,7 +148,10 @@ fn member_handles(job: &OwnedHandle) -> io::Result<Vec<OwnedHandle>> {
         };
         if handle.is_null() {
             let error = io::Error::last_os_error();
-            if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+            if matches!(
+                error.raw_os_error().map(|code| code as u32),
+                Some(ERROR_INVALID_PARAMETER | ERROR_ACCESS_DENIED)
+            ) {
                 continue;
             }
             return Err(error);
@@ -215,7 +231,7 @@ pub(super) fn spawn(
     };
     drop(thread);
     Ok(Process {
-        job,
+        job: Some(job),
         leader,
         terminating_members: Vec::new(),
     })

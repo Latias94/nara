@@ -77,9 +77,9 @@ impl SelectionState {
         }
     }
 
-    pub(crate) fn retain(&mut self, ids: &BTreeSet<EntityUuid>) {
-        self.entities.retain(|entity| ids.contains(entity));
-        if self.anchor.is_some_and(|anchor| !ids.contains(&anchor)) {
+    pub(crate) fn retain(&mut self, mut contains: impl FnMut(EntityUuid) -> bool) {
+        self.entities.retain(|entity| contains(*entity));
+        if self.anchor.is_some_and(|anchor| !contains(anchor)) {
             self.anchor = self.active();
         }
     }

@@ -133,15 +133,9 @@ fn picks_follow_the_renderer_and_reparenting_preserves_surviving_entities() {
     let mut overlay = OverlayFrame::default();
     let stroke = OverlayStroke::new(Color::WHITE, 1.0);
     scene.append_colliders(&mut overlay, stroke);
-    assert_eq!(overlay.primitives.len(), CIRCLE_SEGMENTS);
-    let start = parent_transform
-        .affine()
-        .transform_point2(Vec2::new(2.0, 0.0));
     assert!(
-        matches!(&overlay.primitives[0], OverlayPrimitive::Line { from, .. } if *from == start)
-    );
-    assert!(
-        matches!(overlay.primitives.last(), Some(OverlayPrimitive::Line { to, .. }) if *to == start)
+        matches!(overlay.primitives.as_slice(), [OverlayPrimitive::Circle { center, radius, .. }]
+            if *center == parent_transform.translation && (*radius - 4.0).abs() < 1e-6)
     );
 
     let camera = ViewportCamera2D::new(
@@ -228,6 +222,19 @@ fn image_ids_share_residency_and_bad_edits_leave_the_preview_intact() {
         scene.set_document(&document, assets),
         Err(ViewportError::DecodeImage { path, .. }) if path == "assets/invalid.png"
     ));
+    let invalid_path = directory.path().join("assets/invalid.png");
+    fs::write(&invalid_path, PNG).unwrap();
+    const IMAGE_LIMIT: u64 = 16 * 1024 * 1024;
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&invalid_path)
+        .unwrap()
+        .set_len(IMAGE_LIMIT + 1)
+        .unwrap();
+    assert!(matches!(
+        scene.set_document(&document, assets),
+        Err(ViewportError::SourceTooLarge { path, limit: IMAGE_LIMIT }) if path == "assets/invalid.png"
+    ));
     assert_eq!(scene.images[&first_image].handle, handle);
     assert_eq!(
         scene.runtime.world().resource::<RealTime>().frame,
@@ -236,7 +243,7 @@ fn image_ids_share_residency_and_bad_edits_leave_the_preview_intact() {
     assert_eq!(scene.world_affine(first_id), Some(Affine2::IDENTITY));
     assert!(scene.selection_quad(second_id).is_some());
 
-    fs::write(directory.path().join("assets/invalid.png"), PNG).unwrap();
+    fs::write(invalid_path, PNG).unwrap();
     scene.set_document(&document, assets).unwrap();
     assert_ne!(scene.images[&other_image].handle, handle);
     assert_eq!(scene.images[&first_image].handle, handle);

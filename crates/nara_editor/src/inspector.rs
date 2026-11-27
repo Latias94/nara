@@ -108,6 +108,8 @@ impl InspectorPanel {
 
     pub(crate) fn new(workspace: Entity<Workspace>, cx: &mut Context<Self>) -> Self {
         let selection = Rc::new(Selection::new(&workspace.read(cx).session));
+        let inspector = cx.weak_entity();
+        workspace.update(cx, |workspace, _| workspace.attach_inspector(inspector));
         let subscription = cx.observe(&workspace, |panel, _, cx| {
             if panel.refresh(cx) {
                 cx.notify();

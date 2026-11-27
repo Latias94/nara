@@ -12,9 +12,11 @@ use std::{
 };
 
 use anyhow::{Context as _, Result};
+#[cfg(feature = "native-smoke")]
+use open_gpui::{AnyWindowHandle, Entity};
 use open_gpui::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Entity, TitlebarOptions, WeakEntity,
-    WindowBounds, WindowOptions, px, size,
+    App, AppContext as _, Bounds, TitlebarOptions, WeakEntity, WindowBounds, WindowOptions, px,
+    size,
 };
 use open_gpui_docking::{
     DockPane, DockSurface,
@@ -46,9 +48,13 @@ pub(crate) const ROOT: SurfaceId = SurfaceId::new(1);
 const PANES: [&str; 5] = ["hierarchy", "scene", "inspector", "assets", "console"];
 
 pub(crate) struct OpenEditor {
+    #[cfg(feature = "native-smoke")]
     pub(crate) window: AnyWindowHandle,
+    #[cfg(feature = "native-smoke")]
     pub(crate) dock: DockSurface,
+    #[cfg(feature = "native-smoke")]
     pub(crate) workspace: Entity<Workspace>,
+    #[cfg(feature = "native-smoke")]
     pub(crate) viewport: Entity<ViewportPanel>,
 }
 
@@ -145,9 +151,13 @@ pub fn open(
     }
     cx.activate(true);
     Ok(OpenEditor {
+        #[cfg(feature = "native-smoke")]
         window: main,
+        #[cfg(feature = "native-smoke")]
         dock,
+        #[cfg(feature = "native-smoke")]
         workspace,
+        #[cfg(feature = "native-smoke")]
         viewport: view,
     })
 }

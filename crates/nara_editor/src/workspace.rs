@@ -1,4 +1,9 @@
-use std::{path::Path, sync::mpsc::TryRecvError, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    rc::Rc,
+    sync::mpsc::TryRecvError,
+    time::Duration,
+};
 
 use anyhow::{Context as _, Result};
 use nara_core::{AssetId, DiagnosticSeverity, DocumentId, EntityUuid, Vec2, vfs::AssetPath};
@@ -19,11 +24,16 @@ use nara_scene::{
     },
     spatial::{Transform2d, Visibility},
 };
-use open_gpui::Context;
+use open_gpui::{Context, WeakEntity};
 
-use crate::jobs::{Job, Message};
+use crate::{
+    inspector::InspectorPanel,
+    jobs::{Job, Message},
+};
 
 mod hot_reload;
+#[cfg(test)]
+mod tests;
 use hot_reload::HotReload;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -59,6 +69,20 @@ enum PendingPlayControl {
     Delivered,
 }
 
+struct JobOrigin {
+    directory: PathBuf,
+}
+
+struct ProjectJob {
+    origin: Rc<JobOrigin>,
+    worker: Job,
+}
+
+struct DeferredSchema {
+    origin: Rc<JobOrigin>,
+    catalog: ComponentSchemaCatalog,
+}
+
 pub(crate) struct Workspace {
     pub(crate) session: EditorSession,
     pub(crate) revision: u64,
@@ -73,7 +97,9 @@ pub(crate) struct Workspace {
     pub(crate) steps: u64,
     pub(crate) status: JobStatus,
     trust: ProjectTrust,
-    job: Option<Job>,
+    job: Option<ProjectJob>,
+    deferred_schema: Option<DeferredSchema>,
+    inspector: Option<WeakEntity<InspectorPanel>>,
     hot_reload: HotReload,
 }
 
@@ -146,8 +172,14 @@ impl Workspace {
             steps: 0,
             trust,
             job: None,
+            deferred_schema: None,
+            inspector: None,
             hot_reload: HotReload::default(),
         })
+    }
+
+    pub(crate) fn attach_inspector(&mut self, inspector: WeakEntity<InspectorPanel>) {
+        self.inspector = Some(inspector);
     }
 
     pub(crate) fn apply(&mut self, command: EditorCommand, cx: &mut Context<Self>) -> bool {
@@ -179,12 +211,17 @@ impl Workspace {
     pub(crate) fn end_gesture(&mut self, gesture: &EditorGesture, cx: &mut Context<Self>) {
         if self.session.owns_gesture(gesture) {
             self.session.end_gesture(gesture);
+            self.publish_deferred_schema();
             cx.notify();
         }
     }
 
     pub(crate) fn cancel_gesture(&mut self, gesture: &EditorGesture, cx: &mut Context<Self>) {
-        self.edit(|session| Ok(session.cancel_gesture(gesture)), cx);
+        if self.session.cancel_gesture(gesture) {
+            self.revision = self.revision.wrapping_add(1);
+            self.publish_deferred_schema();
+            cx.notify();
+        }
     }
 
     pub(crate) fn undo(&mut self, cx: &mut Context<Self>) {
@@ -333,13 +370,26 @@ impl Workspace {
         if self.session.gesture_active() {
             return;
         }
-        self.selected_asset = Some(path.clone());
         if matches!(AssetKind::of(path), AssetKind::Scene | AssetKind::Prefab) {
             let document = self.session.document();
             if self.session.is_dirty()
-                && (document.path().is_some() || !document.scene().entities.is_empty())
+                && (document.path().is_some()
+                    || !document.scene().entities.is_empty()
+                    || !document.scene().assets.is_empty()
+                    || self.session.can_undo())
             {
                 self.warn("Save the current document before opening another one", cx);
+                return;
+            }
+            if self.inspector.as_ref().is_some_and(|inspector| {
+                inspector
+                    .read_with(cx, |panel, cx| !panel.drafts(cx).is_empty())
+                    .unwrap_or(false)
+            }) {
+                self.warn(
+                    "Apply or cancel Inspector drafts before opening another document",
+                    cx,
+                );
                 return;
             }
             let result = (|| -> Result<()> {
@@ -360,6 +410,7 @@ impl Workspace {
             self.opened_asset = self.project.asset_reference(path).map(|asset| asset.id);
             self.revision = self.revision.wrapping_add(1);
         }
+        self.selected_asset = Some(path.clone());
         cx.notify();
     }
 
@@ -607,7 +658,7 @@ impl Workspace {
         start: impl FnOnce(&Path, ProjectTrust) -> std::io::Result<Job>,
         cx: &mut Context<Self>,
     ) {
-        if self.job.is_some() {
+        if self.status != JobStatus::Idle {
             return;
         }
         if self.trust != ProjectTrust::Trusted {
@@ -617,16 +668,24 @@ impl Workspace {
             );
             return;
         }
-        match start(self.project.directory(), self.trust) {
-            Ok(job) => {
-                self.job = Some(job);
+        let directory = self.project.directory();
+        match start(directory, self.trust) {
+            Ok(worker) => {
+                let origin = Rc::new(JobOrigin {
+                    directory: directory.to_path_buf(),
+                });
+                self.job = Some(ProjectJob {
+                    origin: origin.clone(),
+                    worker,
+                });
+                self.deferred_schema = None;
                 self.status = status;
                 self.pending = None;
                 cx.notify();
                 cx.spawn(async move |workspace, cx| {
                     let timer = cx.background_executor().clone();
                     while workspace
-                        .update(cx, |workspace, cx| workspace.poll_job(cx))
+                        .update(cx, |workspace, cx| workspace.poll_job(&origin, cx))
                         .unwrap_or(false)
                     {
                         timer.timer(Duration::from_millis(25)).await;
@@ -648,7 +707,7 @@ impl Workspace {
             return;
         }
         if let Some(job) = &self.job {
-            match job.control(control) {
+            match job.worker.control(control) {
                 Ok(()) => {
                     self.pending = Some(PendingPlayControl::Queued(control));
                     cx.notify();
@@ -659,28 +718,44 @@ impl Workspace {
     }
 
     pub fn stop(&mut self, cx: &mut Context<Self>) {
+        let schema_waiting = self.deferred_schema.take().is_some();
         if let Some(job) = &self.job {
-            job.stop();
+            job.worker.stop();
             self.status = JobStatus::Stopping;
             self.pending = None;
+            cx.notify();
+        } else if schema_waiting && self.status == JobStatus::Schema {
+            self.status = JobStatus::Idle;
             cx.notify();
         }
     }
 
     pub(crate) fn take_job(&mut self, cx: &mut Context<Self>) -> Option<Job> {
-        let job = self.job.take()?;
-        job.stop();
-        self.status = JobStatus::Stopping;
-        self.pending = None;
-        cx.notify();
-        Some(job)
+        self.stop(cx);
+        self.job.take().map(|job| job.worker)
     }
 
-    fn poll_job(&mut self, cx: &mut Context<Self>) -> bool {
+    fn poll_job(&mut self, origin: &Rc<JobOrigin>, cx: &mut Context<Self>) -> bool {
+        if !self
+            .job
+            .as_ref()
+            .is_some_and(|job| Rc::ptr_eq(origin, &job.origin))
+        {
+            return false;
+        }
+        if origin.directory != self.project.directory() {
+            if let Some(worker) = self.take_job(cx) {
+                cx.background_executor()
+                    .spawn(async move { drop(worker) })
+                    .detach();
+            }
+            self.status = JobStatus::Idle;
+            return false;
+        }
         let mut changed = false;
         for _ in 0..256 {
             let Some(job) = &self.job else { break };
-            let message = match job.messages.try_recv() {
+            let message = match job.worker.messages.try_recv() {
                 Ok(message) => message,
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
@@ -690,7 +765,7 @@ impl Workspace {
                 }
             };
             changed = true;
-            self.receive_job_message(message);
+            self.receive_job_message(message, origin);
         }
         if changed {
             cx.notify();
@@ -698,29 +773,17 @@ impl Workspace {
         self.job.is_some()
     }
 
-    fn receive_job_message(&mut self, message: Message) {
+    fn receive_job_message(&mut self, message: Message, origin: &Rc<JobOrigin>) {
         match message {
             Message::Log(diagnostic) => self.console.push(diagnostic),
-            Message::Schema(catalog) => {
-                let result = (|| -> Result<_> {
-                    let registry = EditorRegistry::new(builtin_component_schemas()?, catalog)?;
-                    Ok(self.session.set_registry(registry)?)
-                })();
-                match result {
-                    Ok(diagnostics) => {
-                        self.revision = self.revision.wrapping_add(1);
-                        self.console
-                            .line(DiagnosticSeverity::Info, "Schema refreshed");
-                        for error in diagnostics {
-                            self.console
-                                .line(DiagnosticSeverity::Warning, error.to_string());
-                        }
-                    }
-                    Err(error) => self
-                        .console
-                        .line(DiagnosticSeverity::Warning, error.to_string()),
-                }
+            Message::Schema(catalog) if self.status != JobStatus::Stopping => {
+                self.deferred_schema = Some(DeferredSchema {
+                    origin: origin.clone(),
+                    catalog,
+                });
+                self.publish_deferred_schema();
             }
+            Message::Schema(_) => {}
             Message::Play {
                 state,
                 mode,
@@ -759,71 +822,56 @@ impl Workspace {
         }
     }
 
+    fn publish_deferred_schema(&mut self) {
+        if self.session.gesture_active() {
+            return;
+        }
+        let Some(schema) = self.deferred_schema.take() else {
+            return;
+        };
+        if self.status == JobStatus::Schema && self.job.is_none() {
+            self.status = JobStatus::Idle;
+        }
+        if schema.origin.directory != self.project.directory()
+            || self
+                .job
+                .as_ref()
+                .is_some_and(|job| !Rc::ptr_eq(&schema.origin, &job.origin))
+        {
+            return;
+        }
+        let result = (|| -> Result<_> {
+            let registry = EditorRegistry::new(builtin_component_schemas()?, schema.catalog)?;
+            Ok(self.session.set_registry(registry)?)
+        })();
+        match result {
+            Ok(diagnostics) => {
+                self.revision = self.revision.wrapping_add(1);
+                self.console
+                    .line(DiagnosticSeverity::Info, "Schema refreshed");
+                for error in diagnostics {
+                    self.console
+                        .line(DiagnosticSeverity::Warning, error.to_string());
+                }
+            }
+            Err(error) => self
+                .console
+                .line(DiagnosticSeverity::Warning, error.to_string()),
+        }
+    }
+
     fn finish_job(&mut self, result: Result<(), String>) {
         if let Err(error) = result {
+            self.deferred_schema = None;
             self.console.line(DiagnosticSeverity::Error, error);
         } else if self.status == JobStatus::Stopping {
             self.console
                 .line(DiagnosticSeverity::Info, "Stopped the project process");
         }
         self.job = None;
-        self.status = JobStatus::Idle;
+        if self.status != JobStatus::Schema || self.deferred_schema.is_none() {
+            self.status = JobStatus::Idle;
+        }
         self.pending = None;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn play_controls_wait_for_matching_delivery_and_acknowledgment() {
-        let project = tempfile::tempdir().unwrap();
-        std::fs::create_dir(project.path().join("assets")).unwrap();
-        std::fs::write(
-            project.path().join("nara.toml"),
-            "[project]\nname = 'Test game'\nversion = '0.1.0'\n",
-        )
-        .unwrap();
-        let mut workspace = Workspace::open(project.path(), ProjectTrust::Untrusted).unwrap();
-        let state = |state, pending, steps| Message::Play {
-            state,
-            pending,
-            steps,
-            mode: EditorPlayMode::Snapshot,
-        };
-        let delivery = |control, result| Message::PlayControlResult { control, result };
-
-        workspace.pending = Some(PendingPlayControl::Queued(PlayControl::Pause));
-        workspace.receive_job_message(state(PlayState::Running, None, 0));
-        workspace.receive_job_message(delivery(PlayControl::Resume, Ok(())));
-        assert!(workspace.control_pending());
-        workspace.receive_job_message(delivery(PlayControl::Pause, Ok(())));
-        workspace.receive_job_message(state(PlayState::Running, Some(PlayControl::Pause), 0));
-        assert!(workspace.control_pending());
-        workspace.receive_job_message(state(PlayState::Paused, None, 0));
-        assert!(!workspace.control_pending());
-        assert!(workspace.status == JobStatus::Paused);
-
-        workspace.pending = Some(PendingPlayControl::Queued(PlayControl::Step));
-        workspace.receive_job_message(delivery(
-            PlayControl::Step,
-            Err("Control delivery failed".into()),
-        ));
-        assert!(!workspace.control_pending());
-        assert!(workspace.console.entries().iter().any(|entry| {
-            entry.severity == DiagnosticSeverity::Warning
-                && entry.message == "Control delivery failed"
-        }));
-
-        workspace.pending = Some(PendingPlayControl::Queued(PlayControl::Step));
-        workspace.receive_job_message(delivery(PlayControl::Step, Ok(())));
-        workspace.receive_job_message(state(PlayState::Paused, None, 1));
-        assert!(!workspace.control_pending());
-        assert_eq!(workspace.steps, 1);
-        workspace.pending = Some(PendingPlayControl::Queued(PlayControl::Resume));
-        workspace.receive_job_message(Message::Finished(Ok(())));
-        assert!(!workspace.control_pending());
-        assert!(workspace.status == JobStatus::Idle);
     }
 }

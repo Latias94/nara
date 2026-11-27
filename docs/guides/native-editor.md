@@ -70,9 +70,9 @@ Night Relay implements this protocol in its development desktop build.
 
 ## Verify the native workflow
 
-On a native desktop with WGPU, run the built editor with `--project reference-game --trusted
---verify`. It uses a temporary copy for scene saves, checks the shared viewport before and after
-resize, verifies retained presentation and one idle refresh, floats the Inspector, and round-trips
+On a native desktop with WGPU, build the editor with `--features native-smoke` and run it with
+`--project reference-game --trusted --verify`. It uses a temporary copy for scene saves, checks the
+shared viewport before and after resize, verifies retained presentation and one idle refresh, floats the Inspector, and round-trips
 the layout. Night Relay reports the edited shield count and acknowledges Pause, Step, and Resume.
 The editor waits for Stop to reap the game process tree and checks that the source and edited
 documents still match their pre-Play values. Success prints `Night Relay editor verification passed`.
@@ -85,3 +85,11 @@ For a GPU capture, launch the built editor with `--project reference-game --capt
 It opens one window, warms the shared viewport, presents the requested frames, prints the texture
 and buffer creation counts, and exits. PIX on Windows can launch the DX12 editor directly in this
 mode. Allow enough frames for the capture tool to reach the warmed-up portion of the run.
+
+To measure the editor frame path, build in release mode with the same feature and use
+`--project reference-game --measure-editor-performance 240`. The probe opens a temporary project
+copy and measures the viewport with static panels and with the Console status updated on each
+produced frame. Its output includes the display rate, Nara and GPUI submission rates, and the
+median and 95th percentile of the GPUI draw and presentation work. The submission rates measure
+completed host submissions. Repeat with
+`GPUI_VIEW_RETENTION=0` for the same workload with automatic GPUI reuse disabled.

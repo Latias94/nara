@@ -85,8 +85,12 @@ fn valid_shapes_preserve_order_and_premultiplied_color() {
             .iter()
             .map(|instance| instance.kind)
             .collect::<Vec<_>>(),
-        [RECT, CIRCLE, LINE]
+        [1, 2, 3, 4, CIRCLE, LINE]
     );
+    for edge in &instances[..4] {
+        let thickness = Vec2::new(edge.clip_axes[2], edge.clip_axes[3]).length();
+        assert_eq!(thickness, 3.0 * 2.0 / 64.0);
+    }
     assert!(
         instances
             .iter()

@@ -396,7 +396,8 @@ copies and zero in-frame native resource creations.
 **Exit.** A comparable tilemap scene is at least 10 times smaller than v0 and cooked loading takes
 under 2 ms. The editor UI thread takes under 0.5 ms per frame with static panels and a 120 FPS
 viewport. The exported game runs on a clean machine. Aim for 120,000–180,000 lines of Nara source
-and 120,000–160,000 lines of Open-GPUI source with the final workspace boundaries in place.
+with the final workspace boundaries in place. Open-GPUI retains native desktop platform services,
+AccessKit, and docking. The original 120,000–160,000-line estimate predates that scope.
 
 ### Phase 5A verification
 
@@ -463,6 +464,36 @@ build, per-case p95 ranged from 136.688 to 172.667 ms in the editor and 36.203 t
 - **Regression suites.** The engine passed 509 tests with five configured skips. Night Relay
   passed all 12 tests and the eight-round fixed-step replay. The root, editor, and shared viewport
   all-target checks passed on Windows, as did the Wasm core check and the dependency boundary audit.
+
+### Phase 5C verification
+
+Windows 11 release measurements used Rust 1.95.0, an Intel Core i9-13900KF, an RTX 4090
+with DX12, and a 144 Hz display. The editor window was 1460 × 940 logical pixels at 150% scale.
+The probe times accepted GPUI draws and synchronous platform submission on the UI thread.
+The submission time includes any platform wait. The timed sections exclude the Nara viewport
+render callback and idle time.
+
+The static panels stayed below 0.5 ms at p95 while both the viewport and GPUI submitted more
+than 120 frames per second. GPUI presented the previously accepted scene on each measured frame.
+With AccessKit active, a changing Console status still takes the full-draw path and exceeds
+the static-panel budget. Open-GPUI's retained output matches full redraw in six oracles,
+including repeated dirty-view edits inside a clipped independent layout root, input and focus,
+and the accepted native accessibility tree. A release shutdown regression also verified that
+closing the last window during critical cleanup completes the original quit generation.
+
+#### Maintained Rust source
+
+The Phase 1 counting rules include project tests and examples and count fixture Rust separately.
+
+| Repository | Workspace packages | Packages under `crates/` | Project Rust lines | Fixture Rust lines |
+| --- | ---: | ---: | ---: | ---: |
+| Nara | 39 → 19 | 37 → 18 | 1,238,943 → 119,699 | 196,631 → 0 |
+| Open-GPUI | 47 → 13 | 38 → 6 | 1,051,969 → 500,796 | 12,227 → 9,527 |
+
+Nara's 104-line root facade and the 11,381 lines in the separate editor workspace are included
+in the project total. Open-GPUI keeps 272,722 lines in `gpui`, 125,381 in `gpui_platform`, and
+52,471 in `gpui_docking`, including their tests. These packages retain native windowing, input,
+focus, accessibility, and Dockspace integration.
 
 ## Open-GPUI target
 

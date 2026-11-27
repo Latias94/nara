@@ -104,6 +104,11 @@ if __name__ == "__main__":
         re.compile(rf"{editor}|(?:wgpu|winit|dockspace)(?:[-_]|$)"),
         "--all-features",
     )
+    check_dependencies(
+        "nara_editor_gizmo",
+        re.compile(rf"{editor}|(?:winit|dockspace)(?:[-_]|$)"),
+        "--all-features",
+    )
     editor_packages = re.compile(editor)
     for manifest in sorted(Path("crates").glob("nara_*/Cargo.toml")):
         with manifest.open("rb") as stream:

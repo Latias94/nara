@@ -10,6 +10,9 @@ publish = false
 resolver = "3"
 members = ["../nara_editor_viewport"]
 
+[features]
+native-smoke = ["dep:tempfile", "open_gpui/profiler"]
+
 [dependencies]
 anyhow = "1"
 nara_asset = { path = "../nara_asset", features = ["hot-reload"] }
@@ -26,7 +29,7 @@ open_gpui_docking = { package = "open-gpui-docking", path = "../../../open-gpui/
 open_gpui_platform = { package = "open-gpui-platform", path = "../../../open-gpui/crates/gpui_platform" }
 open_gpui_wgpu = { package = "open-gpui-wgpu", path = "../../../open-gpui/crates/gpui_wgpu" }
 pollster = "0.4"
-tempfile = "3.27"
+tempfile = { version = "3.27", optional = true }
 uuid = { version = "1.23.4", features = ["v4"] }
 wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
 
@@ -35,6 +38,9 @@ open_gpui_platform = { package = "open-gpui-platform", path = "../../../open-gpu
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 open_gpui_platform = { package = "open-gpui-platform", path = "../../../open-gpui/crates/gpui_platform", features = ["wayland", "x11"] }
+
+[dev-dependencies]
+tempfile = "3.27"
 
 [target.'cfg(windows)'.dev-dependencies]
 open_gpui = { package = "open-gpui", path = "../../../open-gpui/crates/gpui", default-features = false, features = ["test-support"] }

@@ -2,12 +2,13 @@ mod docking;
 mod inspector;
 mod jobs;
 mod panels;
+#[cfg(feature = "native-smoke")]
 mod smoke;
 mod theme;
 mod viewport;
 mod workspace;
 
-use std::{cell::RefCell, num::NonZeroU32, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 use anyhow::{Context as _, Result, bail, ensure};
 use nara_project::workflow::ProjectTrust;
@@ -20,34 +21,18 @@ use open_gpui_wgpu::SharedWgpuContext;
 fn main() -> Result<()> {
     let mut project: Option<PathBuf> = None;
     let mut trust = ProjectTrust::Untrusted;
-    let mut verify = false;
-    let mut capture_frames = None;
-    let mut measure_hot_reload = None;
+    #[cfg(feature = "native-smoke")]
+    let mut probe = None;
     let mut arguments = std::env::args_os().skip(1);
     while let Some(argument) = arguments.next() {
         if argument == "--trusted" {
             trust = ProjectTrust::Trusted;
-        } else if argument == "--verify" {
-            verify = true;
-        } else if argument == "--capture-frames" && capture_frames.is_none() {
-            capture_frames = Some(
-                arguments
-                    .next()
-                    .and_then(|count| count.to_str()?.parse::<NonZeroU32>().ok())
-                    .context("--capture-frames requires a positive frame count")?,
-            );
-        } else if argument == "--measure-hot-reload" && measure_hot_reload.is_none() {
-            measure_hot_reload = Some(
-                arguments
-                    .next()
-                    .and_then(|count| count.to_str()?.parse::<u32>().ok())
-                    .filter(|count| (1..=100).contains(count))
-                    .context("--measure-hot-reload requires a sample count from 1 to 100")?,
-            );
         } else if argument == "--help" || argument == "-h" {
-            println!(
-                "Usage: nara_editor [--project DIRECTORY] [--trusted] [--verify | --capture-frames N | --measure-hot-reload N]"
-            );
+            const USAGE: &str = "Usage: nara_editor [--project DIRECTORY] [--trusted]";
+            #[cfg(feature = "native-smoke")]
+            println!("{USAGE} {}", smoke::Probe::USAGE);
+            #[cfg(not(feature = "native-smoke"))]
+            println!("{USAGE}");
             return Ok(());
         } else if argument == "--project" && project.is_none() {
             project = Some(
@@ -57,49 +42,41 @@ fn main() -> Result<()> {
                     .into(),
             );
         } else {
+            #[cfg(feature = "native-smoke")]
+            if let Some(parsed) = smoke::Probe::parse(&argument, &mut arguments)? {
+                ensure!(
+                    probe.replace(parsed).is_none(),
+                    "Choose one native smoke probe"
+                );
+                continue;
+            }
             bail!("Unknown argument: {argument:?}. Use --help for usage.");
         }
     }
-    ensure!(
-        !verify || (project.is_some() && trust == ProjectTrust::Trusted),
-        "--verify requires --project and --trusted"
-    );
-    ensure!(
-        capture_frames.is_none() || (project.is_some() && !verify),
-        "--capture-frames requires --project and is separate from --verify"
-    );
-    ensure!(
-        measure_hot_reload.is_none() || (project.is_some() && !verify && capture_frames.is_none()),
-        "--measure-hot-reload requires a Night Relay --project and is separate from other probes"
-    );
-    let measurement_copy = if measure_hot_reload.is_some() {
-        let original = project.as_deref().context("Missing Night Relay project")?;
-        let copy = smoke::hot_reload::copy_fixture(original)?;
-        project = Some(copy.path().to_path_buf());
-        Some(copy)
-    } else {
-        None
+    #[cfg(feature = "native-smoke")]
+    let _measurement_copy = match probe {
+        Some(probe) => probe.prepare(&mut project, trust)?,
+        None => None,
     };
+    #[cfg(feature = "native-smoke")]
+    let persist = probe.is_none();
+    #[cfg(not(feature = "native-smoke"))]
+    let persist = true;
     let shared = pollster::block_on(create_shared_gpu())?;
     let failure = Rc::new(RefCell::new(None));
     let on_open_failure = failure.clone();
     open_gpui_platform::application_with_shared_wgpu(shared.clone())?.run(move |cx| {
         let result = if let Some(directory) = project {
-            workspace::Workspace::open(&directory, trust)
-                .and_then(|workspace| {
-                    let persist =
-                        !verify && capture_frames.is_none() && measure_hot_reload.is_none();
-                    docking::open(workspace, &shared, persist, cx)
-                })
-                .map(|editor| {
-                    if verify {
-                        smoke::start(editor, on_open_failure.clone(), cx);
-                    } else if let Some(frames) = capture_frames {
-                        smoke::capture_frames(editor, frames.get(), on_open_failure.clone(), cx);
-                    } else if let Some(samples) = measure_hot_reload {
-                        smoke::hot_reload::start(editor, samples, on_open_failure.clone(), cx);
-                    }
-                })
+            workspace::Workspace::open(&directory, trust).and_then(|workspace| {
+                let editor = docking::open(workspace, &shared, persist, cx)?;
+                #[cfg(feature = "native-smoke")]
+                if let Some(probe) = probe {
+                    probe.start(editor, on_open_failure.clone(), cx);
+                }
+                #[cfg(not(feature = "native-smoke"))]
+                let _ = editor;
+                Ok(())
+            })
         } else {
             open_project_manager(shared, cx)
         };
@@ -109,7 +86,6 @@ fn main() -> Result<()> {
             cx.quit();
         }
     });
-    drop(measurement_copy);
     failure.borrow_mut().take().map_or(Ok(()), Err)
 }
 

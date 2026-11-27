@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf, time::Duration};
 
-use nara_core::{DocumentId, EntityUuid, Vec2};
+use nara_core::{DocumentId, EntityUuid, Vec2, vfs::AssetPath};
 use nara_project::workflow::ProjectTrust;
 use nara_scene::authoring::{SceneDocument, SceneEntity};
 use open_gpui::{
@@ -251,13 +251,8 @@ fn a_failed_layout_save_can_keep_the_editor_open_or_discard_the_layout() {
 }
 
 #[test]
-fn deleting_an_entity_or_opening_another_scene_evicts_unreachable_drafts() {
+fn deleting_an_entity_evicts_its_inspector_draft() {
     let mut editor = Editor::open(true, false);
-    let second = nara_core::vfs::AssetPath::new("second.scene.ron").unwrap();
-    let second_path = editor.scene_path(second.as_str());
-    let second_scene = SceneDocument::new(DocumentId::try_from_uuid(uuid::Uuid::new_v4()).unwrap());
-    second_scene.write(&second_path).unwrap();
-
     editor.edit_name("Draft before delete");
     assert!(editor.has_drafts());
     editor.workspace.update(&mut editor.cx, |workspace, cx| {
@@ -265,29 +260,55 @@ fn deleting_an_entity_or_opening_another_scene_evicts_unreachable_drafts() {
     });
     editor.cx.run_until_parked();
     assert!(!editor.has_drafts());
+}
 
-    editor
-        .workspace
-        .update(&mut editor.cx, |workspace, cx| workspace.undo(cx));
-    editor.cx.run_until_parked();
-    let entity = editor.workspace.read_with(&editor.cx, |workspace, _| {
-        workspace.session.document().scene().entities[0].id
+#[test]
+fn opening_another_scene_waits_for_inspector_edits_to_be_saved() {
+    let mut editor = Editor::open(true, false);
+    let initial = AssetPath::new(SCENE).unwrap();
+    let initial_id = editor.workspace.read_with(&editor.cx, |workspace, _| {
+        workspace.session.document().scene().id
     });
-    editor.workspace.update(&mut editor.cx, |workspace, cx| {
-        workspace.select([entity], cx)
-    });
-    editor.cx.run_until_parked();
+    let second = AssetPath::new("second.scene.ron").unwrap();
+    let second_scene = SceneDocument::new(DocumentId::try_from_uuid(uuid::Uuid::new_v4()).unwrap());
+    second_scene
+        .write(editor.scene_path(second.as_str()))
+        .unwrap();
+    let try_open = |editor: &mut Editor| {
+        editor.workspace.update(&mut editor.cx, |workspace, cx| {
+            workspace.open_asset(&second, cx);
+        });
+        editor.cx.run_until_parked();
+    };
 
-    editor.edit_name("Draft before switching scene");
+    let mut visual = editor.edit_name("Edited before switching scene");
+    try_open(&mut editor);
     assert!(editor.has_drafts());
-    editor.workspace.update(&mut editor.cx, |workspace, cx| {
-        workspace.refresh_assets(cx);
-        workspace.open_asset(&second, cx);
+    editor.workspace.read_with(&editor.cx, |workspace, _| {
+        assert_eq!(workspace.session.document().scene().id, initial_id);
+        assert_eq!(workspace.selected_asset.as_ref(), Some(&initial));
+        assert!(!workspace.session.is_dirty());
     });
-    editor.cx.run_until_parked();
+
+    visual.simulate_keystrokes("enter");
+    try_open(&mut editor);
     assert!(!editor.has_drafts());
+    editor.workspace.read_with(&editor.cx, |workspace, _| {
+        assert_eq!(workspace.session.document().scene().id, initial_id);
+        assert_eq!(workspace.selected_asset.as_ref(), Some(&initial));
+        assert!(workspace.session.is_dirty());
+    });
+
+    editor.workspace.update(&mut editor.cx, Workspace::save);
+    try_open(&mut editor);
+    editor.workspace.read_with(&editor.cx, |workspace, _| {
+        assert_eq!(workspace.session.document().scene().id, second_scene.id);
+        assert_eq!(workspace.selected_asset.as_ref(), Some(&second));
+    });
     editor.request_close();
     assert!(!editor.is_open());
+    let saved = SceneDocument::read(editor.scene_path(SCENE)).unwrap();
+    assert_eq!(saved.entities[0].name, "Edited before switching scene");
 }
 
 #[test]

@@ -34,12 +34,6 @@ fn segment_distance(point: vec2f, start: vec2f, end: vec2f) -> f32 {
     return length((point - start) - along * edge);
 }
 
-fn rect_distance(point: vec2f, ab: vec4f, cd: vec4f) -> f32 {
-    let first = min(segment_distance(point, ab.xy, ab.zw), segment_distance(point, ab.zw, cd.xy));
-    let second = min(segment_distance(point, cd.xy, cd.zw), segment_distance(point, cd.zw, ab.xy));
-    return min(first, second);
-}
-
 fn ellipse_distance(point: vec2f, center: vec2f, inverse_x: vec2f, inverse_y: vec2f) -> f32 {
     let delta = point - center;
     let local = vec2f(dot(delta, inverse_x), dot(delta, inverse_y));
@@ -58,7 +52,23 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
     var distance: f32;
     switch input.kind {
         case 0u: { distance = segment_distance(point, input.points_ab.xy, input.points_ab.zw); }
-        case 1u: { distance = rect_distance(point, input.points_ab, input.points_cd); }
+        case 1u, 2u, 3u, 4u: {
+            let corners = array(input.points_ab.xy, input.points_ab.zw,
+                                input.points_cd.xy, input.points_cd.zw);
+            var nearest = 0u;
+            distance = segment_distance(point, corners[0], corners[1]);
+            for (var edge = 1u; edge < 4u; edge++) {
+                let candidate = segment_distance(point, corners[edge], corners[(edge + 1u) % 4u]);
+                if candidate < distance {
+                    distance = candidate;
+                    nearest = edge;
+                }
+            }
+            // Assign the shared corner coverage to one edge to preserve translucent joins.
+            if nearest != input.kind - 1u {
+                discard;
+            }
+        }
         default: {
             distance = ellipse_distance(point, input.points_ab.xy, input.points_ab.zw, input.points_cd.xy);
         }

@@ -53,6 +53,8 @@ pub enum ViewportError {
         path: String,
         kind: AssetSourceKind,
     },
+    #[error("preview source '{path}' exceeds its {limit}-byte size limit")]
+    SourceTooLarge { path: String, limit: u64 },
     #[error("could not read preview PNG '{path}': {source}")]
     ReadImage {
         path: String,

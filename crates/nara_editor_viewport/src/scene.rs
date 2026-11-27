@@ -35,8 +35,6 @@ use crate::{PreviewAssets, ViewportError};
 #[cfg(test)]
 mod tests;
 
-const CIRCLE_SEGMENTS: usize = 48;
-
 #[derive(Component)]
 struct PreviewEntity(EntityUuid);
 
@@ -480,20 +478,18 @@ fn append_collider(
     stroke: OverlayStroke,
 ) {
     if let Some(radius) = collider.radius {
+        let radius = radius
+            * affine
+                .matrix2
+                .x_axis
+                .length()
+                .max(affine.matrix2.y_axis.length());
         if !radius.is_finite() || radius <= 0.0 {
             return;
         }
-        let start = affine.transform_point2(Vec2::new(radius, 0.0));
-        let mut from = start;
-        for index in 1..CIRCLE_SEGMENTS {
-            let angle = std::f32::consts::TAU * index as f32 / CIRCLE_SEGMENTS as f32;
-            let to = affine.transform_point2(Vec2::from_angle(angle) * radius);
-            output.push(OverlayPrimitive::Line { from, to, stroke });
-            from = to;
-        }
-        output.push(OverlayPrimitive::Line {
-            from,
-            to: start,
+        output.push(OverlayPrimitive::Circle {
+            center: affine.translation,
+            radius,
             stroke,
         });
     } else {

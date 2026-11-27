@@ -16,7 +16,7 @@ use nara_scene::authoring::{
     },
 };
 
-use super::{EditorError, EditorSession, ScenePatch, row_mut};
+use super::{EditorError, EditorSession, ScenePatch, SceneProjection, row_index, row_mut};
 use crate::EditorRegistry;
 
 type Library = BTreeMap<AssetId, SceneDocument>;
@@ -37,14 +37,14 @@ impl EditorSession {
     }
 
     pub fn is_inherited_entity(&self, entity: EntityUuid) -> bool {
-        self.expanded
-            .as_ref()
+        self.projection
+            .expanded()
             .and_then(|scene| scene.provenance.get(&entity))
             .is_some_and(|origin| !origin.child_path.is_empty())
     }
 
     pub fn prefab_overrides(&self, entity: EntityUuid) -> Vec<PrefabFieldOverride> {
-        let Some(expanded) = &self.expanded else {
+        let Some(expanded) = self.projection.expanded() else {
             return Vec::new();
         };
         let Some(origin) = expanded.provenance.get(&entity) else {
@@ -83,8 +83,8 @@ impl EditorSession {
     ) -> Result<PrefabOverridePath, EditorError> {
         matching_override(&self.document.scene, edit)?;
         let expanded = self
-            .expanded
-            .as_ref()
+            .projection
+            .expanded()
             .ok_or(EditorError::StalePrefabOverride)?;
         let path =
             expanded.parse_override(edit.instance, &edit.address, self.registry.catalog())?;
@@ -113,8 +113,8 @@ impl EditorSession {
             .get(&id)
             .ok_or(EditorError::MissingPrefab(id))?;
         let expanded = self
-            .expanded
-            .as_ref()
+            .projection
+            .expanded()
             .ok_or(EditorError::StalePrefabOverride)?;
         let effective = expanded.resolve_override(edit.instance, &path)?;
         let mut value = effective.clone();
@@ -233,7 +233,7 @@ impl EditorSession {
             .push(ScenePatch::between(&self.document.scene, &after));
         self.document.scene = after;
         self.prefabs = library;
-        self.expanded = preview;
+        self.projection = SceneProjection::admitted(preview);
         self.prune_selection();
         Ok(true)
     }
@@ -256,8 +256,8 @@ pub(super) fn expand(
     Ok(Some(Arc::new(scene)))
 }
 
-pub(super) fn declare_asset(scene: &mut SceneDocument, asset: SceneAsset) {
-    if scene.assets.values().any(|entry| entry.id == asset.id) {
+pub(super) fn declare_asset(assets: &mut BTreeMap<String, SceneAsset>, asset: SceneAsset) {
+    if assets.values().any(|entry| entry.id == asset.id) {
         return;
     }
     let filename = asset.hint.as_str().rsplit('/').next().unwrap_or("asset");
@@ -268,11 +268,11 @@ pub(super) fn declare_asset(scene: &mut SceneDocument, asset: SceneAsset) {
     let base = if base.is_empty() { "asset" } else { &base };
     let mut key = base.to_owned();
     let mut suffix = 2;
-    while scene.assets.contains_key(&key) {
+    while assets.contains_key(&key) {
         key = format!("{base}_{suffix}");
         suffix += 1;
     }
-    scene.assets.insert(key, asset);
+    assets.insert(key, asset);
 }
 
 pub(super) fn known<'a>(
@@ -532,7 +532,9 @@ fn projection(
 }
 
 fn row(scene: &SceneDocument, id: EntityUuid) -> Option<&SceneEntity> {
-    scene.entities.iter().find(|row| row.id == id)
+    row_index(scene, id)
+        .map(|index| &scene.entities[index])
+        .or_else(|| scene.entities.iter().find(|row| row.id == id))
 }
 
 fn instance_mut(
@@ -662,7 +664,7 @@ fn remap_references(
 fn copy_asset_aliases(upstream: &mut SceneDocument, scene: &SceneDocument, value: &ComponentValue) {
     visit_assets(value, &mut |id| {
         if let Some(asset) = scene.assets.values().find(|asset| asset.id == id) {
-            declare_asset(upstream, asset.clone());
+            declare_asset(&mut upstream.assets, asset.clone());
         }
     });
 }

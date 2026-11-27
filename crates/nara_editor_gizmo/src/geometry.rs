@@ -5,8 +5,8 @@ use nara_render::{Extent2d, ExtractedView, WorldCanvasFrame};
 use crate::{OverlayFrame, OverlayGrid, OverlayPrimitive, OverlayStroke};
 
 const LINE: u32 = 0;
-const RECT: u32 = 1;
-const CIRCLE: u32 = 2;
+const FIRST_RECT_EDGE: u32 = 1;
+const CIRCLE: u32 = FIRST_RECT_EDGE + 4;
 const AA_RADIUS: f32 = 0.5;
 const MIN_GRID_SPACING_PX: f64 = 8.0;
 const MAX_GRID_LINES_PER_AXIS: usize = 128;
@@ -225,37 +225,23 @@ impl Geometry<'_> {
     }
 
     fn line(&mut self, from: Vec2, to: Vec2, paint: Paint) {
-        let delta = to - from;
-        let length = delta.x.hypot(delta.y);
-        if !length.is_finite() {
-            return;
+        if let Some(quad) = segment_quad(from, to, paint.padding()) {
+            self.emit(quad, [pack(from, to), [0.0; 4]], paint, LINE);
         }
-        let tangent = if length == 0.0 {
-            Vec2::X
-        } else {
-            delta / length
-        };
-        let along = tangent * paint.padding();
-        let across = along.perp();
-        let quad = Quad {
-            origin: from - along - across,
-            horizontal: delta + 2.0 * along,
-            vertical: 2.0 * across,
-        };
-        self.emit(quad, [pack(from, to), [0.0; 4]], paint, LINE);
     }
 
     fn rect(&mut self, corners: [Vec2; 4], paint: Paint) {
-        let Some([min, max]) = bounds(corners) else {
+        if !corners.into_iter().all(Vec2::is_finite) {
             return;
-        };
-        let padding = Vec2::splat(paint.padding());
-        self.emit(
-            Quad::from_bounds(min - padding, max + padding),
-            [pack(corners[0], corners[1]), pack(corners[2], corners[3])],
-            paint,
-            RECT,
-        );
+        }
+        let points = [pack(corners[0], corners[1]), pack(corners[2], corners[3])];
+        for index in 0..corners.len() {
+            let from = corners[index];
+            let to = corners[(index + 1) % corners.len()];
+            if let Some(quad) = segment_quad(from, to, paint.padding()) {
+                self.emit(quad, points, paint, FIRST_RECT_EDGE + index as u32);
+            }
+        }
     }
 
     fn circle(&mut self, center: Vec2, radius: f32, paint: Paint) {
@@ -339,6 +325,26 @@ impl Geometry<'_> {
             paint,
         );
     }
+}
+
+fn segment_quad(from: Vec2, to: Vec2, padding: f32) -> Option<Quad> {
+    let delta = to - from;
+    let length = delta.x.hypot(delta.y);
+    if !length.is_finite() {
+        return None;
+    }
+    let tangent = if length == 0.0 {
+        Vec2::X
+    } else {
+        delta / length
+    };
+    let along = tangent * padding;
+    let across = along.perp();
+    Some(Quad {
+        origin: from - along - across,
+        horizontal: delta + 2.0 * along,
+        vertical: 2.0 * across,
+    })
 }
 
 fn pack(first: Vec2, second: Vec2) -> [f32; 4] {

@@ -1,8 +1,8 @@
 use std::{
     error::Error,
     io::{self, BufRead, IsTerminal, Write},
-    sync::mpsc::{self, Receiver, SyncSender, TryRecvError},
-    thread,
+    sync::mpsc::{self, Receiver, SyncSender, TrySendError},
+    thread::{self, JoinHandle},
     time::Duration,
 };
 
@@ -27,8 +27,13 @@ struct EditorCommand {
     acknowledgement: &'static str,
 }
 
+struct EditorInput {
+    commands: Receiver<EditorCommand>,
+    reader: JoinHandle<()>,
+}
+
 pub(super) fn run(app: App) -> Result<(), Box<dyn Error>> {
-    let commands = start_input_reader()?;
+    let input = start_input_reader()?;
     let runtime = RuntimeInstance::start(app)?;
     let mut session = WinitRunner::default().start_with_presentation_on(
         runtime,
@@ -39,6 +44,14 @@ pub(super) fn run(app: App) -> Result<(), Box<dyn Error>> {
     let mut ready = false;
     let mut pending = None::<(EditorCommand, RuntimeControlTicket)>;
     loop {
+        if input
+            .as_ref()
+            .is_some_and(|input| input.reader.is_finished())
+        {
+            session.request_close();
+            session.execute();
+            break;
+        }
         let progress = session.poll(POLL_WAIT);
         if let Some((command, ticket)) = pending {
             match session.control_status(ticket) {
@@ -101,24 +114,16 @@ pub(super) fn run(app: App) -> Result<(), Box<dyn Error>> {
             report("ready")?;
             ready = true;
         }
-        if let (None, Some(commands)) = (pending, commands.as_ref()) {
-            match commands.try_recv() {
-                Ok(command) => match session.request_control(command.control) {
-                    RuntimeControlRequestResult::Accepted(ticket) => {
-                        pending = Some((command, ticket))
-                    }
-                    RuntimeControlRequestResult::Rejected(reason) => {
-                        eprintln!(
-                            "editor control {:?} was rejected: {reason:?}",
-                            command.control
-                        );
-                    }
-                },
-                Err(TryRecvError::Empty) => {}
-                Err(TryRecvError::Disconnected) => {
-                    session.request_close();
-                    session.execute();
-                    break;
+        if let (None, Some(input)) = (pending, input.as_ref())
+            && let Ok(command) = input.commands.try_recv()
+        {
+            match session.request_control(command.control) {
+                RuntimeControlRequestResult::Accepted(ticket) => pending = Some((command, ticket)),
+                RuntimeControlRequestResult::Rejected(reason) => {
+                    eprintln!(
+                        "editor control {:?} was rejected: {reason:?}",
+                        command.control
+                    );
                 }
             }
         }
@@ -136,20 +141,20 @@ fn report(event: &str) -> io::Result<()> {
     stdout.flush()
 }
 
-fn start_input_reader() -> io::Result<Option<Receiver<EditorCommand>>> {
+fn start_input_reader() -> io::Result<Option<EditorInput>> {
     let stdin = io::stdin();
     if stdin.is_terminal() {
         return Ok(None);
     }
-    let (sender, receiver) = mpsc::sync_channel(16);
-    thread::Builder::new()
+    let (sender, commands) = mpsc::sync_channel(16);
+    let reader = thread::Builder::new()
         .name("editor-control-stdin".into())
         .spawn(move || {
             if let Err(error) = read_commands(stdin.lock(), sender) {
                 eprintln!("could not read editor controls: {error}");
             }
         })?;
-    Ok(Some(receiver))
+    Ok(Some(EditorInput { commands, reader }))
 }
 
 fn read_commands(mut input: impl BufRead, sender: SyncSender<EditorCommand>) -> io::Result<()> {
@@ -171,10 +176,11 @@ fn read_commands(mut input: impl BufRead, sender: SyncSender<EditorCommand>) -> 
             }
             let command = line.get(..length).and_then(parse_command);
             length = 0;
-            if let Some(command) = command
-                && sender.send(command).is_err()
-            {
-                return Ok(());
+            if let Some(command) = command {
+                match sender.try_send(command) {
+                    Ok(()) | Err(TrySendError::Full(_)) => {}
+                    Err(TrySendError::Disconnected(_)) => return Ok(()),
+                }
             }
         }
         input.consume(available);
@@ -218,5 +224,27 @@ mod tests {
             ]
         );
         Ok(())
+    }
+
+    #[test]
+    fn control_input_reaches_eof_with_a_full_queue() {
+        let (sender, commands) = mpsc::sync_channel(1);
+        let reader = thread::spawn(move || {
+            read_commands(&b"pause\nstep\nresume\n"[..], sender).unwrap();
+        });
+        let input = EditorInput { commands, reader };
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !input.reader.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "queued controls blocked the stdin reader from reaching EOF"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            input.commands.try_recv().unwrap().control,
+            RuntimeControl::Pause
+        );
+        input.reader.join().unwrap();
     }
 }

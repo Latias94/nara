@@ -8,6 +8,8 @@ use super::{DRAIN_TIMEOUT, OutputLine, OutputStream, native};
 
 const READ_BUDGET: usize = 64 * 1024;
 const READ_CHUNK: usize = 8 * 1024;
+const MAX_LINE_BYTES: usize = 256 * 1024;
+const MAX_PENDING_BYTES: usize = MAX_LINE_BYTES + b"\r\n".len();
 
 pub(super) struct LinePipe {
     reader: Option<PipeReader>,
@@ -39,7 +41,8 @@ impl LinePipe {
         let pending = &mut self.pending;
         let result = drain_pipe(&mut self.reader, exit, |chunk| {
             for part in chunk.split_inclusive(|byte| *byte == b'\n') {
-                pending.extend_from_slice(part);
+                let keep = part.len().min(MAX_PENDING_BYTES - pending.len());
+                pending.extend_from_slice(&part[..keep]);
                 if part.ends_with(b"\n") {
                     emit_line(stream, pending, emit);
                 }
@@ -126,14 +129,17 @@ fn emit_line(stream: OutputStream, pending: &mut Vec<u8>, emit: &mut impl FnMut(
     if let Some(line) = bytes.strip_suffix(b"\n") {
         bytes = line.strip_suffix(b"\r").unwrap_or(line);
     }
-    let text = String::from_utf8_lossy(bytes).into_owned();
+    let mut text = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_LINE_BYTES)]).into_owned();
+    if bytes.len() > MAX_LINE_BYTES {
+        text.push_str(" [truncated]");
+    }
     pending.clear();
     emit(OutputLine { stream, text });
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
+    use std::{io::Write as _, thread, time::Duration};
 
     use super::*;
 
@@ -152,5 +158,38 @@ mod tests {
         .unwrap();
         assert_eq!(bytes, input);
         assert!(pipe.is_closed());
+    }
+
+    #[test]
+    fn long_lines_are_bounded_and_resume_at_the_next_newline() {
+        let (mut pipe, mut writer) = LinePipe::new(OutputStream::Stdout).unwrap();
+        let producer = thread::spawn(move || {
+            let block = vec![b'x'; MAX_LINE_BYTES];
+            writer.write_all(&block).unwrap();
+            writer.write_all(&block).unwrap();
+            writer.write_all(b"NARA_EDITOR ready\n").unwrap();
+            writer.write_all(&block).unwrap();
+            writer.write_all(b"\r\nnext\r\n").unwrap();
+            writer.write_all(&block).unwrap();
+            writer.write_all(b"tail").unwrap();
+        });
+
+        let mut lines = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !pipe.is_closed() {
+            assert!(Instant::now() < deadline, "producer did not close its pipe");
+            pipe.drain(None, &mut |line| lines.push(line.text)).unwrap();
+            assert!(pipe.pending.len() <= MAX_PENDING_BYTES);
+            thread::sleep(Duration::from_millis(1));
+        }
+        producer.join().unwrap();
+
+        assert_eq!(lines.len(), 4);
+        let prefix = "x".repeat(MAX_LINE_BYTES);
+        for index in [0, 3] {
+            assert_eq!(lines[index].strip_prefix(&prefix), Some(" [truncated]"));
+        }
+        assert!(lines[1] == prefix);
+        assert_eq!(lines[2], "next");
     }
 }

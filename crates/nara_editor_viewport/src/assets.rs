@@ -17,9 +17,9 @@ use nara_scene::authoring::{SceneDocument, SpriteSource};
 
 use crate::{ViewportError, scene::typed};
 
-const MAX_PNG_READ: u64 = 16 * 1024 * 1024 + 1;
-const MAX_MATERIAL_READ: u64 = 64 * 1024 + 1;
-const MAX_SHADER_READ: u64 = 1024 * 1024 + 1;
+const MAX_PNG_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_MATERIAL_BYTES: u64 = 64 * 1024;
+const MAX_SHADER_BYTES: u64 = 1024 * 1024;
 
 /// Immutable preview inputs resolved against one project index and prepared without a GPU.
 #[derive(Clone, Default)]
@@ -70,7 +70,7 @@ impl PreviewAssets {
                 && let Entry::Vacant(entry) = assets.materials.entry(id)
             {
                 let path = material_path(database, id, "nara.material")?;
-                let text = read_text(source, path, MAX_MATERIAL_READ)?;
+                let text = read_text(source, path, MAX_MATERIAL_BYTES)?;
                 let material = SpriteMaterialAsset::from_ron(&text).map_err(|source| {
                     ViewportError::Material {
                         path: path.to_string(),
@@ -78,7 +78,7 @@ impl PreviewAssets {
                     }
                 })?;
                 let shader_path = material_path(database, material.shader(), "nara.shader")?;
-                let shader = read_text(source, shader_path, MAX_SHADER_READ)?;
+                let shader = read_text(source, shader_path, MAX_SHADER_BYTES)?;
                 let binding = if let Some(cached) = previous.materials.get(&id).filter(|cached| {
                     same_root
                         && cached.source == material
@@ -156,11 +156,12 @@ fn material_path<'a>(
 
 fn read_png(source: &DirAssetSource, record: &AssetRecord) -> Result<ImageAsset, ViewportError> {
     let path = record.path();
-    let bytes =
-        read_bytes(source, path, MAX_PNG_READ).map_err(|source| ViewportError::ReadImage {
+    let bytes = read_bytes(source, path, MAX_PNG_BYTES, |source| {
+        ViewportError::ReadImage {
             path: path.to_string(),
             source,
-        })?;
+        }
+    })?;
     let decoded = match record.meta() {
         Some(meta) => decode_png_source(&bytes, meta),
         None => ImageAsset::from_png(&bytes, ImageColorSpace::Srgb).map_err(Into::into),
@@ -176,27 +177,30 @@ fn read_text(
     path: &AssetSourcePath,
     limit: u64,
 ) -> Result<String, ViewportError> {
-    read_bytes(source, path, limit)
-        .and_then(|bytes| {
-            if bytes.len() as u64 == limit {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "source exceeds its size limit",
-                ));
-            }
-            String::from_utf8(bytes).map_err(io::Error::other)
-        })
-        .map_err(|source| ViewportError::ReadMaterial {
-            path: path.to_string(),
-            source,
-        })
+    let read_error = |source| ViewportError::ReadMaterial {
+        path: path.to_string(),
+        source,
+    };
+    let bytes = read_bytes(source, path, limit, read_error)?;
+    String::from_utf8(bytes).map_err(|error| read_error(io::Error::other(error)))
 }
 
-fn read_bytes(source: &DirAssetSource, path: &AssetSourcePath, limit: u64) -> io::Result<Vec<u8>> {
+fn read_bytes(
+    source: &DirAssetSource,
+    path: &AssetSourcePath,
+    limit: u64,
+    read_error: impl FnOnce(io::Error) -> ViewportError,
+) -> Result<Vec<u8>, ViewportError> {
     let mut bytes = Vec::new();
-    source
-        .open(&AssetPath::new(path.as_str())?)?
-        .take(limit)
-        .read_to_end(&mut bytes)?;
+    AssetPath::new(path.as_str())
+        .and_then(|path| source.open(&path))
+        .and_then(|file| file.take(limit + 1).read_to_end(&mut bytes))
+        .map_err(read_error)?;
+    if bytes.len() as u64 > limit {
+        return Err(ViewportError::SourceTooLarge {
+            path: path.to_string(),
+            limit,
+        });
+    }
     Ok(bytes)
 }
