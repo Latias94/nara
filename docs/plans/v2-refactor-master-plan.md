@@ -397,7 +397,8 @@ copies and zero in-frame native resource creations.
 under 2 ms. The editor UI thread takes under 0.5 ms per frame with static panels and a 120 FPS
 viewport. The exported game runs on a clean machine. Aim for 120,000–180,000 lines of Nara source
 with the final workspace boundaries in place. Open-GPUI retains native desktop platform services,
-AccessKit, and docking. The original 120,000–160,000-line estimate predates that scope.
+AccessKit, and docking. Its measured source count below exceeds the original 120,000–160,000-line
+estimate.
 
 ### Phase 5A verification
 
@@ -449,6 +450,10 @@ AccessKit, and docking. The original 120,000–160,000-line estimate predates th
 
 The final Cargo-built binaries also passed all five reload cases. During a concurrent Starter
 build, per-case p95 ranged from 136.688 to 172.667 ms in the editor and 36.203 to 63.312 ms in Play.
+After the review fixes, both native probes passed all five cases again at 30 Hz with 20 samples
+per case. Per-case p95 ranged from 144.136 to 154.510 ms in the editor and from 99.231 to
+99.547 ms in Play. Test coverage includes same-ID moves across separate source and sidecar
+events, recovery after a Windows sharing violation, and asset directory replacement.
 
 - **Standalone Export on Windows.** A fresh trusted export produced a 20,063,744-byte executable
   and the 2,519-byte archive. A copy containing only those two files ran from a new directory
@@ -456,7 +461,8 @@ build, per-case p95 ranged from 136.688 to 172.667 ms in the editor and 36.203 t
   overrides. Both `--verify-first-present` and `--verify-gameplay` exited successfully. The
   1152 × 768 window presented 110 HUD glyphs, then presented the updated HUD after collecting a
   power cell. The shipping dependency graph excludes the editor, Open-GPUI, RON, PNG decoding,
-  and file watching.
+  and file watching. The review rebuild repeated both clean-directory checks with the same
+  file sizes and four Cook cache hits.
 - **Editor regression on Windows.** The final editor and development game passed `--verify`.
   It reopened the edited scene, preserved Undo and Redo, retained 60 viewport frames with zero
   new textures or buffers, floated the Inspector, and drove the four-shield Play snapshot
@@ -467,19 +473,64 @@ build, per-case p95 ranged from 136.688 to 172.667 ms in the editor and 36.203 t
 
 ### Phase 5C verification
 
-Windows 11 release measurements used Rust 1.95.0, an Intel Core i9-13900KF, an RTX 4090
-with DX12, and a 144 Hz display. The editor window was 1460 × 940 logical pixels at 150% scale.
-The probe times accepted GPUI draws and synchronous platform submission on the UI thread.
-The submission time includes any platform wait. The timed sections exclude the Nara viewport
-render callback and idle time.
+Windows 11 release measurements used Rust 1.95.0, an Intel Core i9-13900KF, and an RTX 4090
+with DX12. The editor window was 1460 × 940 logical pixels at 150% scale. The original
+144 Hz run submitted about 143 viewport and GPUI frames per second with AccessKit active.
+Static panels recorded 0.303 ms p50 / 0.412 ms p95 for GPUI draw and platform submission.
+Publishing Console status on each frame raised those values to 1.746 / 1.968 ms. These
+measurements excluded the synchronous Nara viewport callback.
 
-The static panels stayed below 0.5 ms at p95 while both the viewport and GPUI submitted more
-than 120 frames per second. GPUI presented the previously accepted scene on each measured frame.
-With AccessKit active, a changing Console status still takes the full-draw path and exceeds
-the static-panel budget. Open-GPUI's retained output matches full redraw in six oracles,
-including repeated dirty-view edits inside a clipped independent layout root, input and focus,
-and the accepted native accessibility tree. A release shutdown regression also verified that
+The review follow-up pairs each viewport callback with its native GPUI submission. Combined
+time sums the callback, accepted GPUI draw, and synchronous platform submission for each
+sample, including platform wait. Idle time and other event dispatch are outside the sample.
+Each case requested 240 viewport frames after warmup. The active display was 30 Hz in this
+session, and both the viewport and GPUI submitted about 30 frames per second.
+
+| AccessKit | GPUI view retention | Workload | GPUI draw + submit p50 / p95 (ms) | Viewport callback p50 / p95 (ms) | Combined p50 / p95 (ms) |
+| --- | --- | --- | ---: | ---: | ---: |
+| Active | Enabled | Static panels | 0.345 / 0.435 | 0.337 / 0.419 | 0.686 / 0.848 |
+| Active | Disabled | Static panels | 0.341 / 0.429 | 0.335 / 0.402 | 0.683 / 0.836 |
+| Disabled | Enabled | Static panels | 0.341 / 0.408 | 0.334 / 0.404 | 0.678 / 0.805 |
+| Disabled | Disabled | Static panels | 0.339 / 0.393 | 0.337 / 0.428 | 0.679 / 0.808 |
+| Active | Enabled | Console status | 1.970 / 2.171 | 0.342 / 0.387 | 2.322 / 2.536 |
+| Active | Disabled | Console status | 2.053 / 2.333 | 0.333 / 0.405 | 2.398 / 2.665 |
+| Disabled | Enabled | Console status | 1.804 / 2.095 | 0.337 / 0.428 | 2.146 / 2.468 |
+| Disabled | Disabled | Console status | 1.890 / 2.128 | 0.333 / 0.394 | 2.230 / 2.522 |
+
+All four probes completed and exited cleanly. Static panels issued zero GPUI draws and used
+`request_retained_presentation()` with either setting of `GPUI_VIEW_RETENTION`. Console status
+triggered 241 GPUI draws for 240 updates in each run. With AccessKit disabled, enabling view
+retention reduced the measured Console p95 in this comparison. The combined static-panel
+median was above 0.5 ms in every configuration. The full UI-thread target at 120 FPS remains
+unverified.
+
+AccessKit permits replay of eligible unclipped roots. It falls back to full draws for a dirty
+splice or when accessibility capture owns a subtree clip, including the clipped Dockspace
+path in the editor. The retained/full-redraw tests compare paint, hitboxes, input, focus,
+and the accepted accessibility tree. They also exercise clean subtree replay, dirty-leaf
+splicing, font registration during a splice, group hover, and element-state retirement.
+Redrawing after a pointer exit preserves the exit until a new pointer event arrives.
+Explicit `Window::draw` rebuilds the root, preserving Dockspace's frame-local publications
+and direct consumers' drawing callbacks. A release shutdown regression also verified that
 closing the last window during critical cleanup completes the original quit generation.
+
+The Windows all-feature suites for Open-GPUI Core, Dockspace, and WGPU passed all 2,846 tests.
+The Windows platform library passed all 319 enabled tests. Its native accessibility inspection
+test drives paint callbacks for the observed HWND and checks the tree, draws, and submissions.
+Three native DX12 probes covered the owned host, deferred external delivery, and owned logical-root
+close. The Apple Silicon cross-check compiled all platform targets with all features. Nara's editor
+and viewport suite passed all 46 tests, including DX12 allocation reuse after warmup and resize.
+The standalone 60-frame editor capture recorded 60 Nara renders, 61 GPUI presents, and zero new
+textures or buffers.
+The final native editor smoke edited and reopened Night Relay, floated the Inspector, and
+reaped the game after Pause, one Step, and Resume with an edited four-shield snapshot.
+The separate two-window shared-viewport smoke submitted 287 retained frames at 143.1 FPS,
+with zero Inspector submissions and zero new textures or buffers during steady state.
+The locked all-feature, all-target checks completed without compiler warnings for both root
+workspaces, the Nara editor workspace, Night Relay, and the shared viewport. The portable Nara
+runtime core and the Open-GPUI core passed their `wasm32-unknown-unknown` checks. Every resolved
+`wgpu` entry across the two repositories uses 30.0.0 at
+`cddb2f5d80dc0009b2ef6767635140cacf90a007`.
 
 #### Maintained Rust source
 
@@ -487,22 +538,42 @@ The Phase 1 counting rules include project tests and examples and count fixture 
 
 | Repository | Workspace packages | Packages under `crates/` | Project Rust lines | Fixture Rust lines |
 | --- | ---: | ---: | ---: | ---: |
-| Nara | 39 → 19 | 37 → 18 | 1,238,943 → 119,699 | 196,631 → 0 |
-| Open-GPUI | 47 → 13 | 38 → 6 | 1,051,969 → 500,796 | 12,227 → 9,527 |
+| Nara | 39 → 19 | 37 → 18 | 1,238,943 → 122,018 | 196,631 → 0 |
+| Open-GPUI | 47 → 13 | 38 → 6 | 1,051,969 → 501,581 | 12,227 → 9,527 |
 
-Nara's 104-line root facade and the 11,381 lines in the separate editor workspace are included
-in the project total. Open-GPUI keeps 272,722 lines in `gpui`, 125,381 in `gpui_platform`, and
-52,471 in `gpui_docking`, including their tests. These packages retain native windowing, input,
-focus, accessibility, and Dockspace integration.
+Nara's largest crate is `nara_render` at 20,640 lines. The root facade has 321 lines, including its
+104-line library entry point. The project total includes 12,078 lines in the separate editor
+workspace.
 
-## Open-GPUI target
+Open-GPUI keeps 273,480 lines in `gpui`, 125,391 in `gpui_platform`, 52,471 in `gpui_docking`,
+21,175 in `gpui_wgpu`, 5,414 in `gpui_base`, and 3,763 in `gpui_macros`, including their tests.
+These packages retain native windowing, input, focus, accessibility, and Dockspace integration.
+
+#### Hosted CI
+
+Nara passed all seven jobs on GitHub-hosted Windows and Ubuntu before and after the review.
+The review run at `16111ff` took 22 minutes 30 seconds from creation through completion,
+including runner queue time. Its longest job was Windows core engine tests at 4 minutes
+41 seconds. The previous run at `5041f54` took 11 minutes 16 seconds, and its longest job took
+4 minutes 43 seconds. The workflow has no repository-level Cargo cache.
+[Review CI](https://github.com/Latias94/nara/actions/runs/46039412516) ·
+[Earlier CI](https://github.com/Latias94/nara/actions/runs/45933417713)
+
+Open-GPUI's pre-review Verify run passed all 12 jobs on GitHub-hosted Windows, Linux, and
+macOS, including native Windows and GPU host jobs. Workflow wall time was 67 minutes
+7 seconds, including queue time. The Linux Verify job took 44 minutes 16 seconds. The Windows
+consumer and workspace jobs restored Cargo caches, while the Windows Rust 1.95 docking and
+tooling job had a cache miss. These workflow and job times include setup and tests.
+[Earlier Verify](https://github.com/Latias94/open-gpui/actions/runs/46026905673) ·
+[Review Verify](https://github.com/Latias94/open-gpui/actions/runs/46042321487)
+
+## Open-GPUI packages
 
 | Package | Responsibility |
 | --- | --- |
-| `gpui` | Entities, elements, layout, events, focus, retained frames, and window model |
+| `gpui` | Entities, elements, layout, events, focus, retained frames, window model, and headless test support |
 | `gpui_wgpu` | Unified renderer, atlas, and external image imports |
 | `gpui_platform` | Windows, macOS, and Linux native services |
 | `gpui_macros` | Core derives and action macros |
 | `gpui_base` | Unstyled interaction primitives |
 | `gpui_docking` | Thin adapter to the pure Rust `dockspace` model |
-| `gpui_testing` | Headless platform, input simulation, and rendering tests |

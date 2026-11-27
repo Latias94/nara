@@ -24,8 +24,8 @@ for implementation order and phase gates. The `legacy/v0-imgui-reference` tag pr
 | Workflow and editor | `nara_project` owns the `nara` CLI, Schema discovery, supervised Play, Cook, and Export. `nara_editor_core` owns synchronous editing, selection, gestures, Undo, drafts, and registry. `nara_editor_gizmo` draws world-space overlays. `nara_editor_viewport` passes Nara's leased texture to Open-GPUI. `nara_editor` owns the docked shell and its Design Kit styling. |
 
 Dependencies point inward toward the headless core. The [workspace ADR](adr/ADR-001-workspace-and-dependency-law.md)
-governs package counts and dependency checks. The [Open-GPUI roadmap](../plans/v2-refactor-master-plan.md#open-gpui-target)
-lists its seven target packages.
+governs package counts and dependency checks. The [Open-GPUI package table](../plans/v2-refactor-master-plan.md#open-gpui-packages)
+lists the six framework packages.
 
 ## Accepted decisions
 
