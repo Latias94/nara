@@ -36,12 +36,15 @@ pub(crate) enum Probe {
     Verify,
     CaptureFrames(NonZeroU32),
     MeasureHotReload(u32),
-    MeasureEditorPerformance(u32),
+    MeasureEditorPerformance {
+        count: u32,
+        without_accessibility: bool,
+    },
 }
 
 impl Probe {
-    pub(crate) const USAGE: &str =
-        "[--verify | --capture-frames N | --measure-hot-reload N | --measure-editor-performance N]";
+    pub(crate) const USAGE: &str = "[--verify | --capture-frames N | --measure-hot-reload N | \
+        --measure-editor-performance N | --measure-editor-performance-no-a11y N]";
 
     pub(crate) fn parse(
         argument: &OsStr,
@@ -62,16 +65,30 @@ impl Probe {
                     .filter(|count| (1..=100).contains(count))
                     .context("--measure-hot-reload requires a sample count from 1 to 100")?,
             ),
-            Some("--measure-editor-performance") => Self::MeasureEditorPerformance(
-                arguments
+            Some("--measure-editor-performance" | "--measure-editor-performance-no-a11y") => {
+                let count = arguments
                     .next()
                     .and_then(|count| count.to_str()?.parse().ok())
                     .filter(|count| (2..=600).contains(count))
-                    .context("--measure-editor-performance requires 2 to 600 frames per case")?,
-            ),
+                    .context("The editor performance probe requires 2 to 600 frames per case")?;
+                Self::MeasureEditorPerformance {
+                    count,
+                    without_accessibility: argument == "--measure-editor-performance-no-a11y",
+                }
+            }
             _ => return Ok(None),
         };
         Ok(Some(probe))
+    }
+
+    pub(crate) fn without_accessibility(self) -> bool {
+        matches!(
+            self,
+            Self::MeasureEditorPerformance {
+                without_accessibility: true,
+                ..
+            }
+        )
     }
 
     pub(crate) fn prepare(
@@ -95,7 +112,7 @@ impl Probe {
                 *project = Some(copy.path().to_path_buf());
                 return Ok(Some(copy));
             }
-            Self::MeasureEditorPerformance(_) => {
+            Self::MeasureEditorPerformance { .. } => {
                 ensure!(
                     !cfg!(debug_assertions),
                     "--measure-editor-performance requires a release build"
@@ -121,7 +138,9 @@ impl Probe {
             Self::Verify => start(editor, failure, cx),
             Self::CaptureFrames(count) => capture_frames(editor, count.get(), failure, cx),
             Self::MeasureHotReload(count) => hot_reload::start(editor, count, failure, cx),
-            Self::MeasureEditorPerformance(count) => performance::start(editor, count, failure, cx),
+            Self::MeasureEditorPerformance { count, .. } => {
+                performance::start(editor, count, failure, cx)
+            }
         }
     }
 }

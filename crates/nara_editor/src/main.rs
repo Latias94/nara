@@ -65,7 +65,14 @@ fn main() -> Result<()> {
     let shared = pollster::block_on(create_shared_gpu())?;
     let failure = Rc::new(RefCell::new(None));
     let on_open_failure = failure.clone();
-    open_gpui_platform::application_with_shared_wgpu(shared.clone())?.run(move |cx| {
+    let application = open_gpui_platform::application_with_shared_wgpu(shared.clone())?;
+    #[cfg(feature = "native-smoke")]
+    let application = if probe.is_some_and(smoke::Probe::without_accessibility) {
+        application.without_accessibility()
+    } else {
+        application
+    };
+    application.run(move |cx| {
         let result = if let Some(directory) = project {
             workspace::Workspace::open(&directory, trust).and_then(|workspace| {
                 let editor = docking::open(workspace, &shared, persist, cx)?;

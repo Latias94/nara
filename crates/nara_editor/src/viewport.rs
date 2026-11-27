@@ -57,14 +57,22 @@ pub struct ViewportPanel {
 }
 
 #[cfg(feature = "native-smoke")]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct PerformanceFrames {
     pub(crate) first_submission: Option<Instant>,
     pub(crate) last_submission: Option<Instant>,
     pub(crate) submissions: u64,
     pub(crate) status_updates: u64,
     pub(crate) settled: Option<PerformanceBoundary>,
+    pub(crate) viewport_callbacks: Vec<ViewportCallbackTiming>,
     publish_status: bool,
+}
+
+#[cfg(feature = "native-smoke")]
+#[derive(Clone, Copy)]
+pub(crate) struct ViewportCallbackTiming {
+    pub(crate) preceding_gpui_submissions: u64,
+    pub(crate) elapsed: std::time::Duration,
 }
 
 #[cfg(feature = "native-smoke")]
@@ -188,12 +196,34 @@ impl ViewportPanel {
     }
 
     #[cfg(feature = "native-smoke")]
-    pub(crate) fn completed_performance_frames(&self) -> Option<PerformanceFrames> {
+    pub(crate) fn completed_performance_frames(&self) -> Option<&PerformanceFrames> {
         self.performance
+            .as_ref()
             .filter(|measurement| measurement.settled.is_some())
     }
 
     fn frame(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(feature = "native-smoke")]
+        let timing = (self.performance.is_some() && self.requested_frames != 0)
+            .then(|| PerformanceBoundary::from_window(window));
+        self.render_frame(bounds, window, cx);
+        #[cfg(feature = "native-smoke")]
+        if let Some(timing) = timing
+            && let Some(measurement) = &mut self.performance
+        {
+            measurement.viewport_callbacks.push(ViewportCallbackTiming {
+                preceding_gpui_submissions: timing.gpui_submissions,
+                elapsed: timing.at.elapsed(),
+            });
+        }
+    }
+
+    fn render_frame(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(size) = PanelSize::new(
             bounds.size.width.to_f64() as f32,
             bounds.size.height.to_f64() as f32,

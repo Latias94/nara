@@ -14,7 +14,7 @@ use open_gpui::{
 };
 
 use super::{NATIVE, OpenEditor, wait};
-use crate::viewport::{PerformanceBoundary, PerformanceFrames};
+use crate::viewport::{PerformanceBoundary, PerformanceFrames, ViewportCallbackTiming};
 
 const WARMUP_FRAMES: u32 = 16;
 
@@ -87,20 +87,24 @@ async fn measure(editor: &OpenEditor, count: u32, cx: &mut AsyncApp) -> Result<(
             let viewport_size = window.viewport_size();
             let retention = std::env::var("GPUI_VIEW_RETENTION").unwrap_or_else(|_| "default".into());
             println!(
-                "editor-performance native_display_refresh_hz={refresh_hz} adapter={gpu:?} window_logical_width={} window_logical_height={} window_scale={} window_active={} accessibility_active={} retention={retention}",
-                viewport_size.width.to_f64(), viewport_size.height.to_f64(), window.scale_factor(), window.is_window_active(), window.is_a11y_active(),
+                "editor-performance native_display_refresh_hz={refresh_hz} adapter={gpu:?} window_logical_width={} window_logical_height={} window_scale={} window_active={} accessibility_enabled={} accessibility_active={} retention={retention}",
+                viewport_size.width.to_f64(), viewport_size.height.to_f64(), window.scale_factor(), window.is_window_active(), window.is_a11y_enabled(), window.is_a11y_active(),
             );
             Ok(())
         })?
     })?;
 
     println!(
-        "editor-performance metric=gpui_draw_plus_platform_present_wall_ms measures accepted draw plus synchronous platform present on the UI thread, including any present wait. Retained-only submissions use present duration alone. This wall time bounds CPU time in those slices and excludes the Nara viewport callback and idle intervals. Draw-only percentiles include only draws paired with a native submission. Rates use first-to-last completion and (submissions - 1) / elapsed."
+        "editor-performance metric=ui_work_wall_ms sums the Nara viewport callbacks, accepted GPUI draw and synchronous platform present associated with each submission. Present time includes any platform wait. The sum excludes idle intervals and event dispatch outside those sections. Draw-only percentiles include only draws paired with a native submission. Rates use first-to-last completion and (submissions - 1) / elapsed."
     );
     for (case, publish_status) in [("static", false), ("status", true)] {
         cx.update(|cx| begin_frames(editor, WARMUP_FRAMES, publish_status, cx))?;
         wait(cx, NATIVE, "warm the editor performance case", |cx| {
-            editor.viewport.read(cx).completed_performance_frames()
+            editor
+                .viewport
+                .read(cx)
+                .completed_performance_frames()
+                .map(|_| ())
         })
         .await?;
         capture(editor, case, count, publish_status, cx).await?;
@@ -144,7 +148,7 @@ async fn capture(
         timing.collect(editor.window.window_id(), batch.entries);
         let view = editor.viewport.read(cx);
         view.completed_performance_frames()
-            .map(|done| (done, view.stats()))
+            .map(|done| (done.clone(), view.stats()))
     })
     .await?;
     let end = viewport
@@ -169,8 +173,12 @@ async fn capture(
         "Unexpected Console status update count"
     );
 
-    let nara = SubmissionRate::from_viewport(viewport)?;
-    let gpui = timing.finish(start, end)?;
+    let nara = SubmissionRate::from_viewport(&viewport)?;
+    ensure!(
+        viewport.viewport_callbacks.len() as u64 >= viewport.submissions,
+        "Some Nara submissions lack viewport callback timings"
+    );
+    let gpui = timing.finish(start, end, &viewport.viewport_callbacks)?;
     ensure!(
         !publish_status || gpui.draws != 0,
         "The Console status updates did not produce a GPUI draw"
@@ -180,7 +188,7 @@ async fn capture(
         |values| values.map(|value| format!("{value:.3}")),
     );
     println!(
-        "editor-performance case={case} requested_nara_frames={count} nara_submissions={} nara_elapsed_ms={:.3} nara_submissions_per_s={:.2} gpui_submissions={} gpui_elapsed_ms={:.3} gpui_submissions_per_s={:.2} gpui_draws={} gpui_retained_only_submissions={} status_updates={} gpui_draw_submit_p50_ms={:.3} gpui_draw_submit_p95_ms={:.3} gpui_platform_present_p50_ms={:.3} gpui_platform_present_p95_ms={:.3} gpui_draw_only_p50_ms={draw_p50} gpui_draw_only_p95_ms={draw_p95}",
+        "editor-performance case={case} requested_nara_frames={count} nara_submissions={} nara_elapsed_ms={:.3} nara_submissions_per_s={:.2} gpui_submissions={} gpui_elapsed_ms={:.3} gpui_submissions_per_s={:.2} gpui_draws={} gpui_retained_only_submissions={} status_updates={} gpui_draw_submit_p50_ms={:.3} gpui_draw_submit_p95_ms={:.3} gpui_platform_present_p50_ms={:.3} gpui_platform_present_p95_ms={:.3} gpui_draw_only_p50_ms={draw_p50} gpui_draw_only_p95_ms={draw_p95} viewport_callbacks={} viewport_callback_p50_ms={:.3} viewport_callback_p95_ms={:.3} ui_work_p50_ms={:.3} ui_work_p95_ms={:.3}",
         nara.count,
         milliseconds(nara.elapsed),
         nara.per_second(),
@@ -194,6 +202,11 @@ async fn capture(
         gpui.work[1],
         gpui.present[0],
         gpui.present[1],
+        viewport.viewport_callbacks.len(),
+        gpui.viewport[0],
+        gpui.viewport[1],
+        gpui.ui_work[0],
+        gpui.ui_work[1],
     );
     Ok(())
 }
@@ -230,7 +243,12 @@ impl GpuiTiming {
         }
     }
 
-    fn finish(self, start: PerformanceBoundary, end: PerformanceBoundary) -> Result<GpuiResult> {
+    fn finish(
+        self,
+        start: PerformanceBoundary,
+        end: PerformanceBoundary,
+        viewport_callbacks: &[ViewportCallbackTiming],
+    ) -> Result<GpuiResult> {
         ensure!(
             self.lost == 0,
             "The GPUI foreground journal lost {} entries",
@@ -276,7 +294,20 @@ impl GpuiTiming {
         let mut work = Vec::with_capacity(submissions.len());
         let mut present = Vec::with_capacity(submissions.len());
         let mut draw_only = Vec::with_capacity(draws as usize);
-        for (submission, draw) in submissions {
+        let mut viewport_per_submission = vec![Duration::ZERO; submissions.len()];
+        for callback in viewport_callbacks {
+            ensure!(
+                (start.gpui_submissions..end.gpui_submissions)
+                    .contains(&callback.preceding_gpui_submissions),
+                "A viewport callback has no matching GPUI submission"
+            );
+            let index = (callback.preceding_gpui_submissions - start.gpui_submissions) as usize;
+            viewport_per_submission[index] += callback.elapsed;
+        }
+        let mut ui_work = Vec::with_capacity(submissions.len());
+        for ((submission, draw), viewport_time) in
+            submissions.into_iter().zip(viewport_per_submission)
+        {
             let present_time = submission.present_duration();
             ensure!(
                 !present_time.is_zero(),
@@ -295,13 +326,24 @@ impl GpuiTiming {
             };
             work.push(draw_time + present_time);
             present.push(present_time);
+            ui_work.push(viewport_time + draw_time + present_time);
         }
+        let mut viewport_samples = viewport_callbacks
+            .iter()
+            .map(|callback| callback.elapsed)
+            .collect::<Vec<_>>();
         Ok(GpuiResult {
             rate,
             draws,
             draw_only: (!draw_only.is_empty()).then(|| percentiles(&mut draw_only)),
             work: percentiles(&mut work),
             present: percentiles(&mut present),
+            viewport: if viewport_samples.is_empty() {
+                [0.0; 2]
+            } else {
+                percentiles(&mut viewport_samples)
+            },
+            ui_work: percentiles(&mut ui_work),
         })
     }
 }
@@ -312,6 +354,8 @@ struct GpuiResult {
     draw_only: Option<[f64; 2]>,
     work: [f64; 2],
     present: [f64; 2],
+    viewport: [f64; 2],
+    ui_work: [f64; 2],
 }
 
 struct SubmissionRate {
@@ -329,7 +373,7 @@ impl SubmissionRate {
         Ok(Self { count, elapsed })
     }
 
-    fn from_viewport(frames: PerformanceFrames) -> Result<Self> {
+    fn from_viewport(frames: &PerformanceFrames) -> Result<Self> {
         Self::new(
             frames.submissions,
             frames
@@ -402,7 +446,26 @@ mod tests {
             at: ms(12),
             gpui_submissions: 8,
         };
-        let result = sample.finish(begin, end).unwrap();
+        let result = sample
+            .finish(
+                begin,
+                end,
+                &[
+                    ViewportCallbackTiming {
+                        preceding_gpui_submissions: 6,
+                        elapsed: Duration::from_millis(1),
+                    },
+                    ViewportCallbackTiming {
+                        preceding_gpui_submissions: 7,
+                        elapsed: Duration::from_millis(2),
+                    },
+                    ViewportCallbackTiming {
+                        preceding_gpui_submissions: 7,
+                        elapsed: Duration::from_millis(3),
+                    },
+                ],
+            )
+            .unwrap();
         assert_eq!(result.rate.count, 2);
         assert_eq!(result.rate.elapsed, Duration::from_millis(5));
         assert_eq!(result.rate.per_second(), 200.0);
@@ -410,6 +473,8 @@ mod tests {
         assert_eq!(result.draw_only, Some([3.0, 3.0]));
         assert_eq!(result.work, [1.0, 5.0]);
         assert_eq!(result.present, [1.0, 2.0]);
+        assert_eq!(result.viewport, [2.0, 3.0]);
+        assert_eq!(result.ui_work, [6.0, 6.0]);
     }
 
     #[test]
@@ -434,7 +499,7 @@ mod tests {
             at: ms(8),
             gpui_submissions: 8,
         };
-        let result = sample.finish(begin, end).unwrap();
+        let result = sample.finish(begin, end, &[]).unwrap();
         assert_eq!(result.draws, 0);
         assert_eq!(result.draw_only, None);
         assert_eq!(result.work, [2.0, 4.0]);
@@ -463,7 +528,7 @@ mod tests {
             at: end,
             gpui_submissions: 7,
         };
-        let error = sample.finish(begin, end).err().unwrap();
+        let error = sample.finish(begin, end, &[]).err().unwrap();
         assert!(
             error
                 .to_string()
