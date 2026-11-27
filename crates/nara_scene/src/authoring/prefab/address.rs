@@ -7,9 +7,9 @@ use std::{
 use nara_core::EntityUuid;
 use nara_reflect::{
     ComponentCodecError, ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathParseError,
-    ComponentFieldPathSegment, ComponentNumericDomain, ComponentSchema, ComponentSchemaCatalog,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    ComponentValueShape,
+    ComponentFieldPathSegment, ComponentFieldSchema, ComponentNumericDomain, ComponentSchema,
+    ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind, ComponentValueShape,
 };
 use thiserror::Error;
 
@@ -57,7 +57,7 @@ impl PrefabOverridePath {
         let (child_path, rest) = split_target(raw)?;
         let component_ids = schemas.components().iter().map(ComponentSchema::id);
         let path = Self::parse_field(child_path, rest, component_ids)?;
-        path.shape(schemas)?;
+        path.value_schema(schemas)?;
         Ok(path)
     }
 
@@ -127,13 +127,42 @@ impl PrefabOverridePath {
         write!(output, "{}{delimiter}{}", self.component, self.field)
     }
 
-    fn shape<'a>(
+    fn value_schema<'a>(
         &self,
         schemas: &'a ComponentSchemaCatalog,
-    ) -> Result<Cow<'a, ComponentValueShape>, PrefabOverrideError> {
+    ) -> Result<OverrideValueSchema<'a>, PrefabOverrideError> {
         let schema = find_schema(schemas, &self.component)
             .ok_or_else(|| PrefabOverrideError::MissingSchema(self.component.clone()))?;
-        field_shape(schema, &self.field).ok_or(PrefabOverrideError::UnknownField)
+        let (field, tail) = schema
+            .fields()
+            .iter()
+            .find_map(|field| {
+                let tail = self
+                    .field
+                    .segments()
+                    .strip_prefix(field.path().segments())?;
+                Some((field, tail))
+            })
+            .ok_or(PrefabOverrideError::UnknownField)?;
+        let shape = nested_shape(field.shape(), tail).ok_or(PrefabOverrideError::UnknownField)?;
+        Ok(OverrideValueSchema {
+            shape,
+            choice_field: (tail.is_empty() && !field.choices().is_empty()).then_some(field),
+        })
+    }
+}
+
+struct OverrideValueSchema<'a> {
+    shape: Cow<'a, ComponentValueShape>,
+    choice_field: Option<&'a ComponentFieldSchema>,
+}
+
+impl OverrideValueSchema<'_> {
+    fn validate_choices(&self, value: &ComponentValue) -> Result<(), CompactValueError> {
+        if let Some(field) = self.choice_field {
+            field.validate_value(value)?;
+        }
+        Ok(())
     }
 }
 
@@ -150,25 +179,22 @@ pub fn encode_override_value(
     schemas: &ComponentSchemaCatalog,
     assets: &BTreeMap<String, SceneAsset>,
 ) -> Result<RawRon, PrefabOverrideError> {
-    Ok(compact::encode_value(
-        value,
-        path.shape(schemas)?.as_ref(),
-        assets,
-    )?)
+    let schema = path.value_schema(schemas)?;
+    schema.validate_choices(value)?;
+    Ok(compact::encode_value(value, &schema.shape, assets)?)
 }
 
-/// Decode one override using the addressed field shape and the declaring document's aliases.
+/// Decode one override using the addressed field schema and the declaring document's aliases.
 pub fn decode_override_value(
     path: &PrefabOverridePath,
     value: &RawRon,
     schemas: &ComponentSchemaCatalog,
     assets: &BTreeMap<String, SceneAsset>,
 ) -> Result<ComponentValue, PrefabOverrideError> {
-    Ok(compact::decode_value(
-        value,
-        path.shape(schemas)?.as_ref(),
-        assets,
-    )?)
+    let schema = path.value_schema(schemas)?;
+    let value = compact::decode_value(value, &schema.shape, assets)?;
+    schema.validate_choices(&value)?;
+    Ok(value)
 }
 
 #[derive(Debug, Error)]
@@ -267,14 +293,10 @@ fn split_component<'a, 'ids>(
     found.ok_or(PrefabOverrideError::UnknownComponent)
 }
 
-fn field_shape<'a>(
-    schema: &'a ComponentSchema,
-    path: &ComponentFieldPath,
+pub(super) fn nested_shape<'a>(
+    mut shape: &'a ComponentValueShape,
+    tail: &[ComponentFieldPathSegment],
 ) -> Option<Cow<'a, ComponentValueShape>> {
-    let (mut shape, tail) = schema.fields().iter().find_map(|field| {
-        let tail = path.segments().strip_prefix(field.path().segments())?;
-        Some((field.shape(), tail))
-    })?;
     for (index, segment) in tail.iter().enumerate() {
         while let ComponentValueShape::Optional { value } = shape {
             shape = value;

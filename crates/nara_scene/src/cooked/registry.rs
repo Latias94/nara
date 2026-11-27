@@ -6,6 +6,7 @@ use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueKind, ComponentValueRef, PostcardReference, Schema, TypeSchema,
+    validate_component_value,
 };
 
 use crate::{
@@ -226,6 +227,7 @@ impl Schema for Name {
     }
 
     fn decode_component(value: ComponentValueRef<'_>) -> Result<Self, ComponentCodecError> {
+        validate_component_value(&Self::type_schema()?, value)?;
         value
             .field("value")?
             .as_str()

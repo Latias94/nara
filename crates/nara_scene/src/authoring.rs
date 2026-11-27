@@ -100,10 +100,11 @@ impl SceneDocument {
         schemas: &[ComponentSchema],
     ) -> Result<(), SceneDocumentError> {
         let path = path.as_ref();
-        let kind = if path
-            .file_name()
-            .is_some_and(|name| name.to_string_lossy().ends_with(".prefab.ron"))
-        {
+        let kind = if path.file_name().is_some_and(|name| {
+            name.to_string_lossy()
+                .to_ascii_lowercase()
+                .ends_with(".prefab.ron")
+        }) {
             wire::DocumentKind::Prefab
         } else {
             wire::DocumentKind::Scene

@@ -17,7 +17,7 @@ use nara::{
     scene::components::SpriteSource,
 };
 
-const ENTRY_SCENE: &str = "01a219c4-2965-7784-9173-9c9863ec5284";
+const ENTRY_SCENE: &str = "{entry_scene}";
 
 type GameResult<T> = Result<T, Box<dyn Error>>;
 

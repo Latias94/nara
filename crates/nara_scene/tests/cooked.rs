@@ -76,6 +76,38 @@ fn grid(target: EntityUuid) -> Grid {
 }
 
 #[test]
+fn handwritten_schema_decoders_reject_undeclared_keys() {
+    let visibility = ComponentValue::map([
+        ("mode", ComponentValue::String("visible".into())),
+        ("unexpected", ComponentValue::Bool(true)),
+    ]);
+    let name = ComponentValue::map([
+        ("value", ComponentValue::String("Player".into())),
+        ("unexpected", ComponentValue::Bool(true)),
+    ]);
+    for error in [
+        Visibility::decode_component((&visibility).into()).unwrap_err(),
+        Name::decode_component((&name).into()).unwrap_err(),
+    ] {
+        assert!(
+            matches!(error, ComponentCodecError::Message(message) if message.contains("'unexpected'"))
+        );
+    }
+    for value in [
+        ComponentValue::Map(BTreeMap::new()),
+        ComponentValue::map([("mode", ComponentValue::Null)]),
+    ] {
+        assert_eq!(
+            Visibility::decode_component((&value).into()).unwrap(),
+            Visibility::Inherited
+        );
+    }
+    let name = Name::new("Player");
+    let value = name.encode_component().unwrap();
+    assert_eq!(Name::decode_component((&value).into()).unwrap(), name);
+}
+
+#[test]
 fn prefab_cook_is_deterministic_and_matches_the_native_authored_components() {
     let mut parent = SceneEntity::new(id(11), "Prefab Root");
     parent.set(&Transform2d::from_xy(1.0, 3.0)).unwrap();

@@ -69,8 +69,15 @@ enum PendingPlayControl {
     Delivered,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JobKind {
+    Schema,
+    Play,
+}
+
 struct JobOrigin {
     directory: PathBuf,
+    kind: JobKind,
 }
 
 struct ProjectJob {
@@ -108,13 +115,21 @@ impl Workspace {
         let project = EditorProject::open(directory)?;
         let assets = project.assets();
         let saved_entry = project.entry_scene();
+        let is_scene = |entry: &nara_editor_core::AssetEntry| {
+            entry.kind == AssetKind::Scene && AssetKind::of(&entry.path) == AssetKind::Scene
+        };
         let initial_scene = saved_entry
-            .filter(|path| assets.entries().iter().any(|entry| entry.path == **path))
+            .filter(|path| {
+                assets
+                    .entries()
+                    .iter()
+                    .any(|entry| is_scene(entry) && entry.path == **path)
+            })
             .or_else(|| {
                 assets
                     .entries()
                     .iter()
-                    .find(|entry| entry.kind == AssetKind::Scene)
+                    .find(|entry| is_scene(entry))
                     .map(|entry| &entry.path)
             });
         let selected_asset = initial_scene.cloned();
@@ -504,14 +519,19 @@ impl Workspace {
                 let asset = self
                     .opened_asset
                     .context("Reopen this scene from Assets to restore its file identity")?;
+                let previous_path = self.project.asset_hint(asset);
                 let selected = self.selected_asset_id();
                 let path = self
                     .project
                     .document_save_path(asset, self.session.document().scene().id)?;
-                self.update_asset_browser(selected);
-                self.session
-                    .refresh_asset_hints(|id| self.project.asset_hint(id));
-                Ok(self.session.save_as(path)?)
+                if self.project.asset_hint(asset) != previous_path {
+                    self.update_asset_browser(selected);
+                }
+                let mut saved = self.session.snapshot_for_background()?;
+                saved.refresh_asset_hints(|id| self.project.asset_hint(id));
+                saved.save_as(path)?;
+                self.session = saved;
+                Ok(())
             });
             complete(self.saved(result, cx), cx);
             return;
@@ -522,73 +542,37 @@ impl Workspace {
             return;
         };
         let document_id = self.session.document().scene().id;
-        let root = source.root().to_path_buf();
-        let picker = cx.prompt_for_new_path(&root, Some("untitled.scene.ron"));
+        let revision = self.revision;
+        let project = self.project.directory().to_path_buf();
+        let picker = cx.prompt_for_new_path(source.root(), Some("untitled.scene.ron"));
         cx.spawn(async move |workspace, cx| {
             let result = picker.await;
             let _ = workspace.update(cx, |workspace, cx| {
                 let saved = match result {
                     Ok(Ok(Some(path))) => {
-                        let result = (|| -> Result<AssetPath> {
+                        let result = (|| -> Result<()> {
                             let document = workspace.session.document();
                             anyhow::ensure!(
-                                document.scene().id == document_id && document.path().is_none(),
+                                !workspace.session.gesture_active(),
+                                "Finish the current gesture and save again"
+                            );
+                            anyhow::ensure!(
+                                document.scene().id == document_id
+                                    && document.path().is_none()
+                                    && workspace.revision == revision
+                                    && workspace.project.directory() == project,
                                 "The active untitled scene changed while the save dialog was open"
                             );
                             before_write(workspace, cx)?;
-                            let name = path
-                                .file_name()
-                                .and_then(|name| name.to_str())
-                                .filter(|name| {
-                                    path.as_os_str()
-                                        .as_encoded_bytes()
-                                        .ends_with(name.as_bytes())
-                                })
-                                .context("Use a portable scene filename")?;
-                            AssetPath::new(name).context("Use a portable scene filename")?;
-                            anyhow::ensure!(
-                                name.ends_with(".scene.ron"),
-                                "Include .scene.ron in the filename and save again"
-                            );
-                            let parent = path
-                                .parent()
-                                .context("The selected path has no parent")?
-                                .canonicalize()?;
-                            anyhow::ensure!(
-                                parent.starts_with(&root),
-                                "Save the scene inside the project's asset directory"
-                            );
-                            let destination = parent.join(name);
-                            let path = workspace.project.relative_document_path(&destination)?;
-                            workspace
-                                .session
-                                .refresh_asset_hints(|id| workspace.project.asset_hint(id));
-                            match workspace.session.save_new(&destination) {
-                                Err(nara_editor_core::EditorError::Scene(
-                                    nara_scene::authoring::SceneDocumentError::Io {
-                                        source, ..
-                                    },
-                                )) if source.kind() == std::io::ErrorKind::AlreadyExists => {
-                                    anyhow::bail!(
-                                        "A file already exists at {}. Choose a new filename.",
-                                        destination.display()
-                                    );
-                                }
-                                result => result?,
-                            }
-                            Ok(path)
+                            let selected = workspace.selected_asset_id();
+                            let id = workspace
+                                .project
+                                .save_new_scene(&mut workspace.session, &path)?;
+                            workspace.opened_asset = Some(id);
+                            workspace.update_asset_browser(selected);
+                            Ok(())
                         })();
-                        match result {
-                            Ok(path) => {
-                                workspace.discover_assets(cx);
-                                workspace.opened_asset = workspace
-                                    .project
-                                    .asset_reference(&path)
-                                    .map(|asset| asset.id);
-                                workspace.saved(Ok(()), cx)
-                            }
-                            Err(error) => workspace.saved(Err(error), cx),
-                        }
+                        workspace.saved(result, cx)
                     }
                     Ok(Err(error)) => {
                         workspace.warn(error.to_string(), cx);
@@ -631,7 +615,7 @@ impl Workspace {
 
     pub fn refresh_schema(&mut self, cx: &mut Context<Self>) {
         self.start_job(
-            JobStatus::Schema,
+            JobKind::Schema,
             |project, trust| Job::refresh(project.to_path_buf(), trust),
             cx,
         );
@@ -646,7 +630,7 @@ impl Workspace {
         let schemas = self.session.registry().catalog().clone();
         self.steps = 0;
         self.start_job(
-            JobStatus::Building,
+            JobKind::Play,
             |project, trust| Job::play(project.to_path_buf(), scene, prefabs, schemas, trust),
             cx,
         );
@@ -654,7 +638,7 @@ impl Workspace {
 
     fn start_job(
         &mut self,
-        status: JobStatus,
+        kind: JobKind,
         start: impl FnOnce(&Path, ProjectTrust) -> std::io::Result<Job>,
         cx: &mut Context<Self>,
     ) {
@@ -673,13 +657,16 @@ impl Workspace {
             Ok(worker) => {
                 let origin = Rc::new(JobOrigin {
                     directory: directory.to_path_buf(),
+                    kind,
                 });
                 self.job = Some(ProjectJob {
                     origin: origin.clone(),
                     worker,
                 });
-                self.deferred_schema = None;
-                self.status = status;
+                self.status = match kind {
+                    JobKind::Schema => JobStatus::Schema,
+                    JobKind::Play => JobStatus::Building,
+                };
                 self.pending = None;
                 cx.notify();
                 cx.spawn(async move |workspace, cx| {
@@ -718,13 +705,15 @@ impl Workspace {
     }
 
     pub fn stop(&mut self, cx: &mut Context<Self>) {
-        let schema_waiting = self.deferred_schema.take().is_some();
         if let Some(job) = &self.job {
+            if job.origin.kind == JobKind::Schema {
+                self.deferred_schema = None;
+            }
             job.worker.stop();
             self.status = JobStatus::Stopping;
             self.pending = None;
             cx.notify();
-        } else if schema_waiting && self.status == JobStatus::Schema {
+        } else if self.deferred_schema.take().is_some() && self.status == JobStatus::Schema {
             self.status = JobStatus::Idle;
             cx.notify();
         }
@@ -732,6 +721,7 @@ impl Workspace {
 
     pub(crate) fn take_job(&mut self, cx: &mut Context<Self>) -> Option<Job> {
         self.stop(cx);
+        self.deferred_schema = None;
         self.job.take().map(|job| job.worker)
     }
 
@@ -862,16 +852,25 @@ impl Workspace {
 
     fn finish_job(&mut self, result: Result<(), String>) {
         if let Err(error) = result {
-            self.deferred_schema = None;
+            if self
+                .deferred_schema
+                .as_ref()
+                .is_some_and(|schema| schema.origin.kind == JobKind::Schema)
+            {
+                self.deferred_schema = None;
+            }
             self.console.line(DiagnosticSeverity::Error, error);
         } else if self.status == JobStatus::Stopping {
             self.console
                 .line(DiagnosticSeverity::Info, "Stopped the project process");
         }
         self.job = None;
-        if self.status != JobStatus::Schema || self.deferred_schema.is_none() {
-            self.status = JobStatus::Idle;
-        }
+        self.status = if self.deferred_schema.is_some() {
+            JobStatus::Schema
+        } else {
+            JobStatus::Idle
+        };
         self.pending = None;
+        self.publish_deferred_schema();
     }
 }

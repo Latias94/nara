@@ -599,13 +599,14 @@ fn tags_reject_mismatched_payload_kinds() {
 }
 
 #[test]
-fn map_entries_keep_existing_last_duplicate_key_semantics() {
-    assert_decodes_in_both_orders(
-        "map",
-        r#"{"key":{"type":"i64","value":1},"key":{"value":2,"type":"i64"}}"#,
+fn wire_rejects_duplicate_map_keys_in_both_field_orders() {
+    let json = r#"{"key":{"type":"i64","value":1},"\u006bey":{"value":2,"type":"i64"}}"#;
+    for ron in [
         r#"{"key":(type:"i64",value:1),"key":(value:2,type:"i64")}"#,
-        &ComponentValue::map([("key", ComponentValue::I64(2))]),
-    );
+        r#"(key:(type:"i64",value:1),key:(value:2,type:"i64"))"#,
+    ] {
+        assert_rejects_in_both_orders("map", json, ron);
+    }
 }
 
 #[test]
@@ -674,6 +675,10 @@ fn malformed_nested_values_are_rejected_through_containers_and_parent_buffers() 
         (
             r#"{"type":"list","value":[{"type":"bool","value":true,"value":false}]}"#,
             r#"(type:"list",value:[(type:"bool",value:true,value:false)])"#,
+        ),
+        (
+            r#"{"type":"list","value":[{"value":{"key":{"type":"null"},"key":{"type":"null"}},"type":"map"}]}"#,
+            r#"(type:"list",value:[(value:{"key":(type:"null"),"key":(type:"null")},type:"map")])"#,
         ),
     ] {
         assert!(

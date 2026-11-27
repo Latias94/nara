@@ -1,21 +1,21 @@
 Prefab(
     version: 1,
-    id: "55399513-1511-47f1-b9fb-2205f0646026",
-    assets: {
-        "white": (id: "01a21a01-f10c-7004-9c91-91ef868ff334", hint: "white.png"),
-    },
+    id: "{document}",
+    assets: {{
+        "white": (id: "{image_asset}", hint: "white.png"),
+    }},
     entities: [
         (
-            id: "b25b239e-b19d-4c10-8f70-7725d4e0f364",
+            id: "{entity}",
             name: "Sprite",
-            components: {
+            components: {{
                 "nara.SpriteSource": (
                     size: (160.0, 96.0),
                     tint: (0.22, 0.72, 0.9, 1.0),
                     image: "@white",
                 ),
                 "nara.Transform2d": (),
-            },
+            }},
         ),
     ],
 )

@@ -1,3 +1,5 @@
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+use std::io::{self, Write as _};
 #[cfg(any(unix, windows))]
 use std::path::{Path, PathBuf};
 use std::{
@@ -365,9 +367,10 @@ impl EditorSession {
             let expanded = prefabs::expand(scene, &library, &self.registry)?;
             let mut history = self.history.clone();
             if let Some(scene) = changed_scene {
+                history.rebase_redo(scene);
                 history.insert_before_redo(ScenePatch::between(&self.document.scene, scene));
             }
-            let (undo, redo) = history.entries.split_at_mut(history.cursor);
+            let (undo, redo) = history.entries.split_at(history.cursor);
             let validate = |scene: &SceneDocument| -> Result<(), EditorError> {
                 scene.validate()?;
                 prefabs::expand(scene, &library, &self.registry)?;
@@ -381,12 +384,8 @@ impl EditorSession {
             }
             let mut future = scene.clone();
             for entry in redo {
-                let before = future.clone();
                 entry.patch.apply(&mut future, true);
                 validate(&future).map_err(history_error)?;
-                if changed_scene.is_some() {
-                    entry.patch = ScenePatch::between(&before, &future);
-                }
             }
             self.projection = SceneProjection::admitted(expanded);
             self.prefabs = library;
@@ -595,30 +594,38 @@ impl EditorSession {
     /// Saves to a new path, failing when another file already owns that name.
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     pub fn save_new(&mut self, path: &Path) -> Result<(), EditorError> {
-        use std::io::{self, Write as _};
+        let staging = self.stage_new(path)?;
+        self.publish_new(path, staging)
+    }
 
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    pub(crate) fn stage_new(&self, path: &Path) -> Result<tempfile::NamedTempFile, EditorError> {
         self.require_idle()?;
         let source = self
             .document
             .scene
             .to_ron_with(self.registry.catalog().components())?;
-        (|| -> io::Result<()> {
-            let parent = path
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-                .unwrap_or_else(|| Path::new("."));
-            let mut staging = tempfile::NamedTempFile::new_in(parent)?;
-            staging.write_all(source.as_bytes())?;
-            staging.as_file().sync_all()?;
-            staging
-                .persist_noclobber(path)
-                .map_err(|error| error.error)?;
-            Ok(())
-        })()
-        .map_err(|source| SceneDocumentError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
+        stage_new_file(path, source.as_bytes()).map_err(|source| {
+            SceneDocumentError::Io {
+                path: path.to_owned(),
+                source,
+            }
+            .into()
+        })
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    pub(crate) fn publish_new(
+        &mut self,
+        path: &Path,
+        staging: tempfile::NamedTempFile,
+    ) -> Result<(), EditorError> {
+        staging
+            .persist_noclobber(path)
+            .map_err(|error| SceneDocumentError::Io {
+                path: path.to_owned(),
+                source: error.error,
+            })?;
         self.document.path = Some(path.to_owned());
         self.saved_revision = Some(self.history.revision());
         Ok(())
@@ -670,4 +677,16 @@ impl EditorSession {
         self.selection
             .retain(|entity| row_index(preview, entity).is_some());
     }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+pub(crate) fn stage_new_file(path: &Path, bytes: &[u8]) -> io::Result<tempfile::NamedTempFile> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut staging = tempfile::NamedTempFile::new_in(parent)?;
+    staging.write_all(bytes)?;
+    staging.as_file().sync_all()?;
+    Ok(staging)
 }

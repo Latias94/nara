@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use nara_core::{DocumentId, EntityUuid};
-use nara_editor_core::{EditorCommand, EditorSession, InspectorValue};
+use nara_editor_core::{EditorCommand, EditorSession, InspectorValue, value_draft};
 use nara_reflect::{
     ComponentCapability, ComponentFieldPath, ComponentFieldSchema, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueShape,
@@ -31,25 +31,24 @@ impl Selection {
     }
 
     pub fn exists_in(&self, session: &EditorSession) -> bool {
+        self.present_rows(session).is_some()
+    }
+
+    fn present_rows<'session>(
+        &self,
+        session: &'session EditorSession,
+    ) -> Option<Vec<&'session SceneEntity>> {
         if self.document != session.document().scene().id || self.targets.is_empty() {
-            return false;
+            return None;
         }
         let rows = &session.preview_scene().entities;
         self.targets
             .iter()
-            .all(|id| rows.binary_search_by_key(id, |row| row.id).is_ok())
-    }
-
-    pub fn has_component(&self, session: &EditorSession, component: &ComponentTypeId) -> bool {
-        if !self.exists_in(session) {
-            return false;
-        }
-        let rows = &session.preview_scene().entities;
-        self.targets.iter().all(|id| {
-            rows.binary_search_by_key(id, |row| row.id)
-                .ok()
-                .is_some_and(|index| rows[index].components.contains_key(component))
-        })
+            .map(|id| {
+                let index = rows.binary_search_by_key(id, |row| row.id).ok()?;
+                rows.get(index)
+            })
+            .collect()
     }
 
     pub fn rows<'session>(
@@ -59,11 +58,7 @@ impl Selection {
         if !self.matches(session) {
             return None;
         }
-        let rows = &session.preview_scene().entities;
-        self.targets
-            .iter()
-            .map(|id| rows.iter().find(|row| row.id == *id))
-            .collect()
+        self.present_rows(session)
     }
 
     pub fn rename_command(
@@ -106,6 +101,39 @@ pub(super) struct FieldTarget {
 }
 
 impl FieldTarget {
+    fn live_field<'session>(
+        &self,
+        session: &'session EditorSession,
+    ) -> Option<&'session ComponentFieldSchema> {
+        let schema = session.registry().schema(&self.key.component)?;
+        if schema.version() != self.version
+            || !schema.has_capability(ComponentCapability::Inspect)
+            || !schema.has_capability(ComponentCapability::Edit)
+        {
+            return None;
+        }
+        schema.fields().iter().find(|field| {
+            *field == self.field.as_ref()
+                && field.has_capability(ComponentCapability::Inspect)
+                && field.has_capability(ComponentCapability::Edit)
+                && value_draft::supported(field.shape())
+        })
+    }
+
+    fn live_record<'row>(&self, row: &'row SceneEntity) -> Option<&'row SceneComponent> {
+        row.components
+            .get(&self.key.component)
+            .filter(|record| record.version() == self.version && record.value().is_some())
+    }
+
+    pub fn is_eligible(&self, session: &EditorSession) -> bool {
+        self.live_field(session).is_some()
+            && self
+                .selection
+                .present_rows(session)
+                .is_some_and(|rows| rows.into_iter().all(|row| self.live_record(row).is_some()))
+    }
+
     pub fn command(
         &self,
         session: &EditorSession,
@@ -113,27 +141,10 @@ impl FieldTarget {
         value: ComponentValue,
     ) -> Result<Option<EditorCommand>, String> {
         let rows = self.selection.rows(session).ok_or(SELECTION_CHANGED)?;
-        let field = session
-            .registry()
-            .schema(&self.key.component)
-            .filter(|schema| {
-                schema.version() == self.version && schema.has_capability(ComponentCapability::Edit)
-            })
-            .and_then(|schema| {
-                schema
-                    .fields()
-                    .iter()
-                    .find(|field| *field == self.field.as_ref())
-            })
-            .filter(|field| field.has_capability(ComponentCapability::Edit))
-            .ok_or(CHANGED)?;
+        let field = self.live_field(session).ok_or(CHANGED)?;
         let roots = rows
             .iter()
-            .map(|row| {
-                let record = row.components.get(&self.key.component)?;
-                (record.version() == self.version && record.value().is_some())
-                    .then(|| field_value(record, field))
-            })
+            .map(|row| Some(field_value(self.live_record(row)?, field)))
             .collect::<Option<Vec<_>>>()
             .ok_or(CHANGED)?;
         let live = roots.iter().map(|root| project(*root, &self.key.member));

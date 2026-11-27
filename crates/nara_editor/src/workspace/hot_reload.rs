@@ -8,9 +8,9 @@ use std::{
 };
 
 use anyhow::{Context as _, Result};
-use nara_asset::watch::AssetWatcher;
+use nara_asset::watch::{AssetWatcher, RELOAD_RETRY_DELAYS, is_transient_reload_error};
 use nara_core::{AssetId, vfs::DirAssetSource};
-use nara_editor_core::{EditorProject, EditorSession};
+use nara_editor_core::{EditorProject, EditorSession, ProjectError};
 use nara_editor_viewport::PreviewAssets;
 use open_gpui::{App, BackgroundExecutor, Context, Task, WeakEntity};
 
@@ -21,7 +21,6 @@ const PREVIEW: u8 = 1;
 const EXTERNAL: u8 = 2;
 const DISCOVER: u8 = 4;
 const WATCH_INTERVAL: Duration = Duration::from_millis(20);
-const SETTLE: Duration = Duration::from_millis(20);
 const ACTIVE_EDIT_INTERVAL: Duration = Duration::from_millis(75);
 
 #[derive(Default)]
@@ -47,23 +46,24 @@ impl Workspace {
     ) {
         let directory = self.project.asset_directory().to_path_buf();
         let project_root = self.project.directory().to_path_buf();
+        let initially_empty = self.project.asset_database().records().next().is_none();
         let requests = Arc::clone(&self.hot_reload.requests);
         self.request_preview_assets();
         self.hot_reload.worker = Some(cx.spawn(async move |workspace, cx| {
             let executor = cx.background_executor().clone();
             let watcher = executor
                 .spawn(async move {
-                    let root = if directory.is_dir() {
-                        directory
-                    } else {
-                        project_root
-                    };
-                    AssetWatcher::new(&root)
-                        .with_context(|| format!("Could not watch '{}'", root.display()))
+                    AssetWatcher::under(&project_root, &directory)
+                        .with_context(|| format!("Could not watch '{}'", directory.display()))
                 })
                 .await;
             let mut watcher = match watcher {
-                Ok(watcher) => Some(watcher),
+                Ok(watcher) => {
+                    if initially_empty {
+                        requests.fetch_or(EXTERNAL, Ordering::Relaxed);
+                    }
+                    Some(watcher)
+                }
                 Err(error) => {
                     if workspace
                         .update(cx, |workspace, cx| workspace.warn(format!("{error:#}"), cx))
@@ -77,40 +77,64 @@ impl Workspace {
             loop {
                 let poll = executor.clone();
                 let signal = Arc::clone(&requests);
-                let flags;
-                (watcher, flags) = executor
+                let changes;
+                (watcher, changes) = executor
                     .spawn(async move {
-                        let flags = wait_for_changes(watcher.as_ref(), &signal, &poll).await;
-                        (watcher, flags)
+                        let changes = wait_for_changes(watcher.as_ref(), &signal, &poll).await;
+                        (watcher, changes)
                     })
                     .await;
-                let input = loop {
-                    match workspace.update(cx, |workspace, cx| {
-                        if workspace.reload_blocked(&inspector, cx) {
-                            return None;
+                let flags = match changes {
+                    Ok(flags) => flags,
+                    Err(error) => {
+                        if workspace
+                            .update(cx, |workspace, cx| workspace.warn(format!("{error:#}"), cx))
+                            .is_err()
+                        {
+                            return;
                         }
-                        workspace.reload_input().ok()
-                    }) {
-                        Ok(Some(input)) => break input,
-                        Ok(None) => executor.timer(ACTIVE_EDIT_INTERVAL).await,
-                        Err(_) => return,
+                        continue;
                     }
                 };
-                let guard = input.guard.clone();
-                let prepared = executor.spawn(async move { input.prepare(flags) }).await;
-                if workspace
-                    .update(cx, |workspace, cx| {
+                let mut delays = RELOAD_RETRY_DELAYS.into_iter().peekable();
+                loop {
+                    let input = loop {
+                        match workspace.update(cx, |workspace, cx| {
+                            if workspace.reload_blocked(&inspector, cx) {
+                                return None;
+                            }
+                            workspace.reload_input().ok()
+                        }) {
+                            Ok(Some(input)) => break input,
+                            Ok(None) => executor.timer(ACTIVE_EDIT_INTERVAL).await,
+                            Err(_) => return,
+                        }
+                    };
+                    let guard = input.guard.clone();
+                    let prepared = executor.spawn(async move { input.prepare(flags) }).await;
+                    let retry = prepared
+                        .as_ref()
+                        .err()
+                        .filter(|error| is_transient_reload_error(error.as_ref()))
+                        .and_then(|_| delays.peek().copied());
+                    match workspace.update(cx, |workspace, cx| {
                         if workspace.reload_guard() != guard
                             || workspace.reload_blocked(&inspector, cx)
                         {
-                            requests.fetch_or(flags, Ordering::Relaxed);
-                            return;
+                            return false;
                         }
-                        workspace.publish_reload(prepared, cx);
-                    })
-                    .is_err()
-                {
-                    return;
+                        if retry.is_none() {
+                            workspace.publish_reload(prepared, cx);
+                        }
+                        true
+                    }) {
+                        Err(_) => return,
+                        Ok(false) => continue,
+                        Ok(true) => {}
+                    }
+                    let Some(delay) = retry else { break };
+                    delays.next();
+                    executor.timer(delay).await;
                 }
             }
         }));
@@ -218,21 +242,31 @@ impl ReloadInput {
         let mut scene_changed = false;
         if flags & (EXTERNAL | DISCOVER) != 0 {
             if flags & DISCOVER != 0 {
-                self.project.refresh_assets()?;
+                self.project
+                    .refresh_assets()
+                    .map_err(project_reload_error)?;
             } else {
-                self.project.rescan_assets()?;
+                self.project.rescan_assets().map_err(project_reload_error)?;
             }
             let schemas = self.session.registry().catalog().components();
             let disk = self
                 .guard
                 .active_asset
-                .map(|id| self.project.reload_document(id, schemas))
+                .map(|id| {
+                    self.project
+                        .reload_document(id, schemas)
+                        .map_err(project_reload_error)
+                        .with_context(|| format!("Could not reload scene asset {id}"))
+                })
                 .transpose()?;
             let source = disk
                 .as_ref()
                 .filter(|_| !self.guard.dirty)
                 .map_or(self.session.document().scene(), |disk| disk.scene());
-            let prefabs = self.project.reload_prefabs(source, schemas)?;
+            let prefabs = self
+                .project
+                .reload_prefabs(source, schemas)
+                .map_err(project_reload_error)?;
             scene_changed = self.session.reload_sources(disk, prefabs)?;
         }
         let source = DirAssetSource::new(self.project.directory())?;
@@ -251,23 +285,32 @@ impl ReloadInput {
     }
 }
 
+fn project_reload_error(error: ProjectError) -> anyhow::Error {
+    match error {
+        ProjectError::Assets(error) => error.into(),
+        ProjectError::Io(error) => error.into(),
+        error => error.into(),
+    }
+}
+
 async fn wait_for_changes(
     watcher: Option<&AssetWatcher>,
     requests: &AtomicU8,
     executor: &BackgroundExecutor,
-) -> u8 {
+) -> Result<u8> {
     loop {
-        let mut flags = requests.swap(0, Ordering::Relaxed);
-        if watcher.is_some_and(AssetWatcher::take_changed) {
-            executor.timer(SETTLE).await;
-            if let Some(watcher) = watcher {
-                watcher.take_changed();
-            }
-            flags |= EXTERNAL | requests.swap(0, Ordering::Relaxed);
-        }
+        let external = watcher
+            .map(AssetWatcher::take_changed)
+            .transpose()
+            .context("Could not refresh the asset watch")?
+            .unwrap_or(false);
+        let flags = requests.swap(0, Ordering::Relaxed) | if external { EXTERNAL } else { 0 };
         if flags != 0 {
-            return flags;
+            return Ok(flags);
         }
         executor.timer(WATCH_INTERVAL).await;
     }
 }
+
+#[cfg(all(test, windows))]
+mod tests;

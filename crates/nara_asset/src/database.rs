@@ -58,8 +58,10 @@ impl AssetRecord {
         }
     }
 
-    #[cfg(all(feature = "authoring", any(unix, windows)))]
-    pub(crate) fn from_meta(path: AssetSourcePath, meta: crate::AssetMeta) -> Self {
+    /// Creates a record using the identity and importer from an admitted sidecar.
+    #[cfg(feature = "authoring")]
+    #[must_use]
+    pub fn from_meta(path: AssetSourcePath, meta: crate::AssetMeta) -> Self {
         Self {
             stable_id: meta.id(),
             path,

@@ -51,12 +51,13 @@ impl Cooker {
     pub(super) fn open(
         project: &Path,
         asset_root: &str,
+        scan_mode: AssetScanMode,
         project_schemas: ComponentSchemaCatalog,
     ) -> Result<Self, DeliveryError> {
         let root = AssetSourcePath::new(asset_root)
             .map_err(|_| super::ProjectCheckError::AssetDirectory(asset_root.to_owned()))?;
         let source = DirAssetSource::new(project)?;
-        let database = ProjectAssetDatabase::scan(source.root(), &[root], AssetScanMode::Discover)?;
+        let database = ProjectAssetDatabase::scan(source.root(), &[root], scan_mode)?;
         let builtin = builtin_component_schemas()?;
         let custom = project_schemas
             .components()

@@ -4,7 +4,7 @@ mod scalar;
 use std::{collections::HashMap, rc::Rc};
 
 use nara_editor_core::{
-    EditorGesture, InspectorComponent, InspectorValue,
+    EditorGesture, EditorSession, InspectorComponent, InspectorValue,
     field_draft::{self, DraftAction, DraftInput},
     value_draft::{RootDraft, ValueDraft},
 };
@@ -310,6 +310,18 @@ impl PropertyEditor {
 
     pub fn can_refresh(&self, next: &Property) -> bool {
         self.property.target == next.target && self.property.editable == next.editable
+    }
+
+    pub fn can_resume(&self, session: &EditorSession) -> bool {
+        self.property.editable && self.property.target.is_eligible(session)
+    }
+
+    #[cfg(all(test, windows))]
+    pub(super) fn text_input(&self) -> Option<&Entity<TextInput>> {
+        match &self.control {
+            Control::Scalar(text) => Some(&text.input),
+            _ => None,
+        }
     }
 
     pub(super) fn draft(&self, cx: &App) -> Option<Draft> {

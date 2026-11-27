@@ -522,3 +522,203 @@ fn a_project_schema_can_commit_full_width_integers_without_float_conversion() {
         assert_eq!(bound_values(&session, &target), [Some(expected_value)]);
     }
 }
+
+#[cfg(windows)]
+mod suspended_drafts {
+    use std::fs;
+
+    use nara_project::workflow::ProjectTrust;
+    use open_gpui::{App, AppContext as _, Context, Entity, TestAppContext};
+    use open_gpui_base::{TextInput, TextInputEvent};
+
+    use super::*;
+    use crate::{inspector::InspectorPanel, workspace::Workspace};
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Change {
+        Unrelated,
+        Opaque,
+        NoSchema,
+        NoField,
+        ReadOnly,
+        NoComponent,
+    }
+
+    fn install(
+        workspace: &mut Workspace,
+        schemas: impl IntoIterator<Item = ComponentSchema>,
+        cx: &mut Context<Workspace>,
+    ) {
+        let catalog = ComponentSchemaCatalog::from_components(schemas).unwrap();
+        let registry = EditorRegistry::new(builtin_component_schemas().unwrap(), catalog).unwrap();
+        workspace.session.set_registry(registry).unwrap();
+        workspace.revision += 1;
+        cx.notify();
+    }
+
+    fn editor(panel: &InspectorPanel, component: &ComponentTypeId, cx: &App) -> Entity<TextInput> {
+        panel
+            .sections
+            .iter()
+            .find(|section| &section.id == component)
+            .unwrap()
+            .fields[0]
+            .1
+            .read(cx)
+            .text_input()
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn suspended_field_drafts_resume_only_while_their_schema_and_rows_are_editable() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir(directory.path().join("assets")).unwrap();
+        fs::write(
+            directory.path().join("nara.toml"),
+            "[project]\nname = 'Drafts'\nversion = '0.1'\n",
+        )
+        .unwrap();
+        let entity = "4f99b200-2a5e-4872-8d3d-000000000001"
+            .parse::<EntityUuid>()
+            .unwrap();
+        let id = ComponentTypeId::new("test.DraftFixture");
+        let field = ComponentFieldSchema::required(
+            ComponentFieldId::new("text"),
+            "Text",
+            ComponentFieldPath::from_fields(["text"]),
+            ComponentValueKind::String,
+        )
+        .with_default_value(ComponentValue::String("Original".to_owned()));
+        let editable = field
+            .clone()
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING);
+        let schema_for = |version| {
+            ComponentSchema::new(id.clone(), "Fixture", version)
+                .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        };
+        let schema = schema_for(ComponentSchemaVersion::ONE).with_fields([editable.clone()]);
+        let cx = TestAppContext::single();
+        for change in [
+            Change::Unrelated,
+            Change::Opaque,
+            Change::NoSchema,
+            Change::NoField,
+            Change::ReadOnly,
+            Change::NoComponent,
+        ] {
+            let (workspace, inspector, input) = cx.update(|cx| {
+                let workspace =
+                    cx.new(|_| Workspace::open(directory.path(), ProjectTrust::Untrusted).unwrap());
+                workspace.update(cx, |workspace, cx| {
+                    install(workspace, [schema.clone()], cx);
+                    let mut row = SceneEntity::new(entity, "Original");
+                    row.components.insert(
+                        id.clone(),
+                        SceneComponent::known(
+                            ComponentSchemaVersion::ONE,
+                            ComponentValue::Map(BTreeMap::new()),
+                        ),
+                    );
+                    assert!(workspace.apply(EditorCommand::Create(row), cx));
+                    workspace.select([entity], cx);
+                });
+                let inspector = cx.new(|cx| InspectorPanel::new(workspace.clone(), cx));
+                let input = editor(inspector.read(cx), &id, cx);
+                input.update(cx, |input, cx| {
+                    input.set_value("Pending", cx);
+                    cx.emit(TextInputEvent::Change("Pending".into()));
+                });
+                (workspace, inspector, input)
+            });
+            cx.update(|cx| {
+                assert!(!inspector.read(cx).drafts(cx).is_empty());
+                workspace.update(cx, |workspace, cx| workspace.select([], cx));
+            });
+            cx.update(|cx| {
+                assert_eq!(inspector.read(cx).suspended_fields.len(), 1);
+                workspace.update(cx, |workspace, cx| match change {
+                    Change::Unrelated => install(
+                        workspace,
+                        [
+                            schema.clone(),
+                            ComponentSchema::new(
+                                ComponentTypeId::new("test.Unrelated"),
+                                "Unrelated",
+                                ComponentSchemaVersion::ONE,
+                            ),
+                        ],
+                        cx,
+                    ),
+                    Change::Opaque => install(
+                        workspace,
+                        [schema_for(ComponentSchemaVersion::new(2).unwrap())
+                            .with_fields([editable.clone()])],
+                        cx,
+                    ),
+                    Change::NoSchema => install(workspace, [], cx),
+                    Change::NoField => {
+                        install(workspace, [schema_for(ComponentSchemaVersion::ONE)], cx)
+                    }
+                    Change::ReadOnly => install(
+                        workspace,
+                        [schema_for(ComponentSchemaVersion::ONE).with_fields([field
+                            .clone()
+                            .with_capabilities([
+                                ComponentCapability::Scene,
+                                ComponentCapability::Inspect,
+                            ])])],
+                        cx,
+                    ),
+                    Change::NoComponent => assert!(workspace.apply(
+                        EditorCommand::RemoveComponent {
+                            entities: vec![entity],
+                            component: id.clone(),
+                        },
+                        cx
+                    )),
+                });
+            });
+            cx.update(|cx| {
+                let retained = change == Change::Unrelated;
+                assert_eq!(
+                    inspector.read(cx).drafts(cx).is_empty(),
+                    !retained,
+                    "{change:?}"
+                );
+                workspace.update(cx, |workspace, cx| {
+                    if !retained {
+                        if change == Change::NoComponent {
+                            workspace.undo(cx);
+                        } else {
+                            install(workspace, [schema.clone()], cx);
+                        }
+                    }
+                    workspace.select([entity], cx);
+                });
+            });
+            cx.update(|cx| {
+                let restored = editor(inspector.read(cx), &id, cx);
+                if change == Change::Unrelated {
+                    assert_eq!(restored.entity_id(), input.entity_id());
+                    assert_eq!(restored.read(cx).value(), "Pending");
+                    restored.update(cx, |_, cx| {
+                        cx.emit(TextInputEvent::Submit("Pending".into()))
+                    });
+                } else {
+                    assert_ne!(restored.entity_id(), input.entity_id(), "{change:?}");
+                    assert_eq!(restored.read(cx).value(), "Original");
+                }
+            });
+            cx.update(|cx| {
+                assert!(inspector.read(cx).drafts(cx).is_empty());
+                if change == Change::Unrelated {
+                    let (target, value) =
+                        bind(&workspace.read(cx).session, id.as_str(), "text", &[]);
+                    assert!(target.selection.matches(&workspace.read(cx).session));
+                    assert_eq!(value, [Some(ComponentValue::String("Pending".to_owned()))]);
+                }
+            });
+        }
+    }
+}

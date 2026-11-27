@@ -4,10 +4,12 @@ use std::{
     fs,
     io::{self, Read, Write},
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
-use nara_core::vfs::{AssetPath as VfsPath, DirAssetSource};
+use nara_core::{
+    identity::try_uuid_v7,
+    vfs::{AssetPath as VfsPath, DirAssetSource},
+};
 
 use crate::{
     AssetDatabaseError, AssetMeta, AssetMetaError, AssetRecord, AssetSourcePath,
@@ -213,7 +215,9 @@ fn discover_sidecar(
     }
 
     let target = native_path(source, sidecar.as_str());
-    let id = generate_id().map_err(|error| io_error("generate asset UUID", &target, error))?;
+    let id = try_uuid_v7()
+        .map(StableAssetId::from_uuid)
+        .map_err(|error| io_error("generate asset UUID", &target, error))?;
     let meta = AssetMeta::generated(id, default_importer(&path))
         .map_err(|error| io_error("encode asset sidecar", &target, io::Error::other(error)))?;
     let proposed = AssetRecord::from_meta(path.clone(), meta.clone());
@@ -286,20 +290,6 @@ fn read_sidecar(source: &DirAssetSource, path: &VfsPath) -> Result<AssetMeta, As
         path: path.clone(),
         source,
     })
-}
-
-fn generate_id() -> io::Result<StableAssetId> {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(io::Error::other)?
-        .as_millis();
-    if millis >= 1 << 48 {
-        return Err(io::Error::other("clock is outside the UUID v7 range"));
-    }
-    let mut entropy = [0; 10];
-    getrandom::fill(&mut entropy).map_err(io::Error::other)?;
-    let uuid = uuid::Builder::from_unix_timestamp_millis(millis as u64, &entropy).into_uuid();
-    Ok(StableAssetId::from_uuid(uuid))
 }
 
 fn default_importer(path: &AssetSourcePath) -> &'static str {

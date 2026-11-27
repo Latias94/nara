@@ -4,6 +4,26 @@ use std::{error::Error, fmt, str::FromStr};
 
 use uuid::Uuid;
 
+/// Generates a UUID v7 from the current Unix timestamp and the platform's random-byte source.
+#[cfg(any(unix, windows))]
+pub fn try_uuid_v7() -> std::io::Result<Uuid> {
+    use std::{
+        io,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(io::Error::other)?
+        .as_millis();
+    if millis >= 1 << 48 {
+        return Err(io::Error::other("clock is outside the UUID v7 range"));
+    }
+    let mut entropy = [0; 10];
+    getrandom::fill(&mut entropy).map_err(io::Error::other)?;
+    Ok(uuid::Builder::from_unix_timestamp_millis(millis as u64, &entropy).into_uuid())
+}
+
 macro_rules! uuid_identity {
     ($name:ident, $description:literal) => {
         #[doc = $description]

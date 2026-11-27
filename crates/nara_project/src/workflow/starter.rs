@@ -4,7 +4,7 @@ use std::{
     path::{self, Path, PathBuf},
 };
 
-use nara_core::vfs::AssetPath;
+use nara_core::{identity::try_uuid_v7, vfs::AssetPath};
 use thiserror::Error;
 
 use super::SCHEMA_BINARY;
@@ -34,6 +34,8 @@ pub enum StarterError {
     MissingCheckoutField(&'static str),
     #[error("the local Nara dependency path is not valid UTF-8: {}", .0.display())]
     NonUtf8Checkout(PathBuf),
+    #[error("could not generate a starter identity: {0}")]
+    Identity(#[source] io::Error),
     #[error("could not create the project at {}: {source}", .destination.display())]
     Create {
         destination: PathBuf,
@@ -55,37 +57,49 @@ pub fn create_project(
 ) -> Result<(), StarterError> {
     validate_package(package)?;
     let cargo_manifest = cargo_manifest(package, nara_checkout)?;
+    let new_id = || try_uuid_v7().map_err(StarterError::Identity);
+    let scene_asset = new_id()?;
+    let prefab_asset = new_id()?;
+    let image_asset = new_id()?;
     let project_manifest = format!(
         include_str!("template/nara.toml.in"),
         name = toml_string(package),
+        scene_asset = scene_asset,
     );
+    let scene = format!(
+        include_str!("template/main.scene.ron"),
+        document = new_id()?,
+        entity = new_id()?,
+        prefab_asset = prefab_asset,
+    );
+    let prefab = format!(
+        include_str!("template/sprite.prefab.ron"),
+        document = new_id()?,
+        entity = new_id()?,
+        image_asset = image_asset,
+    );
+    let scene_meta = format!(
+        include_str!("template/main.scene.ron.meta"),
+        id = scene_asset
+    );
+    let prefab_meta = format!(
+        include_str!("template/sprite.prefab.ron.meta"),
+        id = prefab_asset
+    );
+    let image_meta = format!(include_str!("template/white.png.meta"), id = image_asset);
+    let main = include_str!("template/main.rs").replace("{entry_scene}", &scene_asset.to_string());
     let files = [
         (".gitignore", "/target/\n/.nara/\n".as_bytes()),
         ("README.md", include_bytes!("template/README.md").as_slice()),
         ("nara.toml", project_manifest.as_bytes()),
-        (
-            "assets/main.scene.ron",
-            include_bytes!("template/main.scene.ron"),
-        ),
-        (
-            "assets/main.scene.ron.meta",
-            include_bytes!("template/main.scene.ron.meta"),
-        ),
-        (
-            "assets/sprite.prefab.ron",
-            include_bytes!("template/sprite.prefab.ron"),
-        ),
-        (
-            "assets/sprite.prefab.ron.meta",
-            include_bytes!("template/sprite.prefab.ron.meta"),
-        ),
+        ("assets/main.scene.ron", scene.as_bytes()),
+        ("assets/main.scene.ron.meta", scene_meta.as_bytes()),
+        ("assets/sprite.prefab.ron", prefab.as_bytes()),
+        ("assets/sprite.prefab.ron.meta", prefab_meta.as_bytes()),
         ("assets/white.png", STARTER_IMAGE),
-        (
-            "assets/white.png.meta",
-            include_bytes!("template/white.png.meta"),
-        ),
+        ("assets/white.png.meta", image_meta.as_bytes()),
         ("src/lib.rs", include_bytes!("template/lib.rs")),
-        ("src/main.rs", include_bytes!("template/main.rs")),
+        ("src/main.rs", main.as_bytes()),
         ("src/source.rs", include_bytes!("template/source.rs")),
         (
             "src/bin/nara_schema.rs",

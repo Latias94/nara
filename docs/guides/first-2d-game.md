@@ -37,8 +37,9 @@ versions.
 
 The generated `nara.toml` lists the entry scene's `.meta` UUID under `[delivery]`. Cook expands its
 prefabs and imports its referenced assets into `.nara/game.npak`. Run with `--trusted` to refresh
-the release Schema before cooking. Cook without that flag reads the cached catalog for the
-delivery profile when available and otherwise uses the authoring Schema cache.
+the release Schema before cooking. Offline Cook keeps the asset directory read-only and requires
+existing `.meta` sidecars. It reads `.nara/schema_cache.json` first and falls back to a cached
+catalog for the delivery profile when the authoring catalog is absent.
 
 ```text
 cargo run --locked -p nara_project --bin nara -- cook ../my-game --trusted

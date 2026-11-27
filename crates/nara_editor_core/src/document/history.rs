@@ -29,7 +29,7 @@ impl CommandHistory {
     }
 
     pub(super) fn push(&mut self, patch: ScenePatch) -> bool {
-        if patch.entities.is_empty() && patch.assets.is_none() {
+        if patch.is_empty() {
             return false;
         }
         self.entries.truncate(self.cursor);
@@ -55,6 +55,22 @@ impl CommandHistory {
             },
         );
         self.cursor += 1;
+    }
+
+    #[cfg(any(unix, windows))]
+    pub(super) fn rebase_redo(&mut self, scene: &SceneDocument) {
+        if self.cursor == self.entries.len() {
+            return;
+        }
+        let mut future = scene.clone();
+        self.entries
+            .extract_if(self.cursor.., |entry| {
+                let before = future.clone();
+                entry.patch.apply(&mut future, true);
+                entry.patch = ScenePatch::between(&before, &future);
+                entry.patch.is_empty()
+            })
+            .for_each(drop);
     }
 
     pub(super) fn rebind(
@@ -102,6 +118,10 @@ struct AssetPatch {
 }
 
 impl ScenePatch {
+    fn is_empty(&self) -> bool {
+        self.entities.is_empty() && self.assets.is_none()
+    }
+
     pub(super) fn from_rows(rows: impl IntoIterator<Item = (SceneEntity, SceneEntity)>) -> Self {
         let mut patch = Self::default();
         for (before, after) in rows {
@@ -241,5 +261,49 @@ mod tests {
             );
         }
         assert!(!session.redo().unwrap());
+    }
+
+    #[test]
+    fn reloading_discards_noop_redo_without_evicting_valid_edits_or_moving_the_save_cursor() {
+        let mut session = session();
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("saved.scene.ron");
+        session.save_as(&path).unwrap();
+        for step in 0..HISTORY_LIMIT {
+            rename(&mut session, format!("Edit {step}"));
+        }
+        for _ in 0..HISTORY_LIMIT {
+            assert!(session.undo().unwrap());
+        }
+        let mut external = session.document().scene().clone();
+        external.entities[0].name = "Edit 0".into();
+        external.write(&path).unwrap();
+        assert!(
+            session
+                .reload_sources(Some(EditorDocument::open(path).unwrap()), BTreeMap::new())
+                .unwrap()
+        );
+        assert!(!session.is_dirty());
+        assert!(session.undo().unwrap());
+        assert_eq!(session.document().scene().entities[0].name, "Initial");
+        assert!(session.is_dirty());
+        assert!(session.redo().unwrap());
+        assert_eq!(session.document().scene(), &external);
+        assert!(!session.is_dirty());
+        for step in 1..HISTORY_LIMIT {
+            assert!(session.redo().unwrap());
+            assert_eq!(
+                session.document().scene().entities[0].name,
+                format!("Edit {step}")
+            );
+            assert!(session.is_dirty());
+        }
+        assert!(!session.can_redo());
+        assert!(!session.redo().unwrap());
+        for _ in 1..HISTORY_LIMIT {
+            assert!(session.undo().unwrap());
+        }
+        assert_eq!(session.document().scene(), &external);
+        assert!(!session.is_dirty());
     }
 }

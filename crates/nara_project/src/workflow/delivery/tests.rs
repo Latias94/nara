@@ -1,7 +1,22 @@
+use std::process::ExitStatus;
+
 use nara_asset::cooked::{NpakArchive, NpakEntryKind};
-use nara_scene::cooked::CookedScene;
+use nara_reflect::{
+    ComponentCapability, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+};
+use nara_scene::{
+    authoring::{SceneComponent, SceneDocument},
+    cooked::CookedScene,
+};
+
+use crate::workflow::{SCHEMA_CACHE_PATH, schema::finish_refresh};
 
 use super::*;
+
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt as _;
+#[cfg(windows)]
+use std::os::windows::process::ExitStatusExt as _;
 
 const ENTRY: &str = "0193a100-1111-7000-8000-000000000001";
 const PREFAB: &str = "0193a100-1111-7000-8000-000000000002";
@@ -90,6 +105,116 @@ fn packages_only_flattened_dependencies_and_caches_each_input_cut() {
     let error = cook_project(temp.path(), ProjectTrust::Untrusted, || false, |_| {}).unwrap_err();
     assert!(matches!(error, DeliveryError::Asset { id, .. } if id == SHADER.parse().unwrap()));
     assert_eq!(edited_bytes, fs::read(&edited.archive).unwrap());
+}
+
+#[test]
+fn untrusted_cook_leaves_missing_sidecars_for_explicit_discovery() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path();
+    fixture(project);
+    fs::write(project.join("Cargo.toml"), "[package]\nname = 'fixture'\n").unwrap();
+    let source = project.join("assets/unused.txt");
+    let sidecar = source.with_file_name("unused.txt.meta");
+    fs::remove_file(&sidecar).unwrap();
+    let cook = |trust| cook_project(project, trust, || false, |_| panic!("unexpected build"));
+
+    assert!(matches!(
+        cook(ProjectTrust::Untrusted),
+        Err(DeliveryError::AssetScan(AssetScanError::MissingSidecar { path }))
+            if path.as_str() == "assets/unused.txt"
+    ));
+    assert!(!sidecar.exists());
+    assert_eq!(fs::read(&source).unwrap(), b"unused");
+    assert!(!project.join(PROJECT_STATE).exists());
+
+    let trusted = cook(ProjectTrust::Trusted).unwrap();
+    let discovered = fs::read(&sidecar).unwrap();
+    assert_eq!(
+        trusted.archive,
+        project.canonicalize().unwrap().join(".nara/game.npak")
+    );
+    let offline = cook(ProjectTrust::Untrusted).unwrap();
+    assert_eq!((offline.assets, offline.cache_hits), (4, 4));
+    assert_eq!(fs::read(sidecar).unwrap(), discovered);
+    assert_eq!(fs::read(source).unwrap(), b"unused");
+}
+
+#[test]
+fn offline_cook_uses_the_official_refresh_before_a_matching_release_cache() {
+    let component_id = ComponentTypeId::new("fixture.Marker");
+    let version = ComponentSchemaVersion(2);
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path();
+    fixture(project);
+    fs::write(project.join("Cargo.toml"), "[package]\nname = 'fixture'\n").unwrap();
+    let release_cache = schema_cache_path("fixture", "game", &[]);
+    let builtins = nara_scene::authoring::builtin_component_schemas().unwrap();
+    let stale = ComponentSchemaCatalog::from_components(builtins).unwrap();
+    let stale_json = stale.to_json_string().unwrap();
+    fs::create_dir(project.join(PROJECT_STATE)).unwrap();
+    fs::write(project.join(&release_cache), &stale_json).unwrap();
+    let profile = read_project_manifest(project).unwrap().delivery.unwrap();
+    assert_eq!(
+        load_schemas(
+            project,
+            &profile,
+            ProjectTrust::Untrusted,
+            &mut || false,
+            &mut |_| {}
+        )
+        .unwrap(),
+        stale
+    );
+
+    let fresh = ComponentSchemaCatalog::from_components([ComponentSchema::new(
+        component_id.clone(),
+        "Marker",
+        version,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_postcard_codec()])
+    .unwrap();
+    let scene_path = project.join("assets/entry.scene.ron");
+    let mut scene = SceneDocument::read(&scene_path).unwrap();
+    scene.entities[0].components.insert(
+        component_id.clone(),
+        SceneComponent::known(version, ComponentValue::Map(Default::default())),
+    );
+    scene.write_with(&scene_path, fresh.components()).unwrap();
+    let cook = || {
+        cook_project(
+            project,
+            ProjectTrust::Untrusted,
+            || false,
+            |_| {
+                panic!("offline Cook must not run a build");
+            },
+        )
+    };
+    assert!(matches!(
+        cook(),
+        Err(DeliveryError::MissingComponentSchema { component, version: 2, .. })
+            if component == component_id.as_str()
+    ));
+
+    let fresh_json = fresh.to_json_string().unwrap();
+    finish_refresh(
+        project,
+        ExitStatus::from_raw(0),
+        fresh_json.as_bytes(),
+        || false,
+    )
+    .unwrap();
+    let report = cook().unwrap();
+    assert_eq!(report.assets, 4);
+    assert_eq!(
+        fs::read_to_string(project.join(SCHEMA_CACHE_PATH)).unwrap(),
+        fresh_json
+    );
+    assert_eq!(
+        fs::read_to_string(project.join(release_cache)).unwrap(),
+        stale_json
+    );
 }
 
 #[test]

@@ -4,8 +4,8 @@ use std::{collections::BTreeMap, fs, path::Path};
 
 use nara_core::{AssetId, DocumentId, EntityUuid, vfs::AssetPath};
 use nara_editor_core::{
-    EditorCommand, EditorError, EditorProject, EditorRegistry, EditorSession, ProjectError,
-    SelectionMode,
+    AssetKind, EditorCommand, EditorError, EditorProject, EditorRegistry, EditorSession,
+    ProjectError, SelectionMode,
 };
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentSchema,
@@ -56,12 +56,75 @@ fn sidecar(path: &Path, asset: AssetId, importer: &str) {
 }
 
 #[test]
+fn mixed_case_authoring_suffixes_open_and_save_with_the_correct_wrappers() {
+    let directory = project();
+    let assets = directory.path().join("assets");
+    let scene = AssetPath::new("game.SCENE.RON").unwrap();
+    let prefab = AssetPath::new("piece.PrEfAb.RoN").unwrap();
+    assert_eq!(AssetKind::of(&scene), AssetKind::Scene);
+    assert_eq!(AssetKind::of(&prefab), AssetKind::Prefab);
+    document(1).write(assets.join(scene.as_str())).unwrap();
+    document(2).write(assets.join(prefab.as_str())).unwrap();
+    let mut project = EditorProject::open(directory.path()).unwrap();
+    project.set_entry_scene(Some(scene.clone())).unwrap();
+    assert_eq!(project.entry_scene(), Some(&scene));
+    for (path, wrapper) in [(scene, "Scene("), (prefab, "Prefab(")] {
+        let id = project.asset_reference(&path).unwrap().id;
+        let mut session = EditorSession::new(
+            project.open_document(&path).unwrap(),
+            EditorRegistry::default(),
+        );
+        let destination = project
+            .document_save_path(id, session.document().scene().id)
+            .unwrap();
+        session.save_as(&destination).unwrap();
+        assert!(
+            fs::read_to_string(destination)
+                .unwrap()
+                .starts_with(wrapper)
+        );
+    }
+}
+
+#[test]
+fn a_configured_entry_id_must_resolve_to_a_scene() {
+    let directory = project();
+    let assets = directory.path().join("assets");
+    let scene = assets.join("available.scene.ron");
+    document(1).write(&scene).unwrap();
+    document(2).write(assets.join("piece.PREFAB.RON")).unwrap();
+    fs::write(assets.join("image.png"), []).unwrap();
+    let misclassified = assets.join("marks.scene.ron");
+    document(3).write(&misclassified).unwrap();
+    sidecar(
+        &misclassified,
+        "01951a29-2e18-7000-9000-000000000003".parse().unwrap(),
+        "nara.prefab",
+    );
+    let project = EditorProject::open(directory.path()).unwrap();
+    for asset in ["piece.PREFAB.RON", "image.png", "marks.scene.ron"] {
+        let path = AssetPath::new(asset).unwrap();
+        let id = project.asset_reference(&path).unwrap().id;
+        fs::write(
+            directory.path().join(".nara.ron"),
+            format!("(scene: Some(\"available.scene.ron\"), scene_id: Some(\"{id}\"))"),
+        )
+        .unwrap();
+        assert!(matches!(
+            EditorProject::open(directory.path()),
+            Err(ProjectError::InvalidEntryScene(invalid)) if invalid == id
+        ));
+    }
+}
+
+#[test]
 fn saving_a_moved_document_resolves_its_sidecar_again() {
     let directory = project();
     let assets = directory.path().join("assets");
     let path = AssetPath::new("first.scene.ron").unwrap();
     let original = assets.join(path.as_str());
-    let renamed = assets.join("moved.scene.ron");
+    fs::create_dir(assets.join("archive")).unwrap();
+    let renamed = assets.join("archive/moved.SCENE.RON");
     document(1).write(&original).unwrap();
     let mut project = EditorProject::open(directory.path()).unwrap();
     let id = project.asset_reference(&path).unwrap().id;
@@ -72,10 +135,15 @@ fn saving_a_moved_document_resolves_its_sidecar_again() {
     fs::rename(&original, &renamed).unwrap();
     fs::rename(
         assets.join("first.scene.ron.meta"),
-        assets.join("moved.scene.ron.meta"),
+        assets.join("archive/moved.SCENE.RON.meta"),
     )
     .unwrap();
     document(2).write(&original).unwrap();
+    let malformed = assets.join("unrelated.scene.ron");
+    document(3).write(&malformed).unwrap();
+    let unrelated_meta = assets.join("unrelated.scene.ron.meta");
+    fs::write(&unrelated_meta, "malformed meta").unwrap();
+    fs::write(assets.join("unrelated.png"), []).unwrap();
     let other = fs::read(&original).unwrap();
     let entity = session.document().scene().entities[0].id;
     session
@@ -93,11 +161,72 @@ fn saving_a_moved_document_resolves_its_sidecar_again() {
         "Edited"
     );
     assert_eq!(fs::read(original).unwrap(), other);
+    assert_eq!(
+        fs::read_to_string(&unrelated_meta).unwrap(),
+        "malformed meta"
+    );
+    assert!(!assets.join("unrelated.png.meta").exists());
+    assert!(!assets.join("first.scene.ron.meta").exists());
+    assert_eq!(
+        project.entry_scene().map(AssetPath::as_str),
+        Some("archive/moved.SCENE.RON")
+    );
+    assert!(
+        project
+            .asset_database()
+            .record_for_stable_id(id.into())
+            .and_then(|record| record.meta())
+            .is_some()
+    );
+    fs::remove_file(unrelated_meta).unwrap();
     let reopened = EditorProject::open(directory.path()).unwrap();
     assert_eq!(
         reopened.entry_scene().map(AssetPath::as_str),
-        Some("moved.scene.ron")
+        Some("archive/moved.SCENE.RON")
     );
+}
+
+#[test]
+fn a_replaced_document_with_the_same_sidecar_is_rejected_before_save() {
+    let directory = project();
+    let path = AssetPath::new("first.scene.ron").unwrap();
+    let native = directory.path().join("assets").join(path.as_str());
+    let original = document(1);
+    original.write(&native).unwrap();
+    let mut project = EditorProject::open(directory.path()).unwrap();
+    let id = project.asset_reference(&path).unwrap().id;
+    document(2).write(&native).unwrap();
+    assert!(matches!(
+        project.document_save_path(id, original.id),
+        Err(ProjectError::DocumentChanged(found)) if found == original.id
+    ));
+    assert_eq!(SceneDocument::read(native).unwrap(), document(2));
+}
+
+#[test]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn a_new_scene_cannot_take_an_existing_sidecar() {
+    let directory = project();
+    let assets = directory.path().join("assets");
+    let native = assets.join("new.SCENE.RON");
+    let sidecar = assets.join("new.SCENE.RON.meta");
+    let mut project = EditorProject::open(directory.path()).unwrap();
+    let mut session = EditorSession::new(
+        nara_editor_core::EditorDocument::new(document(1)).unwrap(),
+        EditorRegistry::default(),
+    );
+    fs::write(&sidecar, "another writer's sidecar").unwrap();
+    assert!(matches!(
+        project.save_new_scene(&mut session, &native),
+        Err(ProjectError::DocumentExists(path)) if path.ends_with("new.SCENE.RON.meta")
+    ));
+    assert!(!native.exists());
+    assert_eq!(
+        fs::read_to_string(sidecar).unwrap(),
+        "another writer's sidecar"
+    );
+    assert!(session.document().path().is_none() && session.is_dirty());
+    assert!(project.assets().entries().is_empty());
 }
 
 #[test]

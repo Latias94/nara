@@ -248,9 +248,7 @@ impl InspectorPanel {
                 self.suspended_names.insert(previous.clone(), name);
             }
             for (key, view) in existing.drain() {
-                if view.update(cx, PropertyEditor::suspend)
-                    && previous.has_component(&self.workspace.read(cx).session, &key.component)
-                {
+                if view.update(cx, PropertyEditor::suspend) {
                     self.suspended_fields.insert((previous.clone(), key), view);
                 }
             }
@@ -295,21 +293,14 @@ impl InspectorPanel {
                 }
             })
             .collect();
-        for (key, view) in existing {
-            if view.update(cx, PropertyEditor::suspend)
-                && self
-                    .selection
-                    .has_component(&self.workspace.read(cx).session, &key.component)
-            {
-                self.suspended_fields
-                    .insert((self.selection.clone(), key), view);
-            }
+        for view in existing.into_values() {
+            view.update(cx, PropertyEditor::suspend);
         }
         let session = &self.workspace.read(cx).session;
         self.suspended_names
             .retain(|selection, _| selection.exists_in(session));
         self.suspended_fields
-            .retain(|(selection, key), _| selection.has_component(session, &key.component));
+            .retain(|_, view| view.read(cx).can_resume(session));
         self.refresh_add_menu(options, cx);
         true
     }

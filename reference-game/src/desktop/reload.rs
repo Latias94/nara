@@ -1,8 +1,15 @@
 use std::{
     collections::BTreeMap,
     error::Error,
+    future::Future,
     io::{self, Write},
-    sync::atomic::{AtomicBool, Ordering},
+    pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    task::{Context, Poll, Waker},
+    time::Instant,
 };
 
 use nara::{
@@ -14,11 +21,15 @@ use nara::{
     render::material::Material2dBinding,
     render_wgpu::desktop::DesktopPresentation,
     scene::{authoring::SceneDocument, spatial::propagate_spatial},
+    tasks::{Task, io_pool},
 };
-use nara_asset::{ProjectAssetDatabase, watch::AssetWatcher};
+use nara_asset::{
+    ProjectAssetDatabase,
+    watch::{AssetWatcher, RELOAD_RETRY_DELAYS, is_transient_reload_error},
+};
 
 use crate::{
-    arena::source::{SceneLayers, SourceProject, SourceScene},
+    arena::source::{SceneLayers, SourceContent, SourceProject, SourceScene},
     simulation::{ArenaEntities, PilotCharacter, sync_actors},
 };
 
@@ -29,14 +40,66 @@ use super::{
 
 #[derive(Resource)]
 pub(super) struct Reload {
-    project: SourceProject,
-    layers: SceneLayers,
+    source: Arc<ReloadSource>,
     current: SceneDocument,
-    watcher: AssetWatcher,
-    changed: AtomicBool,
+    task: Option<Task<Option<ReloadAttempt>>>,
+    retry: Option<ReloadRetry>,
     last_error: Option<String>,
     trace: bool,
     report: Option<ReloadFrame>,
+}
+
+struct ReloadSource {
+    project: SourceProject,
+    layers: SceneLayers,
+    watcher: AssetWatcher,
+}
+
+#[derive(Clone, Copy)]
+struct ReloadRetry {
+    at: Instant,
+    attempt: usize,
+}
+
+struct ReloadAttempt {
+    index: usize,
+    result: Result<SourceContent, ReloadFailure>,
+}
+
+struct ReloadFailure {
+    message: String,
+    transient: bool,
+}
+
+impl ReloadSource {
+    fn prepare(&self, retry: Option<usize>) -> Option<ReloadAttempt> {
+        let index = match self.watcher.take_changed() {
+            Ok(true) => 0,
+            Ok(false) => retry?,
+            Err(error) => {
+                return Some(ReloadAttempt {
+                    index: 0,
+                    result: Err(ReloadFailure {
+                        message: format!("could not refresh the asset watch: {error}"),
+                        transient: false,
+                    }),
+                });
+            }
+        };
+        Some(ReloadAttempt {
+            index,
+            result: self.read_content().map_err(|error| ReloadFailure {
+                transient: is_transient_reload_error(error.as_ref()),
+                message: error.to_string(),
+            }),
+        })
+    }
+
+    fn read_content(&self) -> Result<SourceContent, Box<dyn Error>> {
+        let assets = self.project.assets()?;
+        let scene = self.layers.read(&self.project, &assets)?;
+        self.project.prepare_content(&assets, scene)
+    }
 }
 
 struct ReloadFrame {
@@ -57,11 +120,14 @@ impl Reload {
     ) -> Self {
         let layers = SceneLayers::capture(&project, assets, &current, snapshot);
         Self {
-            project,
-            layers,
+            source: Arc::new(ReloadSource {
+                project,
+                layers,
+                watcher,
+            }),
             current,
-            watcher,
-            changed: AtomicBool::new(false),
+            task: None,
+            retry: None,
             last_error: None,
             trace: std::env::var_os("NARA_RELOAD_TRACE").is_some_and(|value| value == "1"),
             report: None,
@@ -76,10 +142,13 @@ impl Reload {
     }
 
     pub fn notified(&self) -> bool {
-        if self.watcher.take_changed() {
-            self.changed.store(true, Ordering::Relaxed);
-        }
-        self.changed.load(Ordering::Relaxed)
+        self.task.as_ref().map_or_else(
+            || {
+                self.source.watcher.change_is_ready()
+                    || self.retry.is_some_and(|retry| Instant::now() >= retry.at)
+            },
+            Task::is_finished,
+        )
     }
 
     pub fn observe(&self, presentation: &DesktopPresentation) {
@@ -102,10 +171,57 @@ impl Reload {
         let _ = io::stdout().flush();
     }
 
-    fn refresh(&mut self, world: &mut World) -> Result<(), Box<dyn Error>> {
-        let assets = self.project.assets()?;
-        let scene = self.layers.read(&self.project, &assets)?;
-        let content = self.project.prepare_content(&assets, scene)?;
+    fn advance(&mut self, world: &mut World, now: Instant) {
+        if let Some(task) = &mut self.task {
+            if let Poll::Ready(attempt) =
+                Pin::new(task).poll(&mut Context::from_waker(Waker::noop()))
+            {
+                self.task = None;
+                if let Some(attempt) = attempt {
+                    self.finish_attempt(world, now, attempt);
+                }
+            }
+            return;
+        }
+
+        let source = Arc::clone(&self.source);
+        let retry = self
+            .retry
+            .filter(|retry| now >= retry.at)
+            .map(|retry| retry.attempt);
+        self.task = Some(io_pool().spawn(async move { source.prepare(retry) }));
+    }
+
+    fn finish_attempt(&mut self, world: &mut World, now: Instant, attempt: ReloadAttempt) {
+        let result = attempt.result.and_then(|content| {
+            self.publish(world, content).map_err(|error| ReloadFailure {
+                message: error.to_string(),
+                transient: false,
+            })
+        });
+        self.retry = None;
+        match result {
+            Ok(()) => self.last_error = None,
+            Err(error) => {
+                if error.transient
+                    && let Some(&delay) = RELOAD_RETRY_DELAYS.get(attempt.index)
+                {
+                    self.retry = Some(ReloadRetry {
+                        at: now + delay,
+                        attempt: attempt.index + 1,
+                    });
+                } else if self.last_error.as_ref() != Some(&error.message) {
+                    eprintln!(
+                        "Night Relay kept its current scene and assets after a reload error: {}",
+                        error.message
+                    );
+                    self.last_error = Some(error.message);
+                }
+            }
+        }
+    }
+
+    fn publish(&mut self, world: &mut World, content: SourceContent) -> Result<(), Box<dyn Error>> {
         let replacement = if self.current.entities != content.scene.entities {
             let scene = SourceScene::prepare(&content.scene, None)?;
             let character = PilotCharacter::new(scene.arena().pilot.radius)?;
@@ -141,21 +257,11 @@ impl Reload {
 }
 
 fn reload_if_changed(world: &mut World) {
-    let reload = world.resource::<Reload>();
-    if !reload.notified() || !reload.changed.swap(false, Ordering::Relaxed) {
+    if !world.resource::<Reload>().notified() {
         return;
     }
     world.resource_scope(|world, mut reload: Mut<Reload>| {
-        match reload.refresh(world) {
-            Ok(()) => reload.last_error = None,
-            Err(error) => {
-                let message = error.to_string();
-                if reload.last_error.as_ref() != Some(&message) {
-                    eprintln!("Night Relay kept its current scene and assets after a reload error: {message}");
-                    reload.last_error = Some(message);
-                }
-            }
-        }
+        reload.advance(world, Instant::now());
     });
 }
 
@@ -267,8 +373,7 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn reload_keeps_the_play_snapshot_and_last_good_world() -> Result<(), Box<dyn Error>> {
+    fn staged_project() -> io::Result<tempfile::TempDir> {
         let temporary = tempfile::tempdir()?;
         let assets_dir = temporary.path().join("assets");
         fs::create_dir(&assets_dir)?;
@@ -276,6 +381,13 @@ mod tests {
             let file = file?;
             fs::copy(file.path(), assets_dir.join(file.file_name()))?;
         }
+        Ok(temporary)
+    }
+
+    #[test]
+    fn reload_keeps_the_play_snapshot_and_last_good_world() -> Result<(), Box<dyn Error>> {
+        let temporary = staged_project()?;
+        let assets_dir = temporary.path().join("assets");
         let scene_file = assets_dir.join("night-relay.scene.ron");
         let prefab_file = assets_dir.join("power-cell.prefab.ron");
         let material_file = assets_dir.join("gate.material.ron");
@@ -345,7 +457,29 @@ mod tests {
             ),
         )?;
         fs::write(&image_file, b"invalid PNG")?;
-        assert!(reload.refresh(app.world_mut()?).is_err());
+        let error = reload
+            .source
+            .read_content()
+            .err()
+            .ok_or("accepted invalid PNG")?;
+        reload.finish_attempt(
+            app.world_mut()?,
+            Instant::now(),
+            ReloadAttempt {
+                index: 0,
+                result: Err(ReloadFailure {
+                    message: error.to_string(),
+                    transient: is_transient_reload_error(error.as_ref()),
+                }),
+            },
+        );
+        assert!(reload.retry.is_none());
+        assert!(
+            reload
+                .last_error
+                .as_ref()
+                .is_some_and(|error| error.contains("power-cell.png"))
+        );
         assert_eq!(app.world().resource::<ArenaEntities>().0, original_entities);
         assert_eq!(app.world().resource::<Round>(), &round);
         assert_eq!(
@@ -363,7 +497,8 @@ mod tests {
             &image_meta_file,
             image_meta.replace("settings: ()", "settings: (srgb: false)"),
         )?;
-        reload.refresh(app.world_mut()?)?;
+        let content = reload.source.read_content()?;
+        reload.publish(app.world_mut()?, content)?;
         assert_eq!(app.world().resource::<Round>(), &round);
         let visuals = app.world().resource::<SceneVisuals>();
         assert_eq!(visuals.images.values().copied().next(), Some(image_handle));
@@ -383,6 +518,95 @@ mod tests {
                 .query::<&SpriteSource>()
                 .iter(world)
                 .filter(|sprite| sprite.image.is_some() && sprite.size == Vec2::splat(16.0))
+                .count(),
+            3,
+        );
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_split_same_id_rename_and_locked_prefab_keep_the_triggered_revision()
+    -> Result<(), Box<dyn Error>> {
+        use std::{os::windows::fs::OpenOptionsExt, thread, time::Duration};
+
+        fn drive_until(reload: &mut Reload, world: &mut World, reached: impl Fn(&Reload) -> bool) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !reached(reload) {
+                assert!(
+                    Instant::now() < deadline,
+                    "the reload worker did not advance"
+                );
+                if reload.notified() {
+                    reload.advance(world, Instant::now());
+                }
+                thread::sleep(Duration::from_millis(3));
+            }
+        }
+
+        let temporary = staged_project()?;
+        let assets_dir = temporary.path().join("assets");
+        let mut app = App::new();
+        app.add_plugins(DefaultPlugins::headless())?;
+        let project = SourceProject::new(&mut app, temporary.path())?;
+        let assets = project.assets()?;
+        let content = project.load(&assets, None)?;
+        SceneVisuals::install(app.world_mut()?, content.images, content.materials)?;
+        let watcher = AssetWatcher::new(&assets_dir)?;
+        let mut reload = Reload::new(project, &assets, content.scene.clone(), false, watcher);
+        reload.trace = false;
+        app.add_plugins(GamePlugin::from_scene(content.scene))?;
+        world::setup(app.world_mut()?).map_err(|error| error.to_string())?;
+        app.step_fixed(FixedTime::DEFAULT_TIMESTEP)?;
+        let original_entities = app.world().resource::<ArenaEntities>().0.clone();
+
+        let old = assets_dir.join("power-cell.prefab.ron");
+        let moved = assets_dir.join("moved.prefab.ron");
+        fs::rename(old, &moved)?;
+        drive_until(&mut reload, app.world_mut()?, |reload| {
+            reload.retry.is_some()
+        });
+        let pending = reload.retry.ok_or("incomplete pair was not retried")?;
+        assert_eq!(pending.attempt, 1);
+        assert_eq!(app.world().resource::<ArenaEntities>().0, original_entities);
+
+        fs::write(
+            &moved,
+            fs::read_to_string(&moved)?.replace("(15.0, 15.0)", "(17.0, 17.0)"),
+        )?;
+        fs::rename(
+            assets_dir.join("power-cell.prefab.ron.meta"),
+            assets_dir.join("moved.prefab.ron.meta"),
+        )?;
+        let renamed_index = reload.source.project.assets()?;
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&moved)?;
+        let error = reload
+            .source
+            .layers
+            .read(&reload.source.project, &renamed_index)
+            .err()
+            .ok_or("the prefab remained readable while exclusively held")?;
+        assert!(is_transient_reload_error(error.as_ref()), "{error}");
+        assert!(error.to_string().contains("moved.prefab.ron"));
+        drive_until(&mut reload, app.world_mut()?, |reload| {
+            reload.retry.is_some_and(|retry| retry.at != pending.at)
+        });
+        assert_eq!(app.world().resource::<ArenaEntities>().0, original_entities);
+        drop(lock);
+
+        drive_until(&mut reload, app.world_mut()?, |reload| {
+            reload.retry.is_none()
+        });
+        let world = app.world_mut()?;
+        assert_ne!(world.resource::<ArenaEntities>().0, original_entities);
+        assert_eq!(
+            world
+                .query::<&SpriteSource>()
+                .iter(world)
+                .filter(|sprite| sprite.image.is_some() && sprite.size == Vec2::splat(17.0))
                 .count(),
             3,
         );

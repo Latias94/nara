@@ -35,7 +35,8 @@ jobs:
       - run: cargo fmt --manifest-path reference-game/Cargo.toml --all -- --check
       - run: >-
           rustfmt --check --edition 2024
-          crates/nara_editor/src/main.rs crates/nara_editor_viewport/src/lib.rs
+          crates/nara_editor/build.rs crates/nara_editor/src/main.rs
+          crates/nara_editor_viewport/src/lib.rs examples/shared-viewport/src/main.rs
 
   workspace:
     name: Workspace (${{ matrix.os }})
@@ -89,7 +90,7 @@ jobs:
           -p nara_reflect -p nara_render -p nara_ui --lib --bin nara --test vfs --test mock_audio
           --test fixed_physics --test lifecycle --test code_first_images --test direct_input
           --test schema_registration --test kernel --test text --test clip --test generation_workflow
-          --test spatial_presentation --test editor_session --test project_authoring --test authoring
+          --test spatial_presentation --test editor_session --test project_authoring --test compact_asset_reference --test authoring
           --test prefab --test schema_v2 --test project_asset_database --test compact_float_defaults --test derive_ui
           --test cooked --test cooked_assets --test import_cache --test import_image
           --features nara_app/tasks,nara_asset/cook,nara_asset/image-import,nara_asset/hot-reload,nara_input/gamepad,nara_project/delivery,nara_scene/cook,nara_reflect/serde,nara_reflect/postcard,nara_render/animation,nara_render/material-authoring,nara_render/sprite-render,nara_ui/runtime

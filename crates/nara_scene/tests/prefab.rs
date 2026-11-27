@@ -6,12 +6,12 @@ use nara_core::{AssetId, DocumentId, EntityUuid, vfs::AssetPath};
 use nara_reflect::{
     AssetReferenceDemand, ComponentCapability, ComponentFieldId, ComponentFieldPath,
     ComponentFieldPathSegment, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    ComponentValueShape,
+    ComponentSchemaVersion, ComponentShapeError, ComponentShapeErrorKind, ComponentShapeMember,
+    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
 };
 use nara_scene::authoring::{
-    PrefabInstance, RawRon, SceneAsset, SceneComponent, SceneDocument, SceneEntity,
-    UnknownComponent,
+    CompactValueError, PrefabInstance, RawRon, SceneAsset, SceneComponent, SceneDocument,
+    SceneEntity, UnknownComponent,
     prefab::{
         ExpandedScene, MAX_EXPANDED_ENTITIES, MAX_PREFAB_DEPTH, PrefabError, PrefabOverrideError,
         PrefabOverridePath, decode_override_value, encode_override_value, expand_prefabs,
@@ -762,6 +762,193 @@ fn indexed_packed_overrides_use_the_element_type_and_keep_the_other_cells() {
             ..
         })
     ));
+}
+
+#[test]
+fn override_choices_use_the_exact_declared_path() {
+    let component = ComponentTypeId::new("game.Config");
+    let mode = ComponentFieldSchema::optional_with_default(
+        ComponentFieldId::new("mode"),
+        "Mode",
+        ComponentFieldPath::from_fields(["settings", "mode"]),
+        ComponentValueKind::String,
+        ComponentValue::String("safe".into()),
+    )
+    .with_choices(["safe", "fast"]);
+    let schema = ComponentSchema::new(component.clone(), "Config", ComponentSchemaVersion::ONE)
+        .with_fields([
+            field("count", ComponentValueKind::U64),
+            field(
+                "labels",
+                ComponentValueShape::map(ComponentValueKind::String.into()),
+            ),
+            mode,
+        ]);
+    let catalog = ComponentSchemaCatalog::from_components([schema]).unwrap();
+    let address = format!("child:{}/game.Config::settings.mode", entity_id(12));
+    let path = PrefabOverridePath::parse(&address, &catalog).unwrap();
+    let assets = BTreeMap::new();
+    let unsupported = r#""custom""#;
+    let invalid_choice = |error: &PrefabOverrideError| {
+        matches!(
+            error,
+            PrefabOverrideError::Value(CompactValueError::Shape(ComponentShapeError {
+                kind: ComponentShapeErrorKind::UndeclaredChoice(choice),
+                ..
+            })) if choice == "custom"
+        )
+    };
+    assert!(invalid_choice(
+        &encode_override_value(
+            &path,
+            &ComponentValue::String("custom".into()),
+            &catalog,
+            &assets,
+        )
+        .unwrap_err()
+    ));
+    assert!(invalid_choice(
+        &decode_override_value(&path, &raw(unsupported), &catalog, &assets).unwrap_err()
+    ));
+    for value in [ComponentValue::String("fast".into()), ComponentValue::Null] {
+        let raw = encode_override_value(&path, &value, &catalog, &assets).unwrap();
+        assert_eq!(
+            decode_override_value(&path, &raw, &catalog, &assets).unwrap(),
+            value
+        );
+    }
+
+    let mut child = entity(12, Some(11));
+    child.components.insert(
+        component,
+        known(ComponentValue::map([
+            ("count", ComponentValue::U64(0)),
+            ("labels", ComponentValue::Map(BTreeMap::new())),
+            (
+                "settings",
+                ComponentValue::map([("mode", ComponentValue::String("safe".into()))]),
+            ),
+        ])),
+    );
+    let prefab = document([entity(11, None), child]);
+    let load = |_| Ok::<_, &str>(prefab.clone());
+    let label_address = format!("child:{}/game.Config.labels.mode", entity_id(12));
+    let label = PrefabOverridePath::parse(&label_address, &catalog).unwrap();
+    let label_value = encode_override_value(
+        &label,
+        &ComponentValue::String("custom".into()),
+        &catalog,
+        &assets,
+    )
+    .unwrap();
+    let mut mount = instance(700);
+    mount.overrides = BTreeMap::from([
+        (
+            format!("child:{}/game.Config.count", entity_id(12)),
+            raw("2"),
+        ),
+        (label_address, label_value),
+        (address.clone(), raw(unsupported)),
+    ]);
+    let mut mounted = entity(100, None);
+    mounted.prefab = Some(mount);
+    let mut scene = document([mounted]);
+    assert!(matches!(
+        expand_prefabs(&scene, &catalog, load),
+        Err(PrefabError::Override { instance, address: offending, source })
+            if instance == entity_id(100) && offending == address && invalid_choice(&source)
+    ));
+    scene.entities[0]
+        .prefab
+        .as_mut()
+        .unwrap()
+        .overrides
+        .remove(&address);
+    let expanded = expand_prefabs(&scene, &catalog, load).unwrap();
+    assert_eq!(
+        expanded.resolve_override(entity_id(100), &label).unwrap(),
+        ComponentValue::String("custom".into())
+    );
+}
+
+#[test]
+fn keyed_list_conflicts_attribute_the_edit_that_changed_a_colliding_key() {
+    let component = ComponentTypeId::new("game.Inventory");
+    let key = ComponentFieldId::new("stable_key");
+    let item = ComponentValueShape::record_members([
+        ComponentShapeMember::new("key", ComponentValueKind::String).with_id(key.clone()),
+        ComponentShapeMember::new("note", ComponentValueKind::String),
+    ]);
+    let schema = ComponentSchema::new(component.clone(), "Inventory", ComponentSchemaVersion::ONE)
+        .with_fields([
+            field("caption", ComponentValueKind::String),
+            field(
+                "slots",
+                ComponentValueShape::optional(ComponentValueShape::keyed_list(item, key)),
+            ),
+        ]);
+    let catalog = ComponentSchemaCatalog::from_components([schema]).unwrap();
+    let mut root = entity(11, None);
+    root.components.insert(
+        component,
+        known(ComponentValue::map([
+            ("caption", ComponentValue::String("Stored".into())),
+            (
+                "slots",
+                ComponentValue::List(
+                    ["A", "B", "C", "D"]
+                        .into_iter()
+                        .map(|key| {
+                            ComponentValue::map([
+                                ("key", ComponentValue::String(key.into())),
+                                ("note", ComponentValue::String(String::new())),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
+        ])),
+    );
+    let prefab = document([root]);
+    let load = |_| Ok::<_, &str>(prefab.clone());
+    let offender = "game.Inventory.slots[1].key";
+    let last = "game.Inventory.slots[3]";
+    let mut mount = instance(700);
+    mount.overrides = BTreeMap::from([
+        ("game.Inventory.caption".to_owned(), raw(r#""Carried""#)),
+        ("game.Inventory.slots[0].key".to_owned(), raw(r#""C""#)),
+        (offender.to_owned(), raw(r#""D""#)),
+        ("game.Inventory.slots[2].key".to_owned(), raw(r#""A""#)),
+        (last.to_owned(), raw(r#"(key: "D", note: "edited")"#)),
+    ]);
+    let mut mounted = entity(100, None);
+    mounted.prefab = Some(mount);
+    let mut scene = document([mounted]);
+    assert!(matches!(
+        expand_prefabs(&scene, &catalog, load),
+        Err(PrefabError::Override {
+            address,
+            source: PrefabOverrideError::ComponentValue(_),
+            ..
+        }) if address == offender
+    ));
+
+    scene.entities[0]
+        .prefab
+        .as_mut()
+        .unwrap()
+        .overrides
+        .insert(last.to_owned(), raw(r#"(key: "B", note: "edited")"#));
+    let expanded = expand_prefabs(&scene, &catalog, load).unwrap();
+    for (index, expected) in ["C", "D", "A", "B"].into_iter().enumerate() {
+        let path =
+            PrefabOverridePath::parse(&format!("game.Inventory.slots[{index}].key"), &catalog)
+                .unwrap();
+        assert_eq!(
+            expanded.resolve_override(entity_id(100), &path).unwrap(),
+            ComponentValue::String(expected.into())
+        );
+    }
 }
 
 #[test]

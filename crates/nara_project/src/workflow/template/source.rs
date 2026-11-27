@@ -14,7 +14,7 @@ use nara::{
     reflect::{ComponentSchema, ComponentSchemaCatalog},
     scene::{
         authoring::{SceneDocument, SceneEntity, prefab::expand_prefabs},
-        components::{SpriteSource, builtin_component_schemas},
+        components::{ColliderSource, SpriteSource, builtin_component_schemas},
     },
 };
 
@@ -62,6 +62,9 @@ pub(super) fn load_scene(world: &mut World, entry: AssetId) -> GameResult<()> {
         let mut spawned = world.spawn((Name::new(row.name), row.transform, row.visibility));
         if let Some(sprite) = row.sprite {
             spawned.insert(sprite);
+        }
+        if let Some(collider) = row.collider {
+            spawned.insert(collider);
         }
         if let Some(spin) = row.spin {
             spawned.insert(spin);
@@ -148,6 +151,7 @@ struct AuthoredEntity {
     transform: Transform2d,
     visibility: Visibility,
     sprite: Option<SpriteSource>,
+    collider: Option<ColliderSource>,
     spin: Option<Spin>,
 }
 
@@ -160,6 +164,7 @@ impl AuthoredEntity {
             transform: Transform2d::default(),
             visibility: Visibility::default(),
             sprite: None,
+            collider: None,
             spin: None,
         };
         for (kind, component) in entity.components {
@@ -168,6 +173,9 @@ impl AuthoredEntity {
                 Visibility::COMPONENT_ID => component.typed().map(|value| row.visibility = value),
                 SpriteSource::COMPONENT_ID => {
                     component.typed().map(|value| row.sprite = Some(value))
+                }
+                ColliderSource::COMPONENT_ID => {
+                    component.typed().map(|value| row.collider = Some(value))
                 }
                 Spin::COMPONENT_ID => component.typed().map(|value| row.spin = Some(value)),
                 _ => {

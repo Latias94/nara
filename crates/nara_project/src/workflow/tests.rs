@@ -1,4 +1,4 @@
-use std::{fs, path::Path, process::ExitStatus};
+use std::{collections::BTreeSet, fs, path::Path, process::ExitStatus};
 
 use nara_asset::{AssetScanMode, AssetSourceKind, AssetSourcePath, ProjectAssetDatabase};
 use nara_core::AssetId;
@@ -81,54 +81,77 @@ fn starter_uses_the_checkout_patch_sources_and_a_code_first_manifest() {
     assert_eq!(manifest.paths.assets, "assets");
     assert!(manifest.window.is_none());
     assert_eq!(manifest.editor.play, EditorPlayMode::External);
-    assert_eq!(
-        manifest.delivery.unwrap().scenes,
-        ["01a219c4-2965-7784-9173-9c9863ec5284".parse().unwrap()]
-    );
+    assert_eq!(manifest.delivery.unwrap().scenes.len(), 1);
 }
 
 #[test]
-fn starter_generates_the_scene_prefab_and_png_with_resolvable_sidecars() {
+fn starters_generate_fresh_ids_and_resolve_their_own_assets() {
     let temp = tempfile::tempdir().unwrap();
     let checkout = temp.path().join("engine");
-    let project = temp.path().join("my-game");
     local_checkout(&checkout);
-    create_project(&project, "my-game", &checkout).unwrap();
+    let mut generated = BTreeSet::new();
+    for directory in ["first", "second"] {
+        let project = temp.path().join(directory);
+        create_project(&project, "my-game", &checkout).unwrap();
 
-    let assets = ProjectAssetDatabase::scan(
-        &project,
-        &[AssetSourcePath::new("assets").unwrap()],
-        AssetScanMode::ReadOnly,
-    )
-    .unwrap();
-    for (id, path, kind) in [
-        (
-            "01a219c4-2965-7784-9173-9c9863ec5284",
-            "assets/main.scene.ron",
-            AssetSourceKind::Scene,
-        ),
-        (
-            "01a21a01-f10a-732f-ba5d-e3982408ff21",
-            "assets/sprite.prefab.ron",
-            AssetSourceKind::Prefab,
-        ),
-        (
-            "01a21a01-f10c-7004-9c91-91ef868ff334",
-            "assets/white.png",
-            AssetSourceKind::Image,
-        ),
-    ] {
-        let id = id.parse::<AssetId>().unwrap();
-        let record = assets.record_for_stable_id(id.into()).unwrap();
-        assert_eq!(record.path().as_str(), path);
-        assert_eq!(record.source_kind(), &kind);
-        assert!(project.join(format!("{path}.meta")).is_file());
+        let assets = ProjectAssetDatabase::scan(
+            &project,
+            &[AssetSourcePath::new("assets").unwrap()],
+            AssetScanMode::ReadOnly,
+        )
+        .unwrap();
+        assert_eq!(assets.len(), 3);
+        let asset_ids = [
+            ("assets/main.scene.ron", AssetSourceKind::Scene),
+            ("assets/sprite.prefab.ron", AssetSourceKind::Prefab),
+            ("assets/white.png", AssetSourceKind::Image),
+        ]
+        .map(|(path, kind)| {
+            let path = AssetSourcePath::new(path).unwrap();
+            let record = assets.record_for_path(&path).unwrap();
+            assert_eq!(record.source_kind(), &kind);
+            let id = AssetId::try_from(record.stable_id()).unwrap();
+            assert_eq!(id.as_uuid().get_version_num(), 7);
+            assert!(generated.insert(id.as_uuid()));
+            assert_eq!(
+                assets.record_for_stable_id(id.into()).unwrap().path(),
+                &path
+            );
+            id
+        });
+        let manifest = super::read_project_manifest(&project).unwrap();
+        assert_eq!(manifest.delivery.unwrap().scenes, [asset_ids[0]]);
+        let main = fs::read_to_string(project.join("src/main.rs")).unwrap();
+        assert!(main.contains(&format!("const ENTRY_SCENE: &str = \"{}\";", asset_ids[0])));
+        assert!(
+            fs::read(project.join("assets/white.png"))
+                .unwrap()
+                .starts_with(b"\x89PNG\r\n\x1a\n")
+        );
+
+        #[cfg(feature = "delivery")]
+        {
+            use nara_scene::authoring::{SceneDocument, SpriteSource};
+
+            let scene = SceneDocument::read(project.join("assets/main.scene.ron")).unwrap();
+            let prefab = SceneDocument::read(project.join("assets/sprite.prefab.ron")).unwrap();
+            for document in [&scene, &prefab] {
+                assert_eq!(document.entities.len(), 1);
+                for id in [document.id.as_uuid(), document.entities[0].id.as_uuid()] {
+                    assert_eq!(id.get_version_num(), 7);
+                    assert!(generated.insert(id));
+                }
+            }
+            assert_eq!(scene.assets["sprite"].id, asset_ids[1]);
+            assert_eq!(
+                scene.entities[0].prefab.as_ref().unwrap().asset,
+                asset_ids[1]
+            );
+            assert_eq!(prefab.assets["white"].id, asset_ids[2]);
+            let sprite = prefab.entities[0].typed::<SpriteSource>().unwrap().unwrap();
+            assert_eq!(sprite.image, Some(asset_ids[2]));
+        }
     }
-    assert!(
-        fs::read(project.join("assets/white.png"))
-            .unwrap()
-            .starts_with(b"\x89PNG\r\n\x1a\n")
-    );
 }
 
 #[test]

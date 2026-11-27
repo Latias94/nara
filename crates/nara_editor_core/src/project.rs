@@ -6,7 +6,8 @@ use std::{
 };
 
 use nara_asset::{
-    AssetScanError, AssetScanMode, AssetSourceKind, AssetSourcePath, ProjectAssetDatabase,
+    AssetDatabaseError, AssetMeta, AssetMetaError, AssetRecord, AssetScanError, AssetScanMode,
+    AssetSourceKind, AssetSourcePath, ProjectAssetDatabase,
 };
 use nara_core::{
     AssetId, DocumentId, UuidIdError,
@@ -22,9 +23,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{EditorDocument, EditorError, document::read_editor_source};
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+use crate::{EditorSession, document::stage_new_file};
 
 const SETTINGS: &str = ".nara.ron";
-const SETTINGS_LIMIT: u64 = 64 * 1024;
+const SMALL_FILE_LIMIT: u64 = 64 * 1024;
 
 #[derive(Debug, Error)]
 pub enum ProjectError {
@@ -38,20 +41,39 @@ pub enum ProjectError {
     Serialize(#[from] ron::Error),
     #[error("{0} does not name an authored scene or prefab")]
     NotDocument(AssetPath),
+    #[error("{0} does not name a project scene")]
+    NotScene(AssetPath),
     #[error("invalid entry scene asset UUID: {0}")]
     EntryAsset(#[from] UuidIdError),
+    #[error("entry scene asset {0} is missing or is not a scene")]
+    InvalidEntryScene(AssetId),
     #[error("'{0}' is not a valid project asset directory")]
     AssetDirectory(String),
     #[error(transparent)]
     Assets(#[from] AssetScanError),
+    #[error(transparent)]
+    Sidecar(#[from] AssetMetaError),
+    #[error(transparent)]
+    AssetIndex(#[from] AssetDatabaseError),
     #[error("prefab asset {0} is missing or is not a prefab")]
     MissingPrefab(AssetId),
     #[error("prefab {0} has changed on disk; refresh Assets and try again")]
     PrefabChanged(AssetId),
     #[error("scene or prefab asset {0} is no longer present in the project")]
     MissingDocument(AssetId),
+    #[error("more than one scene or prefab uses asset ID {0}")]
+    AmbiguousDocument(AssetId),
     #[error("document {0} was replaced on disk; reopen it before saving")]
     DocumentChanged(DocumentId),
+    #[error("A file already exists at {}. Choose a new filename.", .0.display())]
+    DocumentExists(PathBuf),
+    #[error("could not remove the new sidecar '{}' after saving failed ({save}): {source}", path.display())]
+    NewDocumentCleanup {
+        path: PathBuf,
+        save: EditorError,
+        #[source]
+        source: io::Error,
+    },
     #[error("applying the override would leave '{}' invalid: {source}", path.display())]
     PrefabDependent {
         path: PathBuf,
@@ -104,12 +126,17 @@ impl EditorProject {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Settings::default(),
             Err(error) => return Err(error.into()),
         };
-        let entry_scene = settings.scene.map(AssetPath::new).transpose()?;
-        let entry_asset = settings.scene_id.as_deref().map(str::parse).transpose()?;
+        let entry_asset: Option<AssetId> =
+            settings.scene_id.as_deref().map(str::parse).transpose()?;
+        let entry_scene = if entry_asset.is_none() {
+            settings.scene.map(AssetPath::new).transpose()?
+        } else {
+            None
+        };
         if let Some(path) = &entry_scene
             && AssetKind::of(path) != AssetKind::Scene
         {
-            return Err(ProjectError::NotDocument(path.clone()));
+            return Err(ProjectError::NotScene(path.clone()));
         }
         let database = ProjectAssetDatabase::scan(
             &directory,
@@ -120,12 +147,17 @@ impl EditorProject {
             directory,
             assets,
             asset_prefix,
-            database,
+            database: ProjectAssetDatabase::default(),
             manifest,
             entry_scene,
             entry_asset,
         };
-        project.update_entry_scene();
+        project.install_database(database)?;
+        if let Some(id) = entry_asset
+            && project.entry_scene.is_none()
+        {
+            return Err(ProjectError::InvalidEntryScene(id));
+        }
         Ok(project)
     }
 
@@ -157,28 +189,55 @@ impl EditorProject {
     }
 
     pub fn refresh_assets(&mut self) -> Result<(), ProjectError> {
-        self.database = self.scan(AssetScanMode::Discover)?;
-        self.update_entry_scene();
-        Ok(())
+        self.install_database(self.scan(AssetScanMode::Discover)?)
     }
 
     /// Rescans external changes without creating sidecars while another tool is moving files.
     pub fn rescan_assets(&mut self) -> Result<(), ProjectError> {
-        self.database = self.scan(AssetScanMode::ReadOnly)?;
-        self.update_entry_scene();
+        self.install_database(self.scan(AssetScanMode::ReadOnly)?)
+    }
+
+    fn install_database(&mut self, database: ProjectAssetDatabase) -> Result<(), ProjectError> {
+        (self.entry_scene, self.entry_asset) = self.resolve_entry(&database)?;
+        self.database = database;
         Ok(())
     }
 
-    fn update_entry_scene(&mut self) {
-        if let Some(asset) = self.entry_asset {
-            self.entry_scene = self.asset_hint(asset);
-        } else if let Some(asset) = self
-            .entry_scene
-            .as_ref()
-            .and_then(|path| self.asset_reference(path))
-        {
-            self.entry_asset = Some(asset.id);
+    fn resolve_entry(
+        &self,
+        database: &ProjectAssetDatabase,
+    ) -> Result<(Option<AssetPath>, Option<AssetId>), ProjectError> {
+        if let Some(id) = self.entry_asset {
+            let path = database
+                .record_for_stable_id(id.into())
+                .map(|record| {
+                    self.relative_asset_path(record.path())
+                        .filter(|path| is_scene_record(path, record))
+                        .ok_or(ProjectError::InvalidEntryScene(id))
+                })
+                .transpose()?;
+            return Ok((path, Some(id)));
         }
+        let id = match &self.entry_scene {
+            Some(path) => self.entry_id_at(database, path)?,
+            None => None,
+        };
+        Ok((self.entry_scene.clone(), id))
+    }
+
+    fn entry_id_at(
+        &self,
+        database: &ProjectAssetDatabase,
+        path: &AssetPath,
+    ) -> Result<Option<AssetId>, ProjectError> {
+        let key = self.project_asset_path(path)?;
+        let Some(record) = database.record_for_path(&key) else {
+            return Ok(None);
+        };
+        if !is_scene_record(path, record) {
+            return Err(ProjectError::NotScene(path.clone()));
+        }
+        Ok(Some(record.stable_id().try_into()?))
     }
 
     fn scan(&self, mode: AssetScanMode) -> Result<ProjectAssetDatabase, ProjectError> {
@@ -212,10 +271,9 @@ impl EditorProject {
     }
 
     pub fn asset_reference(&self, path: &AssetPath) -> Option<SceneAsset> {
-        let path_in_project = self
-            .asset_prefix
-            .joined(&AssetSourcePath::new(path.as_str()).ok()?);
-        let record = self.database.record_for_path(&path_in_project)?;
+        let record = self
+            .database
+            .record_for_path(&self.project_asset_path(path).ok()?)?;
         Some(SceneAsset {
             id: record.stable_id().try_into().ok()?,
             hint: path.clone(),
@@ -232,6 +290,11 @@ impl EditorProject {
             .strip_prefix(self.asset_prefix.as_str())?
             .strip_prefix('/')?;
         AssetPath::new(relative).ok()
+    }
+
+    fn project_asset_path(&self, path: &AssetPath) -> io::Result<AssetSourcePath> {
+        let relative = AssetSourcePath::new(path.as_str()).map_err(io::Error::other)?;
+        Ok(self.asset_prefix.joined(&relative))
     }
 
     /// Opens a scene or prefab on the project's asset mount.
@@ -267,7 +330,9 @@ impl EditorProject {
 
     fn document_path(&self, path: &AssetPath) -> Result<PathBuf, ProjectError> {
         let root = self.asset_source()?;
-        let physical = fs::canonicalize(root.root().join(path.as_str()))?;
+        let mut physical = root.root().to_path_buf();
+        physical.extend(path.as_str().split('/'));
+        let physical = physical.canonicalize()?;
         within(&physical, root.root())?;
         Ok(physical)
     }
@@ -278,12 +343,116 @@ impl EditorProject {
         asset: AssetId,
         document: DocumentId,
     ) -> Result<PathBuf, ProjectError> {
-        self.refresh_assets()?;
-        let path = self.indexed_document_path(&self.database, asset)?;
+        let record = self
+            .database
+            .record_for_stable_id(asset.into())
+            .ok_or(ProjectError::MissingDocument(asset))?;
+        let kind = match record.source_kind() {
+            AssetSourceKind::Scene => AssetKind::Scene,
+            AssetSourceKind::Prefab => AssetKind::Prefab,
+            _ => return Err(ProjectError::MissingDocument(asset)),
+        };
+        let previous = self
+            .relative_asset_path(record.path())
+            .ok_or(ProjectError::MissingDocument(asset))?;
+        let source = self.asset_source()?;
+        let (relative, path, meta) = match document_at(source.root(), &previous, asset, kind) {
+            Some((path, meta)) => (previous.clone(), path, meta),
+            None => find_moved_document(source.root(), asset, kind)?,
+        };
         if SceneDocument::read(&path)?.id != document {
             return Err(ProjectError::DocumentChanged(document));
         }
+        if relative != previous {
+            let mut database = self.database.clone();
+            database.remove_exact(record);
+            let next = self.project_asset_path(&relative)?;
+            if let Some(previous) = database.record_for_path(&next).cloned() {
+                database.remove_exact(&previous);
+            }
+            database.insert(AssetRecord::from_meta(next, meta))?;
+            self.install_database(database)?;
+        }
         Ok(path)
+    }
+
+    /// Writes a new scene and its stable asset ID without discovering other sources.
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    pub fn save_new_scene(
+        &mut self,
+        session: &mut EditorSession,
+        destination: &Path,
+    ) -> Result<AssetId, ProjectError> {
+        let mut staged_session = session.snapshot_for_background()?;
+        let filename = destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| {
+                destination
+                    .as_os_str()
+                    .as_encoded_bytes()
+                    .ends_with(name.as_bytes())
+            })
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "use a portable scene filename")
+            })?;
+        let parent = destination
+            .parent()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "scene path has no parent"))?
+            .canonicalize()?;
+        let destination = parent.join(filename);
+        let path = self.relative_document_path(&destination)?;
+        if AssetKind::of(&path) != AssetKind::Scene
+            || path.as_str().split('/').any(|part| part.starts_with('.'))
+        {
+            return Err(ProjectError::NotScene(path));
+        }
+        let folded_filename = filename.to_lowercase();
+        let folded_sidecar = format!("{folded_filename}.meta");
+        for entry in fs::read_dir(&parent)? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            if name == folded_filename || name == folded_sidecar {
+                return Err(ProjectError::DocumentExists(entry.path()));
+            }
+        }
+
+        let mut database = self.database.clone();
+        let key = self.project_asset_path(&path)?;
+        let id = AssetId::try_from_uuid(nara_core::identity::try_uuid_v7()?)?;
+        if let Some(previous) = database.record_for_path(&key).cloned() {
+            database.remove_exact(&previous);
+        }
+        let meta = format!("AssetMeta(id: \"{id}\", importer: \"nara.scene\", settings: ())\n");
+        database.insert(AssetRecord::from_meta(key, AssetMeta::from_ron(&meta)?))?;
+        let entry = self.resolve_entry(&database)?;
+
+        staged_session.refresh_asset_hints(|id| self.asset_hint(id));
+        let staged_scene = staged_session.stage_new(&destination)?;
+        let sidecar = parent.join(format!("{filename}.meta"));
+        let staged_sidecar = stage_new_file(&sidecar, meta.as_bytes())?;
+        drop(
+            staged_sidecar
+                .persist_noclobber(&sidecar)
+                .map_err(|error| error.error)?,
+        );
+        if let Err(save) = staged_session.publish_new(&destination, staged_scene) {
+            if read_small(&sidecar).is_ok_and(|current| current == meta)
+                && let Err(source) = fs::remove_file(&sidecar)
+                && source.kind() != io::ErrorKind::NotFound
+            {
+                return Err(ProjectError::NewDocumentCleanup {
+                    path: sidecar,
+                    save,
+                    source,
+                });
+            }
+            return Err(save.into());
+        }
+        self.database = database;
+        (self.entry_scene, self.entry_asset) = entry;
+        *session = staged_session;
+        Ok(id)
     }
 
     pub fn relative_document_path(&self, path: &Path) -> io::Result<AssetPath> {
@@ -451,24 +620,95 @@ impl EditorProject {
     }
 
     pub fn set_entry_scene(&mut self, scene: Option<AssetPath>) -> Result<(), ProjectError> {
-        if let Some(path) = &scene {
+        let asset = if let Some(path) = &scene {
             if AssetKind::of(path) != AssetKind::Scene {
-                return Err(ProjectError::NotDocument(path.clone()));
+                return Err(ProjectError::NotScene(path.clone()));
             }
             self.open_document(path)?;
-        }
-        let asset = scene.as_ref().and_then(|path| self.asset_reference(path));
+            self.entry_id_at(&self.database, path)?
+        } else {
+            None
+        };
         let settings = Settings {
             scene: scene.as_ref().map(ToString::to_string),
-            scene_id: asset.as_ref().map(|asset| asset.id.to_string()),
+            scene_id: asset.map(|asset| asset.to_string()),
         };
         let mut text = ron::ser::to_string_pretty(&settings, ron::ser::PrettyConfig::default())?;
         text.push('\n');
         write_atomic(&self.directory.join(SETTINGS), text.as_bytes())?;
         self.entry_scene = scene;
-        self.entry_asset = asset.map(|asset| asset.id);
+        self.entry_asset = asset;
         Ok(())
     }
+}
+
+fn is_scene_record(path: &AssetPath, record: &AssetRecord) -> bool {
+    AssetKind::of(path) == AssetKind::Scene && record.source_kind() == &AssetSourceKind::Scene
+}
+
+fn document_at(
+    root: &Path,
+    path: &AssetPath,
+    id: AssetId,
+    kind: AssetKind,
+) -> Option<(PathBuf, AssetMeta)> {
+    if AssetKind::of(path) != kind {
+        return None;
+    }
+    let mut document = root.to_path_buf();
+    document.extend(path.as_str().split('/'));
+    let sidecar = document.with_file_name(format!("{}.meta", document.file_name()?.to_str()?));
+    if !is_exact_file(&sidecar) {
+        return None;
+    }
+    let meta = AssetMeta::from_ron(read_small(&sidecar).ok()?).ok()?;
+    let matches_kind = matches!(
+        (kind, meta.source_kind()),
+        (AssetKind::Scene, AssetSourceKind::Scene) | (AssetKind::Prefab, AssetSourceKind::Prefab)
+    );
+    (meta.id() == id.into() && matches_kind && is_exact_file(&document)).then_some((document, meta))
+}
+
+fn is_exact_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
+        && path.canonicalize().is_ok_and(|resolved| resolved == path)
+}
+
+fn find_moved_document(
+    root: &Path,
+    id: AssetId,
+    kind: AssetKind,
+) -> Result<(AssetPath, PathBuf, AssetMeta), ProjectError> {
+    let mut directories = vec![(String::new(), root.to_path_buf())];
+    let mut found = None;
+    while let Some((prefix, directory)) = directories.pop() {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str().filter(|name| !name.starts_with('.')) else {
+                continue;
+            };
+            let file_type = entry.file_type()?;
+            if file_type.is_dir()
+                && entry
+                    .path()
+                    .canonicalize()
+                    .is_ok_and(|resolved| resolved == entry.path())
+            {
+                directories.push((format!("{prefix}{name}/"), entry.path()));
+            } else if file_type.is_file()
+                && let Some(base) = name.strip_suffix(".meta")
+                && let Ok(path) = AssetPath::new(format!("{prefix}{base}"))
+                && let Some((native, meta)) = document_at(root, &path, id, kind)
+            {
+                if found.is_some() {
+                    return Err(ProjectError::AmbiguousDocument(id));
+                }
+                found = Some((path, native, meta));
+            }
+        }
+    }
+    found.ok_or(ProjectError::MissingDocument(id))
 }
 
 fn prefab_references(document: &SceneDocument) -> impl Iterator<Item = AssetId> + '_ {
@@ -484,9 +724,9 @@ fn read_small(path: &Path) -> io::Result<String> {
     }
     let mut text = String::new();
     File::open(path)?
-        .take(SETTINGS_LIMIT + 1)
+        .take(SMALL_FILE_LIMIT + 1)
         .read_to_string(&mut text)?;
-    if text.len() as u64 > SETTINGS_LIMIT {
+    if text.len() as u64 > SMALL_FILE_LIMIT {
         return Err(io::ErrorKind::FileTooLarge.into());
     }
     Ok(text)
@@ -509,15 +749,12 @@ pub enum AssetKind {
 
 impl AssetKind {
     pub fn of(path: &AssetPath) -> Self {
-        let name = path.as_str();
+        let name = path.as_str().to_ascii_lowercase();
         if name.ends_with(".scene.ron") {
             Self::Scene
         } else if name.ends_with(".prefab.ron") {
             Self::Prefab
-        } else if name
-            .rsplit_once('.')
-            .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("png"))
-        {
+        } else if name.ends_with(".png") {
             Self::Image
         } else {
             Self::File

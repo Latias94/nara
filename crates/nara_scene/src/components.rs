@@ -5,7 +5,7 @@ use nara_core::{AssetId, Color, Vec2};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueRef, Schema,
+    ComponentValueKind, ComponentValueRef, Schema, validate_component_value,
 };
 
 pub use crate::spatial::{Transform2d, Visibility};
@@ -105,8 +105,8 @@ impl Schema for Visibility {
     }
 
     fn decode_component(value: ComponentValueRef<'_>) -> Result<Self, ComponentCodecError> {
-        let fields = value.as_map().ok_or_else(Self::invalid_schema_mode)?;
-        match fields.get("mode") {
+        validate_component_value(&Self::type_schema()?, value)?;
+        match value.get("mode") {
             None => Ok(Self::Inherited),
             Some(mode) if mode.kind() == ComponentValueKind::Null => Ok(Self::Inherited),
             Some(mode) => {

@@ -3,16 +3,21 @@ use std::{
     rc::Rc,
 };
 
-use nara_core::{AssetId, EntityUuid, vfs::AssetPath};
+use nara_core::{AssetId, DocumentId, EntityUuid, vfs::AssetPath};
 use nara_reflect::{
-    ComponentSchemaCatalog, ComponentTypeId, ComponentValue, validate_component_value,
+    ComponentCodecError, ComponentFieldPath, ComponentFieldPathSegment, ComponentSchema,
+    ComponentSchemaCatalog, ComponentShapeErrorKind, ComponentTypeId, ComponentValue,
+    ComponentValueShape, validate_component_value,
 };
 
 use super::{
-    super::{PrefabInstance, RawRon, SceneAsset, SceneComponent, SceneDocument, SceneEntity},
+    super::{
+        PrefabInstance, RawRon, SceneAsset, SceneComponent, SceneDocument, SceneDocumentError,
+        SceneEntity,
+    },
     DeferredPrefabOverride, EntityIds, ExpandedScene, InstanceEntityIds, MAX_EXPANDED_ENTITIES,
     MAX_PREFAB_DEPTH, PrefabError, PrefabOverrideError, PrefabOverridePath, PrefabProvenance,
-    address::{find_schema, split_target},
+    address::{find_schema, nested_shape, split_target},
     child_id, decode_override_value, derive_path,
 };
 
@@ -38,6 +43,7 @@ pub(super) fn expand(
     };
     expansion.collect_hints(source);
     let outer = Scope {
+        document: source.id,
         ids: source
             .entities
             .iter()
@@ -73,6 +79,7 @@ pub(super) enum Mode {
 }
 
 struct Scope<'a> {
+    document: DocumentId,
     ids: EntityIds,
     parent: Option<&'a Scope<'a>>,
     assets: &'a BTreeMap<String, SceneAsset>,
@@ -261,6 +268,7 @@ where
             ids.insert(entity.id, instance_id);
         }
         let scope = Scope {
+            document: source.document.id,
             ids,
             parent: Some(enclosing),
             assets: &source.document.assets,
@@ -339,7 +347,12 @@ where
             groups
                 .entry((target, path.component().clone()))
                 .or_default()
-                .push(Override { address, raw, path });
+                .push(Override {
+                    address,
+                    raw,
+                    path,
+                    previous: None,
+                });
         }
 
         for ((index, component), mut overrides) in groups {
@@ -364,10 +377,10 @@ where
                     ));
                 }
             }
-            let Some(first) = overrides.first() else {
+            let Some(first_address) = overrides.first().map(|edit| edit.address) else {
                 continue;
             };
-            let invalid_component = |source| override_error(instance_id, first.address, source);
+            let invalid_component = |source| override_error(instance_id, first_address, source);
             let target = &mut self.entities[index];
             let target_id = target.id;
             let record = target.components.get_mut(&component).ok_or_else(|| {
@@ -398,18 +411,34 @@ where
                     current: schema.version(),
                 }));
             }
-            for edit in &overrides {
+            for edit in &mut overrides {
                 let invalid = |source| override_error(instance_id, edit.address, source);
                 let mut replacement =
                     decode_override_value(&edit.path, edit.raw, self.schemas, enclosing.assets)
                         .map_err(invalid)?;
                 enclosing.remap(&mut replacement, Some(prefab));
-                value
+                edit.previous = value
                     .set_path(edit.path.field(), replacement)
                     .map_err(|error| invalid(error.into()))?;
             }
-            validate_component_value(schema, &*value)
-                .map_err(|error| invalid_component(error.into()))?;
+            if let Err(source) = validate_component_value(schema, &*value) {
+                if let Some(keys) = conflicting_list_keys(schema, value, &source)
+                    && let Some(edit) = overrides
+                        .iter()
+                        .rev()
+                        .find(|edit| keys.iter().any(|key| edit.changed_key(value, key)))
+                {
+                    return Err(override_error(instance_id, edit.address, source.into()));
+                }
+                return Err(PrefabError::InvalidDocument {
+                    document: enclosing.document,
+                    source: SceneDocumentError::InvalidComponentValue {
+                        entity: target_id,
+                        component,
+                        source: source.into(),
+                    },
+                });
+            }
         }
         Ok(())
     }
@@ -419,6 +448,75 @@ struct Override<'a> {
     address: &'a str,
     raw: &'a RawRon,
     path: PrefabOverridePath,
+    previous: Option<ComponentValue>,
+}
+
+impl Override<'_> {
+    fn changed_key(&self, value: &ComponentValue, key: &ComponentFieldPath) -> bool {
+        let Some(relative) = key.segments().strip_prefix(self.path.field().segments()) else {
+            return false;
+        };
+        let relative = ComponentFieldPath::new(relative.iter().cloned());
+        self.previous
+            .as_ref()
+            .and_then(|previous| previous.get_path(&relative).ok())
+            != value.get_path(key).ok()
+    }
+}
+
+fn conflicting_list_keys(
+    schema: &ComponentSchema,
+    value: &ComponentValue,
+    source: &ComponentCodecError,
+) -> Option<[ComponentFieldPath; 2]> {
+    if !matches!(source, ComponentCodecError::InvalidField { .. }) {
+        return None;
+    }
+    let (field, error) = schema.fields().iter().find_map(|field| {
+        let error = field
+            .validate_value(value.get_path(field.path()).ok()?)
+            .err()?;
+        Some((field, error))
+    })?;
+    if !matches!(error.kind, ComponentShapeErrorKind::DuplicateListKey(_)) {
+        return None;
+    }
+    let (ComponentFieldPathSegment::Index(duplicate), relative) =
+        error.path.segments().split_last()?
+    else {
+        return None;
+    };
+    let shape = nested_shape(field.shape(), relative)?;
+    let mut list_shape = shape.as_ref();
+    while let ComponentValueShape::Optional { value } = list_shape {
+        list_shape = value;
+    }
+    let ComponentValueShape::KeyedList { item, key } = list_shape else {
+        return None;
+    };
+    let ComponentValueShape::Record { members } = item.as_ref() else {
+        return None;
+    };
+    let member = members
+        .iter()
+        .find(|member| member.id.as_ref() == Some(key))?;
+    let list_path =
+        ComponentFieldPath::new(field.path().segments().iter().chain(relative).cloned());
+    let ComponentValue::List(items) = value.get_path(&list_path).ok()? else {
+        return None;
+    };
+    let duplicate_index = usize::try_from(*duplicate).ok()?;
+    let repeated_key = items.get(duplicate_index)?.get(&member.name)?;
+    let first = items
+        .iter()
+        .take(duplicate_index)
+        .position(|item| item.get(&member.name) == Some(repeated_key))?;
+    Some([u32::try_from(first).ok()?, *duplicate].map(|index| {
+        ComponentFieldPath::new(list_path.segments().iter().cloned().chain([
+            ComponentFieldPathSegment::index(index),
+            ComponentFieldPathSegment::field(&member.name),
+        ]))
+    }))
 }
 
 fn override_error(instance: EntityUuid, address: &str, source: PrefabOverrideError) -> PrefabError {

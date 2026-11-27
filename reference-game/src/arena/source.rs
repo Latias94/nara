@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap, btree_map::Entry},
     error::Error,
+    fmt,
     fs::File,
     io::{self, Read},
     path::{Path, PathBuf},
@@ -214,10 +215,21 @@ impl SourceProject {
         assets: &ProjectAssetDatabase,
         scene: &SceneDocument,
     ) -> Result<SceneDocument, Box<dyn Error>> {
-        Ok(expand_prefabs(scene, &self.catalog, |id| {
+        let mut read_error = None;
+        let expanded = expand_prefabs(scene, &self.catalog, |id| {
             self.read_document(assets, id, AssetSourceKind::Prefab)
-        })?
-        .document)
+                .map_err(|source| {
+                    read_error = Some(SourceReadError {
+                        subject: format!("prefab asset {id}"),
+                        source,
+                    });
+                    "prefab source could not be read"
+                })
+        });
+        if let Some(error) = read_error {
+            return Err(error.into());
+        }
+        Ok(expanded?.document)
     }
 
     fn read_document(
@@ -242,12 +254,37 @@ impl SourceProject {
         id: AssetId,
         path: &AssetSourcePath,
         limit: u64,
-    ) -> Result<Vec<u8>, String> {
+    ) -> Result<Vec<u8>, SourceReadError> {
         let project = ProjectAssetSource::new(&self.source, assets);
         project
             .open_asset(id)
             .and_then(|file| read_bounded(file, limit))
-            .map_err(|error| format!("could not load {path}: {error}"))
+            .map_err(|source| SourceReadError {
+                subject: path.to_string(),
+                source: source.into(),
+            })
+    }
+}
+
+#[derive(Debug)]
+struct SourceReadError {
+    subject: String,
+    source: Box<dyn Error>,
+}
+
+impl fmt::Display for SourceReadError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "could not load {}: {}",
+            self.subject, self.source
+        )
+    }
+}
+
+impl Error for SourceReadError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(self.source.as_ref())
     }
 }
 

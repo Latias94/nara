@@ -3,7 +3,10 @@
 #[cfg(test)]
 mod tests;
 
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::{BTreeMap, btree_map::Entry},
+    fmt,
+};
 
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
@@ -23,7 +26,7 @@ enum Payload {
     Text(String),
     List(Vec<ComponentValue>),
     Numbers(Vec<PackedNumber>),
-    Map(std::collections::BTreeMap<String, ComponentValue>),
+    Map(#[serde(deserialize_with = "deserialize_value_map")] BTreeMap<String, ComponentValue>),
     Unit(()),
 }
 
@@ -214,7 +217,7 @@ impl<'de> DeserializeSeed<'de> for PayloadSeed<'_> {
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
         match self.0 {
             Some("list") => deserializer.deserialize_any(ListVisitor).map(Payload::List),
-            Some("map") => deserializer.deserialize_any(MapVisitor).map(Payload::Map),
+            Some("map") => deserialize_value_map(deserializer).map(Payload::Map),
             Some("bool" | "i64" | "u64" | "f64" | "string" | "asset_ref" | "entity_ref") => {
                 deserializer.deserialize_any(ScalarPayloadVisitor)
             }
@@ -306,6 +309,12 @@ impl<'de> DeserializeSeed<'de> for NestedValueSeed {
     }
 }
 
+fn deserialize_value_map<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<String, ComponentValue>, D::Error> {
+    deserializer.deserialize_any(MapVisitor)
+}
+
 struct MapVisitor;
 
 impl<'de> Visitor<'de> for MapVisitor {
@@ -318,7 +327,17 @@ impl<'de> Visitor<'de> for MapVisitor {
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         let mut values = BTreeMap::new();
         while let Some(key) = map.next_key_seed(StringKeySeed)? {
-            values.insert(key, map.next_value_seed(NestedValueSeed)?);
+            match values.entry(key) {
+                Entry::Vacant(entry) => {
+                    entry.insert(map.next_value_seed(NestedValueSeed)?);
+                }
+                Entry::Occupied(entry) => {
+                    return Err(de::Error::custom(format_args!(
+                        "duplicate component value map key {:?}",
+                        entry.key()
+                    )));
+                }
+            }
         }
         Ok(values)
     }

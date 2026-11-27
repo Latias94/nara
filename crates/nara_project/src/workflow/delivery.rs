@@ -11,7 +11,7 @@ use std::{
     path::{self, Path, PathBuf},
 };
 
-use nara_asset::{AssetScanError, cooked::NpakError};
+use nara_asset::{AssetScanError, AssetScanMode, cooked::NpakError};
 use nara_core::AssetId;
 use nara_reflect::{ComponentCodecError, ComponentRegistryError, ComponentSchemaCatalog};
 use nara_scene::authoring::prefab::PrefabError;
@@ -114,7 +114,7 @@ impl DeliveryError {
 }
 
 /// Bakes entry scenes and their dependency closure into `.nara/game.npak`.
-/// Untrusted Cook uses the last available Schema catalog and does not run Cargo.
+/// Untrusted Cook reads existing sidecars and Schema caches and only writes project state.
 pub fn cook_project(
     project: &Path,
     trust: ProjectTrust,
@@ -218,10 +218,12 @@ fn prepare(
     } else {
         load_schemas(project, &profile, trust, stop, emit)?
     };
-    Ok((
-        profile,
-        Cooker::open(project, &manifest.paths.assets, project_schemas)?,
-    ))
+    let scan_mode = match trust {
+        ProjectTrust::Trusted => AssetScanMode::Discover,
+        ProjectTrust::Untrusted => AssetScanMode::ReadOnly,
+    };
+    let cooker = Cooker::open(project, &manifest.paths.assets, scan_mode, project_schemas)?;
+    Ok((profile, cooker))
 }
 
 fn load_schemas(
@@ -231,20 +233,29 @@ fn load_schemas(
     stop: &mut impl FnMut() -> bool,
     emit: &mut impl FnMut(BuildEvent),
 ) -> Result<ComponentSchemaCatalog, DeliveryError> {
-    if trust == ProjectTrust::Trusted || project.join("Cargo.toml").try_exists()? {
-        let package = CargoPackage::read(project)?;
-        let game = package.default_binary();
-        let mut features = build_features(&package, game, &profile.features);
-        features.extend(
-            package
-                .required_features(SCHEMA_BINARY)
-                .iter()
-                .map(String::as_str),
-        );
-        features.sort_unstable();
-        features.dedup();
-        let cache = schema_cache_path(package.name(), game, &features);
-        if trust == ProjectTrust::Trusted && package.has_binary(project, SCHEMA_BINARY) {
+    let trusted = trust == ProjectTrust::Trusted;
+    if !trusted {
+        if let Some(catalog) = read_schema_cache(project)? {
+            return Ok(catalog);
+        }
+        if !project.join("Cargo.toml").try_exists()? {
+            return Ok(ComponentSchemaCatalog::default());
+        }
+    }
+    let package = CargoPackage::read(project)?;
+    let game = package.default_binary();
+    let mut features = build_features(&package, game, &profile.features);
+    features.extend(
+        package
+            .required_features(SCHEMA_BINARY)
+            .iter()
+            .map(String::as_str),
+    );
+    features.sort_unstable();
+    features.dedup();
+    let cache = schema_cache_path(package.name(), game, &features);
+    if trusted {
+        if package.has_binary(project, SCHEMA_BINARY) {
             let artifacts = tempfile::tempdir()?;
             let request = BuildRequest {
                 features: &features,
@@ -255,11 +266,11 @@ fn load_schemas(
             };
             return Ok(refresh_at(&request, trust, &cache, stop, emit)?);
         }
-        if let Some(catalog) = read_at(project, &cache)? {
+        if let Some(catalog) = read_schema_cache(project)? {
             return Ok(catalog);
         }
     }
-    Ok(read_schema_cache(project)?.unwrap_or_default())
+    Ok(read_at(project, &cache)?.unwrap_or_default())
 }
 
 fn schema_cache_path(package: &str, game: &str, features: &[&str]) -> String {
