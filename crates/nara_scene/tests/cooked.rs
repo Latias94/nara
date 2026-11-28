@@ -14,7 +14,7 @@ use nara_scene::{
         PrefabInstance, RawRon, SceneAsset, SceneComponent, SceneDocument, SceneEntity,
         builtin_component_schemas, prefab::expand_prefabs,
     },
-    components::{ColliderSource, SpriteSource, Transform2d, Visibility},
+    components::{ColliderSource, SpriteSource, TilemapSource, Transform2d, Visibility},
     cook::{CookSceneError, cook_flattened_scene, cook_scene},
     cooked::{CookedRegistry, CookedScene, CookedSceneError},
     spatial::{GlobalTransform2d, InheritedVisibility},
@@ -105,6 +105,45 @@ fn handwritten_schema_decoders_reject_undeclared_keys() {
     let name = Name::new("Player");
     let value = name.encode_component().unwrap();
     assert_eq!(Name::decode_component((&value).into()).unwrap(), name);
+}
+
+#[test]
+fn authored_tilemap_keeps_packed_cells_and_its_tileset_reference_through_cook() {
+    let source = TilemapSource {
+        tileset: asset(101),
+        tile_size: Vec2::new(8.0, 16.0),
+        width: 3,
+        height: 2,
+        origin_x: -1,
+        origin_y: -3,
+        layer: -2,
+        cells: vec![0, 5, 2, 1, 0, u16::MAX].into(),
+    };
+    let mut row = SceneEntity::new(id(21), "Tilemap");
+    row.set(&source).unwrap();
+    let document = document(31, vec![row]);
+    let parsed = SceneDocument::parse(&document.to_ron().unwrap()).unwrap();
+    let output = cook_flattened_scene(&parsed, &catalog()).unwrap();
+    assert_eq!(output.asset_dependencies, [source.tileset]);
+    let scene = CookedScene::parse(&output.bytes).unwrap();
+    let prepared = scene.prepare(&registry()).unwrap();
+    let map = prepared
+        .rows()
+        .next()
+        .unwrap()
+        .get::<TilemapSource>()
+        .unwrap();
+    assert_eq!(map, &source);
+    assert_eq!(map.cell_coordinates(4), Some((0, -2)));
+
+    let mut parsed = parsed;
+    parsed.entities[0]
+        .set(&TilemapSource { width: 2, ..source })
+        .unwrap();
+    assert!(matches!(
+        cook_flattened_scene(&parsed, &catalog()),
+        Err(CookSceneError::Tilemap { entity, .. }) if entity == id(21)
+    ));
 }
 
 #[test]

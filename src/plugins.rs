@@ -98,7 +98,9 @@ impl PluginGroup for DefaultPlugins {
         #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
         let plugins = plugins.add_default::<nara_render::image::ImagePlugin>();
         #[cfg(all(feature = "runtime-2d", feature = "scene-cooked"))]
-        let plugins = plugins.add_default::<nara_render::sprite::SpriteSourceHydrationPlugin>();
+        let plugins = plugins
+            .add_default::<nara_render::sprite::SpriteSourceHydrationPlugin>()
+            .add_default::<nara_render::tilemap::TilemapSourceHydrationPlugin>();
         #[cfg(feature = "runtime-ui")]
         let plugins = plugins.add_default::<nara_ui::UiPlugin>();
         #[cfg(feature = "physics-2d")]

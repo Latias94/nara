@@ -1,5 +1,8 @@
 //! Code-first tilemaps and atlas layouts.
 
+#[cfg(feature = "tilemap-source-hydration")]
+mod hydration;
+
 // Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
 use std::collections::BTreeMap;
 
@@ -8,6 +11,14 @@ use crate::material::{AlphaMode2d, SamplerDescriptor};
 use nara_asset::Handle;
 use nara_core::{Color, Vec2};
 use nara_ecs::Component;
+
+#[cfg(feature = "tilemap-source-hydration")]
+pub use hydration::TilemapSourceHydrationPlugin;
+
+pub use nara_asset::tilemap::{
+    MAX_TILESET_SOURCE_BYTES, MAX_TILESET_TILES, TileAtlasLayout, TileAtlasRegion, TileDefinition,
+    TileIndex, TileSetAsset, TileSetAssetError, TileSetLoader, TileSetLoaderError,
+};
 
 pub const DEFAULT_TILE_SIZE: Vec2 = Vec2::new(16.0, 16.0);
 pub const DEFAULT_CHUNK_SIZE: i32 = 32;
@@ -59,22 +70,6 @@ impl TileChunkCoord {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct TileIndex(pub u32);
-
-impl TileIndex {
-    #[must_use]
-    pub const fn new(index: u32) -> Self {
-        Self(index)
-    }
-
-    #[must_use]
-    pub const fn raw(self) -> u32 {
-        self.0
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TileCell {
@@ -115,115 +110,6 @@ impl Default for TileLayer {
     fn default() -> Self {
         Self::new(0)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct TileAtlasLayout {
-    pub tile_size: Vec2,
-    pub columns: u32,
-    pub rows: u32,
-    pub margin: Vec2,
-    pub spacing: Vec2,
-}
-
-impl TileAtlasLayout {
-    #[must_use]
-    pub fn new(tile_size: Vec2, columns: u32, rows: u32) -> Option<Self> {
-        let layout = Self {
-            tile_size,
-            columns,
-            rows,
-            margin: Vec2::ZERO,
-            spacing: Vec2::ZERO,
-        };
-        layout.is_valid().then_some(layout)
-    }
-
-    #[must_use]
-    pub fn grid(tile_size: Vec2, columns: u32, rows: u32) -> Self {
-        Self::new(tile_size, columns, rows).expect("tile atlas layout must be valid")
-    }
-
-    #[must_use]
-    pub fn with_margin(mut self, margin: Vec2) -> Self {
-        self.margin = margin;
-        assert!(self.is_valid(), "tile atlas margin must be valid");
-        self
-    }
-
-    #[must_use]
-    pub fn with_spacing(mut self, spacing: Vec2) -> Self {
-        self.spacing = spacing;
-        assert!(self.is_valid(), "tile atlas spacing must be valid");
-        self
-    }
-
-    #[must_use]
-    pub fn atlas_size(self) -> Vec2 {
-        Vec2::new(
-            self.margin
-                .x
-                .mul_add(2.0, self.tile_size.x * self.columns as f32)
-                + self.spacing.x * self.columns.saturating_sub(1) as f32,
-            self.margin
-                .y
-                .mul_add(2.0, self.tile_size.y * self.rows as f32)
-                + self.spacing.y * self.rows.saturating_sub(1) as f32,
-        )
-    }
-
-    #[must_use]
-    pub fn normalized_region(self, tile: TileIndex) -> Option<TileAtlasRegion> {
-        if !self.is_valid() {
-            return None;
-        }
-        let raw = tile.raw();
-        let x = raw % self.columns;
-        let y = raw / self.columns;
-        if y >= self.rows {
-            return None;
-        }
-
-        let atlas_size = self.atlas_size();
-        let min = Vec2::new(
-            self.margin.x + (self.tile_size.x + self.spacing.x) * x as f32,
-            self.margin.y + (self.tile_size.y + self.spacing.y) * y as f32,
-        ) / atlas_size;
-        let size = self.tile_size / atlas_size;
-        Some(TileAtlasRegion { min, size })
-    }
-
-    #[must_use]
-    pub fn contains_tile(self, tile: TileIndex) -> bool {
-        self.is_valid() && tile.raw() / self.columns < self.rows
-    }
-
-    #[must_use]
-    pub fn is_valid(self) -> bool {
-        let atlas_size = self.atlas_size();
-        self.columns > 0
-            && self.rows > 0
-            && self.tile_size.is_finite()
-            && self.margin.is_finite()
-            && self.spacing.is_finite()
-            && self.tile_size.x > 0.0
-            && self.tile_size.y > 0.0
-            && self.margin.x >= 0.0
-            && self.margin.y >= 0.0
-            && self.spacing.x >= 0.0
-            && self.spacing.y >= 0.0
-            && atlas_size.is_finite()
-            && atlas_size.x > 0.0
-            && atlas_size.y > 0.0
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct TileAtlasRegion {
-    pub min: Vec2,
-    pub size: Vec2,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -377,6 +263,8 @@ struct TileChunkState {
 #[derive(Debug, Clone, Component)]
 pub struct Tilemap {
     pub tileset: Option<Handle<TileSet>>,
+    #[cfg(feature = "tilemap-source-hydration")]
+    authored_tileset: Option<TileSet>,
     pub tile_size: Vec2,
     pub layer: TileLayer,
     /// Explicit sort group within a layer. Y sorting never crosses this key.
@@ -392,6 +280,7 @@ pub struct Tilemap {
 impl PartialEq for Tilemap {
     fn eq(&self, other: &Self) -> bool {
         self.tileset == other.tileset
+            && self.authored_tileset() == other.authored_tileset()
             && self.tile_size == other.tile_size
             && self.layer == other.layer
             && self.sort_key == other.sort_key
@@ -407,6 +296,8 @@ impl Tilemap {
     pub fn new(tile_size: Vec2) -> Self {
         Self {
             tileset: None,
+            #[cfg(feature = "tilemap-source-hydration")]
+            authored_tileset: None,
             tile_size,
             layer: TileLayer::default(),
             sort_key: 0,
@@ -421,6 +312,19 @@ impl Tilemap {
     pub fn with_tileset(mut self, tileset: Handle<TileSet>) -> Self {
         self.tileset = Some(tileset);
         self
+    }
+
+    pub(crate) fn authored_tileset(&self) -> Option<&TileSet> {
+        #[cfg(feature = "tilemap-source-hydration")]
+        return self.authored_tileset.as_ref();
+        #[cfg(not(feature = "tilemap-source-hydration"))]
+        None
+    }
+
+    #[cfg(feature = "tilemap-source-hydration")]
+    pub(super) fn set_authored_tileset(&mut self, tileset: TileSet) {
+        self.tileset = None;
+        self.authored_tileset = Some(tileset);
     }
 
     #[must_use]

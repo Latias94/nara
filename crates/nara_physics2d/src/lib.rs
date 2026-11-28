@@ -1,8 +1,9 @@
 //! Fixed-step 2D physics for Nara's ECS. Distances and velocities use scene units and seconds.
 //!
-//! Install [`Physics2dPlugin`] and spawn [`RigidBody2d`] and [`Collider2d`] components. Systems
-//! ordered before [`Physics2dSet::Step`] can author kinematic targets. Systems ordered after it
-//! can read collision messages, the latest query state, and synchronized scene transforms.
+//! Install [`Physics2dPlugin`] and spawn [`RigidBody2d`] and either [`Collider2d`] or
+//! [`CompoundCollider2d`] components. Systems before [`Physics2dSet::Step`] can author kinematic
+//! targets and dynamic inputs. Systems after it can read collision messages, queries, scene
+//! transforms, and dynamic velocities from the latest step.
 //!
 //! ```
 //! use std::time::Duration;
@@ -31,8 +32,13 @@
 //! ```
 
 mod character;
+mod compound;
+mod dynamics;
+mod platformer;
 mod query;
 mod simulation;
+#[cfg(feature = "scene-runtime")]
+mod tilemap;
 
 pub mod stateless;
 
@@ -46,16 +52,28 @@ use nara_app::{
     PluginId,
 };
 use nara_core::Vec2;
+use nara_reflect::Schema;
 use nara_scene::spatial::{SpatialPropagation, Transform2d, propagate_spatial, register_spatial};
 use rapier2d::{
     math::{Pose, Vector},
-    prelude::SharedShape,
+    prelude::{Group, InteractionGroups, InteractionTestMode, SharedShape},
 };
 use thiserror::Error;
 
 pub use character::CharacterMovement;
+pub use compound::{CompoundBox2d, CompoundCollider2d, GridRect, merge_solid_grid_rects};
+pub use dynamics::{
+    Damping2d, ExternalForce2d, ExternalImpulse2d, GravityScale2d, LockedAxes2d, PhysicsMaterial2d,
+    Velocity2d,
+};
+pub use platformer::{
+    PlatformerAutostep, PlatformerCharacter, PlatformerConfig, PlatformerJumpTimers,
+    PlatformerMovement,
+};
 pub use query::{PhysicsQueryFilter2d, RayHit2d, ShapeHit2d, TopDownCharacter};
-pub use simulation::{ColliderGeometry2d, PhysicsWorld2d};
+pub use simulation::{ColliderGeometry2d, CompoundColliderGeometry2d, PhysicsWorld2d};
+#[cfg(feature = "scene-runtime")]
+pub use tilemap::{TILEMAP_ONE_WAY_GROUP, TILEMAP_SOLID_GROUP, TilemapColliders2d};
 
 /// Stable ID for this plugin in Nara plugin groups.
 pub const PHYSICS_2D_PLUGIN_ID: PluginId = PluginId::new("nara.physics2d");
@@ -65,7 +83,7 @@ const PHYSICS_2D_DECLARATION: PluginDeclaration =
 /// The complete physics boundary within [`FixedUpdateSet::Simulate`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, SystemSet)]
 pub enum Physics2dSet {
-    /// Propagates incoming scene transforms, steps Rapier, and publishes the resulting transforms.
+    /// Synchronizes ECS inputs, steps physics, and publishes dynamic poses and velocities.
     Step,
 }
 
@@ -92,16 +110,55 @@ impl Plugin for Physics2dPlugin {
                 CoreStage::FixedUpdate,
                 (
                     propagate_physics_spatial,
+                    #[cfg(feature = "scene-runtime")]
+                    (
+                        tilemap::hydrate_tilemap_colliders,
+                        propagate_physics_spatial,
+                    )
+                        .chain()
+                        .run_if(
+                            bevy_ecs::schedule::common_conditions::resource_exists::<
+                                nara_asset::Assets<nara_asset::tilemap::TileSetAsset>,
+                            >,
+                        ),
                     simulation::step_physics,
-                    simulation::write_back_dynamic_poses,
+                    simulation::write_back_dynamic_state,
                     propagate_physics_spatial,
                 )
                     .chain()
                     .in_set(Physics2dSet::Step),
             )?;
         register_spatial(app.world_mut()?);
+        #[cfg(feature = "scene-runtime")]
+        if app.has_plugin(nara_scene::SCENE_PLUGIN_ID) {
+            register_scene_collisions(app)?;
+        }
         Ok(())
     }
+
+    #[cfg(feature = "scene-runtime")]
+    fn finish(&self, app: &mut App) -> Result<(), PluginError> {
+        if app
+            .installed_plugins()
+            .skip_while(|plugin| plugin.id != PHYSICS_2D_PLUGIN_ID)
+            .any(|plugin| plugin.id == nara_scene::SCENE_PLUGIN_ID)
+        {
+            register_scene_collisions(app)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "scene-runtime")]
+fn register_scene_collisions(app: &mut App) -> Result<(), PluginError> {
+    use nara_scene::RegisterSceneComponent as _;
+
+    app.register_scene_component::<CollisionGroups2d>()
+        .map_err(|error| PluginError::SetupFailed {
+            plugin: PHYSICS_2D_PLUGIN_ID,
+            message: error.to_string(),
+        })?;
+    Ok(())
 }
 
 fn propagate_physics_spatial(spatial: SpatialPropagation) {
@@ -160,12 +217,49 @@ impl Collider2d {
             }
             _ => return Err(PhysicsError::InvalidCollider),
         };
-        validate_shape_pose(&shape, &Pose::IDENTITY)?;
-        let mass = shape.mass_properties(1.0);
-        if !positive_finite(mass.mass()) || !positive_finite(mass.principal_inertia()) {
-            return Err(PhysicsError::InvalidCollider);
-        }
+        validate_local_shape(&shape)?;
         Ok(shape)
+    }
+}
+
+/// Collider layer membership and interaction masks. A pair interacts when both masks agree.
+/// A collider without this component uses [`Self::ALL`].
+#[derive(Component, Schema, Clone, Copy, Debug, PartialEq, Eq)]
+#[schema(
+    crate = "nara_reflect",
+    id = "nara.CollisionGroups2d",
+    version = 1,
+    default,
+    alias = "Collision Groups 2D",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit)
+)]
+pub struct CollisionGroups2d {
+    /// Layers this collider belongs to, one bit per layer.
+    pub memberships: u32,
+    /// Layers this collider accepts, one bit per layer.
+    pub filters: u32,
+}
+
+impl CollisionGroups2d {
+    /// Participates in and accepts every layer.
+    pub const ALL: Self = Self {
+        memberships: u32::MAX,
+        filters: u32::MAX,
+    };
+
+    fn native(self) -> InteractionGroups {
+        InteractionGroups::new(
+            Group::from_bits_retain(self.memberships),
+            Group::from_bits_retain(self.filters),
+            InteractionTestMode::And,
+        )
+    }
+}
+
+impl Default for CollisionGroups2d {
+    fn default() -> Self {
+        Self::ALL
     }
 }
 
@@ -230,8 +324,22 @@ pub enum PhysicsError {
     InvalidPose,
     #[error("the collider must have positive, representable dimensions and bounds")]
     InvalidCollider,
+    #[error("an entity can have either a primitive or a compound collider")]
+    ConflictingColliders,
     #[error("gravity must be finite")]
     InvalidGravity,
+    #[error("linear and angular velocity must be finite")]
+    InvalidVelocity,
+    #[error("external force and torque must be finite")]
+    InvalidForce,
+    #[error("external impulse and angular impulse must be finite")]
+    InvalidImpulse,
+    #[error("friction and restitution must be finite and nonnegative")]
+    InvalidMaterial,
+    #[error("linear and angular damping must be finite and nonnegative")]
+    InvalidDamping,
+    #[error("gravity scale must be finite")]
+    InvalidGravityScale,
     #[error(
         "a ray needs a finite origin, direction, and endpoint, a nonzero direction, and a nonnegative range"
     )]
@@ -240,10 +348,32 @@ pub enum PhysicsError {
     InvalidDisplacement,
     #[error("the character's separation margin must be finite and positive")]
     InvalidMargin,
+    #[error("the character's up vector must be finite and nonzero")]
+    InvalidCharacterUp,
+    #[error("slope angles must be finite and in [0, pi/2] radians")]
+    InvalidSlopeAngle,
+    #[error(
+        "ground snap and autostep distances must be finite and nonnegative, with positive step height"
+    )]
+    InvalidCharacterDistance,
 }
 
 fn positive_finite(value: f32) -> bool {
     value.is_finite() && value > 0.0
+}
+
+fn nonnegative_finite(value: f32) -> bool {
+    value.is_finite() && value >= 0.0
+}
+
+fn validate_local_shape(shape: &SharedShape) -> Result<(), PhysicsError> {
+    validate_shape_pose(shape, &Pose::IDENTITY)?;
+    let mass = shape.mass_properties(1.0);
+    if positive_finite(mass.mass()) && positive_finite(mass.principal_inertia()) {
+        Ok(())
+    } else {
+        Err(PhysicsError::InvalidCollider)
+    }
 }
 
 fn validate_shape_pose(shape: &SharedShape, pose: &Pose) -> Result<(), PhysicsError> {

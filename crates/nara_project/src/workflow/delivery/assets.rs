@@ -12,13 +12,17 @@ use nara_asset::{
         NpakInput, write_npak,
     },
     source::ProjectAssetSource,
+    tilemap::{MAX_TILESET_SOURCE_BYTES, TileSetAsset},
 };
 use nara_audio::{AudioClipSource, AudioCodec, NAUD_HEADER_BYTES, cook_audio, cooked_audio_codec};
-use nara_core::{AssetId, Vec4, vfs::DirAssetSource};
+use nara_core::{AssetId, EntityUuid, Vec4, vfs::DirAssetSource};
 use nara_reflect::ComponentSchemaCatalog;
 use nara_render::material::SpriteMaterialAsset;
 use nara_scene::{
-    authoring::{SceneDocument, SpriteSource, builtin_component_schemas, prefab::expand_prefabs},
+    authoring::{
+        SceneDocument, SpriteSource, TilemapSource, builtin_component_schemas,
+        prefab::expand_prefabs,
+    },
     cook::{CookSceneError, cook_flattened_scene},
     cooked::CookedScene,
 };
@@ -32,6 +36,7 @@ const MATERIAL: &str = "nara.material";
 const SHADER: &str = "nara.shader";
 const AUDIO: &str = "nara.audio";
 const FONT: &str = "nara.font";
+const TILESET: &str = "nara.tileset";
 const RAW: &str = "nara.raw";
 
 const DOCUMENT_LIMIT: usize = 64 * 1024 * 1024;
@@ -48,6 +53,19 @@ pub(super) struct Cooker {
     platform: String,
     cache_hits: usize,
     cache_misses: usize,
+}
+
+struct TilemapReference {
+    scene: AssetId,
+    entity: EntityUuid,
+    tileset: AssetId,
+    largest_cell: u16,
+}
+
+#[derive(Default)]
+struct TilemapLinks {
+    maps: Vec<TilemapReference>,
+    tile_counts: BTreeMap<AssetId, usize>,
 }
 
 impl Cooker {
@@ -91,9 +109,10 @@ impl Cooker {
             self.require_importer(*id, SCENE)?;
         }
         let mut pack = BTreeMap::new();
+        let mut tilemaps = TilemapLinks::default();
         while let Some(id) = pending.pop_first() {
             check_stop(stop)?;
-            let (payload, dependencies, hit) = self.cook_asset(id)?;
+            let (payload, dependencies, hit) = self.cook_asset(id, &mut tilemaps)?;
             if hit {
                 self.cache_hits += 1;
             } else {
@@ -101,6 +120,18 @@ impl Cooker {
             }
             pack.insert(id, payload);
             pending.extend(dependencies.into_iter().filter(|id| !pack.contains_key(id)));
+        }
+        for map in tilemaps.maps {
+            let tiles = *tilemaps
+                .tile_counts
+                .get(&map.tileset)
+                .ok_or(DeliveryError::MissingAsset(map.tileset))?;
+            if usize::from(map.largest_cell) > tiles {
+                return Err(self.asset(map.scene)?.error(format!(
+                    "tilemap on {} selects tile {} from tileset '{}' with {tiles} tiles",
+                    map.entity, map.largest_cell, map.tileset
+                )));
+            }
         }
         Ok(Pack(pack))
     }
@@ -122,11 +153,15 @@ impl Cooker {
         }
     }
 
-    fn cook_asset(&self, id: AssetId) -> Result<(Payload, Vec<AssetId>, bool), DeliveryError> {
+    fn cook_asset(
+        &self,
+        id: AssetId,
+        tilemaps: &mut TilemapLinks,
+    ) -> Result<(Payload, Vec<AssetId>, bool), DeliveryError> {
         let asset = self.asset(id)?;
         let (kind, bytes, dependencies, hit) = match asset.meta.importer() {
             SCENE => {
-                let (bytes, dependencies, hit) = self.cook_scene(asset)?;
+                let (bytes, dependencies, hit) = self.cook_scene(asset, &mut tilemaps.maps)?;
                 (NpakEntryKind::Scene, bytes, dependencies, hit)
             }
             IMAGE => {
@@ -178,6 +213,20 @@ impl Cooker {
                 })?;
                 (NpakEntryKind::Font, bytes, Vec::new(), hit)
             }
+            TILESET => {
+                let source = self.read(asset, MAX_TILESET_SOURCE_BYTES)?;
+                let (bytes, hit) =
+                    self.cached(asset, source, "nara.tileset.ntls.v1", |source| {
+                        TileSetAsset::from_ron(asset.utf8(&source)?)
+                            .and_then(|tileset| tileset.encode_cooked())
+                            .map_err(|error| asset.error(error))
+                    })?;
+                let tileset =
+                    TileSetAsset::from_cooked(&bytes).map_err(|error| asset.error(error))?;
+                self.require_importer(tileset.image, IMAGE)?;
+                tilemaps.tile_counts.insert(id, tileset.tiles.len());
+                (NpakEntryKind::TileSet, bytes, vec![tileset.image], hit)
+            }
             RAW => {
                 let path = asset.record.path().as_str().to_ascii_lowercase();
                 if [".ron", ".meta", ".png"]
@@ -220,6 +269,7 @@ impl Cooker {
     fn cook_scene(
         &self,
         asset: Source<'_>,
+        tilemaps: &mut Vec<TilemapReference>,
     ) -> Result<(Vec<u8>, Vec<AssetId>, bool), DeliveryError> {
         let source = self.read(asset, DOCUMENT_LIMIT)?;
         let scene = self.parse_document(asset, &source)?;
@@ -276,6 +326,18 @@ impl Cooker {
                 .map_err(|error| asset.error(error))?
             {
                 self.require_importer(audio.clip, AUDIO)?;
+            }
+            if let Some(map) = row
+                .typed::<TilemapSource>()
+                .map_err(|error| asset.error(error))?
+            {
+                self.require_importer(map.tileset, TILESET)?;
+                tilemaps.push(TilemapReference {
+                    scene: asset.id,
+                    entity: row.id,
+                    tileset: map.tileset,
+                    largest_cell: map.cells.0.into_iter().max().unwrap_or(0),
+                });
             }
         }
         Ok((bytes, dependencies, hit))

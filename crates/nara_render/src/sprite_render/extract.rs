@@ -140,7 +140,8 @@ pub(crate) fn extract_sprites(
         };
         let tileset = tilemap
             .tileset
-            .and_then(|handle| tilesets.as_deref()?.get(handle));
+            .and_then(|handle| tilesets.as_deref()?.get(handle))
+            .or_else(|| tilemap.authored_tileset());
         if tilemap.tileset.is_some() && tileset.is_none() {
             scratch.stats.missing_tilesets = scratch.stats.missing_tilesets.saturating_add(1);
             continue;

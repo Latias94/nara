@@ -89,6 +89,15 @@ impl AssetLoadContext<'_> {
         self.backend.meta(id)
     }
 
+    /// Checks a reference using the mounted source's kind metadata.
+    pub fn validate_dependency_kind(
+        &self,
+        id: AssetId,
+        expected: NpakEntryKind,
+    ) -> Result<(), AssetError> {
+        self.backend.validate_kind(id, expected)
+    }
+
     pub fn read_dependency(
         &mut self,
         id: AssetId,

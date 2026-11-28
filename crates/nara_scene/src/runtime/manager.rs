@@ -8,14 +8,17 @@ use bevy_ecs::{
     query::Allow,
 };
 use nara_asset::{
-    AssetError, AssetId as RuntimeId, AssetLoadError, AssetServer, AssetStates, Assets, Handle,
-    LoadState, NpakEntryKind, RuntimeAssetSource, is_runtime_asset_resident, load_asset_sync,
-    load_dependency_sync,
+    AssetError, AssetId as RuntimeId, AssetLoadError, AssetProductRef, AssetServer, AssetStates,
+    Assets, Handle, ImportedProductId, LoadState, NpakEntryKind, RuntimeAssetSource,
+    is_runtime_asset_resident, load_asset_sync, load_dependency_sync, tilemap::TileSetAsset,
 };
 use nara_core::{AssetId, EntityUuid};
 use thiserror::Error;
 
-use crate::cooked::{CookedScene, CookedSceneError, PreparedScene};
+use crate::{
+    components::TilemapSourceError,
+    cooked::{CookedScene, CookedSceneError, PreparedScene},
+};
 
 use super::{SceneAsset, SceneAssetError, SceneRegistry};
 
@@ -90,6 +93,22 @@ pub enum SceneError {
         entity: EntityUuid,
         id: AssetId,
         actual: NpakEntryKind,
+    },
+    #[error(
+        "scene '{scene_id}' entity {entity} TilemapSource.tileset refers to '{id}' of kind {actual:?}, expected TileSet"
+    )]
+    TileSetAssetKindMismatch {
+        scene_id: AssetId,
+        entity: EntityUuid,
+        id: AssetId,
+        actual: NpakEntryKind,
+    },
+    #[error("scene '{scene_id}' has an invalid tilemap on {entity}: {source}")]
+    Tilemap {
+        scene_id: AssetId,
+        entity: EntityUuid,
+        #[source]
+        source: TilemapSourceError,
     },
     #[error("scene '{scene_id}' failed application validation: {message}")]
     ValidationFailed { scene_id: AssetId, message: String },
@@ -243,6 +262,7 @@ pub fn switch_scene_asset_sync(
             return Err(SceneError::DependencyNotResident { scene_id, id });
         }
     }
+    validate_resident_tilemaps(world, scene_id, &prepared)?;
     // A synchronous switch enters the manager only after all fallible preparation succeeds.
     let mut manager = world.resource_mut::<SceneManager>();
     let instance = manager.reserve_instance(scene_id);
@@ -416,11 +436,36 @@ fn instantiate_pending(
         world.get_resource::<RuntimeAssetSource>(),
         request.preload_source.as_ref(),
     )?;
+    validate_resident_tilemaps(world, scene_id, &prepared)?;
     if let Some(validate) = request.validate {
         validate(&prepared)
             .map_err(|message| SceneError::ValidationFailed { scene_id, message })?;
     }
     commit_scene(world, instance, scene_id, prepared);
+    Ok(())
+}
+
+fn validate_resident_tilemaps(
+    world: &World,
+    scene_id: AssetId,
+    prepared: &PreparedScene<'_>,
+) -> Result<(), SceneError> {
+    for (entity, map) in prepared.tilemap_sources() {
+        let id = map.tileset;
+        let reference = AssetProductRef::new(id.into(), ImportedProductId::PRIMARY)
+            .map_err(AssetError::InvalidProductIdentity)?;
+        let tileset = world
+            .resource::<AssetServer>()
+            .get_product_handle(reference)
+            .and_then(|handle| world.resource::<Assets<TileSetAsset>>().get(handle))
+            .ok_or(SceneError::DependencyNotResident { scene_id, id })?;
+        map.validate_tile_indices(tileset.tiles.len())
+            .map_err(|source| SceneError::Tilemap {
+                scene_id,
+                entity,
+                source,
+            })?;
+    }
     Ok(())
 }
 

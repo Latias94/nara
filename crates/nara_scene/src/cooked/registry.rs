@@ -13,7 +13,7 @@ use nara_reflect::{
 
 use crate::{
     Name,
-    components::{ColliderSource, SpriteSource, Transform2d, Visibility},
+    components::{ColliderSource, SpriteSource, TilemapSource, Transform2d, Visibility},
 };
 
 use super::{
@@ -69,7 +69,7 @@ impl CookedRegistry {
         Ok(self)
     }
 
-    /// Registers `Name`, `Transform2d`, `Visibility`, `SpriteSource`, and `ColliderSource`.
+    /// Registers the engine's native scene components.
     pub fn register_builtins(&mut self) -> Result<&mut Self, CookedSceneError> {
         let mut builtins = Self::new();
         builtins
@@ -77,7 +77,8 @@ impl CookedRegistry {
             .register::<Transform2d>()?
             .register::<Visibility>()?
             .register::<SpriteSource>()?
-            .register::<ColliderSource>()?;
+            .register::<ColliderSource>()?
+            .register::<TilemapSource>()?;
         for (&type_hash, entry) in &builtins.entries {
             self.check_available(type_hash, entry.component)?;
         }

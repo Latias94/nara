@@ -9,4 +9,5 @@ pub enum NpakEntryKind {
     Raw = 5,
     Audio = 6,
     Font = 7,
+    TileSet = 8,
 }

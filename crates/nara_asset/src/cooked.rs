@@ -55,6 +55,7 @@ impl NpakEntryKind {
             5 => Some(Self::Raw),
             6 => Some(Self::Audio),
             7 => Some(Self::Font),
+            8 => Some(Self::TileSet),
             _ => None,
         }
     }

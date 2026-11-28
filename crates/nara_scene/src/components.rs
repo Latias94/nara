@@ -5,8 +5,9 @@ use nara_core::{AssetId, Color, Vec2};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueRef, Schema, validate_component_value,
+    ComponentValueKind, ComponentValueRef, PackedU16, Schema, validate_component_value,
 };
+use thiserror::Error;
 
 pub use crate::spatial::{Transform2d, Visibility};
 
@@ -51,6 +52,101 @@ impl Default for SpriteSource {
             material: None,
         }
     }
+}
+
+/// An authored tile grid in row-major order, with rows increasing in local +Y.
+/// Cell zero is empty. A nonzero cell selects tile `cell - 1` from the tileset.
+#[derive(Component, Schema, Debug, Clone, PartialEq)]
+#[require(Transform2d)]
+#[schema(
+    crate = "nara_reflect",
+    id = "nara.TilemapSource",
+    version = 1,
+    alias = "Tilemap"
+)]
+pub struct TilemapSource {
+    #[schema(capabilities(scene, inspect, edit, asset_ref))]
+    pub tileset: AssetId,
+    /// Size of one tile in scene units, independent of the atlas pixel dimensions.
+    pub tile_size: Vec2,
+    pub width: u32,
+    pub height: u32,
+    #[schema(default)]
+    pub origin_x: i32,
+    #[schema(default)]
+    pub origin_y: i32,
+    #[schema(default)]
+    pub layer: i32,
+    pub cells: PackedU16,
+}
+
+impl TilemapSource {
+    pub fn validate(&self) -> Result<(), TilemapSourceError> {
+        if !self.tile_size.is_finite() || self.tile_size.min_element() <= 0.0 {
+            return Err(TilemapSourceError::TileSize);
+        }
+        let expected = u64::from(self.width) * u64::from(self.height);
+        if self.cells.0.len() as u64 != expected {
+            return Err(TilemapSourceError::CellCount {
+                expected,
+                actual: self.cells.0.len(),
+            });
+        }
+        for (origin, size, step) in [
+            (self.origin_x, self.width, self.tile_size.x),
+            (self.origin_y, self.height, self.tile_size.y),
+        ] {
+            let last = i64::from(origin) + i64::from(size.saturating_sub(1));
+            if last > i64::from(i32::MAX)
+                || !(origin as f32 * step).is_finite()
+                || !((last + 1) as f32 * step).is_finite()
+            {
+                return Err(TilemapSourceError::Bounds);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn validate_tile_indices(&self, tiles: usize) -> Result<(), TilemapSourceError> {
+        if let Some((cell, &value)) = self
+            .cells
+            .0
+            .iter()
+            .enumerate()
+            .find(|(_, value)| usize::from(**value) > tiles)
+        {
+            return Err(TilemapSourceError::TileIndex { cell, value, tiles });
+        }
+        Ok(())
+    }
+
+    /// Converts an occupied or empty cell's row-major index to its local tile coordinates.
+    #[must_use]
+    pub fn cell_coordinates(&self, index: usize) -> Option<(i32, i32)> {
+        let width = self.width as usize;
+        if width == 0 || index >= self.cells.0.len() || index / width >= self.height as usize {
+            return None;
+        }
+        let x = i64::from(self.origin_x) + (index % width) as i64;
+        let y = i64::from(self.origin_y) + (index / width) as i64;
+        Some((i32::try_from(x).ok()?, i32::try_from(y).ok()?))
+    }
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum TilemapSourceError {
+    #[error("tile size must be finite and positive")]
+    TileSize,
+    #[error("expected {expected} tile cells, found {actual}")]
+    CellCount { expected: u64, actual: usize },
+    #[error("the tile grid exceeds representable coordinates")]
+    Bounds,
+    #[error("cell {cell} selects tile {value} from a tileset with {tiles} tiles")]
+    TileIndex {
+        cell: usize,
+        value: u16,
+        tiles: usize,
+    },
 }
 
 /// A centered 2D box or circle in local coordinates.
@@ -164,12 +260,13 @@ impl Visibility {
 }
 
 /// Built-in metadata with complete creation values for a source document inspector.
-pub fn builtin_component_schemas() -> Result<[ComponentSchema; 4], ComponentCodecError> {
+pub fn builtin_component_schemas() -> Result<[ComponentSchema; 5], ComponentCodecError> {
     Ok([
         schema_with_initial::<Transform2d>()?,
         schema_with_initial::<Visibility>()?,
         schema_with_initial::<SpriteSource>()?,
         schema_with_initial::<ColliderSource>()?,
+        TilemapSource::type_schema()?,
     ])
 }
 

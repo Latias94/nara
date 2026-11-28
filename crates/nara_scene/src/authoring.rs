@@ -4,7 +4,9 @@ pub(crate) mod compact;
 pub mod prefab;
 mod wire;
 
-pub use crate::components::{ColliderSource, SpriteSource, builtin_component_schemas};
+pub use crate::components::{
+    ColliderSource, SpriteSource, TilemapSource, builtin_component_schemas,
+};
 pub use compact::CompactValueError;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};

@@ -16,9 +16,10 @@ use thiserror::Error;
 use crate::{
     Name,
     authoring::{
-        SceneDocument, SceneDocumentError, builtin_component_schemas,
+        SceneDocument, SceneDocumentError, TilemapSource, builtin_component_schemas,
         prefab::{PrefabError, expand_prefabs},
     },
+    components::TilemapSourceError,
     cooked::wire,
 };
 
@@ -128,6 +129,14 @@ fn encode_flattened(
                     stored: component.version(),
                     expected: column.schema.version(),
                 });
+            }
+            if id.as_str() == TilemapSource::COMPONENT_ID {
+                TilemapSource::decode_component(value.into())?
+                    .validate()
+                    .map_err(|source| CookSceneError::Tilemap {
+                        entity: entity.id,
+                        source,
+                    })?;
             }
 
             let mut missing = None;
@@ -275,6 +284,12 @@ pub enum CookSceneError {
     Schema(#[from] ComponentCodecError),
     #[error(transparent)]
     InvalidSchema(#[from] ComponentRegistryError),
+    #[error("invalid tilemap on {entity}: {source}")]
+    Tilemap {
+        entity: EntityUuid,
+        #[source]
+        source: TilemapSourceError,
+    },
     #[error("NSCN {0} exceeds the format length limit")]
     Length(&'static str),
     #[error("NSCN input still contains a prefab instance at entity {0}")]

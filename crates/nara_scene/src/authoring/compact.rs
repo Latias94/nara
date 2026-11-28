@@ -19,7 +19,7 @@ use layout::{Layout, Node};
 type Assets = BTreeMap<String, SceneAsset>;
 
 pub(super) struct Schemas<'a> {
-    builtin: [ComponentSchema; 4],
+    builtin: [ComponentSchema; 5],
     project: BTreeMap<&'a ComponentTypeId, &'a ComponentSchema>,
 }
 

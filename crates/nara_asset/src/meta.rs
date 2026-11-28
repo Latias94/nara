@@ -13,6 +13,8 @@ pub(crate) const PREFAB_IMPORTER: &str = "nara.prefab";
 #[cfg(any(unix, windows))]
 pub(crate) const MATERIAL_IMPORTER: &str = "nara.material";
 #[cfg(any(unix, windows))]
+pub(crate) const TILESET_IMPORTER: &str = "nara.tileset";
+#[cfg(any(unix, windows))]
 pub(crate) const SHADER_IMPORTER: &str = "nara.shader";
 #[cfg(any(unix, windows))]
 pub(crate) const RAW_IMPORTER: &str = "nara.raw";

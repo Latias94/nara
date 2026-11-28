@@ -16,7 +16,7 @@ use crate::{
     ProjectAssetDatabase, StableAssetId,
     meta::{
         IMAGE_IMPORTER, MATERIAL_IMPORTER, MAX_META_BYTES, PREFAB_IMPORTER, RAW_IMPORTER,
-        SCENE_IMPORTER, SHADER_IMPORTER,
+        SCENE_IMPORTER, SHADER_IMPORTER, TILESET_IMPORTER,
     },
 };
 
@@ -306,6 +306,8 @@ fn default_importer(path: &AssetSourcePath) -> &'static str {
         PREFAB_IMPORTER
     } else if name.ends_with(".material.ron") {
         MATERIAL_IMPORTER
+    } else if name.ends_with(".tileset.ron") {
+        TILESET_IMPORTER
     } else if name.ends_with(".wgsl") {
         SHADER_IMPORTER
     } else {

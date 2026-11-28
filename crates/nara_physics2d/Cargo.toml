@@ -9,7 +9,12 @@ description = "Fixed-step ECS physics and stateless collision queries for Nara g
 [dependencies]
 bevy_ecs.workspace = true
 nara_app.workspace = true
+nara_asset = { workspace = true, optional = true, features = ["runtime"] }
 nara_core.workspace = true
+nara_reflect.workspace = true
 nara_scene.workspace = true
 rapier2d.workspace = true
 thiserror.workspace = true
+
+[features]
+scene-runtime = ["dep:nara_asset", "nara_scene/runtime"]

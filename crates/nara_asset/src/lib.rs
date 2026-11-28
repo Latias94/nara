@@ -23,6 +23,7 @@ mod runtime;
 mod scan;
 mod server;
 pub mod source;
+pub mod tilemap;
 #[cfg(all(feature = "hot-reload", any(unix, windows)))]
 pub mod watch;
 

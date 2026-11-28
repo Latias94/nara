@@ -25,6 +25,7 @@ pub use library::{
     Material2dBinding, Material2dGeneration, Material2dLibrary, MaterialShaderInput,
     MaterialShaderInputObservation, MaterialUpdateError, PreparedMaterial2dUpdate,
 };
+pub use nara_asset::image::{AddressMode, FilterMode, SamplerDescriptor};
 #[cfg(feature = "material")]
 pub use nara_material_derive::MaterialParameters;
 #[cfg(feature = "material")]
@@ -52,57 +53,6 @@ pub mod __macro_support {
     pub use crate::material::declaration::*;
     pub use crate::material::parameters::*;
     pub use encase;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
-pub enum FilterMode {
-    Nearest,
-    Linear,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
-pub enum AddressMode {
-    ClampToEdge,
-    Repeat,
-    MirrorRepeat,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct SamplerDescriptor {
-    pub min_filter: FilterMode,
-    pub mag_filter: FilterMode,
-    pub mipmap_filter: FilterMode,
-    pub address_mode_u: AddressMode,
-    pub address_mode_v: AddressMode,
-}
-
-impl SamplerDescriptor {
-    pub const LINEAR_CLAMP: Self = Self {
-        min_filter: FilterMode::Linear,
-        mag_filter: FilterMode::Linear,
-        mipmap_filter: FilterMode::Linear,
-        address_mode_u: AddressMode::ClampToEdge,
-        address_mode_v: AddressMode::ClampToEdge,
-    };
-
-    pub const NEAREST_CLAMP: Self = Self {
-        min_filter: FilterMode::Nearest,
-        mag_filter: FilterMode::Nearest,
-        mipmap_filter: FilterMode::Nearest,
-        address_mode_u: AddressMode::ClampToEdge,
-        address_mode_v: AddressMode::ClampToEdge,
-    };
-}
-
-impl Default for SamplerDescriptor {
-    fn default() -> Self {
-        Self::LINEAR_CLAMP
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

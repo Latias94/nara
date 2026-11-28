@@ -74,8 +74,12 @@ pub mod prelude {
     };
     #[cfg(feature = "physics-2d")]
     pub use nara_physics2d::{
-        Collider2d, CollisionEvent, Physics2dPlugin, Physics2dSet, PhysicsPose2d, PhysicsWorld2d,
-        RigidBody2d, Sensor2d, Teleport2d, TopDownCharacter,
+        Collider2d, CollisionEvent, CollisionGroups2d, CompoundBox2d, CompoundCollider2d,
+        Damping2d, ExternalForce2d, ExternalImpulse2d, GravityScale2d, LockedAxes2d,
+        Physics2dPlugin, Physics2dSet, PhysicsMaterial2d, PhysicsPose2d, PhysicsQueryFilter2d,
+        PhysicsWorld2d, PlatformerAutostep, PlatformerCharacter, PlatformerConfig,
+        PlatformerJumpTimers, PlatformerMovement, RigidBody2d, Sensor2d, Teleport2d,
+        TopDownCharacter, Velocity2d,
     };
     pub use nara_reflect::{RegisterSchema, Schema};
     #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
@@ -87,7 +91,10 @@ pub mod prelude {
     #[cfg(feature = "runtime-2d")]
     pub use nara_render::sprite::{Sprite, SpriteAnchor, SpriteMaterial, TextureRegion};
     #[cfg(feature = "runtime-2d")]
-    pub use nara_render::tilemap::{TileCell, TileCoord, TileIndex, TileLayer, TileSet, Tilemap};
+    pub use nara_render::tilemap::{
+        TileAtlasLayout, TileCell, TileCoord, TileDefinition, TileIndex, TileLayer, TileSet,
+        TileSetAsset, Tilemap,
+    };
     #[cfg(any(
         feature = "runtime-2d",
         feature = "presentation-ui",
@@ -101,6 +108,8 @@ pub mod prelude {
     ))]
     pub use nara_render::{ClearColor, RenderPlugin, WorldCanvas, WorldPointer};
     pub use nara_scene::Name;
+    #[cfg(feature = "scene-cooked")]
+    pub use nara_scene::components::TilemapSource;
     pub use nara_scene::spatial::{
         ChildOf, Children, GlobalTransform2d, InheritedVisibility, SpatialPlugin, SpatialSet,
         Transform2d, Visibility,

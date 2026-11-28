@@ -145,6 +145,17 @@ impl PreparedScene<'_> {
     }
 
     #[cfg(feature = "runtime")]
+    pub(crate) fn tilemap_sources(
+        &self,
+    ) -> impl Iterator<Item = (EntityUuid, &crate::components::TilemapSource)> {
+        self.columns
+            .iter()
+            .filter_map(|column| column.typed_rows::<crate::components::TilemapSource>())
+            .flatten()
+            .map(|(index, map)| (self.entities[*index].id, map))
+    }
+
+    #[cfg(feature = "runtime")]
     pub(crate) fn audio_clips(
         &self,
     ) -> impl Iterator<Item = Result<(EntityUuid, AssetId), CookedSceneError>> {

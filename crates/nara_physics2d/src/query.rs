@@ -10,7 +10,7 @@ use rapier2d::{
 };
 
 use crate::{
-    CharacterMovement, Collider2d, PhysicsError, PhysicsPose2d, PhysicsWorld2d,
+    CharacterMovement, Collider2d, CollisionGroups2d, PhysicsError, PhysicsPose2d, PhysicsWorld2d,
     character::{sweep_character, top_down_controller},
     native_vector, positive_finite, scene_vector, validate_shape_pose,
 };
@@ -22,6 +22,8 @@ pub struct PhysicsQueryFilter2d {
     pub exclude: Option<Entity>,
     /// Include sensor colliders alongside solid shapes. The default includes only solid shapes.
     pub include_sensors: bool,
+    /// Apply bilateral collision groups. `None` queries every group.
+    pub groups: Option<CollisionGroups2d>,
 }
 
 /// The nearest point where a ray hits a collider.
@@ -168,11 +170,32 @@ impl PhysicsWorld2d {
         delta: Duration,
         exclude: Option<Entity>,
     ) -> Result<CharacterMovement, PhysicsError> {
+        self.move_top_down_character_with_filter(
+            character,
+            pose,
+            displacement,
+            delta,
+            PhysicsQueryFilter2d {
+                exclude,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Sweeps and slides a character against colliders matching the filter.
+    ///
+    /// Pass a world-space displacement already integrated over `delta` and apply the returned
+    /// translation once. Use `filter.exclude` for the character's own entity.
+    pub fn move_top_down_character_with_filter(
+        &self,
+        character: &TopDownCharacter,
+        pose: PhysicsPose2d,
+        displacement: Vec2,
+        delta: Duration,
+        filter: PhysicsQueryFilter2d,
+    ) -> Result<CharacterMovement, PhysicsError> {
         let pose = validate_sweep(&character.shape, pose, displacement)?;
-        let queries = self.queries(PhysicsQueryFilter2d {
-            exclude,
-            include_sensors: false,
-        });
+        let queries = self.queries(filter);
         Ok(sweep_character(
             &character.controller,
             &queries,
@@ -183,7 +206,7 @@ impl PhysicsWorld2d {
         ))
     }
 
-    fn queries(&self, filter: PhysicsQueryFilter2d) -> QueryPipeline<'_> {
+    pub(super) fn queries(&self, filter: PhysicsQueryFilter2d) -> QueryPipeline<'_> {
         let mut native = QueryFilter::default();
         if !filter.include_sensors {
             native = native.exclude_sensors();
@@ -191,11 +214,14 @@ impl PhysicsWorld2d {
         if let Some(body) = filter.exclude.and_then(|entity| self.body_handle(entity)) {
             native = native.exclude_rigid_body(body);
         }
+        if let Some(groups) = filter.groups {
+            native = native.groups(groups.native());
+        }
         self.native.query_pipeline_with_filter(native)
     }
 }
 
-fn validate_sweep(
+pub(super) fn validate_sweep(
     shape: &SharedShape,
     origin: PhysicsPose2d,
     displacement: Vec2,

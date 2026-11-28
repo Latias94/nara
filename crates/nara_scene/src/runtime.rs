@@ -1,4 +1,5 @@
 mod manager;
+mod tilemap;
 
 use std::sync::Arc;
 
@@ -7,7 +8,8 @@ use bevy_ecs::{
     schedule::{IntoScheduleConfigs, SystemSet},
 };
 use nara_app::{
-    App, CoreStage, FrameCleanup, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
+    App, CoreStage, FixedUpdateSet, FrameCleanup, Plugin, PluginCategory, PluginDeclaration,
+    PluginError, PluginId,
 };
 use nara_asset::{
     ASSET_PLUGIN_ID, AssetAppExt, AssetError, AssetLoadContext, AssetLoadSet, AssetLoader,
@@ -23,6 +25,7 @@ pub use manager::{
     SceneError, SceneEvent, SceneInstanceId, SceneLoadState, SceneManager, SceneMember,
     switch_scene_asset_sync, switch_scene_sync,
 };
+pub use tilemap::{ResolveTilemapAssets, TilemapAsset};
 
 /// Validated NSCN bytes with the stable UUIDs required by their component values.
 #[derive(Clone, Debug)]
@@ -244,6 +247,22 @@ fn validate_asset_references(
             });
         }
     }
+    for (entity, map) in prepared.tilemap_sources() {
+        map.validate().map_err(|source| SceneError::Tilemap {
+            scene_id,
+            entity,
+            source,
+        })?;
+        let actual = dependency_kind(source, map.tileset)?;
+        if actual != NpakEntryKind::TileSet {
+            return Err(SceneError::TileSetAssetKindMismatch {
+                scene_id,
+                entity,
+                id: map.tileset,
+                actual,
+            });
+        }
+    }
     Ok(())
 }
 
@@ -319,6 +338,7 @@ impl Plugin for ScenePlugin {
             })?;
         let loader = SceneAssetLoader::default();
         app.register_asset_loader(loader.clone())?
+            .register_asset_loader(nara_asset::tilemap::TileSetLoader)?
             .insert_resource(SceneRegistry {
                 native,
                 #[cfg(feature = "cook")]
@@ -335,6 +355,16 @@ impl Plugin for ScenePlugin {
             .add_systems(
                 FrameCleanup,
                 |mut messages: ResMut<Messages<SceneEvent>>| messages.update(),
+            )?
+            .add_systems(
+                CoreStage::TaskUpdate,
+                tilemap::resolve_tilemap_assets
+                    .in_set(ResolveTilemapAssets)
+                    .after(SceneUpdateSet),
+            )?
+            .add_systems(
+                CoreStage::FixedUpdate,
+                tilemap::resolve_tilemap_assets.in_set(FixedUpdateSet::Prepare),
             )?;
         Ok(())
     }

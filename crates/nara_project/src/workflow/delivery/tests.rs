@@ -141,6 +141,82 @@ fn cook_validates_and_caches_referenced_audio_and_font() {
 }
 
 #[test]
+fn tilemap_cook_links_and_caches_the_atlas_and_rejects_missing_tiles() {
+    use nara_asset::tilemap::TileSetAsset;
+    use nara_core::Vec2;
+    use nara_scene::authoring::{SceneEntity, TilemapSource};
+
+    let folder = tempfile::tempdir().unwrap();
+    let project = folder.path();
+    fixture(project);
+    let catalog = ComponentSchemaCatalog::from_components(
+        nara_scene::authoring::builtin_component_schemas().unwrap(),
+    )
+    .unwrap();
+    finish_refresh(
+        project,
+        ExitStatus::from_raw(0),
+        catalog.to_json_string().unwrap().as_bytes(),
+        || false,
+    )
+    .unwrap();
+    let root = project.join("assets");
+    let scene_path = root.join("entry.scene.ron");
+    let id = "0193a100-1111-7000-8000-000000000022";
+    let mut source = TilemapSource {
+        tileset: id.parse().unwrap(),
+        tile_size: Vec2::splat(2.0),
+        width: 2,
+        height: 1,
+        origin_x: -1,
+        origin_y: 0,
+        layer: -2,
+        cells: vec![0, 1].into(),
+    };
+    let mut document = SceneDocument::new(ENTRY.parse().unwrap());
+    let mut map = SceneEntity::new(ENTRY.parse().unwrap(), "Tiles");
+    map.set(&source).unwrap();
+    document.entities.push(map);
+    document.write(&scene_path).unwrap();
+    fs::write(root.join("walls.tileset.ron"), format!(r#"TileSet(image: "{PNG}", layout: (tile_size: (1.0, 1.0), columns: 1, rows: 1), tiles: [(solid: true)])"#)).unwrap();
+    fs::write(
+        root.join("walls.tileset.ron.meta"),
+        format!(r#"AssetMeta(id: "{id}", importer: "nara.tileset", settings: ())"#),
+    )
+    .unwrap();
+
+    let cook = || cook_project(project, ProjectTrust::Untrusted, || false, |_| {});
+    let first = cook().unwrap();
+    assert_eq!((first.assets, first.cache_misses), (3, 3));
+    let bytes = fs::read(&first.archive).unwrap();
+    let archive = NpakArchive::from_bytes(bytes.clone()).unwrap();
+    let tileset = archive
+        .read_kind(source.tileset, NpakEntryKind::TileSet)
+        .unwrap();
+    assert_eq!(&tileset[..4], b"NTLS");
+    assert_eq!(
+        TileSetAsset::from_cooked(&tileset).unwrap().image,
+        PNG.parse().unwrap()
+    );
+    assert!(
+        archive
+            .read_kind(PNG.parse().unwrap(), NpakEntryKind::Image)
+            .is_ok()
+    );
+    let repeat = cook().unwrap();
+    assert_eq!((repeat.cache_hits, repeat.cache_misses), (3, 0));
+    assert_eq!(fs::read(&repeat.archive).unwrap(), bytes);
+
+    source.cells.0[1] = 2;
+    document.entities[0].set(&source).unwrap();
+    document.write(&scene_path).unwrap();
+    assert!(
+        matches!(cook(), Err(DeliveryError::Asset { message, .. }) if message.contains("selects tile 2"))
+    );
+    assert_eq!(fs::read(&repeat.archive).unwrap(), bytes);
+}
+
+#[test]
 fn packages_only_flattened_dependencies_and_caches_each_input_cut() {
     let temp = tempfile::tempdir().unwrap();
     fixture(temp.path());

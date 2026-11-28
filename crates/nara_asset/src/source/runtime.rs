@@ -200,20 +200,24 @@ impl RuntimeAssetBackend for ProjectBackend {
         use std::io::Read;
 
         const MAX_SOURCE_BYTES: u64 = 256 * 1024 * 1024;
+        let limit = match expected {
+            Some(NpakEntryKind::TileSet) => crate::tilemap::MAX_TILESET_SOURCE_BYTES as u64,
+            _ => MAX_SOURCE_BYTES,
+        };
         check_read_kind(self, id, expected)?;
         let file = super::ProjectAssetSource::new(&self.directory, &self.database)
             .open_asset(id)
             .map_err(|source| AssetLoadError::Read { id, source })?;
         let mut bytes = Vec::new();
-        file.take(MAX_SOURCE_BYTES + 1)
+        file.take(limit + 1)
             .read_to_end(&mut bytes)
             .map_err(|source| AssetLoadError::Read { id, source })?;
-        if bytes.len() as u64 > MAX_SOURCE_BYTES {
+        if bytes.len() as u64 > limit {
             return Err(AssetLoadError::Read {
                 id,
                 source: std::io::Error::new(
                     std::io::ErrorKind::FileTooLarge,
-                    "asset exceeds 256 MiB",
+                    format!("asset exceeds {limit} bytes"),
                 ),
             });
         }
@@ -228,7 +232,7 @@ impl RuntimeAssetBackend for ProjectBackend {
     fn kind(&self, id: AssetId) -> Option<NpakEntryKind> {
         use crate::meta::{
             AUDIO_IMPORTER, FONT_IMPORTER, IMAGE_IMPORTER, MATERIAL_IMPORTER, RAW_IMPORTER,
-            SCENE_IMPORTER, SHADER_IMPORTER,
+            SCENE_IMPORTER, SHADER_IMPORTER, TILESET_IMPORTER,
         };
 
         let record = self.database.record_for_stable_id(id.into())?;
@@ -240,6 +244,7 @@ impl RuntimeAssetBackend for ProjectBackend {
             RAW_IMPORTER => Some(NpakEntryKind::Raw),
             SCENE_IMPORTER => Some(NpakEntryKind::Scene),
             SHADER_IMPORTER => Some(NpakEntryKind::Shader),
+            TILESET_IMPORTER => Some(NpakEntryKind::TileSet),
             _ => None,
         }
     }

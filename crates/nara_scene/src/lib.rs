@@ -16,9 +16,10 @@ pub mod spatial;
 
 #[cfg(feature = "runtime")]
 pub use runtime::{
-    RegisterSceneComponent, SCENE_PLUGIN_ID, SceneAsset, SceneAssetError, SceneAssetLoader,
-    SceneError, SceneEvent, SceneInstanceId, SceneLoadState, SceneManager, SceneMember,
-    ScenePlugin, SceneRegistry, SceneUpdateSet, switch_scene_asset_sync, switch_scene_sync,
+    RegisterSceneComponent, ResolveTilemapAssets, SCENE_PLUGIN_ID, SceneAsset, SceneAssetError,
+    SceneAssetLoader, SceneError, SceneEvent, SceneInstanceId, SceneLoadState, SceneManager,
+    SceneMember, ScenePlugin, SceneRegistry, SceneUpdateSet, TilemapAsset, switch_scene_asset_sync,
+    switch_scene_sync,
 };
 pub use spatial::{SPATIAL_PLUGIN_ID, SpatialPlugin, SpatialSet, Visibility};
 
