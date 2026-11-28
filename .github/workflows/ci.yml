@@ -92,7 +92,9 @@ jobs:
           --test schema_registration --test kernel --test text --test clip --test sprite_animation --test generation_workflow
           --test spatial_presentation --test editor_session --test project_authoring --test compact_asset_reference --test authoring
           --test prefab --test schema_v2 --test project_asset_database --test compact_float_defaults --test derive_ui
-          --test cooked --test cooked_assets --test tileset --test property_animation_clip --test animation_runtime --test import_cache --test import_image --test runtime_loading --test runtime_sprite_assets --test runtime_scene --test scene_physics
+          --test cooked --test cooked_assets --test tileset --test property_animation_clip --test animation_runtime
+          --test camera_rig --test particles --test import_cache --test import_image --test runtime_loading
+          --test runtime_sprite_assets --test runtime_scene --test scene_physics
           --features nara/scene-cook,nara/physics-2d,nara_asset/tasks,nara_asset/cook,nara_asset/image-import,nara_asset/hot-reload,nara_input/gamepad,nara_project/delivery,nara_scene/cook,nara_scene/runtime,nara_scene/save,nara_reflect/serde,nara_reflect/postcard,nara_render/animation,nara_render/material-authoring,nara_render/sprite-render,nara_render/sprite-source-hydration,nara_ui/runtime
           --features nara_audio/scene-runtime
           --no-tests fail --no-fail-fast

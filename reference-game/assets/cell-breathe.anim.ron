@@ -1,0 +1,10 @@
+(
+    duration_ns: 1600000000,
+    mode: PingPong,
+    tracks: [
+        (component: "nara.Transform2d", path: "scale", keyframes: [
+            (time_ns: 0, value: Vec2((1.0, 1.0)), easing: SineInOut),
+            (time_ns: 1600000000, value: Vec2((1.22, 1.22))),
+        ]),
+    ],
+)

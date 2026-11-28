@@ -335,3 +335,62 @@ pub enum CookSceneError {
         target: EntityUuid,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use bevy_ecs::world::World;
+    use nara_core::{Color, Vec2};
+    use nara_reflect::ComponentValue;
+
+    use super::*;
+    use crate::{
+        authoring::SceneEntity,
+        components::{LegacySpriteSource, SpriteSource},
+        cooked::{CookedRegistry, CookedScene},
+    };
+
+    #[test]
+    fn legacy_sprite_columns_decode_with_visual_defaults_and_asset_references() {
+        let image = "c6c942a6-406c-4baa-88f4-fb277fbf2482".parse().unwrap();
+        let material = "7ef992f8-8d1b-4c1a-b06d-dfdc5cd6ec1d".parse().unwrap();
+        let id = "1e6a425a-7625-41a7-bf24-07d4f9208dfd".parse().unwrap();
+        let expected = SpriteSource {
+            size: Vec2::new(24.0, 17.0),
+            tint: Color::rgba(0.1, 0.25, 0.5, 0.75),
+            layer: -2,
+            image: Some(image),
+            material: Some(material),
+            ..Default::default()
+        };
+        let ComponentValue::Map(mut fields) = expected.encode_component().unwrap() else {
+            unreachable!();
+        };
+        fields.retain(|field, _| {
+            matches!(
+                field.as_str(),
+                "size" | "tint" | "layer" | "image" | "material"
+            )
+        });
+        let legacy =
+            LegacySpriteSource::decode_component((&ComponentValue::Map(fields)).into()).unwrap();
+        let mut row = SceneEntity::new(id, "Legacy sprite");
+        row.set(&legacy).unwrap();
+        let document = SceneDocument {
+            id: "29428e25-cf68-40f9-96f9-ee04b3033456".parse().unwrap(),
+            assets: BTreeMap::new(),
+            entities: vec![row],
+        };
+        let schemas =
+            ComponentSchemaCatalog::from_components([LegacySpriteSource::type_schema().unwrap()])
+                .unwrap();
+        let compiled = encode_flattened(&document, &schemas).unwrap();
+        assert_eq!(compiled.asset_dependencies, [material, image]);
+
+        let mut registry = CookedRegistry::new();
+        registry.register_builtins().unwrap();
+        let scene = CookedScene::parse(&compiled.bytes).unwrap();
+        let mut world = World::new();
+        let entities = scene.prepare(&registry).unwrap().spawn(&mut world, || ());
+        assert_eq!(world.get::<SpriteSource>(entities[&id]), Some(&expected));
+    }
+}

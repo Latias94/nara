@@ -188,6 +188,7 @@ mod hydration {
             layer: 5,
             image: Some(id(1)),
             material: Some(id(3)),
+            ..Default::default()
         }
     }
 
@@ -253,6 +254,7 @@ mod hydration {
             tint: Color::WHITE,
             image: Some(id(2)),
             material: Some(id(4)),
+            ..Default::default()
         };
         tick(&mut app);
         assert_eq!(image_red(app.world(), entity), Some(17));

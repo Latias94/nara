@@ -2,6 +2,8 @@ Scene(
     version: 1,
     id: "681a78dc-b6ab-4f3a-8eb6-4742d2ced237",
     assets: {
+        "courier": (id: "0193f100-2222-7000-8000-000000000102", hint: "courier.png"),
+        "courier_animation": (id: "0193f100-2222-7000-8000-000000000101", hint: "courier.sanim.ron"),
         "gate_material": (id: "01a21a30-ef81-76a6-8eab-ca52f3bae4dc", hint: "gate.material.ron"),
         "power_cell": (id: "01a219be-557a-7c47-82c3-84a2b7f7894c", hint: "power-cell.prefab.ron"),
     },
@@ -11,7 +13,8 @@ Scene(
             name: "Courier",
             components: {
                 "nara.ColliderSource": (radius: 10.0),
-                "nara.SpriteSource": (size: (32.0, 32.0), tint: (0.65, 0.9, 1.0, 1.0), layer: 5),
+                "nara.SpriteAnimatorSource": (set: "@courier_animation", clip: "idle"),
+                "nara.SpriteSource": (size: (32.0, 32.0), tint: (0.65, 0.9, 1.0, 1.0), layer: 5, image: "@courier"),
                 "nara.Transform2d": (translation: (-256.0, 96.0)),
                 "night-relay.Pilot": (),
             },
@@ -201,6 +204,14 @@ Scene(
                 "nara.ColliderSource": (half_extents: (16.0, 32.0)),
                 "nara.SpriteSource": (size: (32.0, 64.0), tint: (0.087, 0.156, 0.19, 1.0), layer: -9),
                 "nara.Transform2d": (translation: (64.0, -80.0)),
+            },
+        ),
+        (
+            id: "4f99b200-2a5e-4872-8d3d-000000000022",
+            name: "Arena camera",
+            components: {
+                "nara.Camera2dSource": (viewport_height: 390.0, clear_color: (0.009, 0.015, 0.026, 1.0)),
+                "nara.Transform2d": (translation: (-72.0, 20.0)),
             },
         ),
     ],

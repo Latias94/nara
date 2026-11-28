@@ -19,6 +19,7 @@ mod error;
 mod frame_buffer;
 mod output;
 mod pass;
+mod post_process;
 mod renderer;
 #[cfg(feature = "sprite-render")]
 mod sprite_tile;
@@ -44,6 +45,7 @@ pub use device::{GpuContext, GpuDeviceErrors};
 pub use error::WgpuRenderError;
 pub use output::WgpuImageOutput;
 pub use pass::{Attachment, PassAttachments, RenderPass, RenderPassContext, RenderTargetView};
+pub use post_process::{Bloom2d, PostProcess2d, ScreenFade2d, Vignette2d};
 pub use renderer::{RenderInput, RenderReport, Renderer};
 #[cfg(feature = "sprite-render")]
 pub use sprite_tile::SpriteTilePass;

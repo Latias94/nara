@@ -1,6 +1,7 @@
 use std::{
     f32::consts::{FRAC_PI_2, FRAC_PI_6, PI},
-    time::Duration,
+    hint::black_box,
+    time::{Duration, Instant},
 };
 
 use nara_app::{App, FixedTime};
@@ -81,6 +82,34 @@ fn grid_merging_keeps_contiguous_runs_and_preserves_holes() {
         ]
     );
     assert!(merge_solid_grid_rects(0, 8, |_, _| unreachable!()).is_empty());
+}
+
+#[test]
+#[ignore = "run explicitly with --release to measure tilemap collider generation"]
+fn benchmark_greedy_collision_rectangles_for_sixty_four_chunks() {
+    const SIDE: u32 = 32;
+    const CHUNKS: u32 = 64;
+    const MAPS: u32 = 200;
+    let is_solid = |x, y| x == 0 || x == SIDE - 1 || y == 0 || y >= SIDE - 3;
+    let solid = (0..SIDE)
+        .flat_map(|y| (0..SIDE).map(move |x| (x, y)))
+        .filter(|&(x, y)| is_solid(x, y))
+        .count();
+    let start = Instant::now();
+    for _ in 0..MAPS {
+        for _ in 0..CHUNKS {
+            let rectangles = black_box(merge_solid_grid_rects(black_box(SIDE), SIDE, is_solid));
+            assert_eq!(rectangles.len(), 4);
+        }
+    }
+    let per_map = start.elapsed() / MAPS;
+    println!(
+        "grid_merge_64_chunks: {:.1} µs per map, {} solid tiles -> {} rectangles",
+        per_map.as_secs_f64() * 1.0e6,
+        solid * CHUNKS as usize,
+        4 * CHUNKS,
+    );
+    assert!(per_map < Duration::from_millis(5));
 }
 
 #[test]

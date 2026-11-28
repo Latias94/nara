@@ -1,9 +1,9 @@
 use std::error::Error;
 
 #[cfg(feature = "source")]
-const USAGE: &str = "game [--verify-first-present | --verify-gameplay | --verify-r1 <save-dir> | --editor-play <scene-path>]";
+const USAGE: &str = "game [--verify-first-present | --verify-gameplay | --verify-r1 <save-dir> | --verify-r2 <save-dir> | --editor-play <scene-path>]";
 #[cfg(not(feature = "source"))]
-const USAGE: &str = "game [--verify-first-present | --verify-gameplay | --verify-r1 <save-dir>]";
+const USAGE: &str = "game [--verify-first-present | --verify-gameplay | --verify-r1 <save-dir> | --verify-r2 <save-dir>]";
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut arguments = std::env::args_os().skip(1);
@@ -16,6 +16,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         (Some("--verify-gameplay"), None) => nara_reference_game::desktop::verify_gameplay(),
         (Some("--verify-r1"), Some(directory)) if arguments.next().is_none() => {
             nara_reference_game::desktop::verify_r1(std::path::Path::new(&directory))
+        }
+        (Some("--verify-r2"), Some(directory)) if arguments.next().is_none() => {
+            nara_reference_game::desktop::verify_r2(std::path::Path::new(&directory))
         }
         #[cfg(feature = "source")]
         (Some("--editor-play"), Some(scene)) if arguments.next().is_none() => {

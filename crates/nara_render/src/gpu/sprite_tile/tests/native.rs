@@ -14,6 +14,8 @@ use crate::{
 
 use super::*;
 
+mod visual;
+
 const RED: [u8; 4] = [255, 0, 0, 255];
 const GREEN: [u8; 4] = [0, 255, 0, 255];
 const BLUE: [u8; 4] = [0, 0, 255, 255];
@@ -296,27 +298,36 @@ impl NativeSceneTest {
     }
 
     fn input(&mut self, views: &[ExtractedView], batches: Vec<SpriteBatch>) -> RenderInput {
-        self.frame += 1;
         let mut views_resource = ExtractedViews::default();
         for view in views {
             views_resource.push(*view);
         }
-        let packet = build_image_render_frame_packet(
-            self.source,
-            self.frame,
-            &views_resource,
-            self.packet_target,
-        )
-        .unwrap()
-        .unwrap();
         let mut world = nara_ecs::World::new();
         let mut batches_resource = SpriteBatches::default();
         batches_resource.replace(batches);
         world.insert_resource(batches_resource);
-        RenderInput::capture(&world, packet)
+        self.capture(&world, &views_resource)
+    }
+
+    fn capture(&mut self, world: &nara_ecs::World, views: &ExtractedViews) -> RenderInput {
+        self.frame += 1;
+        let packet =
+            build_image_render_frame_packet(self.source, self.frame, views, self.packet_target)
+                .unwrap()
+                .unwrap();
+        RenderInput::capture(world, packet)
     }
 
     fn draw(&mut self, input: &RenderInput) -> ([[[u8; 4]; 4]; 2], WgpuNativeWorkStats) {
+        let (pixels, work) = self.draw_pixels(input);
+        let row = pixels[2];
+        (
+            [row[..4].try_into().unwrap(), row[4..].try_into().unwrap()],
+            work,
+        )
+    }
+
+    fn draw_pixels(&mut self, input: &RenderInput) -> ([[[u8; 4]; 8]; 4], WgpuNativeWorkStats) {
         let report = self
             .renderer
             .render_to_view(
@@ -368,11 +379,12 @@ impl NativeSceneTest {
             .unwrap()
             .unwrap();
         let mapped = buffer.slice(..).get_mapped_range().unwrap();
-        let row = &mapped[2 * stride as usize..2 * stride as usize + 32];
-        let pixels = [
-            bytemuck::cast_slice(&row[..16]).try_into().unwrap(),
-            bytemuck::cast_slice(&row[16..]).try_into().unwrap(),
-        ];
+        let pixels = std::array::from_fn(|row| {
+            let start = row * stride as usize;
+            bytemuck::cast_slice(&mapped[start..start + 32])
+                .try_into()
+                .unwrap()
+        });
         drop(mapped);
         buffer.unmap();
         (pixels, report.work)

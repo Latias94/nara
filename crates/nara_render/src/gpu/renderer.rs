@@ -7,10 +7,11 @@ use crate::ViewLoadOp;
 use crate::{ClearColor, Color, Extent2d, RenderFramePacket, RenderFrameTarget};
 
 use super::{
-    GpuContext, PassAttachments, RenderPass, RenderPassContext, RenderTargetView,
+    GpuContext, PassAttachments, PostProcess2d, RenderPass, RenderPassContext, RenderTargetView,
     TextureCacheStats, WgpuImageOutput, WgpuNativeWorkStats, WgpuRenderError,
     canvas::CanvasPipelines,
     frame_buffer::FrameRingBuffer,
+    post_process::{PostProcessInput, PostProcessPass},
     texture_cache::{TextureCache, TextureLease},
 };
 
@@ -22,6 +23,7 @@ mod tests;
 pub struct RenderInput {
     packet: RenderFramePacket,
     clear: Color,
+    post_process: PostProcess2d,
     #[cfg(feature = "sprite-render")]
     sprites: crate::sprite_render::SpriteBatches,
     #[cfg(feature = "hud-runtime")]
@@ -39,6 +41,10 @@ impl RenderInput {
                 .copied()
                 .unwrap_or_default()
                 .0,
+            post_process: world
+                .get_resource::<PostProcess2d>()
+                .copied()
+                .unwrap_or_default(),
             #[cfg(feature = "sprite-render")]
             sprites: world
                 .get_resource::<crate::sprite_render::SpriteBatches>()
@@ -54,6 +60,12 @@ impl RenderInput {
 
     pub fn clear_color(&self) -> Color {
         self.clear
+    }
+
+    /// Returns the effects captured with this frame.
+    #[must_use]
+    pub const fn post_process(&self) -> PostProcess2d {
+        self.post_process
     }
 
     #[cfg(feature = "sprite-render")]
@@ -83,13 +95,14 @@ pub struct RenderReport {
     pub hud: Result<Option<crate::hud::HudPresentation>, crate::hud::HudDrawError>,
 }
 
-/// Executes the same scene, HUD and optional editor overlay for both target kinds.
+/// Executes the scene, optional post processing, HUD, and editor overlay for both target kinds.
 pub struct Renderer {
     context: GpuContext,
     error_cursor: u64,
     targets: TextureCache,
     uploads: FrameRingBuffer,
     canvas: CanvasPipelines,
+    post_process: PostProcessPass,
     #[cfg(feature = "sprite-render")]
     scene: super::SpriteTilePass,
     #[cfg(feature = "hud-runtime")]
@@ -105,6 +118,7 @@ impl Renderer {
             targets: TextureCache::default(),
             uploads: FrameRingBuffer::default(),
             canvas: CanvasPipelines::default(),
+            post_process: PostProcessPass::default(),
             #[cfg(feature = "sprite-render")]
             scene: super::SpriteTilePass::default(),
             #[cfg(feature = "hud-runtime")]
@@ -159,6 +173,7 @@ impl Renderer {
         self.targets = TextureCache::default();
         self.uploads = FrameRingBuffer::default();
         self.canvas = CanvasPipelines::default();
+        self.post_process.clear_caches();
         #[cfg(feature = "sprite-render")]
         {
             self.scene = super::SpriteTilePass::default();
@@ -180,7 +195,9 @@ impl Renderer {
     ) -> Result<RenderReport, WgpuRenderError> {
         self.validate_extent(frame, target.extent)?;
         self.check_errors()?;
-        self.render(frame, target, WgpuNativeWorkStats::default(), None)
+        let mut work = WgpuNativeWorkStats::default();
+        let scene = self.acquire_scene_targets(frame, false, &mut work)?;
+        self.render(frame, target, work, scene, None)
     }
 
     /// Draws into a leased sRGB image for sampling on the same queue.
@@ -200,6 +217,7 @@ impl Renderer {
         self.check_errors()?;
 
         let mut work = WgpuNativeWorkStats::default();
+        let scene = self.acquire_scene_targets(frame, true, &mut work)?;
         let lease = self.targets.acquire(
             self.context.device(),
             extent,
@@ -207,7 +225,7 @@ impl Renderer {
             self.context.loss_signal(),
             &mut work,
         )?;
-        let rendered = self.render(frame, lease.target(), work, Some(Arc::clone(&lease)));
+        let rendered = self.render(frame, lease.target(), work, scene, Some(Arc::clone(&lease)));
         match rendered {
             Ok(report) => Ok((WgpuImageOutput(lease), report)),
             Err(error) => {
@@ -241,27 +259,71 @@ impl Renderer {
         Ok(())
     }
 
+    fn acquire_scene_targets(
+        &self,
+        frame: &RenderInput,
+        image_output: bool,
+        work: &mut WgpuNativeWorkStats,
+    ) -> Result<SceneTargets, WgpuRenderError> {
+        let canvas = frame.packet.world_canvas();
+        let effects = frame.post_process();
+        let mut acquire = |extent, format| {
+            self.targets.acquire(
+                self.context.device(),
+                extent,
+                format,
+                self.context.loss_signal(),
+                work,
+            )
+        };
+        if effects.is_active() {
+            let has_bloom = effects.has_bloom();
+            let count = if has_bloom { 3 } else { 1 };
+            self.targets
+                .check_available(count + usize::from(image_output))?;
+            let extent = canvas.map_or(frame.packet.target().extent(), |canvas| canvas.extent());
+            let scene = acquire(extent, PostProcessPass::FORMAT)?;
+            let bloom = if has_bloom {
+                let half = Extent2d {
+                    width: extent.width.div_ceil(2),
+                    height: extent.height.div_ceil(2),
+                };
+                Some([
+                    acquire(half, PostProcessPass::FORMAT)?,
+                    acquire(half, PostProcessPass::FORMAT)?,
+                ])
+            } else {
+                None
+            };
+            Ok(SceneTargets::PostProcess { scene, bloom })
+        } else if let Some(canvas) = canvas {
+            self.targets
+                .check_available(1 + usize::from(image_output))?;
+            acquire(canvas.extent(), WgpuImageOutput::FORMAT).map(SceneTargets::Canvas)
+        } else {
+            Ok(SceneTargets::Direct)
+        }
+    }
+
     fn render(
         &mut self,
         frame: &RenderInput,
         target: RenderTargetView<'_>,
         mut work: WgpuNativeWorkStats,
+        scene_targets: SceneTargets,
         output_lease: Option<Arc<TextureLease>>,
     ) -> Result<RenderReport, WgpuRenderError> {
         let device = self.context.device();
         let queue = self.context.queue();
-        let canvas = frame.packet.world_canvas();
-        let canvas_lease = canvas
-            .map(|canvas| {
-                self.targets.acquire(
-                    device,
-                    canvas.extent(),
-                    WgpuImageOutput::FORMAT,
-                    self.context.loss_signal(),
-                    &mut work,
-                )
-            })
-            .transpose()?;
+        let (scene_target, post_process) = match &scene_targets {
+            SceneTargets::Direct => (target, None),
+            SceneTargets::Canvas(lease) => (lease.target(), None),
+            SceneTargets::PostProcess { scene, bloom } => {
+                let scene = scene.target();
+                let bloom = bloom.as_ref().map(|[a, b]| [a.target(), b.target()]);
+                (scene, Some(PostProcessInput { scene, bloom }))
+            }
+        };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("nara_frame"),
         });
@@ -272,10 +334,11 @@ impl Renderer {
             device,
             queue,
             encoder: &mut encoder,
-            target: canvas_lease.as_ref().map_or(target, |lease| lease.target()),
+            target: scene_target,
             frame,
             work: &mut work,
             uploads: &mut self.uploads,
+            post_process,
             #[cfg(feature = "hud-runtime")]
             hud: &mut hud,
         };
@@ -297,10 +360,12 @@ impl Renderer {
                     .unwrap_or(frame.clear),
             );
 
-            let scene_view = context.target.view;
             context.target = target;
-            if let Some(canvas) = canvas {
-                self.canvas.composite(&mut context, scene_view, canvas)?;
+            if post_process.is_some() {
+                self.post_process.execute(&mut context)?;
+            } else if let Some(canvas) = frame.packet.world_canvas() {
+                self.canvas
+                    .composite(&mut context, scene_target.view, canvas)?;
             }
             #[cfg(feature = "hud-runtime")]
             self.hud.execute(&mut context)?;
@@ -312,10 +377,10 @@ impl Renderer {
         let rendered = (|| {
             if let Err(error) = encoded {
                 drop(encoder);
+                self.context.check_signal(&mut self.error_cursor)?;
                 if work.issued_buffer_write_calls != 0 || work.issued_texture_write_calls != 0 {
                     // WGPU holds queue writes until a submit. Retire their staging even when
                     // a later pass rejects the frame. The failed encoder is already discarded.
-                    self.context.check_signal(&mut self.error_cursor)?;
                     queue.submit([]);
                     self.context.check_signal(&mut self.error_cursor)?;
                 }
@@ -325,8 +390,8 @@ impl Renderer {
             self.context.check_signal(&mut self.error_cursor)?;
             let submission = queue.submit([commands]);
             // Hold each texture even when submission has reported an uncaptured error.
-            if canvas_lease.is_some() || output_lease.is_some() {
-                let leases = (canvas_lease.clone(), output_lease);
+            if !matches!(scene_targets, SceneTargets::Direct) || output_lease.is_some() {
+                let leases = (scene_targets.clone(), output_lease);
                 queue.on_submitted_work_done(move || drop(leases));
             }
             self.context.check_signal(&mut self.error_cursor)?;
@@ -338,10 +403,8 @@ impl Renderer {
             })
         })();
         self.uploads.end_frame();
-        if rendered.is_err()
-            && let Some(lease) = canvas_lease
-        {
-            lease.discard();
+        if rendered.is_err() {
+            scene_targets.discard();
         }
         if matches!(
             rendered,
@@ -350,5 +413,30 @@ impl Renderer {
             self.discard_caches();
         }
         rendered
+    }
+}
+
+#[derive(Clone)]
+enum SceneTargets {
+    Direct,
+    Canvas(Arc<TextureLease>),
+    PostProcess {
+        scene: Arc<TextureLease>,
+        bloom: Option<[Arc<TextureLease>; 2]>,
+    },
+}
+
+impl SceneTargets {
+    fn discard(&self) {
+        match self {
+            Self::Direct => {}
+            Self::Canvas(lease) => lease.discard(),
+            Self::PostProcess { scene, bloom } => {
+                scene.discard();
+                for lease in bloom.iter().flatten() {
+                    lease.discard();
+                }
+            }
+        }
     }
 }

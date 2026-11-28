@@ -56,6 +56,14 @@ tilemap, collision, sound, and a HUD. Run it with the features below.
 cargo run --locked --example first_game --features physics-2d,audio-device,presentation-2d,presentation-ui,desktop-winit,render-wgpu
 ```
 
+The [platformer demo](examples/platformer_demo.rs) uses merged tile colliders, a slope, and one-way
+platforms. Move with **A/D** or the **arrow keys**, and jump with **Space**. Add `-- --verify` to
+replay a slope climb and one-way landing and exit after the window presents the result.
+
+```text
+cargo run --locked --example platformer_demo --features scene-cooked,physics-2d,presentation-2d,desktop-winit,render-wgpu
+```
+
 On Linux, audio device support requires the ALSA development headers. Optional gamepad support
 requires the libudev development headers.
 

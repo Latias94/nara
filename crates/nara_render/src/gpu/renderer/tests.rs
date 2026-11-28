@@ -19,6 +19,8 @@ use crate::{
 
 use super::*;
 
+mod post_process;
+
 fn gpu() -> Renderer {
     Renderer::new(
         GpuContext::request(
@@ -30,18 +32,30 @@ fn gpu() -> Renderer {
 }
 
 fn frame(canvas: bool) -> (RenderInput, RenderInput, Extent2d) {
-    let runtime = RuntimeInstance::start(App::new()).unwrap();
     let extent = Extent2d::new(8, 8).unwrap();
-    let window = Window::new(
-        "test target",
-        WindowResolution::new(extent.width, extent.height),
-    );
     let canvas = canvas.then(|| {
         WorldCanvas::new(4, 2)
             .unwrap()
             .with_bar_color(Color::rgb(0.0, 0.0, 1.0))
             .unwrap()
     });
+    let window_frame = window_packet(extent, canvas, Color::rgba(1.0, 0.0, 0.0, 0.25));
+    let image = RenderImagePacket::new(RenderImage2d::allocate_handle().unwrap(), extent).unwrap();
+    let image_frame = window_frame.with_image_target(image).unwrap();
+    let world = World::new();
+    (
+        RenderInput::capture(&world, window_frame),
+        RenderInput::capture(&world, image_frame),
+        extent,
+    )
+}
+
+fn window_packet(extent: Extent2d, canvas: Option<WorldCanvas>, clear: Color) -> RenderFramePacket {
+    let runtime = RuntimeInstance::start(App::new()).unwrap();
+    let window = Window::new(
+        "test target",
+        WindowResolution::new(extent.width, extent.height),
+    );
     let scene_extent = canvas.map_or(extent, WorldCanvas::extent);
     let viewport = ViewportRect::from_extent(scene_extent).unwrap();
     let mut views = ExtractedViews::default();
@@ -52,7 +66,7 @@ fn frame(canvas: bool) -> (RenderInput, RenderInput, Extent2d) {
         order: 0,
         viewport,
         mapping: ViewMapping2d::orthographic(Mat3::IDENTITY, 2.0, viewport).unwrap(),
-        load: ViewLoadOp::Clear(Color::rgba(1.0, 0.0, 0.0, 0.25)),
+        load: ViewLoadOp::Clear(clear),
     });
     let window_frame = build_render_frame_packet_with_world_canvas(
         runtime.generation(),
@@ -64,15 +78,8 @@ fn frame(canvas: bool) -> (RenderInput, RenderInput, Extent2d) {
     )
     .unwrap()
     .unwrap();
-    let image = RenderImagePacket::new(RenderImage2d::allocate_handle().unwrap(), extent).unwrap();
-    let image_frame = window_frame.with_image_target(image).unwrap();
-    let inputs = (
-        RenderInput::capture(runtime.world(), window_frame),
-        RenderInput::capture(runtime.world(), image_frame),
-        extent,
-    );
     runtime.finish().unwrap();
-    inputs
+    window_frame
 }
 
 struct EditorOverlay(wgpu::RenderPipeline);

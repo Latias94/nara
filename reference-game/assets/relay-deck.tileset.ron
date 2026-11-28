@@ -1,0 +1,6 @@
+TileSet(
+    image: "0193f100-2222-7000-8000-000000000105",
+    layout: (tile_size: (8.0, 8.0), columns: 2, rows: 1),
+    sampler: (min_filter: nearest, mag_filter: nearest, mipmap_filter: nearest, address_mode_u: clamp_to_edge, address_mode_v: clamp_to_edge),
+    tiles: [(), (solid: true, collision_group: 1)],
+)

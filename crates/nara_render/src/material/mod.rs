@@ -61,6 +61,8 @@ pub mod __macro_support {
 pub enum AlphaMode2d {
     Opaque,
     Blend,
+    /// Adds source RGB weighted by its alpha. Target alpha uses source-over coverage.
+    Additive,
 }
 
 impl Default for AlphaMode2d {

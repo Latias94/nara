@@ -1,6 +1,7 @@
 use std::{cmp::Ordering, sync::Arc};
 
 use crate::image::{PreparedImageSnapshot, PreparedImages, image_resource_key};
+use crate::material::AlphaMode2d;
 use crate::{ExtractedView, ExtractedViews};
 use nara_core::{Color, Vec2};
 use nara_ecs::{Res, ResMut};
@@ -269,7 +270,10 @@ fn resolve_sprite_material(
     };
     let material_extension = sprite.material_extension.clone();
     let mut material = SpriteMaterialKey::from_material(sprite.material);
-    if let Some(extension) = &material_extension {
+    // An explicit additive sprite uses the bound shader with its own blend policy.
+    if let Some(extension) = &material_extension
+        && material.alpha_mode != AlphaMode2d::Additive
+    {
         material.alpha_mode = extension.binding.generation().declaration().alpha_mode();
     }
     Some((material, image, material_extension, sprite.texture_region))

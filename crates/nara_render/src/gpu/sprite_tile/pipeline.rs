@@ -128,13 +128,23 @@ fn create_pipeline(
             module: &shader,
             entry_point: Some(match key.alpha {
                 AlphaMode2d::Opaque => "fs_opaque",
-                AlphaMode2d::Blend => "fs_main",
+                AlphaMode2d::Blend | AlphaMode2d::Additive => "fs_main",
             }),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: key.format,
-                blend: (key.alpha == AlphaMode2d::Blend)
-                    .then_some(wgpu::BlendState::ALPHA_BLENDING),
+                blend: match key.alpha {
+                    AlphaMode2d::Opaque => None,
+                    AlphaMode2d::Blend => Some(wgpu::BlendState::ALPHA_BLENDING),
+                    AlphaMode2d::Additive => Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent::OVER,
+                    }),
+                },
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),

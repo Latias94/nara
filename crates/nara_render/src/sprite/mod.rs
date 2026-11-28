@@ -18,6 +18,8 @@ pub use hydration::{
 mod property_animation;
 #[cfg(feature = "sprite-source-hydration")]
 pub use property_animation::SpritePropertyAnimationPlugin;
+mod visual;
+pub use visual::{NineSlice, SpriteScaleMode};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -96,6 +98,11 @@ pub struct Sprite {
     pub texture_region: Option<TextureRegion>,
     pub size: Vec2,
     pub anchor: SpriteAnchor,
+    /// Mirrors the texture from left to right.
+    pub flip_x: bool,
+    /// Mirrors the texture from top to bottom.
+    pub flip_y: bool,
+    pub scale_mode: SpriteScaleMode,
     pub layer: i32,
     /// Explicit sort group within a layer. Y sorting never crosses this key.
     pub sort_key: i32,
@@ -166,6 +173,9 @@ impl Sprite {
             texture_region: None,
             size,
             anchor: SpriteAnchor::CENTER,
+            flip_x: false,
+            flip_y: false,
+            scale_mode: SpriteScaleMode::Stretch,
             layer: 0,
             sort_key: 0,
             y_sort_anchor: None,
@@ -179,6 +189,9 @@ impl Sprite {
             texture_region: None,
             size,
             anchor: SpriteAnchor::CENTER,
+            flip_x: false,
+            flip_y: false,
+            scale_mode: SpriteScaleMode::Stretch,
             layer: 0,
             sort_key: 0,
             y_sort_anchor: None,
@@ -188,6 +201,19 @@ impl Sprite {
     #[must_use]
     pub fn with_texture_region(mut self, region: TextureRegion) -> Self {
         self.texture_region = Some(region);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_flip(mut self, flip_x: bool, flip_y: bool) -> Self {
+        self.flip_x = flip_x;
+        self.flip_y = flip_y;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_scale_mode(mut self, scale_mode: SpriteScaleMode) -> Self {
+        self.scale_mode = scale_mode;
         self
     }
 

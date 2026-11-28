@@ -2,6 +2,7 @@ Prefab(
     version: 1,
     id: "2e3f8b73-8f73-46a1-9443-1b8e5159f543",
     assets: {
+        "motion": (id: "0193f100-2222-7000-8000-000000000103", hint: "cell-breathe.anim.ron"),
         "texture": (id: "01a219be-557a-739e-81a5-2a8c6e88aee5", hint: "power-cell.png"),
     },
     entities: [
@@ -9,6 +10,7 @@ Prefab(
             id: "1e6a425a-7625-41a7-bf24-07d4f9208dfd",
             name: "Power cell",
             components: {
+                "nara.AnimationSource": (clip: "@motion"),
                 "nara.ColliderSource": (radius: 15.0),
                 "nara.SpriteSource": (size: (15.0, 15.0), tint: (0.99, 0.57, 0.1, 1.0), layer: 2, image: "@texture"),
                 "nara.Transform2d": (rotation: 0.7853982),

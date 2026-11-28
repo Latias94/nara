@@ -9,7 +9,7 @@ use nara::{
 
 use crate::{
     RunRules,
-    arena::{Actor, Arena, ArenaPlan, CELL_COUNT, SceneActor, SceneRow},
+    arena::{Actor, Arena, ArenaPlan, CELL_COUNT, COURIER, SceneActor, SceneRow, WALLS},
     audio::{ARRIVAL_BUS, Sounds},
     campaign::{Campaign, Sector, resolve_switch},
 };
@@ -130,6 +130,11 @@ impl Round {
         self.cells.iter().filter(|&&collected| collected).count()
     }
 
+    #[cfg(feature = "desktop")]
+    pub(crate) const fn collected_cells(&self) -> [bool; CELL_COUNT] {
+        self.cells
+    }
+
     pub(crate) fn can_extract(&self) -> bool {
         self.cells.iter().all(|&collected| collected)
     }
@@ -236,12 +241,18 @@ pub(crate) fn advance_round(
     let displacement = movement * round.velocity_limit * delta.as_secs_f32();
     round.moving = false;
     if displacement != Vec2::ZERO {
-        let motion = physics.move_top_down_character(
+        let motion = physics.move_top_down_character_with_filter(
             &pilot.0,
             PhysicsPose2d::new(round.position, 0.0),
             displacement,
             delta,
-            None,
+            PhysicsQueryFilter2d {
+                groups: Some(CollisionGroups2d {
+                    memberships: COURIER,
+                    filters: WALLS,
+                }),
+                ..Default::default()
+            },
         )?;
         round.position += motion.translation;
         round.moving = motion.translation.length_squared() > 0.0001;

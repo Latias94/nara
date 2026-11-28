@@ -102,7 +102,9 @@ impl PluginGroup for DefaultPlugins {
             .add_default::<nara_scene::animation::AnimationPlugin>()
             .add_default::<nara_scene::animation::TweenPlugin>();
         #[cfg(feature = "runtime-2d")]
-        let plugins = plugins.add_default::<nara_render::animation::SpriteAnimationPlugin>();
+        let plugins = plugins
+            .add_default::<nara_render::animation::SpriteAnimationPlugin>()
+            .add_default::<nara_render::particles::ParticlePlugin>();
         #[cfg(all(feature = "runtime-2d", feature = "scene-cooked"))]
         let plugins = plugins
             .add_default::<nara_render::sprite::SpriteSourceHydrationPlugin>()
@@ -152,6 +154,7 @@ mod desktop {
         let plugins = plugins
             .add_definition(nara_window::plugin(Some(window)))
             .add_default::<nara_render::RenderPlugin>()
+            .add_default::<nara_render::camera::CameraRig2dPlugin>()
             .add_default::<DesktopPresentationPlugin>();
         #[cfg(feature = "presentation-2d")]
         let plugins = plugins

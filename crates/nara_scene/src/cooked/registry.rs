@@ -16,8 +16,8 @@ use crate::animation::{ApplyProperty, apply_schema_field};
 use crate::{
     Name,
     components::{
-        AnimationSource, ColliderSource, SpriteAnimatorSource, SpriteSource, TilemapSource,
-        Transform2d, Visibility,
+        AnimationSource, Camera2dSource, ColliderSource, LegacySpriteSource, SpriteAnimatorSource,
+        SpriteSource, TilemapSource, Transform2d, Visibility,
     },
 };
 
@@ -69,6 +69,7 @@ impl CookedRegistry {
                         || field.has_capability(ComponentCapability::EntityRef)
                 }),
                 decode: decode_column::<T>,
+                previous: None,
                 #[cfg(feature = "runtime")]
                 apply_property: apply_schema_field::<T>,
             },
@@ -87,7 +88,16 @@ impl CookedRegistry {
             .register::<ColliderSource>()?
             .register::<TilemapSource>()?
             .register::<AnimationSource>()?
-            .register::<SpriteAnimatorSource>()?;
+            .register::<SpriteAnimatorSource>()?
+            .register::<Camera2dSource>()?;
+        let mut previous = Self::new();
+        previous.register::<LegacySpriteSource>()?;
+        let sprite_hash = wire::type_hash(SpriteSource::COMPONENT_ID);
+        if let Some(current) = builtins.entries.get_mut(&sprite_hash)
+            && let Some(previous) = previous.entries.remove(&sprite_hash)
+        {
+            current.previous = Some((previous.schema_hash, decode_legacy_sprite));
+        }
         for (&type_hash, entry) in &builtins.entries {
             self.check_available(type_hash, entry.component)?;
         }
@@ -124,12 +134,12 @@ impl CookedRegistry {
                         .ok_or(CookedSceneError::MissingSchema {
                             type_hash: column.type_hash,
                         })?;
-                if entry.schema_hash != column.schema_hash {
-                    return Err(CookedSceneError::SchemaMismatch {
+                entry
+                    .decoder(column.schema_hash)
+                    .map(|decode| (entry, decode))
+                    .ok_or(CookedSceneError::SchemaMismatch {
                         component: entry.component,
-                    });
-                }
-                Ok(entry)
+                    })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -137,7 +147,7 @@ impl CookedRegistry {
             .columns
             .iter()
             .zip(entries)
-            .map(|(column, entry)| (entry.decode)(scene, column, entry))
+            .map(|(column, (entry, decode))| decode(scene, column, entry))
             .collect()
     }
 
@@ -158,8 +168,21 @@ struct Entry {
     schema_hash: [u8; 32],
     has_references: bool,
     decode: DecodeColumn,
+    previous: Option<([u8; 32], DecodeColumn)>,
     #[cfg(feature = "runtime")]
     apply_property: ApplyProperty,
+}
+
+impl Entry {
+    fn decoder(&self, hash: [u8; 32]) -> Option<DecodeColumn> {
+        if self.schema_hash == hash {
+            Some(self.decode)
+        } else {
+            self.previous
+                .filter(|(previous, _)| *previous == hash)
+                .map(|(_, decode)| decode)
+        }
+    }
 }
 
 pub(super) trait ReadyColumn: Any {
@@ -219,6 +242,29 @@ fn decode_column<T: Component + Schema>(
     column: &Column<'_>,
     entry: &Entry,
 ) -> Result<Box<dyn ReadyColumn>, CookedSceneError> {
+    Ok(Box::new(TypedColumn(decode_rows::<T>(
+        scene, column, entry,
+    )?)))
+}
+
+fn decode_legacy_sprite(
+    scene: &CookedScene<'_>,
+    column: &Column<'_>,
+    entry: &Entry,
+) -> Result<Box<dyn ReadyColumn>, CookedSceneError> {
+    let rows = decode_rows::<LegacySpriteSource>(scene, column, entry)?;
+    Ok(Box::new(TypedColumn(
+        rows.into_iter()
+            .map(|(index, source)| (index, SpriteSource::from(source)))
+            .collect(),
+    )))
+}
+
+fn decode_rows<T: Schema>(
+    scene: &CookedScene<'_>,
+    column: &Column<'_>,
+    entry: &Entry,
+) -> Result<Vec<(usize, T)>, CookedSceneError> {
     let mut values = Vec::with_capacity(column.row_count);
     column.read_rows(scene.entity_count(), |index, payload| {
         let entity = scene.entities[index].id;
@@ -263,7 +309,7 @@ fn decode_column<T: Component + Schema>(
         values.push((index, component));
         Ok(())
     })?;
-    Ok(Box::new(TypedColumn(values)))
+    Ok(values)
 }
 
 impl Schema for Name {

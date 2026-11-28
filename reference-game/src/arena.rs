@@ -18,8 +18,11 @@ pub(crate) mod source;
 
 pub(crate) const CELL_COUNT: usize = 3;
 const DRONE_COUNT: usize = 3;
-#[cfg(feature = "desktop")]
-pub(crate) const WIDTH: f32 = 672.0;
+pub(crate) const WALLS: u32 = 1;
+pub(crate) const COURIER: u32 = 1 << 1;
+const DRONES: u32 = 1 << 2;
+const CELLS: u32 = 1 << 3;
+const GATE: u32 = 1 << 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Actor {
@@ -27,6 +30,21 @@ pub(crate) enum Actor {
     Cell(usize),
     Drone(usize),
     Gate,
+}
+
+impl Actor {
+    const fn collision_groups(self) -> CollisionGroups2d {
+        let (memberships, filters) = match self {
+            Self::Pilot => (COURIER, WALLS | DRONES | CELLS | GATE),
+            Self::Drone(_) => (DRONES, COURIER),
+            Self::Cell(_) => (CELLS, COURIER),
+            Self::Gate => (GATE, COURIER),
+        };
+        CollisionGroups2d {
+            memberships,
+            filters,
+        }
+    }
 }
 
 impl Display for Actor {
@@ -249,13 +267,29 @@ impl ArenaPlan {
             let mut entity = world.entity_mut(entity);
             entity.insert((row.pose, row.visibility));
             if let Some(role) = row.actor {
-                entity.insert(SceneActor {
-                    role,
-                    rotation: row.pose.rotation,
-                    visibility: row.visibility,
-                });
+                entity.insert((
+                    role.collision_groups(),
+                    SceneActor {
+                        role,
+                        rotation: row.pose.rotation,
+                        visibility: row.visibility,
+                    },
+                ));
+                if let Some(collider) = row.collider {
+                    let body = match role {
+                        Actor::Pilot | Actor::Drone(_) => RigidBody2d::Kinematic,
+                        Actor::Cell(_) | Actor::Gate => RigidBody2d::Static,
+                    };
+                    entity.insert((collider, body, Sensor2d));
+                }
             } else if let Some(collider) = row.collider {
-                entity.insert(collider);
+                entity.insert((
+                    collider,
+                    CollisionGroups2d {
+                        memberships: WALLS,
+                        filters: COURIER,
+                    },
+                ));
             }
         }
         (self.arena, self.rules)

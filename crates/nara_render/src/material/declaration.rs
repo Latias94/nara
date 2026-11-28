@@ -206,6 +206,7 @@ impl Material2dDeclaration {
         hasher.update(&[match self.alpha_mode {
             AlphaMode2d::Opaque => 0,
             AlphaMode2d::Blend => 1,
+            AlphaMode2d::Additive => 2,
         }]);
         let mut fields: Vec<_> = self.parameters.fields().iter().collect();
         fields.sort_unstable_by(|left, right| left.id().cmp(right.id()));

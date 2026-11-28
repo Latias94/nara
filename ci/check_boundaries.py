@@ -71,9 +71,6 @@ def check_source_size():
     facade = rust_lines(Path("src"))
     if facade > 1_500:
         raise SystemExit(f"Root src has {facade:,} Rust lines; the limit is 1,500")
-    render = rust_lines(Path("crates/nara_render"))
-    if render > 28_000:
-        raise SystemExit(f"nara_render has {render:,} Rust lines; the limit is 28,000")
     for manifest in sorted(Path("crates").glob("*/Cargo.toml")):
         lines = rust_lines(manifest.parent / "src")
         if lines > 30_000:

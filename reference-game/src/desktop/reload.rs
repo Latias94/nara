@@ -22,10 +22,13 @@ use nara::{
     ecs::{Mut, bevy_ecs::error::Result as SystemResult, schedule::IntoScheduleConfigs},
     prelude::*,
     render::{
+        animation::SpriteAnimationLoader,
         image::ImageAssetLoader,
         material::{SpriteMaterialBindingAsset, SpriteMaterialLoader},
+        tilemap::TileSetLoader,
     },
     render_wgpu::desktop::DesktopPresentation,
+    scene::animation::PropertyAnimationLoader,
     tasks::{Task, io_pool},
 };
 use nara_asset::watch::{AssetWatcher, RELOAD_RETRY_DELAYS, is_transient_reload_error};
@@ -83,6 +86,9 @@ enum Dependency {
     Image(PreparedAsset<ImageAsset>),
     Material(PreparedAsset<SpriteMaterialBindingAsset>),
     Audio(PreparedAsset<AudioClip>),
+    TileSet(PreparedAsset<TileSetAsset>),
+    SpriteAnimation(PreparedAsset<SpriteAnimationSet>),
+    PropertyAnimation(PreparedAsset<PropertyAnimationClip>),
 }
 
 impl ReloadSource {
@@ -133,29 +139,47 @@ fn stage_dependencies(
     source: &RuntimeAssetSource,
     scene: &SceneAsset,
 ) -> Result<Vec<(AssetId, Dependency)>, Box<dyn Error>> {
-    scene
-        .asset_dependencies()
-        .iter()
-        .map(|&id| {
-            let value = match source.backend().kind(id) {
-                Some(NpakEntryKind::Image) => {
-                    Dependency::Image(prepare_asset(source, id, &ImageAssetLoader)?)
-                }
-                Some(NpakEntryKind::Material) => {
-                    Dependency::Material(prepare_asset(source, id, &SpriteMaterialLoader)?)
-                }
-                Some(NpakEntryKind::Audio) => {
-                    Dependency::Audio(prepare_asset(source, id, &AudioClipLoader)?)
-                }
-                kind => {
-                    return Err(
-                        format!("could not reload dependency {id} with kind {kind:?}").into(),
-                    );
-                }
-            };
-            Ok((id, value))
-        })
-        .collect()
+    use std::collections::BTreeSet;
+
+    let mut pending: BTreeSet<_> = scene.asset_dependencies().iter().copied().collect();
+    let mut staged = BTreeSet::new();
+    let mut dependencies = Vec::new();
+    while let Some(id) = pending.pop_first() {
+        if !staged.insert(id) {
+            continue;
+        }
+        let value = match source.backend().kind(id) {
+            Some(NpakEntryKind::Image) => {
+                Dependency::Image(prepare_asset(source, id, &ImageAssetLoader)?)
+            }
+            Some(NpakEntryKind::Material) => {
+                Dependency::Material(prepare_asset(source, id, &SpriteMaterialLoader)?)
+            }
+            Some(NpakEntryKind::Audio) => {
+                Dependency::Audio(prepare_asset(source, id, &AudioClipLoader)?)
+            }
+            Some(NpakEntryKind::TileSet) => {
+                let prepared = prepare_asset(source, id, &TileSetLoader)?;
+                let image = prepared.value().image;
+                source
+                    .backend()
+                    .validate_kind(image, NpakEntryKind::Image)?;
+                pending.insert(image);
+                Dependency::TileSet(prepared)
+            }
+            Some(NpakEntryKind::SpriteAnimation) => {
+                Dependency::SpriteAnimation(prepare_asset(source, id, &SpriteAnimationLoader)?)
+            }
+            Some(NpakEntryKind::PropertyAnimation) => {
+                Dependency::PropertyAnimation(prepare_asset(source, id, &PropertyAnimationLoader)?)
+            }
+            kind => {
+                return Err(format!("could not reload dependency {id} with kind {kind:?}").into());
+            }
+        };
+        dependencies.push((id, value));
+    }
+    Ok(dependencies)
 }
 
 struct ReloadFrame {
@@ -196,7 +220,10 @@ impl Reload {
         app.insert_resource(self)?
             .add_systems(
                 CoreStage::TaskUpdate,
-                reload_if_changed.after(resolve_switch).before(dress_arena),
+                reload_if_changed
+                    .after(resolve_switch)
+                    .before(nara::render::sprite::SpriteSourceHydrationSet)
+                    .before(dress_arena),
             )?
             .add_systems(Last, observe_presentation)?;
         Ok(())
@@ -306,7 +333,40 @@ impl Reload {
             self.active,
             &content.scene,
             &content.assets,
-            validate_arena,
+            |scene| {
+                validate_arena(scene)?;
+                for row in scene.rows() {
+                    if let Some(map) = row.get::<TilemapSource>() {
+                        let tileset = content
+                            .dependencies
+                            .iter()
+                            .find_map(|(id, dep)| match dep {
+                                Dependency::TileSet(tileset) if *id == map.tileset => {
+                                    Some(tileset.value())
+                                }
+                                _ => None,
+                            })
+                            .ok_or_else(|| format!("missing staged tileset {}", map.tileset))?;
+                        map.validate_tile_indices(tileset.tiles.len())
+                            .map_err(|error| error.to_string())?;
+                    }
+                    if let Some(source) = row.get::<SpriteAnimatorSource>() {
+                        let set = content.dependencies.iter().find_map(|(id, dep)| match dep {
+                            Dependency::SpriteAnimation(set) if *id == source.set => {
+                                Some(set.value())
+                            }
+                            _ => None,
+                        });
+                        if set.and_then(|set| set.get(&source.clip)).is_none() {
+                            return Err(format!(
+                                "animation set {} has no clip '{}'",
+                                source.set, source.clip
+                            ));
+                        }
+                    }
+                }
+                Ok(())
+            },
         )?;
         let server = world.resource::<AssetServer>();
         for (id, dependency) in &content.dependencies {
@@ -317,6 +377,13 @@ impl Reload {
                     server.validate_product_type::<SpriteMaterialBindingAsset>(product)?;
                 }
                 Dependency::Audio(_) => server.validate_product_type::<AudioClip>(product)?,
+                Dependency::TileSet(_) => server.validate_product_type::<TileSetAsset>(product)?,
+                Dependency::SpriteAnimation(_) => {
+                    server.validate_product_type::<SpriteAnimationSet>(product)?
+                }
+                Dependency::PropertyAnimation(_) => {
+                    server.validate_product_type::<PropertyAnimationClip>(product)?
+                }
             }
         }
         if scene_changed {
@@ -331,11 +398,10 @@ impl Reload {
             .into_iter()
             .flat_map(SceneAsset::asset_dependencies)
             .filter(|id| {
-                content
-                    .scene
-                    .asset_dependencies()
-                    .binary_search(id)
-                    .is_err()
+                !content
+                    .dependencies
+                    .iter()
+                    .any(|(staged, _)| *staged == **id)
             })
             .copied()
             .collect::<Vec<_>>();
@@ -359,6 +425,15 @@ impl Reload {
                 Dependency::Audio(clip) => {
                     publish_asset(world, id, clip, |_, _| false)?;
                 }
+                Dependency::TileSet(tileset) => {
+                    publish_asset(world, id, tileset, PartialEq::eq)?;
+                }
+                Dependency::SpriteAnimation(set) => {
+                    publish_asset(world, id, set, PartialEq::eq)?;
+                }
+                Dependency::PropertyAnimation(clip) => {
+                    publish_asset(world, id, clip, PartialEq::eq)?;
+                }
             }
         }
         if scene_changed {
@@ -374,6 +449,9 @@ impl Reload {
                 images += usize::from(retire_asset::<ImageAsset>(world, id)?);
                 materials += usize::from(retire_asset::<SpriteMaterialBindingAsset>(world, id)?);
                 retire_asset::<AudioClip>(world, id)?;
+                retire_asset::<TileSetAsset>(world, id)?;
+                retire_asset::<SpriteAnimationSet>(world, id)?;
+                retire_asset::<PropertyAnimationClip>(world, id)?;
             }
         }
         self.current = Some(content.scene);
@@ -590,6 +668,52 @@ mod tests {
             .expect_err("accepted conflicting claim");
         assert!(error.to_string().contains("is claimed as"), "{error}");
         assert_eq!(app.world().resource::<RuntimeAssetSource>(), &source);
+        Ok(())
+    }
+
+    #[test]
+    fn an_animation_reload_with_a_missing_clip_preserves_the_resident_set()
+    -> Result<(), Box<dyn Error>> {
+        let temporary = staged_project()?;
+        let motion = temporary.path().join("assets/courier.sanim.ron");
+        let original = fs::read_to_string(&motion)?;
+        let (mut app, mut reload) = staged_app(temporary.path(), None)?;
+        let id = "0193f100-2222-7000-8000-000000000101".parse()?;
+        let handle = primary_handle::<SpriteAnimationSet>(app.world(), id)?
+            .ok_or("missing courier animation")?;
+        let source = app.world().resource::<RuntimeAssetSource>().clone();
+        let version = app.world().resource::<AssetStates>().version(handle.id());
+        let instance = app.world().resource::<SceneManager>().main_instance();
+
+        fs::write(&motion, original.replace("\"idle\"", "\"different\""))?;
+        let content = reload.source.read_content(reload.active)?;
+        let error = reload
+            .publish(app.world_mut()?, content)
+            .expect_err("accepted a missing clip");
+        assert!(error.to_string().contains("has no clip 'idle'"), "{error}");
+        assert_eq!(app.world().resource::<RuntimeAssetSource>(), &source);
+        assert_eq!(
+            app.world().resource::<AssetStates>().version(handle.id()),
+            version
+        );
+
+        fs::write(&motion, original.replace("110000000", "130000000"))?;
+        let content = reload.source.read_content(reload.active)?;
+        reload.publish(app.world_mut()?, content)?;
+        let world = app.world();
+        assert_ne!(
+            world.resource::<AssetStates>().version(handle.id()),
+            version
+        );
+        assert_eq!(world.resource::<SceneManager>().main_instance(), instance);
+        assert!(
+            world
+                .resource::<Assets<SpriteAnimationSet>>()
+                .get(handle)
+                .unwrap()
+                .get("idle")
+                .is_some()
+        );
         Ok(())
     }
 

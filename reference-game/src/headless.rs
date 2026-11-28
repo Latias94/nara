@@ -123,9 +123,12 @@ fn step(app: &mut App, movement: Vec2) -> GameResult<()> {
 }
 
 fn follow(app: &mut App, route: &[(usize, usize)]) -> GameResult<()> {
+    follow_points(app, route.iter().map(|&(column, row)| at(column, row)))
+}
+
+fn follow_points(app: &mut App, route: impl IntoIterator<Item = Vec2>) -> GameResult<()> {
     let stride = RunRules::default().move_speed * STEP.as_secs_f32();
-    for &(column, row) in route {
-        let target = at(column, row);
+    for target in route {
         for _ in 0..240 {
             let round = app.world().resource::<Round>();
             if round.status() == RoundStatus::Escaped || round.position().distance(target) < 0.1 {
@@ -136,7 +139,7 @@ fn follow(app: &mut App, route: &[(usize, usize)]) -> GameResult<()> {
         }
         let round = app.world().resource::<Round>();
         if round.status() != RoundStatus::Escaped && round.position().distance(target) >= 0.1 {
-            return Err(format!("the pilot did not reach arena tile ({column}, {row})").into());
+            return Err(format!("the pilot did not reach arena waypoint {target:?}").into());
         }
     }
     Ok(())
@@ -280,10 +283,7 @@ mod tests {
             resumed.world().resource::<Round>().position(),
             Vec2::new(-256.0, -96.0)
         );
-        follow(
-            &mut resumed,
-            &[(7, 8), (7, 7), (18, 7), (19, 7), (19, 2), (15, 2), (2, 2)],
-        )?;
+        follow_points(&mut resumed, crate::route::SECOND_ESCAPE_ROUTE)?;
         let round = resumed.world().resource::<Round>();
         assert_eq!(round.status(), RoundStatus::Escaped);
         assert_eq!(round.collected(), CELL_COUNT);
@@ -527,6 +527,9 @@ mod tests {
             ("night-relay.scene.ron", "arena.scene.ron"),
             ("power-cell.prefab.ron", "cell.prefab.ron"),
             ("power-cell.png", "cell.png"),
+            ("cell-breathe.anim.ron", "cell-motion.anim.ron"),
+            ("courier.png", "pilot.png"),
+            ("courier.sanim.ron", "pilot.sanim.ron"),
             ("gate.material.ron", "gate.material.ron"),
             ("gate.wgsl", "gate.wgsl"),
         ] {

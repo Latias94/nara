@@ -79,7 +79,9 @@ impl ExtractedSpriteMaterial {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextureUvRect {
+    /// UV at the quad's local top-left corner.
     pub min: Vec2,
+    /// Signed UV span. A zero span samples a single coordinate along that axis.
     pub size: Vec2,
 }
 
@@ -96,24 +98,39 @@ impl TextureUvRect {
 
     #[must_use]
     pub fn from_texture_region(region: TextureRegion) -> Self {
-        Self::new(region.min, region.size)
+        if region.is_valid_uv() {
+            Self::new(region.min, region.size)
+        } else {
+            // Keep invalid authored regions invalid when signed or collapsed spans are allowed.
+            Self::new(Vec2::splat(-1.0), Vec2::ZERO)
+        }
+    }
+
+    #[must_use]
+    pub(super) fn flipped(mut self, flip_x: bool, flip_y: bool) -> Self {
+        if flip_x {
+            self.min.x += self.size.x;
+            self.size.x = -self.size.x;
+        }
+        if flip_y {
+            self.min.y += self.size.y;
+            self.size.y = -self.size.y;
+        }
+        self
     }
 
     #[must_use]
     pub fn max(self) -> Vec2 {
-        self.min + self.size
+        self.min.max(self.min + self.size)
     }
 
     #[must_use]
     pub fn is_valid(self) -> bool {
+        let end = self.min + self.size;
         self.min.is_finite()
             && self.size.is_finite()
-            && self.size.x > 0.0
-            && self.size.y > 0.0
-            && self.min.x >= 0.0
-            && self.min.y >= 0.0
-            && self.max().x <= 1.0
-            && self.max().y <= 1.0
+            && self.min.min(end).cmpge(Vec2::ZERO).all()
+            && self.min.max(end).cmple(Vec2::ONE).all()
     }
 }
 

@@ -18,9 +18,10 @@ frame's WGPU encoder.
   Rebuild `DirtyTileChunk` GPU data only for affected chunks. Keep synchronous pipeline validation
   out of frame submission and return device failures through the normal surface lifecycle.
 - The window and offscreen targets use the same renderer. `SpriteTilePass` clears and draws the
-  scene. `HudPass` loads that attachment in place. The window driver publishes HUD hit geometry
+  scene. Optional `PostProcess2d` effects use pooled linear textures and composite into the final
+  attachment before `HudPass` loads it in place. The window driver publishes HUD hit geometry
   after presenting the matching swapchain image. An explicit virtual-resolution `WorldCanvas`
-  adds a pooled intermediate with a nearest-sampled composite before the HUD.
+  retains its nearest-sampled composite and letterbox when effects are enabled.
 - `Renderer::set_editor_overlay` accepts the Phase 4 `EditorOverlayPass` after the scene and HUD.
   The overlay loads and writes the final color attachment before submission. Submit Nara's work
   before GPUI's sampling pass on the same queue. Pass the pooled `WgpuImageOutput` through

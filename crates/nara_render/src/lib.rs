@@ -4,6 +4,8 @@
 
 #[cfg(feature = "animation")]
 pub mod animation;
+#[cfg(feature = "runtime")]
+pub mod camera;
 #[cfg(feature = "wgpu")]
 pub mod gpu;
 #[cfg(feature = "hud")]
@@ -12,6 +14,8 @@ pub mod hud;
 pub mod image;
 #[cfg(feature = "material")]
 pub mod material;
+#[cfg(feature = "sprites")]
+pub mod particles;
 #[cfg(feature = "sprites")]
 pub mod sprite;
 #[cfg(feature = "sprite-render")]

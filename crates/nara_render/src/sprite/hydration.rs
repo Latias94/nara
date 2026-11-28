@@ -16,8 +16,10 @@ use nara_scene::{
 
 use crate::{
     image::{IMAGE_PLUGIN_ID, ImageAsset},
-    material::{Material2dBinding, SpriteMaterialBindingAsset, register_sprite_material_loader},
-    sprite::Sprite,
+    material::{
+        AlphaMode2d, Material2dBinding, SpriteMaterialBindingAsset, register_sprite_material_loader,
+    },
+    sprite::{NineSlice, Sprite, SpriteScaleMode},
 };
 
 /// Hydrates authored sprites in `TaskUpdate`, including in apps without a renderer.
@@ -90,23 +92,54 @@ impl HydratedSprite {
         source: &SpriteSource,
         image: Option<Handle<ImageAsset>>,
     ) {
-        if sprite.size == self.applied.size && sprite.size != source.size {
-            sprite.size = source.size;
-            self.applied.size = source.size;
-        }
-        if sprite.layer == self.applied.layer && sprite.layer != source.layer {
-            sprite.layer = source.layer;
-            self.applied.layer = source.layer;
-        }
-        if sprite.material.tint == self.applied.material.tint && sprite.material.tint != source.tint
-        {
-            sprite.material.tint = source.tint;
-            self.applied.material.tint = source.tint;
-        }
-        if sprite.material.image == self.applied.material.image && sprite.material.image != image {
-            sprite.material.image = image;
-            self.applied.material.image = image;
-        }
+        let authored = authored_sprite(source);
+        merge_source_field(
+            sprite.reborrow().map_unchanged(|sprite| &mut sprite.size),
+            &mut self.applied.size,
+            authored.size,
+        );
+        merge_source_field(
+            sprite.reborrow().map_unchanged(|sprite| &mut sprite.layer),
+            &mut self.applied.layer,
+            authored.layer,
+        );
+        merge_source_field(
+            sprite.reborrow().map_unchanged(|sprite| &mut sprite.flip_x),
+            &mut self.applied.flip_x,
+            authored.flip_x,
+        );
+        merge_source_field(
+            sprite.reborrow().map_unchanged(|sprite| &mut sprite.flip_y),
+            &mut self.applied.flip_y,
+            authored.flip_y,
+        );
+        merge_source_field(
+            sprite
+                .reborrow()
+                .map_unchanged(|sprite| &mut sprite.scale_mode),
+            &mut self.applied.scale_mode,
+            authored.scale_mode,
+        );
+        let mut material = sprite.map_unchanged(|sprite| &mut sprite.material);
+        merge_source_field(
+            material
+                .reborrow()
+                .map_unchanged(|material| &mut material.tint),
+            &mut self.applied.material.tint,
+            authored.material.tint,
+        );
+        merge_source_field(
+            material
+                .reborrow()
+                .map_unchanged(|material| &mut material.alpha_mode),
+            &mut self.applied.material.alpha_mode,
+            authored.material.alpha_mode,
+        );
+        merge_source_field(
+            material.map_unchanged(|material| &mut material.image),
+            &mut self.applied.material.image,
+            image,
+        );
     }
 
     fn apply_binding(
@@ -142,8 +175,26 @@ impl HydratedSprite {
     }
 }
 
+fn merge_source_field<T: Copy + PartialEq>(mut current: Mut<'_, T>, applied: &mut T, next: T) {
+    if *current == *applied && current.set_if_neq(next) {
+        *applied = next;
+    }
+}
+
 fn authored_sprite(source: &SpriteSource) -> Sprite {
-    Sprite::from_color(source.size, source.tint).with_layer(source.layer)
+    let scale_mode = source.slice.map_or(SpriteScaleMode::Stretch, |slice| {
+        SpriteScaleMode::Sliced(NineSlice::new(slice.x, slice.y, slice.z, slice.w))
+    });
+    let alpha_mode = if source.additive {
+        AlphaMode2d::Additive
+    } else {
+        AlphaMode2d::Blend
+    };
+    Sprite::from_color(source.size, source.tint)
+        .with_layer(source.layer)
+        .with_flip(source.flip_x, source.flip_y)
+        .with_scale_mode(scale_mode)
+        .with_alpha_mode(alpha_mode)
 }
 
 type SourceSprites<'w, 's> = Query<
@@ -314,6 +365,7 @@ mod tests {
         NpakEntryKind, RuntimeAssetBackend, RuntimeAssetMode, RuntimeAssetSource, load_asset_sync,
         source::{MemoryAssetSource, asset_id_path},
     };
+    use nara_core::Vec4;
     use nara_ecs::bevy_ecs::entity_disabling::Disabled;
 
     use super::*;
@@ -338,6 +390,67 @@ mod tests {
             self.0.fetch_add(1, Ordering::Relaxed);
             Err(AssetError::UnknownRuntimeKind(id))
         }
+    }
+
+    #[test]
+    fn sprite_source_applies_visuals_without_clobbering_runtime_overrides() {
+        let mut app = App::new();
+        app.add_plugins((AssetPlugin, ImagePlugin, SpriteSourceHydrationPlugin))
+            .unwrap();
+        let source = SpriteSource {
+            flip_x: true,
+            slice: Some(Vec4::new(1.0, 2.0, -3.0, f32::NAN)),
+            additive: true,
+            ..SpriteSource::default()
+        };
+        let world = app.world_mut().unwrap();
+        let managed = world.spawn(source.clone()).id();
+        let overridden = world.spawn(source).id();
+        app.update_with_delta(Duration::ZERO).unwrap();
+
+        let sprite = app.world().get::<Sprite>(managed).unwrap();
+        assert!(sprite.flip_x);
+        assert!(!sprite.flip_y);
+        assert_eq!(sprite.material.alpha_mode, AlphaMode2d::Additive);
+        assert_eq!(
+            sprite.scale_mode,
+            SpriteScaleMode::Sliced(NineSlice::new(1.0, 2.0, 0.0, 0.0))
+        );
+
+        let world = app.world_mut().unwrap();
+        let override_mode = SpriteScaleMode::Sliced(NineSlice::new(4.0, 3.0, 2.0, 1.0));
+        let mut sprite = world.get_mut::<Sprite>(overridden).unwrap();
+        sprite.flip_x = false;
+        sprite.scale_mode = override_mode;
+        sprite.material.alpha_mode = AlphaMode2d::Opaque;
+        world.entity_mut(managed).insert(SpriteSource {
+            flip_y: true,
+            ..SpriteSource::default()
+        });
+        world.entity_mut(overridden).insert(SpriteSource {
+            flip_x: true,
+            flip_y: true,
+            ..SpriteSource::default()
+        });
+        app.update_with_delta(Duration::ZERO).unwrap();
+
+        let sprite = app.world().get::<Sprite>(managed).unwrap();
+        assert!(!sprite.flip_x);
+        assert!(sprite.flip_y);
+        assert_eq!(sprite.scale_mode, SpriteScaleMode::Stretch);
+        assert_eq!(sprite.material.alpha_mode, AlphaMode2d::Blend);
+        let sprite = app.world().get::<Sprite>(overridden).unwrap();
+        assert!(!sprite.flip_x);
+        assert!(sprite.flip_y);
+        assert_eq!(sprite.scale_mode, override_mode);
+        assert_eq!(sprite.material.alpha_mode, AlphaMode2d::Opaque);
+
+        let world = app.world_mut().unwrap();
+        world.entity_mut(managed).remove::<SpriteSource>();
+        world.entity_mut(overridden).remove::<SpriteSource>();
+        app.update_with_delta(Duration::ZERO).unwrap();
+        assert!(app.world().get::<Sprite>(managed).is_none());
+        assert!(app.world().get::<Sprite>(overridden).is_some());
     }
 
     #[test]

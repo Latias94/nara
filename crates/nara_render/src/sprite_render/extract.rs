@@ -1,8 +1,9 @@
 use std::{cmp::Reverse, sync::Arc};
 
-use crate::image::{ImageAsset, PreparedImageSnapshot};
-use crate::material::Material2dBinding;
-use crate::sprite::Sprite;
+use crate::image::{ImageAsset, ImageExtent, PreparedImageSnapshot};
+use crate::material::{Material2dBinding, SamplerDescriptor};
+use crate::particles::ParticleEmitter2d;
+use crate::sprite::{NineSlice, Sprite, SpriteScaleMode};
 use crate::tilemap::{TileCoord, TileIndex, TileSet, Tilemap};
 use nara_asset::{AssetStates, Assets, Handle};
 use nara_core::{Affine2, Color, Vec2};
@@ -32,18 +33,19 @@ type SpriteSources<'w, 's> = Query<
         Entity,
         Option<&'static Sprite>,
         Option<&'static Tilemap>,
+        Option<&'static ParticleEmitter2d>,
         Option<&'static Material2dBinding>,
         Option<&'static GlobalTransform2d>,
         Option<&'static InheritedVisibility>,
     ),
-    Or<(With<Sprite>, With<Tilemap>)>,
+    Or<(With<Sprite>, With<Tilemap>, With<ParticleEmitter2d>)>,
 >;
 
 type SourceHierarchy<'w, 's> =
     Query<'w, 's, (Option<&'static ChildOf>, Option<&'static Children>), Allow<Disabled>>;
 
 #[derive(Debug, thiserror::Error)]
-#[error("sprite or tilemap entity {0:?} has no GlobalTransform2d")]
+#[error("sprite, tilemap, or particle emitter entity {0:?} has no GlobalTransform2d")]
 struct MissingGlobalTransform(Entity);
 
 pub(crate) fn extract_sprites(
@@ -62,7 +64,7 @@ pub(crate) fn extract_sprites(
     scratch.branches.clear();
     scratch.pending.clear();
 
-    for (mut entity, _, _, _, global, visibility) in &sources {
+    for (mut entity, _, _, _, _, global, visibility) in &sources {
         if visibility.is_some_and(|visibility| !visibility.get()) {
             continue;
         }
@@ -109,15 +111,19 @@ pub(crate) fn extract_sprites(
                     .filter(|child| scratch.branches.contains(child)),
             );
         }
-        let Ok((_, sprite, tilemap, binding, Some(global), visibility)) = sources.get(entity)
+        let Ok((_, sprite, tilemap, emitter, binding, Some(global), visibility)) =
+            sources.get(entity)
         else {
             continue;
         };
         if visibility.is_some_and(|visibility| !visibility.get()) {
             continue;
         }
+        if let Some(emitter) = emitter {
+            extract_particles(scratch, entity, emitter, global);
+        }
         let mut material = None;
-        if let Some(binding) = binding {
+        if let Some(binding) = binding.filter(|_| sprite.is_some() || tilemap.is_some()) {
             let Ok(captured) = capture_material(binding.clone(), |handle| {
                 PreparedImageSnapshot::capture(handle, images.as_deref()?, states.as_deref()?)
             }) else {
@@ -131,7 +137,25 @@ pub(crate) fn extract_sprites(
             let source_order = scratch.sprites.len() as u64;
             let mut extracted = extract_sprite(entity, sprite, global, source_order);
             extracted.material_extension = material.clone();
-            scratch.sprites.push(extracted);
+            if let SpriteScaleMode::Sliced(borders) = sprite.scale_mode
+                && let Some(image) = sprite
+                    .material
+                    .image
+                    .and_then(|id| images.as_deref()?.get(id))
+                && sprite.size.is_finite()
+                && sprite.size.cmpne(Vec2::ZERO).all()
+                && extracted.texture_region.is_valid()
+            {
+                extract_slices(
+                    &mut scratch.sprites,
+                    extracted,
+                    sprite.size,
+                    image.extent(),
+                    borders,
+                );
+            } else {
+                scratch.sprites.push(extracted);
+            }
             scratch.stats.extracted_sprites = scratch.stats.extracted_sprites.saturating_add(1);
         }
 
@@ -186,8 +210,44 @@ fn capture_material(
     Ok(Arc::new(PreparedMaterial2d { binding, textures }))
 }
 
+fn extract_particles(
+    scratch: &mut ExtractedSpriteScratch,
+    entity: Entity,
+    emitter: &ParticleEmitter2d,
+    global: &GlobalTransform2d,
+) {
+    let instances = emitter.render_instances(global);
+    scratch.stats.extracted_sprites = scratch
+        .stats
+        .extracted_sprites
+        .saturating_add(u32::try_from(instances.len()).unwrap_or(u32::MAX));
+    for particle in instances {
+        scratch.sprites.push(ExtractedSprite {
+            entity,
+            source_order: scratch.sprites.len() as u64,
+            kind: ExtractedSpriteKind::Sprite,
+            material: ExtractedSpriteMaterial {
+                image: particle.texture,
+                sampler: SamplerDescriptor::default(),
+                alpha_mode: particle.alpha_mode,
+                tint: particle.color,
+            },
+            material_extension: None,
+            texture_region: TextureUvRect::FULL,
+            world_center: particle.world_center,
+            world_x_axis: particle.world_x_axis,
+            world_y_axis: particle.world_y_axis,
+            color: particle.color,
+            layer: particle.layer,
+            world_z: particle.world_z,
+            sort_key: particle.sort_key,
+            world_sort_y: 0.0,
+        });
+    }
+}
+
 #[must_use]
-fn extract_sprite(
+pub(super) fn extract_sprite(
     entity: Entity,
     sprite: &Sprite,
     global: &GlobalTransform2d,
@@ -211,8 +271,8 @@ fn extract_sprite(
         material_extension: None,
         texture_region: sprite
             .texture_region
-            .map(TextureUvRect::from_texture_region)
-            .unwrap_or(TextureUvRect::FULL),
+            .map_or(TextureUvRect::FULL, TextureUvRect::from_texture_region)
+            .flipped(sprite.flip_x, sprite.flip_y),
         world_center: affine.transform_point2(local_center),
         world_x_axis: affine.transform_vector2(local_x_axis),
         world_y_axis: affine.transform_vector2(local_y_axis),
@@ -223,6 +283,97 @@ fn extract_sprite(
         world_sort_y: sprite
             .y_sort_anchor
             .map_or(0.0, |anchor| affine.transform_point2(anchor).y),
+    }
+}
+
+fn extract_slices(
+    extracted: &mut ExtractedSprites,
+    sprite: ExtractedSprite,
+    size: Vec2,
+    extent: ImageExtent,
+    borders: NineSlice,
+) {
+    let borders = borders.nonnegative();
+    if borders == NineSlice::default() {
+        extracted.push(sprite);
+        return;
+    }
+
+    let uv = sprite.texture_region;
+    let x = SliceAxis::new(
+        [borders.left, borders.right],
+        extent.width,
+        size.x,
+        [uv.min.x, uv.size.x],
+    );
+    let y = SliceAxis::new(
+        [borders.top, borders.bottom],
+        extent.height,
+        size.y,
+        [uv.min.y, uv.size.y],
+    );
+    for row in 0..3 {
+        let top = y.positions[row];
+        let bottom = y.positions[row + 1];
+        if top == bottom {
+            continue;
+        }
+        let row_center = sprite.world_center - sprite.world_y_axis * ((top + bottom) * 0.5);
+        let world_y_axis = sprite.world_y_axis * ((bottom - top) * 0.5);
+        for column in 0..3 {
+            let left = x.positions[column];
+            let right = x.positions[column + 1];
+            if left == right {
+                continue;
+            }
+
+            let start = Vec2::new(x.uvs[column], y.uvs[row]);
+            let end = Vec2::new(x.uvs[column + 1], y.uvs[row + 1]);
+            let mut quad = sprite.clone();
+            quad.source_order = extracted.len() as u64;
+            quad.texture_region = TextureUvRect::new(start, end - start);
+            quad.world_center = row_center + sprite.world_x_axis * ((left + right) * 0.5);
+            quad.world_x_axis *= (right - left) * 0.5;
+            quad.world_y_axis = world_y_axis;
+            extracted.push(quad);
+        }
+    }
+}
+
+struct SliceAxis {
+    /// Normalized positions along the original quad, increasing rightward or downward.
+    positions: [f32; 4],
+    uvs: [f32; 4],
+}
+
+impl SliceAxis {
+    fn new(borders: [f32; 2], pixels: u32, size: f32, uv: [f32; 2]) -> Self {
+        let [start, span] = uv.map(f64::from);
+        let source_size = span.abs() * f64::from(pixels);
+        let destination_size = f64::from(size.abs());
+        let [first, last] = borders.map(f64::from);
+        let borders = if span < 0.0 {
+            [last, first]
+        } else {
+            [first, last]
+        };
+        let source = split_axis(borders, source_size);
+        let destination = split_axis([source[1], source_size - source[2]], destination_size);
+
+        Self {
+            positions: destination.map(|point| (2.0 * (point / destination_size) - 1.0) as f32),
+            uvs: source.map(|point| (start + span * (point / source_size)) as f32),
+        }
+    }
+}
+
+fn split_axis([first, last]: [f64; 2], length: f64) -> [f64; 4] {
+    let sum = first + last;
+    if sum >= length {
+        let middle = length * (first / sum);
+        [0.0, middle, middle, length]
+    } else {
+        [0.0, first, length - last, length]
     }
 }
 

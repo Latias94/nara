@@ -323,6 +323,37 @@ fn invalid_camera_extraction_preserves_the_previous_views_and_clock() {
 }
 
 #[test]
+fn non_finite_camera_settings_preserve_the_previous_capture() {
+    let invalid_cameras = [
+        Camera2d {
+            viewport_height: f32::INFINITY,
+            ..Camera2d::default()
+        },
+        Camera2d {
+            clear_color: Some(Color::rgba(0.0, f32::NAN, 0.0, 1.0)),
+            ..Camera2d::default()
+        },
+    ];
+    for invalid in invalid_cameras {
+        let mut app = app(true);
+        let camera = app
+            .world_mut()
+            .unwrap()
+            .spawn((Camera2d::default(), Transform2d::IDENTITY))
+            .id();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        extract(&mut runtime);
+        let previous = views(&runtime).clone();
+        edit(&mut runtime, |world| {
+            *world.get_mut::<Camera2d>(camera).unwrap() = invalid;
+        });
+        assert!(runtime.drive(Duration::ZERO).is_err());
+        assert_eq!(views(&runtime), &previous);
+        runtime.finish().unwrap();
+    }
+}
+
+#[test]
 fn offscreen_extraction_uses_explicit_viewport_and_target() {
     let mut app = app(false);
     let image = RenderImage2d::allocate_handle().unwrap();

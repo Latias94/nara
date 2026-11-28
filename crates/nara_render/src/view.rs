@@ -43,24 +43,30 @@ impl ViewMapping2d {
         viewport_height: f32,
         viewport: ViewportRect,
     ) -> Option<Self> {
-        if !world_from_camera.is_finite()
-            || !viewport_height.is_finite()
-            || viewport_height <= 0.0
-            || viewport.physical_width == 0
-            || viewport.physical_height == 0
-            || world_from_camera.determinant() == 0.0
-        {
+        let half_extents = orthographic_half_extents(viewport_height, viewport)?;
+        Self::from_orthographic_half_extents(world_from_camera, half_extents)
+    }
+
+    pub(crate) fn from_orthographic_half_extents(
+        world_from_camera: Mat3,
+        half_extents: Vec2,
+    ) -> Option<Self> {
+        let determinant = world_from_camera.determinant();
+        if !world_from_camera.is_finite() || !determinant.is_finite() || determinant == 0.0 {
             return None;
         }
-        let width =
-            viewport_height * viewport.physical_width as f32 / viewport.physical_height as f32;
-        let projection = Mat3::from_scale(Vec2::new(2.0 / width, 2.0 / viewport_height));
+        let projection = Mat3::from_scale(half_extents.recip());
         let world_to_clip = projection * world_from_camera.inverse();
-        let clip_to_world = world_to_clip.inverse();
-        (world_to_clip.is_finite() && clip_to_world.is_finite()).then_some(Self {
-            world_to_clip,
-            clip_to_world,
-        })
+        let clip_to_world = world_from_camera * Mat3::from_scale(half_extents);
+        let determinant = world_to_clip.determinant();
+        (world_to_clip.is_finite()
+            && clip_to_world.is_finite()
+            && determinant.is_finite()
+            && determinant != 0.0)
+            .then_some(Self {
+                world_to_clip,
+                clip_to_world,
+            })
     }
 
     #[must_use]
@@ -89,6 +95,20 @@ impl ViewMapping2d {
     pub const fn clip_to_world_matrix(self) -> Mat3 {
         self.clip_to_world
     }
+}
+
+pub(crate) fn orthographic_half_extents(
+    viewport_height: f32,
+    viewport: ViewportRect,
+) -> Option<Vec2> {
+    if !viewport_height.is_finite() || viewport_height <= 0.0 || viewport.extent().is_empty() {
+        return None;
+    }
+    let half_height = f64::from(viewport_height) * 0.5;
+    let half_width =
+        half_height * f64::from(viewport.physical_width) / f64::from(viewport.physical_height);
+    let extents = Vec2::new(half_width as f32, half_height as f32);
+    (extents.is_finite() && extents.min_element() > 0.0).then_some(extents)
 }
 
 /// Color attachment operation. A clear affects the entire target, including outside the viewport.

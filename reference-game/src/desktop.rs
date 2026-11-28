@@ -10,11 +10,11 @@ use nara::{
     },
     input::{ActionContext, ActionPhase, InputSeatId},
     prelude::*,
-    render::sprite::SpriteSourceHydrationSet,
+    render::{animation::SpriteAnimationUpdateSet, sprite::SpriteSourceHydrationSet},
     render_wgpu::desktop::DesktopPresentedFrame,
     save::{SaveError, SaveStore},
     scene::spatial::propagate_spatial,
-    window::{WindowId, WindowSet},
+    window::WindowId,
 };
 
 use crate::{
@@ -41,20 +41,28 @@ pub fn verify_gameplay() -> Result<(), Box<dyn Error>> {
 }
 
 pub fn verify_r1(save_dir: &Path) -> Result<(), Box<dyn Error>> {
+    verify_campaign(save_dir, probe::CampaignRun::Arrival)
+}
+
+pub fn verify_r2(save_dir: &Path) -> Result<(), Box<dyn Error>> {
+    verify_campaign(save_dir, probe::CampaignRun::BothSectors)
+}
+
+fn verify_campaign(save_dir: &Path, run: probe::CampaignRun) -> Result<(), Box<dyn Error>> {
     let store = SaveStore::in_dir(save_dir);
-    match store.load::<SaveSnapshot>(probe::SAVE_SLOT) {
+    match store.load::<SaveSnapshot>(run.save_slot()) {
         Err(SaveError::NotFound(_)) => {}
-        Ok(_) => return Err("use a fresh save directory for --verify-r1".into()),
+        Ok(_) => return Err("use a fresh save directory for campaign verification".into()),
         Err(error) => return Err(error.into()),
     }
     let mut app = desktop_app()?;
-    app.insert_resource(Campaign::with_save(store, probe::SAVE_SLOT))?;
+    app.insert_resource(Campaign::with_save(store, run.save_slot()))?;
     install_archive(
         &mut app,
         &std::env::current_exe()?.with_file_name("game.npak"),
         Sector::One,
     )?;
-    probe::verify_r1(&mut app, save_dir)
+    probe::verify_campaign(&mut app, save_dir, run)
 }
 
 fn run_with_probe(probe: Option<probe::Smoke>) -> Result<(), Box<dyn Error>> {
@@ -152,31 +160,31 @@ fn desktop_app() -> Result<App, Box<dyn Error>> {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins::new(TITLE).with_window_size(WINDOW_SIZE.0, WINDOW_SIZE.1))?;
     register_scene_roles(&mut app)?;
-    app.add_systems(
-        Startup,
-        (
-            bind_controls,
-            world::setup,
-            (hud::setup, hud::update).chain(),
-        ),
-    )?
-    .add_systems(FrameIntent, read_controls.in_set(FrameIntentSet::Collect))?
-    .add_systems(First, world::fit_camera.after(WindowSet::ApplyEvents))?
-    .add_systems(
-        CoreStage::TaskUpdate,
-        (
-            world::dress_arena
-                .after(resolve_switch)
-                .before(SpriteSourceHydrationSet),
-            (propagate_spatial, hud::update)
-                .after(SpriteSourceHydrationSet)
-                .run_if(resource_changed::<ArenaInstance>),
-        ),
-    )?
-    .add_systems(
-        FixedUpdate,
-        (world::update_appearance, hud::update).in_set(FixedUpdateSet::Finalize),
-    )?;
+    app.insert_resource(world::post_process())?
+        .add_systems(Startup, (bind_controls, (hud::setup, hud::update).chain()))?
+        .add_systems(FrameIntent, read_controls.in_set(FrameIntentSet::Collect))?
+        .add_systems(Update, world::update_fade)?
+        .add_systems(
+            CoreStage::TaskUpdate,
+            (
+                world::dress_arena
+                    .after(resolve_switch)
+                    .after(SpriteSourceHydrationSet),
+                (propagate_spatial, hud::update)
+                    .after(world::dress_arena)
+                    .run_if(resource_changed::<ArenaInstance>),
+            ),
+        )?
+        .add_systems(
+            FixedUpdate,
+            (
+                world::update_appearance
+                    .before(SpatialSet::AfterFixed)
+                    .before(SpriteAnimationUpdateSet),
+                hud::update,
+            )
+                .in_set(FixedUpdateSet::Finalize),
+        )?;
     Ok(app)
 }
 

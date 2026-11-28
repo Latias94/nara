@@ -20,6 +20,7 @@ use nara_scene::spatial::{ChildOf, GlobalTransform2d, Transform2d, Visibility};
 
 mod material;
 mod visibility;
+mod visual;
 
 #[derive(MaterialParameters)]
 struct PaletteParameters {

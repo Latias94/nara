@@ -1,7 +1,7 @@
 //! Authored 2D components with typed runtime codecs.
 
 use bevy_ecs::component::Component;
-use nara_core::{AssetId, Color, Vec2};
+use nara_core::{AssetId, Color, Vec2, Vec4};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
@@ -10,6 +10,8 @@ use nara_reflect::{
 use thiserror::Error;
 
 pub use crate::spatial::{Transform2d, Visibility};
+mod camera;
+pub use camera::Camera2dSource;
 
 /// A source quad with linear tint and optional stable image and material IDs.
 #[derive(Component, Schema, Debug, Clone, PartialEq)]
@@ -33,6 +35,15 @@ pub struct SpriteSource {
     pub image: Option<AssetId>,
     #[schema(alias = "Material")]
     pub material: Option<AssetId>,
+    #[schema(alias = "Flip X")]
+    pub flip_x: bool,
+    #[schema(alias = "Flip Y")]
+    pub flip_y: bool,
+    /// Nine-slice borders in left, right, top, bottom order.
+    #[schema(alias = "Slice Borders")]
+    pub slice: Option<Vec4>,
+    #[schema(alias = "Additive Blend")]
+    pub additive: bool,
 }
 
 impl SpriteSource {
@@ -50,6 +61,62 @@ impl Default for SpriteSource {
             layer: 0,
             image: None,
             material: None,
+            flip_x: false,
+            flip_y: false,
+            slice: None,
+            additive: false,
+        }
+    }
+}
+
+// Native layout of SpriteSource columns written before presentation fields were introduced.
+#[cfg(feature = "cooked")]
+#[derive(Component, Schema)]
+#[schema(
+    crate = "nara_reflect",
+    id = "nara.SpriteSource",
+    version = 1,
+    default,
+    alias = "Sprite",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit)
+)]
+pub(crate) struct LegacySpriteSource {
+    #[schema(alias = "Size")]
+    size: Vec2,
+    #[schema(alias = "Tint", color_srgb)]
+    tint: Color,
+    #[schema(alias = "Layer")]
+    layer: i32,
+    #[schema(alias = "PNG Image")]
+    image: Option<AssetId>,
+    #[schema(alias = "Material")]
+    material: Option<AssetId>,
+}
+
+#[cfg(feature = "cooked")]
+impl Default for LegacySpriteSource {
+    fn default() -> Self {
+        Self {
+            size: Vec2::ONE,
+            tint: Color::WHITE,
+            layer: 0,
+            image: None,
+            material: None,
+        }
+    }
+}
+
+#[cfg(feature = "cooked")]
+impl From<LegacySpriteSource> for SpriteSource {
+    fn from(source: LegacySpriteSource) -> Self {
+        Self {
+            size: source.size,
+            tint: source.tint,
+            layer: source.layer,
+            image: source.image,
+            material: source.material,
+            ..Self::default()
         }
     }
 }
@@ -299,6 +366,7 @@ pub fn builtin_component_schemas() -> Result<Vec<ComponentSchema>, ComponentCode
         TilemapSource::type_schema()?,
         AnimationSource::type_schema()?,
         SpriteAnimatorSource::type_schema()?,
+        schema_with_initial::<Camera2dSource>()?,
     ])
 }
 

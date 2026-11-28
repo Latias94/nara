@@ -51,6 +51,16 @@ impl TextureCache {
         }
     }
 
+    /// Check room for a frame's leases before acquiring any of them. Only the renderer acquires
+    /// leases, so concurrent completion callbacks can only increase the available capacity.
+    pub(super) fn check_available(&self, count: usize) -> Result<(), WgpuRenderError> {
+        let pool = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        if count > MAX_ACTIVE_TEXTURES - pool.active {
+            return Err(WgpuRenderError::TargetsBusy);
+        }
+        Ok(())
+    }
+
     pub(super) fn acquire(
         &self,
         device: &wgpu::Device,

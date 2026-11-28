@@ -18,13 +18,28 @@ use crate::{
     PilotInput, Round, RoundStatus, RunRules,
     audio::ARRIVAL_BUS,
     campaign::{ARRIVAL_AUDIO, Campaign, SaveSnapshot, Sector},
-    route::{ESCAPE_ROUTE, at},
+    route::{ESCAPE_ROUTE, SECOND_ESCAPE_ROUTE, at},
     simulation::advance_round,
 };
 
 use super::is_game_frame;
 
-pub(super) const SAVE_SLOT: &str = "r1-verification";
+mod visuals;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum CampaignRun {
+    Arrival,
+    BothSectors,
+}
+
+impl CampaignRun {
+    pub(super) const fn save_slot(self) -> &'static str {
+        match self {
+            Self::Arrival => "r1-verification",
+            Self::BothSectors => "r2-verification",
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Smoke {
@@ -35,7 +50,7 @@ pub(super) enum Smoke {
 pub(super) fn verify_present(app: &mut App, probe: Smoke) -> Result<(), Box<dyn Error>> {
     let require_pickup = probe == Smoke::Pickup;
     if require_pickup {
-        install_route(app, true)?;
+        install_route(app, true, CampaignRun::Arrival)?;
     }
     let deadline = Instant::now() + Duration::from_secs(15);
     let presented = Arc::new(OnceLock::new());
@@ -79,34 +94,62 @@ pub(super) fn verify_present(app: &mut App, probe: Smoke) -> Result<(), Box<dyn 
     .into())
 }
 
-fn install_route(app: &mut App, pickup_only: bool) -> Result<(), PluginError> {
-    let route = if pickup_only {
-        &ESCAPE_ROUTE[..4]
-    } else {
-        &ESCAPE_ROUTE[..]
-    };
+#[derive(Default)]
+struct RouteProgress {
+    waypoint: usize,
+    sector: Sector,
+    took_impact: bool,
+}
+
+fn install_route(app: &mut App, pickup_only: bool, run: CampaignRun) -> Result<(), PluginError> {
+    let first = ESCAPE_ROUTE.map(|(column, row)| at(column, row));
+    let impact = [(2, 5), (8, 5), (8, 3), (11, 3)].map(|(column, row)| at(column, row));
     app.add_systems(
         FixedUpdate,
-        (move |mut waypoint: Local<usize>,
+        (move |mut progress: Local<RouteProgress>,
                mut input: ResMut<PilotInput>,
                round: Res<Round>,
                campaign: Res<Campaign>,
                rules: Single<&RunRules>,
                time: Res<FixedTime>| {
             input.movement = Vec2::ZERO;
-            if campaign.sector != Sector::One
-                || round.status() != RoundStatus::Running
-                || pickup_only && round.collected() != 0
-            {
+            if round.status() != RoundStatus::Running || pickup_only && round.collected() != 0 {
                 return;
             }
-            while let Some(&(column, row)) = route.get(*waypoint) {
-                let offset = at(column, row) - round.position();
+            if campaign.sector != progress.sector {
+                progress.sector = campaign.sector;
+                progress.waypoint = 0;
+            }
+            let route: &[Vec2] = match (run, campaign.sector) {
+                (CampaignRun::Arrival, Sector::One) if pickup_only => &first[..4],
+                (CampaignRun::Arrival, Sector::One) => &first,
+                (CampaignRun::Arrival, Sector::Two) => return,
+                (CampaignRun::BothSectors, Sector::One) if !progress.took_impact => {
+                    if round.shields() < rules.shield_charges {
+                        if round.cooldown <= Duration::from_millis(800) {
+                            progress.took_impact = true;
+                            progress.waypoint = 0;
+                            input.restart = true;
+                        }
+                        return;
+                    }
+                    &impact
+                }
+                (CampaignRun::BothSectors, Sector::One) => &first,
+                (CampaignRun::BothSectors, Sector::Two) => {
+                    if round.elapsed < Duration::from_millis(600) {
+                        return;
+                    }
+                    &SECOND_ESCAPE_ROUTE
+                }
+            };
+            while let Some(&target) = route.get(progress.waypoint) {
+                let offset = target - round.position();
                 if offset.length_squared() > 0.01 {
                     input.movement = offset / (rules.move_speed * time.delta().as_secs_f32());
                     return;
                 }
-                *waypoint += 1;
+                progress.waypoint += 1;
             }
         })
         .in_set(FixedUpdateSet::Simulate)
@@ -115,16 +158,27 @@ fn install_route(app: &mut App, pickup_only: bool) -> Result<(), PluginError> {
     Ok(())
 }
 
-struct R1Receipt {
+struct CampaignReceipt {
     retired: usize,
     frame: DesktopPresentedFrame,
     output: AudioOutput,
     peak: f32,
     progress: SaveSnapshot,
+    merged_tiles: Option<(usize, usize)>,
+    quiet_frames: u32,
 }
 
-pub(super) fn verify_r1(app: &mut App, save_dir: &Path) -> Result<(), Box<dyn Error>> {
-    install_route(app, false)?;
+pub(super) fn verify_campaign(
+    app: &mut App,
+    save_dir: &Path,
+    run: CampaignRun,
+) -> Result<(), Box<dyn Error>> {
+    let complete = run == CampaignRun::BothSectors;
+    install_route(app, false, run)?;
+    if complete {
+        app.init_resource::<visuals::Evidence>()?
+            .add_systems(Last, visuals::observe)?;
+    }
     let manager = app.world().resource::<SceneManager>();
     let first = manager
         .main_instance()
@@ -135,24 +189,26 @@ pub(super) fn verify_r1(app: &mut App, save_dir: &Path) -> Result<(), Box<dyn Er
         .len();
     let arrival: AssetId = ARRIVAL_AUDIO.parse()?;
     let bus = AudioBusId::new(ARRIVAL_BUS);
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let result = Arc::new(OnceLock::<Result<R1Receipt, String>>::new());
+    let deadline = Instant::now() + Duration::from_secs(if complete { 50 } else { 30 });
+    let result = Arc::new(OnceLock::<Result<CampaignReceipt, String>>::new());
     let receipt = Arc::clone(&result);
     app.add_systems(
         Last,
-        move |(present, execution, mixer): (
+        (move |(present, execution, mixer): (
             Res<DesktopPresentation>,
             Res<FrameExecutionStart>,
             Res<AudioMixer>,
         ),
-              (manager, campaign, round): (Res<SceneManager>, Res<Campaign>, Res<Round>),
-              entities: Query<(Entity, Option<&SceneMember>)>,
-              audio: Query<(&SceneMember, &AudioClipSource, &AudioPlayback)>,
-              mut old: Local<Vec<Entity>>,
-              mut switched_at: Local<Option<u64>>,
-              mut playing: Local<bool>,
-              mut peak: Local<f32>,
-              mut exit: ResMut<AppExitRequests>| {
+               (manager, campaign, round): (Res<SceneManager>, Res<Campaign>, Res<Round>),
+               entities: Query<(Entity, Option<&SceneMember>)>,
+               audio: Query<(&SceneMember, &AudioClipSource, &AudioPlayback)>,
+               visuals: Option<Res<visuals::Evidence>>,
+               mut old: Local<Vec<Entity>>,
+               mut switched_at: Local<Option<u64>>,
+               mut cleared_at: Local<Option<u64>>,
+               mut playing: Local<bool>,
+               mut peak: Local<f32>,
+               mut exit: ResMut<AppExitRequests>| {
             let mut fail = |message| {
                 let _ = receipt.set(Err(message));
                 exit.request_exit();
@@ -175,13 +231,16 @@ pub(super) fn verify_r1(app: &mut App, save_dir: &Path) -> Result<(), Box<dyn Er
             }
             if Instant::now() >= deadline {
                 fail(format!(
-                    "timed out waiting for Sector 2, arrival playback and presentation \
-                     (sector={:?}, round={:?}, audio_output={:?}, playing={}, arrival_peak={})",
+                    "campaign verification timed out \
+                     (sector={:?}, round={:?}, position={:?}, audio_output={:?}, \
+                      playing={}, arrival_peak={}, unconfirmed_visuals={:?})",
                     campaign.sector,
                     round.status(),
+                    round.position(),
                     mixer.output(),
                     *playing,
                     *peak,
+                    visuals.as_ref().map(|visuals| visuals.unconfirmed()),
                 ));
                 return;
             }
@@ -206,11 +265,16 @@ pub(super) fn verify_r1(app: &mut App, save_dir: &Path) -> Result<(), Box<dyn Er
                 fail("Sector 1 entities or decorations survived the switch".into());
                 return;
             }
-            if round.status() != RoundStatus::Running || round.collected() != 0 {
+            if switched_at.is_none()
+                && (round.status() != RoundStatus::Running || round.collected() != 0)
+            {
                 fail("Sector 2 did not start a clean round".into());
                 return;
             }
             let frame_index = *switched_at.get_or_insert(execution.frame());
+            if complete && round.status() == RoundStatus::Escaped {
+                cleared_at.get_or_insert(execution.frame());
+            }
             let Some((_, _, playback)) = audio.iter().find(|(member, clip, _)| {
                 member.0 == main && clip.clip == arrival && clip.autoplay && clip.bus == ARRIVAL_BUS
             }) else {
@@ -233,47 +297,79 @@ pub(super) fn verify_r1(app: &mut App, save_dir: &Path) -> Result<(), Box<dyn Er
             }
             if *playing
                 && (output == AudioOutput::Mock || *peak > 0.0)
+                && (!complete
+                    || round.status() == RoundStatus::Escaped
+                        && visuals.as_ref().is_some_and(|visuals| visuals.complete()))
                 && let Some(frame) = present.latest().filter(is_game_frame)
-                && frame.frame_index >= frame_index
+                && frame.frame_index >= cleared_at.unwrap_or(frame_index)
             {
-                let _ = receipt.set(Ok(R1Receipt {
+                let _ = receipt.set(Ok(CampaignReceipt {
                     retired: old.len(),
                     frame,
                     output,
                     peak: *peak,
                     progress: campaign.progress,
+                    merged_tiles: visuals.as_ref().and_then(|visuals| visuals.merged_tiles),
+                    quiet_frames: visuals.as_ref().map_or(0, |visuals| visuals.quiet_frames),
                 }));
                 exit.request_success();
             }
-        },
+        })
+        .after(visuals::observe),
     )?;
     let exit = app.run()?;
     let observation = result
         .get()
-        .ok_or("the window closed before the R1 verification completed")?
+        .ok_or("the window closed before campaign verification completed")?
         .as_ref()
         .map_err(String::as_str)?;
     if exit != AppExit::Success {
-        return Err("the native R1 verification did not exit successfully".into());
+        return Err("the native campaign verification did not exit successfully".into());
     }
-    let saved = SaveStore::in_dir(save_dir).load::<SaveSnapshot>(SAVE_SLOT)?;
+    let saved = SaveStore::in_dir(save_dir).load::<SaveSnapshot>(run.save_slot())?;
     let best = saved
         .sector_one_best_ms
         .ok_or("the save has no Sector 1 clear time")?;
-    if saved != observation.progress || best == 0 || saved.sector_two_best_ms.is_some() {
-        return Err("saved progress did not match the Sector 1 clear".into());
+    if saved != observation.progress || best == 0 {
+        return Err("saved progress did not match the campaign clear times".into());
     }
     let frame = observation.frame;
-    println!(
-        "NIGHT_RELAY_R1 sector=2 retired={} audio=Playing audio_output={:?} arrival_peak={:.6} \
+    if complete {
+        let second = saved
+            .sector_two_best_ms
+            .filter(|&ms| ms > 0)
+            .ok_or("the save has no Sector 2 clear time")?;
+        let (rectangles, solid) = observation
+            .merged_tiles
+            .ok_or("Sector 2 tile colliders were not presented")?;
+        println!(
+            "NIGHT_RELAY_R2 sectors=2 retired={} audio_output={:?} arrival_peak={:.6} \
+             clear_ms={best},{second} save_round_trip=true camera_follow=true camera_shake=true \
+             sprite_animation=true property_animation=true gate_tween=true additive_particles=true \
+             bloom=true fade=true merged_tiles={rectangles}/{solid} steady_zero_frames={} \
+             presented={}x{} hud_glyphs={}",
+            observation.retired,
+            observation.output,
+            observation.peak,
+            observation.quiet_frames,
+            frame.extent.width,
+            frame.extent.height,
+            frame.hud_glyph_primitives,
+        );
+    } else if saved.sector_two_best_ms.is_some() {
+        return Err("the Sector 1 probe unexpectedly saved a Sector 2 clear".into());
+    } else {
+        println!(
+            "NIGHT_RELAY_R1 sector=2 retired={} audio=Playing audio_output={:?} arrival_peak={:.6} \
          best_clear_ms={best} save_round_trip=true presented={}x{} hud_glyphs={}",
-        observation.retired,
-        observation.output,
-        observation.peak,
-        frame.extent.width,
-        frame.extent.height,
-        frame.hud_glyph_primitives,
-    );
+            observation.retired,
+            observation.output,
+            observation.peak,
+            frame.extent.width,
+            frame.extent.height,
+            frame.hud_glyph_primitives,
+        );
+    }
     if observation.output != AudioOutput::Device {
         return Err("the native mixer used audio_output=Mock".into());
     }

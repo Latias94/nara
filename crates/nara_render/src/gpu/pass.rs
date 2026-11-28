@@ -1,10 +1,16 @@
 use crate::{Color, Extent2d};
 
-use super::{RenderInput, WgpuNativeWorkStats, WgpuRenderError, frame_buffer::FrameRingBuffer};
+use super::{
+    RenderInput, WgpuNativeWorkStats, WgpuRenderError, frame_buffer::FrameRingBuffer,
+    post_process::PostProcessInput,
+};
 
-/// Attachment shared by the scene, HUD and editor overlay in submission order.
+/// Logical color attachments routed by the renderer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Attachment {
+    /// The world raster, which aliases `Color` when the scene draws directly to the target.
+    SceneColor,
+    /// The final attachment used for the HUD, editor overlay, and presentation.
     Color,
 }
 
@@ -18,6 +24,10 @@ pub struct PassAttachments {
 impl PassAttachments {
     pub const SCENE: Self = Self {
         reads: &[],
+        writes: &[Attachment::SceneColor],
+    };
+    pub const POST_PROCESS: Self = Self {
+        reads: &[Attachment::SceneColor],
         writes: &[Attachment::Color],
     };
     pub const OVERLAY: Self = Self {
@@ -52,6 +62,7 @@ pub struct RenderPassContext<'a> {
     pub frame: &'a RenderInput,
     pub(crate) work: &'a mut WgpuNativeWorkStats,
     pub(super) uploads: &'a mut FrameRingBuffer,
+    pub(super) post_process: Option<PostProcessInput<'a>>,
     #[cfg(feature = "hud-runtime")]
     pub(crate) hud: &'a mut Result<Option<crate::hud::HudPresentation>, crate::hud::HudDrawError>,
 }

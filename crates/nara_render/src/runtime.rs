@@ -15,7 +15,8 @@ use nara_window::{PrimaryWindowId, Window, WindowId};
 
 use crate::{
     Camera2d, CapturedRenderTime, Color, Extent2d, ExtractedView, ExtractedViews, RenderViewId,
-    ViewLoadOp, ViewMapping2d, ViewportRect, WorldCanvas, frame, world_pointer,
+    ViewLoadOp, ViewMapping2d, ViewportRect, WorldCanvas, camera::CameraRigExtraction, frame,
+    view::orthographic_half_extents, world_pointer,
 };
 
 /// Frame capture and presentation hooks for desktop and other renderer hosts.
@@ -30,6 +31,9 @@ pub mod runtime_integration {
 pub enum RenderExtractSet {
     Views,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+pub(crate) struct CameraSpatial;
 
 #[derive(Debug, Clone, Copy, PartialEq, Resource)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -94,7 +98,7 @@ impl Plugin for RenderPlugin {
         app.add_systems(
             CoreStage::Extract,
             (
-                propagate_spatial,
+                propagate_spatial.in_set(CameraSpatial),
                 extract_views.in_set(RenderExtractSet::Views),
             )
                 .chain(),
@@ -156,6 +160,8 @@ enum RenderViewExtractionError {
     SingularTransform { entity: Entity },
     #[error("camera entity {entity:?} has an invalid orthographic projection")]
     InvalidProjection { entity: Entity },
+    #[error("camera entity {entity:?} has a non-finite target clear color")]
+    NonFiniteClearColor { entity: Entity },
 }
 
 #[derive(SystemParam)]
@@ -171,6 +177,7 @@ struct ViewExtraction<'w, 's> {
     primary_window_id: Option<Res<'w, PrimaryWindowId>>,
     windows: Query<'w, 's, &'static Window>,
     canvas: Option<Res<'w, WorldCanvas>>,
+    rigs: CameraRigExtraction<'w, 's>,
     cameras: Query<
         'w,
         's,
@@ -202,6 +209,7 @@ fn extract_views(
         primary_window_id,
         windows,
         canvas,
+        mut rigs,
         cameras,
     } = state.get_mut(world).map_err(BevyError::error)?;
     let canvas = canvas.as_deref().copied();
@@ -209,7 +217,8 @@ fn extract_views(
     scratch.0.clear();
 
     for (entity, camera, global, visibility) in &cameras {
-        if visibility.is_some_and(|visibility| !visibility.get()) {
+        let shake = rigs.advance_shake(entity, &virtual_time);
+        if !rigs.is_active(entity) || visibility.is_some_and(|visibility| !visibility.get()) {
             continue;
         }
         let global = global
@@ -225,13 +234,29 @@ fn extract_views(
         else {
             continue;
         };
+        let base = global.matrix();
+        validate_camera_transform(entity, base).map_err(BevyError::error)?;
+        let invalid_projection =
+            || BevyError::error(RenderViewExtractionError::InvalidProjection { entity });
+        let half_view = orthographic_half_extents(camera.viewport_height, viewport)
+            .ok_or_else(invalid_projection)?;
+        let pose = rigs.pose(
+            entity,
+            id,
+            global.affine(),
+            half_view,
+            shake,
+            virtual_time.delta_seconds(),
+        );
+        let mapping = ViewMapping2d::from_orthographic_half_extents(pose.into(), half_view)
+            .or_else(|| ViewMapping2d::from_orthographic_half_extents(base, half_view))
+            .ok_or_else(invalid_projection)?;
         scratch.0.push(ExtractedView {
             id,
             camera_entity: entity,
             target: camera.target,
             viewport,
-            mapping: camera_mapping(entity, global.matrix(), camera.viewport_height, viewport)
-                .map_err(BevyError::error)?,
+            mapping,
             order: camera.order,
             load: camera
                 .clear_color
@@ -252,26 +277,35 @@ fn extract_views(
         {
             view.load = ViewLoadOp::Clear(clear_color.0);
         }
+        if let ViewLoadOp::Clear(color) = view.load
+            && ![color.r, color.g, color.b, color.a]
+                .into_iter()
+                .all(f32::is_finite)
+        {
+            return Err(BevyError::error(
+                RenderViewExtractionError::NonFiniteClearColor {
+                    entity: view.camera_entity,
+                },
+            ));
+        }
     }
     let time = CapturedRenderTime::new(*real_time, *virtual_time, *render_time, *time_settings);
     extracted_views.replace(&mut scratch.0, canvas, time);
     Ok(())
 }
 
-fn camera_mapping(
+fn validate_camera_transform(
     entity: Entity,
     matrix: Mat3,
-    viewport_height: f32,
-    viewport: ViewportRect,
-) -> Result<ViewMapping2d, RenderViewExtractionError> {
+) -> Result<(), RenderViewExtractionError> {
     if !matrix.is_finite() {
         return Err(RenderViewExtractionError::NonFiniteTransform { entity });
     }
-    if matrix.determinant() == 0.0 {
+    let determinant = matrix.determinant();
+    if determinant == 0.0 || !determinant.is_finite() {
         return Err(RenderViewExtractionError::SingularTransform { entity });
     }
-    ViewMapping2d::orthographic(matrix, viewport_height, viewport)
-        .ok_or(RenderViewExtractionError::InvalidProjection { entity })
+    Ok(())
 }
 
 fn viewport_for_camera(
