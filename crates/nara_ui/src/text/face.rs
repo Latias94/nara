@@ -41,33 +41,7 @@ impl FontFace {
 
     /// Admits one face while allowing several selections to share the same container.
     pub fn from_shared_bytes(bytes: Arc<Vec<u8>>, face_index: u32) -> Result<Self, FontFaceError> {
-        if bytes.len() > MAX_FONT_CONTAINER_BYTES {
-            return Err(FontFaceError::ContainerTooLarge {
-                actual: bytes.len(),
-                maximum: MAX_FONT_CONTAINER_BYTES,
-            });
-        }
-        if bytes.is_empty() {
-            return Err(FontFaceError::Empty);
-        }
-        if let Some(face_count) = ttf_parser::fonts_in_collection(&bytes) {
-            let table_bytes = usize::try_from(face_count)
-                .ok()
-                .and_then(|count| count.checked_mul(4))
-                .and_then(|length| length.checked_add(12))
-                .ok_or(FontFaceError::Malformed)?;
-            if table_bytes > bytes.len() {
-                return Err(FontFaceError::Malformed);
-            }
-        }
-        let parsed = Face::parse(&bytes, face_index).map_err(|error| match error {
-            FaceParsingError::FaceIndexOutOfBounds => FontFaceError::FaceIndexOutOfBounds {
-                requested: face_index,
-                faces: ttf_parser::fonts_in_collection(&bytes).unwrap_or(1),
-            },
-            _ => FontFaceError::Malformed,
-        })?;
-        let family_name = preferred_family_name(&parsed).ok_or(FontFaceError::MissingFamilyName)?;
+        let family_name = validate_face(&bytes, face_index)?;
         let mut hasher = blake3::Hasher::new();
         hasher.update(&bytes);
         hasher.update(&face_index.to_le_bytes());
@@ -79,6 +53,11 @@ impl FontFace {
             family_name,
             id,
         })
+    }
+
+    /// Checks that the selected face can be loaded without taking ownership of the font bytes.
+    pub fn validate_bytes(bytes: &[u8], face_index: u32) -> Result<(), FontFaceError> {
+        validate_face(bytes, face_index).map(drop)
     }
 
     #[must_use]
@@ -108,6 +87,36 @@ impl FontFace {
     pub(crate) fn shared_bytes(&self) -> Arc<Vec<u8>> {
         Arc::clone(&self.bytes)
     }
+}
+
+fn validate_face(bytes: &[u8], face_index: u32) -> Result<String, FontFaceError> {
+    if bytes.len() > MAX_FONT_CONTAINER_BYTES {
+        return Err(FontFaceError::ContainerTooLarge {
+            actual: bytes.len(),
+            maximum: MAX_FONT_CONTAINER_BYTES,
+        });
+    }
+    if bytes.is_empty() {
+        return Err(FontFaceError::Empty);
+    }
+    if let Some(face_count) = ttf_parser::fonts_in_collection(bytes) {
+        let table_bytes = usize::try_from(face_count)
+            .ok()
+            .and_then(|count| count.checked_mul(4))
+            .and_then(|length| length.checked_add(12))
+            .ok_or(FontFaceError::Malformed)?;
+        if table_bytes > bytes.len() {
+            return Err(FontFaceError::Malformed);
+        }
+    }
+    let parsed = Face::parse(bytes, face_index).map_err(|error| match error {
+        FaceParsingError::FaceIndexOutOfBounds => FontFaceError::FaceIndexOutOfBounds {
+            requested: face_index,
+            faces: ttf_parser::fonts_in_collection(bytes).unwrap_or(1),
+        },
+        _ => FontFaceError::Malformed,
+    })?;
+    preferred_family_name(&parsed).ok_or(FontFaceError::MissingFamilyName)
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]

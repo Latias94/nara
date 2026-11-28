@@ -95,7 +95,7 @@ if __name__ == "__main__":
         "--features", "desktop",
     )
     check_dependencies(
-        "nara-reference-game", re.compile(rf"{shipping.pattern}|^(?:notify|png|ron)$"),
+        "nara-reference-game", re.compile(rf"{shipping.pattern}|^(?:notify|png|ron|image)$"),
         "--manifest-path", "reference-game/Cargo.toml", "--no-default-features", "--features", "desktop",
     )
     check_dependencies("nara_project", re.compile(rf"{editor}|^(?:wgpu|winit)$"), "--all-features")

@@ -1614,7 +1614,6 @@ dependencies = [
  "pastey",
  "rtrb",
  "send_wrapper",
- "symphonia",
  "triple_buffer",
 ]
 
@@ -1967,7 +1966,9 @@ dependencies = [
  "nara_app",
  "nara_asset",
  "nara_core",
+ "nara_reflect",
  "nara_scene",
+ "symphonia",
  "symphonia-metadata",
  "thiserror 2.0.18",
 ]

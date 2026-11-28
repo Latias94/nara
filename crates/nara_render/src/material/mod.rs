@@ -6,6 +6,8 @@ mod declaration;
 mod library;
 #[cfg(feature = "material")]
 mod parameters;
+#[cfg(feature = "runtime")]
+mod runtime_loader;
 #[cfg(feature = "material")]
 mod shader;
 #[cfg(feature = "material")]
@@ -29,6 +31,12 @@ pub use nara_material_derive::MaterialParameters;
 pub use parameters::{
     MaterialParameterKind, MaterialParameterLayout, MaterialParameterValue,
     MaterialParameterValues, MaterialParameters,
+};
+#[cfg(any(feature = "sprite-render", feature = "sprite-source-hydration"))]
+pub(crate) use runtime_loader::register_sprite_material_loader;
+#[cfg(feature = "runtime")]
+pub use runtime_loader::{
+    SpriteMaterialBindingAsset, SpriteMaterialLoader, SpriteMaterialLoaderError,
 };
 #[cfg(feature = "material")]
 pub use shader::{

@@ -1,10 +1,10 @@
 use nara_app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
 
-use crate::{ASSET_PLUGIN_ID, Assets};
+use crate::{ASSET_PLUGIN_ID, AssetAppExt};
 
-use super::ImageAsset;
+use super::ImageAssetLoader;
 
-/// Initializes the typed image store for code-first loading and rendering.
+/// Initializes the typed image store and registers its runtime loader.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ImagePlugin;
 
@@ -19,7 +19,7 @@ impl Plugin for ImagePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<Assets<ImageAsset>>()?;
+        app.register_asset_loader(ImageAssetLoader)?;
         Ok(())
     }
 }

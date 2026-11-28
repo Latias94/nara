@@ -17,9 +17,11 @@ tempfile = "3.27"
 blake3 = { workspace = true, optional = true }
 ctrlc = { version = "3.5", optional = true }
 nara_asset = { workspace = true, optional = true, features = ["authoring"] }
+nara_audio = { workspace = true, optional = true }
 nara_reflect = { workspace = true, optional = true, features = ["serde"] }
 nara_render = { workspace = true, optional = true, features = ["material-authoring"] }
 nara_scene = { workspace = true, optional = true, features = ["cook"] }
+nara_ui = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tempfile = { version = "3.27", optional = true }
 thiserror = { workspace = true, optional = true }
@@ -42,8 +44,10 @@ default = ["delivery"]
 delivery = [
     "workflow",
     "dep:blake3",
+    "dep:nara_audio",
     "dep:nara_render",
     "dep:nara_scene",
+    "dep:nara_ui",
     "dep:rustix",
     "dep:tempfile",
     "nara_asset/cook",

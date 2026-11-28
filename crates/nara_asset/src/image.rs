@@ -10,6 +10,8 @@ mod decode;
 mod load;
 #[cfg(feature = "runtime")]
 mod plugin;
+#[cfg(feature = "runtime")]
+mod runtime_loader;
 #[cfg(all(feature = "authoring", any(feature = "image-import", feature = "cook")))]
 mod source_import;
 
@@ -21,6 +23,8 @@ pub use decode::ImageDecodeError;
 pub use load::{ImageLoadError, ImageSourceDirectory, load_image};
 #[cfg(feature = "runtime")]
 pub use plugin::{IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID, ImagePlugin};
+#[cfg(feature = "runtime")]
+pub use runtime_loader::{ImageAssetLoader, ImageAssetLoaderError};
 #[cfg(all(feature = "authoring", any(feature = "image-import", feature = "cook")))]
 pub use source_import::{
     ImageImportError, ImageImportFilter, ImageImportSettings, decode_png_source,

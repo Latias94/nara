@@ -10,7 +10,9 @@ mod prepare;
 #[cfg(feature = "image-import")]
 pub use nara_asset::image::ImageDecodeError;
 #[cfg(feature = "image-runtime")]
-pub use nara_asset::image::{IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID, ImagePlugin};
+pub use nara_asset::image::{
+    IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID, ImageAssetLoader, ImageAssetLoaderError, ImagePlugin,
+};
 pub use nara_asset::image::{
     ImageAsset, ImageAssetCreateError, ImageColorSpace, ImageContentHash, ImageExtent, ImageFormat,
     ImagePixels,

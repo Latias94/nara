@@ -26,6 +26,7 @@ default = ["runtime"]
 runtime = [
     "dep:nara_app",
     "dep:nara_asset",
+    "nara_asset/runtime",
     "dep:nara_ecs",
     "dep:nara_input",
 ]

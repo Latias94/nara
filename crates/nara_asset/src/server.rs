@@ -47,6 +47,9 @@ pub enum AssetError {
     MissingRuntimeSource,
     MissingLoader(&'static str),
     UnresolvedPath(AssetPath),
+    UnknownRuntimeKind(nara_core::AssetId),
+    MissingKindLoader(crate::NpakEntryKind),
+    AmbiguousKindLoader(crate::NpakEntryKind),
     AssetTypeMismatch {
         id: AssetId,
         existing: &'static str,
@@ -112,6 +115,17 @@ impl Display for AssetError {
             Self::UnresolvedPath(path) => write!(
                 formatter,
                 "asset path '{path}' is not in the runtime source"
+            ),
+            Self::UnknownRuntimeKind(id) => write!(
+                formatter,
+                "the runtime source has no known kind for asset '{id}'"
+            ),
+            Self::MissingKindLoader(kind) => {
+                write!(formatter, "no asset loader is registered for kind {kind:?}")
+            }
+            Self::AmbiguousKindLoader(kind) => write!(
+                formatter,
+                "multiple asset loaders are registered for kind {kind:?}"
             ),
             Self::UnknownProduct(reference) => {
                 write!(

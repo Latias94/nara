@@ -1,3 +1,4 @@
+use nara_audio::{AudioCodec, NAUD_HEADER_BYTES, cook_audio, cooked_audio_codec};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{self, Read as _, Seek, Write},
@@ -29,6 +30,8 @@ const PREFAB: &str = "nara.prefab";
 const IMAGE: &str = "nara.image";
 const MATERIAL: &str = "nara.material";
 const SHADER: &str = "nara.shader";
+const AUDIO: &str = "nara.audio";
+const FONT: &str = "nara.font";
 const RAW: &str = "nara.raw";
 
 const DOCUMENT_LIMIT: usize = 64 * 1024 * 1024;
@@ -159,6 +162,22 @@ impl Cooker {
                     })?;
                 (NpakEntryKind::Shader, bytes, Vec::new(), hit)
             }
+            AUDIO => {
+                let source = self.read(asset, MAX_NPAK_ENTRY_BYTES - NAUD_HEADER_BYTES)?;
+                let (bytes, hit) = self.cached(asset, source, "nara.audio.naud.v1", |source| {
+                    cook_audio(&source).map_err(|error| asset.error(error))
+                })?;
+                (NpakEntryKind::Audio, bytes, Vec::new(), hit)
+            }
+            FONT => {
+                let source = self.read(asset, nara_ui::text::MAX_FONT_CONTAINER_BYTES)?;
+                let (bytes, hit) = self.cached(asset, source, "nara.font.sfnt.v1", |source| {
+                    nara_ui::FontFace::validate_bytes(&source, 0)
+                        .map_err(|error| asset.error(error))?;
+                    Ok(source)
+                })?;
+                (NpakEntryKind::Font, bytes, Vec::new(), hit)
+            }
             RAW => {
                 let path = asset.record.path().as_str().to_ascii_lowercase();
                 if [".ron", ".meta", ".png"]
@@ -174,7 +193,28 @@ impl Cooker {
             PREFAB => return Err(asset.error("prefabs are expanded into scenes during Cook")),
             importer => return Err(asset.error(format!("no cooker for importer '{importer}'"))),
         };
-        Ok((Payload { kind, bytes }, dependencies, hit))
+        let lz4 = match kind {
+            NpakEntryKind::Audio => matches!(
+                cooked_audio_codec(&bytes).map_err(|error| asset.error(error))?,
+                AudioCodec::PcmWav
+            ),
+            NpakEntryKind::Font => true,
+            _ => bytes.len() >= 1_024,
+        };
+        let compression = if lz4 && bytes.len() <= MAX_NPAK_LZ4_BYTES {
+            NpakCompression::Lz4
+        } else {
+            NpakCompression::None
+        };
+        Ok((
+            Payload {
+                kind,
+                bytes,
+                compression,
+            },
+            dependencies,
+            hit,
+        ))
     }
 
     fn cook_scene(
@@ -339,6 +379,7 @@ impl Source<'_> {
 struct Payload {
     kind: NpakEntryKind,
     bytes: Vec<u8>,
+    compression: NpakCompression,
 }
 
 pub(super) struct Pack(BTreeMap<AssetId, Payload>);
@@ -353,12 +394,7 @@ impl Pack {
             .0
             .iter()
             .map(|(&id, payload)| {
-                let compression = if (1_024..=MAX_NPAK_LZ4_BYTES).contains(&payload.bytes.len()) {
-                    NpakCompression::Lz4
-                } else {
-                    NpakCompression::None
-                };
-                NpakInput::new(id, payload.kind, &payload.bytes, compression)
+                NpakInput::new(id, payload.kind, &payload.bytes, payload.compression)
             })
             .collect::<Vec<_>>();
         write_npak(output, &entries)

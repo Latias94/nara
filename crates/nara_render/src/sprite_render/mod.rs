@@ -14,6 +14,7 @@ mod tests;
 use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_ecs::schedule::IntoScheduleConfigs;
 
+use crate::material::register_sprite_material_loader;
 use crate::sprite_render::extract::extract_sprites;
 #[cfg(test)]
 use crate::sprite_render::queue::{
@@ -58,6 +59,7 @@ impl Plugin for SpriteRenderPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        register_sprite_material_loader(app)?;
         app.init_resource::<ExtractedSprites>()?;
         app.init_resource::<extract::ExtractedSpriteScratch>()?;
         app.init_resource::<QueuedSpriteItems>()?;
@@ -70,6 +72,10 @@ impl Plugin for SpriteRenderPlugin {
         app.add_systems(CoreStage::Queue, queue_sprites)?;
         app.add_systems(CoreStage::Sort, sort_and_batch_sprites)?;
         Ok(())
+    }
+
+    fn finish(&self, app: &mut App) -> Result<(), PluginError> {
+        register_sprite_material_loader(app)
     }
 }
 

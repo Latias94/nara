@@ -26,6 +26,11 @@ pub trait RuntimeAssetBackend: Send + Sync + 'static {
         None
     }
 
+    /// Reports the entry's runtime kind when the source has a type index.
+    fn kind(&self, _id: AssetId) -> Option<NpakEntryKind> {
+        None
+    }
+
     #[cfg(feature = "authoring")]
     fn meta(&self, _id: AssetId) -> Option<crate::AssetMeta> {
         None
@@ -138,6 +143,10 @@ impl RuntimeAssetBackend for ArchiveBackend {
         };
         Ok(bytes)
     }
+
+    fn kind(&self, id: AssetId) -> Option<NpakEntryKind> {
+        self.0.entry(id).map(|entry| entry.kind)
+    }
 }
 
 #[cfg(all(feature = "authoring", any(unix, windows)))]
@@ -179,6 +188,25 @@ impl RuntimeAssetBackend for ProjectBackend {
     fn resolve_path(&self, path: &AssetPath) -> Option<AssetId> {
         let record = self.database.record_for_path(&self.scope.resolve(path))?;
         AssetId::try_from_uuid(record.stable_id().as_uuid()).ok()
+    }
+
+    fn kind(&self, id: AssetId) -> Option<NpakEntryKind> {
+        use crate::meta::{
+            AUDIO_IMPORTER, FONT_IMPORTER, IMAGE_IMPORTER, MATERIAL_IMPORTER, RAW_IMPORTER,
+            SCENE_IMPORTER, SHADER_IMPORTER,
+        };
+
+        let record = self.database.record_for_stable_id(id.into())?;
+        match record.meta()?.importer() {
+            AUDIO_IMPORTER => Some(NpakEntryKind::Audio),
+            FONT_IMPORTER => Some(NpakEntryKind::Font),
+            IMAGE_IMPORTER => Some(NpakEntryKind::Image),
+            MATERIAL_IMPORTER => Some(NpakEntryKind::Material),
+            RAW_IMPORTER => Some(NpakEntryKind::Raw),
+            SCENE_IMPORTER => Some(NpakEntryKind::Scene),
+            SHADER_IMPORTER => Some(NpakEntryKind::Shader),
+            _ => None,
+        }
     }
 
     fn meta(&self, id: AssetId) -> Option<crate::AssetMeta> {

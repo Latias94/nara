@@ -28,6 +28,7 @@ uuid = { workspace = true, optional = true }
 wgpu = { workspace = true, optional = true }
 
 [dev-dependencies]
+nara_asset = { workspace = true, features = ["cooked"] }
 nara_input.workspace = true
 
 [features]
@@ -55,6 +56,7 @@ sprites = ["runtime", "image", "material"]
 tiles = ["runtime", "image", "material"]
 animation = ["sprites"]
 sprite-render = ["sprites", "tiles", "image-runtime", "render-prepare"]
+sprite-source-hydration = ["sprites", "image-runtime", "nara_scene/cooked"]
 hud = ["render-prepare", "dep:guillotiere", "dep:nara_ui"]
 hud-runtime = ["hud", "runtime", "image-runtime", "nara_ui/runtime"]
 wgpu = ["runtime", "material", "dep:bytemuck", "dep:pollster", "dep:wgpu"]

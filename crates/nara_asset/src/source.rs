@@ -2,6 +2,7 @@
 
 use std::io;
 
+pub use nara_core::vfs::MemoryAssetSource;
 use nara_core::{
     AssetId,
     vfs::{AssetPath, AssetSource},

@@ -3,7 +3,7 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
-use nara_asset::cooked::{NpakArchive, NpakEntryKind};
+use nara_asset::cooked::{NpakArchive, NpakCompression, NpakEntryKind};
 use nara_reflect::{
     ComponentCapability, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
 };
@@ -29,6 +29,96 @@ const SHADER: &str = "0193a100-1111-7000-8000-000000000005";
 const UNUSED: &str = "0193a100-1111-7000-8000-000000000006";
 
 const VALID_SHADER: &str = "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return sampled * tint * material_parameters.color; }";
+
+#[test]
+fn cook_validates_and_caches_referenced_audio_and_font() {
+    use nara_reflect::{
+        AssetReferenceDemand, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+        ComponentValueShape,
+    };
+
+    const WAV: &[u8] = include_bytes!("../../../../../examples/assets/pickup.wav");
+    const FONT: &[u8] = include_bytes!("../../../../nara_ui/assets/FiraSans-Regular.ttf");
+    let clip = "0193a100-1111-7000-8000-000000000011".parse().unwrap();
+    let font = "0193a100-1111-7000-8000-000000000012".parse().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path();
+    fixture(project);
+    let component = ComponentTypeId::new("fixture.Media");
+    let version = ComponentSchemaVersion::ONE;
+    let schema = ComponentSchema::new(component.clone(), "Media", version)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_postcard_codec()
+        .with_fields(["clip", "font"].map(|field| {
+            ComponentFieldSchema::required(
+                ComponentFieldId::new(field),
+                field,
+                ComponentFieldPath::from_fields([field]),
+                ComponentValueShape::stable_asset_ref(AssetReferenceDemand::Immediate),
+            )
+            .with_capabilities([ComponentCapability::Scene, ComponentCapability::AssetRef])
+        }));
+    let catalog = ComponentSchemaCatalog::from_components([schema]).unwrap();
+    finish_refresh(
+        project,
+        ExitStatus::from_raw(0),
+        catalog.to_json_string().unwrap().as_bytes(),
+        || false,
+    )
+    .unwrap();
+    let prefab_path = project.join("assets/node.prefab.ron");
+    let mut prefab = SceneDocument::read(&prefab_path).unwrap();
+    prefab.entities[0].components.insert(
+        component,
+        SceneComponent::known(
+            version,
+            ComponentValue::map([
+                ("clip", ComponentValue::AssetReference(clip)),
+                ("font", ComponentValue::AssetReference(font)),
+            ]),
+        ),
+    );
+    prefab
+        .write_with(&prefab_path, catalog.components())
+        .unwrap();
+    for (name, id, importer, bytes) in [
+        ("pickup.wav", clip, "nara.audio", WAV),
+        ("regular.ttf", font, "nara.font", FONT),
+    ] {
+        fs::write(project.join("assets").join(name), bytes).unwrap();
+        fs::write(
+            project.join("assets").join(format!("{name}.meta")),
+            format!(r#"AssetMeta(id: "{id}", importer: "{importer}", settings: ())"#),
+        )
+        .unwrap();
+    }
+    let cook = || cook_project(project, ProjectTrust::Untrusted, || false, |_| {});
+    let first = cook().unwrap();
+    assert_eq!((first.assets, first.cache_misses), (6, 6));
+    let bytes = fs::read(&first.archive).unwrap();
+    let archive = NpakArchive::from_bytes(bytes.clone()).unwrap();
+    let audio = archive.read_kind(clip, NpakEntryKind::Audio).unwrap();
+    assert_eq!(&audio[..4], b"NAUD");
+    assert_eq!(&audio[24..], WAV);
+    assert_eq!(
+        archive.entry(font).unwrap().compression,
+        NpakCompression::Lz4
+    );
+    assert_eq!(archive.read_kind(font, NpakEntryKind::Font).unwrap(), FONT);
+    let repeat = cook().unwrap();
+    assert_eq!((repeat.cache_hits, repeat.cache_misses), (6, 0));
+    assert_eq!(fs::read(&repeat.archive).unwrap(), bytes);
+
+    for (id, path, original) in [
+        (clip, "assets/pickup.wav", WAV),
+        (font, "assets/regular.ttf", FONT),
+    ] {
+        fs::write(project.join(path), b"invalid media").unwrap();
+        assert!(matches!(cook(), Err(DeliveryError::Asset { id: failed, .. }) if failed == id));
+        assert_eq!(fs::read(&repeat.archive).unwrap(), bytes);
+        fs::write(project.join(path), original).unwrap();
+    }
+}
 
 #[test]
 fn packages_only_flattened_dependencies_and_caches_each_input_cut() {

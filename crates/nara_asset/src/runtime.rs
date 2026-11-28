@@ -133,6 +133,8 @@ struct DecodedAsset {
 }
 
 trait ErasedLoader: Send + Sync {
+    fn cooked_kind(&self) -> Option<NpakEntryKind>;
+    fn request(&self, server: &mut AssetServer, id: AssetId) -> Result<RuntimeId, AssetError>;
     fn read(
         &self,
         request: Request,
@@ -142,13 +144,21 @@ trait ErasedLoader: Send + Sync {
 }
 
 impl<L: AssetLoader> ErasedLoader for L {
+    fn cooked_kind(&self) -> Option<NpakEntryKind> {
+        AssetLoader::cooked_kind(self)
+    }
+
+    fn request(&self, server: &mut AssetServer, id: AssetId) -> Result<RuntimeId, AssetError> {
+        server.load_id::<L::Asset>(id).map(Handle::id)
+    }
+
     fn read(
         &self,
         request: Request,
         source: &RuntimeAssetSource,
     ) -> Result<DecodedAsset, AssetLoadError> {
         let backend = source.backend();
-        let bytes = backend.read_asset(request.id, self.cooked_kind())?;
+        let bytes = backend.read_asset(request.id, AssetLoader::cooked_kind(self))?;
         let mut context = AssetLoadContext {
             id: request.id,
             backend,
@@ -286,6 +296,33 @@ impl AssetServer {
             .ok_or(AssetError::UnresolvedPath(path))?;
         self.load_id(id)
     }
+
+    /// Requests a persistent dependency using the unique registered loader for its kind.
+    /// The returned runtime ID can be queried in [`AssetStates`].
+    pub fn load_dependency(&mut self, id: AssetId) -> Result<RuntimeId, AssetError> {
+        let kind = self
+            .runtime
+            .source
+            .as_ref()
+            .ok_or(AssetError::MissingRuntimeSource)?
+            .backend()
+            .kind(id)
+            .ok_or(AssetError::UnknownRuntimeKind(id))?;
+        let mut loaders = self
+            .runtime
+            .registry
+            .loaders
+            .values()
+            .filter(|loader| loader.0.cooked_kind() == Some(kind));
+        let loader = loaders
+            .next()
+            .ok_or(AssetError::MissingKindLoader(kind))?
+            .clone();
+        if loaders.next().is_some() {
+            return Err(AssetError::AmbiguousKindLoader(kind));
+        }
+        loader.0.request(self, id)
+    }
 }
 
 /// Returns a typed asset with its value already published. A pending request for the same UUID
@@ -294,6 +331,18 @@ pub fn load_asset_sync<T: Asset>(
     world: &mut World,
     id: AssetId,
 ) -> Result<Handle<T>, AssetLoadError> {
+    load_sync(world, |server| server.load_id::<T>(id).map(Handle::id)).map(Handle::new)
+}
+
+/// Publishes a dependency immediately using the unique loader for its source kind.
+pub fn load_dependency_sync(world: &mut World, id: AssetId) -> Result<RuntimeId, AssetLoadError> {
+    load_sync(world, |server| server.load_dependency(id))
+}
+
+fn load_sync(
+    world: &mut World,
+    request_load: impl FnOnce(&mut AssetServer) -> Result<RuntimeId, AssetError>,
+) -> Result<RuntimeId, AssetLoadError> {
     if !world.contains_resource::<AssetStates>() || !world.contains_resource::<AssetEvents>() {
         return Err(AssetLoadError::MissingPlugin);
     }
@@ -301,11 +350,11 @@ pub fn load_asset_sync<T: Asset>(
         let mut server = world
             .get_resource_mut::<AssetServer>()
             .ok_or(AssetLoadError::MissingPlugin)?;
-        let handle = server.load_id(id)?;
+        let handle = request_load(&mut server)?;
         let request = server
             .runtime
             .requests
-            .remove(&handle.id())
+            .remove(&handle)
             .ok_or(AssetLoadError::MissingPlugin)?;
         let source = server
             .runtime
@@ -317,18 +366,18 @@ pub fn load_asset_sync<T: Asset>(
             .registry
             .loaders
             .get(&request.asset_type)
-            .ok_or(AssetError::MissingLoader(type_name::<T>()))?
+            .ok_or(AssetLoadError::MissingPlugin)?
             .clone();
         (handle, request, source, loader)
     };
     if already_settled(world, request, &loader)? {
         return Ok(handle);
     }
-    world.resource_mut::<AssetStates>().set_loading(handle.id());
+    world.resource_mut::<AssetStates>().set_loading(handle);
     #[cfg(all(feature = "tasks", not(target_arch = "wasm32")))]
     let task = world
         .get_resource_mut::<pending::PendingLoads>()
-        .and_then(|mut pending| pending.0.remove(&handle.id()));
+        .and_then(|mut pending| pending.0.remove(&handle));
     #[cfg(all(feature = "tasks", not(target_arch = "wasm32")))]
     let result = task.map_or_else(
         || loader.0.read(request, &source),
@@ -336,7 +385,7 @@ pub fn load_asset_sync<T: Asset>(
     );
     #[cfg(not(all(feature = "tasks", not(target_arch = "wasm32"))))]
     let result = loader.0.read(request, &source);
-    finish(world, handle.id(), result)?;
+    finish(world, handle, result)?;
     Ok(handle)
 }
 

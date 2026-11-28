@@ -84,6 +84,8 @@ pub struct AudioBusMeter {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AudioError {
+    #[error("could not load audio clip ({0})")]
+    ClipLoadFailed(String),
     #[error("audio bus '{0}' is not registered")]
     UnknownBus(AudioBusId),
     #[error("audio bus '{0}' already exists")]

@@ -30,7 +30,7 @@ pub use components::{
 #[cfg(feature = "runtime")]
 pub use interaction::{UiActionEvent, UiActivationSource};
 #[cfg(feature = "runtime")]
-pub use plugin::{UI_PLUGIN_DECLARATION, UI_PLUGIN_ID, UiPlugin, plugin};
+pub use plugin::{FontFaceLoader, UI_PLUGIN_DECLARATION, UI_PLUGIN_ID, UiPlugin, plugin};
 #[cfg(feature = "runtime")]
 pub use primary_surface_metrics::UiPrimarySurfaceMetrics;
 #[cfg(feature = "runtime")]

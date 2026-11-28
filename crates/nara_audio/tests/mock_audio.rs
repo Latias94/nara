@@ -1,13 +1,179 @@
 use std::time::Duration;
 
 use bevy_ecs::prelude::{Entity, On, Query, ResMut, Resource, Schedule, World};
-use nara_asset::{Assets, Handle, allocate_anonymous_handle};
-use nara_audio::{
-    AudioBusId, AudioBusMeter, AudioClip, AudioClipError, AudioError, AudioFinished, AudioListener,
-    AudioMixer, AudioOutput, AudioPlayback, AudioPlayer, AudioPosition2d, PlaybackState,
-    SpatialAudio, setup_audio, update_audio_players,
+use nara_app::App;
+use nara_asset::{
+    AssetAppExt, AssetPlugin, AssetReferenceDemand, Assets, Handle, RuntimeAssetMode,
+    RuntimeAssetSource, allocate_anonymous_handle, load_asset_sync, source::asset_id_path,
 };
-use nara_core::Vec2;
+use nara_audio::{
+    AudioBusId, AudioBusMeter, AudioClip, AudioClipError, AudioClipSource, AudioError,
+    AudioFinished, AudioListener, AudioMixer, AudioOutput, AudioPlayback, AudioPlayer, AudioPlugin,
+    AudioPosition2d, PlaybackState, SpatialAudio, cook_audio, setup_audio, update_audio_players,
+};
+use nara_core::{AssetId, Vec2, vfs::MemoryAssetSource};
+use nara_reflect::{ComponentValue, ComponentValueShape, Schema};
+
+const CLIP_ID: &str = "0193a100-1111-7000-8000-000000000001";
+const STEP: Duration = Duration::from_millis(20);
+
+#[test]
+fn authored_sources_hydrate_and_use_the_existing_transport() {
+    let clip_id = CLIP_ID.parse().unwrap();
+    let mut app = App::new();
+    app.add_plugin(AssetPlugin).unwrap();
+    app.add_plugin(AudioPlugin::mock()).unwrap();
+    let cooked = cook_audio(&tone_wav(200)).unwrap();
+    install_clip_source(&mut app, clip_id, RuntimeAssetMode::Cooked, &cooked);
+
+    let schema = AudioClipSource::type_schema().unwrap();
+    assert_eq!(schema.id().as_str(), "nara.AudioClipSource");
+    let clip_field = schema
+        .fields()
+        .iter()
+        .find(|field| field.id().as_str() == "clip")
+        .unwrap();
+    assert_eq!(
+        clip_field.shape(),
+        &ComponentValueShape::stable_asset_ref(AssetReferenceDemand::Immediate)
+    );
+    let component = ComponentValue::map([("clip", ComponentValue::AssetReference(clip_id))]);
+    let authored = AudioClipSource::decode_component((&component).into()).unwrap();
+    assert_eq!(authored.bus, "sfx");
+    assert_eq!(authored.volume, 1.0);
+    assert!(authored.autoplay);
+    assert_eq!(
+        AudioClipSource::decode_postcard(&authored.encode_postcard().unwrap()).unwrap(),
+        authored
+    );
+
+    let world = app.world_mut().unwrap();
+    world.spawn(AudioListener);
+    let autoplay = world
+        .spawn((
+            AudioClipSource {
+                bus: "bgm".to_owned(),
+                volume: 0.75,
+                looping: true,
+                spatial: true,
+                ..authored.clone()
+            },
+            AudioPosition2d(Vec2::new(5.0, 0.0)),
+        ))
+        .id();
+    let manual = world
+        .spawn(AudioClipSource {
+            autoplay: false,
+            ..authored
+        })
+        .id();
+    assert_eq!(state(world, manual), PlaybackState::Idle);
+
+    app.step_fixed(STEP).unwrap();
+    let player = app.world().get::<AudioPlayer>(autoplay).unwrap();
+    assert_eq!(player.bus, AudioBusId::BGM);
+    assert_eq!(player.volume, 0.75);
+    assert!(player.looping);
+    assert!(app.world().get::<SpatialAudio>(autoplay).is_some());
+    assert!(app.world().get::<SpatialAudio>(manual).is_none());
+    assert_eq!(state(app.world(), autoplay), PlaybackState::WaitingForClip);
+    assert_eq!(state(app.world(), manual), PlaybackState::Idle);
+
+    let handle = player.clip;
+    assert_eq!(
+        load_asset_sync::<AudioClip>(app.world_mut().unwrap(), clip_id).unwrap(),
+        handle
+    );
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), autoplay), PlaybackState::Playing);
+    assert_eq!(state(app.world(), manual), PlaybackState::Idle);
+    app.world_mut()
+        .unwrap()
+        .get_mut::<AudioPlayback>(manual)
+        .unwrap()
+        .play();
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), manual), PlaybackState::Playing);
+    let bgm = meter(app.world(), &AudioBusId::BGM);
+    assert!(bgm.peak_left > 0.0 && bgm.peak_right > bgm.peak_left);
+
+    app.world_mut()
+        .unwrap()
+        .entity_mut(autoplay)
+        .remove::<AudioClipSource>();
+    app.step_fixed(STEP).unwrap();
+    assert!(app.world().get::<AudioPlayer>(autoplay).is_none());
+    assert!(app.world().get::<SpatialAudio>(autoplay).is_none());
+    assert_silent(meter(app.world(), &AudioBusId::BGM));
+}
+
+#[test]
+fn authored_autoplay_reports_a_failed_clip() {
+    let clip_id = CLIP_ID.parse().unwrap();
+    let mut app = App::new();
+    app.add_plugin(AssetPlugin).unwrap();
+    app.add_plugin(AudioPlugin::mock()).unwrap();
+    let mut cooked = cook_audio(&tone_wav(20)).unwrap();
+    cooked.pop();
+    install_clip_source(&mut app, clip_id, RuntimeAssetMode::Cooked, &cooked);
+    let entity = app
+        .world_mut()
+        .unwrap()
+        .spawn(AudioClipSource {
+            clip: clip_id,
+            bus: "sfx".to_owned(),
+            volume: 1.0,
+            looping: false,
+            autoplay: true,
+            spatial: false,
+        })
+        .id();
+
+    app.step_fixed(STEP).unwrap();
+    assert!(load_asset_sync::<AudioClip>(app.world_mut().unwrap(), clip_id).is_err());
+    app.step_fixed(STEP).unwrap();
+    let playback = app.world().get::<AudioPlayback>(entity).unwrap();
+    assert_eq!(playback.state(), PlaybackState::Failed);
+    assert!(matches!(
+        playback.error(),
+        Some(AudioError::ClipLoadFailed(_))
+    ));
+}
+
+#[test]
+fn audio_plugin_loads_source_clips_when_asset_plugin_is_installed_later() {
+    let clip_id = CLIP_ID.parse().unwrap();
+    let mut app = App::new();
+    app.add_plugin(AudioPlugin::mock()).unwrap();
+    app.add_plugin(AssetPlugin).unwrap();
+    install_clip_source(&mut app, clip_id, RuntimeAssetMode::Source, &tone_wav(40));
+    app.update_with_delta(Duration::ZERO).unwrap();
+    let clip = load_asset_sync::<AudioClip>(app.world_mut().unwrap(), clip_id).unwrap();
+    let loaded = app
+        .world()
+        .resource::<Assets<AudioClip>>()
+        .get(clip)
+        .unwrap();
+    assert_eq!(loaded.duration(), Duration::from_millis(40));
+}
+
+#[test]
+fn standalone_audio_plugin_plays_procedural_clips() {
+    let mut app = App::new();
+    app.add_plugin(AudioPlugin::mock()).unwrap();
+    let world = app.world_mut().unwrap();
+    let clip = add_tone(world, 40);
+    let entity = world.spawn(AudioPlayer::new(clip)).id();
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Playing);
+}
+
+fn install_clip_source(app: &mut App, id: AssetId, mode: RuntimeAssetMode, bytes: &[u8]) {
+    let mut source = MemoryAssetSource::new();
+    source.insert(&asset_id_path(id), bytes).unwrap();
+    app.set_asset_source(RuntimeAssetSource::from_memory(mode, source))
+        .unwrap();
+}
 
 #[test]
 fn autoplay_waits_for_asset_and_notifies_before_despawn() {
@@ -296,6 +462,12 @@ fn add_tone(world: &mut World, millis: u32) -> Handle<AudioClip> {
 }
 
 fn tone(millis: u32) -> AudioClip {
+    let clip = AudioClip::from_bytes(tone_wav(millis)).unwrap();
+    assert_eq!(clip.duration(), Duration::from_millis(u64::from(millis)));
+    clip
+}
+
+fn tone_wav(millis: u32) -> Vec<u8> {
     let frames = millis * 48;
     let data_bytes = frames * 2;
     let mut wav = b"RIFF".to_vec();
@@ -308,7 +480,5 @@ fn tone(millis: u32) -> AudioClip {
     for _ in 0..frames {
         wav.extend_from_slice(&16_384_i16.to_le_bytes());
     }
-    let clip = AudioClip::from_bytes(wav).unwrap();
-    assert_eq!(clip.duration(), Duration::from_millis(u64::from(millis)));
-    clip
+    wav
 }

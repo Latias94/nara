@@ -485,3 +485,28 @@ fn exact_steps_route_keyboard_once_and_hidden_modal_releases_gameplay() {
     assert_eq!(cursor.read(runtime.world().resource()).count(), 0);
     runtime.finish().unwrap();
 }
+#[test]
+fn ui_plugin_loads_an_authored_font_through_the_asset_server() {
+    use nara_asset::{
+        AssetAppExt, AssetPlugin, Assets, RuntimeAssetMode, RuntimeAssetSource, load_asset_sync,
+        source::asset_id_path,
+    };
+
+    let face = crate::text::bundled_font_face().unwrap();
+    let id = "0193a100-1111-7000-8000-000000000021".parse().unwrap();
+    let mut files = nara_asset::source::MemoryAssetSource::new();
+    files.insert(&asset_id_path(id), face.bytes()).unwrap();
+    let mut app = App::new();
+    app.add_plugins((AssetPlugin, InputPlugin, UiPlugin::default()))
+        .unwrap();
+    app.set_asset_source(RuntimeAssetSource::from_memory(
+        RuntimeAssetMode::Source,
+        files,
+    ))
+    .unwrap();
+    let handle = load_asset_sync::<FontFace>(app.world_mut().unwrap(), id).unwrap();
+    assert_eq!(
+        app.world().resource::<Assets<FontFace>>().get(handle),
+        Some(&face)
+    );
+}

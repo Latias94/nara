@@ -259,6 +259,11 @@ fn project_paths_and_archive_entries_produce_the_same_asset() {
         load_asset_sync::<Text>(source_app.world_mut().unwrap(), MAIN.parse().unwrap()).unwrap();
     let cooked =
         load_asset_sync::<Text>(cooked_app.world_mut().unwrap(), MAIN.parse().unwrap()).unwrap();
+    assert_eq!(
+        nara_asset::load_dependency_sync(cooked_app.world_mut().unwrap(), MAIN.parse().unwrap())
+            .unwrap(),
+        cooked.id(),
+    );
     assert_eq!(by_path, by_id);
     assert_eq!(
         source_app.world().resource::<Assets<Text>>().get(by_id),

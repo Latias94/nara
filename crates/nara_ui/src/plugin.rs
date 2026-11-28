@@ -2,10 +2,13 @@ use nara_app::{
     App, CoreStage, FrameCleanup, FrameIntent, Plugin, PluginDefinition, PluginDefinitionId,
     PluginError,
 };
+use nara_asset::{ASSET_PLUGIN_ID, AssetAppExt, AssetLoadContext, AssetLoader, NpakEntryKind};
 use nara_ecs::{ResMut, bevy_ecs::message::Messages, schedule::IntoScheduleConfigs};
 use nara_input::InputSet;
 
-use crate::{FontFace, UiActionEvent, UiAdapterDiagnostics, interaction, runtime, text};
+use crate::{
+    FontFace, FontFaceError, UiActionEvent, UiAdapterDiagnostics, interaction, runtime, text,
+};
 
 /// Installs code-first UI layout and routes input against accepted layouts.
 #[derive(Debug, Clone, Default)]
@@ -44,6 +47,9 @@ impl Plugin for UiPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        if app.has_plugin(ASSET_PLUGIN_ID) {
+            app.register_asset_loader(FontFaceLoader)?;
+        }
         let font = match &self.font {
             Some(font) => font.clone(),
             None => text::bundled_font_face().map_err(|error| PluginError::SetupFailed {
@@ -65,6 +71,23 @@ impl Plugin for UiPlugin {
             .add_systems(CoreStage::Extract, runtime::compile_ui_frames)?
             .add_systems(FrameCleanup, advance_actions)?;
         Ok(())
+    }
+}
+
+/// Loads the first face of a game font in either a project directory or an NPAK.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FontFaceLoader;
+
+impl AssetLoader for FontFaceLoader {
+    type Asset = FontFace;
+    type Error = FontFaceError;
+
+    fn cooked_kind(&self) -> Option<NpakEntryKind> {
+        Some(NpakEntryKind::Font)
+    }
+
+    fn load(&self, bytes: &[u8], _: &mut AssetLoadContext<'_>) -> Result<FontFace, FontFaceError> {
+        FontFace::from_bytes(bytes.to_vec(), 0)
     }
 }
 

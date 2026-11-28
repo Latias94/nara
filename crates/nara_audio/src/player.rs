@@ -10,7 +10,7 @@ use kira::{
     Panning, PlaybackRate, Tween,
     sound::{PlaybackState as KiraPlaybackState, static_sound::StaticSoundHandle},
 };
-use nara_asset::{Assets, Handle};
+use nara_asset::{AssetStates, Assets, Handle, LoadState};
 use nara_core::Vec2;
 use nara_scene::spatial::GlobalTransform2d;
 
@@ -200,7 +200,7 @@ impl AudioPlayback {
         self.error = None;
     }
 
-    fn fail(&mut self, error: AudioError) {
+    pub(super) fn fail(&mut self, error: AudioError) {
         self.reset(PlaybackState::Failed);
         self.error = Some(error);
     }
@@ -210,6 +210,7 @@ impl AudioPlayback {
         player: &AudioPlayer,
         spatial: SpatialMix,
         clips: &Assets<AudioClip>,
+        states: Option<&AssetStates>,
         mixer: &mut AudioMixer,
     ) -> bool {
         if self.clip != Some(player.clip) {
@@ -247,9 +248,16 @@ impl AudioPlayback {
                 _ => self.state,
             };
             voice.update(settings, self.state == PlaybackState::Paused);
-        } else if self.state == PlaybackState::WaitingForClip
-            && let Some(clip) = clips.get(player.clip)
-        {
+        } else if self.state == PlaybackState::WaitingForClip {
+            let Some(clip) = clips.get(player.clip) else {
+                if let Some(LoadState::Failed { message }) = states
+                    .and_then(|states| states.state(player.clip.id()))
+                    .map(|state| state.load_state())
+                {
+                    self.fail(AudioError::ClipLoadFailed(message.clone()));
+                }
+                return false;
+            };
             let started = player.voice_settings(spatial).and_then(|settings| {
                 mixer
                     .start_sound(clip, &player.bus, settings)
@@ -375,6 +383,7 @@ pub fn update_audio_players(
     mut commands: Commands,
     mut mixer: ResMut<AudioMixer>,
     clips: Res<Assets<AudioClip>>,
+    states: Option<Res<AssetStates>>,
     listeners: Query<
         (Entity, Option<&GlobalTransform2d>, Option<&AudioPosition2d>),
         With<AudioListener>,
@@ -400,7 +409,7 @@ pub fn update_audio_players(
         let spatial = spatial.map_or(SpatialMix::CENTER, |spatial| {
             spatial.mix(world_position(global, position), listener)
         });
-        if playback.update(player, spatial, &clips, &mut mixer) {
+        if playback.update(player, spatial, &clips, states.as_deref(), &mut mixer) {
             commands.trigger(AudioFinished {
                 entity,
                 clip: player.clip,

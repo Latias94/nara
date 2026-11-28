@@ -48,11 +48,14 @@ fn discovery_indexes_project_paths_and_moving_the_sidecar_preserves_identity() {
     let root = root.path();
     for source in [
         "assets/art/ship.PNG",
+        "assets/font.otf",
         "assets/levels/main.nara.scene.ron",
         "assets/levels/props.prefab.ron",
         "assets/paint.material.ron",
         "assets/program.WGSL",
         "shared/beep.ogg",
+        "shared/font.TTF",
+        "shared/sweep.wav",
     ] {
         write(root, source, []);
     }
@@ -94,6 +97,7 @@ fn discovery_indexes_project_paths_and_moving_the_sidecar_preserves_identity() {
         records,
         [
             ("assets/art/ship.PNG", "nara.image", AssetSourceKind::Image),
+            ("assets/font.otf", "nara.font", AssetSourceKind::Font),
             (
                 "assets/levels/main.nara.scene.ron",
                 "nara.scene",
@@ -114,11 +118,9 @@ fn discovery_indexes_project_paths_and_moving_the_sidecar_preserves_identity() {
                 "nara.shader",
                 AssetSourceKind::Other("nara.shader".into())
             ),
-            (
-                "shared/beep.ogg",
-                "nara.audio",
-                AssetSourceKind::Audio
-            ),
+            ("shared/beep.ogg", "nara.audio", AssetSourceKind::Audio),
+            ("shared/font.TTF", "nara.font", AssetSourceKind::Font),
+            ("shared/sweep.wav", "nara.audio", AssetSourceKind::Audio),
         ]
     );
     assert!(!root.join("assets/.cache/ignored.png.meta").exists());

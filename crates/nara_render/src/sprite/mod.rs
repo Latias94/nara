@@ -7,6 +7,14 @@ use nara_asset::Handle;
 use nara_core::{Color, Vec2};
 use nara_ecs::Component;
 
+#[cfg(feature = "sprite-source-hydration")]
+mod hydration;
+#[cfg(feature = "sprite-source-hydration")]
+pub use hydration::{
+    SPRITE_SOURCE_HYDRATION_PLUGIN_DECLARATION, SPRITE_SOURCE_HYDRATION_PLUGIN_ID,
+    SpriteSourceHydrationPlugin,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TextureRegion {
