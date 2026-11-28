@@ -296,6 +296,10 @@ fn default_importer(path: &AssetSourcePath) -> &'static str {
     let name = path.as_str().to_ascii_lowercase();
     if name.ends_with(".png") {
         IMAGE_IMPORTER
+    } else if name.ends_with(".ogg") || name.ends_with(".wav") {
+        crate::meta::AUDIO_IMPORTER
+    } else if name.ends_with(".ttf") || name.ends_with(".otf") {
+        crate::meta::FONT_IMPORTER
     } else if name.ends_with(".scene.ron") {
         SCENE_IMPORTER
     } else if name.ends_with(".prefab.ron") {

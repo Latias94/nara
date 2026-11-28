@@ -6,6 +6,8 @@ use crate::{AssetSourceKind, StableAssetId};
 pub(crate) const MAX_META_BYTES: usize = 64 * 1024;
 
 pub(crate) const IMAGE_IMPORTER: &str = "nara.image";
+pub(crate) const AUDIO_IMPORTER: &str = "nara.audio";
+pub(crate) const FONT_IMPORTER: &str = "nara.font";
 pub(crate) const SCENE_IMPORTER: &str = "nara.scene";
 pub(crate) const PREFAB_IMPORTER: &str = "nara.prefab";
 #[cfg(any(unix, windows))]
@@ -80,6 +82,8 @@ impl AssetMeta {
     pub fn source_kind(&self) -> AssetSourceKind {
         match self.importer() {
             IMAGE_IMPORTER => AssetSourceKind::Image,
+            AUDIO_IMPORTER => AssetSourceKind::Audio,
+            FONT_IMPORTER => AssetSourceKind::Font,
             SCENE_IMPORTER => AssetSourceKind::Scene,
             PREFAB_IMPORTER => AssetSourceKind::Prefab,
             importer => AssetSourceKind::Other(importer.to_owned()),

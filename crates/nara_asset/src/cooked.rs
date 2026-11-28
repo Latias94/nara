@@ -53,6 +53,8 @@ impl NpakEntryKind {
             3 => Some(Self::Shader),
             4 => Some(Self::Material),
             5 => Some(Self::Raw),
+            6 => Some(Self::Audio),
+            7 => Some(Self::Font),
             _ => None,
         }
     }

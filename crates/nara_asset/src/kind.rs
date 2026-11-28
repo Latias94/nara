@@ -7,4 +7,6 @@ pub enum NpakEntryKind {
     Shader = 3,
     Material = 4,
     Raw = 5,
+    Audio = 6,
+    Font = 7,
 }

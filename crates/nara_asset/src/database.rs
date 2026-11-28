@@ -15,6 +15,8 @@ use crate::{AssetPath, AssetPathScope, AssetRef, AssetSourcePath, StableAssetId}
 pub enum AssetSourceKind {
     Unknown,
     Image,
+    Audio,
+    Font,
     Scene,
     Prefab,
     Other(String),
@@ -25,6 +27,8 @@ impl Display for AssetSourceKind {
         match self {
             Self::Unknown => formatter.write_str("unknown"),
             Self::Image => formatter.write_str("image"),
+            Self::Audio => formatter.write_str("audio"),
+            Self::Font => formatter.write_str("font"),
             Self::Scene => formatter.write_str("scene"),
             Self::Prefab => formatter.write_str("prefab"),
             Self::Other(kind) => formatter.write_str(kind),

@@ -116,8 +116,8 @@ fn discovery_indexes_project_paths_and_moving_the_sidecar_preserves_identity() {
             ),
             (
                 "shared/beep.ogg",
-                "nara.raw",
-                AssetSourceKind::Other("nara.raw".into())
+                "nara.audio",
+                AssetSourceKind::Audio
             ),
         ]
     );
