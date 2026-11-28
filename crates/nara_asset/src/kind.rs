@@ -10,4 +10,6 @@ pub enum NpakEntryKind {
     Audio = 6,
     Font = 7,
     TileSet = 8,
+    SpriteAnimation = 9,
+    PropertyAnimation = 10,
 }

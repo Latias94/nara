@@ -202,6 +202,9 @@ impl RuntimeAssetBackend for ProjectBackend {
         const MAX_SOURCE_BYTES: u64 = 256 * 1024 * 1024;
         let limit = match expected {
             Some(NpakEntryKind::TileSet) => crate::tilemap::MAX_TILESET_SOURCE_BYTES as u64,
+            Some(NpakEntryKind::SpriteAnimation | NpakEntryKind::PropertyAnimation) => {
+                8 * 1024 * 1024
+            }
             _ => MAX_SOURCE_BYTES,
         };
         check_read_kind(self, id, expected)?;
@@ -231,8 +234,9 @@ impl RuntimeAssetBackend for ProjectBackend {
 
     fn kind(&self, id: AssetId) -> Option<NpakEntryKind> {
         use crate::meta::{
-            AUDIO_IMPORTER, FONT_IMPORTER, IMAGE_IMPORTER, MATERIAL_IMPORTER, RAW_IMPORTER,
-            SCENE_IMPORTER, SHADER_IMPORTER, TILESET_IMPORTER,
+            AUDIO_IMPORTER, FONT_IMPORTER, IMAGE_IMPORTER, MATERIAL_IMPORTER,
+            PROPERTY_ANIMATION_IMPORTER, RAW_IMPORTER, SCENE_IMPORTER, SHADER_IMPORTER,
+            SPRITE_ANIMATION_IMPORTER, TILESET_IMPORTER,
         };
 
         let record = self.database.record_for_stable_id(id.into())?;
@@ -245,6 +249,8 @@ impl RuntimeAssetBackend for ProjectBackend {
             SCENE_IMPORTER => Some(NpakEntryKind::Scene),
             SHADER_IMPORTER => Some(NpakEntryKind::Shader),
             TILESET_IMPORTER => Some(NpakEntryKind::TileSet),
+            SPRITE_ANIMATION_IMPORTER => Some(NpakEntryKind::SpriteAnimation),
+            PROPERTY_ANIMATION_IMPORTER => Some(NpakEntryKind::PropertyAnimation),
             _ => None,
         }
     }

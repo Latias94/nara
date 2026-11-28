@@ -56,6 +56,8 @@ impl NpakEntryKind {
             6 => Some(Self::Audio),
             7 => Some(Self::Font),
             8 => Some(Self::TileSet),
+            9 => Some(Self::SpriteAnimation),
+            10 => Some(Self::PropertyAnimation),
             _ => None,
         }
     }

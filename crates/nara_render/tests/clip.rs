@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use nara_core::Vec2;
 use nara_render::animation::{
-    Clip, ClipError, Frame, FrameSample, MAX_CLIP_NAME_BYTES, MAX_CLIPS, MAX_FRAMES_PER_CLIP,
-    MAX_TOTAL_FRAMES, PlaybackMode, SpriteAnimationSet,
+    Clip, ClipError, Frame, FrameSample, MAX_CLIP_NAME_BYTES, MAX_CLIPS, MAX_FRAME_MARKER_BYTES,
+    MAX_FRAMES_PER_CLIP, MAX_TOTAL_FRAMES, PlaybackMode, SpriteAnimationSet,
 };
 use nara_render::sprite::TextureRegion;
 
@@ -97,6 +97,70 @@ fn looping_wraps_at_exact_cycle_ends_and_never_finishes() {
 }
 
 #[test]
+fn ping_pong_assigns_forward_reverse_and_wrap_boundaries() {
+    let clip = Clip::new(
+        PlaybackMode::PingPong,
+        [2, 3, 5, 7]
+            .into_iter()
+            .enumerate()
+            .map(|(index, nanos)| Frame::new(region(index), Duration::from_nanos(nanos)).unwrap()),
+    )
+    .unwrap();
+    assert_eq!(clip.duration(), Duration::from_nanos(17));
+    for (elapsed_ns, expected_index) in [
+        (0, 0),
+        (2, 1),
+        (5, 2),
+        (10, 3),
+        (16, 3),
+        (17, 2),
+        (21, 2),
+        (22, 1),
+        (24, 1),
+        (25, 0),
+        (27, 1),
+    ] {
+        assert_eq!(
+            clip.sample(Duration::from_nanos(elapsed_ns)),
+            FrameSample {
+                index: expected_index,
+                region: region(expected_index),
+                finished: false,
+            },
+            "elapsed nanoseconds: {elapsed_ns}"
+        );
+    }
+
+    let long = Clip::new(
+        PlaybackMode::PingPong,
+        [1, u64::MAX - 2, 1]
+            .into_iter()
+            .map(|nanos| Frame::new(TextureRegion::FULL, Duration::from_nanos(nanos)).unwrap()),
+    )
+    .unwrap();
+    let wrap = long.duration() + Duration::from_nanos(u64::MAX - 2);
+    assert_eq!(long.sample(wrap - Duration::from_nanos(1)).index, 1);
+    assert_eq!(long.sample(wrap).index, 0);
+}
+
+#[test]
+fn frame_markers_are_optional_and_bounded_in_utf8_bytes() {
+    let frame = Frame::new(TextureRegion::FULL, Duration::from_nanos(1)).unwrap();
+    assert_eq!(frame.event(), None);
+    let marker = "é".repeat(MAX_FRAME_MARKER_BYTES / 2);
+    assert_eq!(
+        frame.clone().with_event(marker.as_str()).unwrap().event(),
+        Some(marker.as_str())
+    );
+    for invalid in [String::new(), marker + "!"] {
+        assert_eq!(
+            frame.clone().with_event(invalid),
+            Err(ClipError::InvalidFrameMarker)
+        );
+    }
+}
+
+#[test]
 fn once_holds_the_final_frame_and_finishes_only_at_the_clip_end() {
     let clip = unequal_clip(PlaybackMode::Once);
     assert!(!clip.sample(Duration::from_nanos(9)).finished);
@@ -138,8 +202,12 @@ fn looping_reduces_huge_elapsed_time_before_any_narrowing() {
 fn a_single_frame_supports_the_entire_admitted_duration_range() {
     let duration = Duration::from_nanos(u64::MAX);
     let frame = Frame::new(TextureRegion::FULL, duration).unwrap();
-    for mode in [PlaybackMode::Loop, PlaybackMode::Once] {
-        let clip = Clip::new(mode, [frame]).unwrap();
+    for mode in [
+        PlaybackMode::Loop,
+        PlaybackMode::Once,
+        PlaybackMode::PingPong,
+    ] {
+        let clip = Clip::new(mode, [frame.clone()]).unwrap();
         assert_eq!(clip.duration(), duration);
         assert_eq!(clip.sample(Duration::ZERO).index, 0);
         assert!(!clip.sample(duration - Duration::from_nanos(1)).finished);

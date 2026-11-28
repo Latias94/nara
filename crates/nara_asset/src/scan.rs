@@ -15,8 +15,9 @@ use crate::{
     AssetDatabaseError, AssetMeta, AssetMetaError, AssetRecord, AssetSourcePath,
     ProjectAssetDatabase, StableAssetId,
     meta::{
-        IMAGE_IMPORTER, MATERIAL_IMPORTER, MAX_META_BYTES, PREFAB_IMPORTER, RAW_IMPORTER,
-        SCENE_IMPORTER, SHADER_IMPORTER, TILESET_IMPORTER,
+        IMAGE_IMPORTER, MATERIAL_IMPORTER, MAX_META_BYTES, PREFAB_IMPORTER,
+        PROPERTY_ANIMATION_IMPORTER, RAW_IMPORTER, SCENE_IMPORTER, SHADER_IMPORTER,
+        SPRITE_ANIMATION_IMPORTER, TILESET_IMPORTER,
     },
 };
 
@@ -308,6 +309,10 @@ fn default_importer(path: &AssetSourcePath) -> &'static str {
         MATERIAL_IMPORTER
     } else if name.ends_with(".tileset.ron") {
         TILESET_IMPORTER
+    } else if name.ends_with(".sanim.ron") {
+        SPRITE_ANIMATION_IMPORTER
+    } else if name.ends_with(".anim.ron") {
+        PROPERTY_ANIMATION_IMPORTER
     } else if name.ends_with(".wgsl") {
         SHADER_IMPORTER
     } else {

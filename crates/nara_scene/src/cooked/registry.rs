@@ -11,9 +11,14 @@ use nara_reflect::{
     validate_component_value,
 };
 
+#[cfg(feature = "runtime")]
+use crate::animation::{ApplyProperty, apply_schema_field};
 use crate::{
     Name,
-    components::{ColliderSource, SpriteSource, TilemapSource, Transform2d, Visibility},
+    components::{
+        AnimationSource, ColliderSource, SpriteAnimatorSource, SpriteSource, TilemapSource,
+        Transform2d, Visibility,
+    },
 };
 
 use super::{
@@ -64,6 +69,8 @@ impl CookedRegistry {
                         || field.has_capability(ComponentCapability::EntityRef)
                 }),
                 decode: decode_column::<T>,
+                #[cfg(feature = "runtime")]
+                apply_property: apply_schema_field::<T>,
             },
         );
         Ok(self)
@@ -78,7 +85,9 @@ impl CookedRegistry {
             .register::<Visibility>()?
             .register::<SpriteSource>()?
             .register::<ColliderSource>()?
-            .register::<TilemapSource>()?;
+            .register::<TilemapSource>()?
+            .register::<AnimationSource>()?
+            .register::<SpriteAnimatorSource>()?;
         for (&type_hash, entry) in &builtins.entries {
             self.check_available(type_hash, entry.component)?;
         }
@@ -131,6 +140,13 @@ impl CookedRegistry {
             .map(|(column, entry)| (entry.decode)(scene, column, entry))
             .collect()
     }
+
+    #[cfg(feature = "runtime")]
+    pub(crate) fn property_applier(&self, id: &ComponentTypeId) -> Option<ApplyProperty> {
+        let id = id.as_str();
+        let entry = self.entries.get(&wire::type_hash(id))?;
+        (entry.component == id).then_some(entry.apply_property)
+    }
 }
 
 type DecodeColumn =
@@ -142,6 +158,8 @@ struct Entry {
     schema_hash: [u8; 32],
     has_references: bool,
     decode: DecodeColumn,
+    #[cfg(feature = "runtime")]
+    apply_property: ApplyProperty,
 }
 
 pub(super) trait ReadyColumn: Any {

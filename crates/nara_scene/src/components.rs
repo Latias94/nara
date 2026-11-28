@@ -54,6 +54,36 @@ impl Default for SpriteSource {
     }
 }
 
+/// Starts property animation from a stable scene dependency.
+#[derive(Component, Schema, Clone, Debug, PartialEq, Eq)]
+#[schema(
+    crate = "nara_reflect",
+    id = "nara.AnimationSource",
+    version = 1,
+    alias = "Property Animation",
+    component_capabilities(scene, inspect, edit)
+)]
+pub struct AnimationSource {
+    #[schema(capabilities(scene, inspect, edit, asset_ref))]
+    pub clip: AssetId,
+}
+
+/// Selects a named sprite clip from a stable scene dependency.
+#[derive(Component, Schema, Clone, Debug, PartialEq, Eq)]
+#[schema(
+    crate = "nara_reflect",
+    id = "nara.SpriteAnimatorSource",
+    version = 1,
+    alias = "Sprite Animation",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit)
+)]
+pub struct SpriteAnimatorSource {
+    #[schema(capabilities(scene, inspect, edit, asset_ref))]
+    pub set: AssetId,
+    pub clip: String,
+}
+
 /// An authored tile grid in row-major order, with rows increasing in local +Y.
 /// Cell zero is empty. A nonzero cell selects tile `cell - 1` from the tileset.
 #[derive(Component, Schema, Debug, Clone, PartialEq)]
@@ -260,13 +290,15 @@ impl Visibility {
 }
 
 /// Built-in metadata with complete creation values for a source document inspector.
-pub fn builtin_component_schemas() -> Result<[ComponentSchema; 5], ComponentCodecError> {
-    Ok([
+pub fn builtin_component_schemas() -> Result<Vec<ComponentSchema>, ComponentCodecError> {
+    Ok(vec![
         schema_with_initial::<Transform2d>()?,
         schema_with_initial::<Visibility>()?,
         schema_with_initial::<SpriteSource>()?,
         schema_with_initial::<ColliderSource>()?,
         TilemapSource::type_schema()?,
+        AnimationSource::type_schema()?,
+        SpriteAnimatorSource::type_schema()?,
     ])
 }
 

@@ -103,6 +103,17 @@ pub enum SceneError {
         id: AssetId,
         actual: NpakEntryKind,
     },
+    #[error(
+        "scene '{scene_id}' entity {entity} {component} refers to '{id}' of kind {actual:?}, expected {expected:?}"
+    )]
+    AnimationAssetKindMismatch {
+        scene_id: AssetId,
+        entity: EntityUuid,
+        component: &'static str,
+        id: AssetId,
+        expected: NpakEntryKind,
+        actual: NpakEntryKind,
+    },
     #[error("scene '{scene_id}' has an invalid tilemap on {entity}: {source}")]
     Tilemap {
         scene_id: AssetId,

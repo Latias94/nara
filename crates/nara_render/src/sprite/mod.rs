@@ -14,6 +14,10 @@ pub use hydration::{
     SPRITE_SOURCE_HYDRATION_PLUGIN_DECLARATION, SPRITE_SOURCE_HYDRATION_PLUGIN_ID,
     SpriteSourceHydrationPlugin, SpriteSourceHydrationSet,
 };
+#[cfg(feature = "sprite-source-hydration")]
+mod property_animation;
+#[cfg(feature = "sprite-source-hydration")]
+pub use property_animation::SpritePropertyAnimationPlugin;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

@@ -141,6 +141,84 @@ fn cook_validates_and_caches_referenced_audio_and_font() {
 }
 
 #[test]
+fn animation_assets_follow_scene_dependencies_and_cook_identically_offline() {
+    use nara_scene::{
+        authoring::SceneEntity,
+        components::{AnimationSource, SpriteAnimatorSource},
+    };
+
+    let folder = tempfile::tempdir().unwrap();
+    let project = folder.path();
+    fixture(project);
+    let catalog = ComponentSchemaCatalog::from_components(
+        nara_scene::authoring::builtin_component_schemas().unwrap(),
+    )
+    .unwrap();
+    finish_refresh(
+        project,
+        ExitStatus::from_raw(0),
+        catalog.to_json_string().unwrap().as_bytes(),
+        || false,
+    )
+    .unwrap();
+    let root = project.join("assets");
+    let frames: AssetId = "0193a100-1111-7000-8000-000000000023".parse().unwrap();
+    let tracks: AssetId = "0193a100-1111-7000-8000-000000000024".parse().unwrap();
+    for (name, id, importer, source) in [
+        (
+            "actor.sanim.ron",
+            frames,
+            "nara.sprite-animation",
+            r#"(clips: [(name: "idle", mode: once, frames: [(min: (0.0, 0.0), size: (1.0, 1.0), duration_nanos: 100000000)])])"#,
+        ),
+        (
+            "actor.anim.ron",
+            tracks,
+            "nara.property-animation",
+            r#"(duration_ns: 100000000, tracks: [(component: "nara.Transform2d", path: "rotation", keyframes: [(time_ns: 0, value: F32(0.0)), (time_ns: 100000000, value: F32(1.0))])])"#,
+        ),
+    ] {
+        fs::write(root.join(name), source).unwrap();
+        fs::write(
+            root.join(format!("{name}.meta")),
+            format!(r#"AssetMeta(id: "{id}", importer: "{importer}", settings: ())"#),
+        )
+        .unwrap();
+    }
+    let mut row = SceneEntity::new(ENTRY.parse().unwrap(), "Animated actor");
+    row.set(&SpriteAnimatorSource {
+        set: frames,
+        clip: "idle".into(),
+    })
+    .unwrap();
+    row.set(&AnimationSource { clip: tracks }).unwrap();
+    let mut scene = SceneDocument::new(ENTRY.parse().unwrap());
+    scene.entities.push(row);
+    scene.write(root.join("entry.scene.ron")).unwrap();
+
+    let cook = || cook_project(project, ProjectTrust::Untrusted, || false, |_| {}).unwrap();
+    let first = cook();
+    assert_eq!((first.assets, first.cache_misses), (3, 3));
+    let bytes = fs::read(&first.archive).unwrap();
+    let archive = NpakArchive::from_bytes(bytes.clone()).unwrap();
+    assert_eq!(
+        &archive
+            .read_kind(frames, NpakEntryKind::SpriteAnimation)
+            .unwrap()[..4],
+        b"NSAN"
+    );
+    assert_eq!(
+        &archive
+            .read_kind(tracks, NpakEntryKind::PropertyAnimation)
+            .unwrap()[..4],
+        b"NPAN"
+    );
+    let second = cook();
+    assert_eq!((second.cache_hits, second.cache_misses), (3, 0));
+    assert_eq!(fs::read(second.archive).unwrap(), bytes);
+}
+
+#[test]
 fn tilemap_cook_links_and_caches_the_atlas_and_rejects_missing_tiles() {
     use nara_asset::tilemap::TileSetAsset;
     use nara_core::Vec2;

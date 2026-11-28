@@ -43,6 +43,15 @@ impl ComponentFieldPath {
         &self.segments
     }
 
+    /// Returns the field name when this path selects exactly one top-level field.
+    #[must_use]
+    pub fn top_level_field(&self) -> Option<&str> {
+        match self.segments.as_slice() {
+            [ComponentFieldPathSegment::Field(field)] => Some(field),
+            _ => None,
+        }
+    }
+
     #[must_use]
     pub fn into_segments(self) -> Vec<ComponentFieldPathSegment> {
         self.segments

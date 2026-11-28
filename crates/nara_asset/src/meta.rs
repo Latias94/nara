@@ -15,6 +15,10 @@ pub(crate) const MATERIAL_IMPORTER: &str = "nara.material";
 #[cfg(any(unix, windows))]
 pub(crate) const TILESET_IMPORTER: &str = "nara.tileset";
 #[cfg(any(unix, windows))]
+pub(crate) const SPRITE_ANIMATION_IMPORTER: &str = "nara.sprite-animation";
+#[cfg(any(unix, windows))]
+pub(crate) const PROPERTY_ANIMATION_IMPORTER: &str = "nara.property-animation";
+#[cfg(any(unix, windows))]
 pub(crate) const SHADER_IMPORTER: &str = "nara.shader";
 #[cfg(any(unix, windows))]
 pub(crate) const RAW_IMPORTER: &str = "nara.raw";

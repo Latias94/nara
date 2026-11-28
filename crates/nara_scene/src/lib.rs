@@ -1,5 +1,7 @@
 //! Scene data and 2D spatial propagation over the Bevy hierarchy.
 
+#[cfg(any(feature = "authoring", feature = "cooked"))]
+pub mod animation;
 #[cfg(feature = "authoring")]
 pub mod authoring;
 #[cfg(any(feature = "authoring", feature = "cooked"))]

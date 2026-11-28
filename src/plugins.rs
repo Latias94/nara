@@ -97,10 +97,17 @@ impl PluginGroup for DefaultPlugins {
         let plugins = PluginGroupBuilder::new().add_group(MinimalPlugins);
         #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
         let plugins = plugins.add_default::<nara_render::image::ImagePlugin>();
+        #[cfg(feature = "scene-cooked")]
+        let plugins = plugins
+            .add_default::<nara_scene::animation::AnimationPlugin>()
+            .add_default::<nara_scene::animation::TweenPlugin>();
+        #[cfg(feature = "runtime-2d")]
+        let plugins = plugins.add_default::<nara_render::animation::SpriteAnimationPlugin>();
         #[cfg(all(feature = "runtime-2d", feature = "scene-cooked"))]
         let plugins = plugins
             .add_default::<nara_render::sprite::SpriteSourceHydrationPlugin>()
-            .add_default::<nara_render::tilemap::TilemapSourceHydrationPlugin>();
+            .add_default::<nara_render::tilemap::TilemapSourceHydrationPlugin>()
+            .add_default::<nara_render::sprite::SpritePropertyAnimationPlugin>();
         #[cfg(feature = "runtime-ui")]
         let plugins = plugins.add_default::<nara_ui::UiPlugin>();
         #[cfg(feature = "physics-2d")]

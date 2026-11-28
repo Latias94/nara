@@ -19,7 +19,10 @@ use nara_core::AssetId;
 use nara_reflect::{COMPONENT_REGISTRY_PLUGIN_ID, RegisterSchema, Schema};
 use thiserror::Error;
 
-use crate::cooked::{CookedRegistry, CookedScene, CookedSceneError, PreparedScene};
+use crate::{
+    components::{AnimationSource, SpriteAnimatorSource},
+    cooked::{CookedRegistry, CookedScene, CookedSceneError, PreparedScene},
+};
 
 pub use manager::{
     SceneError, SceneEvent, SceneInstanceId, SceneLoadState, SceneManager, SceneMember,
@@ -177,6 +180,13 @@ pub struct SceneRegistry {
 }
 
 impl SceneRegistry {
+    pub(crate) fn property_applier(
+        &self,
+        component: &nara_reflect::ComponentTypeId,
+    ) -> Option<crate::animation::ApplyProperty> {
+        self.native.property_applier(component)
+    }
+
     /// Decodes a candidate with this registry, checks its typed references against `source`,
     /// and runs application validation on the decoded rows. The caller stages dependency payloads
     /// separately and can mount `source` after this check succeeds.
@@ -260,6 +270,39 @@ fn validate_asset_references(
                 entity,
                 id: map.tileset,
                 actual,
+            });
+        }
+    }
+    let property = prepared
+        .component_rows::<AnimationSource>()
+        .map(|(entity, source)| {
+            (
+                entity,
+                AnimationSource::COMPONENT_ID,
+                source.clip,
+                NpakEntryKind::PropertyAnimation,
+            )
+        });
+    let sprite = prepared
+        .component_rows::<SpriteAnimatorSource>()
+        .map(|(entity, source)| {
+            (
+                entity,
+                SpriteAnimatorSource::COMPONENT_ID,
+                source.set,
+                NpakEntryKind::SpriteAnimation,
+            )
+        });
+    for (entity, component, id, expected) in property.chain(sprite) {
+        let actual = dependency_kind(source, id)?;
+        if actual != expected {
+            return Err(SceneError::AnimationAssetKindMismatch {
+                scene_id,
+                entity,
+                component,
+                id,
+                actual,
+                expected,
             });
         }
     }

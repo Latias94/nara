@@ -156,6 +156,15 @@ impl PreparedScene<'_> {
     }
 
     #[cfg(feature = "runtime")]
+    pub(crate) fn component_rows<T: Component>(&self) -> impl Iterator<Item = (EntityUuid, &T)> {
+        self.columns
+            .iter()
+            .filter_map(|column| column.typed_rows::<T>())
+            .flatten()
+            .map(|(index, component)| (self.entities[*index].id, component))
+    }
+
+    #[cfg(feature = "runtime")]
     pub(crate) fn audio_clips(
         &self,
     ) -> impl Iterator<Item = Result<(EntityUuid, AssetId), CookedSceneError>> {

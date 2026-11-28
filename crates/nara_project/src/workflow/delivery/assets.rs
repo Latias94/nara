@@ -17,12 +17,17 @@ use nara_asset::{
 use nara_audio::{AudioClipSource, AudioCodec, NAUD_HEADER_BYTES, cook_audio, cooked_audio_codec};
 use nara_core::{AssetId, EntityUuid, Vec4, vfs::DirAssetSource};
 use nara_reflect::ComponentSchemaCatalog;
-use nara_render::material::SpriteMaterialAsset;
+use nara_render::{
+    animation::{MAX_SPRITE_ANIMATION_SOURCE_BYTES, SpriteAnimationSet},
+    material::SpriteMaterialAsset,
+};
 use nara_scene::{
+    animation::{MAX_PROPERTY_ANIMATION_SOURCE_BYTES, PropertyAnimationClip},
     authoring::{
         SceneDocument, SpriteSource, TilemapSource, builtin_component_schemas,
         prefab::expand_prefabs,
     },
+    components::{AnimationSource, SpriteAnimatorSource},
     cook::{CookSceneError, cook_flattened_scene},
     cooked::CookedScene,
 };
@@ -37,6 +42,8 @@ const SHADER: &str = "nara.shader";
 const AUDIO: &str = "nara.audio";
 const FONT: &str = "nara.font";
 const TILESET: &str = "nara.tileset";
+const SPRITE_ANIMATION: &str = "nara.sprite-animation";
+const PROPERTY_ANIMATION: &str = "nara.property-animation";
 const RAW: &str = "nara.raw";
 
 const DOCUMENT_LIMIT: usize = 64 * 1024 * 1024;
@@ -227,6 +234,26 @@ impl Cooker {
                 tilemaps.tile_counts.insert(id, tileset.tiles.len());
                 (NpakEntryKind::TileSet, bytes, vec![tileset.image], hit)
             }
+            SPRITE_ANIMATION => {
+                let source = self.read(asset, MAX_SPRITE_ANIMATION_SOURCE_BYTES)?;
+                let (bytes, hit) =
+                    self.cached(asset, source, "nara.sprite-animation.nsan.v1", |source| {
+                        SpriteAnimationSet::from_ron(asset.utf8(&source)?)
+                            .and_then(|asset| asset.encode_cooked())
+                            .map_err(|error| asset.error(error))
+                    })?;
+                (NpakEntryKind::SpriteAnimation, bytes, Vec::new(), hit)
+            }
+            PROPERTY_ANIMATION => {
+                let source = self.read(asset, MAX_PROPERTY_ANIMATION_SOURCE_BYTES)?;
+                let (bytes, hit) =
+                    self.cached(asset, source, "nara.property-animation.npan.v1", |source| {
+                        PropertyAnimationClip::from_ron(asset.utf8(&source)?)
+                            .and_then(|asset| asset.encode_cooked())
+                            .map_err(|error| asset.error(error))
+                    })?;
+                (NpakEntryKind::PropertyAnimation, bytes, Vec::new(), hit)
+            }
             RAW => {
                 let path = asset.record.path().as_str().to_ascii_lowercase();
                 if [".ron", ".meta", ".png"]
@@ -338,6 +365,18 @@ impl Cooker {
                     tileset: map.tileset,
                     largest_cell: map.cells.0.into_iter().max().unwrap_or(0),
                 });
+            }
+            if let Some(animation) = row
+                .typed::<SpriteAnimatorSource>()
+                .map_err(|error| asset.error(error))?
+            {
+                self.require_importer(animation.set, SPRITE_ANIMATION)?;
+            }
+            if let Some(animation) = row
+                .typed::<AnimationSource>()
+                .map_err(|error| asset.error(error))?
+            {
+                self.require_importer(animation.clip, PROPERTY_ANIMATION)?;
             }
         }
         Ok((bytes, dependencies, hit))

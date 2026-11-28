@@ -82,6 +82,8 @@ pub mod prelude {
         TopDownCharacter, Velocity2d,
     };
     pub use nara_reflect::{RegisterSchema, Schema};
+    #[cfg(feature = "runtime-2d")]
+    pub use nara_render::animation::{SpriteAnimationEvent, SpriteAnimationSet, SpriteAnimator};
     #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
     pub use nara_render::image::{
         ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin,
@@ -108,8 +110,6 @@ pub mod prelude {
     ))]
     pub use nara_render::{ClearColor, RenderPlugin, WorldCanvas, WorldPointer};
     pub use nara_scene::Name;
-    #[cfg(feature = "scene-cooked")]
-    pub use nara_scene::components::TilemapSource;
     pub use nara_scene::spatial::{
         ChildOf, Children, GlobalTransform2d, InheritedVisibility, SpatialPlugin, SpatialSet,
         Transform2d, Visibility,
@@ -119,6 +119,13 @@ pub mod prelude {
         RegisterSceneComponent, SceneAsset, SceneEvent, SceneInstanceId, SceneLoadState,
         SceneManager, SceneMember, ScenePlugin, SceneRegistry, switch_scene_asset_sync,
         switch_scene_sync,
+    };
+    #[cfg(feature = "scene-cooked")]
+    pub use nara_scene::{
+        animation::{
+            AnimationClock, AnimationPlayer, Easing, KeyframeValue, PropertyAnimationClip, Tween2d,
+        },
+        components::{AnimationSource, SpriteAnimatorSource, TilemapSource},
     };
     #[cfg(feature = "runtime-ui")]
     pub use nara_ui::{UiNode, UiRoot, UiRuntimeKey, UiText};
