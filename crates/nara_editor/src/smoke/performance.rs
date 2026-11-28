@@ -21,11 +21,12 @@ const WARMUP_FRAMES: u32 = 16;
 pub(super) fn start(
     editor: OpenEditor,
     count: u32,
+    without_accessibility: bool,
     failure: Rc<RefCell<Option<anyhow::Error>>>,
     cx: &mut App,
 ) {
     cx.spawn(async move |cx| {
-        match measure(&editor, count, cx).await {
+        match measure(&editor, count, without_accessibility, cx).await {
             Ok(()) => println!("EDITOR_PERFORMANCE_MEASUREMENT_OK"),
             Err(error) => {
                 eprintln!("Editor performance measurement failed: {error:#}");
@@ -37,7 +38,12 @@ pub(super) fn start(
     .detach();
 }
 
-async fn measure(editor: &OpenEditor, count: u32, cx: &mut AsyncApp) -> Result<()> {
+async fn measure(
+    editor: &OpenEditor,
+    count: u32,
+    without_accessibility: bool,
+    cx: &mut AsyncApp,
+) -> Result<()> {
     wait(cx, NATIVE, "present the initial editor viewport", |cx| {
         let viewport = editor.viewport.read(cx);
         (viewport.presented_preview().is_some()
@@ -77,6 +83,10 @@ async fn measure(editor: &OpenEditor, count: u32, cx: &mut AsyncApp) -> Result<(
             ensure!(
                 window.frame_delivery_mode() == PlatformFrameDeliveryMode::Synchronous,
                 "The native profiler does not time platform submission on this deferred window"
+            );
+            ensure!(
+                !without_accessibility || !window.is_a11y_enabled(),
+                "The no-accessibility measurement opened an accessibility-enabled window"
             );
             let refresh_hz = window
                 .display(cx)
@@ -174,14 +184,16 @@ async fn capture(
     );
 
     let nara = SubmissionRate::from_viewport(&viewport)?;
+    let gpui = timing.finish(
+        start,
+        end,
+        viewport.submissions,
+        &viewport.viewport_callbacks,
+    )?;
     ensure!(
-        viewport.viewport_callbacks.len() as u64 >= viewport.submissions,
-        "Some Nara submissions lack viewport callback timings"
-    );
-    let gpui = timing.finish(start, end, &viewport.viewport_callbacks)?;
-    ensure!(
-        !publish_status || gpui.draws != 0,
-        "The Console status updates did not produce a GPUI draw"
+        gpui.draws == expected_status,
+        "Expected {expected_status} GPUI draws in the {case} case, observed {}",
+        gpui.draws
     );
     let [draw_p50, draw_p95] = gpui.draw_only.map_or_else(
         || ["unavailable".into(), "unavailable".into()],
@@ -247,6 +259,7 @@ impl GpuiTiming {
         self,
         start: PerformanceBoundary,
         end: PerformanceBoundary,
+        expected_submissions: u64,
         viewport_callbacks: &[ViewportCallbackTiming],
     ) -> Result<GpuiResult> {
         ensure!(
@@ -266,6 +279,10 @@ impl GpuiTiming {
             submissions.len() as u64 == count,
             "GPUI recorded {} presentation timings for {count} native submissions; cannot attribute retained or refused attempts",
             submissions.len()
+        );
+        ensure!(
+            count == expected_submissions,
+            "Observed {count} GPUI submissions for {expected_submissions} Nara submissions"
         );
         let first = submissions
             .first()
@@ -294,7 +311,7 @@ impl GpuiTiming {
         let mut work = Vec::with_capacity(submissions.len());
         let mut present = Vec::with_capacity(submissions.len());
         let mut draw_only = Vec::with_capacity(draws as usize);
-        let mut viewport_per_submission = vec![Duration::ZERO; submissions.len()];
+        let mut viewport_per_submission = vec![None; submissions.len()];
         for callback in viewport_callbacks {
             ensure!(
                 (start.gpui_submissions..end.gpui_submissions)
@@ -302,12 +319,14 @@ impl GpuiTiming {
                 "A viewport callback has no matching GPUI submission"
             );
             let index = (callback.preceding_gpui_submissions - start.gpui_submissions) as usize;
-            viewport_per_submission[index] += callback.elapsed;
+            *viewport_per_submission[index].get_or_insert(Duration::ZERO) += callback.elapsed;
         }
         let mut ui_work = Vec::with_capacity(submissions.len());
         for ((submission, draw), viewport_time) in
             submissions.into_iter().zip(viewport_per_submission)
         {
+            let viewport_time =
+                viewport_time.context("A GPUI submission lacks a viewport callback timing")?;
             let present_time = submission.present_duration();
             ensure!(
                 !present_time.is_zero(),
@@ -338,11 +357,7 @@ impl GpuiTiming {
             draw_only: (!draw_only.is_empty()).then(|| percentiles(&mut draw_only)),
             work: percentiles(&mut work),
             present: percentiles(&mut present),
-            viewport: if viewport_samples.is_empty() {
-                [0.0; 2]
-            } else {
-                percentiles(&mut viewport_samples)
-            },
+            viewport: percentiles(&mut viewport_samples),
             ui_work: percentiles(&mut ui_work),
         })
     }
@@ -450,6 +465,7 @@ mod tests {
             .finish(
                 begin,
                 end,
+                2,
                 &[
                     ViewportCallbackTiming {
                         preceding_gpui_submissions: 6,
@@ -487,7 +503,7 @@ mod tests {
             present_end: ms(end),
             animation_interval: None,
         };
-        let sample = GpuiTiming {
+        let sample = || GpuiTiming {
             presentations: vec![(present(1, 3), None), (present(4, 8), None)],
             ..Default::default()
         };
@@ -499,11 +515,30 @@ mod tests {
             at: ms(8),
             gpui_submissions: 8,
         };
-        let result = sample.finish(begin, end, &[]).unwrap();
+        let callbacks = [6, 7].map(|preceding_gpui_submissions| ViewportCallbackTiming {
+            preceding_gpui_submissions,
+            elapsed: Duration::from_millis(1),
+        });
+        let result = sample().finish(begin, end, 2, &callbacks).unwrap();
         assert_eq!(result.draws, 0);
         assert_eq!(result.draw_only, None);
         assert_eq!(result.work, [2.0, 4.0]);
         assert_eq!(result.present, result.work);
+
+        let extra = sample()
+            .finish(begin, end, 1, &callbacks[..1])
+            .err()
+            .unwrap();
+        assert!(extra.to_string().contains("2 GPUI submissions for 1 Nara"));
+        let missing = sample()
+            .finish(begin, end, 2, &callbacks[..1])
+            .err()
+            .unwrap();
+        assert!(
+            missing
+                .to_string()
+                .contains("lacks a viewport callback timing")
+        );
     }
 
     #[test]
@@ -528,7 +563,7 @@ mod tests {
             at: end,
             gpui_submissions: 7,
         };
-        let error = sample.finish(begin, end, &[]).err().unwrap();
+        let error = sample.finish(begin, end, 0, &[]).err().unwrap();
         assert!(
             error
                 .to_string()

@@ -138,9 +138,10 @@ impl Probe {
             Self::Verify => start(editor, failure, cx),
             Self::CaptureFrames(count) => capture_frames(editor, count.get(), failure, cx),
             Self::MeasureHotReload(count) => hot_reload::start(editor, count, failure, cx),
-            Self::MeasureEditorPerformance { count, .. } => {
-                performance::start(editor, count, failure, cx)
-            }
+            Self::MeasureEditorPerformance {
+                count,
+                without_accessibility,
+            } => performance::start(editor, count, without_accessibility, failure, cx),
         }
     }
 }

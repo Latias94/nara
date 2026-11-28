@@ -327,10 +327,7 @@ impl ConsolePanel {
         cx: &mut Context<Self>,
     ) -> Self {
         cx.observe(&workspace, |_, _, cx| cx.notify()).detach();
-        let viewport_status = cx.new(|cx| {
-            cx.observe(&viewport_stats, |_, _, cx| cx.notify()).detach();
-            ViewportStatus(viewport_stats)
-        });
+        let viewport_status = cx.new(|_| ViewportStatus(viewport_stats));
         Self {
             workspace,
             viewport_status,

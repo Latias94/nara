@@ -454,6 +454,10 @@ After the review fixes, both native probes passed all five cases again at 30 Hz 
 per case. Per-case p95 ranged from 144.136 to 154.510 ms in the editor and from 99.231 to
 99.547 ms in Play. Test coverage includes same-ID moves across separate source and sidecar
 events, recovery after a Windows sharing violation, and asset directory replacement.
+A follow-up Windows test held a newly created asset directory under an exclusive share lock.
+After release, the queued mount retry attached the watch and observed a new source write.
+The native editor also presented all five kinds of hot reload with five samples each and
+resolved the texture under the same asset ID after a move.
 
 - **Standalone Export on Windows.** A fresh trusted export produced a 20,063,744-byte executable
   and the 2,519-byte archive. A copy containing only those two files ran from a new directory
@@ -497,18 +501,28 @@ session, and both the viewport and GPUI submitted about 30 frames per second.
 | Disabled | Enabled | Console status | 1.804 / 2.095 | 0.337 / 0.428 | 2.146 / 2.468 |
 | Disabled | Disabled | Console status | 1.890 / 2.128 | 0.333 / 0.394 | 2.230 / 2.522 |
 
-All four probes completed and exited cleanly. Static panels issued zero GPUI draws and used
-`request_retained_presentation()` with either setting of `GPUI_VIEW_RETENTION`. Console status
-triggered 241 GPUI draws for 240 updates in each run. With AccessKit disabled, enabling view
-retention reduced the measured Console p95 in this comparison. The combined static-panel
-median was above 0.5 ms in every configuration. The full UI-thread target at 120 FPS remains
-unverified.
+All four initial review probes completed and exited cleanly. Static panels issued zero GPUI
+draws and used `request_retained_presentation()` with either setting of `GPUI_VIEW_RETENTION`.
+Console status triggered 241 GPUI draws for 240 updates in each run. With AccessKit disabled,
+enabling view retention reduced the measured Console p95 in this comparison. The combined
+static-panel median was above 0.5 ms in every configuration. The full UI-thread target at
+120 FPS remains unverified.
+
+The final Windows rerun used a 60 Hz display and measured about 30–60 submissions per second.
+In each of the four accepted configurations, 240 static frames produced 240 retained-only
+submissions and zero GPUI draws. The 240 Console status updates produced 240 draws and
+240 submissions. The probe now requires viewport callback timing for every GPUI submission.
+Combined static work ranged from **0.637 to 0.679 ms p50** and **0.799 to 1.057 ms p95**.
+The probe rejected four attempts with unexpected static draws or incomplete draw-to-submission
+pairing before the accepted runs.
 
 AccessKit permits replay of eligible unclipped roots. It falls back to full draws for a dirty
 splice or when accessibility capture owns a subtree clip, including the clipped Dockspace
 path in the editor. The retained/full-redraw tests compare paint, hitboxes, input, focus,
 and the accepted accessibility tree. They also exercise clean subtree replay, dirty-leaf
 splicing, font registration during a splice, group hover, and element-state retirement.
+Follow-up tests cover pointer exit during deferred frame preparation and discard, and retained
+list queries before the first layout and after remeasurement.
 Redrawing after a pointer exit preserves the exit until a new pointer event arrives.
 Explicit `Window::draw` rebuilds the root, preserving Dockspace's frame-local publications
 and direct consumers' drawing callbacks. A release shutdown regression also verified that
