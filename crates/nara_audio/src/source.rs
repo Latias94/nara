@@ -56,12 +56,13 @@ pub(super) fn hydrate_audio_sources(
     mut sources: Query<(
         Entity,
         Ref<AudioClipSource>,
+        &AudioPlayback,
         Option<&AudioPlayer>,
         Option<&mut AudioClipRequest>,
     )>,
 ) {
     let source_generation = server.runtime_source_generation();
-    for (entity, source, player, request) in &mut sources {
+    for (entity, source, playback, player, request) in &mut sources {
         let mut cached = request.filter(|request| request.id == source.clip);
         let previous = cached.as_ref().and_then(|request| request.handle);
         let remounted = cached
@@ -75,7 +76,7 @@ pub(super) fn hydrate_audio_sources(
             cached.source_generation = source_generation;
         }
         let retired = missing
-            && (source.is_changed() || player.is_none())
+            && (source.is_changed() || player.is_none() || playback.needs_clip())
             && previous.is_some_and(|clip| {
                 states.state(clip.id()).is_some_and(|state| {
                     matches!(state.load_state(), LoadState::Removed | LoadState::Loaded)
@@ -94,13 +95,16 @@ pub(super) fn hydrate_audio_sources(
                 Err(error) => {
                     let same_clip = cached.is_some();
                     entity.queue_silenced(move |mut entity: EntityWorldMut| {
-                        // Preserve pending transport commands across the player's removal hook.
+                        // Preserve transport state across the removal hook for the same clip.
                         let mut playback = entity
                             .get_mut::<AudioPlayback>()
                             .map(|mut playback| std::mem::take(&mut *playback))
                             .unwrap_or_default();
                         entity.remove::<(AudioPlayer, SpatialAudio)>();
-                        if !same_clip || playback.state() != PlaybackState::Stopped {
+                        if !same_clip {
+                            playback
+                                .fail_clip_switch(AudioError::ClipLoadFailed(error.to_string()));
+                        } else if playback.state() != PlaybackState::Stopped {
                             playback.fail(AudioError::ClipLoadFailed(error.to_string()));
                         }
                         entity.insert(playback);

@@ -114,16 +114,21 @@ pub(crate) fn resolve_switch(world: &mut World) -> SystemResult {
         return Ok(());
     };
     let manager = world.resource::<SceneManager>();
-    if let Some(SceneLoadState::Failed(message)) = manager.state(instance) {
-        eprintln!("Night Relay could not enter Sector 2: {message}");
-        world.resource_mut::<SceneManager>().despawn_scene(instance);
-        world.resource_mut::<Campaign>().pending = None;
-        discard_rejected_source_scene(world, Sector::Two.asset()?)?;
-    } else if manager.main_instance() == Some(instance) {
-        bind_arena(world, instance, true)?;
-        let mut campaign = world.resource_mut::<Campaign>();
-        campaign.sector = Sector::Two;
-        campaign.pending = None;
+    match manager.state(instance) {
+        None => world.resource_mut::<Campaign>().pending = None,
+        Some(SceneLoadState::Failed(message)) => {
+            eprintln!("Night Relay could not enter Sector 2: {message}");
+            world.resource_mut::<SceneManager>().despawn_scene(instance);
+            world.resource_mut::<Campaign>().pending = None;
+            discard_rejected_source_scene(world, Sector::Two.asset()?)?;
+        }
+        Some(_) if manager.main_instance() == Some(instance) => {
+            bind_arena(world, instance, true)?;
+            let mut campaign = world.resource_mut::<Campaign>();
+            campaign.sector = Sector::Two;
+            campaign.pending = None;
+        }
+        Some(_) => {}
     }
     Ok(())
 }

@@ -47,7 +47,7 @@ pub enum DeliveryError {
     #[error("declare the stable entry scene IDs in [delivery] in nara.toml")]
     MissingDeliveryProfile,
     #[error(
-        "the {id} asset at {path} has no matching Schema for '{component}' version {version}; refresh the Schema cache and verify that the component is registered"
+        "the {id} asset at {path} has no matching Schema for '{component}' version {version}. Verify that the component is registered and run `nara cook --trusted` to refresh the release delivery Schema cache"
     )]
     MissingComponentSchema {
         id: AssetId,

@@ -209,6 +209,22 @@ impl AudioPlayback {
         self.failed_while_paused = paused;
     }
 
+    pub(super) fn fail_clip_switch(&mut self, error: AudioError) {
+        *self = Self {
+            state: PlaybackState::Failed,
+            error: Some(error),
+            ..Self::default()
+        };
+    }
+
+    pub(super) fn needs_clip(&self) -> bool {
+        match self.command {
+            Some(PlaybackCommand::Play) => true,
+            Some(PlaybackCommand::Stop) => false,
+            _ => self.state == PlaybackState::WaitingForClip,
+        }
+    }
+
     pub(super) fn retry_after_failure(&mut self) {
         self.reset(if self.failed_while_paused {
             PlaybackState::Paused

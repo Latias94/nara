@@ -431,6 +431,9 @@ fn commit_scene(
     prepared: PreparedScene<'_>,
 ) -> bool {
     let mut manager = world.resource_mut::<SceneManager>();
+    if !manager.instances.contains_key(&instance) {
+        return false;
+    }
     let promote = manager.switching == Some(instance);
     if promote {
         let previous = manager.main;
@@ -440,21 +443,30 @@ fn commit_scene(
             unload(world, previous);
         }
     }
-    if world
-        .resource_mut::<SceneManager>()
-        .unload
-        .remove(&instance)
-    {
+    let manager = world.resource::<SceneManager>();
+    if manager.unload.contains(&instance) || promote && manager.main.is_some() {
         unload(world, instance);
         return false;
     }
-    let entities = prepared.spawn(world, || SceneMember(instance));
-    let mut manager = world.resource_mut::<SceneManager>();
-    manager.pending.remove(&instance);
-    if let Some(entry) = manager.instances.get_mut(&instance) {
-        entry.entities = entities;
-        entry.state = SceneLoadState::Ready;
+    if !manager.instances.contains_key(&instance) {
+        return false;
     }
+    let entities = prepared.spawn(world, || SceneMember(instance));
+    // Batch insertion invokes hooks but leaves their queued commands deferred.
+    world.flush();
+    let mut manager = world.resource_mut::<SceneManager>();
+    let cancelled = manager.unload.contains(&instance) || promote && manager.main.is_some();
+    let Some(entry) = manager.instances.get_mut(&instance) else {
+        despawn_members(world, instance);
+        return false;
+    };
+    entry.entities = entities;
+    if cancelled {
+        unload(world, instance);
+        return false;
+    }
+    entry.state = SceneLoadState::Ready;
+    manager.pending.remove(&instance);
     if promote {
         manager.main = Some(instance);
     }
@@ -484,6 +496,7 @@ fn fail(world: &mut World, instance: SceneInstanceId, scene_id: AssetId, error: 
 
 fn unload(world: &mut World, instance: SceneInstanceId) {
     let mut manager = world.resource_mut::<SceneManager>();
+    manager.unload.remove(&instance);
     let Some(entry) = manager.instances.remove(&instance) else {
         return;
     };
@@ -494,18 +507,8 @@ fn unload(world: &mut World, instance: SceneInstanceId) {
     if manager.switching == Some(instance) {
         manager.switching = None;
     }
-    if entry.state == SceneLoadState::Ready {
-        let entities = world
-            .query_filtered::<(Entity, &SceneMember), Allow<Disabled>>()
-            .iter(world)
-            .filter_map(|(entity, member)| (member.0 == instance).then_some(entity))
-            .collect::<Vec<_>>();
-        detach_other_instances(world, instance, &entities);
-        for entity in entities {
-            if let Ok(entity) = world.get_entity_mut(entity) {
-                entity.despawn();
-            }
-        }
+    if entry.state == SceneLoadState::Ready || !entry.entities.is_empty() {
+        despawn_members(world, instance);
     }
     emit(
         world,
@@ -514,6 +517,20 @@ fn unload(world: &mut World, instance: SceneInstanceId) {
             scene_id: entry.scene_id,
         },
     );
+}
+
+fn despawn_members(world: &mut World, instance: SceneInstanceId) {
+    let entities = world
+        .query_filtered::<(Entity, &SceneMember), Allow<Disabled>>()
+        .iter(world)
+        .filter_map(|(entity, member)| (member.0 == instance).then_some(entity))
+        .collect::<Vec<_>>();
+    detach_other_instances(world, instance, &entities);
+    for entity in entities {
+        if let Ok(entity) = world.get_entity_mut(entity) {
+            entity.despawn();
+        }
+    }
 }
 
 fn detach_other_instances(world: &mut World, instance: SceneInstanceId, entities: &[Entity]) {

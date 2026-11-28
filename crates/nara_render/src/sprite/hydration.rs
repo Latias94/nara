@@ -1,5 +1,7 @@
 use nara_app::{App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
-use nara_asset::{Asset, AssetError, AssetLoadSet, AssetServer, Assets, Handle};
+use nara_asset::{
+    Asset, AssetError, AssetLoadSet, AssetServer, AssetStates, Assets, Handle, LoadState,
+};
 use nara_core::AssetId;
 use nara_ecs::{
     Commands, Component, DetectChangesMut, Entity, EntityCommands, EntityWorldMut, Mut, Or, Query,
@@ -161,6 +163,7 @@ fn hydrate_sprite_sources(
     mut commands: Commands,
     mut sources: SourceSprites,
     mut server: ResMut<AssetServer>,
+    states: Res<AssetStates>,
     images: Res<Assets<ImageAsset>>,
     materials: Res<Assets<SpriteMaterialBindingAsset>>,
 ) {
@@ -195,6 +198,7 @@ fn hydrate_sprite_sources(
             source.image,
             hydrated.applied.material.image,
             &mut server,
+            &states,
             &images,
             &mut commands,
         )
@@ -204,6 +208,7 @@ fn hydrate_sprite_sources(
             source.material,
             hydrated.binding.as_ref().map(|(handle, _)| *handle),
             &mut server,
+            &states,
             &materials,
             &mut commands,
         );
@@ -228,6 +233,7 @@ fn ready_asset<'a, T: Asset>(
     id: Option<AssetId>,
     previous: Option<Handle<T>>,
     server: &mut AssetServer,
+    states: &AssetStates,
     assets: &'a Assets<T>,
     commands: &mut EntityCommands<'_>,
 ) -> Option<(Handle<T>, &'a T)> {
@@ -244,8 +250,15 @@ fn ready_asset<'a, T: Asset>(
         cached.source_generation = source_generation;
         return Some((handle, asset));
     }
-    let handle = if cached.is_none_or(|request| request.source_generation != source_generation) {
-        // Keep rejected requests until the reference or mount changes.
+    let handle = if cached.is_none_or(|request| {
+        request.source_generation != source_generation
+            || request.handle.is_some_and(|handle| {
+                states
+                    .state(handle.id())
+                    .is_some_and(|state| state.load_state() == &LoadState::Removed)
+            })
+    }) {
+        // Keep rejected requests until the reference or mount changes. Removed assets can reload.
         let handle = match server.load_id(id) {
             Ok(handle) => Some(handle),
             Err(AssetError::MissingRuntimeSource) => None,
@@ -297,7 +310,7 @@ mod tests {
     };
 
     use nara_asset::{
-        AssetAppExt, AssetLoadError, AssetPlugin, AssetProductRef, ImportedProductId,
+        AssetAppExt, AssetEvents, AssetLoadError, AssetPlugin, AssetProductRef, ImportedProductId,
         NpakEntryKind, RuntimeAssetBackend, RuntimeAssetMode, RuntimeAssetSource, load_asset_sync,
         source::{MemoryAssetSource, asset_id_path},
     };
@@ -407,6 +420,38 @@ mod tests {
         assert_eq!(
             app.world().resource::<Assets<ImageAsset>>().get(handle),
             Some(&image)
+        );
+
+        app.world_mut()
+            .unwrap()
+            .resource_scope(|world, mut images: Mut<Assets<ImageAsset>>| {
+                world.resource_scope(|world, mut states: Mut<AssetStates>| {
+                    images
+                        .remove_with_state(
+                            handle,
+                            &mut states,
+                            &mut world.resource_mut::<AssetEvents>(),
+                        )
+                        .unwrap();
+                });
+            });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app
+            .world()
+            .resource::<Assets<ImageAsset>>()
+            .get(handle)
+            .is_none()
+        {
+            assert!(
+                Instant::now() < deadline,
+                "the retired image did not reload"
+            );
+            app.update_with_delta(Duration::ZERO).unwrap();
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            app.world().get::<Sprite>(entity).unwrap().material.image,
+            Some(handle)
         );
     }
 }

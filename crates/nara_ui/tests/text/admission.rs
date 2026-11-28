@@ -52,6 +52,21 @@ fn malformed_containers_and_out_of_bounds_face_indices_fail_before_publication()
 }
 
 #[test]
+fn a_face_without_a_character_map_is_rejected_before_publication() {
+    let mut bytes = BUNDLED_BYTES.to_vec();
+    let tables = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
+    let cmap = bytes[12..][..tables * 16]
+        .chunks_exact_mut(16)
+        .find(|record| &record[..4] == b"cmap")
+        .unwrap();
+    cmap[12..16].copy_from_slice(&0_u32.to_be_bytes());
+    assert_eq!(
+        FontFace::validate_bytes(&bytes, 0),
+        Err(FontFaceError::Malformed)
+    );
+}
+
+#[test]
 fn oversized_font_is_rejected_before_parser_work() {
     let oversized = vec![0; MAX_FONT_CONTAINER_BYTES + 1];
     assert_eq!(

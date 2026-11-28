@@ -9,7 +9,7 @@ use std::{
 use bevy_ecs::{
     hierarchy::ChildOf,
     lifecycle::HookContext,
-    prelude::{Component, Messages, ResMut, Resource},
+    prelude::{Component, Messages, ResMut, Resource, World},
     schedule::IntoScheduleConfigs,
     world::DeferredWorld,
 };
@@ -689,6 +689,93 @@ fn switches_requested_from_component_hooks_survive_promotion() {
         assert_eq!(manager.main_instance(), Some(next));
         assert!(manager.state(second).is_none());
     }
+}
+
+#[test]
+fn a_reentrant_sync_switch_keeps_the_newest_main_scene() {
+    #[derive(Default, Resource)]
+    struct Reenter {
+        armed: bool,
+        activated: Option<SceneInstanceId>,
+    }
+
+    fn switch_again(mut world: DeferredWorld<'_>, _: HookContext) {
+        if world
+            .get_resource_mut::<Reenter>()
+            .is_some_and(|mut reenter| std::mem::take(&mut reenter.armed))
+        {
+            world.commands().queue(|world: &mut World| {
+                let instance = switch_scene_sync(world, FIRST.parse().unwrap()).unwrap();
+                world.resource_mut::<Reenter>().activated = Some(instance);
+            });
+        }
+    }
+
+    for on_remove in [true, false] {
+        let mut app = app(pack(true));
+        let world = app.world_mut().unwrap();
+        let hooks = world.register_component_hooks::<Sector>();
+        if on_remove {
+            hooks.on_remove(switch_again);
+        } else {
+            hooks.on_add(switch_again);
+        }
+        let original = switch_scene_sync(world, FIRST.parse().unwrap()).unwrap();
+        world.insert_resource(Reenter {
+            armed: true,
+            ..Default::default()
+        });
+        let second = SECOND.parse().unwrap();
+        assert!(matches!(
+            switch_scene_sync(world, second),
+            Err(SceneError::ActivationCancelled { scene_id }) if scene_id == second
+        ));
+
+        let newest = world.resource::<Reenter>().activated.unwrap();
+        let manager = world.resource::<SceneManager>();
+        assert_eq!(manager.main_instance(), Some(newest));
+        assert_eq!(manager.state(original), None);
+        let members = world
+            .query::<&SceneMember>()
+            .iter(world)
+            .copied()
+            .collect::<Vec<_>>();
+        assert_eq!(members, [SceneMember(newest); 2]);
+    }
+}
+
+#[test]
+fn an_on_add_hook_can_cancel_its_own_sync_activation() {
+    let mut app = app(pack(true));
+    let world = app.world_mut().unwrap();
+    world
+        .register_component_hooks::<Sector>()
+        .on_add(|mut world, context| {
+            let instance = world.get::<SceneMember>(context.entity).unwrap().0;
+            world.commands().queue(move |world: &mut World| {
+                world.resource_mut::<SceneManager>().despawn_scene(instance);
+            });
+        });
+    let id = FIRST.parse().unwrap();
+    let mut events = world
+        .resource::<Messages<SceneEvent>>()
+        .get_cursor_current();
+
+    assert!(matches!(
+        switch_scene_sync(world, id),
+        Err(SceneError::ActivationCancelled { scene_id }) if scene_id == id
+    ));
+    let [SceneEvent::Unloaded { instance, scene_id }] = events
+        .read(world.resource::<Messages<SceneEvent>>())
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("expected only the unload event for the cancelled scene");
+    };
+    assert_eq!(*scene_id, id);
+    let manager = world.resource::<SceneManager>();
+    assert_eq!(manager.main_instance(), None);
+    assert_eq!(manager.state(*instance), None);
+    assert_eq!(world.query::<&SceneMember>().iter(world).count(), 0);
 }
 
 #[test]

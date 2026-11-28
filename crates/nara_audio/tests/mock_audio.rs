@@ -199,6 +199,71 @@ fn authored_autoplay_recovers_from_request_and_decode_failures_after_remounts() 
 }
 
 #[test]
+fn rejecting_a_clip_switch_allows_the_previous_manual_clip_to_be_selected_again() {
+    let clip_id = CLIP_ID.parse().unwrap();
+    let bad_id = "0193a100-1111-7000-8000-000000000002".parse().unwrap();
+    let mut app = App::new();
+    app.add_plugins((AssetPlugin, AudioPlugin::mock())).unwrap();
+    let mut source = MemoryAssetSource::new();
+    source
+        .insert(&asset_id_path(clip_id), tone_wav(200))
+        .unwrap();
+    app.set_asset_source(RuntimeAssetSource::from_memory_with_kinds(
+        RuntimeAssetMode::Source,
+        source,
+        [
+            (clip_id, NpakEntryKind::Audio),
+            (bad_id, NpakEntryKind::Raw),
+        ],
+    ))
+    .unwrap();
+    let world = app.world_mut().unwrap();
+    load_asset_sync::<AudioClip>(world, clip_id).unwrap();
+    let entity = world
+        .spawn(AudioClipSource {
+            clip: clip_id,
+            bus: "sfx".to_owned(),
+            volume: 1.0,
+            looping: true,
+            autoplay: false,
+            spatial: false,
+        })
+        .id();
+
+    world.get_mut::<AudioPlayback>(entity).unwrap().play();
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Playing);
+    app.world_mut()
+        .unwrap()
+        .get_mut::<AudioPlayback>(entity)
+        .unwrap()
+        .pause();
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Paused);
+
+    let world = app.world_mut().unwrap();
+    world.get_mut::<AudioClipSource>(entity).unwrap().clip = bad_id;
+    world.get_mut::<AudioPlayback>(entity).unwrap().play();
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Failed);
+    app.world_mut()
+        .unwrap()
+        .get_mut::<AudioClipSource>(entity)
+        .unwrap()
+        .clip = clip_id;
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Idle);
+
+    app.world_mut()
+        .unwrap()
+        .get_mut::<AudioPlayback>(entity)
+        .unwrap()
+        .play();
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Playing);
+}
+
+#[test]
 fn authored_autoplay_retries_corrected_settings_and_respects_manual_transport() {
     let clip_id = CLIP_ID.parse().unwrap();
     let mut app = App::new();
@@ -303,7 +368,6 @@ fn authored_autoplay_retries_corrected_settings_and_respects_manual_transport() 
                 .unwrap();
         });
     });
-    world.get_mut::<AudioClipSource>(entity).unwrap().volume = 0.5;
     world.get_mut::<AudioPlayback>(entity).unwrap().play();
     let deadline = Instant::now() + Duration::from_secs(5);
     while state(app.world(), entity) != PlaybackState::Playing {

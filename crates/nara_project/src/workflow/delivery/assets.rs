@@ -171,7 +171,7 @@ impl Cooker {
             }
             FONT => {
                 let source = self.read(asset, nara_ui::text::MAX_FONT_CONTAINER_BYTES)?;
-                let (bytes, hit) = self.cached(asset, source, "nara.font.sfnt.v1", |source| {
+                let (bytes, hit) = self.cached(asset, source, "nara.font.sfnt.v2", |source| {
                     nara_ui::FontFace::validate_bytes(&source, 0)
                         .map_err(|error| asset.error(error))?;
                     Ok(source)

@@ -130,7 +130,27 @@ fn validate_face(bytes: &[u8], face_index: u32) -> Result<String, FontFaceError>
         },
         _ => FontFaceError::Malformed,
     })?;
-    preferred_family_name(&parsed).ok_or(FontFaceError::MissingFamilyName)
+    let family_name = preferred_family_name(&parsed).ok_or(FontFaceError::MissingFamilyName)?;
+    swash::FontRef::from_index(bytes, face_index as usize).ok_or(FontFaceError::Malformed)?;
+    // Fontique needs a character map to register the face for shaping.
+    if !parsed.tables().cmap.is_some_and(|map| {
+        map.subtables.into_iter().any(|table| {
+            use ttf_parser::cmap::Format;
+
+            matches!(
+                table.format,
+                Format::ByteEncodingTable(_)
+                    | Format::SegmentMappingToDeltaValues(_)
+                    | Format::TrimmedTableMapping(_)
+                    | Format::TrimmedArray(_)
+                    | Format::SegmentedCoverage(_)
+                    | Format::ManyToOneRangeMappings(_)
+            )
+        })
+    }) {
+        return Err(FontFaceError::Malformed);
+    }
+    Ok(family_name)
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
