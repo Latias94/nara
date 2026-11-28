@@ -157,6 +157,37 @@ fn audio_plugin_loads_source_clips_when_asset_plugin_is_installed_later() {
     assert_eq!(loaded.duration(), Duration::from_millis(40));
 }
 
+#[cfg(feature = "scene-runtime")]
+#[test]
+fn audio_plugin_registers_clip_source_in_both_scene_plugin_orders() {
+    use nara_reflect::{ComponentRegistryPlugin, component_registry};
+    use nara_scene::ScenePlugin;
+
+    let registered = |app: &App| {
+        component_registry(app.world())
+            .unwrap()
+            .components()
+            .iter()
+            .any(|schema| schema.id().as_str() == AudioClipSource::COMPONENT_ID)
+    };
+
+    let mut scene_first = App::new();
+    scene_first
+        .add_plugins((ComponentRegistryPlugin, AssetPlugin, ScenePlugin))
+        .unwrap();
+    scene_first.add_plugin(AudioPlugin::mock()).unwrap();
+    assert!(registered(&scene_first));
+    scene_first.update_with_delta(Duration::ZERO).unwrap();
+
+    let mut audio_first = App::new();
+    audio_first.add_plugin(AudioPlugin::mock()).unwrap();
+    audio_first
+        .add_plugins((ComponentRegistryPlugin, AssetPlugin, ScenePlugin))
+        .unwrap();
+    audio_first.update_with_delta(Duration::ZERO).unwrap();
+    assert!(registered(&audio_first));
+}
+
 #[test]
 fn standalone_audio_plugin_plays_procedural_clips() {
     let mut app = App::new();

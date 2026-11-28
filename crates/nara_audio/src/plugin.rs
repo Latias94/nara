@@ -24,6 +24,8 @@ const DECLARATION: PluginDeclaration =
 /// default output device when available and keeps mock playback available when it cannot open.
 /// When `AssetPlugin` is installed, it also registers the clip loader. Install `AssetPlugin`
 /// first to load clips synchronously during app setup.
+/// With the `scene-runtime` feature, install `ScenePlugin` first to load scenes containing
+/// authored clip sources during app setup.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AudioPlugin<const DEVICE: bool = false>;
 
@@ -58,13 +60,7 @@ impl<const DEVICE: bool> Plugin for AudioPlugin<DEVICE> {
         register_clip_loader(app)?;
         #[cfg(feature = "scene-runtime")]
         if app.has_plugin(nara_scene::SCENE_PLUGIN_ID) {
-            use nara_scene::RegisterSceneComponent as _;
-
-            app.register_scene_component::<crate::AudioClipSource>()
-                .map_err(|error| PluginError::SetupFailed {
-                    plugin: AUDIO_PLUGIN_ID,
-                    message: error.to_string(),
-                })?;
+            register_clip_source(app)?;
         }
         app.add_systems(
             CoreStage::FixedUpdate,
@@ -81,8 +77,30 @@ impl<const DEVICE: bool> Plugin for AudioPlugin<DEVICE> {
     }
 
     fn finish(&self, app: &mut App) -> Result<(), PluginError> {
-        register_clip_loader(app)
+        register_clip_loader(app)?;
+        // Build registers the clip source when ScenePlugin was installed first.
+        #[cfg(feature = "scene-runtime")]
+        if app
+            .installed_plugins()
+            .skip_while(|plugin| plugin.id != AUDIO_PLUGIN_ID)
+            .any(|plugin| plugin.id == nara_scene::SCENE_PLUGIN_ID)
+        {
+            register_clip_source(app)?;
+        }
+        Ok(())
     }
+}
+
+#[cfg(feature = "scene-runtime")]
+fn register_clip_source(app: &mut App) -> Result<(), PluginError> {
+    use nara_scene::RegisterSceneComponent as _;
+
+    app.register_scene_component::<crate::AudioClipSource>()
+        .map_err(|error| PluginError::SetupFailed {
+            plugin: AUDIO_PLUGIN_ID,
+            message: error.to_string(),
+        })?;
+    Ok(())
 }
 
 fn register_clip_loader(app: &mut App) -> Result<(), PluginError> {

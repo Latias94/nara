@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{any::Any, collections::BTreeMap};
 
 use bevy_ecs::{component::Component, entity::Entity, world::World};
 use nara_reflect::{
@@ -141,8 +141,17 @@ struct Entry {
     decode: DecodeColumn,
 }
 
-pub(super) trait ReadyColumn {
+pub(super) trait ReadyColumn: Any {
     fn insert(self: Box<Self>, world: &mut World, spawned: &[Entity]);
+}
+
+#[cfg(feature = "runtime")]
+impl dyn ReadyColumn {
+    pub(super) fn sprite_sources(&self) -> &[(usize, SpriteSource)] {
+        (self as &dyn Any)
+            .downcast_ref::<TypedColumn<SpriteSource>>()
+            .map_or(&[], |column| column.0.as_slice())
+    }
 }
 
 struct TypedColumn<T>(Vec<(usize, T)>);

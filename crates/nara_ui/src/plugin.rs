@@ -2,7 +2,7 @@ use nara_app::{
     App, CoreStage, FrameCleanup, FrameIntent, Plugin, PluginDefinition, PluginDefinitionId,
     PluginError,
 };
-use nara_asset::{ASSET_PLUGIN_ID, AssetAppExt, AssetLoadContext, AssetLoader, NpakEntryKind};
+use nara_asset::{AssetAppExt, AssetLoadContext, AssetLoader, AssetServer, NpakEntryKind};
 use nara_ecs::{ResMut, bevy_ecs::message::Messages, schedule::IntoScheduleConfigs};
 use nara_input::InputSet;
 
@@ -47,9 +47,7 @@ impl Plugin for UiPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        if app.has_plugin(ASSET_PLUGIN_ID) {
-            app.register_asset_loader(FontFaceLoader)?;
-        }
+        register_font_loader(app)?;
         let font = match &self.font {
             Some(font) => font.clone(),
             None => text::bundled_font_face().map_err(|error| PluginError::SetupFailed {
@@ -72,6 +70,19 @@ impl Plugin for UiPlugin {
             .add_systems(FrameCleanup, advance_actions)?;
         Ok(())
     }
+
+    fn finish(&self, app: &mut App) -> Result<(), PluginError> {
+        register_font_loader(app)
+    }
+}
+
+fn register_font_loader(app: &mut App) -> Result<(), PluginError> {
+    if let Some(server) = app.world().get_resource::<AssetServer>()
+        && !server.loader_registry().contains::<FontFace>()
+    {
+        app.register_asset_loader(FontFaceLoader)?;
+    }
+    Ok(())
 }
 
 /// Loads the first face of a game font in either a project directory or an NPAK.

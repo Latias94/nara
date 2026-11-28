@@ -48,6 +48,11 @@ pub enum AssetError {
     MissingLoader(&'static str),
     UnresolvedPath(AssetPath),
     UnknownRuntimeKind(nara_core::AssetId),
+    WrongRuntimeKind {
+        id: nara_core::AssetId,
+        expected: crate::NpakEntryKind,
+        actual: crate::NpakEntryKind,
+    },
     MissingKindLoader(crate::NpakEntryKind),
     AmbiguousKindLoader(crate::NpakEntryKind),
     AssetTypeMismatch {
@@ -119,6 +124,14 @@ impl Display for AssetError {
             Self::UnknownRuntimeKind(id) => write!(
                 formatter,
                 "the runtime source has no known kind for asset '{id}'"
+            ),
+            Self::WrongRuntimeKind {
+                id,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "asset '{id}' has kind {actual:?}; expected {expected:?}"
             ),
             Self::MissingKindLoader(kind) => {
                 write!(formatter, "no asset loader is registered for kind {kind:?}")
@@ -363,6 +376,11 @@ impl AssetServer {
             .get(&id)
             .filter(|(asset_type, _)| *asset_type == TypeId::of::<T>())
             .map(|_| Handle::new(id))
+    }
+
+    #[cfg(feature = "runtime")]
+    pub(crate) fn claimed_type(&self, id: AssetId) -> Option<TypeId> {
+        self.type_claims.get(&id).map(|(asset_type, _)| *asset_type)
     }
 
     /// Returns an already reserved product with its existing exact Rust type claim.

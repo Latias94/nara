@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use bevy_ecs::{
     prelude::{Messages, ResMut, Resource},
-    schedule::IntoScheduleConfigs,
+    schedule::{IntoScheduleConfigs, SystemSet},
 };
 use nara_app::{
     App, CoreStage, FrameCleanup, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
@@ -56,7 +56,7 @@ impl SceneAsset {
 #[derive(Clone, Default)]
 pub struct SceneAssetLoader {
     #[cfg(feature = "cook")]
-    schemas: Arc<std::sync::RwLock<nara_reflect::ComponentSchemaCatalog>>,
+    schemas: Arc<std::sync::RwLock<Arc<nara_reflect::ComponentSchemaCatalog>>>,
 }
 
 impl AssetLoader for SceneAssetLoader {
@@ -195,9 +195,11 @@ impl RegisterSceneComponent for App {
         self.register_schema::<T>()?;
         #[cfg(feature = "cook")]
         {
-            *schemas = nara_reflect::component_registry(self.world())
-                .ok_or(nara_reflect::SchemaRegistrationError::MissingRegistry)?
-                .clone();
+            *schemas = Arc::new(
+                nara_reflect::component_registry(self.world())
+                    .ok_or(nara_reflect::SchemaRegistrationError::MissingRegistry)?
+                    .clone(),
+            );
         }
         self.world_mut()?.resource_mut::<SceneRegistry>().native = native;
         Ok(self)
@@ -208,6 +210,11 @@ impl RegisterSceneComponent for App {
 pub struct ScenePlugin;
 
 pub const SCENE_PLUGIN_ID: PluginId = PluginId::new("nara.scene");
+
+/// Advances scene loads and applies ready switches during `TaskUpdate`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+pub struct SceneUpdateSet;
+
 const DECLARATION: PluginDeclaration =
     PluginDeclaration::new(SCENE_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(&[ASSET_PLUGIN_ID, COMPONENT_REGISTRY_PLUGIN_ID]);
@@ -236,7 +243,9 @@ impl Plugin for ScenePlugin {
             .init_resource::<Messages<SceneEvent>>()?
             .add_systems(
                 CoreStage::TaskUpdate,
-                manager::update_scenes.after(AssetLoadSet::Publish),
+                manager::update_scenes
+                    .in_set(SceneUpdateSet)
+                    .after(AssetLoadSet::Publish),
             )?
             .add_systems(
                 FrameCleanup,

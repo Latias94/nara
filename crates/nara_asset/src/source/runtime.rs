@@ -1,4 +1,4 @@
-use std::{fmt, sync::Arc};
+use std::{collections::BTreeMap, fmt, sync::Arc};
 
 use nara_core::{AssetId, vfs::MemoryAssetSource};
 use nara_ecs::Resource;
@@ -53,7 +53,21 @@ impl RuntimeAssetSource {
 
     /// Uses the virtual UUID paths returned by [`super::asset_id_path`].
     pub fn from_memory(mode: RuntimeAssetMode, files: MemoryAssetSource) -> Self {
-        Self::new(MemoryBackend { mode, files })
+        Self::from_memory_with_kinds(mode, files, [])
+    }
+
+    /// Adds a type index for UUIDs that must be resolved through untyped dependency references.
+    /// Bytes use the same virtual paths as [`Self::from_memory`].
+    pub fn from_memory_with_kinds(
+        mode: RuntimeAssetMode,
+        files: MemoryAssetSource,
+        kinds: impl IntoIterator<Item = (AssetId, NpakEntryKind)>,
+    ) -> Self {
+        Self::new(MemoryBackend {
+            mode,
+            files,
+            kinds: kinds.into_iter().collect(),
+        })
     }
 
     #[cfg(all(feature = "cooked", any(unix, windows)))]
@@ -111,6 +125,7 @@ impl Eq for RuntimeAssetSource {}
 struct MemoryBackend {
     mode: RuntimeAssetMode,
     files: MemoryAssetSource,
+    kinds: BTreeMap<AssetId, NpakEntryKind>,
 }
 
 impl RuntimeAssetBackend for MemoryBackend {
@@ -118,8 +133,17 @@ impl RuntimeAssetBackend for MemoryBackend {
         self.mode
     }
 
-    fn read_asset(&self, id: AssetId, _: Option<NpakEntryKind>) -> Result<Vec<u8>, AssetLoadError> {
+    fn read_asset(
+        &self,
+        id: AssetId,
+        expected: Option<NpakEntryKind>,
+    ) -> Result<Vec<u8>, AssetLoadError> {
+        check_kind(id, expected, self.kind(id))?;
         super::read_asset(&self.files, id).map_err(|source| AssetLoadError::Read { id, source })
+    }
+
+    fn kind(&self, id: AssetId) -> Option<NpakEntryKind> {
+        self.kinds.get(&id).copied()
     }
 }
 
@@ -162,10 +186,15 @@ impl RuntimeAssetBackend for ProjectBackend {
         RuntimeAssetMode::Source
     }
 
-    fn read_asset(&self, id: AssetId, _: Option<NpakEntryKind>) -> Result<Vec<u8>, AssetLoadError> {
+    fn read_asset(
+        &self,
+        id: AssetId,
+        expected: Option<NpakEntryKind>,
+    ) -> Result<Vec<u8>, AssetLoadError> {
         use std::io::Read;
 
         const MAX_SOURCE_BYTES: u64 = 256 * 1024 * 1024;
+        check_kind(id, expected, self.kind(id))?;
         let file = super::ProjectAssetSource::new(&self.directory, &self.database)
             .open_asset(id)
             .map_err(|source| AssetLoadError::Read { id, source })?;
@@ -215,4 +244,21 @@ impl RuntimeAssetBackend for ProjectBackend {
             .meta()
             .cloned()
     }
+}
+
+fn check_kind(
+    id: AssetId,
+    expected: Option<NpakEntryKind>,
+    actual: Option<NpakEntryKind>,
+) -> Result<(), AssetLoadError> {
+    if let (Some(expected), Some(actual)) = (expected, actual)
+        && expected != actual
+    {
+        return Err(AssetLoadError::WrongKind {
+            id,
+            expected,
+            actual,
+        });
+    }
+    Ok(())
 }

@@ -152,6 +152,17 @@ impl AssetStates {
     }
 
     #[cfg(feature = "runtime")]
+    pub(crate) fn reset_unpublished_failures(&mut self) {
+        for state in self.states.values_mut() {
+            if state.published_slot.is_none()
+                && matches!(state.load_state, LoadState::Failed { .. })
+            {
+                state.set_load_state(LoadState::Removed);
+            }
+        }
+    }
+
+    #[cfg(feature = "runtime")]
     pub(crate) fn fail_loading(&mut self, id: AssetId, message: String, events: &mut AssetEvents) {
         if let Some(state) = self.state_mut(id) {
             state.set_load_state(LoadState::Failed { message });

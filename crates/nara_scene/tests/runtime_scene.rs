@@ -8,12 +8,15 @@ use std::{
 
 use bevy_ecs::{
     hierarchy::ChildOf,
-    prelude::{Component, Messages},
+    lifecycle::HookContext,
+    prelude::{Component, Messages, ResMut, Resource},
+    schedule::IntoScheduleConfigs,
+    world::DeferredWorld,
 };
-use nara_app::App;
+use nara_app::{App, CoreStage};
 use nara_asset::{
-    AssetAppExt, AssetLoadContext, AssetLoader, AssetPlugin, AssetStates, Assets, RuntimeAssetMode,
-    RuntimeAssetSource,
+    AssetAppExt, AssetEvents, AssetLoadContext, AssetLoadSet, AssetLoader, AssetPlugin,
+    AssetStates, Assets, RuntimeAssetMode, RuntimeAssetSource,
     cooked::{NpakArchive, NpakCompression, NpakEntryKind, NpakInput, encode_npak},
     load_asset_sync,
     source::{MemoryAssetSource, asset_id_path},
@@ -21,10 +24,10 @@ use nara_asset::{
 use nara_core::AssetId;
 use nara_reflect::{ComponentRegistryPlugin, ComponentSchemaCatalog, Schema};
 use nara_scene::{
-    Name, RegisterSceneComponent, SceneAsset, SceneEvent, SceneInstanceId, SceneLoadState,
-    SceneManager, SceneMember, ScenePlugin,
+    Name, RegisterSceneComponent, SceneAsset, SceneError, SceneEvent, SceneInstanceId,
+    SceneLoadState, SceneManager, SceneMember, ScenePlugin, SceneUpdateSet,
     authoring::{SceneDocument, SceneEntity, SpriteSource},
-    cook::cook_scene,
+    cook::{cook_flattened_scene, cook_scene},
     switch_scene_sync,
 };
 
@@ -269,6 +272,269 @@ fn missing_scene_or_dependency_keeps_the_main_instance() {
                 .all(|&entity| app.world().get::<Name>(entity).is_some())
         );
     }
+}
+
+#[test]
+fn wrong_sprite_asset_kind_keeps_the_main_instance() {
+    struct MaterialStub;
+
+    impl AssetLoader for MaterialStub {
+        type Asset = ();
+        type Error = Infallible;
+
+        fn cooked_kind(&self) -> Option<NpakEntryKind> {
+            Some(NpakEntryKind::Material)
+        }
+
+        fn load(&self, _: &[u8], _: &mut AssetLoadContext<'_>) -> Result<(), Infallible> {
+            Ok(())
+        }
+    }
+
+    let first = FIRST.parse().unwrap();
+    let second = SECOND.parse().unwrap();
+    for (mode, id, field, expected, actual) in [
+        (
+            RuntimeAssetMode::Cooked,
+            "0193f100-2222-7000-8000-000000000016".parse().unwrap(),
+            "image",
+            NpakEntryKind::Image,
+            NpakEntryKind::Material,
+        ),
+        (
+            RuntimeAssetMode::Source,
+            IMAGE.parse().unwrap(),
+            "material",
+            NpakEntryKind::Material,
+            NpakEntryKind::Image,
+        ),
+    ] {
+        let mut invalid = document(2, None);
+        let entity = invalid.entities[0].id;
+        invalid.entities[0]
+            .set(&SpriteSource {
+                image: (expected == NpakEntryKind::Image).then_some(id),
+                material: (expected == NpakEntryKind::Material).then_some(id),
+                ..Default::default()
+            })
+            .unwrap();
+
+        let mut memory = MemoryAssetSource::new();
+        let schemas = schemas();
+        for (scene_id, document) in [(first, document(1, None)), (second, invalid)] {
+            let bytes = match mode {
+                RuntimeAssetMode::Cooked => {
+                    cook_flattened_scene(&document, &schemas).unwrap().bytes
+                }
+                RuntimeAssetMode::Source => document
+                    .to_ron_with(schemas.components())
+                    .unwrap()
+                    .into_bytes(),
+            };
+            memory.insert(&asset_id_path(scene_id), bytes).unwrap();
+        }
+        memory.insert(&asset_id_path(id), b"asset").unwrap();
+        let mut app = app(RuntimeAssetSource::from_memory_with_kinds(
+            mode,
+            memory,
+            [
+                (first, NpakEntryKind::Scene),
+                (second, NpakEntryKind::Scene),
+                (id, actual),
+            ],
+        ));
+        app.register_asset_loader(MaterialStub).unwrap();
+
+        let world = app.world_mut().unwrap();
+        let main = switch_scene_sync(world, first).unwrap();
+        let root = world.resource::<SceneManager>().entities(main).unwrap()[&entity];
+        let next = world.resource_mut::<SceneManager>().switch_scene(second);
+        let message = SceneError::SpriteAssetKindMismatch {
+            scene_id: second,
+            entity,
+            field,
+            id,
+            expected,
+            actual,
+        }
+        .to_string();
+        assert_eq!(
+            settle(&mut app, next),
+            SceneLoadState::Failed(message.clone())
+        );
+
+        let world = app.world_mut().unwrap();
+        assert_eq!(
+            switch_scene_sync(world, second).unwrap_err().to_string(),
+            message
+        );
+        assert_eq!(world.resource::<SceneManager>().main_instance(), Some(main));
+        assert_eq!(world.get::<Sector>(root), Some(&Sector { number: 1 }));
+    }
+}
+
+#[test]
+fn switches_requested_from_component_hooks_survive_promotion() {
+    #[derive(Default, Resource)]
+    struct NextSwitch(Option<SceneInstanceId>);
+
+    fn request_next(mut world: DeferredWorld<'_>, _: HookContext) {
+        if world
+            .get_resource::<NextSwitch>()
+            .is_some_and(|next| next.0.is_none())
+        {
+            let next = world
+                .resource_mut::<SceneManager>()
+                .switch_scene(FIRST.parse().unwrap());
+            world.resource_mut::<NextSwitch>().0 = Some(next);
+        }
+    }
+
+    for on_remove in [true, false] {
+        let mut app = app(pack(true));
+        let world = app.world_mut().unwrap();
+        let hooks = world.register_component_hooks::<Sector>();
+        if on_remove {
+            hooks.on_remove(request_next);
+        } else {
+            hooks.on_add(request_next);
+        }
+        switch_scene_sync(world, FIRST.parse().unwrap()).unwrap();
+        world.init_resource::<NextSwitch>();
+
+        let second = world
+            .resource_mut::<SceneManager>()
+            .switch_scene(SECOND.parse().unwrap());
+        assert_eq!(settle(&mut app, second), SceneLoadState::Ready);
+        let world = app.world();
+        assert_eq!(
+            world.resource::<SceneManager>().main_instance(),
+            Some(second)
+        );
+        let next = world.resource::<NextSwitch>().0.unwrap();
+
+        assert_eq!(settle(&mut app, next), SceneLoadState::Ready);
+        let manager = app.world().resource::<SceneManager>();
+        assert_eq!(manager.main_instance(), Some(next));
+        assert!(manager.state(second).is_none());
+    }
+}
+
+#[test]
+fn dependency_removed_during_preload_keeps_the_main_instance() {
+    for with_state in [false, true] {
+        let mut app = app(pack(true));
+        app.add_systems(
+            CoreStage::TaskUpdate,
+            (move |mut images: ResMut<Assets<Vec<u8>>>,
+                   mut states: ResMut<AssetStates>,
+                   mut events: ResMut<AssetEvents>| {
+                let handle = images.iter().next().map(|(handle, _)| handle);
+                if let Some(handle) = handle {
+                    let removed = if with_state {
+                        images
+                            .remove_with_state(handle, &mut states, &mut events)
+                            .unwrap()
+                    } else {
+                        images.remove(handle)
+                    };
+                    assert!(removed.is_some());
+                }
+            })
+            .after(AssetLoadSet::Publish)
+            .before(SceneUpdateSet),
+        )
+        .unwrap();
+        let world = app.world_mut().unwrap();
+        let main = switch_scene_sync(world, FIRST.parse().unwrap()).unwrap();
+        let second = SECOND.parse().unwrap();
+        let next = world.resource_mut::<SceneManager>().switch_scene(second);
+        let error = SceneError::DependencyNotResident {
+            scene_id: second,
+            id: IMAGE.parse().unwrap(),
+        };
+        assert_eq!(
+            settle(&mut app, next),
+            SceneLoadState::Failed(error.to_string())
+        );
+        let world = app.world();
+        let manager = world.resource::<SceneManager>();
+        assert_eq!(manager.main_instance(), Some(main));
+        assert!(
+            manager
+                .entities(main)
+                .unwrap()
+                .values()
+                .all(|&entity| world.get_entity(entity).is_ok())
+        );
+    }
+}
+
+#[test]
+fn switch_commits_the_same_scene_revision_whose_dependencies_it_requested() {
+    let mut app = app(pack(true));
+    let world = app.world_mut().unwrap();
+    let first = FIRST.parse().unwrap();
+    let second = SECOND.parse().unwrap();
+    switch_scene_sync(world, first).unwrap();
+    let handle = load_asset_sync::<SceneAsset>(world, second).unwrap();
+    let pending = world.resource_mut::<SceneManager>().switch_scene(second);
+    app.update_with_delta(Duration::ZERO).unwrap();
+    assert!(matches!(
+        app.world().resource::<SceneManager>().state(pending),
+        Some(SceneLoadState::LoadingDependencies { total: 1, .. })
+    ));
+
+    let replacement = cook_scene(
+        &document(3, Some(MISSING.parse().unwrap())),
+        &schemas(),
+        |_| Err::<SceneDocument, _>("unexpected prefab"),
+    )
+    .unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<Assets<SceneAsset>>()
+        .insert(handle, SceneAsset::from_cooked(replacement.bytes).unwrap());
+    assert_eq!(settle(&mut app, pending), SceneLoadState::Ready);
+    let world = app.world();
+    let manager = world.resource::<SceneManager>();
+    let entity = *manager.entities(pending).unwrap().values().next().unwrap();
+    assert_eq!(world.get::<Sector>(entity), Some(&Sector { number: 2 }));
+    assert_eq!(
+        world.get::<SpriteSource>(entity).unwrap().image,
+        Some(IMAGE.parse().unwrap())
+    );
+}
+
+#[test]
+fn unloading_a_scene_keeps_independent_instances_parented_under_it() {
+    use bevy_ecs::entity_disabling::Disabled;
+
+    let mut app = app(pack(true));
+    let world = app.world_mut().unwrap();
+    let first = FIRST.parse().unwrap();
+    let main = switch_scene_sync(world, first).unwrap();
+    let separate = world.resource_mut::<SceneManager>().load_scene(first);
+    assert_eq!(settle(&mut app, separate), SceneLoadState::Ready);
+    let world = app.world_mut().unwrap();
+    let manager = world.resource::<SceneManager>();
+    let parent = *manager.entities(main).unwrap().values().next().unwrap();
+    let other_root = *manager.entities(separate).unwrap().values().next().unwrap();
+    let decoration = world.spawn(ChildOf(parent)).id();
+    let disabled = world.spawn((SceneMember(main), Disabled)).id();
+    world.entity_mut(other_root).insert(ChildOf(decoration));
+    world.resource_mut::<SceneManager>().despawn_scene(main);
+    app.update_with_delta(Duration::ZERO).unwrap();
+
+    let world = app.world();
+    assert!(world.get_entity(parent).is_err());
+    assert!(world.get_entity(decoration).is_err());
+    assert!(world.get_entity(disabled).is_err());
+    assert_eq!(
+        world.get::<SceneMember>(other_root),
+        Some(&SceneMember(separate))
+    );
+    assert!(world.get::<ChildOf>(other_root).is_none());
 }
 
 #[test]

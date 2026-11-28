@@ -125,6 +125,16 @@ pub(crate) struct PreparedScene<'a> {
 }
 
 impl PreparedScene<'_> {
+    #[cfg(feature = "runtime")]
+    pub(crate) fn sprite_sources(
+        &self,
+    ) -> impl Iterator<Item = (EntityUuid, &crate::components::SpriteSource)> {
+        self.columns
+            .iter()
+            .flat_map(|column| column.sprite_sources())
+            .map(|(index, sprite)| (self.entities[*index].id, sprite))
+    }
+
     pub(crate) fn spawn<B: Bundle<Effect: NoBundleEffect>>(
         self,
         world: &mut World,

@@ -56,7 +56,8 @@ pub use reference::AssetReferenceDemand;
 #[cfg(feature = "runtime")]
 pub use runtime::{
     AssetAppExt, AssetLoadContext, AssetLoadError, AssetLoadSet, AssetLoader, AssetLoaderRegistry,
-    load_asset_sync, load_dependency_sync,
+    PreparedAsset, is_runtime_asset_resident, load_asset_sync, load_dependency_sync, prepare_asset,
+    set_runtime_asset_source,
 };
 #[cfg(all(feature = "authoring", any(unix, windows)))]
 pub use scan::{AssetScanError, AssetScanMode};

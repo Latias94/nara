@@ -1,11 +1,16 @@
 use nara_app::{App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
-use nara_asset::{Asset, AssetError, AssetServer, Assets, Handle};
+use nara_asset::{Asset, AssetError, AssetLoadSet, AssetServer, Assets, Handle};
 use nara_core::AssetId;
 use nara_ecs::{
     Commands, Component, DetectChangesMut, Entity, EntityCommands, EntityWorldMut, Mut, Or, Query,
-    Res, ResMut, With, bevy_ecs::error::BevyError,
+    Res, ResMut, With,
+    bevy_ecs::error::BevyError,
+    schedule::{IntoScheduleConfigs, SystemSet},
 };
-use nara_scene::components::SpriteSource;
+use nara_scene::{
+    SceneUpdateSet,
+    components::{SpriteSource, Transform2d},
+};
 
 use crate::{
     image::{IMAGE_PLUGIN_ID, ImageAsset},
@@ -13,7 +18,7 @@ use crate::{
     sprite::Sprite,
 };
 
-/// Hydrates authored sprites in `PreUpdate`, including in apps without a renderer.
+/// Hydrates authored sprites in `TaskUpdate`, including in apps without a renderer.
 ///
 /// The plugin seeds missing sprites from `SpriteSource`. Fields it manages follow the source
 /// while their current values match the last applied values. Texture regions, sampling, anchors,
@@ -22,6 +27,10 @@ use crate::{
 /// created by this plugin.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SpriteSourceHydrationPlugin;
+
+/// Applies authored sprite values after asset publication and scene switches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+pub struct SpriteSourceHydrationSet;
 
 pub const SPRITE_SOURCE_HYDRATION_PLUGIN_ID: PluginId =
     PluginId::new("nara.sprite-source-hydration");
@@ -36,7 +45,13 @@ impl Plugin for SpriteSourceHydrationPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         register_sprite_material_loader(app)?;
-        app.add_systems(CoreStage::PreUpdate, hydrate_sprite_sources)?;
+        app.add_systems(
+            CoreStage::TaskUpdate,
+            hydrate_sprite_sources
+                .in_set(SpriteSourceHydrationSet)
+                .after(AssetLoadSet::Publish)
+                .after(SceneUpdateSet),
+        )?;
         Ok(())
     }
 }
@@ -193,7 +208,7 @@ fn hydrate_sprite_sources(
             hydrated.created_sprite = true;
             hydrated.applied = authored_sprite(source);
             hydrated.applied.material.image = image;
-            commands.try_insert_if_new(hydrated.applied.clone());
+            commands.try_insert_if_new((hydrated.applied.clone(), Transform2d::default()));
         }
         hydrated.apply_binding(binding, material, &mut commands);
         if let Some(new) = new {
@@ -217,7 +232,11 @@ fn ready_asset<'a, T: Asset>(
     if request.is_none_or(|(requested, _)| requested != id) {
         *request = match server.load_id(id) {
             Ok(handle) => Some((id, handle)),
-            Err(AssetError::MissingRuntimeSource) => None,
+            Err(
+                AssetError::MissingRuntimeSource
+                | AssetError::WrongRuntimeKind { .. }
+                | AssetError::AssetTypeMismatch { .. },
+            ) => None,
             Err(error) => return Err(error),
         };
     }

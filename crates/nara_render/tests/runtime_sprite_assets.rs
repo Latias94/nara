@@ -165,7 +165,7 @@ mod hydration {
         material::{MaterialParameterValue, SamplerDescriptor},
         sprite::{Sprite, SpriteSourceHydrationPlugin, TextureRegion},
     };
-    use nara_scene::components::SpriteSource;
+    use nara_scene::components::{SpriteSource, Transform2d};
 
     use super::*;
 
@@ -229,6 +229,10 @@ mod hydration {
         let entity = app.world_mut().unwrap().spawn(source()).id();
         tick(&mut app);
         let sprite = app.world().get::<Sprite>(entity).unwrap();
+        assert_eq!(
+            app.world().get::<Transform2d>(entity),
+            Some(&Transform2d::default())
+        );
         assert_eq!(sprite.size, source().size);
         assert_eq!(sprite.material.tint, Color::BLACK);
         assert_eq!(sprite.material.image, None);

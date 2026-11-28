@@ -1,14 +1,21 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use bevy_ecs::prelude::{Component, Entity, Message, Messages, Resource, World};
+use bevy_ecs::{
+    entity::EntityHashSet,
+    entity_disabling::Disabled,
+    hierarchy::{ChildOf, Children},
+    prelude::{Component, Entity, Message, Messages, Resource, World},
+    query::Allow,
+};
 use nara_asset::{
     AssetError, AssetId as RuntimeId, AssetLoadError, AssetServer, AssetStates, Assets, Handle,
-    LoadState, load_asset_sync, load_dependency_sync,
+    LoadState, NpakEntryKind, RuntimeAssetSource, is_runtime_asset_resident, load_asset_sync,
+    load_dependency_sync,
 };
 use nara_core::{AssetId, EntityUuid};
 use thiserror::Error;
 
-use crate::cooked::{CookedScene, CookedSceneError};
+use crate::cooked::{CookedScene, CookedSceneError, PreparedScene};
 
 use super::{SceneAsset, SceneAssetError, SceneRegistry};
 
@@ -62,18 +69,31 @@ pub enum SceneError {
     Registration(#[from] nara_reflect::SchemaRegistrationError),
     #[error("scene asset or dependency '{id}' failed: {message}")]
     LoadFailed { id: AssetId, message: String },
+    #[error("scene '{scene_id}' dependency '{id}' is no longer resident")]
+    DependencyNotResident { scene_id: AssetId, id: AssetId },
+    #[error(
+        "scene '{scene_id}' entity {entity} SpriteSource.{field} refers to asset '{id}' of kind {actual:?}, expected {expected:?}"
+    )]
+    SpriteAssetKindMismatch {
+        scene_id: AssetId,
+        entity: EntityUuid,
+        field: &'static str,
+        id: AssetId,
+        expected: NpakEntryKind,
+        actual: NpakEntryKind,
+    },
 }
 
 #[derive(Default)]
 struct PendingScene {
     scene: Option<Handle<SceneAsset>>,
-    dependencies: Option<Vec<(AssetId, RuntimeId)>>,
+    prepared: Option<(SceneAsset, Vec<(AssetId, RuntimeId)>)>,
+    preload_source: Option<RuntimeAssetSource>,
 }
 
 struct Instance {
     scene_id: AssetId,
     state: SceneLoadState,
-    pending: Option<PendingScene>,
     entities: BTreeMap<EntityUuid, Entity>,
 }
 
@@ -83,6 +103,7 @@ struct Instance {
 pub struct SceneManager {
     next: u64,
     instances: BTreeMap<SceneInstanceId, Instance>,
+    pending: BTreeMap<SceneInstanceId, PendingScene>,
     unload: BTreeSet<SceneInstanceId>,
     main: Option<SceneInstanceId>,
     switching: Option<SceneInstanceId>,
@@ -97,10 +118,10 @@ impl SceneManager {
             Instance {
                 scene_id,
                 state: SceneLoadState::LoadingScene,
-                pending: Some(PendingScene::default()),
                 entities: BTreeMap::new(),
             },
         );
+        self.pending.insert(instance, PendingScene::default());
         instance
     }
 
@@ -157,11 +178,14 @@ pub fn switch_scene_asset_sync(
     asset: &SceneAsset,
 ) -> Result<SceneInstanceId, SceneError> {
     require_plugin(world)?;
-    for &dependency in asset.asset_dependencies() {
-        load_dependency_sync(world, dependency)?;
+    for &id in asset.asset_dependencies() {
+        let handle = load_dependency_sync(world, id)?;
+        if !is_runtime_asset_resident(world, handle) {
+            return Err(SceneError::DependencyNotResident { scene_id, id });
+        }
     }
     let instance = world.resource_mut::<SceneManager>().switch_scene(scene_id);
-    let result = instantiate(world, instance, scene_id, asset);
+    let result = instantiate(world, instance, scene_id, asset, None);
     if let Err(error) = &result {
         fail(world, instance, scene_id, error);
     }
@@ -184,34 +208,29 @@ pub(super) fn update_scenes(world: &mut World) {
     for instance in retiring {
         unload(world, instance);
     }
-    let pending = world
-        .resource::<SceneManager>()
-        .instances
-        .iter()
-        .filter_map(|(&instance, entry)| entry.pending.as_ref().map(|_| instance))
-        .collect::<Vec<_>>();
-    for instance in pending {
-        let mut manager = world.resource_mut::<SceneManager>();
-        let Some(entry) = manager.instances.get_mut(&instance) else {
-            continue;
-        };
-        let Some(mut request) = entry.pending.take() else {
+    let pending = std::mem::take(&mut world.resource_mut::<SceneManager>().pending);
+    for (instance, mut request) in pending {
+        let manager = world.resource::<SceneManager>();
+        let Some(entry) = manager.instances.get(&instance) else {
             continue;
         };
         let scene_id = entry.scene_id;
         match request.advance(world, scene_id) {
             Ok(Progress::Loading(state)) => {
-                if let Some(entry) = world
-                    .resource_mut::<SceneManager>()
-                    .instances
-                    .get_mut(&instance)
-                {
-                    entry.pending = Some(request);
+                let mut manager = world.resource_mut::<SceneManager>();
+                if let Some(entry) = manager.instances.get_mut(&instance) {
                     entry.state = state;
+                    manager.pending.insert(instance, request);
                 }
             }
             Ok(Progress::Ready(asset)) => {
-                if let Err(error) = instantiate(world, instance, scene_id, &asset) {
+                if let Err(error) = instantiate(
+                    world,
+                    instance,
+                    scene_id,
+                    &asset,
+                    request.preload_source.as_ref(),
+                ) {
                     fail(world, instance, scene_id, &error);
                 }
             }
@@ -227,35 +246,59 @@ enum Progress {
 
 impl PendingScene {
     fn advance(&mut self, world: &mut World, scene_id: AssetId) -> Result<Progress, SceneError> {
-        let handle = match self.scene {
-            Some(handle) => handle,
-            None => *self
-                .scene
-                .insert(world.resource_mut::<AssetServer>().load_id(scene_id)?),
-        };
-        if !is_loaded(world, scene_id, handle.id())? {
-            return Ok(Progress::Loading(SceneLoadState::LoadingScene));
-        }
-        let asset = resident_scene(world, scene_id, handle)?;
-        let dependencies = match &self.dependencies {
-            Some(dependencies) => dependencies,
+        let just_requested = self.prepared.is_none();
+        let (asset, dependencies) = match &self.prepared {
+            Some(prepared) => prepared,
             None => {
+                let scene_requested_now = self.scene.is_none();
+                let handle = match self.scene {
+                    Some(handle) => handle,
+                    None => *self
+                        .scene
+                        .insert(world.resource_mut::<AssetServer>().load_id(scene_id)?),
+                };
+                if !is_runtime_asset_resident(world, handle.id()) {
+                    if !scene_requested_now
+                        && matches!(
+                            load_state(world, scene_id, handle.id())?,
+                            Some(LoadState::Loaded | LoadState::Removed)
+                        )
+                    {
+                        return Err(SceneError::LoadFailed {
+                            id: scene_id,
+                            message: "the target scene is no longer resident".into(),
+                        });
+                    }
+                    return Ok(Progress::Loading(SceneLoadState::LoadingScene));
+                }
+                let asset = resident_scene(world, scene_id, handle)?;
+                self.preload_source = world.get_resource::<RuntimeAssetSource>().cloned();
                 let mut server = world.resource_mut::<AssetServer>();
                 let handles = asset
                     .asset_dependencies()
                     .iter()
                     .map(|&id| Ok((id, server.load_dependency(id)?)))
                     .collect::<Result<Vec<_>, AssetError>>()?;
-                self.dependencies.insert(handles)
+                self.prepared.insert((asset, handles))
             }
         };
         let total = dependencies.len();
         let mut loaded = 0;
         for &(id, handle) in dependencies {
-            loaded += usize::from(is_loaded(world, id, handle)?);
+            if is_runtime_asset_resident(world, handle) {
+                loaded += 1;
+                continue;
+            }
+            match load_state(world, id, handle)? {
+                // A new request can republish an asset that was already removed.
+                Some(LoadState::Loaded | LoadState::Removed) if !just_requested => {
+                    return Err(SceneError::DependencyNotResident { scene_id, id });
+                }
+                _ => {}
+            }
         }
         if loaded == total {
-            Ok(Progress::Ready(asset))
+            Ok(Progress::Ready(asset.clone()))
         } else {
             Ok(Progress::Loading(SceneLoadState::LoadingDependencies {
                 loaded,
@@ -265,18 +308,21 @@ impl PendingScene {
     }
 }
 
-fn is_loaded(world: &World, id: AssetId, handle: RuntimeId) -> Result<bool, SceneError> {
+fn load_state(
+    world: &World,
+    id: AssetId,
+    handle: RuntimeId,
+) -> Result<Option<&LoadState>, SceneError> {
     match world
         .resource::<AssetStates>()
         .state(handle)
         .map(|state| state.load_state())
     {
-        Some(LoadState::Loaded) => Ok(true),
         Some(LoadState::Failed { message }) => Err(SceneError::LoadFailed {
             id,
             message: message.clone(),
         }),
-        _ => Ok(false),
+        state => Ok(state),
     }
 }
 
@@ -300,34 +346,78 @@ fn instantiate(
     instance: SceneInstanceId,
     scene_id: AssetId,
     asset: &SceneAsset,
+    preload_source: Option<&RuntimeAssetSource>,
 ) -> Result<(), SceneError> {
     let scene = CookedScene::parse(asset.bytes())?;
     let prepared = scene.prepare(&world.resource::<SceneRegistry>().native)?;
+    let source = world.get_resource::<RuntimeAssetSource>();
+    // A remount leaves previously loaded handles bound to their original types.
+    if let Some(preload_source) = preload_source
+        && Some(preload_source) != source
+    {
+        validate_sprite_references(Some(preload_source), scene_id, &prepared)?;
+    }
+    validate_sprite_references(source, scene_id, &prepared)?;
     let manager = world.resource::<SceneManager>();
     let promote = manager.switching == Some(instance);
-    if promote && let Some(previous) = manager.main {
-        unload(world, previous);
+    if promote {
+        let previous = manager.main;
+        // Unload and spawn hooks can request the next switch.
+        world.resource_mut::<SceneManager>().switching = None;
+        if let Some(previous) = previous {
+            unload(world, previous);
+        }
     }
     let entities = prepared.spawn(world, || SceneMember(instance));
     let mut manager = world.resource_mut::<SceneManager>();
+    manager.pending.remove(&instance);
     if let Some(entry) = manager.instances.get_mut(&instance) {
         entry.entities = entities;
-        entry.pending = None;
         entry.state = SceneLoadState::Ready;
     }
     if promote {
         manager.main = Some(instance);
-        manager.switching = None;
     }
     emit(world, SceneEvent::Ready { instance, scene_id });
+    Ok(())
+}
+
+fn validate_sprite_references(
+    source: Option<&RuntimeAssetSource>,
+    scene_id: AssetId,
+    prepared: &PreparedScene<'_>,
+) -> Result<(), SceneError> {
+    for (entity, sprite) in prepared.sprite_sources() {
+        for (field, id, expected) in [
+            ("image", sprite.image, NpakEntryKind::Image),
+            ("material", sprite.material, NpakEntryKind::Material),
+        ] {
+            let Some(id) = id else { continue };
+            let actual = source
+                .ok_or(AssetError::MissingRuntimeSource)?
+                .backend()
+                .kind(id)
+                .ok_or(AssetError::UnknownRuntimeKind(id))?;
+            if actual != expected {
+                return Err(SceneError::SpriteAssetKindMismatch {
+                    scene_id,
+                    entity,
+                    field,
+                    id,
+                    expected,
+                    actual,
+                });
+            }
+        }
+    }
     Ok(())
 }
 
 fn fail(world: &mut World, instance: SceneInstanceId, scene_id: AssetId, error: &SceneError) {
     let message = error.to_string();
     let mut manager = world.resource_mut::<SceneManager>();
+    manager.pending.remove(&instance);
     if let Some(entry) = manager.instances.get_mut(&instance) {
-        entry.pending = None;
         entry.state = SceneLoadState::Failed(message.clone());
     }
     if manager.switching == Some(instance) {
@@ -348,6 +438,7 @@ fn unload(world: &mut World, instance: SceneInstanceId) {
     let Some(entry) = manager.instances.remove(&instance) else {
         return;
     };
+    manager.pending.remove(&instance);
     if manager.main == Some(instance) {
         manager.main = None;
     }
@@ -356,10 +447,11 @@ fn unload(world: &mut World, instance: SceneInstanceId) {
     }
     if entry.state == SceneLoadState::Ready {
         let entities = world
-            .query::<(Entity, &SceneMember)>()
+            .query_filtered::<(Entity, &SceneMember), Allow<Disabled>>()
             .iter(world)
             .filter_map(|(entity, member)| (member.0 == instance).then_some(entity))
             .collect::<Vec<_>>();
+        detach_other_instances(world, instance, &entities);
         for entity in entities {
             if let Ok(entity) = world.get_entity_mut(entity) {
                 entity.despawn();
@@ -373,6 +465,24 @@ fn unload(world: &mut World, instance: SceneInstanceId) {
             scene_id: entry.scene_id,
         },
     );
+}
+
+fn detach_other_instances(world: &mut World, instance: SceneInstanceId, entities: &[Entity]) {
+    let mut visited = EntityHashSet::default();
+    let mut pending = entities.to_vec();
+    while let Some(entity) = pending.pop() {
+        if !visited.insert(entity) {
+            continue;
+        }
+        if world
+            .get::<SceneMember>(entity)
+            .is_some_and(|member| member.0 != instance)
+        {
+            world.entity_mut(entity).remove::<ChildOf>();
+        } else if let Some(children) = world.get::<Children>(entity) {
+            pending.extend(children);
+        }
+    }
 }
 
 fn emit(world: &mut World, event: SceneEvent) {

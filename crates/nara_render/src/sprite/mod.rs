@@ -12,7 +12,7 @@ mod hydration;
 #[cfg(feature = "sprite-source-hydration")]
 pub use hydration::{
     SPRITE_SOURCE_HYDRATION_PLUGIN_DECLARATION, SPRITE_SOURCE_HYDRATION_PLUGIN_ID,
-    SpriteSourceHydrationPlugin,
+    SpriteSourceHydrationPlugin, SpriteSourceHydrationSet,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]

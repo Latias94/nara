@@ -18,7 +18,7 @@ pub mod spatial;
 pub use runtime::{
     RegisterSceneComponent, SCENE_PLUGIN_ID, SceneAsset, SceneAssetError, SceneAssetLoader,
     SceneError, SceneEvent, SceneInstanceId, SceneLoadState, SceneManager, SceneMember,
-    ScenePlugin, SceneRegistry, switch_scene_asset_sync, switch_scene_sync,
+    ScenePlugin, SceneRegistry, SceneUpdateSet, switch_scene_asset_sync, switch_scene_sync,
 };
 pub use spatial::{SPATIAL_PLUGIN_ID, SpatialPlugin, SpatialSet, Visibility};
 

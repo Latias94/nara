@@ -11,8 +11,8 @@ use std::{
 
 use nara_app::App;
 use nara_asset::{
-    AssetAppExt, AssetEventKind, AssetEvents, AssetLoadContext, AssetLoadError, AssetLoader,
-    AssetPlugin, AssetServer, AssetStates, Assets, Handle, LoadState, NpakEntryKind,
+    AssetAppExt, AssetError, AssetEventKind, AssetEvents, AssetLoadContext, AssetLoadError,
+    AssetLoader, AssetPlugin, AssetServer, AssetStates, Assets, Handle, LoadState, NpakEntryKind,
     RuntimeAssetMode, RuntimeAssetSource, load_asset_sync, source::asset_id_path,
 };
 use nara_core::{AssetId, vfs::MemoryAssetSource};
@@ -61,6 +61,10 @@ fn app(source: RuntimeAssetSource) -> (App, Arc<AtomicUsize>) {
 }
 
 fn memory(main: &[u8]) -> RuntimeAssetSource {
+    RuntimeAssetSource::from_memory(RuntimeAssetMode::Source, files(main))
+}
+
+fn files(main: &[u8]) -> MemoryAssetSource {
     let mut memory = MemoryAssetSource::new();
     memory
         .insert(&asset_id_path(MAIN.parse().unwrap()), main)
@@ -68,7 +72,7 @@ fn memory(main: &[u8]) -> RuntimeAssetSource {
     memory
         .insert(&asset_id_path(DEPENDENCY.parse().unwrap()), b" world")
         .unwrap();
-    RuntimeAssetSource::from_memory(RuntimeAssetMode::Source, memory)
+    memory
 }
 
 fn request(app: &mut App) -> Handle<Text> {
@@ -160,6 +164,67 @@ fn sync_completes_a_queued_request_and_keeps_failures_available() {
     );
 }
 
+#[test]
+fn a_new_source_can_recover_a_previously_failed_handle() {
+    let (mut app, hits) = app(memory(b"broken"));
+    let handle = request(&mut app);
+    update_until_settled(&mut app, handle);
+    assert!(app.world().resource::<Assets<Text>>().get(handle).is_none());
+
+    app.set_asset_source(memory(b"fixed")).unwrap();
+    assert_eq!(request(&mut app), handle);
+    update_until_settled(&mut app, handle);
+    assert_eq!(hits.load(Ordering::Relaxed), 2);
+    assert_eq!(
+        app.world().resource::<Assets<Text>>().get(handle),
+        Some(&Text(b"fixed world".to_vec()))
+    );
+}
+
+#[test]
+fn a_wrong_kind_request_does_not_claim_the_uuid() {
+    struct WrongKind;
+
+    impl AssetLoader for WrongKind {
+        type Asset = Vec<u8>;
+        type Error = std::convert::Infallible;
+
+        fn cooked_kind(&self) -> Option<NpakEntryKind> {
+            Some(NpakEntryKind::Image)
+        }
+
+        fn load(
+            &self,
+            bytes: &[u8],
+            _: &mut AssetLoadContext<'_>,
+        ) -> Result<Self::Asset, Self::Error> {
+            Ok(bytes.to_vec())
+        }
+    }
+
+    let id = MAIN.parse().unwrap();
+    let source = RuntimeAssetSource::from_memory_with_kinds(
+        RuntimeAssetMode::Source,
+        files(b"hello"),
+        [(id, NpakEntryKind::Raw)],
+    );
+    let (mut app, _) = app(source);
+    app.register_asset_loader(WrongKind).unwrap();
+    let world = app.world_mut().unwrap();
+    assert!(matches!(
+        load_asset_sync::<Vec<u8>>(world, id),
+        Err(AssetLoadError::Request(AssetError::WrongRuntimeKind {
+            expected: NpakEntryKind::Image,
+            actual: NpakEntryKind::Raw,
+            ..
+        }))
+    ));
+    let handle = load_asset_sync::<Text>(world, id).unwrap();
+    assert!(nara_asset::is_runtime_asset_resident(world, handle.id()));
+    world.resource_mut::<Assets<Text>>().remove(handle);
+    assert!(!nara_asset::is_runtime_asset_resident(world, handle.id()));
+}
+
 #[cfg(all(feature = "tasks", not(target_arch = "wasm32")))]
 #[test]
 fn native_loads_decode_off_thread_and_sync_joins_the_running_job() {
@@ -204,6 +269,21 @@ fn native_loads_decode_off_thread_and_sync_joins_the_running_job() {
         .get(ready)
         .unwrap();
     assert_ne!(*worker, std::thread::current().id());
+}
+
+#[cfg(all(feature = "tasks", not(target_arch = "wasm32")))]
+#[test]
+fn replacing_the_source_restarts_unpublished_loads_without_changing_handles() {
+    let (mut app, _) = app(memory(b"previous"));
+    let handle = request(&mut app);
+    app.update_with_delta(Duration::ZERO).unwrap();
+    app.set_asset_source(memory(b"new")).unwrap();
+    update_until_settled(&mut app, handle);
+    assert_eq!(request(&mut app), handle);
+    assert_eq!(
+        app.world().resource::<Assets<Text>>().get(handle),
+        Some(&Text(b"new world".to_vec())),
+    );
 }
 
 #[cfg(not(all(feature = "tasks", not(target_arch = "wasm32"))))]
