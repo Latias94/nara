@@ -6,17 +6,17 @@ use nara::prelude::*;
 
 use crate::{
     Failure, GamePlugin, PilotInput, Round, RoundStatus, RunRules,
-    arena::{CELL_COUNT, source},
+    arena::CELL_COUNT,
+    campaign::Sector,
+    development_root,
+    route::{ESCAPE_ROUTE, at},
+    scene_roles::register_scene_roles,
 };
 
 type GameResult<T> = Result<T, Box<dyn Error>>;
 const STEP: Duration = FixedTime::DEFAULT_TIMESTEP;
 pub const MAX_ROUNDS: u32 = 200;
 const START: Vec2 = at(2, 2);
-
-const fn at(column: usize, row: usize) -> Vec2 {
-    Vec2::new((column as f32 - 10.0) * 32.0, (5.0 - row as f32) * 32.0)
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct StressReport {
@@ -27,7 +27,7 @@ pub struct StressReport {
 }
 
 pub fn run_stress(rounds: u32) -> GameResult<StressReport> {
-    run_stress_in(&source::development_root()?, rounds)
+    run_stress_in(&development_root()?, rounds)
 }
 
 fn run_stress_in(project_root: &Path, rounds: u32) -> GameResult<StressReport> {
@@ -35,9 +35,7 @@ fn run_stress_in(project_root: &Path, rounds: u32) -> GameResult<StressReport> {
         return Err(format!("choose 1–{MAX_ROUNDS} stress rounds").into());
     }
     let mut app = headless_app()?;
-    let project = source::SourceProject::new(&mut app, project_root)?;
-    let content = project.load(&project.assets()?, None)?;
-    app.add_plugins(GamePlugin::from_scene(content.scene))?;
+    install_project(&mut app, project_root, Sector::One)?;
     let baseline = exercise_round(&mut app)?;
     for _ in 1..rounds {
         if exercise_round(&mut app)? != baseline {
@@ -58,7 +56,15 @@ fn run_stress_in(project_root: &Path, rounds: u32) -> GameResult<StressReport> {
 fn headless_app() -> GameResult<App> {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins::headless())?;
+    register_scene_roles(&mut app)?;
     Ok(app)
+}
+
+fn install_project(app: &mut App, root: &Path, sector: Sector) -> GameResult<()> {
+    app.set_asset_source(RuntimeAssetSource::from_project_dir(root, "assets")?)?;
+    switch_scene_sync(app.world_mut()?, sector.asset()?)?;
+    app.add_plugins(GamePlugin)?;
+    Ok(())
 }
 
 fn exercise_round(app: &mut App) -> GameResult<(u32, Round)> {
@@ -85,27 +91,7 @@ fn exercise_round(app: &mut App) -> GameResult<(u32, Round)> {
     }
 
     restart(app)?;
-    follow(
-        app,
-        &[
-            (2, 5),
-            (8, 5),
-            (8, 2),
-            (9, 2),
-            (8, 2),
-            (8, 4),
-            (17, 4),
-            (17, 2),
-            (17, 4),
-            (19, 4),
-            (19, 9),
-            (3, 9),
-            (3, 8),
-            (3, 9),
-            (17, 9),
-            (17, 8),
-        ],
-    )?;
+    follow(app, &ESCAPE_ROUTE)?;
     let round = app.world().resource::<Round>();
     if round.status() != RoundStatus::Escaped || round.collected() != CELL_COUNT {
         return Err("the pilot could not power the gate and escape".into());
@@ -158,25 +144,44 @@ fn follow(app: &mut App, route: &[(usize, usize)]) -> GameResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, thread, time::Instant};
 
     use super::*;
-    use crate::{Pilot, PowerCell, arena, register_game_schema};
+    use crate::{
+        arena::{self, source},
+        audio::ARRIVAL_BUS,
+        campaign::{ARRIVAL_AUDIO, Campaign, SaveSnapshot},
+        scene_roles::{Pilot, PowerCell},
+    };
     use nara::{
+        audio::{AudioOutput, PlaybackState},
         reflect::{ComponentTypeId, component_registry},
+        save::SaveStore,
         scene::authoring::{SceneDocument, SpriteSource},
     };
 
     fn scene_fixture() -> GameResult<SceneDocument> {
-        let mut app = headless_app()?;
-        let project = source::SourceProject::new(&mut app, source::test_root())?;
-        Ok(project.load(&project.assets()?, None)?.scene)
+        let app = headless_app()?;
+        let project = source::SourceProject::new(&app)?;
+        let assets = RuntimeAssetSource::from_project_dir(source::test_root(), "assets")?;
+        project.read_scene(&assets, Sector::One.asset()?)
     }
 
-    fn new_app(game: GamePlugin) -> GameResult<App> {
+    fn new_app(scene: SceneDocument) -> GameResult<App> {
         let mut app = headless_app()?;
-        app.add_plugins(game)?;
+        app.set_asset_source(RuntimeAssetSource::from_project_dir(
+            source::test_root(),
+            "assets",
+        )?)?;
+        install_document(&mut app, &scene)?;
         Ok(app)
+    }
+
+    fn install_document(app: &mut App, scene: &SceneDocument) -> GameResult<()> {
+        let cooked = source::SourceProject::new(app)?.cook(scene)?;
+        switch_scene_asset_sync(app.world_mut()?, Sector::One.asset()?, &cooked)?;
+        app.add_plugins(GamePlugin)?;
+        Ok(())
     }
 
     #[test]
@@ -190,13 +195,121 @@ mod tests {
     }
 
     #[test]
+    fn escape_switches_sectors_plays_arrival_and_saves_progress() -> GameResult<()> {
+        let temporary = tempfile::tempdir()?;
+        let mut app = headless_app()?;
+        app.insert_resource(Campaign::with_save(
+            SaveStore::in_dir(temporary.path()),
+            "progress",
+        ))?;
+        install_project(&mut app, source::test_root(), Sector::One)?;
+        let first = app
+            .world()
+            .resource::<SceneManager>()
+            .main_instance()
+            .unwrap();
+        let old = app
+            .world()
+            .resource::<SceneManager>()
+            .entities(first)
+            .unwrap()
+            .values()
+            .copied()
+            .collect::<Vec<_>>();
+
+        restart(&mut app)?;
+        follow(&mut app, &ESCAPE_ROUTE)?;
+        let round = app.world().resource::<Round>();
+        assert_eq!(round.status(), RoundStatus::Escaped);
+        let expected = SaveSnapshot {
+            sector_one_best_ms: Some(round.elapsed.as_millis() as u64),
+            sector_two_best_ms: None,
+        };
+        let next = app
+            .world()
+            .resource::<Campaign>()
+            .pending
+            .ok_or("switch not requested")?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().resource::<SceneManager>().main_instance() != Some(next) {
+            assert!(Instant::now() < deadline, "Sector 2 did not become ready");
+            app.update_with_delta(Duration::ZERO)?;
+            thread::sleep(Duration::from_millis(1));
+        }
+        let world = app.world_mut()?;
+        let manager = world.resource::<SceneManager>();
+        assert_eq!(manager.state(next), Some(&SceneLoadState::Ready));
+        assert_eq!(manager.state(first), None);
+        assert!(old.iter().all(|&entity| world.get_entity(entity).is_err()));
+        assert!(
+            world
+                .query::<&SceneMember>()
+                .iter(world)
+                .all(|member| member.0 == next)
+        );
+        assert_eq!(world.resource::<Campaign>().sector, Sector::Two);
+        let round = world.resource::<Round>();
+        assert_eq!(round.status(), RoundStatus::Running);
+        assert_eq!(round.collected(), 0);
+        assert_eq!(round.position(), Vec2::new(-256.0, -96.0));
+        assert_eq!(round.remaining(), Duration::from_secs(38));
+
+        step(&mut app, Vec2::ZERO)?;
+        let world = app.world_mut()?;
+        let arrival: AssetId = ARRIVAL_AUDIO.parse()?;
+        assert_eq!(world.resource::<AudioMixer>().output(), AudioOutput::Mock);
+        assert!(
+            world
+                .query::<(&SceneMember, &AudioClipSource, &AudioPlayback)>()
+                .iter(world)
+                .any(|(member, source, playback)| member.0 == next
+                    && source.clip == arrival
+                    && source.bus == ARRIVAL_BUS
+                    && playback.state() == PlaybackState::Playing)
+        );
+
+        let store = SaveStore::in_dir(temporary.path());
+        assert_eq!(store.load::<SaveSnapshot>("progress")?, expected);
+        let campaign = Campaign::load(store, "progress")?;
+        assert_eq!(campaign.progress, expected);
+        let sector = campaign.sector;
+        let mut resumed = headless_app()?;
+        resumed.insert_resource(campaign)?;
+        install_project(&mut resumed, source::test_root(), sector)?;
+        assert_eq!(
+            resumed.world().resource::<Round>().position(),
+            Vec2::new(-256.0, -96.0)
+        );
+        follow(
+            &mut resumed,
+            &[(7, 8), (7, 7), (18, 7), (19, 7), (19, 2), (15, 2), (2, 2)],
+        )?;
+        let round = resumed.world().resource::<Round>();
+        assert_eq!(round.status(), RoundStatus::Escaped);
+        assert_eq!(round.collected(), CELL_COUNT);
+        assert_eq!(
+            SaveStore::in_dir(temporary.path()).load::<SaveSnapshot>("progress")?,
+            SaveSnapshot {
+                sector_two_best_ms: Some(round.elapsed.as_millis() as u64),
+                ..expected
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
     fn time_expiry_freezes_the_round_until_restart() -> GameResult<()> {
-        let mut app = new_app(
-            GamePlugin::from_scene(scene_fixture()?).with_rules(RunRules {
+        let mut scene = scene_fixture()?;
+        scene
+            .entities
+            .iter_mut()
+            .find(|entity| entity.name == "Round rules")
+            .ok_or("missing round rules")?
+            .set(&RunRules {
                 time_limit_seconds: 1,
                 ..Default::default()
-            }),
-        )?;
+            })?;
+        let mut app = new_app(scene)?;
         for _ in 0..60 {
             step(&mut app, Vec2::ZERO)?;
         }
@@ -214,7 +327,7 @@ mod tests {
 
     #[test]
     fn reaching_an_unpowered_gate_keeps_the_round_running() -> GameResult<()> {
-        let mut app = new_app(GamePlugin::from_scene(scene_fixture()?))?;
+        let mut app = new_app(scene_fixture()?)?;
         follow(
             &mut app,
             &[(2, 5), (8, 5), (8, 4), (19, 4), (19, 9), (17, 9), (17, 8)],
@@ -242,7 +355,7 @@ mod tests {
                 _ => {}
             }
         }
-        let mut app = new_app(GamePlugin::from_scene(scene))?;
+        let mut app = new_app(scene)?;
         let round = app.world().resource::<Round>();
         assert_eq!(round.position(), spawn);
         assert_eq!(round.remaining(), Duration::from_secs(12));
@@ -268,7 +381,7 @@ mod tests {
             entity.id = format!("a9cf0ab5-1435-4be1-b235-{index:012x}").parse()?;
             entity.name = format!("Renamed {index}");
         }
-        let mut app = new_app(GamePlugin::from_scene(scene))?;
+        let mut app = new_app(scene)?;
         let arena = app.world().resource::<arena::Arena>();
         assert_eq!(arena.pilot.pose.translation, START);
         assert_eq!(
@@ -289,8 +402,7 @@ mod tests {
 
     #[test]
     fn power_cell_roles_belong_to_the_instances_and_keep_their_ids() -> GameResult<()> {
-        let mut app = headless_app()?;
-        register_game_schema(&mut app)?;
+        let app = headless_app()?;
         let schemas = component_registry(app.world())
             .ok_or("missing game schema")?
             .components();
@@ -374,11 +486,11 @@ mod tests {
             ),
         )?;
         let mut app = headless_app()?;
-        let source = source::SourceProject::new(&mut app, project.path())?;
-        let edited = source.load(&source.assets()?, Some(&snapshot))?;
-        #[cfg(feature = "desktop")]
-        assert_eq!(edited.images.len(), 1);
-        app.add_plugins(GamePlugin::from_scene(edited.scene))?;
+        let source = source::SourceProject::new(&app)?;
+        let assets = RuntimeAssetSource::from_project_dir(project.path(), "assets")?;
+        let edited = source.read_snapshot(&assets, &snapshot)?;
+        app.set_asset_source(assets)?;
+        install_document(&mut app, &edited)?;
         assert_eq!(app.world().resource::<Round>().shields(), 4);
         assert_eq!(fs::read_to_string(entry)?, authored);
 
@@ -386,7 +498,9 @@ mod tests {
         let error = run_stress_in(project.path(), 1)
             .expect_err("headless should load the relocated texture");
         assert!(
-            error.to_string().contains("assets/relocated/cell.png"),
+            error
+                .to_string()
+                .contains("01a219be-557a-739e-81a5-2a8c6e88aee5"),
             "{error}"
         );
         Ok(())
@@ -425,10 +539,7 @@ mod tests {
     fn reject_scene(scene: SceneDocument) -> GameResult<String> {
         let mut app = headless_app()?;
         let initial_entities = app.world().entity_count();
-        let error = app
-            .add_plugins(GamePlugin::from_scene(scene))
-            .err()
-            .ok_or("invalid scene accepted")?;
+        let error = install_document(&mut app, &scene).expect_err("invalid scene accepted");
         assert_eq!(app.world().entity_count(), initial_entities);
         Ok(error.to_string())
     }

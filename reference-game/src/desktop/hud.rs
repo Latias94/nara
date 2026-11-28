@@ -10,7 +10,10 @@ use nara::{
     },
 };
 
-use crate::{Failure, Round, RoundStatus, arena};
+use crate::{
+    Failure, Round, RoundStatus, arena,
+    campaign::{Campaign, Sector},
+};
 
 const DOMAIN: &str = "night-relay";
 const PANEL: UiColor = UiColor::rgba(0.025, 0.044, 0.064, 0.98);
@@ -33,6 +36,8 @@ pub(super) enum Label {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct Readout {
+    sector: Sector,
+    entering_sector: bool,
     status: RoundStatus,
     cells: usize,
     shields: u32,
@@ -140,12 +145,15 @@ fn text(content: &str, size: f32, color: UiColor) -> Result<UiText, nara::ui::Ui
 
 pub(super) fn update(
     round: Res<Round>,
+    campaign: Res<Campaign>,
     mut labels: Query<(&Label, &mut UiText)>,
     mut panel: Single<&mut UiNode, With<ResultPanel>>,
     mut previous: Local<Option<Readout>>,
 ) {
     let remaining = round.remaining();
     let readout = Readout {
+        sector: campaign.sector,
+        entering_sector: campaign.pending.is_some(),
         status: round.status(),
         cells: round.collected(),
         shields: round.shields(),
@@ -175,11 +183,15 @@ pub(super) fn update(
                         LIGHT
                     },
                 )),
-            Label::Objective => text.clone().with_content(if round.can_extract() {
-                "Gate powered. Fly to the exit."
-            } else {
-                "Collect all three amber cells to power the exit."
-            }),
+            Label::Objective => {
+                text.clone()
+                    .with_content(match (readout.sector, round.can_extract()) {
+                        (Sector::One, false) => "Collect all three amber cells to power the exit.",
+                        (Sector::One, true) => "Gate powered. Fly to the exit.",
+                        (Sector::Two, false) => "Sector 2 - Collect all three amber cells.",
+                        (Sector::Two, true) => "Sector 2 - Gate powered. Fly to the exit.",
+                    })
+            }
             Label::Result => {
                 let (caption, color) = match readout.status {
                     RoundStatus::Running => ("", LIGHT),
@@ -192,6 +204,7 @@ pub(super) fn update(
             }
             Label::Reason => text.clone().with_content(match readout.status {
                 RoundStatus::Running => "",
+                RoundStatus::Escaped if readout.entering_sector => "Entering Sector 2…",
                 RoundStatus::Escaped => "All three cells recovered. Press R or Enter to fly again.",
                 RoundStatus::Failed(Failure::TimeExpired) => {
                     "Time expired. Press R or Enter to retry."

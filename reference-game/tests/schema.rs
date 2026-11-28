@@ -58,6 +58,7 @@ fn schema_binary_exports_the_round_rules_and_roles() -> Result<(), Box<dyn Error
         "night-relay.PowerCell",
         "night-relay.PatrolDrone",
         "night-relay.ExtractionGate",
+        "nara.AudioClipSource",
     ] {
         assert!(ids.contains(role));
     }

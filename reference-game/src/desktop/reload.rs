@@ -1,8 +1,8 @@
 use std::{
-    collections::BTreeMap,
     error::Error,
     future::Future,
     io::{self, Write},
+    path::PathBuf,
     pin::Pin,
     sync::{
         Arc,
@@ -14,34 +14,35 @@ use std::{
 
 use nara::{
     app::FrameExecutionStart,
-    asset::{AssetEvents, AssetStates, Assets, add_asset},
-    core::AssetId,
-    ecs::{Mut, bevy_ecs::query::With},
+    asset::{
+        AssetEvents, AssetLoadError, AssetProductRef, AssetStates, ImportedProductId,
+        NpakEntryKind, PreparedAsset, prepare_asset, set_runtime_asset_source,
+    },
+    audio::AudioClipLoader,
+    ecs::{Mut, bevy_ecs::error::Result as SystemResult, schedule::IntoScheduleConfigs},
     prelude::*,
-    render::material::Material2dBinding,
+    render::{
+        image::ImageAssetLoader,
+        material::{SpriteMaterialBindingAsset, SpriteMaterialLoader},
+    },
     render_wgpu::desktop::DesktopPresentation,
-    scene::{authoring::SceneDocument, spatial::propagate_spatial},
     tasks::{Task, io_pool},
 };
-use nara_asset::{
-    ProjectAssetDatabase,
-    watch::{AssetWatcher, RELOAD_RETRY_DELAYS, is_transient_reload_error},
-};
+use nara_asset::watch::{AssetWatcher, RELOAD_RETRY_DELAYS, is_transient_reload_error};
 
 use crate::{
-    arena::source::{SceneLayers, SourceContent, SourceProject, SourceScene},
-    simulation::{ArenaEntities, PilotCharacter, sync_actors},
+    arena::source::{SceneLayers, SourceProject},
+    campaign::{Campaign, resolve_switch},
+    simulation::bind_arena,
 };
 
-use super::{
-    is_game_frame,
-    world::{self, SceneDecoration, SceneVisuals},
-};
+use super::{is_game_frame, world::dress_arena};
 
 #[derive(Resource)]
 pub(super) struct Reload {
     source: Arc<ReloadSource>,
-    current: SceneDocument,
+    active: AssetId,
+    current: Option<SceneAsset>,
     task: Option<Task<Option<ReloadAttempt>>>,
     retry: Option<ReloadRetry>,
     last_error: Option<String>,
@@ -50,6 +51,7 @@ pub(super) struct Reload {
 }
 
 struct ReloadSource {
+    root: PathBuf,
     project: SourceProject,
     layers: SceneLayers,
     watcher: AssetWatcher,
@@ -63,7 +65,7 @@ struct ReloadRetry {
 
 struct ReloadAttempt {
     index: usize,
-    result: Result<SourceContent, ReloadFailure>,
+    result: Result<ReloadContent, ReloadFailure>,
 }
 
 struct ReloadFailure {
@@ -71,8 +73,20 @@ struct ReloadFailure {
     transient: bool,
 }
 
+struct ReloadContent {
+    assets: RuntimeAssetSource,
+    scene: SceneAsset,
+    dependencies: Vec<(AssetId, Dependency)>,
+}
+
+enum Dependency {
+    Image(PreparedAsset<ImageAsset>),
+    Material(PreparedAsset<SpriteMaterialBindingAsset>),
+    Audio(PreparedAsset<AudioClip>),
+}
+
 impl ReloadSource {
-    fn prepare(&self, retry: Option<usize>) -> Option<ReloadAttempt> {
+    fn prepare(&self, active: AssetId, retry: Option<usize>) -> Option<ReloadAttempt> {
         let index = match self.watcher.take_changed() {
             Ok(true) => 0,
             Ok(false) => retry?,
@@ -88,18 +102,60 @@ impl ReloadSource {
         };
         Some(ReloadAttempt {
             index,
-            result: self.read_content().map_err(|error| ReloadFailure {
+            result: self.read_content(active).map_err(|error| ReloadFailure {
                 transient: is_transient_reload_error(error.as_ref()),
                 message: error.to_string(),
             }),
         })
     }
 
-    fn read_content(&self) -> Result<SourceContent, Box<dyn Error>> {
-        let assets = self.project.assets()?;
-        let scene = self.layers.read(&self.project, &assets)?;
-        self.project.prepare_content(&assets, scene)
+    fn read_content(&self, active: AssetId) -> Result<ReloadContent, Box<dyn Error>> {
+        let assets = RuntimeAssetSource::from_project_dir(&self.root, "assets").map_err(
+            |error| -> Box<dyn Error> {
+                match error {
+                    AssetLoadError::Scan(error) => Box::new(error),
+                    error => Box::new(error),
+                }
+            },
+        )?;
+        let document = self.layers.read(&self.project, &assets, active)?;
+        let scene = self.project.cook(&document)?;
+        let dependencies = stage_dependencies(&assets, &scene)?;
+        Ok(ReloadContent {
+            assets,
+            scene,
+            dependencies,
+        })
     }
+}
+
+fn stage_dependencies(
+    source: &RuntimeAssetSource,
+    scene: &SceneAsset,
+) -> Result<Vec<(AssetId, Dependency)>, Box<dyn Error>> {
+    scene
+        .asset_dependencies()
+        .iter()
+        .map(|&id| {
+            let value = match source.backend().kind(id) {
+                Some(NpakEntryKind::Image) => {
+                    Dependency::Image(prepare_asset(source, id, &ImageAssetLoader)?)
+                }
+                Some(NpakEntryKind::Material) => {
+                    Dependency::Material(prepare_asset(source, id, &SpriteMaterialLoader)?)
+                }
+                Some(NpakEntryKind::Audio) => {
+                    Dependency::Audio(prepare_asset(source, id, &AudioClipLoader)?)
+                }
+                kind => {
+                    return Err(
+                        format!("could not reload dependency {id} with kind {kind:?}").into(),
+                    );
+                }
+            };
+            Ok((id, value))
+        })
+        .collect()
 }
 
 struct ReloadFrame {
@@ -112,19 +168,21 @@ struct ReloadFrame {
 
 impl Reload {
     pub fn new(
+        root: PathBuf,
         project: SourceProject,
-        assets: &ProjectAssetDatabase,
-        current: SceneDocument,
-        snapshot: bool,
+        layers: SceneLayers,
+        active: AssetId,
+        current: Option<SceneAsset>,
         watcher: AssetWatcher,
     ) -> Self {
-        let layers = SceneLayers::capture(&project, assets, &current, snapshot);
         Self {
             source: Arc::new(ReloadSource {
+                root,
                 project,
                 layers,
                 watcher,
             }),
+            active,
             current,
             task: None,
             retry: None,
@@ -136,7 +194,10 @@ impl Reload {
 
     pub fn install(self, app: &mut App) -> Result<(), Box<dyn Error>> {
         app.insert_resource(self)?
-            .add_systems(CoreStage::TaskUpdate, reload_if_changed)?
+            .add_systems(
+                CoreStage::TaskUpdate,
+                reload_if_changed.after(resolve_switch).before(dress_arena),
+            )?
             .add_systems(Last, observe_presentation)?;
         Ok(())
     }
@@ -189,7 +250,21 @@ impl Reload {
             .retry
             .filter(|retry| now >= retry.at)
             .map(|retry| retry.attempt);
-        self.task = Some(io_pool().spawn(async move { source.prepare(retry) }));
+        let active = self.active;
+        self.task = Some(io_pool().spawn(async move { source.prepare(active, retry) }));
+    }
+
+    fn follow_sector(&mut self, active: AssetId, now: Instant) {
+        if self.active != active {
+            self.active = active;
+            self.current = None;
+            if self.task.take().is_some() || self.retry.is_some() {
+                self.retry = Some(ReloadRetry {
+                    at: now,
+                    attempt: 0,
+                });
+            }
+        }
     }
 
     fn finish_attempt(&mut self, world: &mut World, now: Instant, attempt: ReloadAttempt) {
@@ -221,28 +296,62 @@ impl Reload {
         }
     }
 
-    fn publish(&mut self, world: &mut World, content: SourceContent) -> Result<(), Box<dyn Error>> {
-        let replacement = if self.current.entities != content.scene.entities {
-            let scene = SourceScene::prepare(&content.scene, None)?;
-            let character = PilotCharacter::new(scene.arena().pilot.radius)?;
-            Some((scene, character))
-        } else {
-            None
-        };
-
-        let (images, materials) =
-            world.resource_scope(|world, mut visuals: Mut<SceneVisuals>| {
-                let images = update_images(world, &mut visuals.images, content.images)?;
-                let materials = update_materials(&mut visuals.materials, content.materials);
-                Ok::<_, Box<dyn Error>>((images, materials))
-            })?;
-        let scene_changed = replacement.is_some();
-        if let Some((prepared, character)) = replacement {
-            replace_scene(world, prepared, character)?;
-        } else if materials != 0 {
-            world::bind_materials(world)?;
+    fn publish(&mut self, world: &mut World, content: ReloadContent) -> Result<(), Box<dyn Error>> {
+        let resident = primary_handle(world, self.active)?
+            .and_then(|handle| world.resource::<Assets<SceneAsset>>().get(handle));
+        let previous = self.current.as_ref().or(resident);
+        let scene_changed =
+            previous.is_none_or(|previous| previous.bytes() != content.scene.bytes());
+        let retired = previous
+            .into_iter()
+            .flat_map(SceneAsset::asset_dependencies)
+            .filter(|id| {
+                content
+                    .scene
+                    .asset_dependencies()
+                    .binary_search(id)
+                    .is_err()
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        set_runtime_asset_source(world, content.assets)?;
+        let mut images = 0;
+        let mut materials = 0;
+        for (id, dependency) in content.dependencies {
+            match dependency {
+                Dependency::Image(image) => {
+                    images += usize::from(publish_asset(world, id, image, |old, new| {
+                        old.content_hash() == new.content_hash()
+                    })?);
+                }
+                Dependency::Material(binding) => {
+                    materials += usize::from(publish_asset(world, id, binding, |old, new| {
+                        old.0.uniform_bytes() == new.0.uniform_bytes()
+                            && old.0.generation().shader().digest()
+                                == new.0.generation().shader().digest()
+                    })?);
+                }
+                Dependency::Audio(clip) => {
+                    publish_asset(world, id, clip, |_, _| false)?;
+                }
+            }
         }
-        self.current = content.scene;
+        if scene_changed {
+            let instance = switch_scene_asset_sync(world, self.active, &content.scene)?;
+            bind_arena(world, instance, false).map_err(|error| error.to_string())?;
+            publish_asset(
+                world,
+                self.active,
+                PreparedAsset::from_value(content.scene.clone()),
+                |_, _| false,
+            )?;
+            for id in retired {
+                images += usize::from(retire_asset::<ImageAsset>(world, id)?);
+                materials += usize::from(retire_asset::<SpriteMaterialBindingAsset>(world, id)?);
+                retire_asset::<AudioClip>(world, id)?;
+            }
+        }
+        self.current = Some(content.scene);
         if self.trace && (scene_changed || images != 0 || materials != 0) {
             self.report = Some(ReloadFrame {
                 applied: world.resource::<FrameExecutionStart>().frame(),
@@ -256,120 +365,82 @@ impl Reload {
     }
 }
 
-fn reload_if_changed(world: &mut World) {
-    if !world.resource::<Reload>().notified() {
-        return;
+fn reload_if_changed(world: &mut World) -> SystemResult {
+    let campaign = world.resource::<Campaign>();
+    if campaign.pending.is_some() {
+        return Ok(());
     }
+    let active = campaign.sector.asset()?;
+    let now = Instant::now();
     world.resource_scope(|world, mut reload: Mut<Reload>| {
-        reload.advance(world, Instant::now());
+        reload.follow_sector(active, now);
+        if reload.notified() {
+            reload.advance(world, now);
+        }
     });
+    Ok(())
 }
 
 fn observe_presentation(presentation: Res<DesktopPresentation>, reload: Res<Reload>) {
     reload.observe(&presentation);
 }
 
-fn replace_scene(
-    world: &mut World,
-    scene: SourceScene<'_>,
-    character: PilotCharacter,
-) -> Result<(), Box<dyn Error>> {
-    let previous = std::mem::take(&mut world.resource_mut::<ArenaEntities>().0);
-    let decorations = world
-        .query_filtered::<Entity, With<SceneDecoration>>()
-        .iter(world)
-        .collect::<Vec<_>>();
-    for entity in previous.into_iter().chain(decorations) {
-        if let Ok(entity) = world.get_entity_mut(entity) {
-            entity.despawn();
-        }
-    }
-    let (arena, _, entities) = scene.spawn(world);
-    world.insert_resource(ArenaEntities(entities));
-    world.insert_resource(arena);
-    world.insert_resource(character);
-    world::install_sprites(world)?;
-    world.run_system_cached(sync_actors)?;
-    world.run_system_cached(world::update_appearance)?;
-    world.run_system_cached(propagate_spatial)?;
-    Ok(())
+fn primary_handle<T: Asset>(
+    world: &World,
+    id: AssetId,
+) -> Result<Option<Handle<T>>, Box<dyn Error>> {
+    let product = AssetProductRef::new(id.into(), ImportedProductId::PRIMARY)?;
+    Ok(world.resource::<AssetServer>().get_product_handle(product))
 }
 
-fn update_images(
+fn publish_asset<T: Asset>(
     world: &mut World,
-    handles: &mut BTreeMap<AssetId, Handle<ImageAsset>>,
-    updated: BTreeMap<AssetId, ImageAsset>,
-) -> Result<usize, Box<dyn Error>> {
-    let removed = handles
-        .keys()
-        .filter(|id| !updated.contains_key(id))
-        .copied()
-        .collect::<Vec<_>>();
-    let mut changed = removed.len();
-    for (id, image) in updated {
-        if let Some(&handle) = handles.get(&id) {
-            let current = world.resource::<Assets<ImageAsset>>().get(handle);
-            if current.is_some_and(|current| current.content_hash() == image.content_hash()) {
-                continue;
-            }
-            world.resource_scope(|world, mut images: Mut<Assets<ImageAsset>>| {
-                world.resource_scope(|world, mut states: Mut<AssetStates>| {
-                    images.commit_loaded(
-                        handle,
-                        image,
-                        &mut states,
-                        &mut world.resource_mut::<AssetEvents>(),
-                    )
-                })
-            })?;
-        } else {
-            handles.insert(id, add_asset(world, image)?);
-        }
-        changed += 1;
+    id: AssetId,
+    prepared: PreparedAsset<T>,
+    unchanged: impl FnOnce(&T, &T) -> bool,
+) -> Result<bool, Box<dyn Error>> {
+    let handle = world.resource_mut::<AssetServer>().load_id::<T>(id)?;
+    if world
+        .resource::<Assets<T>>()
+        .get(handle)
+        .is_some_and(|old| unchanged(old, prepared.value()))
+        && world
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .is_some_and(|state| state.dependencies() == prepared.dependencies())
+    {
+        return Ok(false);
     }
-    for id in removed {
-        let handle = handles[&id];
-        world.resource_scope(|world, mut images: Mut<Assets<ImageAsset>>| {
-            world.resource_scope(|world, mut states: Mut<AssetStates>| {
-                images.remove_with_state(
-                    handle,
-                    &mut states,
-                    &mut world.resource_mut::<AssetEvents>(),
-                )
-            })
-        })?;
-        handles.remove(&id);
-    }
-    Ok(changed)
+    prepared.publish(world, handle)?;
+    Ok(true)
 }
 
-fn update_materials(
-    current: &mut BTreeMap<AssetId, Material2dBinding>,
-    updated: BTreeMap<AssetId, Material2dBinding>,
-) -> usize {
-    let previous = current.len();
-    current.retain(|id, _| updated.contains_key(id));
-    let mut changed = previous - current.len();
-    for (id, binding) in updated {
-        if current.get(&id).is_some_and(|old| {
-            old.uniform_bytes() == binding.uniform_bytes()
-                && old.generation().shader().digest() == binding.generation().shader().digest()
-        }) {
-            continue;
-        }
-        current.insert(id, binding);
-        changed += 1;
-    }
-    changed
+fn retire_asset<T: Asset>(world: &mut World, id: AssetId) -> Result<bool, Box<dyn Error>> {
+    let Some(handle) = primary_handle::<T>(world, id)? else {
+        return Ok(false);
+    };
+    let removed = world.resource_scope(|world, mut assets: Mut<Assets<T>>| {
+        world.resource_scope(|world, mut states: Mut<AssetStates>| {
+            assets.remove_with_state(
+                handle,
+                &mut states,
+                &mut world.resource_mut::<AssetEvents>(),
+            )
+        })
+    })?;
+    Ok(removed.is_some())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, path::Path};
 
     use nara::scene::components::SpriteSource;
 
-    use crate::{GamePlugin, Round, RunRules, arena::source};
+    use crate::{
+        GamePlugin, Round, RunRules, arena::source, campaign::Sector,
+        scene_roles::register_scene_roles,
+    };
 
     use super::*;
 
@@ -382,6 +453,35 @@ mod tests {
             fs::copy(file.path(), assets_dir.join(file.file_name()))?;
         }
         Ok(temporary)
+    }
+
+    fn staged_app(root: &Path, snapshot: Option<&Path>) -> Result<(App, Reload), Box<dyn Error>> {
+        let mut app = App::new();
+        app.add_plugins(DefaultPlugins::headless())?;
+        register_scene_roles(&mut app)?;
+        let watcher = AssetWatcher::new(root.join("assets"))?;
+        let assets = RuntimeAssetSource::from_project_dir(root, "assets")?;
+        let project = SourceProject::new(&app)?;
+        let active = Sector::One.asset()?;
+        let document = snapshot
+            .map(|path| project.read_snapshot(&assets, path))
+            .transpose()?;
+        let prepared = document
+            .as_ref()
+            .map(|scene| project.cook(scene))
+            .transpose()?;
+        app.set_asset_source(assets.clone())?;
+        if let Some(scene) = &prepared {
+            switch_scene_asset_sync(app.world_mut()?, active, scene)?;
+        } else {
+            switch_scene_sync(app.world_mut()?, active)?;
+        }
+        app.add_plugins(GamePlugin)?;
+        app.step_fixed(FixedTime::DEFAULT_TIMESTEP)?;
+        let layers = SceneLayers::capture(&project, &assets, active, document);
+        let mut reload = Reload::new(root.to_owned(), project, layers, active, prepared, watcher);
+        reload.trace = false;
+        Ok((app, reload))
     }
 
     #[test]
@@ -406,37 +506,23 @@ mod tests {
             ),
         )?;
 
-        let mut app = App::new();
-        app.add_plugins(DefaultPlugins::headless())?;
-        let project = SourceProject::new(&mut app, temporary.path())?;
-        let assets = project.assets()?;
-        let saved = project.read_snapshot(&assets, &snapshot)?;
-        let content = project.prepare_content(&assets, saved)?;
-        SceneVisuals::install(app.world_mut()?, content.images, content.materials)?;
-        let watcher = AssetWatcher::new(&assets_dir)?;
-        let mut reload = Reload::new(project, &assets, content.scene.clone(), true, watcher);
-        reload.trace = false;
-        app.add_plugins(GamePlugin::from_scene(content.scene))?;
-        world::setup(app.world_mut()?).map_err(|error| error.to_string())?;
-        app.step_fixed(FixedTime::DEFAULT_TIMESTEP)?;
+        let (mut app, mut reload) = staged_app(temporary.path(), Some(&snapshot))?;
         let round = app.world().resource::<Round>().clone();
         assert_eq!(round.shields(), 4);
-        let image_handle = *app
-            .world()
-            .resource::<SceneVisuals>()
-            .images
-            .values()
-            .next()
-            .ok_or("no image fixture")?;
+        let image_id: AssetId = "01a219be-557a-739e-81a5-2a8c6e88aee5".parse()?;
+        let material_id: AssetId = "01a21a30-ef81-76a6-8eab-ca52f3bae4dc".parse()?;
+        let image_handle =
+            primary_handle::<ImageAsset>(app.world(), image_id)?.ok_or("no image fixture")?;
+        let material_handle =
+            primary_handle::<SpriteMaterialBindingAsset>(app.world(), material_id)?
+                .ok_or("no material fixture")?;
         let original_binding = app
             .world()
-            .resource::<SceneVisuals>()
-            .materials
-            .values()
-            .next()
+            .resource::<Assets<SpriteMaterialBindingAsset>>()
+            .get(material_handle)
             .ok_or("no material fixture")?
             .clone();
-        let original_entities = app.world().resource::<ArenaEntities>().0.clone();
+        let original = app.world().resource::<SceneManager>().main_instance();
 
         fs::write(
             &scene_file,
@@ -459,7 +545,7 @@ mod tests {
         fs::write(&image_file, b"invalid PNG")?;
         let error = reload
             .source
-            .read_content()
+            .read_content(reload.active)
             .err()
             .ok_or("accepted invalid PNG")?;
         reload.finish_attempt(
@@ -478,16 +564,17 @@ mod tests {
             reload
                 .last_error
                 .as_ref()
-                .is_some_and(|error| error.contains("power-cell.png"))
+                .is_some_and(|error| error.contains(&image_id.to_string()))
         );
-        assert_eq!(app.world().resource::<ArenaEntities>().0, original_entities);
+        assert_eq!(
+            app.world().resource::<SceneManager>().main_instance(),
+            original
+        );
         assert_eq!(app.world().resource::<Round>(), &round);
         assert_eq!(
             app.world()
-                .resource::<SceneVisuals>()
-                .materials
-                .values()
-                .next(),
+                .resource::<Assets<SpriteMaterialBindingAsset>>()
+                .get(material_handle),
             Some(&original_binding),
         );
 
@@ -497,12 +584,34 @@ mod tests {
             &image_meta_file,
             image_meta.replace("settings: ()", "settings: (srgb: false)"),
         )?;
-        let content = reload.source.read_content()?;
+        let content = reload.source.read_content(reload.active)?;
         reload.publish(app.world_mut()?, content)?;
+        app.update_with_delta(std::time::Duration::ZERO)?;
         assert_eq!(app.world().resource::<Round>(), &round);
-        let visuals = app.world().resource::<SceneVisuals>();
-        assert_eq!(visuals.images.values().copied().next(), Some(image_handle));
-        assert_ne!(visuals.materials.values().next(), Some(&original_binding));
+        assert_eq!(
+            primary_handle::<ImageAsset>(app.world(), image_id)?,
+            Some(image_handle)
+        );
+        let binding = app
+            .world()
+            .resource::<Assets<SpriteMaterialBindingAsset>>()
+            .get(material_handle);
+        assert_ne!(binding, Some(&original_binding));
+        let shader = app
+            .world()
+            .get_resource::<RuntimeAssetSource>()
+            .unwrap()
+            .backend()
+            .resolve_path(&nara::asset::AssetPath::new("gate.wgsl")?)
+            .unwrap();
+        assert_eq!(
+            app.world()
+                .resource::<AssetStates>()
+                .state(material_handle.id())
+                .unwrap()
+                .dependencies(),
+            &[shader]
+        );
         let image = app
             .world()
             .resource::<Assets<ImageAsset>>()
@@ -515,9 +624,10 @@ mod tests {
         assert_eq!(rules.move_speed, 210.0);
         assert_eq!(
             world
-                .query::<&SpriteSource>()
+                .query::<&Sprite>()
                 .iter(world)
-                .filter(|sprite| sprite.image.is_some() && sprite.size == Vec2::splat(16.0))
+                .filter(|sprite| sprite.material.image == Some(image_handle)
+                    && sprite.size == Vec2::splat(16.0))
                 .count(),
             3,
         );
@@ -546,19 +656,8 @@ mod tests {
 
         let temporary = staged_project()?;
         let assets_dir = temporary.path().join("assets");
-        let mut app = App::new();
-        app.add_plugins(DefaultPlugins::headless())?;
-        let project = SourceProject::new(&mut app, temporary.path())?;
-        let assets = project.assets()?;
-        let content = project.load(&assets, None)?;
-        SceneVisuals::install(app.world_mut()?, content.images, content.materials)?;
-        let watcher = AssetWatcher::new(&assets_dir)?;
-        let mut reload = Reload::new(project, &assets, content.scene.clone(), false, watcher);
-        reload.trace = false;
-        app.add_plugins(GamePlugin::from_scene(content.scene))?;
-        world::setup(app.world_mut()?).map_err(|error| error.to_string())?;
-        app.step_fixed(FixedTime::DEFAULT_TIMESTEP)?;
-        let original_entities = app.world().resource::<ArenaEntities>().0.clone();
+        let (mut app, mut reload) = staged_app(temporary.path(), None)?;
+        let original = app.world().resource::<SceneManager>().main_instance();
 
         let old = assets_dir.join("power-cell.prefab.ron");
         let moved = assets_dir.join("moved.prefab.ron");
@@ -568,7 +667,10 @@ mod tests {
         });
         let pending = reload.retry.ok_or("incomplete pair was not retried")?;
         assert_eq!(pending.attempt, 1);
-        assert_eq!(app.world().resource::<ArenaEntities>().0, original_entities);
+        assert_eq!(
+            app.world().resource::<SceneManager>().main_instance(),
+            original
+        );
 
         fs::write(
             &moved,
@@ -578,30 +680,35 @@ mod tests {
             assets_dir.join("power-cell.prefab.ron.meta"),
             assets_dir.join("moved.prefab.ron.meta"),
         )?;
-        let renamed_index = reload.source.project.assets()?;
         let lock = fs::OpenOptions::new()
             .read(true)
             .share_mode(0)
             .open(&moved)?;
         let error = reload
             .source
-            .layers
-            .read(&reload.source.project, &renamed_index)
+            .read_content(reload.active)
             .err()
             .ok_or("the prefab remained readable while exclusively held")?;
         assert!(is_transient_reload_error(error.as_ref()), "{error}");
-        assert!(error.to_string().contains("moved.prefab.ron"));
+        assert!(
+            error
+                .to_string()
+                .contains("01a219be-557a-7c47-82c3-84a2b7f7894c")
+        );
         drive_until(&mut reload, app.world_mut()?, |reload| {
             reload.retry.is_some_and(|retry| retry.at != pending.at)
         });
-        assert_eq!(app.world().resource::<ArenaEntities>().0, original_entities);
+        assert_eq!(
+            app.world().resource::<SceneManager>().main_instance(),
+            original
+        );
         drop(lock);
 
         drive_until(&mut reload, app.world_mut()?, |reload| {
             reload.retry.is_none()
         });
         let world = app.world_mut()?;
-        assert_ne!(world.resource::<ArenaEntities>().0, original_entities);
+        assert_ne!(world.resource::<SceneManager>().main_instance(), original);
         assert_eq!(
             world
                 .query::<&SpriteSource>()

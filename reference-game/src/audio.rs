@@ -2,6 +2,8 @@ use std::{f32::consts::TAU, time::Duration};
 
 use nara::{asset::add_asset, ecs::bevy_ecs::error::Result, prelude::*};
 
+pub(crate) const ARRIVAL_BUS: &str = "arrival";
+
 #[derive(Resource)]
 pub(crate) struct Sounds {
     pub(crate) pickup: Handle<AudioClip>,

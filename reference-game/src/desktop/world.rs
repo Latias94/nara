@@ -1,16 +1,15 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 
 use nara::{
-    asset::{AddAssetError, add_asset},
-    core::AssetId,
+    asset::add_asset,
     ecs::{
-        Single,
+        Local, Single,
         bevy_ecs::{error::Result as SystemResult, query::With},
     },
     prelude::*,
     render::{
         animation::{Clip, Frame, PlaybackMode},
-        material::{Material2dBinding, SamplerDescriptor},
+        material::SamplerDescriptor,
     },
     scene::components::SpriteSource,
     window::{PrimaryWindow, Window},
@@ -19,6 +18,7 @@ use nara::{
 use crate::{
     Round, RoundStatus,
     arena::{self, Actor, Arena, SceneActor},
+    simulation::{ArenaInstance, sync_actors},
 };
 
 const BACKGROUND: Color = Color::rgb(0.009, 0.015, 0.026);
@@ -32,30 +32,6 @@ pub(super) struct AnimatedPilot;
 pub(super) struct PilotAnimation {
     clip: Clip,
     image: Handle<ImageAsset>,
-}
-
-#[derive(Component)]
-pub(super) struct SceneDecoration;
-
-#[derive(Resource, Default)]
-pub(super) struct SceneVisuals {
-    pub images: BTreeMap<AssetId, Handle<ImageAsset>>,
-    pub materials: BTreeMap<AssetId, Material2dBinding>,
-}
-
-impl SceneVisuals {
-    pub fn install(
-        world: &mut World,
-        images: BTreeMap<AssetId, ImageAsset>,
-        materials: BTreeMap<AssetId, Material2dBinding>,
-    ) -> Result<(), AddAssetError> {
-        let images = images
-            .into_iter()
-            .map(|(id, image)| add_asset(world, image).map(|handle| (id, handle)))
-            .collect::<Result<_, _>>()?;
-        world.insert_resource(Self { images, materials });
-        Ok(())
-    }
 }
 
 pub(super) fn setup(world: &mut World) -> SystemResult {
@@ -84,71 +60,67 @@ pub(super) fn setup(world: &mut World) -> SystemResult {
     )?;
     let image = add_asset(world, make_pilot_texture()?)?;
     world.insert_resource(PilotAnimation { clip, image });
-    Ok(install_sprites(world)?)
+    Ok(())
 }
 
-pub(super) fn install_sprites(world: &mut World) -> Result<(), String> {
+pub(super) fn dress_arena(
+    world: &mut World,
+    mut dressed: Local<Option<SceneInstanceId>>,
+) -> SystemResult {
+    let owner = SceneMember(world.resource::<ArenaInstance>().0);
+    if *dressed == Some(owner.0) {
+        return Ok(());
+    }
     let animation = world.resource::<PilotAnimation>();
     let pilot_image = animation.image;
     let initial_region = animation.clip.sample(Duration::ZERO).region;
+    let powered = world.resource::<Round>().can_extract();
     let sources = world
-        .query::<(Entity, &SpriteSource, &Transform2d, Option<&SceneActor>)>()
+        .query::<(
+            Entity,
+            &SceneMember,
+            &SpriteSource,
+            &Transform2d,
+            Option<&SceneActor>,
+        )>()
         .iter(world)
-        .map(|(entity, source, pose, actor)| {
+        .filter(|(_, member, _, _, _)| **member == owner)
+        .map(|(entity, _, source, pose, actor)| {
             (entity, source.clone(), *pose, actor.map(|actor| actor.role))
         })
         .collect::<Vec<_>>();
     for (entity, source, pose, role) in sources {
-        let sprite = if let Some(id) = source.image {
-            let texture = world
-                .resource::<SceneVisuals>()
-                .images
-                .get(&id)
-                .copied()
-                .ok_or_else(|| format!("Night Relay scene texture {id} was not loaded"))?;
-            Sprite::from_texture(texture, source.size)
-                .with_sampler(SamplerDescriptor::NEAREST_CLAMP)
-        } else if role == Some(Actor::Pilot) {
-            world.entity_mut(entity).insert(AnimatedPilot);
-            Sprite::from_texture(pilot_image, source.size)
+        if source.image.is_none() && role == Some(Actor::Pilot) {
+            let sprite = Sprite::from_texture(pilot_image, source.size)
                 .with_sampler(SamplerDescriptor::NEAREST_CLAMP)
                 .with_texture_region(initial_region)
-        } else {
-            Sprite::from_color(source.size, source.tint())
-        };
-        world
-            .entity_mut(entity)
-            .insert(sprite.with_tint(source.tint()).with_layer(source.layer));
+                .with_tint(source.tint())
+                .with_layer(source.layer);
+            world.entity_mut(entity).insert((AnimatedPilot, sprite));
+        } else if source.image.is_some() || powered && role == Some(Actor::Gate) {
+            let tint = if powered && role == Some(Actor::Gate) {
+                GATE_POWERED
+            } else {
+                source.tint()
+            };
+            world.entity_mut(entity).insert(
+                Sprite::from_color(source.size, tint)
+                    .with_layer(source.layer)
+                    .with_sampler(SamplerDescriptor::NEAREST_CLAMP),
+            );
+        }
         if let Some(role) = role {
-            decorate_actor(world, entity, &source, pose, role);
+            decorate_actor(world, owner, entity, &source, pose, role);
         }
     }
-    bind_materials(world)?;
-    Ok(())
-}
-
-pub(super) fn bind_materials(world: &mut World) -> Result<(), String> {
-    let sources = world
-        .query::<(Entity, &SpriteSource)>()
-        .iter(world)
-        .filter_map(|(entity, source)| source.material.map(|material| (entity, material)))
-        .collect::<Vec<_>>();
-    for (entity, material) in sources {
-        let binding = world
-            .resource::<SceneVisuals>()
-            .materials
-            .get(&material)
-            .ok_or_else(|| format!("Night Relay scene material {material} was not loaded"))?
-            .clone();
-        if world.get::<Material2dBinding>(entity) != Some(&binding) {
-            world.entity_mut(entity).insert(binding);
-        }
-    }
+    world.run_system_cached(sync_actors)?;
+    *dressed = Some(owner.0);
     Ok(())
 }
 
 fn decorate_actor(
     world: &mut World,
+    owner: SceneMember,
     entity: Entity,
     source: &SpriteSource,
     pose: Transform2d,
@@ -157,6 +129,7 @@ fn decorate_actor(
     match role {
         Actor::Pilot => quad(
             world,
+            owner,
             pose.translation,
             source.size * 0.81,
             Color::rgb(0.035, 0.18, 0.20),
@@ -165,6 +138,7 @@ fn decorate_actor(
         Actor::Cell(_) => {
             quad(
                 world,
+                owner,
                 pose.translation,
                 source.size * 1.73,
                 Color::rgb(0.16, 0.115, 0.035),
@@ -173,6 +147,7 @@ fn decorate_actor(
             if source.image.is_none() {
                 detail(
                     world,
+                    owner,
                     entity,
                     source.size * 0.4,
                     Color::rgb(1.0, 0.93, 0.65),
@@ -185,6 +160,7 @@ fn decorate_actor(
             let track = (end - start).abs() + Vec2::splat(2.0);
             quad(
                 world,
+                owner,
                 start.midpoint(end),
                 track,
                 Color::rgb(0.22, 0.06, 0.10),
@@ -193,6 +169,7 @@ fn decorate_actor(
             if source.image.is_none() {
                 detail(
                     world,
+                    owner,
                     entity,
                     source.size * Vec2::new(0.55, 0.22),
                     Color::rgb(1.0, 0.68, 0.52),
@@ -203,6 +180,7 @@ fn decorate_actor(
         Actor::Gate if source.image.is_none() => {
             detail(
                 world,
+                owner,
                 entity,
                 source.size * 0.71,
                 BACKGROUND,
@@ -210,6 +188,7 @@ fn decorate_actor(
             );
             detail(
                 world,
+                owner,
                 entity,
                 source.size * Vec2::new(0.18, 0.54),
                 Color::rgb(0.09, 0.47, 0.38),
@@ -220,17 +199,32 @@ fn decorate_actor(
     }
 }
 
-fn quad(world: &mut World, position: Vec2, size: Vec2, color: Color, layer: i32) {
+fn quad(
+    world: &mut World,
+    owner: SceneMember,
+    position: Vec2,
+    size: Vec2,
+    color: Color,
+    layer: i32,
+) {
     world.spawn((
-        SceneDecoration,
+        owner,
         Transform2d::from_translation(position),
         Visibility::Inherited,
         Sprite::from_color(size, color).with_layer(layer),
     ));
 }
 
-fn detail(world: &mut World, parent: Entity, size: Vec2, color: Color, layer: i32) {
+fn detail(
+    world: &mut World,
+    owner: SceneMember,
+    parent: Entity,
+    size: Vec2,
+    color: Color,
+    layer: i32,
+) {
     world.spawn((
+        owner,
         ChildOf(parent),
         Transform2d::default(),
         Visibility::Inherited,

@@ -1,101 +1,157 @@
 //! Winit and WGPU presentation for Night Relay.
 
-#[cfg(feature = "source")]
-use std::path::Path;
-use std::{
-    error::Error,
-    sync::{Arc, OnceLock},
-    time::{Duration, Instant},
-};
+use std::{error::Error, path::Path};
 
 use nara::{
-    app::{FrameExecutionStart, FrameIntent, FrameIntentSet},
-    ecs::{Local, Single, bevy_ecs::error::Result as SystemResult, schedule::IntoScheduleConfigs},
+    app::{FrameIntent, FrameIntentSet},
+    ecs::{
+        bevy_ecs::{error::Result as SystemResult, schedule::common_conditions::resource_changed},
+        schedule::IntoScheduleConfigs,
+    },
     input::{ActionContext, ActionPhase, InputSeatId},
     prelude::*,
-    render_wgpu::desktop::{DesktopPresentation, DesktopPresentedFrame},
+    render::sprite::SpriteSourceHydrationSet,
+    render_wgpu::desktop::DesktopPresentedFrame,
+    save::{SaveError, SaveStore},
+    scene::spatial::propagate_spatial,
     window::{WindowId, WindowSet},
 };
 
-use crate::{PilotInput, Round, RunRules, TITLE, WINDOW_SIZE, simulation::advance_round};
+use crate::{
+    GamePlugin, PilotInput, TITLE, WINDOW_SIZE,
+    campaign::{Campaign, SaveSnapshot, Sector, resolve_switch},
+    scene_roles::register_scene_roles,
+    simulation::ArenaInstance,
+};
 
 #[cfg(feature = "source")]
 mod editor_play;
 mod hud;
+mod probe;
 #[cfg(feature = "hot-reload")]
 mod reload;
-mod standalone;
 mod world;
 
-const SMOKE_TIMEOUT: Duration = Duration::from_secs(15);
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Probe {
-    FirstPresent,
-    Pickup,
-}
-
 pub fn run(verify_first_present: bool) -> Result<(), Box<dyn Error>> {
-    run_with_probe(verify_first_present.then_some(Probe::FirstPresent))
+    run_with_probe(verify_first_present.then_some(probe::Smoke::FirstPresent))
 }
 
 pub fn verify_gameplay() -> Result<(), Box<dyn Error>> {
-    run_with_probe(Some(Probe::Pickup))
+    run_with_probe(Some(probe::Smoke::Pickup))
 }
 
-fn run_with_probe(probe: Option<Probe>) -> Result<(), Box<dyn Error>> {
+pub fn verify_r1(save_dir: &Path) -> Result<(), Box<dyn Error>> {
+    let store = SaveStore::in_dir(save_dir);
+    match store.load::<SaveSnapshot>(probe::SAVE_SLOT) {
+        Err(SaveError::NotFound(_)) => {}
+        Ok(_) => return Err("use a fresh save directory for --verify-r1".into()),
+        Err(error) => return Err(error.into()),
+    }
     let mut app = desktop_app()?;
+    app.insert_resource(Campaign::with_save(store, probe::SAVE_SLOT))?;
+    install_archive(
+        &mut app,
+        &std::env::current_exe()?.with_file_name("game.npak"),
+        Sector::One,
+    )?;
+    probe::verify_r1(&mut app, save_dir)
+}
+
+fn run_with_probe(probe: Option<probe::Smoke>) -> Result<(), Box<dyn Error>> {
+    let mut app = desktop_app()?;
+    let campaign = if probe.is_some() {
+        Campaign::default()
+    } else {
+        Campaign::persistent()
+    };
+    let sector = campaign.sector;
+    app.insert_resource(campaign)?;
     let archive = std::env::current_exe()?.with_file_name("game.npak");
     #[cfg(feature = "source")]
-    if archive.try_exists()? {
-        standalone::install(&mut app, &archive)?;
-    } else {
-        install_source(&mut app, None)?;
-    }
+    let use_source = !archive.try_exists()?;
     #[cfg(not(feature = "source"))]
-    standalone::install(&mut app, &archive)?;
+    let use_source = false;
+    if use_source {
+        #[cfg(feature = "source")]
+        install_source(&mut app, None, sector)?;
+    } else {
+        install_archive(&mut app, &archive, sector)?;
+    }
     if let Some(probe) = probe {
-        verify_present(&mut app, probe)?;
+        probe::verify_present(&mut app, probe)?;
     } else {
         app.run()?;
     }
     Ok(())
 }
 
+fn install_archive(app: &mut App, path: &Path, sector: Sector) -> Result<(), Box<dyn Error>> {
+    let source = RuntimeAssetSource::from_npak(path)
+        .map_err(|error| format!("could not open {}: {error}", path.display()))?;
+    app.set_asset_source(source)?;
+    switch_scene_sync(app.world_mut()?, sector.asset()?)?;
+    app.add_plugins(GamePlugin)?;
+    Ok(())
+}
+
 #[cfg(feature = "source")]
 pub fn run_editor_play(scene_path: &Path) -> Result<(), Box<dyn Error>> {
     let mut app = desktop_app()?;
-    install_source(&mut app, Some(scene_path))?;
+    app.insert_resource(Campaign::default())?;
+    install_source(&mut app, Some(scene_path), Sector::One)?;
     editor_play::run(app)
 }
 
 #[cfg(feature = "source")]
-fn install_source(app: &mut App, snapshot: Option<&Path>) -> Result<(), Box<dyn Error>> {
-    use crate::{GamePlugin, arena::source};
+fn install_source(
+    app: &mut App,
+    snapshot: Option<&Path>,
+    mut sector: Sector,
+) -> Result<(), Box<dyn Error>> {
+    use crate::{arena::source::SourceProject, development_root};
 
-    let project = source::SourceProject::new(app, &source::development_root()?)?;
+    let root = development_root()?;
     #[cfg(feature = "hot-reload")]
-    let watcher = nara_asset::watch::AssetWatcher::new(project.watch_directory())?;
-    let assets = project.assets()?;
-    let content = project.load(&assets, snapshot)?;
+    let watcher = nara_asset::watch::AssetWatcher::new(root.join("assets"))?;
+    let assets = RuntimeAssetSource::from_project_dir(&root, "assets")?;
+    let project = SourceProject::new(app)?;
+    let document = snapshot
+        .map(|path| project.read_snapshot(&assets, path))
+        .transpose()?;
+    if let Some(document) = &document
+        && project
+            .read_scene(&assets, Sector::Two.asset()?)
+            .is_ok_and(|saved| saved.id == document.id)
+    {
+        sector = Sector::Two;
+        app.world_mut()?.resource_mut::<Campaign>().sector = sector;
+    }
+    let id = sector.asset()?;
+    app.set_asset_source(assets.clone())?;
+    let prepared = document
+        .as_ref()
+        .map(|scene| project.cook(scene))
+        .transpose()?;
+    if let Some(scene) = &prepared {
+        switch_scene_asset_sync(app.world_mut()?, id, scene)?;
+    } else {
+        switch_scene_sync(app.world_mut()?, id)?;
+    }
+    app.add_plugins(GamePlugin)?;
     #[cfg(feature = "hot-reload")]
-    let reload = reload::Reload::new(
-        project,
-        &assets,
-        content.scene.clone(),
-        snapshot.is_some(),
-        watcher,
-    );
-    world::SceneVisuals::install(app.world_mut()?, content.images, content.materials)?;
-    app.add_plugins(GamePlugin::from_scene(content.scene))?;
-    #[cfg(feature = "hot-reload")]
-    reload.install(app)?;
+    {
+        use crate::arena::source::SceneLayers;
+
+        let layers = SceneLayers::capture(&project, &assets, id, document);
+        reload::Reload::new(root, project, layers, id, prepared, watcher).install(app)?;
+    }
     Ok(())
 }
 
 fn desktop_app() -> Result<App, Box<dyn Error>> {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins::new(TITLE).with_window_size(WINDOW_SIZE.0, WINDOW_SIZE.1))?;
+    register_scene_roles(&mut app)?;
     app.add_systems(
         Startup,
         (
@@ -106,6 +162,17 @@ fn desktop_app() -> Result<App, Box<dyn Error>> {
     )?
     .add_systems(FrameIntent, read_controls.in_set(FrameIntentSet::Collect))?
     .add_systems(First, world::fit_camera.after(WindowSet::ApplyEvents))?
+    .add_systems(
+        CoreStage::TaskUpdate,
+        (
+            world::dress_arena
+                .after(resolve_switch)
+                .before(SpriteSourceHydrationSet),
+            (propagate_spatial, hud::update)
+                .after(SpriteSourceHydrationSet)
+                .run_if(resource_changed::<ArenaInstance>),
+        ),
+    )?
     .add_systems(
         FixedUpdate,
         (world::update_appearance, hud::update).in_set(FixedUpdateSet::Finalize),
@@ -156,85 +223,6 @@ fn read_controls(
             "quit" => exit.request_exit(),
             _ => {}
         }
-    }
-}
-
-fn verify_present(app: &mut App, probe: Probe) -> Result<(), Box<dyn Error>> {
-    let require_pickup = probe == Probe::Pickup;
-    if require_pickup {
-        app.add_systems(
-            FixedUpdate,
-            fly_to_first_cell
-                .in_set(FixedUpdateSet::Simulate)
-                .before(advance_round),
-        )?;
-    }
-    let deadline = Instant::now() + SMOKE_TIMEOUT;
-    let presented = Arc::new(OnceLock::new());
-    let receipt = Arc::clone(&presented);
-    app.add_systems(
-        Last,
-        move |observation: Res<DesktopPresentation>,
-              execution: Res<FrameExecutionStart>,
-              round: Res<Round>,
-              mut pickup_frame: Local<Option<u64>>,
-              mut exit: ResMut<AppExitRequests>| {
-            if round.collected() > 0 && pickup_frame.is_none() {
-                *pickup_frame = Some(execution.frame());
-            }
-            if Instant::now() >= deadline {
-                exit.request_exit();
-            } else if let Some(frame) = observation.latest().filter(is_game_frame)
-                && (!require_pickup || pickup_frame.is_some_and(|index| frame.frame_index >= index))
-            {
-                let _ = receipt.set((frame.extent, frame.hud_glyph_primitives));
-                exit.request_success();
-            }
-        },
-    )?;
-    let exit = app.run()?;
-    if let (AppExit::Success, Some((extent, glyphs))) = (exit, presented.get()) {
-        println!(
-            "Night Relay presented {}x{} with {glyphs} HUD glyphs",
-            extent.width, extent.height
-        );
-        if require_pickup {
-            println!("Night Relay collected a power cell and presented the updated HUD");
-        }
-        return Ok(());
-    }
-    Err(if require_pickup {
-        "the game closed or timed out before picking up a cell and presenting the HUD"
-    } else {
-        "the window closed or timed out before presenting the game and HUD"
-    }
-    .into())
-}
-
-fn fly_to_first_cell(
-    mut waypoint: Local<usize>,
-    mut input: ResMut<PilotInput>,
-    round: Res<Round>,
-    rules: Single<&RunRules>,
-    time: Res<FixedTime>,
-) {
-    const ROUTE: [Vec2; 4] = [
-        Vec2::new(-256.0, 0.0),
-        Vec2::new(-64.0, 0.0),
-        Vec2::new(-64.0, 96.0),
-        Vec2::new(-32.0, 96.0),
-    ];
-    input.movement = Vec2::ZERO;
-    if round.collected() != 0 {
-        return;
-    }
-    while let Some(&target) = ROUTE.get(*waypoint) {
-        let offset = target - round.position();
-        if offset.length_squared() > 0.01 {
-            input.movement = offset / (rules.move_speed * time.delta().as_secs_f32());
-            return;
-        }
-        *waypoint += 1;
     }
 }
 

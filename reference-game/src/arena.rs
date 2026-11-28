@@ -5,11 +5,12 @@ use std::{
 
 use nara::{prelude::*, scene::components::ColliderSource};
 
-use crate::RunRules;
-#[cfg(feature = "desktop")]
-use crate::{ExtractionGate, PatrolDrone, Pilot, PowerCell};
+use crate::{
+    RunRules,
+    scene_roles::{ExtractionGate, PatrolDrone, Pilot, PowerCell},
+};
 
-#[cfg(feature = "source")]
+#[cfg(all(feature = "source", any(feature = "desktop", test)))]
 pub(crate) mod source;
 
 pub(crate) const CELL_COUNT: usize = 3;
@@ -75,14 +76,12 @@ struct BoundRow {
     visibility: Visibility,
     collider: Option<Collider2d>,
     actor: Option<Actor>,
-    carries_rules: bool,
 }
 
 impl<'a> SceneRow<'a> {
-    #[cfg(feature = "desktop")]
-    pub(crate) fn cooked(entity: nara::ecs::bevy_ecs::world::EntityRef<'a>) -> Self {
+    pub(crate) fn from_entity(entity: nara::ecs::bevy_ecs::world::EntityRef<'a>) -> Self {
         Self {
-            name: entity.get::<Name>().map_or("cooked entity", Name::as_str),
+            name: entity.get::<Name>().map_or("unnamed entity", Name::as_str),
             is_child: entity.contains::<ChildOf>(),
             pose: entity.get::<Transform2d>().copied(),
             visibility: entity.get::<Visibility>().copied(),
@@ -150,7 +149,6 @@ impl<'a> SceneRow<'a> {
             visibility: self.visibility.unwrap_or_default(),
             collider,
             actor,
-            carries_rules: self.rules.is_some(),
         })
     }
 }
@@ -172,7 +170,6 @@ pub(crate) struct ArenaPlan {
 impl ArenaPlan {
     pub fn prepare<'a>(
         rows: impl IntoIterator<Item = Result<SceneRow<'a>, String>>,
-        rules_override: Option<RunRules>,
     ) -> Result<Self, String> {
         let mut actors = HashMap::with_capacity(2 + CELL_COUNT + DRONE_COUNT);
         let mut bindings = Vec::new();
@@ -196,8 +193,9 @@ impl ArenaPlan {
             }
             bindings.push(binding);
         }
-        let rules = rules.ok_or("Night Relay requires exactly one Run Rules component")?;
-        let rules = rules_override.unwrap_or(rules).checked()?;
+        let rules = rules
+            .ok_or("Night Relay requires exactly one Run Rules component")?
+            .checked()?;
         let marker = |actor| -> Result<Marker, String> {
             let &(name, pose, collider) = actors
                 .get(&actor)
@@ -240,9 +238,6 @@ impl ArenaPlan {
                 });
             } else if let Some(collider) = row.collider {
                 entity.insert(collider);
-            }
-            if row.carries_rules {
-                entity.insert(self.rules);
             }
         }
         (self.arena, self.rules)

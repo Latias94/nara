@@ -1,10 +1,12 @@
 # Night Relay
 
-Fly through a dark relay station, collect three amber power cells, and reach the lower-right gate
-before time runs out. Walls block the courier and red patrol drones drain its shields. The gate turns
-green when it has power.
+Fly through a dark relay station, collect three amber power cells in each sector, and reach the
+extraction gate before time runs out. Walls block the courier and red patrol drones drain its shields.
+The gate turns green when it has power. Clearing Sector 1 opens Sector 2 and plays its arrival cue.
 
 Use **WASD** or the **arrow keys** to fly, **R** or **Enter** to restart, and **Esc** to quit.
+The desktop game stores each sector's best clear time in `progress.nsav` under the platform's
+`night-relay` user data directory. After clearing Sector 1, the next launch starts in Sector 2.
 
 ## Desktop
 
@@ -29,17 +31,25 @@ cannot set the process working directory. Launches from the repository root also
 ## Standalone export
 
 Run `nara export reference-game --out <directory> --trusted` from the repository root. Export
-builds the game with `--release --no-default-features --features desktop` and cooks its entry
-scene, prefab expansion, images, and gate material into `game.npak`. The packaged game opens
-that archive beside its executable. It can launch from any working directory with the executable
-and archive together. Run the exported game with `--verify-first-present` for a native smoke.
+builds the game with `--release --no-default-features --features desktop` and cooks both sectors,
+their expanded prefabs, images, gate material and shader, and `arrival.wav` into `game.npak`.
+The packaged game opens that archive beside its executable. It can launch from any working
+directory with the executable and archive together. Run `--verify-first-present` for a native smoke.
 Development-capable binaries also prefer a sibling `game.npak` on normal launch. `--editor-play`
 always uses development sources.
 
+Run `game --verify-r1 <save-dir>` with the exported executable and a fresh disposable save
+directory. The game flies the Sector 1 route in its native window, waits for Sector 2 to present,
+and checks that the previous scene's entities and decorations were retired. It requires the
+authored arrival clip to reach `Playing` with `audio_output=Device` and a nonzero arrival mix peak.
+The `NIGHT_RELAY_R1` line reports those observations and the `r1-verification.nsav` round trip.
+Both original smoke flags run with in-memory progress.
+
 ## Scene and Editor Play
 
-The editor opens `assets/night-relay.scene.ron` by default. The desktop and headless games find
-that same scene by its stable `.meta` ID under the development project's `assets` directory.
+The editor opens `assets/night-relay.scene.ron` by default. The runtime finds it and
+`assets/sector-2.scene.ron` by their stable `.meta` IDs under the development project's `assets`
+directory or in the cooked archive.
 Edit the courier spawn, wall shapes, cell and gate positions, patrol placement, or the
 `Round rules` entity. World coordinates use +Y up. The arena
 needs one `Pilot`, one `ExtractionGate`, three `PowerCell` roles, and three `PatrolDrone` roles,
@@ -55,15 +65,17 @@ to a sprite material and its shader.
 With `hot-reload`, the game watches the project `assets` directory and validates the active scene
 and asset changes together. Invalid edits leave the last good scene, pixels, material, and round
 in place. A valid reload keeps the current timer, shields, collected cells, and pilot position.
-New round rules and the authored pilot spawn take effect on restart.
-The game rescans and loads the small dependency set during its next frame after a coalesced change.
+New round rules and the authored pilot spawn take effect on restart. The watcher rescans and
+validates the active scene's dependencies after a coalesced change, then publishes the revision
+for the next frame. Paused Play also presents live asset changes.
 
 Play can open a temporary snapshot while reading assets from the original project. At launch the
-game compares the effective snapshot to the expanded saved entry scene by entity UUID. Added or
+game compares the effective snapshot to the expanded saved scene by entity UUID. Added or
 removed rows, name and hierarchy edits, and edited component fields in the snapshot stay pinned.
 Unedited fields follow saves and prefab changes on disk. A snapshot for another document, or one
 without a readable baseline at launch, owns the scene rows for that Play session. Textures and
-materials still follow their project assets. The game never writes the snapshot or source files.
+materials still follow their project assets. Play keeps progress in memory and leaves the snapshot
+and project assets on disk as supplied by the editor and watcher.
 
 The editor launches `game --editor-play <scene-path>` with piped stdin. It receives
 `NARA_EDITOR ready` after the first game frame with HUD. Send `pause`, `step`, or `resume`, one
@@ -78,8 +90,10 @@ Measure from a source save to receipt of this line after the matching game frame
 ## Headless
 
 The `simulation` feature uses the same game plugin and checks the same authored assets with exact
-fixed ticks and mock audio. The replay checks wall collision, shield depletion, restart, and a
-complete escape. Repeated runs compare their results for deterministic behavior.
+fixed ticks and mock audio. The stress replay checks wall collision, shield depletion, restart,
+and a complete Sector 1 escape. Repeated runs compare their results for deterministic behavior.
+The headless test suite also exercises the asynchronous switch, Sector 2 autoplay, and a full
+Sector 2 clear after restarting from saved progress in a temporary directory.
 
 ```sh
 cd reference-game
@@ -97,7 +111,8 @@ nara play reference-game --trusted
 nara play reference-game --trusted --bin headless -- --stress 8
 ```
 
-The `nara_schema` target builds with the default `schema` feature and exports `RunRules` and the
-four arena roles. It also builds with `--no-default-features --features schema`. `GamePlugin`
-applies the scene's rules to the timer, flight speed, and shield count. Game logic, the animated
-courier texture, and sound cues live in Rust. `nara.toml` supplies project metadata to the CLI.
+The `nara_schema` target builds with the default `schema` feature and exports `RunRules`, the four
+arena roles, and `AudioClipSource`. It also builds with `--no-default-features --features schema`.
+`GamePlugin` applies the scene's rules to the timer, flight speed, and shield count. The animated
+courier texture and moment-to-moment gameplay cues live in Rust. `nara.toml` supplies project
+metadata to the CLI.

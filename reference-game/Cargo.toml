@@ -13,13 +13,12 @@ resolver = "3"
 
 [features]
 default = ["hot-reload", "schema"]
-schema = ["nara/serde"]
+schema = ["nara/serde", "nara/scene-cooked", "nara/audio"]
 source = [
     "dep:nara_asset",
-    "nara/scene-authoring",
+    "nara/scene-cook",
     "nara/material-authoring",
-    "nara_asset/authoring",
-    "nara_asset/image-import",
+    "nara/asset-image-import",
 ]
 hot-reload = ["source", "nara_asset/hot-reload"]
 simulation = ["nara/physics-2d", "nara/audio"]

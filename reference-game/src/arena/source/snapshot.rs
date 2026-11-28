@@ -1,16 +1,17 @@
 use std::{collections::BTreeMap, error::Error};
 
 use nara::{
+    prelude::{AssetId, RuntimeAssetSource},
     reflect::ComponentValue,
     scene::authoring::{SceneComponent, SceneDocument, SceneEntity},
 };
-use nara_asset::ProjectAssetDatabase;
 
 use super::SourceProject;
 
 pub(crate) enum SceneLayers {
     Saved,
     Snapshot {
+        asset: AssetId,
         initial: SceneDocument,
         baseline: Option<SceneDocument>,
     },
@@ -19,17 +20,18 @@ pub(crate) enum SceneLayers {
 impl SceneLayers {
     pub fn capture(
         project: &SourceProject,
-        assets: &ProjectAssetDatabase,
-        initial: &SceneDocument,
-        snapshot: bool,
+        assets: &RuntimeAssetSource,
+        asset: AssetId,
+        snapshot: Option<SceneDocument>,
     ) -> Self {
-        if snapshot {
+        if let Some(initial) = snapshot {
             let baseline = project
-                .read_entry(assets)
+                .read_scene(assets, asset)
                 .ok()
                 .filter(|scene| scene.id == initial.id);
             Self::Snapshot {
-                initial: initial.clone(),
+                asset,
+                initial,
                 baseline,
             }
         } else {
@@ -40,19 +42,19 @@ impl SceneLayers {
     pub fn read(
         &self,
         project: &SourceProject,
-        assets: &ProjectAssetDatabase,
+        assets: &RuntimeAssetSource,
+        active: AssetId,
     ) -> Result<SceneDocument, Box<dyn Error>> {
         match self {
-            Self::Saved => project.read_entry(assets),
             Self::Snapshot {
+                asset,
                 initial,
-                baseline: None,
-            } => Ok(initial.clone()),
-            Self::Snapshot {
-                initial,
-                baseline: Some(baseline),
-            } => {
-                let disk = project.read_entry(assets)?;
+                baseline,
+            } if *asset == active => {
+                let Some(baseline) = baseline else {
+                    return Ok(initial.clone());
+                };
+                let disk = project.read_scene(assets, active)?;
                 if disk.id != baseline.id {
                     return Err(
                         "the saved Night Relay scene changed document UUID during Play".into(),
@@ -60,6 +62,7 @@ impl SceneLayers {
                 }
                 Ok(overlay(baseline, initial, disk))
             }
+            _ => project.read_scene(assets, active),
         }
     }
 }

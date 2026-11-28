@@ -1,60 +1,26 @@
 use std::{f32::consts::FRAC_PI_2, time::Duration};
 
-#[cfg(feature = "source")]
-use nara::scene::authoring::SceneDocument;
 use nara::{
+    audio::AudioBusId,
     ecs::{Single, bevy_ecs::error::Result as SystemResult, schedule::IntoScheduleConfigs},
     prelude::*,
+    scene::SceneUpdateSet,
 };
 
 use crate::{
     RunRules,
-    arena::{Actor, Arena, CELL_COUNT, SceneActor},
-    audio::Sounds,
+    arena::{Actor, Arena, ArenaPlan, CELL_COUNT, SceneActor, SceneRow},
+    audio::{ARRIVAL_BUS, Sounds},
+    campaign::{Campaign, Sector, resolve_switch},
 };
 
 const HIT_COOLDOWN: Duration = Duration::from_millis(950);
 const PLUGIN: PluginId = PluginId::new("night-relay.game");
 const DECLARATION: PluginDeclaration = PluginDeclaration::new(PLUGIN, PluginCategory::Runtime);
 
-/// Installs the shared arena and fixed simulation after Nara's `DefaultPlugins`.
-#[derive(Clone, Debug)]
-pub struct GamePlugin {
-    scene: GameScene,
-    rules_override: Option<RunRules>,
-}
-
-#[derive(Clone, Debug)]
-enum GameScene {
-    #[cfg(feature = "source")]
-    Source(SceneDocument),
-    #[cfg(feature = "desktop")]
-    Cooked(Vec<Entity>),
-}
-
-impl GamePlugin {
-    /// Uses a source scene whose prefab instances have already been expanded.
-    #[cfg(feature = "source")]
-    pub fn from_scene(scene: SceneDocument) -> Self {
-        Self {
-            scene: GameScene::Source(scene),
-            rules_override: None,
-        }
-    }
-
-    #[cfg(feature = "desktop")]
-    pub(crate) fn from_cooked_entities(entities: Vec<Entity>) -> Self {
-        Self {
-            scene: GameScene::Cooked(entities),
-            rules_override: None,
-        }
-    }
-
-    pub fn with_rules(mut self, rules: RunRules) -> Self {
-        self.rules_override = Some(rules);
-        self
-    }
-}
+/// Binds the active scene to the shared fixed-step simulation.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn declaration() -> &'static PluginDeclaration {
@@ -63,35 +29,13 @@ impl Plugin for GamePlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         let world = app.world_mut()?;
-        let (arena, rules, _entities) = match &self.scene {
-            #[cfg(feature = "source")]
-            GameScene::Source(scene) => {
-                crate::arena::source::SourceScene::prepare(scene, self.rules_override)
-                    .map_err(setup_error)?
-                    .spawn(world)
-            }
-            #[cfg(feature = "desktop")]
-            GameScene::Cooked(entities) => {
-                use crate::arena::{ArenaPlan, SceneRow};
-                let rows = entities.iter().map(|&id| {
-                    world
-                        .get_entity(id)
-                        .map(SceneRow::cooked)
-                        .map_err(|error| error.to_string())
-                });
-                let (arena, rules) = ArenaPlan::prepare(rows, self.rules_override)
-                    .map_err(setup_error)?
-                    .bind(world, entities);
-                (arena, rules, entities.clone())
-            }
-        };
-        #[cfg(all(feature = "desktop", feature = "hot-reload"))]
-        app.insert_resource(ArenaEntities(_entities))?;
-        let round = Round::new(rules, arena.pilot.pose);
-        app.init_resource::<PilotInput>()?
-            .insert_resource(round)?
-            .insert_resource(arena)?
-            .add_systems(Startup, setup_round)?
+        let instance = world
+            .get_resource::<SceneManager>()
+            .and_then(SceneManager::main_instance)
+            .ok_or_else(|| setup_error("Night Relay requires an active scene"))?;
+        bind_arena(world, instance, true).map_err(setup_error)?;
+        app.add_systems(Startup, setup_sounds)?
+            .add_systems(CoreStage::TaskUpdate, resolve_switch.after(SceneUpdateSet))?
             .add_systems(
                 FixedUpdate,
                 (advance_round, sync_actors)
@@ -103,10 +47,10 @@ impl Plugin for GamePlugin {
     }
 }
 
-fn setup_error(message: String) -> PluginError {
+fn setup_error(message: impl ToString) -> PluginError {
     PluginError::SetupFailed {
         plugin: PLUGIN,
-        message,
+        message: message.to_string(),
     }
 }
 
@@ -203,13 +147,44 @@ impl PilotCharacter {
     }
 }
 
-#[cfg(all(feature = "desktop", feature = "hot-reload"))]
-#[derive(Resource)]
-pub(crate) struct ArenaEntities(pub Vec<Entity>);
+#[derive(Clone, Copy, Resource)]
+pub(crate) struct ArenaInstance(pub SceneInstanceId);
 
-fn setup_round(world: &mut World) -> SystemResult {
-    let pilot_radius = world.resource::<Arena>().pilot.radius;
-    world.insert_resource(PilotCharacter::new(pilot_radius)?);
+pub(crate) fn bind_arena(
+    world: &mut World,
+    instance: SceneInstanceId,
+    reset_round: bool,
+) -> SystemResult {
+    let entities = world
+        .resource::<SceneManager>()
+        .entities(instance)
+        .ok_or("the Night Relay scene is not ready")?
+        .values()
+        .copied()
+        .collect::<Vec<_>>();
+    let rows = entities.iter().map(|&entity| {
+        world
+            .get_entity(entity)
+            .map(SceneRow::from_entity)
+            .map_err(|error| error.to_string())
+    });
+    let plan = ArenaPlan::prepare(rows)?;
+    let character = PilotCharacter::new(plan.arena.pilot.radius)?;
+    let (arena, rules) = plan.bind(world, &entities);
+    if reset_round {
+        world.insert_resource(Round::new(rules, arena.pilot.pose));
+        world.insert_resource(PilotInput::default());
+    }
+    world.insert_resource(arena);
+    world.insert_resource(character);
+    world.insert_resource(ArenaInstance(instance));
+    Ok(())
+}
+
+fn setup_sounds(world: &mut World) -> SystemResult {
+    world
+        .resource_mut::<AudioMixer>()
+        .add_bus(AudioBusId::new(ARRIVAL_BUS))?;
     let sounds = Sounds::register(world)?;
     world.insert_resource(sounds);
     Ok(())
@@ -222,14 +197,23 @@ pub(crate) fn advance_round(
     rules: Single<&RunRules>,
     time: Res<FixedTime>,
     (physics, pilot): (Res<PhysicsWorld2d>, Res<PilotCharacter>),
-    arena: Res<Arena>,
+    (arena, instance): (Res<Arena>, Res<ArenaInstance>),
     sounds: Res<Sounds>,
+    (campaign, mut scenes): (Option<ResMut<Campaign>>, ResMut<SceneManager>),
 ) -> SystemResult {
     if input.restart {
         input.restart = false;
-        *round = Round::new(rules.checked()?, arena.pilot.pose);
+        if !campaign
+            .as_ref()
+            .is_some_and(|campaign| campaign.pending.is_some())
+        {
+            *round = Round::new(rules.checked()?, arena.pilot.pose);
+        }
         return Ok(());
     }
+    let mut play = |clip| {
+        commands.spawn((SceneMember(instance.0), AudioPlayer::one_shot(clip)));
+    };
     if round.status != RoundStatus::Running {
         return Ok(());
     }
@@ -238,7 +222,7 @@ pub(crate) fn advance_round(
     round.remaining -= delta;
     if round.remaining.is_zero() {
         round.status = RoundStatus::Failed(Failure::TimeExpired);
-        commands.spawn(AudioPlayer::one_shot(sounds.expired));
+        play(sounds.expired);
         return Ok(());
     }
 
@@ -272,7 +256,7 @@ pub(crate) fn advance_round(
     {
         round.shields -= 1;
         round.cooldown = HIT_COOLDOWN;
-        commands.spawn(AudioPlayer::one_shot(sounds.impact));
+        play(sounds.impact);
         if round.shields == 0 {
             round.status = RoundStatus::Failed(Failure::ShieldDepleted);
             return Ok(());
@@ -282,14 +266,20 @@ pub(crate) fn advance_round(
     for (collected, cell) in round.cells.iter_mut().zip(arena.cells) {
         if !*collected && position.distance_squared(cell.pose.translation) < cell.radius.powi(2) {
             *collected = true;
-            commands.spawn(AudioPlayer::one_shot(sounds.pickup));
+            play(sounds.pickup);
         }
     }
     if round.can_extract()
         && position.distance_squared(arena.gate.pose.translation) < arena.gate.radius.powi(2)
     {
         round.status = RoundStatus::Escaped;
-        commands.spawn(AudioPlayer::one_shot(sounds.escaped));
+        play(sounds.escaped);
+        if let Some(mut campaign) = campaign {
+            campaign.clear(round.elapsed);
+            if campaign.sector == Sector::One {
+                campaign.pending = Some(scenes.switch_scene(Sector::Two.asset()?));
+            }
+        }
     }
     Ok(())
 }
