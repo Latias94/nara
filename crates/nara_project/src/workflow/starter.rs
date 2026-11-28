@@ -100,7 +100,6 @@ pub fn create_project(
         ("assets/white.png.meta", image_meta.as_bytes()),
         ("src/lib.rs", include_bytes!("template/lib.rs")),
         ("src/main.rs", main.as_bytes()),
-        ("src/source.rs", include_bytes!("template/source.rs")),
         (
             "src/bin/nara_schema.rs",
             include_bytes!("template/nara_schema.rs"),

@@ -68,12 +68,11 @@ fn starter_uses_the_checkout_patch_sources_and_a_code_first_manifest() {
             .iter()
             .any(|feature| feature.as_str() == Some("nara/asset-cooked"))
     );
-    assert!(
-        source
-            .iter()
-            .any(|feature| feature.as_str() == Some("nara/asset-authoring"))
-    );
+    for required in ["nara/scene-cook", "nara/asset-image-import"] {
+        assert!(source.iter().any(|feature| feature.as_str() == Some(required)));
+    }
     assert!(project.join("src/bin/nara_schema.rs").is_file());
+    assert!(!project.join("src/source.rs").exists());
 
     let manifest = super::check_project(&project).unwrap();
     assert_eq!(manifest.project.name, "my-game");

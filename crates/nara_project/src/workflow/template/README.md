@@ -3,9 +3,9 @@
 From the project directory, run `nara play . --trusted` or `cargo run --features desktop` to open
 a window with a spinning sprite. Change `game.Spin` in `assets/main.scene.ron` to adjust the speed.
 The scene mounts `assets/sprite.prefab.ron`, which defines the sprite's size, tint, starting
-transform, and PNG image. `src/source.rs` resolves these assets by their `.meta` IDs. Move or
-rename an asset together with its `.meta` file to keep its references working. Save scene changes
-before using Play in the editor. Stop closes the game.
+transform, and PNG image. The development game resolves assets by their `.meta` IDs and cooks
+the scene in memory. Move or rename an asset together with its `.meta` file to keep its references
+working. Save scene changes before using Play in the editor. Stop closes the game.
 
 ## Export
 
@@ -19,9 +19,9 @@ scene and texture. If you change the entry scene, update its asset ID in `[deliv
 ## Project checks and Schema
 
 Run `nara check .` to validate the project manifest, Cargo package, and source assets. The project
-manifest requires `[project]` with `name` and `version`. If you change `paths.assets`, update
-`ASSET_DIRECTORY` in `src/source.rs` as well. Tooling can read optional `[window]` metadata (`title`,
-`width`, and `height`). The running app configures its window in Rust.
+manifest requires `[project]` with `name` and `version`. If you change `paths.assets`, pass the same
+path to `RuntimeAssetSource::from_project_dir` in `src/main.rs`. Tooling can read optional `[window]`
+metadata (`title`, `width`, and `height`). The running app configures its window in Rust.
 
 Run `nara schema . --trusted` to build `src/bin/nara_schema.rs` and update `.nara/schema_cache.json`.
 Run `nara schema .` to read the last cached catalog. Trust permits Cargo and project code to run.

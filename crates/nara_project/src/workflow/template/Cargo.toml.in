@@ -14,7 +14,7 @@ name = "game_components"
 
 [features]
 default = ["source", "schema"]
-source = ["nara/asset-authoring", "nara/asset-image-import", "nara/scene-authoring"]
+source = ["nara/scene-cook", "nara/asset-image-import"]
 schema = ["nara/serde"]
 desktop = [
     "nara/asset-cooked",
