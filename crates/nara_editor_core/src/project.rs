@@ -367,9 +367,7 @@ impl EditorProject {
             let mut database = self.database.clone();
             database.remove_exact(record);
             let next = self.project_asset_path(&relative)?;
-            if let Some(previous) = database.record_for_path(&next).cloned() {
-                database.remove_exact(&previous);
-            }
+            self.remove_replaced_record(&mut database, &next, &path)?;
             database.insert(AssetRecord::from_meta(next, meta))?;
             self.install_database(database)?;
         }
@@ -420,9 +418,7 @@ impl EditorProject {
         let mut database = self.database.clone();
         let key = self.project_asset_path(&path)?;
         let id = AssetId::try_from_uuid(nara_core::identity::try_uuid_v7()?)?;
-        if let Some(previous) = database.record_for_path(&key).cloned() {
-            database.remove_exact(&previous);
-        }
+        self.remove_replaced_record(&mut database, &key, &destination)?;
         let meta = format!("AssetMeta(id: \"{id}\", importer: \"nara.scene\", settings: ())\n");
         database.insert(AssetRecord::from_meta(key, AssetMeta::from_ron(&meta)?))?;
         let entry = self.resolve_entry(&database)?;
@@ -453,6 +449,27 @@ impl EditorProject {
         (self.entry_scene, self.entry_asset) = entry;
         *session = staged_session;
         Ok(id)
+    }
+
+    fn remove_replaced_record(
+        &self,
+        database: &mut ProjectAssetDatabase,
+        key: &AssetSourcePath,
+        destination: &Path,
+    ) -> io::Result<()> {
+        let Some(previous) = database.record_for_path_ignoring_case(key).cloned() else {
+            return Ok(());
+        };
+        if previous.path() != key {
+            let old_path = self.directory.join(previous.path().as_str());
+            match old_path.canonicalize() {
+                Ok(actual) if actual != destination => return Ok(()),
+                Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+                _ => {}
+            }
+        }
+        database.remove_exact(&previous);
+        Ok(())
     }
 
     pub fn relative_document_path(&self, path: &Path) -> io::Result<AssetPath> {

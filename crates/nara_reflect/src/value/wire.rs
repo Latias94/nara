@@ -127,6 +127,12 @@ impl<'de> Visitor<'de> for ValueVisitor {
             .next_element::<String>()?
             .ok_or_else(|| de::Error::invalid_length(0, &self))?;
         let value = sequence.next_element_seed(PayloadSeed(Some(&kind)))?;
+        if value.is_some() && sequence.next_element::<de::IgnoredAny>()?.is_some() {
+            return Err(de::Error::invalid_length(
+                3,
+                &"at most two component value elements",
+            ));
+        }
         decode_value(&kind, value)
     }
 }

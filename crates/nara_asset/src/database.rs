@@ -182,12 +182,9 @@ impl ProjectAssetDatabase {
             });
         }
 
-        let case_key = record.path().as_str().to_lowercase();
-        if let Some(existing_path) = self.case_folded_paths.get(&case_key).cloned()
-            && existing_path != *record.path()
-        {
+        if let Some(existing) = self.record_for_path_ignoring_case(record.path()) {
             return Err(AssetDatabaseError::CaseInsensitivePathCollision {
-                existing_path,
+                existing_path: existing.path().clone(),
                 new_path: record.path().clone(),
             });
         }
@@ -198,6 +195,14 @@ impl ProjectAssetDatabase {
     #[must_use]
     pub fn record_for_path(&self, path: &AssetSourcePath) -> Option<&AssetRecord> {
         self.by_path.get(path)
+    }
+
+    /// Finds the record that occupies this path under the index's case-insensitive uniqueness rule.
+    #[must_use]
+    pub fn record_for_path_ignoring_case(&self, path: &AssetSourcePath) -> Option<&AssetRecord> {
+        self.case_folded_paths
+            .get(&path.as_str().to_lowercase())
+            .and_then(|path| self.record_for_path(path))
     }
 
     #[must_use]

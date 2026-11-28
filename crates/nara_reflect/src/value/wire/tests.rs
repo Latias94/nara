@@ -6,6 +6,32 @@ use serde::Deserialize;
 use crate::{ComponentFloat, ComponentValue};
 
 #[test]
+fn toml_component_value_sequences_reject_extra_elements() {
+    #[derive(Deserialize)]
+    struct Document {
+        component: ComponentValue,
+    }
+
+    for (value, expected) in [
+        (r#"["bool", true]"#, ComponentValue::Bool(true)),
+        (r#"["null"]"#, ComponentValue::Null),
+    ] {
+        let source = format!("component = {value}");
+        assert_eq!(
+            toml::from_str::<Document>(&source).unwrap().component,
+            expected
+        );
+    }
+    for value in [
+        r#"["bool", true, "extra"]"#,
+        r#"["list", [["bool", true, "extra"]]]"#,
+    ] {
+        let source = format!("component = {value}");
+        assert!(toml::from_str::<Document>(&source).is_err(), "{source}");
+    }
+}
+
+#[test]
 fn direct_ron_container_children_keep_buffered_tuple_and_brace_map_forms() {
     assert_decodes_in_both_orders(
         "list",

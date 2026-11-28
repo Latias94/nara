@@ -126,12 +126,18 @@ fn saving_a_moved_document_resolves_its_sidecar_again() {
     fs::create_dir(assets.join("archive")).unwrap();
     let renamed = assets.join("archive/moved.SCENE.RON");
     document(1).write(&original).unwrap();
+    let stale_path = AssetPath::new("archive/MOVED.scene.ron").unwrap();
+    let stale = assets.join(stale_path.as_str());
+    document(4).write(&stale).unwrap();
     let mut project = EditorProject::open(directory.path()).unwrap();
     let id = project.asset_reference(&path).unwrap().id;
+    let stale_id = project.asset_reference(&stale_path).unwrap().id;
     project.set_entry_scene(Some(path.clone())).unwrap();
     let loaded = project.open_document(&path).unwrap();
     let mut session = EditorSession::new(loaded, EditorRegistry::default());
 
+    fs::remove_file(&stale).unwrap();
+    fs::remove_file(assets.join("archive/MOVED.scene.ron.meta")).unwrap();
     fs::rename(&original, &renamed).unwrap();
     fs::rename(
         assets.join("first.scene.ron.meta"),
@@ -167,6 +173,12 @@ fn saving_a_moved_document_resolves_its_sidecar_again() {
     );
     assert!(!assets.join("unrelated.png.meta").exists());
     assert!(!assets.join("first.scene.ron.meta").exists());
+    assert!(
+        project
+            .asset_database()
+            .record_for_stable_id(stale_id.into())
+            .is_none()
+    );
     assert_eq!(
         project.entry_scene().map(AssetPath::as_str),
         Some("archive/moved.SCENE.RON")
@@ -227,6 +239,39 @@ fn a_new_scene_cannot_take_an_existing_sidecar() {
     );
     assert!(session.document().path().is_none() && session.is_dirty());
     assert!(project.assets().entries().is_empty());
+}
+
+#[test]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn new_scene_can_reuse_the_name_of_a_deleted_asset_with_different_case() {
+    let directory = project();
+    let assets = directory.path().join("assets");
+    let path = AssetPath::new("Level.scene.ron").unwrap();
+    let old_path = assets.join(path.as_str());
+    document(1).write(&old_path).unwrap();
+    let mut project = EditorProject::open(directory.path()).unwrap();
+    let old_id = project.asset_reference(&path).unwrap().id;
+    fs::remove_file(&old_path).unwrap();
+    fs::remove_file(assets.join("Level.scene.ron.meta")).unwrap();
+
+    let path = AssetPath::new("level.scene.ron").unwrap();
+    let destination = assets.join(path.as_str());
+    let scene = document(2);
+    let mut session = EditorSession::new(
+        nara_editor_core::EditorDocument::new(scene.clone()).unwrap(),
+        EditorRegistry::default(),
+    );
+    let new_id = project.save_new_scene(&mut session, &destination).unwrap();
+    assert_ne!(new_id, old_id);
+    assert_eq!(project.asset_reference(&path).unwrap().id, new_id);
+    assert!(
+        project
+            .asset_database()
+            .record_for_stable_id(old_id.into())
+            .is_none()
+    );
+    assert_eq!(SceneDocument::read(destination).unwrap(), scene);
+    assert!(!session.is_dirty());
 }
 
 #[test]

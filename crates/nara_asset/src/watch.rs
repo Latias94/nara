@@ -22,6 +22,8 @@ use crate::image::{IMAGE_PLUGIN_ID, ImageAsset, ImageSourceDirectory};
 use crate::{AssetEvents, AssetServer, AssetStates, Assets, LoadState};
 
 const QUIET_INTERVAL: Duration = Duration::from_millis(20);
+const MAX_BATCH_INTERVAL: Duration = Duration::from_millis(100);
+const REMOUNT_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 
 /// Backoff for a single revision blocked by a sharing error or an incomplete asset pair.
 pub const RELOAD_RETRY_DELAYS: [Duration; 3] = [
@@ -57,7 +59,7 @@ pub fn is_transient_reload_error(mut error: &(dyn Error + 'static)) -> bool {
     }
 }
 
-/// Watches a native asset directory and coalesces changes until it is quiet.
+/// Watches a native asset directory and coalesces changes until it is quiet or the batch expires.
 /// Dropping the watcher stops observation.
 #[derive(Resource)]
 pub struct AssetWatcher {
@@ -131,17 +133,22 @@ impl AssetWatcher {
         })
     }
 
-    /// Checks for a quiet change without consuming it or touching the filesystem.
+    /// Checks for a ready batch without consuming it or touching the filesystem.
     pub fn change_is_ready(&self) -> bool {
         self.changes.lock().unwrap().ready(Instant::now())
     }
 
-    /// Takes one quiet batch. Notifications received after the take form the next batch.
-    /// A directory creation or replacement may reconfigure native watches here.
+    /// Takes one ready batch. Notifications received after the take form the next batch.
+    /// A directory creation or replacement may reconfigure native watches here. A failed
+    /// remount leaves a batch pending for retry.
     pub fn take_changed(&self) -> notify::Result<bool> {
+        let mut watches = self.watches.lock()?;
         let change = self.changes.lock().unwrap().take(Instant::now());
-        if change == Some(true) {
-            self.watches.lock()?.remount(&self.root)?;
+        if change == Some(true)
+            && let Err(error) = watches.remount(&self.root)
+        {
+            self.changes.lock().unwrap().retry_remount(Instant::now());
+            return Err(error);
         }
         Ok(change.is_some())
     }
@@ -149,22 +156,45 @@ impl AssetWatcher {
 
 #[derive(Default)]
 struct PendingChange {
-    deadline: Option<Instant>,
+    batch: Option<ChangeBatch>,
+    retry_at: Option<Instant>,
+}
+
+struct ChangeBatch {
+    started: Instant,
+    deadline: Instant,
     remount: bool,
 }
 
 impl PendingChange {
     fn record(&mut self, now: Instant, remount: bool) {
-        self.deadline = Some(now + QUIET_INTERVAL);
-        self.remount |= remount;
+        let batch = self.batch.get_or_insert(ChangeBatch {
+            started: now,
+            deadline: now,
+            remount: false,
+        });
+        batch.deadline = (now + QUIET_INTERVAL).min(batch.started + MAX_BATCH_INTERVAL);
+        batch.remount |= remount;
+    }
+
+    fn retry_remount(&mut self, now: Instant) {
+        self.record(now, true);
+        self.retry_at = Some(now + REMOUNT_RETRY_INTERVAL);
     }
 
     fn ready(&self, now: Instant) -> bool {
-        self.deadline.is_some_and(|deadline| now >= deadline)
+        self.batch
+            .as_ref()
+            .is_some_and(|batch| now >= batch.deadline)
+            && self.retry_at.is_none_or(|retry_at| now >= retry_at)
     }
 
     fn take(&mut self, now: Instant) -> Option<bool> {
-        self.ready(now).then(|| std::mem::take(self).remount)
+        if !self.ready(now) {
+            return None;
+        }
+        self.retry_at = None;
+        self.batch.take().map(|batch| batch.remount)
     }
 }
 
@@ -190,10 +220,14 @@ fn relevant_change(event: notify::Result<notify::Event>, root: &Path) -> Option<
     };
     if topology && paths.iter().any(|path| root.starts_with(path)) {
         Some(true)
-    } else if paths
-        .iter()
-        .any(|path| path.starts_with(root) && path != root)
-    {
+    } else if paths.iter().any(|path| {
+        path.strip_prefix(root).is_ok_and(|relative| {
+            !relative.as_os_str().is_empty()
+                && relative
+                    .components()
+                    .all(|part| !part.as_os_str().as_encoded_bytes().starts_with(b"."))
+        })
+    }) {
         Some(false)
     } else {
         None
@@ -309,8 +343,19 @@ fn refresh_images(
     mut states: ResMut<AssetStates>,
     mut events: ResMut<AssetEvents>,
 ) -> Result {
-    if watcher.root != directory.path() || !watcher.take_changed()? {
+    if watcher.root != directory.path() {
         return Ok(());
+    }
+    match watcher.take_changed() {
+        Ok(true) => {}
+        Ok(false) => return Ok(()),
+        // On Windows, notify may report a directory it cannot open as missing.
+        Err(error) if matches!(error.kind, notify::ErrorKind::PathNotFound) => return Ok(()),
+        Err(error) if matches!(&error.kind, notify::ErrorKind::Io(source) if is_transient_reload_error(source)) =>
+        {
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
     }
     let loaded: Vec<_> = images
         .iter()
