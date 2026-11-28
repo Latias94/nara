@@ -9,6 +9,7 @@ license.workspace = true
 bevy_ecs.workspace = true
 blake3 = { workspace = true, optional = true }
 nara_app.workspace = true
+nara_asset = { workspace = true, optional = true, features = ["runtime"] }
 nara_core.workspace = true
 nara_reflect = { workspace = true, optional = true }
 ron = { workspace = true, optional = true }
@@ -25,7 +26,9 @@ tempfile = "3.27"
 [features]
 authoring = ["dep:nara_reflect", "nara_reflect/serde", "dep:ron", "dep:serde", "dep:thiserror", "dep:uuid", "uuid/v5"]
 cooked = ["dep:blake3", "dep:nara_reflect", "nara_reflect/postcard", "dep:thiserror", "dep:uuid"]
-cook = ["authoring", "cooked"]
+cook = ["authoring", "cooked", "nara_asset?/authoring"]
+runtime = ["cooked", "dep:nara_asset", "nara_asset/cooked"]
+save = ["dep:blake3", "dep:nara_reflect", "nara_reflect/postcard", "dep:thiserror"]
 
 [[example]]
 name = "cooked_scene_benchmark"

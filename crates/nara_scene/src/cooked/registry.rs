@@ -20,7 +20,7 @@ use super::{
 };
 
 /// Native component decoders for a particular game. Extra registrations may be unused by a scene.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct CookedRegistry {
     entries: BTreeMap<u64, Entry>,
 }
@@ -133,6 +133,7 @@ impl CookedRegistry {
 type DecodeColumn =
     fn(&CookedScene<'_>, &Column<'_>, &Entry) -> Result<Box<dyn ReadyColumn>, CookedSceneError>;
 
+#[derive(Clone)]
 struct Entry {
     component: &'static str,
     schema_hash: [u8; 32],

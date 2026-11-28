@@ -92,8 +92,8 @@ jobs:
           --test schema_registration --test kernel --test text --test clip --test generation_workflow
           --test spatial_presentation --test editor_session --test project_authoring --test compact_asset_reference --test authoring
           --test prefab --test schema_v2 --test project_asset_database --test compact_float_defaults --test derive_ui
-          --test cooked --test cooked_assets --test import_cache --test import_image --test runtime_loading --test runtime_sprite_assets
-          --features nara_asset/tasks,nara_asset/cook,nara_asset/image-import,nara_asset/hot-reload,nara_input/gamepad,nara_project/delivery,nara_scene/cook,nara_reflect/serde,nara_reflect/postcard,nara_render/animation,nara_render/material-authoring,nara_render/sprite-render,nara_render/sprite-source-hydration,nara_ui/runtime
+          --test cooked --test cooked_assets --test import_cache --test import_image --test runtime_loading --test runtime_sprite_assets --test runtime_scene
+          --features nara_asset/tasks,nara_asset/cook,nara_asset/image-import,nara_asset/hot-reload,nara_input/gamepad,nara_project/delivery,nara_scene/cook,nara_scene/runtime,nara_scene/save,nara_reflect/serde,nara_reflect/postcard,nara_render/animation,nara_render/material-authoring,nara_render/sprite-render,nara_render/sprite-source-hydration,nara_ui/runtime
           --no-tests fail --no-fail-fast
       - name: Test offscreen WGPU passes on software Vulkan
         if: runner.os == 'Linux'

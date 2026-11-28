@@ -8,7 +8,10 @@ use std::{
 
 use nara_app::{App, CoreStage, PluginError};
 use nara_core::AssetId;
-use nara_ecs::World;
+use nara_ecs::{
+    World,
+    schedule::{IntoScheduleConfigs, SystemSet},
+};
 
 use crate::{
     ASSET_PLUGIN_ID, Asset, AssetError, AssetEvents, AssetId as RuntimeId, AssetPath,
@@ -68,7 +71,13 @@ impl AssetLoadContext<'_> {
     #[cfg(feature = "authoring")]
     #[must_use]
     pub fn meta(&self) -> Option<crate::AssetMeta> {
-        self.backend.meta(self.id)
+        self.meta_for(self.id)
+    }
+
+    #[cfg(feature = "authoring")]
+    #[must_use]
+    pub fn meta_for(&self, id: AssetId) -> Option<crate::AssetMeta> {
+        self.backend.meta(id)
     }
 
     pub fn read_dependency(
@@ -389,10 +398,19 @@ fn load_sync(
     Ok(handle)
 }
 
+/// Asset publication in `CoreStage::TaskUpdate`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+pub enum AssetLoadSet {
+    Publish,
+}
+
 pub(crate) fn install(app: &mut App) -> Result<(), PluginError> {
     #[cfg(all(feature = "tasks", not(target_arch = "wasm32")))]
     app.init_resource::<pending::PendingLoads>()?;
-    app.add_systems(CoreStage::TaskUpdate, update_loads)?;
+    app.add_systems(
+        CoreStage::TaskUpdate,
+        update_loads.in_set(AssetLoadSet::Publish),
+    )?;
     Ok(())
 }
 

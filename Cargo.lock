@@ -2271,6 +2271,7 @@ dependencies = [
  "bevy_ecs",
  "blake3",
  "nara_app",
+ "nara_asset",
  "nara_core",
  "nara_reflect",
  "ron",

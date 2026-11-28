@@ -17,6 +17,8 @@ pub use nara_physics2d as physics2d;
 pub use nara_render as render;
 #[cfg(feature = "render-wgpu")]
 pub use nara_render::gpu as render_wgpu;
+#[cfg(all(feature = "save", any(unix, windows)))]
+pub use nara_scene::save;
 #[cfg(feature = "runtime-ui")]
 pub use nara_ui as ui;
 #[cfg(feature = "runtime-window")]
@@ -57,10 +59,10 @@ pub mod prelude {
     };
     #[cfg(feature = "audio")]
     pub use nara_audio::{
-        AudioClip, AudioFinished, AudioListener, AudioMixer, AudioPlayback, AudioPlayer,
-        SpatialAudio,
+        AudioClip, AudioClipSource, AudioFinished, AudioListener, AudioMixer, AudioPlayback,
+        AudioPlayer, SpatialAudio,
     };
-    pub use nara_core::{Color, Vec2, Vec3};
+    pub use nara_core::{AssetId, Color, Vec2, Vec3};
     pub use nara_ecs::{
         Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, SystemParam, World,
     };
@@ -80,6 +82,8 @@ pub mod prelude {
     pub use nara_render::image::{
         ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin,
     };
+    #[cfg(all(feature = "runtime-2d", feature = "scene-cooked"))]
+    pub use nara_render::sprite::SpriteSourceHydrationPlugin;
     #[cfg(feature = "runtime-2d")]
     pub use nara_render::sprite::{Sprite, SpriteAnchor, SpriteMaterial, TextureRegion};
     #[cfg(feature = "runtime-2d")]
@@ -100,6 +104,12 @@ pub mod prelude {
     pub use nara_scene::spatial::{
         ChildOf, Children, GlobalTransform2d, InheritedVisibility, SpatialPlugin, SpatialSet,
         Transform2d, Visibility,
+    };
+    #[cfg(feature = "scene-cooked")]
+    pub use nara_scene::{
+        RegisterSceneComponent, SceneAsset, SceneEvent, SceneInstanceId, SceneLoadState,
+        SceneManager, SceneMember, ScenePlugin, SceneRegistry, switch_scene_asset_sync,
+        switch_scene_sync,
     };
     #[cfg(feature = "runtime-ui")]
     pub use nara_ui::{UiNode, UiRoot, UiRuntimeKey, UiText};

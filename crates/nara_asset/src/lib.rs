@@ -55,7 +55,7 @@ pub use product_identity::{AssetProductIdentityError, AssetProductRef, ImportedP
 pub use reference::AssetReferenceDemand;
 #[cfg(feature = "runtime")]
 pub use runtime::{
-    AssetAppExt, AssetLoadContext, AssetLoadError, AssetLoader, AssetLoaderRegistry,
+    AssetAppExt, AssetLoadContext, AssetLoadError, AssetLoadSet, AssetLoader, AssetLoaderRegistry,
     load_asset_sync, load_dependency_sync,
 };
 #[cfg(all(feature = "authoring", any(unix, windows)))]

@@ -10,6 +10,8 @@ impl PluginGroup for MinimalPlugins {
             .add_default::<nara_app::diagnostics::DiagnosticsPlugin>()
             .add_default::<nara_asset::AssetPlugin>()
             .add_default::<nara_scene::SpatialPlugin>();
+        #[cfg(feature = "scene-cooked")]
+        let plugins = plugins.add_default::<nara_scene::ScenePlugin>();
         #[cfg(feature = "runtime-input")]
         let plugins = plugins.add_default::<nara_input::InputPlugin>();
         plugins
@@ -95,6 +97,8 @@ impl PluginGroup for DefaultPlugins {
         let plugins = PluginGroupBuilder::new().add_group(MinimalPlugins);
         #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
         let plugins = plugins.add_default::<nara_render::image::ImagePlugin>();
+        #[cfg(all(feature = "runtime-2d", feature = "scene-cooked"))]
+        let plugins = plugins.add_default::<nara_render::sprite::SpriteSourceHydrationPlugin>();
         #[cfg(feature = "runtime-ui")]
         let plugins = plugins.add_default::<nara_ui::UiPlugin>();
         #[cfg(feature = "physics-2d")]

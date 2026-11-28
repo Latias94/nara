@@ -18,7 +18,12 @@ pub(crate) mod wire;
 
 use std::collections::BTreeMap;
 
-use bevy_ecs::{entity::Entity, hierarchy::ChildOf, world::World};
+use bevy_ecs::{
+    bundle::{Bundle, NoBundleEffect},
+    entity::Entity,
+    hierarchy::ChildOf,
+    world::World,
+};
 use nara_core::{AssetId, EntityUuid};
 use nara_reflect::{ComponentCodecError, ComponentRegistryError, ComponentTypeId};
 use thiserror::Error;
@@ -94,29 +99,52 @@ impl<'a> CookedScene<'a> {
         world: &mut World,
         registry: &CookedRegistry,
     ) -> Result<BTreeMap<EntityUuid, Entity>, CookedSceneError> {
-        let ready = registry.prepare(self)?;
-        let spawned: Vec<_> = world
-            .spawn_batch(std::iter::repeat_n((), self.entities.len()))
-            .collect();
-        world.insert_batch(self.entities.iter().enumerate().filter_map(|(index, row)| {
-            row.parent
-                .map(|parent| (spawned[index], ChildOf(spawned[parent])))
-        }));
-        for column in ready {
-            column.insert(world, &spawned);
-        }
-        Ok(self
-            .entities
-            .iter()
-            .map(|row| row.id)
-            .zip(spawned)
-            .collect())
+        Ok(self.prepare(registry)?.spawn(world, || ()))
+    }
+
+    pub(crate) fn prepare(
+        &self,
+        registry: &CookedRegistry,
+    ) -> Result<PreparedScene<'_>, CookedSceneError> {
+        Ok(PreparedScene {
+            columns: registry.prepare(self)?,
+            entities: &self.entities,
+        })
     }
 
     fn contains_entity(&self, id: EntityUuid) -> bool {
         self.entities
             .binary_search_by_key(&id, |row| row.id)
             .is_ok()
+    }
+}
+
+pub(crate) struct PreparedScene<'a> {
+    columns: Vec<Box<dyn registry::ReadyColumn>>,
+    entities: &'a [EntityRow],
+}
+
+impl PreparedScene<'_> {
+    pub(crate) fn spawn<B: Bundle<Effect: NoBundleEffect>>(
+        self,
+        world: &mut World,
+        bundle: impl FnMut() -> B,
+    ) -> BTreeMap<EntityUuid, Entity> {
+        let spawned: Vec<_> = world
+            .spawn_batch(std::iter::repeat_with(bundle).take(self.entities.len()))
+            .collect();
+        world.insert_batch(self.entities.iter().enumerate().filter_map(|(index, row)| {
+            row.parent
+                .map(|parent| (spawned[index], ChildOf(spawned[parent])))
+        }));
+        for column in self.columns {
+            column.insert(world, &spawned);
+        }
+        self.entities
+            .iter()
+            .map(|row| row.id)
+            .zip(spawned)
+            .collect()
     }
 }
 

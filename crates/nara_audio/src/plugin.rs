@@ -56,6 +56,16 @@ impl<const DEVICE: bool> Plugin for AudioPlugin<DEVICE> {
         })?;
         setup_audio(app.world_mut()?, mixer);
         register_clip_loader(app)?;
+        #[cfg(feature = "scene-runtime")]
+        if app.has_plugin(nara_scene::SCENE_PLUGIN_ID) {
+            use nara_scene::RegisterSceneComponent as _;
+
+            app.register_scene_component::<crate::AudioClipSource>()
+                .map_err(|error| PluginError::SetupFailed {
+                    plugin: AUDIO_PLUGIN_ID,
+                    message: error.to_string(),
+                })?;
+        }
         app.add_systems(
             CoreStage::FixedUpdate,
             (

@@ -135,7 +135,9 @@ parallel-executor = ["runtime-core", "nara_app/parallel-executor"]
 runtime-input = ["runtime-core", "dep:nara_input"]
 runtime-window = ["runtime-core", "dep:nara_window"]
 scene-authoring = ["runtime-core", "nara_scene/authoring"]
-scene-cooked = ["runtime-core", "nara_scene/cooked"]
+scene-cooked = ["save", "nara_scene/runtime", "nara_render?/sprite-source-hydration", "nara_audio?/scene-runtime"]
+scene-cook = ["scene-authoring", "scene-cooked", "nara_scene/cook", "asset-authoring"]
+save = ["runtime-core", "nara_scene/save"]
 runtime-2d = [
     "runtime-input",
     "runtime-window",

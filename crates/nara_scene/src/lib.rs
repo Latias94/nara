@@ -8,8 +8,18 @@ pub mod components;
 pub mod cook;
 #[cfg(feature = "cooked")]
 pub mod cooked;
+#[cfg(feature = "runtime")]
+mod runtime;
+#[cfg(all(feature = "save", any(unix, windows)))]
+pub mod save;
 pub mod spatial;
 
+#[cfg(feature = "runtime")]
+pub use runtime::{
+    RegisterSceneComponent, SCENE_PLUGIN_ID, SceneAsset, SceneAssetError, SceneAssetLoader,
+    SceneError, SceneEvent, SceneInstanceId, SceneLoadState, SceneManager, SceneMember,
+    ScenePlugin, SceneRegistry, switch_scene_asset_sync, switch_scene_sync,
+};
 pub use spatial::{SPATIAL_PLUGIN_ID, SpatialPlugin, SpatialSet, Visibility};
 
 use bevy_ecs::component::Component;
