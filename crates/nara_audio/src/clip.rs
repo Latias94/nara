@@ -1,6 +1,6 @@
 use std::{collections::TryReserveError, fmt, io, path::Path, time::Duration};
 
-use kira::sound::static_sound::StaticSoundData;
+use kira::{Frame, sound::static_sound::StaticSoundData};
 use nara_asset::{AssetLoadContext, AssetLoader, NpakEntryKind, RuntimeAssetMode};
 
 mod decode;
@@ -9,6 +9,8 @@ mod tests;
 
 const MAGIC: &[u8; 4] = b"NAUD";
 const VERSION: u16 = 1;
+const MAX_DECODED_BYTES: usize = 128 * 1024 * 1024;
+const MAX_DECODED_FRAMES: usize = MAX_DECODED_BYTES / size_of::<Frame>();
 
 /// Size in bytes of the fixed NAUD v1 header.
 pub const NAUD_HEADER_BYTES: usize = 24;
@@ -26,9 +28,9 @@ pub enum AudioCodec {
 pub struct AudioClip(pub(super) StaticSoundData);
 
 impl AudioClip {
-    /// Decodes a complete clip from memory.
+    /// Decodes a complete clip from memory with up to 128 MiB of stereo PCM frames.
     pub fn from_bytes(bytes: impl AsRef<[u8]> + Send + Sync) -> Result<Self, AudioClipError> {
-        decode::source(bytes.as_ref()).map(|(clip, _)| clip)
+        Self::decode(bytes.as_ref(), None)
     }
 
     /// Reads and decodes a clip from a local path.
@@ -39,13 +41,19 @@ impl AudioClip {
     /// Decodes a NAUD v1 clip and checks its header against the payload and decoded frames.
     pub fn from_cooked(bytes: &[u8]) -> Result<Self, AudioClipError> {
         let (header, payload) = parse_cooked_header(bytes)?;
-        let (clip, decoded) = decode::source(payload)?;
-        if header != decoded {
-            return Err(AudioClipError::InvalidCooked(
-                "header does not match decoded audio",
-            ));
-        }
-        Ok(clip)
+        Self::decode(payload, Some(&header))
+    }
+
+    fn decode(bytes: &[u8], header: Option<&AudioMetadata>) -> Result<Self, AudioClipError> {
+        let mut frames = Vec::new();
+        let metadata = decode::source(bytes, header, Some(&mut frames))?;
+        Ok(Self(StaticSoundData {
+            sample_rate: metadata.sample_rate,
+            // Kira needs an Arc slice. The conversion can briefly hold two bounded PCM buffers.
+            frames: frames.into(),
+            settings: Default::default(),
+            slice: None,
+        }))
     }
 
     #[must_use]
@@ -83,7 +91,7 @@ pub enum AudioClipError {
 /// header. The header stores the magic, version (`u16`), codec (`u16`), sample rate (`u32`),
 /// channels (`u16`), zero flags (`u16`), and frame count (`u64`) in little-endian order.
 pub fn cook_audio(bytes: &[u8]) -> Result<Vec<u8>, AudioClipError> {
-    let (_, metadata) = decode::source(bytes)?;
+    let metadata = decode::source(bytes, None, None)?;
     let mut cooked = Vec::new();
     cooked.try_reserve_exact(NAUD_HEADER_BYTES + bytes.len())?;
     cooked.extend_from_slice(MAGIC);
@@ -102,7 +110,6 @@ pub fn cooked_audio_codec(bytes: &[u8]) -> Result<AudioCodec, AudioClipError> {
     parse_cooked_header(bytes).map(|(header, _)| header.codec)
 }
 
-#[derive(PartialEq, Eq)]
 struct AudioMetadata {
     codec: AudioCodec,
     sample_rate: u32,
@@ -132,6 +139,11 @@ fn parse_cooked_header(bytes: &[u8]) -> Result<(AudioMetadata, &[u8]), AudioClip
         u64::from_le_bytes(header[16..24].try_into().expect("fixed frame count field"));
     if sample_rate == 0 || !matches!(channels, 1 | 2) || frame_count == 0 {
         return Err(AudioClipError::InvalidCooked("invalid sample metadata"));
+    }
+    if frame_count > MAX_DECODED_FRAMES as u64 {
+        return Err(AudioClipError::InvalidCooked(
+            "frame count exceeds the decoded PCM limit",
+        ));
     }
     if header[14..16] != [0, 0] {
         return Err(AudioClipError::InvalidCooked("unknown flags"));

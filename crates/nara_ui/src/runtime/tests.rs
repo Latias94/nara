@@ -510,3 +510,51 @@ fn ui_plugin_loads_an_authored_font_through_the_asset_server() {
         Some(&face)
     );
 }
+
+#[test]
+fn ui_plugin_rejects_oversized_and_malformed_fonts() {
+    use nara_asset::{
+        AssetAppExt, AssetLoadError, AssetPlugin, Assets, RuntimeAssetMode, RuntimeAssetSource,
+        load_asset_sync,
+        source::{MemoryAssetSource, asset_id_path},
+    };
+
+    use crate::{FontFaceError, text::MAX_FONT_CONTAINER_BYTES};
+
+    let oversized = "0193a100-1111-7000-8000-000000000022".parse().unwrap();
+    let malformed = "0193a100-1111-7000-8000-000000000023".parse().unwrap();
+    let size = MAX_FONT_CONTAINER_BYTES + 1;
+    let mut files = MemoryAssetSource::new();
+    files
+        .insert(&asset_id_path(oversized), vec![0; size])
+        .unwrap();
+    files
+        .insert(&asset_id_path(malformed), b"bad font")
+        .unwrap();
+    let mut app = App::new();
+    app.add_plugins((AssetPlugin, InputPlugin, UiPlugin::default()))
+        .unwrap();
+    app.set_asset_source(RuntimeAssetSource::from_memory(
+        RuntimeAssetMode::Cooked,
+        files,
+    ))
+    .unwrap();
+
+    for (id, expected) in [
+        (
+            oversized,
+            FontFaceError::ContainerTooLarge {
+                actual: size,
+                maximum: MAX_FONT_CONTAINER_BYTES,
+            },
+        ),
+        (malformed, FontFaceError::Malformed),
+    ] {
+        let error = load_asset_sync::<FontFace>(app.world_mut().unwrap(), id).unwrap_err();
+        let AssetLoadError::Decode { source, .. } = error else {
+            panic!("expected a font decode error, got {error}");
+        };
+        assert_eq!(source.downcast_ref::<FontFaceError>(), Some(&expected));
+    }
+    assert!(app.world().resource::<Assets<FontFace>>().is_empty());
+}

@@ -82,13 +82,29 @@ pub enum SceneError {
         expected: NpakEntryKind,
         actual: NpakEntryKind,
     },
+    #[error(
+        "scene '{scene_id}' entity {entity} AudioClipSource.clip refers to asset '{id}' of kind {actual:?}, expected Audio"
+    )]
+    AudioClipAssetKindMismatch {
+        scene_id: AssetId,
+        entity: EntityUuid,
+        id: AssetId,
+        actual: NpakEntryKind,
+    },
+    #[error("scene '{scene_id}' failed application validation: {message}")]
+    ValidationFailed { scene_id: AssetId, message: String },
+    #[error("scene '{scene_id}' was cancelled during activation")]
+    ActivationCancelled { scene_id: AssetId },
 }
+
+type SceneValidator = Box<dyn FnOnce(&PreparedScene<'_>) -> Result<(), String> + Send + Sync>;
 
 #[derive(Default)]
 struct PendingScene {
     scene: Option<Handle<SceneAsset>>,
     prepared: Option<(SceneAsset, Vec<(AssetId, RuntimeId)>)>,
     preload_source: Option<RuntimeAssetSource>,
+    validate: Option<SceneValidator>,
 }
 
 struct Instance {
@@ -111,6 +127,45 @@ pub struct SceneManager {
 
 impl SceneManager {
     pub fn load_scene(&mut self, scene_id: AssetId) -> SceneInstanceId {
+        let instance = self.reserve_instance(scene_id);
+        self.pending.insert(instance, PendingScene::default());
+        instance
+    }
+
+    /// Replaces the main scene after the new scene is ready. A later request supersedes an earlier
+    /// switch that is still pending.
+    pub fn switch_scene(&mut self, scene_id: AssetId) -> SceneInstanceId {
+        self.queue_switch(scene_id, None)
+    }
+
+    /// Runs application validation after the scene's dependencies, codecs, and asset kinds have
+    /// passed validation. A rejection fails the pending instance and preserves the main scene.
+    pub fn switch_scene_validated(
+        &mut self,
+        scene_id: AssetId,
+        validate: impl FnOnce(&PreparedScene<'_>) -> Result<(), String> + Send + Sync + 'static,
+    ) -> SceneInstanceId {
+        self.queue_switch(scene_id, Some(Box::new(validate)))
+    }
+
+    fn queue_switch(
+        &mut self,
+        scene_id: AssetId,
+        validate: Option<SceneValidator>,
+    ) -> SceneInstanceId {
+        let instance = self.reserve_instance(scene_id);
+        self.pending.insert(
+            instance,
+            PendingScene {
+                validate,
+                ..PendingScene::default()
+            },
+        );
+        self.begin_switch(instance);
+        instance
+    }
+
+    fn reserve_instance(&mut self, scene_id: AssetId) -> SceneInstanceId {
         self.next = self.next.wrapping_add(1);
         let instance = SceneInstanceId(self.next);
         self.instances.insert(
@@ -121,18 +176,13 @@ impl SceneManager {
                 entities: BTreeMap::new(),
             },
         );
-        self.pending.insert(instance, PendingScene::default());
         instance
     }
 
-    /// Replaces the main scene after the new scene is ready. A later request supersedes an earlier
-    /// switch that is still pending.
-    pub fn switch_scene(&mut self, scene_id: AssetId) -> SceneInstanceId {
-        let instance = self.load_scene(scene_id);
+    fn begin_switch(&mut self, instance: SceneInstanceId) {
         if let Some(previous) = self.switching.replace(instance) {
             self.despawn_scene(previous);
         }
-        instance
     }
 
     pub fn despawn_scene(&mut self, instance: SceneInstanceId) {
@@ -159,7 +209,8 @@ impl SceneManager {
     }
 }
 
-/// Immediately loads and activates an entry scene during app setup.
+/// Immediately loads and activates an entry scene during app setup. A validation or loading error
+/// preserves the main scene and any pending switch.
 pub fn switch_scene_sync(
     world: &mut World,
     scene_id: AssetId,
@@ -172,24 +223,35 @@ pub fn switch_scene_sync(
 
 /// Immediately activates a prepared scene, such as a supervised editor snapshot. Dependencies
 /// still use the configured asset source and the same typed loaders as an asynchronous switch.
+/// A validation or loading error preserves the main scene and any pending switch.
 pub fn switch_scene_asset_sync(
     world: &mut World,
     scene_id: AssetId,
     asset: &SceneAsset,
 ) -> Result<SceneInstanceId, SceneError> {
     require_plugin(world)?;
+    let scene = CookedScene::parse(asset.bytes())?;
+    let prepared = world.resource::<SceneRegistry>().prepare(
+        &scene,
+        scene_id,
+        world.get_resource::<RuntimeAssetSource>(),
+        None,
+    )?;
     for &id in asset.asset_dependencies() {
         let handle = load_dependency_sync(world, id)?;
         if !is_runtime_asset_resident(world, handle) {
             return Err(SceneError::DependencyNotResident { scene_id, id });
         }
     }
-    let instance = world.resource_mut::<SceneManager>().switch_scene(scene_id);
-    let result = instantiate(world, instance, scene_id, asset, None);
-    if let Err(error) = &result {
-        fail(world, instance, scene_id, error);
+    // A synchronous switch enters the manager only after all fallible preparation succeeds.
+    let mut manager = world.resource_mut::<SceneManager>();
+    let instance = manager.reserve_instance(scene_id);
+    manager.begin_switch(instance);
+    if commit_scene(world, instance, scene_id, prepared) {
+        Ok(instance)
+    } else {
+        Err(SceneError::ActivationCancelled { scene_id })
     }
-    result.map(|()| instance)
 }
 
 fn require_plugin(world: &World) -> Result<(), SceneError> {
@@ -211,6 +273,10 @@ pub(super) fn update_scenes(world: &mut World) {
     let pending = std::mem::take(&mut world.resource_mut::<SceneManager>().pending);
     for (instance, mut request) in pending {
         let manager = world.resource::<SceneManager>();
+        // Hooks run while earlier requests are committed and can cancel a request in this batch.
+        if manager.unload.contains(&instance) {
+            continue;
+        }
         let Some(entry) = manager.instances.get(&instance) else {
             continue;
         };
@@ -224,13 +290,8 @@ pub(super) fn update_scenes(world: &mut World) {
                 }
             }
             Ok(Progress::Ready(asset)) => {
-                if let Err(error) = instantiate(
-                    world,
-                    instance,
-                    scene_id,
-                    &asset,
-                    request.preload_source.as_ref(),
-                ) {
+                if let Err(error) = instantiate_pending(world, instance, scene_id, &asset, request)
+                {
                     fail(world, instance, scene_id, &error);
                 }
             }
@@ -341,32 +402,51 @@ fn resident_scene(
         })
 }
 
-fn instantiate(
+fn instantiate_pending(
     world: &mut World,
     instance: SceneInstanceId,
     scene_id: AssetId,
     asset: &SceneAsset,
-    preload_source: Option<&RuntimeAssetSource>,
+    request: PendingScene,
 ) -> Result<(), SceneError> {
     let scene = CookedScene::parse(asset.bytes())?;
-    let prepared = scene.prepare(&world.resource::<SceneRegistry>().native)?;
-    let source = world.get_resource::<RuntimeAssetSource>();
-    // A remount leaves previously loaded handles bound to their original types.
-    if let Some(preload_source) = preload_source
-        && Some(preload_source) != source
-    {
-        validate_sprite_references(Some(preload_source), scene_id, &prepared)?;
+    let prepared = world.resource::<SceneRegistry>().prepare(
+        &scene,
+        scene_id,
+        world.get_resource::<RuntimeAssetSource>(),
+        request.preload_source.as_ref(),
+    )?;
+    if let Some(validate) = request.validate {
+        validate(&prepared)
+            .map_err(|message| SceneError::ValidationFailed { scene_id, message })?;
     }
-    validate_sprite_references(source, scene_id, &prepared)?;
-    let manager = world.resource::<SceneManager>();
+    commit_scene(world, instance, scene_id, prepared);
+    Ok(())
+}
+
+fn commit_scene(
+    world: &mut World,
+    instance: SceneInstanceId,
+    scene_id: AssetId,
+    prepared: PreparedScene<'_>,
+) -> bool {
+    let mut manager = world.resource_mut::<SceneManager>();
     let promote = manager.switching == Some(instance);
     if promote {
         let previous = manager.main;
         // Unload and spawn hooks can request the next switch.
-        world.resource_mut::<SceneManager>().switching = None;
+        manager.switching = None;
         if let Some(previous) = previous {
             unload(world, previous);
         }
+    }
+    if world
+        .resource_mut::<SceneManager>()
+        .unload
+        .remove(&instance)
+    {
+        unload(world, instance);
+        return false;
     }
     let entities = prepared.spawn(world, || SceneMember(instance));
     let mut manager = world.resource_mut::<SceneManager>();
@@ -379,38 +459,7 @@ fn instantiate(
         manager.main = Some(instance);
     }
     emit(world, SceneEvent::Ready { instance, scene_id });
-    Ok(())
-}
-
-fn validate_sprite_references(
-    source: Option<&RuntimeAssetSource>,
-    scene_id: AssetId,
-    prepared: &PreparedScene<'_>,
-) -> Result<(), SceneError> {
-    for (entity, sprite) in prepared.sprite_sources() {
-        for (field, id, expected) in [
-            ("image", sprite.image, NpakEntryKind::Image),
-            ("material", sprite.material, NpakEntryKind::Material),
-        ] {
-            let Some(id) = id else { continue };
-            let actual = source
-                .ok_or(AssetError::MissingRuntimeSource)?
-                .backend()
-                .kind(id)
-                .ok_or(AssetError::UnknownRuntimeKind(id))?;
-            if actual != expected {
-                return Err(SceneError::SpriteAssetKindMismatch {
-                    scene_id,
-                    entity,
-                    field,
-                    id,
-                    expected,
-                    actual,
-                });
-            }
-        }
-    }
-    Ok(())
+    true
 }
 
 fn fail(world: &mut World, instance: SceneInstanceId, scene_id: AssetId, error: &SceneError) {

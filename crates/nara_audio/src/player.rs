@@ -161,6 +161,7 @@ pub struct AudioPlayback {
     command: Option<PlaybackCommand>,
     state: PlaybackState,
     error: Option<AudioError>,
+    failed_while_paused: bool,
 }
 
 impl AudioPlayback {
@@ -198,11 +199,22 @@ impl AudioPlayback {
         self.voice = None;
         self.state = state;
         self.error = None;
+        self.failed_while_paused = false;
     }
 
     pub(super) fn fail(&mut self, error: AudioError) {
+        let paused = self.failed_while_paused || self.state == PlaybackState::Paused;
         self.reset(PlaybackState::Failed);
         self.error = Some(error);
+        self.failed_while_paused = paused;
+    }
+
+    pub(super) fn retry_after_failure(&mut self) {
+        self.reset(if self.failed_while_paused {
+            PlaybackState::Paused
+        } else {
+            PlaybackState::WaitingForClip
+        });
     }
 
     fn update(
@@ -226,6 +238,12 @@ impl AudioPlayback {
         match command {
             Some(PlaybackCommand::Play) => self.reset(PlaybackState::WaitingForClip),
             Some(PlaybackCommand::Stop) => self.reset(PlaybackState::Stopped),
+            Some(PlaybackCommand::Resume)
+                if self.voice.is_none()
+                    && (self.state == PlaybackState::Paused || self.failed_while_paused) =>
+            {
+                self.reset(PlaybackState::WaitingForClip);
+            }
             _ => (),
         }
 
@@ -235,17 +253,17 @@ impl AudioPlayback {
                 self.reset(PlaybackState::Finished);
                 return true;
             }
+            self.state = match command {
+                Some(PlaybackCommand::Pause) => PlaybackState::Paused,
+                Some(PlaybackCommand::Resume) => PlaybackState::Playing,
+                _ => self.state,
+            };
             let settings = match player.voice_settings(spatial) {
                 Ok(settings) => settings,
                 Err(error) => {
                     self.fail(error);
                     return false;
                 }
-            };
-            self.state = match command {
-                Some(PlaybackCommand::Pause) => PlaybackState::Paused,
-                Some(PlaybackCommand::Resume) => PlaybackState::Playing,
-                _ => self.state,
             };
             voice.update(settings, self.state == PlaybackState::Paused);
         } else if self.state == PlaybackState::WaitingForClip {

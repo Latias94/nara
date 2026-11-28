@@ -3,7 +3,11 @@ use std::time::Duration;
 #[cfg(any(feature = "desktop", test))]
 use nara::save::SaveError;
 use nara::{
-    core::UuidIdError, ecs::bevy_ecs::error::Result as SystemResult, prelude::*, save::SaveStore,
+    asset::{AssetEvents, AssetProductRef, AssetStates, ImportedProductId, RuntimeAssetMode},
+    core::UuidIdError,
+    ecs::{Mut, bevy_ecs::error::Result as SystemResult},
+    prelude::*,
+    save::SaveStore,
 };
 
 use crate::simulation::bind_arena;
@@ -114,11 +118,34 @@ pub(crate) fn resolve_switch(world: &mut World) -> SystemResult {
         eprintln!("Night Relay could not enter Sector 2: {message}");
         world.resource_mut::<SceneManager>().despawn_scene(instance);
         world.resource_mut::<Campaign>().pending = None;
+        discard_rejected_source_scene(world, Sector::Two.asset()?)?;
     } else if manager.main_instance() == Some(instance) {
         bind_arena(world, instance, true)?;
         let mut campaign = world.resource_mut::<Campaign>();
         campaign.sector = Sector::Two;
         campaign.pending = None;
+    }
+    Ok(())
+}
+
+fn discard_rejected_source_scene(world: &mut World, id: AssetId) -> SystemResult {
+    if world
+        .get_resource::<RuntimeAssetSource>()
+        .is_some_and(|source| source.backend().mode() == RuntimeAssetMode::Source)
+    {
+        let product = AssetProductRef::new(id.into(), ImportedProductId::PRIMARY)?;
+        if let Some(handle) = world.resource::<AssetServer>().get_product_handle(product) {
+            // The next attempt must read the edited scene from disk even if it has the same UUID.
+            world.resource_scope(|world, mut scenes: Mut<Assets<SceneAsset>>| {
+                world.resource_scope(|world, mut states: Mut<AssetStates>| {
+                    scenes.remove_with_state(
+                        handle,
+                        &mut states,
+                        &mut world.resource_mut::<AssetEvents>(),
+                    )
+                })
+            })?;
+        }
     }
     Ok(())
 }

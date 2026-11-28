@@ -180,8 +180,8 @@ impl<T: Asset> Assets<T> {
     ) -> Result<Option<T>, AssetStateError> {
         let id = handle.id();
         let version = states.next_version(id)?;
+        states.set_removed(id, version)?;
         let removed = self.remove(handle);
-        states.set_removed(id, version);
         events.push(id, version, AssetEventKind::Removed);
         Ok(removed)
     }

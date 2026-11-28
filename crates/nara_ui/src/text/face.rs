@@ -42,17 +42,31 @@ impl FontFace {
     /// Admits one face while allowing several selections to share the same container.
     pub fn from_shared_bytes(bytes: Arc<Vec<u8>>, face_index: u32) -> Result<Self, FontFaceError> {
         let family_name = validate_face(&bytes, face_index)?;
+        Ok(Self::from_validated_bytes(bytes, face_index, family_name))
+    }
+
+    #[cfg(feature = "runtime")]
+    pub(crate) fn from_slice(bytes: &[u8], face_index: u32) -> Result<Self, FontFaceError> {
+        let family_name = validate_face(bytes, face_index)?;
+        Ok(Self::from_validated_bytes(
+            Arc::new(bytes.to_vec()),
+            face_index,
+            family_name,
+        ))
+    }
+
+    fn from_validated_bytes(bytes: Arc<Vec<u8>>, face_index: u32, family_name: String) -> Self {
         let mut hasher = blake3::Hasher::new();
         hasher.update(&bytes);
         hasher.update(&face_index.to_le_bytes());
         let id = FontFaceId(*hasher.finalize().as_bytes());
 
-        Ok(Self {
+        Self {
             bytes,
             face_index,
             family_name,
             id,
-        })
+        }
     }
 
     /// Checks that the selected face can be loaded without taking ownership of the font bytes.

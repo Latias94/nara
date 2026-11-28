@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use kira::{Frame, sound::static_sound::StaticSoundData};
+use kira::Frame;
 use symphonia::{
     core::{
         checksum::Crc32,
@@ -14,16 +14,32 @@ use symphonia::{
     default::{get_codecs, get_probe},
 };
 
-use super::{AudioClip, AudioClipError, AudioCodec, AudioMetadata};
+use super::{AudioClipError, AudioCodec, AudioMetadata, MAX_DECODED_BYTES, MAX_DECODED_FRAMES};
 
-pub(super) fn source(bytes: &[u8]) -> Result<(AudioClip, AudioMetadata), AudioClipError> {
-    let wav_bytes = if bytes.starts_with(b"OggS") {
-        validate_ogg_pages(bytes)?;
-        None
+const HEADER_MISMATCH: AudioClipError =
+    AudioClipError::InvalidCooked("header does not match decoded audio");
+
+pub(super) fn source(
+    bytes: &[u8],
+    header: Option<&AudioMetadata>,
+    mut frames: Option<&mut Vec<Frame>>,
+) -> Result<AudioMetadata, AudioClipError> {
+    let codec = if bytes.starts_with(b"OggS") {
+        AudioCodec::OggVorbis
     } else if bytes.starts_with(b"RIFF") {
-        Some(wav_data_bytes(bytes)?)
+        AudioCodec::PcmWav
     } else {
         return Err(decode_error("expected Ogg Vorbis or PCM WAV"));
+    };
+    if header.is_some_and(|header| header.codec != codec) {
+        return Err(HEADER_MISMATCH);
+    }
+    let wav_bytes = match codec {
+        AudioCodec::PcmWav => Some(wav_data_bytes(bytes)?),
+        AudioCodec::OggVorbis => {
+            validate_ogg_pages(bytes)?;
+            None
+        }
     };
 
     let stream = MediaSourceStream::new(Box::new(Cursor::new(bytes)), Default::default());
@@ -54,7 +70,7 @@ pub(super) fn source(bytes: &[u8]) -> Result<(AudioClip, AudioMetadata), AudioCl
         _ => return Err(decode_error("expected mono or stereo audio")),
     };
 
-    let (codec, expected_frames) = if let Some(wav_bytes) = wav_bytes {
+    let wav_frames = if let Some(wav_bytes) = wav_bytes {
         let sample_bytes = match params.codec {
             CODEC_ID_PCM_U8 => 1,
             CODEC_ID_PCM_S16LE => 2,
@@ -67,18 +83,38 @@ pub(super) fn source(bytes: &[u8]) -> Result<(AudioClip, AudioMetadata), AudioCl
         if !wav_bytes.is_multiple_of(frame_bytes) {
             return Err(decode_error("WAV data ends in a partial frame"));
         }
-        (AudioCodec::PcmWav, Some(wav_bytes / frame_bytes))
+        Some(wav_bytes / frame_bytes)
     } else if params.codec == CODEC_ID_VORBIS {
-        (AudioCodec::OggVorbis, None)
+        None
     } else {
         return Err(decode_error("expected Vorbis in Ogg"));
+    };
+    if header.is_some_and(|header| {
+        header.sample_rate != sample_rate
+            || header.channels != channels
+            || wav_frames.is_some_and(|frames| header.frame_count != frames)
+    }) {
+        return Err(HEADER_MISMATCH);
+    }
+
+    let expected_frames = header.map(|header| header.frame_count).or(wav_frames);
+    if expected_frames.is_some_and(|frames| frames > MAX_DECODED_FRAMES as u64) {
+        return Err(decoded_too_large());
+    }
+    let frame_limit = expected_frames.map_or(MAX_DECODED_FRAMES, |frames| frames as usize);
+    let frame_count_mismatch = || {
+        if header.is_some() {
+            HEADER_MISMATCH
+        } else {
+            decode_error("WAV frame count does not match its data length")
+        }
     };
 
     let mut decoder = get_codecs()
         .make_audio_decoder(params, &Default::default())
         .map_err(symphonia_error)?;
     let mut samples = Vec::<f32>::new();
-    let mut frames = Vec::new();
+    let mut frame_count = 0_usize;
     while let Some(packet) = format.next_packet().map_err(symphonia_error)? {
         if packet.track_id != track_id {
             return Err(decode_error("unexpected audio track"));
@@ -87,46 +123,56 @@ pub(super) fn source(bytes: &[u8]) -> Result<(AudioClip, AudioMetadata), AudioCl
         if audio.spec().rate() != sample_rate || audio.num_planes() != usize::from(channels) {
             return Err(decode_error("audio format changed during decoding"));
         }
+        let total_frames = frame_count.saturating_add(audio.frames());
+        if total_frames > frame_limit {
+            return Err(if expected_frames.is_some() {
+                frame_count_mismatch()
+            } else {
+                decoded_too_large()
+            });
+        }
+        let sample_count = audio.frames() * usize::from(channels);
+        samples.try_reserve(sample_count.saturating_sub(samples.len()))?;
         audio.copy_to_vec_interleaved(&mut samples);
         if samples.iter().any(|sample| !sample.is_finite()) {
             return Err(AudioClipError::NonFiniteSamples);
         }
-        frames.try_reserve(samples.len() / usize::from(channels))?;
-        if channels == 1 {
-            frames.extend(samples.iter().copied().map(Frame::from_mono));
-        } else {
-            frames.extend(
-                samples
-                    .chunks_exact(2)
-                    .map(|pair| Frame::new(pair[0], pair[1])),
-            );
+        if let Some(frames) = frames.as_deref_mut() {
+            if total_frames > frames.capacity() {
+                // Grow amortized within the limit as packets are decoded.
+                let capacity = frames
+                    .capacity()
+                    .saturating_mul(2)
+                    .max(total_frames)
+                    .min(frame_limit);
+                frames.try_reserve_exact(capacity - frames.len())?;
+            }
+            if channels == 1 {
+                frames.extend(samples.iter().copied().map(Frame::from_mono));
+            } else {
+                frames.extend(
+                    samples
+                        .chunks_exact(2)
+                        .map(|pair| Frame::new(pair[0], pair[1])),
+                );
+            }
         }
+        frame_count = total_frames;
     }
-    if frames.is_empty() {
+    let frame_count = frame_count as u64;
+    if expected_frames.is_some_and(|expected| expected != frame_count) {
+        return Err(frame_count_mismatch());
+    }
+    if frame_count == 0 {
         return Err(AudioClipError::Empty);
     }
-    let frame_count = frames.len() as u64;
-    if expected_frames.is_some_and(|expected| expected != frame_count) {
-        return Err(decode_error(
-            "WAV frame count does not match its data length",
-        ));
-    }
 
-    let clip = AudioClip(StaticSoundData {
+    Ok(AudioMetadata {
+        codec,
         sample_rate,
-        frames: frames.into(),
-        settings: Default::default(),
-        slice: None,
-    });
-    Ok((
-        clip,
-        AudioMetadata {
-            codec,
-            sample_rate,
-            channels,
-            frame_count,
-        },
-    ))
+        channels,
+        frame_count,
+    })
 }
 
 fn wav_data_bytes(bytes: &[u8]) -> Result<u64, AudioClipError> {
@@ -215,6 +261,12 @@ fn validate_ogg_pages(mut bytes: &[u8]) -> Result<(), AudioClipError> {
 
 fn decode_error(message: &str) -> AudioClipError {
     AudioClipError::Decode(message.to_owned())
+}
+
+fn decoded_too_large() -> AudioClipError {
+    AudioClipError::Decode(format!(
+        "decoded PCM exceeds the {MAX_DECODED_BYTES}-byte limit"
+    ))
 }
 
 fn symphonia_error(error: symphonia::core::errors::Error) -> AudioClipError {

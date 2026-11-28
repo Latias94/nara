@@ -244,6 +244,16 @@ impl AssetServer {
         self.claim(id)
     }
 
+    /// Preflights a type claim for a staged product without reserving or changing it.
+    pub fn validate_product_type<T: 'static>(
+        &self,
+        reference: AssetProductRef,
+    ) -> Result<(), AssetError> {
+        self.products
+            .get(&reference)
+            .map_or(Ok(()), |&id| self.validate_type_claim::<T>(id))
+    }
+
     /// Resolves only an existing complete product identity and checks or establishes its Rust type.
     ///
     /// Unknown products and incompatible type claims reject without changing the catalogue or

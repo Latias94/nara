@@ -10,14 +10,14 @@ use nara_app::{
     App, CoreStage, FrameCleanup, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
 };
 use nara_asset::{
-    ASSET_PLUGIN_ID, AssetAppExt, AssetLoadContext, AssetLoadSet, AssetLoader, NpakEntryKind,
-    RuntimeAssetMode,
+    ASSET_PLUGIN_ID, AssetAppExt, AssetError, AssetLoadContext, AssetLoadSet, AssetLoader,
+    NpakEntryKind, RuntimeAssetMode, RuntimeAssetSource,
 };
 use nara_core::AssetId;
 use nara_reflect::{COMPONENT_REGISTRY_PLUGIN_ID, RegisterSchema, Schema};
 use thiserror::Error;
 
-use crate::cooked::{CookedRegistry, CookedScene, CookedSceneError};
+use crate::cooked::{CookedRegistry, CookedScene, CookedSceneError, PreparedScene};
 
 pub use manager::{
     SceneError, SceneEvent, SceneInstanceId, SceneLoadState, SceneManager, SceneMember,
@@ -171,6 +171,91 @@ pub struct SceneRegistry {
     native: CookedRegistry,
     #[cfg(feature = "cook")]
     loader: SceneAssetLoader,
+}
+
+impl SceneRegistry {
+    /// Decodes a candidate with this registry, checks its typed references against `source`,
+    /// and runs application validation on the decoded rows. The caller stages dependency payloads
+    /// separately and can mount `source` after this check succeeds.
+    pub fn validate_asset<T>(
+        &self,
+        scene_id: AssetId,
+        asset: &SceneAsset,
+        source: &RuntimeAssetSource,
+        validate: impl FnOnce(&PreparedScene<'_>) -> Result<T, String>,
+    ) -> Result<T, SceneError> {
+        let scene = CookedScene::parse(asset.bytes())?;
+        let prepared = self.prepare(&scene, scene_id, Some(source), None)?;
+        validate(&prepared).map_err(|message| SceneError::ValidationFailed { scene_id, message })
+    }
+
+    fn prepare<'a>(
+        &self,
+        scene: &'a CookedScene<'_>,
+        scene_id: AssetId,
+        source: Option<&RuntimeAssetSource>,
+        preload_source: Option<&RuntimeAssetSource>,
+    ) -> Result<PreparedScene<'a>, SceneError> {
+        let prepared = scene.prepare(&self.native)?;
+        // A remount leaves previously loaded handles bound to their original types.
+        if let Some(preload_source) = preload_source
+            && Some(preload_source) != source
+        {
+            validate_asset_references(Some(preload_source), scene_id, &prepared)?;
+        }
+        validate_asset_references(source, scene_id, &prepared)?;
+        Ok(prepared)
+    }
+}
+
+fn validate_asset_references(
+    source: Option<&RuntimeAssetSource>,
+    scene_id: AssetId,
+    prepared: &PreparedScene<'_>,
+) -> Result<(), SceneError> {
+    for (entity, sprite) in prepared.sprite_sources() {
+        for (field, id, expected) in [
+            ("image", sprite.image, NpakEntryKind::Image),
+            ("material", sprite.material, NpakEntryKind::Material),
+        ] {
+            let Some(id) = id else { continue };
+            let actual = dependency_kind(source, id)?;
+            if actual != expected {
+                return Err(SceneError::SpriteAssetKindMismatch {
+                    scene_id,
+                    entity,
+                    field,
+                    id,
+                    expected,
+                    actual,
+                });
+            }
+        }
+    }
+    for clip in prepared.audio_clips() {
+        let (entity, id) = clip?;
+        let actual = dependency_kind(source, id)?;
+        if actual != NpakEntryKind::Audio {
+            return Err(SceneError::AudioClipAssetKindMismatch {
+                scene_id,
+                entity,
+                id,
+                actual,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn dependency_kind(
+    source: Option<&RuntimeAssetSource>,
+    id: AssetId,
+) -> Result<NpakEntryKind, AssetError> {
+    source
+        .ok_or(AssetError::MissingRuntimeSource)?
+        .backend()
+        .kind(id)
+        .ok_or(AssetError::UnknownRuntimeKind(id))
 }
 
 pub trait RegisterSceneComponent {

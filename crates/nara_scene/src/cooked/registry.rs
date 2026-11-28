@@ -1,6 +1,8 @@
 use std::{any::Any, collections::BTreeMap};
 
 use bevy_ecs::{component::Component, entity::Entity, world::World};
+#[cfg(feature = "runtime")]
+use nara_core::AssetId;
 use nara_reflect::{
     __macro_support::{finish_postcard, read_postcard_field, write_postcard_field},
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
@@ -143,26 +145,53 @@ struct Entry {
 
 pub(super) trait ReadyColumn: Any {
     fn insert(self: Box<Self>, world: &mut World, spawned: &[Entity]);
+
+    #[cfg(feature = "runtime")]
+    fn audio_clips(&self) -> Option<AudioClipRows<'_>>;
 }
 
 #[cfg(feature = "runtime")]
+pub(super) const AUDIO_CLIP_SOURCE_ID: &str = "nara.AudioClipSource";
+
+#[cfg(feature = "runtime")]
+type AudioClipRows<'a> =
+    Box<dyn Iterator<Item = (usize, Result<AssetId, ComponentCodecError>)> + 'a>;
+
 impl dyn ReadyColumn {
-    pub(super) fn sprite_sources(&self) -> &[(usize, SpriteSource)] {
+    pub(super) fn typed_rows<T: Component>(&self) -> Option<&[(usize, T)]> {
         (self as &dyn Any)
-            .downcast_ref::<TypedColumn<SpriteSource>>()
-            .map_or(&[], |column| column.0.as_slice())
+            .downcast_ref::<TypedColumn<T>>()
+            .map(|column| column.0.as_slice())
     }
 }
 
 struct TypedColumn<T>(Vec<(usize, T)>);
 
-impl<T: Component> ReadyColumn for TypedColumn<T> {
+impl<T: Schema> ReadyColumn for TypedColumn<T> {
     fn insert(self: Box<Self>, world: &mut World, spawned: &[Entity]) {
         world.insert_batch(
             self.0
                 .into_iter()
                 .map(|(index, component)| (spawned[index], component)),
         );
+    }
+
+    #[cfg(feature = "runtime")]
+    fn audio_clips(&self) -> Option<AudioClipRows<'_>> {
+        // The audio crate depends on scene. Read its stable field through the registered Schema.
+        if T::COMPONENT_ID != AUDIO_CLIP_SOURCE_ID {
+            return None;
+        }
+        let field = ComponentFieldPath::from_fields(["clip"]);
+        Some(Box::new(self.0.iter().map(move |(index, component)| {
+            let clip = component.get_field(&field).and_then(|value| {
+                value
+                    .as_asset_reference()
+                    .copied()
+                    .ok_or_else(|| ComponentCodecError::invalid_field("clip", "asset reference"))
+            });
+            (*index, clip)
+        })))
     }
 }
 

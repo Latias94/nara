@@ -98,7 +98,7 @@ impl AssetLoader for FontFaceLoader {
     }
 
     fn load(&self, bytes: &[u8], _: &mut AssetLoadContext<'_>) -> Result<FontFace, FontFaceError> {
-        FontFace::from_bytes(bytes.to_vec(), 0)
+        FontFace::from_slice(bytes, 0)
     }
 }
 

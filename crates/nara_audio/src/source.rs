@@ -1,14 +1,18 @@
 use bevy_ecs::{
+    change_detection::{DetectChanges, Ref},
     lifecycle::HookContext,
-    prelude::{Changed, Component, Entity, Or, Query, ResMut, Without},
+    prelude::{Component, Entity, Query, Res, ResMut},
     system::Commands,
     world::{DeferredWorld, EntityWorldMut},
 };
-use nara_asset::AssetServer;
+use nara_asset::{AssetServer, AssetStates, Assets, Handle, LoadState};
 use nara_core::AssetId;
 use nara_reflect::Schema;
 
-use crate::{AudioBusId, AudioError, AudioPlayback, AudioPlayer, SpatialAudio};
+use crate::{
+    AudioBusId, AudioClip, AudioError, AudioPlayback, AudioPlayer, PlaybackState, SpatialAudio,
+    mixer::validate_volume,
+};
 
 /// Authored clip and playback settings. [`AudioPlugin`](crate::AudioPlugin) resolves the clip
 /// ID and installs the player on this entity. Use [`AudioPlayback`] to trigger a manual start.
@@ -37,27 +41,83 @@ pub struct AudioClipSource {
     pub spatial: bool,
 }
 
+#[derive(Component)]
+pub(super) struct AudioClipRequest {
+    id: AssetId,
+    handle: Option<Handle<AudioClip>>,
+    source_generation: u64,
+}
+
 pub(super) fn hydrate_audio_sources(
     mut commands: Commands,
     mut server: ResMut<AssetServer>,
-    sources: Query<
-        (Entity, &AudioClipSource, Option<&AudioPlayer>),
-        Or<(Changed<AudioClipSource>, Without<AudioPlayer>)>,
-    >,
+    clips: Res<Assets<AudioClip>>,
+    states: Res<AssetStates>,
+    mut sources: Query<(
+        Entity,
+        Ref<AudioClipSource>,
+        Option<&AudioPlayer>,
+        Option<&mut AudioClipRequest>,
+    )>,
 ) {
-    for (entity, source, player) in &sources {
-        let mut entity = commands.entity(entity);
-        let clip = match server.load_id(source.clip) {
-            Ok(clip) => clip,
-            Err(error) => {
-                let mut playback = AudioPlayback::default();
-                playback.fail(AudioError::ClipLoadFailed(error.to_string()));
-                entity
-                    .try_remove::<(AudioPlayer, SpatialAudio)>()
-                    .try_insert(playback);
-                continue;
+    let source_generation = server.runtime_source_generation();
+    for (entity, source, player, request) in &mut sources {
+        let mut cached = request.filter(|request| request.id == source.clip);
+        let previous = cached.as_ref().and_then(|request| request.handle);
+        let remounted = cached
+            .as_ref()
+            .is_some_and(|request| request.source_generation != source_generation);
+        let missing = previous.is_none_or(|clip| clips.get(clip).is_none());
+        if remounted
+            && !missing
+            && let Some(cached) = &mut cached
+        {
+            cached.source_generation = source_generation;
+        }
+        let retired = missing
+            && (source.is_changed() || player.is_none())
+            && previous.is_some_and(|clip| {
+                states.state(clip.id()).is_some_and(|state| {
+                    matches!(state.load_state(), LoadState::Removed | LoadState::Loaded)
+                })
+            });
+        let clip = if cached.is_none() || missing && (remounted || retired) {
+            let request = server.load_id(source.clip);
+            let mut entity = commands.entity(entity);
+            entity.try_insert(AudioClipRequest {
+                id: source.clip,
+                handle: request.as_ref().ok().copied(),
+                source_generation,
+            });
+            match request {
+                Ok(clip) => clip,
+                Err(error) => {
+                    let same_clip = cached.is_some();
+                    entity.queue_silenced(move |mut entity: EntityWorldMut| {
+                        // Preserve pending transport commands across the player's removal hook.
+                        let mut playback = entity
+                            .get_mut::<AudioPlayback>()
+                            .map(|mut playback| std::mem::take(&mut *playback))
+                            .unwrap_or_default();
+                        entity.remove::<(AudioPlayer, SpatialAudio)>();
+                        if !same_clip || playback.state() != PlaybackState::Stopped {
+                            playback.fail(AudioError::ClipLoadFailed(error.to_string()));
+                        }
+                        entity.insert(playback);
+                    });
+                    continue;
+                }
             }
+        } else if let Some(clip) = previous {
+            clip
+        } else {
+            continue;
         };
+
+        if player.is_some() && !source.is_changed() && previous == Some(clip) {
+            continue;
+        }
+        let mut entity = commands.entity(entity);
         let mut player = player.cloned().unwrap_or_else(|| AudioPlayer::new(clip));
         player.clip = clip;
         player.bus = AudioBusId::new(source.bus.clone());
@@ -76,13 +136,48 @@ pub(super) fn hydrate_audio_sources(
     }
 }
 
+pub(super) fn restart_recovered_audio_sources(
+    clips: Res<Assets<AudioClip>>,
+    mut sources: Query<(
+        Ref<AudioClipSource>,
+        &AudioClipRequest,
+        &AudioPlayer,
+        &mut AudioPlayback,
+    )>,
+) {
+    for (source, request, player, mut playback) in &mut sources {
+        if !source.autoplay || request.id != source.clip || request.handle != Some(player.clip) {
+            continue;
+        }
+        let settings_changed = source.is_changed();
+        let retry = match playback.error() {
+            Some(AudioError::ClipLoadFailed(_)) => clips.get(player.clip).is_some(),
+            Some(
+                AudioError::UnknownBus(bus)
+                | AudioError::SoundCapacity(bus)
+                | AudioError::SoundInitialization(bus),
+            ) => settings_changed && player.bus != *bus,
+            Some(AudioError::MasterIsOutputOnly) => {
+                settings_changed && player.bus != AudioBusId::MASTER
+            }
+            Some(AudioError::InvalidVolume) => {
+                settings_changed && validate_volume(player.volume).is_ok()
+            }
+            _ => false,
+        };
+        if retry {
+            playback.retry_after_failure();
+        }
+    }
+}
+
 fn remove_audio_source(mut world: DeferredWorld<'_>, context: HookContext) {
     world
         .commands()
         .entity(context.entity)
         .queue_silenced(|mut entity: EntityWorldMut| {
             if !entity.contains::<AudioClipSource>() {
-                entity.remove::<(AudioPlayer, SpatialAudio)>();
+                entity.remove::<(AudioPlayer, SpatialAudio, AudioClipRequest)>();
             }
         });
 }

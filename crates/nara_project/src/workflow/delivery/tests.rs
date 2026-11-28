@@ -4,8 +4,10 @@ use std::{
 };
 
 use nara_asset::cooked::{NpakArchive, NpakCompression, NpakEntryKind};
+use nara_audio::AudioClipSource;
 use nara_reflect::{
     ComponentCapability, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    Schema,
 };
 use nara_scene::{
     authoring::{SceneComponent, SceneDocument},
@@ -44,21 +46,37 @@ fn cook_validates_and_caches_referenced_audio_and_font() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path();
     fixture(project);
-    let component = ComponentTypeId::new("fixture.Media");
+    let component = ComponentTypeId::new("fixture.Font");
     let version = ComponentSchemaVersion::ONE;
-    let schema = ComponentSchema::new(component.clone(), "Media", version)
+    let font_schema = ComponentSchema::new(component.clone(), "Font", version)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
         .with_postcard_codec()
-        .with_fields(["clip", "font"].map(|field| {
-            ComponentFieldSchema::required(
-                ComponentFieldId::new(field),
-                field,
-                ComponentFieldPath::from_fields([field]),
-                ComponentValueShape::stable_asset_ref(AssetReferenceDemand::Immediate),
-            )
-            .with_capabilities([ComponentCapability::Scene, ComponentCapability::AssetRef])
-        }));
-    let catalog = ComponentSchemaCatalog::from_components([schema]).unwrap();
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("font"),
+            "font",
+            ComponentFieldPath::from_fields(["font"]),
+            ComponentValueShape::stable_asset_ref(AssetReferenceDemand::Immediate),
+        )
+        .with_capabilities([ComponentCapability::Scene, ComponentCapability::AssetRef])]);
+    let audio_schema = AudioClipSource::type_schema().unwrap();
+    let prefab_path = project.join("assets/node.prefab.ron");
+    let mut prefab = SceneDocument::read(&prefab_path).unwrap();
+    let components = &mut prefab.entities[0].components;
+    components.insert(
+        audio_schema.id().clone(),
+        SceneComponent::known(
+            audio_schema.version(),
+            ComponentValue::map([("clip", ComponentValue::AssetReference(clip))]),
+        ),
+    );
+    components.insert(
+        component,
+        SceneComponent::known(
+            version,
+            ComponentValue::map([("font", ComponentValue::AssetReference(font))]),
+        ),
+    );
+    let catalog = ComponentSchemaCatalog::from_components([font_schema, audio_schema]).unwrap();
     finish_refresh(
         project,
         ExitStatus::from_raw(0),
@@ -66,18 +84,6 @@ fn cook_validates_and_caches_referenced_audio_and_font() {
         || false,
     )
     .unwrap();
-    let prefab_path = project.join("assets/node.prefab.ron");
-    let mut prefab = SceneDocument::read(&prefab_path).unwrap();
-    prefab.entities[0].components.insert(
-        component,
-        SceneComponent::known(
-            version,
-            ComponentValue::map([
-                ("clip", ComponentValue::AssetReference(clip)),
-                ("font", ComponentValue::AssetReference(font)),
-            ]),
-        ),
-    );
     prefab
         .write_with(&prefab_path, catalog.components())
         .unwrap();
@@ -108,6 +114,20 @@ fn cook_validates_and_caches_referenced_audio_and_font() {
     let repeat = cook().unwrap();
     assert_eq!((repeat.cache_hits, repeat.cache_misses), (6, 0));
     assert_eq!(fs::read(&repeat.archive).unwrap(), bytes);
+
+    let sidecar = project.join("assets/pickup.wav.meta");
+    let original = fs::read_to_string(&sidecar).unwrap();
+    for wrong_importer in ["nara.raw", "nara.prefab", "fixture.audio"] {
+        fs::write(&sidecar, original.replace("nara.audio", wrong_importer)).unwrap();
+        assert!(matches!(
+            cook(),
+            Err(DeliveryError::AssetImporter { id, path, expected: "nara.audio", importer })
+                if id == clip && path == "assets/pickup.wav" && importer == wrong_importer
+        ));
+        assert_eq!(fs::read(&repeat.archive).unwrap(), bytes);
+    }
+    fs::write(sidecar, original).unwrap();
+    assert_eq!(cook().unwrap().cache_hits, 6);
 
     for (id, path, original) in [
         (clip, "assets/pickup.wav", WAV),
@@ -201,6 +221,28 @@ fn packages_only_flattened_dependencies_and_caches_each_input_cut() {
 }
 
 #[test]
+fn cook_requires_the_prefab_importer_for_instance_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path();
+    fixture(project);
+    let cook = || cook_project(project, ProjectTrust::Untrusted, || false, |_| {});
+    let report = cook().unwrap();
+    let archive = fs::read(&report.archive).unwrap();
+
+    let sidecar = project.join("assets/node.prefab.ron.meta");
+    let original = fs::read_to_string(&sidecar).unwrap();
+    fs::write(&sidecar, original.replace("nara.prefab", "fixture.prefab")).unwrap();
+    assert!(matches!(
+        cook(),
+        Err(DeliveryError::Prefab(PrefabError::Load { asset, message }))
+            if asset == PREFAB.parse().unwrap()
+                && message.contains("expected nara.prefab")
+                && message.contains("found fixture.prefab")
+    ));
+    assert_eq!(fs::read(report.archive).unwrap(), archive);
+}
+
+#[test]
 fn untrusted_cook_leaves_missing_sidecars_for_explicit_discovery() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path();
@@ -233,31 +275,18 @@ fn untrusted_cook_leaves_missing_sidecars_for_explicit_discovery() {
 }
 
 #[test]
-fn offline_cook_uses_the_newest_matching_catalog() {
+fn offline_cook_prefers_the_matching_release_catalog_regardless_of_mtime() {
     let component_id = ComponentTypeId::new("fixture.Marker");
     let version = ComponentSchemaVersion(2);
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path();
     fixture(project);
     fs::write(project.join("Cargo.toml"), "[package]\nname = 'fixture'\n").unwrap();
-    let release_cache = schema_cache_path("fixture", "game", &[]);
-    let builtins = nara_scene::authoring::builtin_component_schemas().unwrap();
-    let stale = ComponentSchemaCatalog::from_components(builtins).unwrap();
-    let stale_json = stale.to_json_string().unwrap();
-    fs::create_dir(project.join(PROJECT_STATE)).unwrap();
-    fs::write(project.join(&release_cache), &stale_json).unwrap();
-    let profile = read_project_manifest(project).unwrap().delivery.unwrap();
-    assert_eq!(
-        load_schemas(
-            project,
-            &profile,
-            ProjectTrust::Untrusted,
-            &mut || false,
-            &mut |_| {}
-        )
-        .unwrap(),
-        stale
-    );
+    fs::create_dir_all(project.join("src/bin")).unwrap();
+    fs::write(project.join("src/bin/nara_schema.rs"), "fn main() {}\n").unwrap();
+    let release_cache = project.join(schema_cache_path("fixture", "game", &[]));
+    let other_release_cache = project.join(schema_cache_path("fixture", "game", &["other"]));
+    let dev_cache = project.join(SCHEMA_CACHE_PATH);
 
     let fresh = ComponentSchemaCatalog::from_components([ComponentSchema::new(
         component_id.clone(),
@@ -267,6 +296,9 @@ fn offline_cook_uses_the_newest_matching_catalog() {
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)
     .with_postcard_codec()])
     .unwrap();
+    let fresh_json = fresh.to_json_string().unwrap();
+    fs::create_dir(project.join(PROJECT_STATE)).unwrap();
+    fs::write(other_release_cache, &fresh_json).unwrap();
     let scene_path = project.join("assets/entry.scene.ron");
     let mut scene = SceneDocument::read(&scene_path).unwrap();
     scene.entities[0].components.insert(
@@ -290,7 +322,6 @@ fn offline_cook_uses_the_newest_matching_catalog() {
             if component == component_id.as_str()
     ));
 
-    let fresh_json = fresh.to_json_string().unwrap();
     finish_refresh(
         project,
         ExitStatus::from_raw(0),
@@ -300,26 +331,36 @@ fn offline_cook_uses_the_newest_matching_catalog() {
     .unwrap();
     let report = cook().unwrap();
     assert_eq!(report.assets, 4);
-    assert_eq!(
-        fs::read_to_string(project.join(SCHEMA_CACHE_PATH)).unwrap(),
-        fresh_json
-    );
-    assert_eq!(
-        fs::read_to_string(project.join(&release_cache)).unwrap(),
-        stale_json
-    );
 
-    fs::write(project.join(&release_cache), &fresh_json).unwrap();
-    fs::write(project.join(SCHEMA_CACHE_PATH), stale_json).unwrap();
-    for (path, time) in [(release_cache.as_str(), 2), (SCHEMA_CACHE_PATH, 1)] {
+    let dev = ComponentSchemaCatalog::default();
+    fs::write(&release_cache, &fresh_json).unwrap();
+    fs::write(&dev_cache, dev.to_json_string().unwrap()).unwrap();
+    let set_modified = |path: &Path, time| {
         fs::OpenOptions::new()
             .write(true)
-            .open(project.join(path))
+            .open(path)
             .unwrap()
-            .set_modified(UNIX_EPOCH + Duration::from_secs(time))
+            .set_modified(time)
             .unwrap();
+    };
+    let timestamp = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    set_modified(&release_cache, timestamp);
+    for dev_time in [timestamp, timestamp + Duration::from_secs(4)] {
+        set_modified(&dev_cache, dev_time);
+        assert_eq!(cook().unwrap().cache_hits, 4);
     }
+    assert_eq!(read_schema_cache(project).unwrap(), Some(dev));
+
+    fs::write(&dev_cache, b"invalid JSON").unwrap();
     assert_eq!(cook().unwrap().cache_hits, 4);
+    fs::write(&dev_cache, fresh_json).unwrap();
+    fs::write(&release_cache, b"invalid JSON").unwrap();
+    assert!(matches!(
+        cook(),
+        Err(DeliveryError::SchemaCache(
+            SchemaCacheError::InvalidCatalog(_)
+        ))
+    ));
 }
 
 #[test]

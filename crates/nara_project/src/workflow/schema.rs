@@ -125,39 +125,18 @@ pub(super) fn read_at(
     project_dir: &Path,
     cache: &str,
 ) -> Result<Option<ComponentSchemaCatalog>, SchemaCacheError> {
-    optional_cache(project_dir, cache)?
-        .map(read_catalog)
-        .transpose()
-}
-
-#[cfg(feature = "delivery")]
-pub(super) fn read_latest_schema_cache(
-    project_dir: &Path,
-    delivery_cache: &str,
-) -> Result<Option<ComponentSchemaCatalog>, SchemaCacheError> {
-    let delivery = optional_cache(project_dir, delivery_cache)?;
-    let official = optional_cache(project_dir, SCHEMA_CACHE_PATH)?;
-    let selected = match (delivery, official) {
-        (Some(delivery), Some(official)) => {
-            if delivery.metadata()?.modified()? >= official.metadata()?.modified()? {
-                Some(delivery)
-            } else {
-                Some(official)
-            }
-        }
-        (delivery, official) => delivery.or(official),
+    let file = match open_cache(project_dir, cache) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
     };
-    selected.map(read_catalog).transpose()
-}
-
-fn read_catalog(file: File) -> Result<ComponentSchemaCatalog, SchemaCacheError> {
     let limit = catalog_limit();
     let mut bytes = Vec::new();
     file.take(limit as u64 + 1).read_to_end(&mut bytes)?;
     if bytes.len() > limit {
         return Err(SchemaCacheError::TooLarge { limit });
     }
-    Ok(ComponentSchemaCatalog::from_json_bytes(&bytes)?)
+    Ok(Some(ComponentSchemaCatalog::from_json_bytes(&bytes)?))
 }
 
 fn catalog_limit() -> usize {
@@ -205,14 +184,6 @@ fn open_cache(project_dir: &Path, cache: &str) -> io::Result<File> {
         ));
     }
     File::open(path)
-}
-
-fn optional_cache(project_dir: &Path, cache: &str) -> io::Result<Option<File>> {
-    match open_cache(project_dir, cache) {
-        Ok(file) => Ok(Some(file)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
-    }
 }
 
 fn cache_path(project_dir: &Path, cache: &str, create: bool) -> io::Result<PathBuf> {

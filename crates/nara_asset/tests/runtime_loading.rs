@@ -25,6 +25,14 @@ struct Text(Vec<u8>);
 
 struct TextLoader(Arc<AtomicUsize>);
 
+struct PanicOnDrop;
+
+impl Drop for PanicOnDrop {
+    fn drop(&mut self) {
+        panic!("test panic payload panicked while dropping");
+    }
+}
+
 impl AssetLoader for TextLoader {
     type Asset = Text;
     type Error = AssetLoadError;
@@ -39,6 +47,11 @@ impl AssetLoader for TextLoader {
         context: &mut AssetLoadContext<'_>,
     ) -> Result<Text, AssetLoadError> {
         self.0.fetch_add(1, Ordering::Relaxed);
+        match bytes {
+            b"panic" => panic!("test loader panicked"),
+            b"panic on drop" => std::panic::panic_any(PanicOnDrop),
+            _ => (),
+        }
         if bytes == b"broken" {
             return Err(AssetLoadError::Read {
                 id: context.id(),
@@ -182,6 +195,92 @@ fn a_new_source_can_recover_a_previously_failed_handle() {
 }
 
 #[test]
+fn a_panicking_loader_fails_its_handle_and_other_requests_still_publish() {
+    for (bytes, expected) in [
+        (b"panic".as_slice(), "test loader panicked"),
+        (b"panic on drop", "non-string panic payload"),
+    ] {
+        let (mut app, hits) = app(memory(bytes));
+        let bad = request(&mut app);
+        #[cfg(all(feature = "tasks", not(target_arch = "wasm32")))]
+        app.update_with_delta(Duration::ZERO).unwrap();
+        let good = app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<AssetServer>()
+            .load_id::<Text>(DEPENDENCY.parse().unwrap())
+            .unwrap();
+
+        update_until_settled(&mut app, bad);
+        update_until_settled(&mut app, good);
+        app.update_with_delta(Duration::ZERO).unwrap();
+        assert!(matches!(
+            app.world().resource::<AssetStates>().state(bad.id()).unwrap().load_state(),
+            LoadState::Failed { message } if message.contains(expected)
+        ));
+        assert_eq!(
+            app.world().resource::<Assets<Text>>().get(good),
+            Some(&Text(b" world world".to_vec())),
+        );
+        let events = app.world().resource::<AssetEvents>();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.id() == bad.id())
+                .map(|event| event.kind())
+                .collect::<Vec<_>>(),
+            [AssetEventKind::LoadFailed],
+        );
+        assert_eq!(hits.load(Ordering::Relaxed), 2);
+    }
+}
+
+#[test]
+fn a_removal_cancels_queued_work_and_a_later_request_can_load_again() {
+    let (mut app, hits) = app(memory(b"hello"));
+    let handle = request(&mut app);
+    remove_text(&mut app, handle);
+    app.update_with_delta(Duration::ZERO).unwrap();
+    assert_eq!(
+        app.world()
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .load_state(),
+        &LoadState::Removed,
+    );
+    assert_eq!(hits.load(Ordering::Relaxed), 0);
+
+    assert_eq!(request(&mut app), handle);
+    remove_text(&mut app, handle);
+    assert_eq!(request(&mut app), handle);
+    update_until_settled(&mut app, handle);
+    assert_eq!(
+        app.world().resource::<Assets<Text>>().get(handle),
+        Some(&Text(b"hello world".to_vec())),
+    );
+    assert_eq!(hits.load(Ordering::Relaxed), 1);
+}
+
+fn remove_text(app: &mut App, handle: Handle<Text>) {
+    use nara_ecs::Mut;
+
+    app.world_mut()
+        .unwrap()
+        .resource_scope(|world, mut assets: Mut<Assets<Text>>| {
+            world.resource_scope(|world, mut states: Mut<AssetStates>| {
+                assets
+                    .remove_with_state(
+                        handle,
+                        &mut states,
+                        &mut world.resource_mut::<AssetEvents>(),
+                    )
+                    .unwrap();
+            });
+        });
+}
+
+#[test]
 fn a_wrong_kind_request_does_not_claim_the_uuid() {
     struct WrongKind;
 
@@ -286,6 +385,26 @@ fn replacing_the_source_restarts_unpublished_loads_without_changing_handles() {
     );
 }
 
+#[cfg(all(feature = "tasks", not(target_arch = "wasm32")))]
+#[test]
+fn a_removal_cancels_work_requeued_by_a_remount() {
+    let (mut app, _) = app(memory(b"previous"));
+    let handle = request(&mut app);
+    app.update_with_delta(Duration::ZERO).unwrap();
+    app.set_asset_source(memory(b"new")).unwrap();
+    remove_text(&mut app, handle);
+    app.update_with_delta(Duration::ZERO).unwrap();
+    assert_eq!(
+        app.world()
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .load_state(),
+        &LoadState::Removed,
+    );
+    assert!(app.world().resource::<Assets<Text>>().get(handle).is_none());
+}
+
 #[cfg(not(all(feature = "tasks", not(target_arch = "wasm32"))))]
 #[test]
 fn no_task_pool_publishes_in_the_next_task_update() {
@@ -349,4 +468,41 @@ fn project_paths_and_archive_entries_produce_the_same_asset() {
         source_app.world().resource::<Assets<Text>>().get(by_id),
         cooked_app.world().resource::<Assets<Text>>().get(cooked)
     );
+}
+
+#[cfg(all(feature = "authoring", any(unix, windows)))]
+#[test]
+fn project_source_rejects_unmapped_importers_when_a_kind_is_expected() {
+    use std::fs;
+
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("assets");
+    fs::create_dir(&root).unwrap();
+    for (id, name, importer) in [
+        (MAIN, "example.prefab.ron", "nara.prefab"),
+        (DEPENDENCY, "example.txt", "custom.example"),
+    ] {
+        fs::write(root.join(name), b"example").unwrap();
+        fs::write(
+            root.join(format!("{name}.meta")),
+            format!("(id:\"{id}\",importer:\"{importer}\",settings:())"),
+        )
+        .unwrap();
+    }
+    let source = RuntimeAssetSource::from_project_dir(directory.path(), "assets").unwrap();
+    let (mut app, hits) = app(source.clone());
+    for id in [MAIN, DEPENDENCY].map(|id| id.parse::<AssetId>().unwrap()) {
+        assert_eq!(source.backend().read_asset(id, None).unwrap(), b"example");
+        assert!(
+            source
+                .backend()
+                .read_asset(id, Some(NpakEntryKind::Raw))
+                .is_err()
+        );
+        assert!(matches!(
+            app.world_mut().unwrap().resource_mut::<AssetServer>().load_id::<Text>(id),
+            Err(AssetError::UnknownRuntimeKind(rejected)) if rejected == id,
+        ));
+    }
+    assert_eq!(hits.load(Ordering::Relaxed), 0);
 }

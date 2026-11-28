@@ -1,10 +1,15 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use bevy_ecs::prelude::{Entity, On, Query, ResMut, Resource, Schedule, World};
+use bevy_ecs::{
+    change_detection::DetectChanges,
+    entity_disabling::Disabled,
+    prelude::{Entity, Mut, On, Query, ResMut, Resource, Schedule, World},
+};
 use nara_app::App;
 use nara_asset::{
-    AssetAppExt, AssetPlugin, AssetReferenceDemand, Assets, Handle, RuntimeAssetMode,
-    RuntimeAssetSource, allocate_anonymous_handle, load_asset_sync, source::asset_id_path,
+    AssetAppExt, AssetEvents, AssetPlugin, AssetReferenceDemand, AssetStates, Assets, Handle,
+    NpakEntryKind, RuntimeAssetMode, RuntimeAssetSource, allocate_anonymous_handle,
+    load_asset_sync, source::asset_id_path,
 };
 use nara_audio::{
     AudioBusId, AudioBusMeter, AudioClip, AudioClipError, AudioClipSource, AudioError,
@@ -108,28 +113,65 @@ fn authored_sources_hydrate_and_use_the_existing_transport() {
 }
 
 #[test]
-fn authored_autoplay_reports_a_failed_clip() {
+fn authored_autoplay_recovers_from_request_and_decode_failures_after_remounts() {
     let clip_id = CLIP_ID.parse().unwrap();
     let mut app = App::new();
     app.add_plugin(AssetPlugin).unwrap();
     app.add_plugin(AudioPlugin::mock()).unwrap();
-    let mut cooked = cook_audio(&tone_wav(20)).unwrap();
-    cooked.pop();
-    install_clip_source(&mut app, clip_id, RuntimeAssetMode::Cooked, &cooked);
-    let entity = app
-        .world_mut()
-        .unwrap()
-        .spawn(AudioClipSource {
-            clip: clip_id,
-            bus: "sfx".to_owned(),
-            volume: 1.0,
-            looping: false,
-            autoplay: true,
-            spatial: false,
-        })
-        .id();
+    app.set_asset_source(RuntimeAssetSource::from_memory_with_kinds(
+        RuntimeAssetMode::Cooked,
+        MemoryAssetSource::new(),
+        [(clip_id, NpakEntryKind::Raw)],
+    ))
+    .unwrap();
+    let source = AudioClipSource {
+        clip: clip_id,
+        bus: "sfx".to_owned(),
+        volume: 1.0,
+        looping: true,
+        autoplay: true,
+        spatial: false,
+    };
+    let entity = app.world_mut().unwrap().spawn(source.clone()).id();
 
     app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Failed);
+    assert!(app.world().get::<AudioPlayer>(entity).is_none());
+    let failure_tick = app
+        .world()
+        .entity(entity)
+        .get_ref::<AudioPlayback>()
+        .unwrap()
+        .last_changed();
+    for _ in 0..3 {
+        app.step_fixed(STEP).unwrap();
+    }
+    assert_eq!(
+        app.world()
+            .entity(entity)
+            .get_ref::<AudioPlayback>()
+            .unwrap()
+            .last_changed(),
+        failure_tick
+    );
+
+    let cooked = cook_audio(&tone_wav(200)).unwrap();
+    app.world_mut().unwrap().entity_mut(entity).insert(Disabled);
+    install_clip_source(
+        &mut app,
+        clip_id,
+        RuntimeAssetMode::Cooked,
+        &cooked[..cooked.len() - 1],
+    );
+    app.step_fixed(STEP).unwrap();
+    app.world_mut()
+        .unwrap()
+        .entity_mut(entity)
+        .remove::<Disabled>();
+    let stopped = app.world_mut().unwrap().spawn(source).id();
+    app.step_fixed(STEP).unwrap();
+    let handle = app.world().get::<AudioPlayer>(entity).unwrap().clip;
+    assert_eq!(state(app.world(), entity), PlaybackState::WaitingForClip);
     assert!(load_asset_sync::<AudioClip>(app.world_mut().unwrap(), clip_id).is_err());
     app.step_fixed(STEP).unwrap();
     let playback = app.world().get::<AudioPlayback>(entity).unwrap();
@@ -138,6 +180,141 @@ fn authored_autoplay_reports_a_failed_clip() {
         playback.error(),
         Some(AudioError::ClipLoadFailed(_))
     ));
+
+    install_clip_source(&mut app, clip_id, RuntimeAssetMode::Cooked, &cooked);
+    app.world_mut()
+        .unwrap()
+        .get_mut::<AudioPlayback>(stopped)
+        .unwrap()
+        .stop();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while state(app.world(), entity) != PlaybackState::Playing {
+        assert!(Instant::now() < deadline, "the remounted clip did not play");
+        app.update_with_delta(Duration::ZERO).unwrap();
+        app.step_fixed(STEP).unwrap();
+        std::thread::yield_now();
+    }
+    assert_eq!(app.world().get::<AudioPlayer>(entity).unwrap().clip, handle);
+    assert_eq!(state(app.world(), stopped), PlaybackState::Stopped);
+}
+
+#[test]
+fn authored_autoplay_retries_corrected_settings_and_respects_manual_transport() {
+    let clip_id = CLIP_ID.parse().unwrap();
+    let mut app = App::new();
+    app.add_plugins((AssetPlugin, AudioPlugin::mock())).unwrap();
+    install_clip_source(&mut app, clip_id, RuntimeAssetMode::Source, &tone_wav(200));
+    let world = app.world_mut().unwrap();
+    load_asset_sync::<AudioClip>(world, clip_id).unwrap();
+    let entity = world
+        .spawn(AudioClipSource {
+            clip: clip_id,
+            bus: "missing-bus".to_owned(),
+            volume: 1.0,
+            looping: true,
+            autoplay: true,
+            spatial: false,
+        })
+        .id();
+
+    app.step_fixed(STEP).unwrap();
+    assert!(matches!(
+        app.world().get::<AudioPlayback>(entity).unwrap().error(),
+        Some(AudioError::UnknownBus(_))
+    ));
+    {
+        let mut source = app
+            .world_mut()
+            .unwrap()
+            .get_mut::<AudioClipSource>(entity)
+            .unwrap();
+        source.bus = "bgm".to_owned();
+        source.volume = 3.0;
+    }
+    app.step_fixed(STEP).unwrap();
+    app.step_fixed(STEP).unwrap();
+    assert!(matches!(
+        app.world().get::<AudioPlayback>(entity).unwrap().error(),
+        Some(AudioError::InvalidVolume)
+    ));
+
+    {
+        let mut source = app
+            .world_mut()
+            .unwrap()
+            .get_mut::<AudioClipSource>(entity)
+            .unwrap();
+        source.volume = 0.75;
+        source.autoplay = false;
+    }
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Failed);
+
+    let world = app.world_mut().unwrap();
+    world.get_mut::<AudioClipSource>(entity).unwrap().autoplay = true;
+    app.step_fixed(STEP).unwrap();
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Playing);
+
+    let world = app.world_mut().unwrap();
+    world.get_mut::<AudioPlayback>(entity).unwrap().pause();
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Paused);
+    app.world_mut()
+        .unwrap()
+        .get_mut::<AudioClipSource>(entity)
+        .unwrap()
+        .volume = 3.0;
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Failed);
+    app.world_mut()
+        .unwrap()
+        .get_mut::<AudioClipSource>(entity)
+        .unwrap()
+        .volume = 0.75;
+    app.step_fixed(STEP).unwrap();
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Paused);
+    app.world_mut()
+        .unwrap()
+        .get_mut::<AudioPlayback>(entity)
+        .unwrap()
+        .resume();
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Playing);
+
+    let world = app.world_mut().unwrap();
+    world.get_mut::<AudioPlayback>(entity).unwrap().stop();
+    world.get_mut::<AudioClipSource>(entity).unwrap().bus = "sfx".to_owned();
+    app.step_fixed(STEP).unwrap();
+    app.step_fixed(STEP).unwrap();
+    assert_eq!(state(app.world(), entity), PlaybackState::Stopped);
+
+    let world = app.world_mut().unwrap();
+    let handle = world.get::<AudioPlayer>(entity).unwrap().clip;
+    world.resource_scope(|world, mut clips: Mut<Assets<AudioClip>>| {
+        world.resource_scope(|world, mut states: Mut<AssetStates>| {
+            clips
+                .remove_with_state(
+                    handle,
+                    &mut states,
+                    &mut world.resource_mut::<AssetEvents>(),
+                )
+                .unwrap();
+        });
+    });
+    world.get_mut::<AudioClipSource>(entity).unwrap().volume = 0.5;
+    world.get_mut::<AudioPlayback>(entity).unwrap().play();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while state(app.world(), entity) != PlaybackState::Playing {
+        assert!(
+            Instant::now() < deadline,
+            "the retired clip did not reload after play"
+        );
+        app.step_fixed(STEP).unwrap();
+        app.update_with_delta(Duration::ZERO).unwrap();
+        std::thread::yield_now();
+    }
 }
 
 #[test]

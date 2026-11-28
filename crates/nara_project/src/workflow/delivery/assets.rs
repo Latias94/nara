@@ -1,4 +1,3 @@
-use nara_audio::{AudioCodec, NAUD_HEADER_BYTES, cook_audio, cooked_audio_codec};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{self, Read as _, Seek, Write},
@@ -14,6 +13,7 @@ use nara_asset::{
     },
     source::ProjectAssetSource,
 };
+use nara_audio::{AudioClipSource, AudioCodec, NAUD_HEADER_BYTES, cook_audio, cooked_audio_codec};
 use nara_core::{AssetId, Vec4, vfs::DirAssetSource};
 use nara_reflect::ComponentSchemaCatalog;
 use nara_render::material::SpriteMaterialAsset;
@@ -270,6 +270,12 @@ impl Cooker {
                 if let Some(material) = sprite.material {
                     self.require_importer(material, MATERIAL)?;
                 }
+            }
+            if let Some(audio) = row
+                .typed::<AudioClipSource>()
+                .map_err(|error| asset.error(error))?
+            {
+                self.require_importer(audio.clip, AUDIO)?;
             }
         }
         Ok((bytes, dependencies, hit))

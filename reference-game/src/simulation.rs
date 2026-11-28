@@ -4,7 +4,7 @@ use nara::{
     audio::AudioBusId,
     ecs::{Single, bevy_ecs::error::Result as SystemResult, schedule::IntoScheduleConfigs},
     prelude::*,
-    scene::SceneUpdateSet,
+    scene::{SceneUpdateSet, cooked::PreparedScene},
 };
 
 use crate::{
@@ -150,6 +150,12 @@ impl PilotCharacter {
 #[derive(Clone, Copy, Resource)]
 pub(crate) struct ArenaInstance(pub SceneInstanceId);
 
+pub(crate) fn validate_arena(scene: &PreparedScene<'_>) -> Result<(), String> {
+    let plan = ArenaPlan::prepare(scene.rows().map(|row| Ok(SceneRow::from_prepared(row))))?;
+    PilotCharacter::new(plan.arena.pilot.radius).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 pub(crate) fn bind_arena(
     world: &mut World,
     instance: SceneInstanceId,
@@ -277,7 +283,8 @@ pub(crate) fn advance_round(
         if let Some(mut campaign) = campaign {
             campaign.clear(round.elapsed);
             if campaign.sector == Sector::One {
-                campaign.pending = Some(scenes.switch_scene(Sector::Two.asset()?));
+                campaign.pending =
+                    Some(scenes.switch_scene_validated(Sector::Two.asset()?, validate_arena));
             }
         }
     }

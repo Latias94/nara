@@ -25,10 +25,11 @@ use nara_core::AssetId;
 use nara_reflect::{ComponentRegistryPlugin, ComponentSchemaCatalog, Schema};
 use nara_scene::{
     Name, RegisterSceneComponent, SceneAsset, SceneError, SceneEvent, SceneInstanceId,
-    SceneLoadState, SceneManager, SceneMember, ScenePlugin, SceneUpdateSet,
+    SceneLoadState, SceneManager, SceneMember, ScenePlugin, SceneRegistry, SceneUpdateSet,
     authoring::{SceneDocument, SceneEntity, SpriteSource},
     cook::{cook_flattened_scene, cook_scene},
-    switch_scene_sync,
+    cooked::CookedSceneError,
+    switch_scene_asset_sync, switch_scene_sync,
 };
 
 const FIRST: &str = "0193f100-2222-7000-8000-000000000011";
@@ -275,6 +276,63 @@ fn missing_scene_or_dependency_keeps_the_main_instance() {
 }
 
 #[test]
+fn synchronous_switch_rejection_preserves_an_in_flight_switch() {
+    #[derive(Component, Schema)]
+    #[schema(crate = "nara_reflect", id = "fixture.Unregistered", version = 1)]
+    struct Unregistered;
+
+    let mut invalid = document(3, None);
+    invalid.entities[0].set(&Unregistered).unwrap();
+    let schemas = ComponentSchemaCatalog::from_components([
+        Sector::type_schema().unwrap(),
+        Unregistered::type_schema().unwrap(),
+    ])
+    .unwrap();
+    let invalid =
+        SceneAsset::from_cooked(cook_flattened_scene(&invalid, &schemas).unwrap().bytes).unwrap();
+
+    let mut app = app(pack(true));
+    let world = app.world_mut().unwrap();
+    let main = switch_scene_sync(world, FIRST.parse().unwrap()).unwrap();
+    let second = SECOND.parse().unwrap();
+    load_asset_sync::<SceneAsset>(world, second).unwrap();
+    let next = world.resource_mut::<SceneManager>().switch_scene(second);
+    app.update_with_delta(Duration::ZERO).unwrap();
+
+    let world = app.world_mut().unwrap();
+    let manager = world.resource::<SceneManager>();
+    let loading = SceneLoadState::LoadingDependencies {
+        loaded: 0,
+        total: 1,
+    };
+    assert_eq!(manager.state(next), Some(&loading));
+    let root = *manager.entities(main).unwrap().values().next().unwrap();
+    let mut events = world
+        .resource::<Messages<SceneEvent>>()
+        .get_cursor_current();
+    assert!(matches!(
+        switch_scene_asset_sync(world, second, &invalid),
+        Err(SceneError::Cooked(CookedSceneError::MissingSchema { .. }))
+    ));
+    let manager = world.resource::<SceneManager>();
+    assert_eq!(manager.main_instance(), Some(main));
+    assert_eq!(manager.state(next), Some(&loading));
+    assert_eq!(world.get::<Sector>(root), Some(&Sector { number: 1 }));
+    assert!(
+        events
+            .read(world.resource::<Messages<SceneEvent>>())
+            .next()
+            .is_none()
+    );
+
+    assert_eq!(settle(&mut app, next), SceneLoadState::Ready);
+    assert_eq!(
+        app.world().resource::<SceneManager>().main_instance(),
+        Some(next)
+    );
+}
+
+#[test]
 fn wrong_sprite_asset_kind_keeps_the_main_instance() {
     struct MaterialStub;
 
@@ -374,6 +432,219 @@ fn wrong_sprite_asset_kind_keeps_the_main_instance() {
 }
 
 #[test]
+fn audio_clip_kind_is_checked_before_promotion() {
+    // The native audio crate depends on scene, so register a fixture under its stable Schema ID.
+    #[derive(Component, Schema)]
+    #[schema(crate = "nara_reflect", id = "nara.AudioClipSource", version = 1)]
+    struct AuthoredClip {
+        clip: AssetId,
+    }
+
+    let first = FIRST.parse().unwrap();
+    let second = SECOND.parse().unwrap();
+    let clip = IMAGE.parse().unwrap();
+    let mut target = document(2, None);
+    let entity = target.entities[0].id;
+    target.entities[0].set(&AuthoredClip { clip }).unwrap();
+    let schemas = ComponentSchemaCatalog::from_components([
+        Sector::type_schema().unwrap(),
+        AuthoredClip::type_schema().unwrap(),
+    ])
+    .unwrap();
+    let initial = cook_flattened_scene(&document(1, None), &schemas).unwrap();
+    let target = cook_flattened_scene(&target, &schemas).unwrap();
+    let make_source = |kind| {
+        let mut memory = MemoryAssetSource::new();
+        memory
+            .insert(&asset_id_path(first), initial.bytes.as_slice())
+            .unwrap();
+        memory
+            .insert(&asset_id_path(second), target.bytes.as_slice())
+            .unwrap();
+        memory.insert(&asset_id_path(clip), b"asset").unwrap();
+        RuntimeAssetSource::from_memory_with_kinds(
+            RuntimeAssetMode::Cooked,
+            memory,
+            [
+                (first, NpakEntryKind::Scene),
+                (second, NpakEntryKind::Scene),
+                (clip, kind),
+            ],
+        )
+    };
+    let live = make_source(NpakEntryKind::Image);
+    let candidate = make_source(NpakEntryKind::Audio);
+    let asset = SceneAsset::from_cooked(target.bytes).unwrap();
+    let mut app = app(live.clone());
+    app.register_scene_component::<AuthoredClip>().unwrap();
+    let world = app.world_mut().unwrap();
+    let main = switch_scene_sync(world, first).unwrap();
+    let root = world.resource::<SceneManager>().entities(main).unwrap()[&entity];
+    let registry = world.resource::<SceneRegistry>();
+    let decoded_clip = registry
+        .validate_asset(second, &asset, &candidate, |prepared| {
+            let row = prepared.rows().next().unwrap();
+            assert_eq!(row.id(), entity);
+            Ok(row.get::<AuthoredClip>().unwrap().clip)
+        })
+        .unwrap();
+    assert_eq!(decoded_clip, clip);
+    assert_eq!(world.resource::<RuntimeAssetSource>(), &live);
+
+    let mismatch = SceneError::AudioClipAssetKindMismatch {
+        scene_id: second,
+        entity,
+        id: clip,
+        actual: NpakEntryKind::Image,
+    }
+    .to_string();
+    assert_eq!(
+        registry
+            .validate_asset(second, &asset, &live, |_| -> Result<(), String> {
+                panic!("called application validation for an invalid clip")
+            })
+            .unwrap_err()
+            .to_string(),
+        mismatch
+    );
+    assert_eq!(
+        switch_scene_asset_sync(world, second, &asset)
+            .unwrap_err()
+            .to_string(),
+        mismatch
+    );
+    let next = world
+        .resource_mut::<SceneManager>()
+        .switch_scene_validated(second, |_| panic!("validated an invalid clip"));
+    assert_eq!(settle(&mut app, next), SceneLoadState::Failed(mismatch));
+    let world = app.world();
+    assert_eq!(world.resource::<SceneManager>().main_instance(), Some(main));
+    assert_eq!(world.get::<Sector>(root), Some(&Sector { number: 1 }));
+}
+
+#[test]
+fn application_validation_can_reject_a_ready_candidate() {
+    let mut app = app(pack(true));
+    let world = app.world_mut().unwrap();
+    let first = FIRST.parse().unwrap();
+    let second = SECOND.parse().unwrap();
+    let main = switch_scene_sync(world, first).unwrap();
+    let root = *world
+        .resource::<SceneManager>()
+        .entities(main)
+        .unwrap()
+        .values()
+        .next()
+        .unwrap();
+    let next = world
+        .resource_mut::<SceneManager>()
+        .switch_scene_validated(second, |prepared| {
+            let mut rows = prepared.rows();
+            let root = rows.next().unwrap();
+            let child = rows.next().unwrap();
+            assert_eq!(root.parent(), None);
+            assert_eq!(root.get::<Sector>(), Some(&Sector { number: 2 }));
+            assert_eq!(child.parent(), Some(root.id()));
+            assert!(child.get::<Sector>().is_none());
+            Err("missing arena role".into())
+        });
+    let message = SceneError::ValidationFailed {
+        scene_id: second,
+        message: "missing arena role".into(),
+    }
+    .to_string();
+    let mut events = world
+        .resource::<Messages<SceneEvent>>()
+        .get_cursor_current();
+    assert_eq!(
+        settle(&mut app, next),
+        SceneLoadState::Failed(message.clone())
+    );
+    let world = app.world();
+    let manager = world.resource::<SceneManager>();
+    assert_eq!(manager.main_instance(), Some(main));
+    assert_eq!(world.get::<Sector>(root), Some(&Sector { number: 1 }));
+    assert_eq!(
+        events
+            .read(world.resource::<Messages<SceneEvent>>())
+            .cloned()
+            .collect::<Vec<_>>(),
+        [SceneEvent::Failed {
+            instance: next,
+            scene_id: second,
+            message
+        }]
+    );
+
+    let accepted = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<SceneManager>()
+        .switch_scene_validated(second, |_| Ok(()));
+    assert_eq!(settle(&mut app, accepted), SceneLoadState::Ready);
+    assert_eq!(
+        app.world().resource::<SceneManager>().main_instance(),
+        Some(accepted)
+    );
+}
+
+#[test]
+fn a_hook_can_cancel_a_pending_switch_in_the_same_tick() {
+    #[derive(Resource)]
+    struct CancelSwitch(SceneInstanceId);
+
+    fn cancel_switch(mut world: DeferredWorld<'_>, _: HookContext) {
+        if let Some(cancelled) = world.get_resource::<CancelSwitch>().map(|cancel| cancel.0) {
+            world
+                .resource_mut::<SceneManager>()
+                .despawn_scene(cancelled);
+        }
+    }
+
+    let mut app = app(pack(true));
+    let world = app.world_mut().unwrap();
+    world
+        .register_component_hooks::<Sector>()
+        .on_add(cancel_switch);
+    let first = FIRST.parse().unwrap();
+    let main = switch_scene_sync(world, first).unwrap();
+    let mut manager = world.resource_mut::<SceneManager>();
+    let root = *manager.entities(main).unwrap().values().next().unwrap();
+    let independent = manager.load_scene(first);
+    let cancelled = manager.switch_scene(first);
+    world.insert_resource(CancelSwitch(cancelled));
+    let mut events = world
+        .resource::<Messages<SceneEvent>>()
+        .get_cursor_current();
+
+    app.update_with_delta(Duration::ZERO).unwrap();
+    let world = app.world();
+    let manager = world.resource::<SceneManager>();
+    assert_eq!(manager.state(independent), Some(&SceneLoadState::Ready));
+    assert_eq!(manager.main_instance(), Some(main));
+    assert!(manager.entities(cancelled).is_none());
+    assert_eq!(world.get::<Sector>(root), Some(&Sector { number: 1 }));
+    assert_eq!(
+        events
+            .read(world.resource::<Messages<SceneEvent>>())
+            .cloned()
+            .collect::<Vec<_>>(),
+        [SceneEvent::Ready {
+            instance: independent,
+            scene_id: first
+        }]
+    );
+
+    app.update_with_delta(Duration::ZERO).unwrap();
+    assert!(
+        app.world()
+            .resource::<SceneManager>()
+            .state(cancelled)
+            .is_none()
+    );
+}
+
+#[test]
 fn switches_requested_from_component_hooks_survive_promotion() {
     #[derive(Default, Resource)]
     struct NextSwitch(Option<SceneInstanceId>);
@@ -417,6 +688,67 @@ fn switches_requested_from_component_hooks_survive_promotion() {
         let manager = app.world().resource::<SceneManager>();
         assert_eq!(manager.main_instance(), Some(next));
         assert!(manager.state(second).is_none());
+    }
+}
+
+#[test]
+fn an_unload_hook_can_cancel_the_incoming_scene_before_it_spawns() {
+    #[derive(Resource)]
+    struct Cancel(SceneInstanceId);
+
+    let mut app = app(pack(true));
+    let world = app.world_mut().unwrap();
+    world
+        .register_component_hooks::<Sector>()
+        .on_remove(|mut world, _| {
+            if let Some(instance) = world.get_resource::<Cancel>().map(|cancel| cancel.0) {
+                world.resource_mut::<SceneManager>().despawn_scene(instance);
+            }
+        });
+    let first = FIRST.parse().unwrap();
+    let second = SECOND.parse().unwrap();
+    let original = switch_scene_sync(world, first).unwrap();
+    let incoming = world.resource_mut::<SceneManager>().switch_scene(second);
+    world.insert_resource(Cancel(incoming));
+    let mut cursor = world
+        .resource::<Messages<SceneEvent>>()
+        .get_cursor_current();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        app.update_with_delta(Duration::ZERO).unwrap();
+        let world = app.world();
+        let events = cursor
+            .read(world.resource::<Messages<SceneEvent>>())
+            .cloned()
+            .collect::<Vec<_>>();
+        if events.contains(&SceneEvent::Unloaded {
+            instance: original,
+            scene_id: first,
+        }) {
+            assert_eq!(
+                events,
+                [
+                    SceneEvent::Unloaded {
+                        instance: original,
+                        scene_id: first
+                    },
+                    SceneEvent::Unloaded {
+                        instance: incoming,
+                        scene_id: second
+                    },
+                ]
+            );
+            let manager = world.resource::<SceneManager>();
+            assert_eq!(manager.main_instance(), None);
+            assert_eq!(manager.state(incoming), None);
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "incoming scene never reached activation"
+        );
+        std::thread::yield_now();
     }
 }
 

@@ -3,6 +3,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     error::Error,
     fmt, io,
+    panic::{AssertUnwindSafe, catch_unwind},
     sync::Arc,
 };
 
@@ -50,6 +51,8 @@ pub enum AssetLoadError {
         id: AssetId,
         source: Box<dyn Error + Send + Sync>,
     },
+    #[error("asset '{id}' loader panicked: {message}")]
+    LoaderPanicked { id: AssetId, message: String },
     #[error("asset '{id}' failed to load: {message}")]
     PreviouslyFailed { id: AssetId, message: String },
     #[error(transparent)]
@@ -118,24 +121,39 @@ pub fn prepare_asset<L: AssetLoader>(
     id: AssetId,
     loader: &L,
 ) -> Result<PreparedAsset<L::Asset>, AssetLoadError> {
-    let backend = source.backend();
-    let bytes = backend.read_asset(id, AssetLoader::cooked_kind(loader))?;
-    let mut context = AssetLoadContext {
-        id,
-        backend,
-        dependencies: Vec::new(),
-    };
-    let value = loader
-        .load(&bytes, &mut context)
-        .map_err(|source| AssetLoadError::Decode {
+    catch_unwind(AssertUnwindSafe(|| {
+        let backend = source.backend();
+        let bytes = backend.read_asset(id, AssetLoader::cooked_kind(loader))?;
+        let mut context = AssetLoadContext {
             id,
-            source: Box::new(source),
-        })?;
-    context.dependencies.sort_unstable();
-    context.dependencies.dedup();
-    Ok(PreparedAsset {
-        value,
-        dependencies: context.dependencies,
+            backend,
+            dependencies: Vec::new(),
+        };
+        let value = loader
+            .load(&bytes, &mut context)
+            .map_err(|source| AssetLoadError::Decode {
+                id,
+                source: Box::new(source),
+            })?;
+        context.dependencies.sort_unstable();
+        context.dependencies.dedup();
+        Ok(PreparedAsset {
+            value,
+            dependencies: context.dependencies,
+        })
+    }))
+    .unwrap_or_else(|mut panic| {
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or("non-string panic payload")
+            .to_owned();
+        // Dropping a custom panic payload can unwind too.
+        while let Err(next) = catch_unwind(AssertUnwindSafe(|| drop(panic))) {
+            panic = next;
+        }
+        Err(AssetLoadError::LoaderPanicked { id, message })
     })
 }
 
@@ -251,11 +269,13 @@ struct Request {
     id: AssetId,
     handle: RuntimeId,
     asset_type: TypeId,
+    requested_at: u64,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct RuntimeLoading {
     source: Option<RuntimeAssetSource>,
+    source_generation: u64,
     registry: AssetLoaderRegistry,
     requests: BTreeMap<RuntimeId, Request>,
 }
@@ -319,6 +339,7 @@ pub fn set_runtime_asset_source(
         return Ok(());
     }
     server.runtime.source = Some(source.clone());
+    server.runtime.source_generation = server.runtime.source_generation.wrapping_add(1);
     world.insert_resource(source);
     if let Some(mut states) = world.get_resource_mut::<AssetStates>() {
         states.reset_unpublished_failures();
@@ -341,6 +362,12 @@ impl AssetServer {
         &self.runtime.registry
     }
 
+    /// Identifies the current mount for callers that cache asset requests between updates.
+    #[must_use]
+    pub fn runtime_source_generation(&self) -> u64 {
+        self.runtime.source_generation
+    }
+
     /// Requests a persistent UUID and returns its typed handle immediately. Decode errors are
     /// available through [`AssetStates`] after `TaskUpdate` publishes the result.
     pub fn load_id<T: Asset>(&mut self, id: AssetId) -> Result<Handle<T>, AssetError> {
@@ -355,14 +382,8 @@ impl AssetServer {
             .loaders
             .get(&TypeId::of::<T>())
             .ok_or(AssetError::MissingLoader(type_name::<T>()))?;
-        if let (Some(expected), Some(actual)) = (loader.0.cooked_kind(), source.backend().kind(id))
-            && expected != actual
-        {
-            return Err(AssetError::WrongRuntimeKind {
-                id,
-                expected,
-                actual,
-            });
+        if let Some(expected) = loader.0.cooked_kind() {
+            source.backend().validate_kind(id, expected)?;
         }
         let product = AssetProductRef::new(
             StableAssetId::from_uuid(id.as_uuid()),
@@ -370,11 +391,15 @@ impl AssetServer {
         )
         .map_err(AssetError::InvalidProductIdentity)?;
         let handle = self.reserve_product(product)?;
-        self.runtime.requests.entry(handle.id()).or_insert(Request {
-            id,
-            handle: handle.id(),
-            asset_type: TypeId::of::<T>(),
-        });
+        self.runtime.requests.insert(
+            handle.id(),
+            Request {
+                id,
+                handle: handle.id(),
+                asset_type: TypeId::of::<T>(),
+                requested_at: AssetStates::removal_epoch(),
+            },
+        );
         Ok(handle)
     }
 
@@ -519,6 +544,8 @@ pub(crate) fn install(app: &mut App) -> Result<(), PluginError> {
 }
 
 fn update_loads(world: &mut World) {
+    #[cfg(all(feature = "tasks", not(target_arch = "wasm32")))]
+    pending::publish_ready(world);
     let (source, requests) = {
         let mut server = world.resource_mut::<AssetServer>();
         (
@@ -526,10 +553,14 @@ fn update_loads(world: &mut World) {
             std::mem::take(&mut server.runtime.requests),
         )
     };
-    #[cfg(all(feature = "tasks", not(target_arch = "wasm32")))]
-    pending::publish_ready(world);
     let Some(source) = source else { return };
     for request in requests.into_values() {
+        if !world
+            .resource::<AssetStates>()
+            .request_is_current(request.handle, request.requested_at)
+        {
+            continue;
+        }
         let Some(loader) = world
             .resource::<AssetServer>()
             .runtime
@@ -597,7 +628,7 @@ fn finish(
 
 #[cfg(all(feature = "tasks", not(target_arch = "wasm32")))]
 mod pending {
-    use nara_app::tasks::{Task, block_on, io_pool, poll_once};
+    use nara_app::tasks::{Task, block_on, io_pool};
     use nara_ecs::{Mut, Resource};
 
     use super::*;
@@ -648,7 +679,8 @@ mod pending {
                     .resource_mut::<AssetServer>()
                     .runtime
                     .requests
-                    .insert(handle, load.request);
+                    .entry(handle)
+                    .or_insert(load.request);
             }
         }
     }
@@ -675,19 +707,19 @@ mod pending {
     }
 
     pub(super) fn publish_ready(world: &mut World) {
-        world.resource_scope(|world, mut pending: Mut<PendingLoads>| {
-            pending.0.retain(|handle, load| {
-                if !load.is_current(world) {
-                    return false;
-                }
-                if let Some(result) = block_on(poll_once(&mut load.task)) {
-                    let _ = finish(world, *handle, result);
-                    false
-                } else {
-                    true
-                }
-            });
+        let completed = world.resource_scope(|world, mut pending: Mut<PendingLoads>| {
+            pending
+                .0
+                .extract_if(.., |_, load| {
+                    !load.is_current(world) || load.task.is_finished()
+                })
+                .collect::<Vec<_>>()
         });
+        for (handle, load) in completed {
+            if load.is_current(world) {
+                let _ = finish(world, handle, block_on(load.task));
+            }
+        }
     }
 
     #[cfg(test)]

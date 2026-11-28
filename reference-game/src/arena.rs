@@ -3,7 +3,10 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use nara::{prelude::*, scene::components::ColliderSource};
+use nara::{
+    prelude::*,
+    scene::{components::ColliderSource, cooked::PreparedSceneRow},
+};
 
 use crate::{
     RunRules,
@@ -91,6 +94,21 @@ impl<'a> SceneRow<'a> {
             drone_order: entity.get::<PatrolDrone>().map(|drone| drone.order),
             gate: entity.contains::<ExtractionGate>(),
             rules: entity.get::<RunRules>().copied(),
+        }
+    }
+
+    pub(crate) fn from_prepared(row: PreparedSceneRow<'a>) -> Self {
+        Self {
+            name: row.get::<Name>().map_or("unnamed entity", Name::as_str),
+            is_child: row.parent().is_some(),
+            pose: row.get::<Transform2d>().copied(),
+            visibility: row.get::<Visibility>().copied(),
+            collider: row.get::<ColliderSource>().copied(),
+            pilot: row.get::<Pilot>().is_some(),
+            cell_order: row.get::<PowerCell>().map(|cell| cell.order),
+            drone_order: row.get::<PatrolDrone>().map(|drone| drone.order),
+            gate: row.get::<ExtractionGate>().is_some(),
+            rules: row.get::<RunRules>().copied(),
         }
     }
 

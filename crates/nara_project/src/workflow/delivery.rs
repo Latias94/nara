@@ -21,7 +21,7 @@ use self::assets::Cooker;
 use super::{
     CargoPackage, ProjectCheckError, SCHEMA_BINARY, SchemaCacheError, read_project_manifest,
     read_schema_cache,
-    schema::{read_latest_schema_cache, refresh_at},
+    schema::{read_at, refresh_at},
 };
 use crate::{
     ProjectDelivery,
@@ -260,7 +260,11 @@ fn load_schemas(
         };
         return Ok(refresh_at(&request, trust, &cache, stop, emit)?);
     }
-    Ok(read_latest_schema_cache(project, &cache)?.unwrap_or_default())
+    // The release catalog describes this delivery profile even after an authoring refresh.
+    if let Some(catalog) = read_at(project, &cache)? {
+        return Ok(catalog);
+    }
+    Ok(read_schema_cache(project)?.unwrap_or_default())
 }
 
 fn schema_cache_path(package: &str, game: &str, features: &[&str]) -> String {

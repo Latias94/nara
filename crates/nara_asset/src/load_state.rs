@@ -3,7 +3,14 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
+#[cfg(feature = "runtime")]
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::{AssetId, AssetSlotRevision};
+
+// Requests and explicit removals can be made through disjoint ECS resources.
+#[cfg(feature = "runtime")]
+static REMOVAL_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -43,6 +50,8 @@ pub struct AssetState {
     load_state: LoadState,
     published_slot: Option<AssetSlotRevision>,
     dependencies: Vec<nara_core::AssetId>,
+    #[cfg(feature = "runtime")]
+    removed_at: u64,
 }
 
 impl AssetState {
@@ -132,6 +141,17 @@ impl AssetStates {
     }
 
     #[cfg(feature = "runtime")]
+    pub(crate) fn removal_epoch() -> u64 {
+        REMOVAL_EPOCH.load(Ordering::Relaxed)
+    }
+
+    #[cfg(feature = "runtime")]
+    pub(crate) fn request_is_current(&self, id: AssetId, requested_at: u64) -> bool {
+        self.state(id)
+            .is_none_or(|state| state.removed_at <= requested_at)
+    }
+
+    #[cfg(feature = "runtime")]
     pub(crate) fn set_loading(&mut self, id: AssetId) {
         self.states
             .entry(id)
@@ -140,6 +160,7 @@ impl AssetStates {
                 load_state: LoadState::Loading,
                 published_slot: None,
                 dependencies: Vec::new(),
+                removed_at: 0,
             })
             .set_load_state(LoadState::Loading);
     }
@@ -181,6 +202,8 @@ impl AssetStates {
         version: AssetVersion,
         slot: AssetSlotRevision,
     ) {
+        #[cfg(feature = "runtime")]
+        let removed_at = self.state(id).map_or(0, |state| state.removed_at);
         self.states.insert(
             id,
             AssetState {
@@ -188,11 +211,24 @@ impl AssetStates {
                 load_state: LoadState::Loaded,
                 published_slot: Some(slot),
                 dependencies: Vec::new(),
+                #[cfg(feature = "runtime")]
+                removed_at,
             },
         );
     }
 
-    pub(crate) fn set_removed(&mut self, id: AssetId, version: AssetVersion) {
+    pub(crate) fn set_removed(
+        &mut self,
+        id: AssetId,
+        version: AssetVersion,
+    ) -> Result<(), AssetStateError> {
+        #[cfg(feature = "runtime")]
+        let removed_at = REMOVAL_EPOCH
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |epoch| {
+                epoch.checked_add(1)
+            })
+            .map_err(|_| AssetStateError::RemovalEpochExhausted)?
+            + 1;
         self.states.insert(
             id,
             AssetState {
@@ -200,8 +236,11 @@ impl AssetStates {
                 load_state: LoadState::Removed,
                 published_slot: None,
                 dependencies: Vec::new(),
+                #[cfg(feature = "runtime")]
+                removed_at,
             },
         );
+        Ok(())
     }
 }
 
@@ -211,6 +250,9 @@ pub enum AssetStateError {
     UnknownAsset { id: AssetId },
     #[error("asset {id:?} version cannot advance past {current}")]
     VersionExhausted { id: AssetId, current: AssetVersion },
+    #[cfg(feature = "runtime")]
+    #[error("runtime asset removal epoch exhausted")]
+    RemovalEpochExhausted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

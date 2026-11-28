@@ -3,8 +3,8 @@ use nara_asset::{Asset, AssetError, AssetLoadSet, AssetServer, Assets, Handle};
 use nara_core::AssetId;
 use nara_ecs::{
     Commands, Component, DetectChangesMut, Entity, EntityCommands, EntityWorldMut, Mut, Or, Query,
-    Res, ResMut, With,
-    bevy_ecs::error::BevyError,
+    Res, ResMut, With, World,
+    bevy_ecs::error::{BevyError, warn},
     schedule::{IntoScheduleConfigs, SystemSet},
 };
 use nara_scene::{
@@ -60,9 +60,15 @@ impl Plugin for SpriteSourceHydrationPlugin {
 struct HydratedSprite {
     applied: Sprite,
     created_sprite: bool,
-    image_request: Option<(AssetId, Handle<ImageAsset>)>,
-    material_request: Option<(AssetId, Handle<SpriteMaterialBindingAsset>)>,
+    image_request: Option<AssetRequest<ImageAsset>>,
+    material_request: Option<AssetRequest<SpriteMaterialBindingAsset>>,
     binding: Option<(Handle<SpriteMaterialBindingAsset>, Material2dBinding)>,
+}
+
+struct AssetRequest<T> {
+    id: AssetId,
+    handle: Option<Handle<T>>,
+    source_generation: u64,
 }
 
 impl HydratedSprite {
@@ -157,7 +163,7 @@ fn hydrate_sprite_sources(
     mut server: ResMut<AssetServer>,
     images: Res<Assets<ImageAsset>>,
     materials: Res<Assets<SpriteMaterialBindingAsset>>,
-) -> Result<(), BevyError> {
+) {
     for (entity, source, sprite, binding, mut tracked) in &mut sources {
         let mut commands = commands.entity(entity);
         let Some(source) = source else {
@@ -190,8 +196,8 @@ fn hydrate_sprite_sources(
             hydrated.applied.material.image,
             &mut server,
             &images,
+            &mut commands,
         )
-        .map_err(BevyError::error)?
         .map(|(handle, _)| handle);
         let material = ready_asset(
             &mut hydrated.material_request,
@@ -199,8 +205,8 @@ fn hydrate_sprite_sources(
             hydrated.binding.as_ref().map(|(handle, _)| *handle),
             &mut server,
             &materials,
-        )
-        .map_err(BevyError::error)?;
+            &mut commands,
+        );
 
         if let Some(sprite) = sprite {
             hydrated.apply_sprite(sprite, source, image);
@@ -215,37 +221,61 @@ fn hydrate_sprite_sources(
             commands.try_insert_if_new(new);
         }
     }
-    Ok(())
 }
 
 fn ready_asset<'a, T: Asset>(
-    request: &mut Option<(AssetId, Handle<T>)>,
+    request: &mut Option<AssetRequest<T>>,
     id: Option<AssetId>,
     previous: Option<Handle<T>>,
-    server: &mut ResMut<'_, AssetServer>,
+    server: &mut AssetServer,
     assets: &'a Assets<T>,
-) -> Result<Option<(Handle<T>, &'a T)>, AssetError> {
+    commands: &mut EntityCommands<'_>,
+) -> Option<(Handle<T>, &'a T)> {
     let Some(id) = id else {
         *request = None;
-        return Ok(None);
+        return None;
     };
-    if request.is_none_or(|(requested, _)| requested != id) {
-        *request = match server.load_id(id) {
-            Ok(handle) => Some((id, handle)),
-            Err(
-                AssetError::MissingRuntimeSource
-                | AssetError::WrongRuntimeKind { .. }
-                | AssetError::AssetTypeMismatch { .. },
-            ) => None,
-            Err(error) => return Err(error),
-        };
+    let source_generation = server.runtime_source_generation();
+    let mut cached = request.as_mut().filter(|request| request.id == id);
+    if let Some(cached) = &mut cached
+        && let Some(handle) = cached.handle
+        && let Some(asset) = assets.get(handle)
+    {
+        cached.source_generation = source_generation;
+        return Some((handle, asset));
     }
+    let handle = if cached.is_none_or(|request| request.source_generation != source_generation) {
+        // Keep rejected requests until the reference or mount changes.
+        let handle = match server.load_id(id) {
+            Ok(handle) => Some(handle),
+            Err(AssetError::MissingRuntimeSource) => None,
+            Err(error) => {
+                let entity = commands.id();
+                commands.commands().queue_handled(
+                    move |_: &mut World| -> Result<(), BevyError> {
+                        Err(BevyError::warning(format!(
+                            "sprite source on {entity} could not request asset '{id}': {error}"
+                        )))
+                    },
+                    warn,
+                );
+                None
+            }
+        };
+        *request = Some(AssetRequest {
+            id,
+            handle,
+            source_generation,
+        });
+        handle
+    } else {
+        None
+    };
 
-    Ok(request
-        .map(|(_, handle)| handle)
+    handle
         .into_iter()
         .chain(previous)
-        .find_map(|handle| assets.get(handle).map(|asset| (handle, asset))))
+        .find_map(|handle| assets.get(handle).map(|asset| (handle, asset)))
 }
 
 fn remove_if_unchanged<T: Component + PartialEq>(commands: &mut EntityCommands<'_>, applied: T) {
@@ -254,4 +284,129 @@ fn remove_if_unchanged<T: Component + PartialEq>(commands: &mut EntityCommands<'
             entity.remove::<T>();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::{Duration, Instant},
+    };
+
+    use nara_asset::{
+        AssetAppExt, AssetLoadError, AssetPlugin, AssetProductRef, ImportedProductId,
+        NpakEntryKind, RuntimeAssetBackend, RuntimeAssetMode, RuntimeAssetSource, load_asset_sync,
+        source::{MemoryAssetSource, asset_id_path},
+    };
+    use nara_ecs::bevy_ecs::entity_disabling::Disabled;
+
+    use super::*;
+    use crate::image::{ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin};
+
+    struct UnknownImageKind(Arc<AtomicUsize>);
+
+    impl RuntimeAssetBackend for UnknownImageKind {
+        fn mode(&self) -> RuntimeAssetMode {
+            RuntimeAssetMode::Cooked
+        }
+
+        fn read_asset(
+            &self,
+            _: AssetId,
+            _: Option<NpakEntryKind>,
+        ) -> Result<Vec<u8>, AssetLoadError> {
+            panic!("a rejected request must not read asset bytes");
+        }
+
+        fn validate_kind(&self, id: AssetId, _: NpakEntryKind) -> Result<(), AssetError> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Err(AssetError::UnknownRuntimeKind(id))
+        }
+    }
+
+    #[test]
+    fn sprite_image_recovers_from_request_and_decode_failures_after_remounts() {
+        let mut app = App::new();
+        app.add_plugins((AssetPlugin, ImagePlugin, SpriteSourceHydrationPlugin))
+            .unwrap();
+        let kind_checks = Arc::new(AtomicUsize::new(0));
+        app.set_asset_source(RuntimeAssetSource::new(UnknownImageKind(
+            kind_checks.clone(),
+        )))
+        .unwrap();
+        let id = "0193a100-1111-7000-8000-000000000001".parse().unwrap();
+        let entity = app
+            .world_mut()
+            .unwrap()
+            .spawn(SpriteSource {
+                image: Some(id),
+                ..Default::default()
+            })
+            .id();
+        let unaffected = app.world_mut().unwrap().spawn(SpriteSource::default()).id();
+
+        for _ in 0..3 {
+            app.update_with_delta(Duration::ZERO).unwrap();
+        }
+        assert_eq!(kind_checks.load(Ordering::Relaxed), 1);
+        assert!(app.world().get::<Sprite>(unaffected).is_some());
+        assert_eq!(
+            app.world().get::<Sprite>(entity).unwrap().material.image,
+            None
+        );
+
+        let mut files = MemoryAssetSource::new();
+        let path = asset_id_path(id);
+        files.insert(&path, b"broken image").unwrap();
+        app.world_mut().unwrap().entity_mut(entity).insert(Disabled);
+        app.set_asset_source(RuntimeAssetSource::from_memory(
+            RuntimeAssetMode::Cooked,
+            files,
+        ))
+        .unwrap();
+        app.update_with_delta(Duration::ZERO).unwrap();
+        app.world_mut()
+            .unwrap()
+            .entity_mut(entity)
+            .remove::<Disabled>();
+        app.update_with_delta(Duration::ZERO).unwrap();
+        let reference = AssetProductRef::new(id.into(), ImportedProductId::PRIMARY).unwrap();
+        let handle = app
+            .world()
+            .resource::<AssetServer>()
+            .get_product_handle::<ImageAsset>(reference)
+            .unwrap();
+        assert!(load_asset_sync::<ImageAsset>(app.world_mut().unwrap(), id).is_err());
+
+        let image = ImageAsset::new(
+            ImageExtent::new(1, 1),
+            ImageFormat::Rgba8,
+            ImageColorSpace::Linear,
+            vec![42, 0, 0, 255],
+        )
+        .unwrap();
+        let mut files = MemoryAssetSource::new();
+        files.insert(&path, image.encode_cooked().unwrap()).unwrap();
+        app.set_asset_source(RuntimeAssetSource::from_memory(
+            RuntimeAssetMode::Cooked,
+            files,
+        ))
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().get::<Sprite>(entity).unwrap().material.image != Some(handle) {
+            assert!(
+                Instant::now() < deadline,
+                "the remounted image did not hydrate"
+            );
+            app.update_with_delta(Duration::ZERO).unwrap();
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            app.world().resource::<Assets<ImageAsset>>().get(handle),
+            Some(&image)
+        );
+    }
 }

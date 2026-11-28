@@ -33,7 +33,7 @@ use nara_asset::watch::{AssetWatcher, RELOAD_RETRY_DELAYS, is_transient_reload_e
 use crate::{
     arena::source::{SceneLayers, SourceProject},
     campaign::{Campaign, resolve_switch},
-    simulation::bind_arena,
+    simulation::{bind_arena, validate_arena},
 };
 
 use super::{is_game_frame, world::dress_arena};
@@ -302,6 +302,31 @@ impl Reload {
         let previous = self.current.as_ref().or(resident);
         let scene_changed =
             previous.is_none_or(|previous| previous.bytes() != content.scene.bytes());
+        world.resource::<SceneRegistry>().validate_asset(
+            self.active,
+            &content.scene,
+            &content.assets,
+            validate_arena,
+        )?;
+        let server = world.resource::<AssetServer>();
+        for (id, dependency) in &content.dependencies {
+            let product = AssetProductRef::new((*id).into(), ImportedProductId::PRIMARY)?;
+            match dependency {
+                Dependency::Image(_) => server.validate_product_type::<ImageAsset>(product)?,
+                Dependency::Material(_) => {
+                    server.validate_product_type::<SpriteMaterialBindingAsset>(product)?;
+                }
+                Dependency::Audio(_) => server.validate_product_type::<AudioClip>(product)?,
+            }
+        }
+        if scene_changed {
+            let product = AssetProductRef::new(self.active.into(), ImportedProductId::PRIMARY)?;
+            server.validate_product_type::<SceneAsset>(product)?;
+            content
+                .assets
+                .backend()
+                .validate_kind(self.active, NpakEntryKind::Scene)?;
+        }
         let retired = previous
             .into_iter()
             .flat_map(SceneAsset::asset_dependencies)
@@ -482,6 +507,90 @@ mod tests {
         let mut reload = Reload::new(root.to_owned(), project, layers, active, prepared, watcher);
         reload.trace = false;
         Ok((app, reload))
+    }
+
+    #[test]
+    fn an_invalid_scene_reload_keeps_the_live_source_and_asset_versions()
+    -> Result<(), Box<dyn Error>> {
+        let temporary = staged_project()?;
+        let assets = temporary.path().join("assets");
+        let (mut app, mut reload) = staged_app(temporary.path(), None)?;
+        let world = app.world();
+        let source = world.resource::<RuntimeAssetSource>().clone();
+        let instance = world.resource::<SceneManager>().main_instance();
+        let round = world.resource::<Round>().clone();
+        let material_id = "01a21a30-ef81-76a6-8eab-ca52f3bae4dc".parse()?;
+        let material = primary_handle::<SpriteMaterialBindingAsset>(world, material_id)?
+            .ok_or("missing material")?;
+        let version = world.resource::<AssetStates>().version(material.id());
+
+        let scene = assets.join("night-relay.scene.ron");
+        fs::write(
+            &scene,
+            fs::read_to_string(&scene)?
+                .replace("material: \"@gate_material\"", "image: \"@gate_material\""),
+        )?;
+        let binding = assets.join("gate.material.ron");
+        fs::write(
+            &binding,
+            fs::read_to_string(&binding)?.replace(
+                "SpriteMaterial(",
+                "SpriteMaterial(color: (0.5, 1.0, 1.0, 1.0),",
+            ),
+        )?;
+        let content = reload.source.read_content(reload.active)?;
+        let error = reload
+            .publish(app.world_mut()?, content)
+            .expect_err("accepted an invalid sprite reference");
+        assert!(error.to_string().contains("SpriteSource.image"), "{error}");
+
+        let world = app.world();
+        assert_eq!(world.resource::<RuntimeAssetSource>(), &source);
+        assert_eq!(
+            world.resource::<AssetStates>().version(material.id()),
+            version
+        );
+        assert_eq!(world.resource::<SceneManager>().main_instance(), instance);
+        assert_eq!(world.resource::<Round>(), &round);
+        Ok(())
+    }
+
+    #[test]
+    fn a_conflicting_asset_claim_rejects_reload_before_mounting_the_source()
+    -> Result<(), Box<dyn Error>> {
+        let temporary = staged_project()?;
+        let assets = temporary.path().join("assets");
+        let (mut app, mut reload) = staged_app(temporary.path(), None)?;
+        let source = app.world().resource::<RuntimeAssetSource>().clone();
+        let id: AssetId = "0193f100-2222-7000-8000-000000000004".parse()?;
+        let product = AssetProductRef::new(id.into(), ImportedProductId::PRIMARY)?;
+        app.world_mut()?
+            .resource_mut::<AssetServer>()
+            .reserve_product::<AudioClip>(product)?;
+
+        let original = "01a219be-557a-739e-81a5-2a8c6e88aee5";
+        fs::copy(
+            assets.join("power-cell.png"),
+            assets.join("replacement.png"),
+        )?;
+        let sidecar = fs::read_to_string(assets.join("power-cell.png.meta"))?;
+        fs::write(
+            assets.join("replacement.png.meta"),
+            sidecar.replace(original, &id.to_string()),
+        )?;
+        let prefab = assets.join("power-cell.prefab.ron");
+        fs::write(
+            &prefab,
+            fs::read_to_string(&prefab)?.replace(original, &id.to_string()),
+        )?;
+
+        let content = reload.source.read_content(reload.active)?;
+        let error = reload
+            .publish(app.world_mut()?, content)
+            .expect_err("accepted conflicting claim");
+        assert!(error.to_string().contains("is claimed as"), "{error}");
+        assert_eq!(app.world().resource::<RuntimeAssetSource>(), &source);
+        Ok(())
     }
 
     #[test]

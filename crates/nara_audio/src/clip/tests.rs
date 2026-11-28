@@ -22,7 +22,7 @@ fn wav_preserves_the_payload_and_decoded_frames() {
 
 #[test]
 fn rejects_invalid_cooked_headers_and_mismatched_payloads() {
-    let wav = wav(1, 1, 48_000, 16, &[0, 8]);
+    let wav = wav(3, 1, 48_000, 32, &0.25_f32.to_le_bytes());
     let cooked = cook_audio(&wav).unwrap();
     let header = &cooked[..NAUD_HEADER_BYTES];
     assert_eq!(cooked_audio_codec(header).unwrap(), AudioCodec::PcmWav);
@@ -38,6 +38,8 @@ fn rejects_invalid_cooked_headers_and_mismatched_payloads() {
         (12, &[3, 0]),
         (14, &[1, 0]),
         (16, &[0; 8]),
+        (16, &(MAX_DECODED_FRAMES as u64 + 1).to_le_bytes()),
+        (16, &[u8::MAX; 8]),
     ] {
         let mut invalid = cooked.clone();
         invalid[offset..offset + bytes.len()].copy_from_slice(bytes);
@@ -53,6 +55,7 @@ fn rejects_invalid_cooked_headers_and_mismatched_payloads() {
     for (offset, value) in [(6, 1), (8, 0x81), (12, 2), (16, 2)] {
         let mut mismatched = cooked.clone();
         mismatched[offset] = value;
+        *mismatched.last_chunk_mut::<4>().unwrap() = f32::NAN.to_le_bytes();
         assert!(
             cooked_audio_codec(&mismatched).is_ok(),
             "header offset {offset}"
@@ -62,6 +65,19 @@ fn rejects_invalid_cooked_headers_and_mismatched_payloads() {
             Err(AudioClipError::InvalidCooked(_))
         ));
     }
+}
+
+#[test]
+fn rejects_wav_exceeding_the_decoded_frame_budget() {
+    let wav = wav(1, 1, 48_000, 8, &vec![128; MAX_DECODED_FRAMES + 1]);
+    assert!(matches!(
+        AudioClip::from_bytes(&wav),
+        Err(AudioClipError::Decode(message)) if message.contains("decoded PCM exceeds")
+    ));
+    assert!(matches!(
+        cook_audio(&wav),
+        Err(AudioClipError::Decode(message)) if message.contains("decoded PCM exceeds")
+    ));
 }
 
 #[test]
@@ -99,6 +115,15 @@ fn vorbis_round_trips_and_rejects_missing_or_corrupt_pages() {
         AudioClip::from_cooked(&cooked).unwrap().0,
         AudioClip::from_bytes(&ogg).unwrap().0
     );
+    let (header, _) = parse_cooked_header(&cooked).unwrap();
+    for frame_count in [1, header.frame_count + 1] {
+        let mut mismatched = cooked.clone();
+        mismatched[16..24].copy_from_slice(&frame_count.to_le_bytes());
+        assert!(matches!(
+            AudioClip::from_cooked(&mismatched),
+            Err(AudioClipError::InvalidCooked(_))
+        ));
+    }
 
     let last_page = ogg.windows(4).rposition(|bytes| bytes == b"OggS").unwrap();
     assert!(cook_audio(&ogg[..last_page]).is_err());

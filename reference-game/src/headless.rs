@@ -298,6 +298,74 @@ mod tests {
     }
 
     #[test]
+    fn an_invalid_sector_keeps_the_current_arena_and_round() -> GameResult<()> {
+        use nara::{
+            asset::{AssetServer, PreparedAsset},
+            scene::cook::cook_flattened_scene,
+        };
+
+        let mut app = headless_app()?;
+        app.insert_resource(Campaign::default())?;
+        install_project(&mut app, source::test_root(), Sector::One)?;
+        let id = Sector::Two.asset()?;
+        let assets = app.world().resource::<RuntimeAssetSource>();
+        let project = source::SourceProject::new(&app)?;
+        let mut scene = project.read_scene(assets, id)?;
+        scene
+            .entities
+            .retain(|entity| entity.name != "Extraction gate");
+        let schemas = component_registry(app.world()).ok_or("missing game schema")?;
+        let broken = SceneAsset::from_cooked(cook_flattened_scene(&scene, schemas)?.bytes)?;
+        let world = app.world_mut()?;
+        let original = world
+            .resource::<SceneManager>()
+            .main_instance()
+            .ok_or("missing entry scene")?;
+        let handle = world
+            .resource_mut::<AssetServer>()
+            .load_id::<SceneAsset>(id)?;
+        PreparedAsset::from_value(broken).publish(world, handle)?;
+
+        follow(&mut app, &ESCAPE_ROUTE)?;
+        let round = app.world().resource::<Round>().clone();
+        assert_eq!(round.status(), RoundStatus::Escaped);
+        assert!(app.world().resource::<Campaign>().pending.is_some());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().resource::<Campaign>().pending.is_some() {
+            assert!(Instant::now() < deadline, "Sector 2 did not settle");
+            app.update_with_delta(Duration::ZERO)?;
+            thread::sleep(Duration::from_millis(1));
+        }
+        let world = app.world_mut()?;
+        assert_eq!(
+            world.resource::<SceneManager>().main_instance(),
+            Some(original)
+        );
+        assert!(
+            world
+                .query::<&SceneMember>()
+                .iter(world)
+                .all(|member| member.0 == original)
+        );
+        assert_eq!(world.resource::<Campaign>().sector, Sector::One);
+        assert_eq!(world.resource::<Round>(), &round);
+
+        restart(&mut app)?;
+        follow(&mut app, &ESCAPE_ROUTE)?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.world().resource::<Campaign>().pending.is_some() {
+            assert!(
+                Instant::now() < deadline,
+                "Sector 2 did not settle after retry"
+            );
+            app.update_with_delta(Duration::ZERO)?;
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(app.world().resource::<Campaign>().sector, Sector::Two);
+        Ok(())
+    }
+
+    #[test]
     fn time_expiry_freezes_the_round_until_restart() -> GameResult<()> {
         let mut scene = scene_fixture()?;
         scene

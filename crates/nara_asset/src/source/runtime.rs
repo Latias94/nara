@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt, sync::Arc};
 use nara_core::{AssetId, vfs::MemoryAssetSource};
 use nara_ecs::Resource;
 
-use crate::{AssetLoadError, AssetPath, NpakEntryKind};
+use crate::{AssetError, AssetLoadError, AssetPath, NpakEntryKind};
 
 /// Selects the byte format the runtime loader should decode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +29,12 @@ pub trait RuntimeAssetBackend: Send + Sync + 'static {
     /// Reports the entry's runtime kind when the source has a type index.
     fn kind(&self, _id: AssetId) -> Option<NpakEntryKind> {
         None
+    }
+
+    /// Checks a typed request before the server claims a handle. Sources without a type index
+    /// can leave format validation to the loader.
+    fn validate_kind(&self, id: AssetId, expected: NpakEntryKind) -> Result<(), AssetError> {
+        validate_kind(id, expected, self.kind(id))
     }
 
     #[cfg(feature = "authoring")]
@@ -138,7 +144,7 @@ impl RuntimeAssetBackend for MemoryBackend {
         id: AssetId,
         expected: Option<NpakEntryKind>,
     ) -> Result<Vec<u8>, AssetLoadError> {
-        check_kind(id, expected, self.kind(id))?;
+        check_read_kind(self, id, expected)?;
         super::read_asset(&self.files, id).map_err(|source| AssetLoadError::Read { id, source })
     }
 
@@ -194,7 +200,7 @@ impl RuntimeAssetBackend for ProjectBackend {
         use std::io::Read;
 
         const MAX_SOURCE_BYTES: u64 = 256 * 1024 * 1024;
-        check_kind(id, expected, self.kind(id))?;
+        check_read_kind(self, id, expected)?;
         let file = super::ProjectAssetSource::new(&self.directory, &self.database)
             .open_asset(id)
             .map_err(|source| AssetLoadError::Read { id, source })?;
@@ -238,6 +244,14 @@ impl RuntimeAssetBackend for ProjectBackend {
         }
     }
 
+    fn validate_kind(&self, id: AssetId, expected: NpakEntryKind) -> Result<(), AssetError> {
+        let actual = self.kind(id);
+        if actual.is_none() && self.database.record_for_stable_id(id.into()).is_some() {
+            return Err(AssetError::UnknownRuntimeKind(id));
+        }
+        validate_kind(id, expected, actual)
+    }
+
     fn meta(&self, id: AssetId) -> Option<crate::AssetMeta> {
         self.database
             .record_for_stable_id(crate::StableAssetId::from_uuid(id.as_uuid()))?
@@ -246,19 +260,41 @@ impl RuntimeAssetBackend for ProjectBackend {
     }
 }
 
-fn check_kind(
+fn validate_kind(
     id: AssetId,
-    expected: Option<NpakEntryKind>,
+    expected: NpakEntryKind,
     actual: Option<NpakEntryKind>,
-) -> Result<(), AssetLoadError> {
-    if let (Some(expected), Some(actual)) = (expected, actual)
-        && expected != actual
-    {
-        return Err(AssetLoadError::WrongKind {
+) -> Result<(), AssetError> {
+    if let Some(actual) = actual.filter(|&actual| actual != expected) {
+        return Err(AssetError::WrongRuntimeKind {
             id,
             expected,
             actual,
         });
+    }
+    Ok(())
+}
+
+fn check_read_kind(
+    backend: &impl RuntimeAssetBackend,
+    id: AssetId,
+    expected: Option<NpakEntryKind>,
+) -> Result<(), AssetLoadError> {
+    if let Some(expected) = expected {
+        backend
+            .validate_kind(id, expected)
+            .map_err(|error| match error {
+                AssetError::WrongRuntimeKind {
+                    id,
+                    expected,
+                    actual,
+                } => AssetLoadError::WrongKind {
+                    id,
+                    expected,
+                    actual,
+                },
+                error => AssetLoadError::Request(error),
+            })?;
     }
     Ok(())
 }

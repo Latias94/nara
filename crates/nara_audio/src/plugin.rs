@@ -10,7 +10,8 @@ use nara_asset::{ASSET_PLUGIN_ID, AssetAppExt, AssetServer, RuntimeAssetSource};
 use nara_scene::spatial::SpatialSet;
 
 use crate::{
-    AudioClip, AudioClipLoader, AudioMixer, setup_audio, source::hydrate_audio_sources,
+    AudioClip, AudioClipLoader, AudioMixer, setup_audio,
+    source::{hydrate_audio_sources, restart_recovered_audio_sources},
     update_audio_players,
 };
 
@@ -67,7 +68,11 @@ impl<const DEVICE: bool> Plugin for AudioPlugin<DEVICE> {
             (
                 hydrate_audio_sources.run_if(resource_exists::<RuntimeAssetSource>),
                 advance_mock,
-                update_audio_players,
+                (
+                    update_audio_players,
+                    restart_recovered_audio_sources.run_if(resource_exists::<RuntimeAssetSource>),
+                )
+                    .chain_ignore_deferred(),
             )
                 .chain()
                 .after(SpatialSet::AfterFixed)

@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 
 use bevy_ecs::{
     bundle::{Bundle, NoBundleEffect},
+    component::Component,
     entity::Entity,
     hierarchy::ChildOf,
     world::World,
@@ -102,7 +103,8 @@ impl<'a> CookedScene<'a> {
         Ok(self.prepare(registry)?.spawn(world, || ()))
     }
 
-    pub(crate) fn prepare(
+    /// Decodes native columns and validates stored references for inspection before insertion.
+    pub fn prepare(
         &self,
         registry: &CookedRegistry,
     ) -> Result<PreparedScene<'_>, CookedSceneError> {
@@ -119,20 +121,46 @@ impl<'a> CookedScene<'a> {
     }
 }
 
-pub(crate) struct PreparedScene<'a> {
+/// The native component values and hierarchy decoded from a cooked scene.
+pub struct PreparedScene<'a> {
     columns: Vec<Box<dyn registry::ReadyColumn>>,
     entities: &'a [EntityRow],
 }
 
 impl PreparedScene<'_> {
+    /// Visits scene rows in UUID order, matching the order of the instantiated entity map.
+    pub fn rows(&self) -> impl ExactSizeIterator<Item = PreparedSceneRow<'_>> {
+        (0..self.entities.len()).map(move |index| PreparedSceneRow { scene: self, index })
+    }
+
     #[cfg(feature = "runtime")]
     pub(crate) fn sprite_sources(
         &self,
     ) -> impl Iterator<Item = (EntityUuid, &crate::components::SpriteSource)> {
         self.columns
             .iter()
-            .flat_map(|column| column.sprite_sources())
+            .filter_map(|column| column.typed_rows::<crate::components::SpriteSource>())
+            .flatten()
             .map(|(index, sprite)| (self.entities[*index].id, sprite))
+    }
+
+    #[cfg(feature = "runtime")]
+    pub(crate) fn audio_clips(
+        &self,
+    ) -> impl Iterator<Item = Result<(EntityUuid, AssetId), CookedSceneError>> {
+        self.columns
+            .iter()
+            .filter_map(|column| column.audio_clips())
+            .flatten()
+            .map(|(index, clip)| {
+                let entity = self.entities[index].id;
+                clip.map(|id| (entity, id))
+                    .map_err(|source| CookedSceneError::Component {
+                        component: registry::AUDIO_CLIP_SOURCE_ID,
+                        entity,
+                        source,
+                    })
+            })
     }
 
     pub(crate) fn spawn<B: Bundle<Effect: NoBundleEffect>>(
@@ -155,6 +183,40 @@ impl PreparedScene<'_> {
             .map(|row| row.id)
             .zip(spawned)
             .collect()
+    }
+}
+
+/// A read-only view of one decoded entity before it is inserted into a world.
+pub struct PreparedSceneRow<'a> {
+    scene: &'a PreparedScene<'a>,
+    index: usize,
+}
+
+impl<'a> PreparedSceneRow<'a> {
+    #[must_use]
+    pub fn id(&self) -> EntityUuid {
+        self.scene.entities[self.index].id
+    }
+
+    #[must_use]
+    pub fn parent(&self) -> Option<EntityUuid> {
+        self.scene.entities[self.index]
+            .parent
+            .map(|index| self.scene.entities[index].id)
+    }
+
+    /// Returns a stored component value. Bevy inserts required components during spawning.
+    #[must_use]
+    pub fn get<T: Component>(&self) -> Option<&'a T> {
+        let rows = self
+            .scene
+            .columns
+            .iter()
+            .find_map(|column| column.typed_rows::<T>())?;
+        let index = rows
+            .binary_search_by_key(&self.index, |(index, _)| *index)
+            .ok()?;
+        Some(&rows[index].1)
     }
 }
 
