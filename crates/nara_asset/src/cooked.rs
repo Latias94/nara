@@ -32,6 +32,7 @@ use crate::source::{asset_id_path, check_root_dir, lookup_id};
 
 mod write;
 
+pub use crate::NpakEntryKind;
 pub use write::{NpakInput, encode_npak, write_npak};
 
 pub const NPAK_VERSION: u16 = 1;
@@ -43,17 +44,6 @@ pub const MAX_NPAK_LZ4_BYTES: usize = 15 * 1024 * 1024;
 const MAGIC: &[u8; 4] = b"NPAK";
 const HEADER_BYTES: usize = 26;
 const TOC_ROW_BYTES: usize = 52;
-
-/// Stable type tags stored in the NPAK v1 table of contents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u64)]
-pub enum NpakEntryKind {
-    Scene = 1,
-    Image = 2,
-    Shader = 3,
-    Material = 4,
-    Raw = 5,
-}
 
 impl NpakEntryKind {
     fn from_wire(tag: u64) -> Option<Self> {
@@ -348,9 +338,7 @@ fn read_toc(reader: &mut (impl Read + Seek), len: u64) -> Result<Vec<NpakEntry>,
         }
         let compression = match u32::from_le_bytes(field(&row, 48)) {
             0 if stored_len == uncompressed_len => NpakCompression::None,
-            1 if (1..=MAX_NPAK_LZ4_BYTES as u64).contains(&stored_len) && uncompressed_len != 0 => {
-                NpakCompression::Lz4
-            }
+            1 if valid_lz4_lengths(stored_len, uncompressed_len) => NpakCompression::Lz4,
             0 | 1 => return Err(invalid("incorrect entry lengths for compression flags")),
             _ => return Err(invalid("unknown entry flags")),
         };
@@ -374,6 +362,12 @@ fn read_toc(reader: &mut (impl Read + Seek), len: u64) -> Result<Vec<NpakEntry>,
         return Err(NpakError::InvalidHeader("unused bytes in the data region"));
     }
     Ok(entries)
+}
+
+fn valid_lz4_lengths(stored: u64, uncompressed: u64) -> bool {
+    (1..=MAX_NPAK_LZ4_BYTES as u64).contains(&stored)
+        && stored < uncompressed
+        && uncompressed <= stored.saturating_mul(255)
 }
 
 fn read_array<const LEN: usize>(reader: &mut impl Read) -> io::Result<[u8; LEN]> {

@@ -42,7 +42,7 @@ impl ImageAsset {
         decoder_limits.max_image_width = Some(MAX_IMPORT_DIMENSION);
         decoder_limits.max_image_height = Some(MAX_IMPORT_DIMENSION);
         decoder_limits.max_alloc = Some(PNG_DECODER_SCRATCH_BYTES);
-        let decoder = PngDecoder::with_limits(Cursor::new(bytes), decoder_limits)?;
+        let mut decoder = PngDecoder::with_limits(Cursor::new(bytes), decoder_limits)?;
         let (width, height) = decoder.dimensions();
         let extent = ImageExtent::new(width, height);
         if extent.pixel_count() > MAX_IMPORT_PIXELS {
@@ -53,10 +53,12 @@ impl ImageAsset {
         }
         let mut pixel_limits = Limits::no_limits();
         pixel_limits.max_alloc = Some(MAX_PNG_PIXEL_BUFFER_BYTES);
-        pixel_limits.reserve(decoder.total_bytes())?;
+        let mut pixel_budget = pixel_limits.clone();
+        pixel_budget.reserve(decoder.total_bytes())?;
         if decoder.color_type() != ColorType::Rgba8 {
-            pixel_limits.reserve(extent.pixel_count() * RGBA8_BYTES_PER_PIXEL)?;
+            pixel_budget.reserve(extent.pixel_count() * RGBA8_BYTES_PER_PIXEL)?;
         }
+        decoder.set_limits(pixel_limits)?;
         let pixels = DynamicImage::from_decoder(decoder)?.into_rgba8().into_raw();
         Ok(Self::new(extent, ImageFormat::Rgba8, color_space, pixels)?)
     }

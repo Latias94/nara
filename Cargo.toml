@@ -124,8 +124,8 @@ default = ["runtime-core", "runtime-input", "runtime-window"]
 runtime-core = [
     "dep:nara_app",
     "nara_app/diagnostics",
-    "nara_app/tasks",
     "dep:nara_asset",
+    "nara_asset/tasks",
     "dep:nara_core",
     "dep:nara_ecs",
     "dep:nara_reflect",

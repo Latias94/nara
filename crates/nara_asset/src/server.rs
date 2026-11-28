@@ -9,7 +9,7 @@ use std::{
 use nara_ecs::Resource;
 
 use crate::{
-    AssetId, AssetPathError, AssetProductIdentityError, AssetProductRef, AssetRecord,
+    AssetId, AssetPath, AssetPathError, AssetProductIdentityError, AssetProductRef, AssetRecord,
     AssetSourcePath, Handle, ImportedProductId, StableAssetId,
 };
 
@@ -44,6 +44,9 @@ pub enum AssetError {
     },
     UnknownAssetId(AssetId),
     UnknownProduct(AssetProductRef),
+    MissingRuntimeSource,
+    MissingLoader(&'static str),
+    UnresolvedPath(AssetPath),
     AssetTypeMismatch {
         id: AssetId,
         existing: &'static str,
@@ -100,6 +103,16 @@ impl Display for AssetError {
                 id
             ),
             Self::UnknownAssetId(id) => write!(formatter, "runtime asset id {:?} is unknown", id),
+            Self::MissingRuntimeSource => {
+                formatter.write_str("configure a runtime asset source first")
+            }
+            Self::MissingLoader(asset_type) => {
+                write!(formatter, "no asset loader is registered for {asset_type}")
+            }
+            Self::UnresolvedPath(path) => write!(
+                formatter,
+                "asset path '{path}' is not in the runtime source"
+            ),
             Self::UnknownProduct(reference) => {
                 write!(
                     formatter,
@@ -134,6 +147,8 @@ pub struct AssetServer {
     products: HashMap<AssetProductRef, AssetId>,
     reverse_products: HashMap<AssetId, AssetProductRef>,
     type_claims: HashMap<AssetId, (TypeId, &'static str)>,
+    #[cfg(feature = "runtime")]
+    pub(crate) runtime: crate::runtime::RuntimeLoading,
 }
 
 impl Default for AssetServer {
@@ -151,6 +166,8 @@ impl AssetServer {
             products: HashMap::new(),
             reverse_products: HashMap::new(),
             type_claims: HashMap::new(),
+            #[cfg(feature = "runtime")]
+            runtime: crate::runtime::RuntimeLoading::default(),
         }
     }
 

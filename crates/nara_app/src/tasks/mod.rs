@@ -4,7 +4,8 @@
 //! task under Bevy's cancellation semantics. A detached task may outlive the App.
 
 pub use bevy_tasks::{
-    AsyncComputeTaskPool, ComputeTaskPool, IoTaskPool, Task, TaskPool, TaskPoolBuilder, poll_once,
+    AsyncComputeTaskPool, ComputeTaskPool, IoTaskPool, Task, TaskPool, TaskPoolBuilder, block_on,
+    poll_once,
 };
 
 /// Returns the process-wide pool for work that may span multiple frames.

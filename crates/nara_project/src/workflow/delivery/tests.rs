@@ -1,4 +1,7 @@
-use std::process::ExitStatus;
+use std::{
+    process::ExitStatus,
+    time::{Duration, UNIX_EPOCH},
+};
 
 use nara_asset::cooked::{NpakArchive, NpakEntryKind};
 use nara_reflect::{
@@ -140,7 +143,7 @@ fn untrusted_cook_leaves_missing_sidecars_for_explicit_discovery() {
 }
 
 #[test]
-fn offline_cook_uses_the_official_refresh_before_a_matching_release_cache() {
+fn offline_cook_uses_the_newest_matching_catalog() {
     let component_id = ComponentTypeId::new("fixture.Marker");
     let version = ComponentSchemaVersion(2);
     let temp = tempfile::tempdir().unwrap();
@@ -212,9 +215,21 @@ fn offline_cook_uses_the_official_refresh_before_a_matching_release_cache() {
         fresh_json
     );
     assert_eq!(
-        fs::read_to_string(project.join(release_cache)).unwrap(),
+        fs::read_to_string(project.join(&release_cache)).unwrap(),
         stale_json
     );
+
+    fs::write(project.join(&release_cache), &fresh_json).unwrap();
+    fs::write(project.join(SCHEMA_CACHE_PATH), stale_json).unwrap();
+    for (path, time) in [(release_cache.as_str(), 2), (SCHEMA_CACHE_PATH, 1)] {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(project.join(path))
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(time))
+            .unwrap();
+    }
+    assert_eq!(cook().unwrap().cache_hits, 4);
 }
 
 #[test]

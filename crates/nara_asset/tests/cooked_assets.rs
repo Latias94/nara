@@ -76,6 +76,7 @@ fn archive_rejects_truncated_unsorted_and_unbounded_directories() {
             (MAX_NPAK_ENTRY_BYTES as u64 + 1).to_le_bytes().to_vec(),
         ),
         (toc + 48, 2u32.to_le_bytes().to_vec()),
+        (toc + 48, 1u32.to_le_bytes().to_vec()),
         (toc + 52, 1u128.to_be_bytes().to_vec()),
     ];
     for (offset, replacement) in mutations {
@@ -132,6 +133,15 @@ fn compressed_entries_read_independently_and_share_the_memory_source_namespace()
         ]
     );
     assert!(!archive.exists(&AssetPath::new(id(8).as_uuid().simple().to_string()).unwrap()));
+
+    let mut impossible = bytes.clone();
+    let toc = u64::from_le_bytes(impossible[10..18].try_into().unwrap()) as usize;
+    impossible[toc + 40..toc + 48]
+        .copy_from_slice(&(compressed.stored_len * 255 + 1).to_le_bytes());
+    assert!(matches!(
+        NpakArchive::from_bytes(impossible),
+        Err(NpakError::InvalidEntry { index: 0, .. })
+    ));
 
     let start = compressed.offset as usize;
     bytes[start..start + compressed.stored_len as usize].fill(255);

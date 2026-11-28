@@ -21,6 +21,7 @@ impl Plugin for AssetPlugin {
         app.init_resource::<AssetServer>()?;
         app.init_resource::<AssetStates>()?;
         app.init_resource::<AssetEvents>()?;
+        crate::runtime::install(app)?;
         Ok(())
     }
 }

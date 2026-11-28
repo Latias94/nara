@@ -52,7 +52,9 @@ pub mod prelude {
         FixedUpdateSet, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginGroup,
         PluginId, RealTime, RuntimeInstance, RuntimeState, StartupStage, VirtualTime,
     };
-    pub use nara_asset::{Asset, AssetServer, Assets, Handle};
+    pub use nara_asset::{
+        Asset, AssetAppExt, AssetServer, Assets, Handle, RuntimeAssetSource, load_asset_sync,
+    };
     #[cfg(feature = "audio")]
     pub use nara_audio::{
         AudioClip, AudioFinished, AudioListener, AudioMixer, AudioPlayback, AudioPlayer,

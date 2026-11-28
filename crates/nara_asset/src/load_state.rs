@@ -31,6 +31,7 @@ impl Display for AssetVersion {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoadState {
+    Loading,
     Loaded,
     Failed { message: String },
     Removed,
@@ -41,6 +42,7 @@ pub struct AssetState {
     version: AssetVersion,
     load_state: LoadState,
     published_slot: Option<AssetSlotRevision>,
+    dependencies: Vec<nara_core::AssetId>,
 }
 
 impl AssetState {
@@ -62,6 +64,12 @@ impl AssetState {
     #[must_use]
     pub const fn load_state(&self) -> &LoadState {
         &self.load_state
+    }
+
+    /// Persistent IDs of the byte dependencies read by the loader of the usable version.
+    #[must_use]
+    pub fn dependencies(&self) -> &[nara_core::AssetId] {
+        &self.dependencies
     }
 
     pub(crate) fn set_load_state(&mut self, load_state: LoadState) {
@@ -123,6 +131,39 @@ impl AssetStates {
         self.states.get_mut(&id)
     }
 
+    #[cfg(feature = "runtime")]
+    pub(crate) fn set_loading(&mut self, id: AssetId) {
+        self.states
+            .entry(id)
+            .or_insert_with(|| AssetState {
+                version: AssetVersion::ZERO,
+                load_state: LoadState::Loading,
+                published_slot: None,
+                dependencies: Vec::new(),
+            })
+            .set_load_state(LoadState::Loading);
+    }
+
+    #[cfg(feature = "runtime")]
+    pub(crate) fn set_dependencies(&mut self, id: AssetId, dependencies: Vec<nara_core::AssetId>) {
+        if let Some(state) = self.state_mut(id) {
+            state.dependencies = dependencies;
+        }
+    }
+
+    #[cfg(feature = "runtime")]
+    pub(crate) fn fail_loading(&mut self, id: AssetId, message: String, events: &mut AssetEvents) {
+        if let Some(state) = self.state_mut(id) {
+            state.set_load_state(LoadState::Failed { message });
+            let kind = if state.published_slot.is_some() {
+                AssetEventKind::ReloadFailed
+            } else {
+                AssetEventKind::LoadFailed
+            };
+            events.push(id, state.version(), kind);
+        }
+    }
+
     pub(crate) fn set_loaded(
         &mut self,
         id: AssetId,
@@ -135,6 +176,7 @@ impl AssetStates {
                 version,
                 load_state: LoadState::Loaded,
                 published_slot: Some(slot),
+                dependencies: Vec::new(),
             },
         );
     }
@@ -146,6 +188,7 @@ impl AssetStates {
                 version,
                 load_state: LoadState::Removed,
                 published_slot: None,
+                dependencies: Vec::new(),
             },
         );
     }
@@ -164,6 +207,7 @@ pub enum AssetEventKind {
     Added,
     Modified,
     Removed,
+    LoadFailed,
     ReloadFailed,
 }
 

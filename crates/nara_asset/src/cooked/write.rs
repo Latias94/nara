@@ -1,9 +1,9 @@
 use std::io::{BufWriter, Cursor, Seek, SeekFrom, Write};
 
 use super::{
-    AssetId, HEADER_BYTES, MAGIC, MAX_NPAK_ENTRIES, MAX_NPAK_ENTRY_BYTES, MAX_NPAK_LZ4_BYTES,
-    NPAK_VERSION, NpakCompression, NpakEntry, NpakEntryKind, NpakError, TOC_ROW_BYTES,
-    resize_bytes,
+    AssetId, HEADER_BYTES, MAGIC, MAX_NPAK_ENTRIES, MAX_NPAK_ENTRY_BYTES, NPAK_VERSION,
+    NpakCompression, NpakEntry, NpakEntryKind, NpakError, TOC_ROW_BYTES, resize_bytes,
+    valid_lz4_lengths,
 };
 
 /// One borrowed cooked payload and its requested storage encoding.
@@ -122,7 +122,7 @@ fn encode_payload<'a>(
                 source,
             }
         })?;
-        if len < input.bytes.len() && len <= MAX_NPAK_LZ4_BYTES {
+        if valid_lz4_lengths(len as u64, input.bytes.len() as u64) {
             return Ok((&scratch[..len], NpakCompression::Lz4));
         }
     }

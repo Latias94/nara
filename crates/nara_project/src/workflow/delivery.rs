@@ -21,7 +21,7 @@ use self::assets::Cooker;
 use super::{
     CargoPackage, ProjectCheckError, SCHEMA_BINARY, SchemaCacheError, read_project_manifest,
     read_schema_cache,
-    schema::{read_at, refresh_at},
+    schema::{read_latest_schema_cache, refresh_at},
 };
 use crate::{
     ProjectDelivery,
@@ -234,13 +234,8 @@ fn load_schemas(
     emit: &mut impl FnMut(BuildEvent),
 ) -> Result<ComponentSchemaCatalog, DeliveryError> {
     let trusted = trust == ProjectTrust::Trusted;
-    if !trusted {
-        if let Some(catalog) = read_schema_cache(project)? {
-            return Ok(catalog);
-        }
-        if !project.join("Cargo.toml").try_exists()? {
-            return Ok(ComponentSchemaCatalog::default());
-        }
+    if !trusted && !project.join("Cargo.toml").try_exists()? {
+        return Ok(read_schema_cache(project)?.unwrap_or_default());
     }
     let package = CargoPackage::read(project)?;
     let game = package.default_binary();
@@ -254,23 +249,18 @@ fn load_schemas(
     features.sort_unstable();
     features.dedup();
     let cache = schema_cache_path(package.name(), game, &features);
-    if trusted {
-        if package.has_binary(project, SCHEMA_BINARY) {
-            let artifacts = tempfile::tempdir()?;
-            let request = BuildRequest {
-                features: &features,
-                release: true,
-                no_default_features: true,
-                artifact_directory: Some(artifacts.path()),
-                ..BuildRequest::new(project, package.name(), SCHEMA_BINARY)
-            };
-            return Ok(refresh_at(&request, trust, &cache, stop, emit)?);
-        }
-        if let Some(catalog) = read_schema_cache(project)? {
-            return Ok(catalog);
-        }
+    if trusted && package.has_binary(project, SCHEMA_BINARY) {
+        let artifacts = tempfile::tempdir()?;
+        let request = BuildRequest {
+            features: &features,
+            release: true,
+            no_default_features: true,
+            artifact_directory: Some(artifacts.path()),
+            ..BuildRequest::new(project, package.name(), SCHEMA_BINARY)
+        };
+        return Ok(refresh_at(&request, trust, &cache, stop, emit)?);
     }
-    Ok(read_at(project, &cache)?.unwrap_or_default())
+    Ok(read_latest_schema_cache(project, &cache)?.unwrap_or_default())
 }
 
 fn schema_cache_path(package: &str, game: &str, features: &[&str]) -> String {

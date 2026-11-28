@@ -57,3 +57,8 @@ pub(crate) fn check_root_dir<T>(
 mod project;
 #[cfg(any(unix, windows))]
 pub use project::ProjectAssetSource;
+
+#[cfg(feature = "runtime")]
+mod runtime;
+#[cfg(feature = "runtime")]
+pub use runtime::{RuntimeAssetBackend, RuntimeAssetMode, RuntimeAssetSource};

@@ -8,6 +8,7 @@ pub mod cooked;
 mod database;
 mod identity;
 pub mod image;
+mod kind;
 mod load_state;
 #[cfg(feature = "authoring")]
 mod meta;
@@ -16,6 +17,8 @@ mod plugin;
 mod product_identity;
 mod reference;
 mod revision;
+#[cfg(feature = "runtime")]
+mod runtime;
 #[cfg(all(feature = "authoring", any(unix, windows)))]
 mod scan;
 mod server;
@@ -33,6 +36,7 @@ pub use database::{
     AssetDatabaseError, AssetRecord, AssetReferenceResolver, AssetSourceKind, ProjectAssetDatabase,
 };
 pub use identity::{AssetId, AssetPath, AssetPathScope, AssetRef};
+pub use kind::NpakEntryKind;
 pub use load_state::{
     AssetEvent, AssetEventKind, AssetEvents, AssetState, AssetStateError, AssetStates,
     AssetVersion, LoadState,
@@ -49,9 +53,16 @@ pub use plugin::{
 };
 pub use product_identity::{AssetProductIdentityError, AssetProductRef, ImportedProductId};
 pub use reference::AssetReferenceDemand;
+#[cfg(feature = "runtime")]
+pub use runtime::{
+    AssetAppExt, AssetLoadContext, AssetLoadError, AssetLoader, AssetLoaderRegistry,
+    load_asset_sync,
+};
 #[cfg(all(feature = "authoring", any(unix, windows)))]
 pub use scan::{AssetScanError, AssetScanMode};
 pub use server::{AssetError, AssetServer};
+#[cfg(feature = "runtime")]
+pub use source::{RuntimeAssetBackend, RuntimeAssetMode, RuntimeAssetSource};
 
 /// Selects the export form for source-bound primary products.
 ///
